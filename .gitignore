@@ -1,0 +1,60 @@
+# ============================================================
+# Credenciales. Nada de esto se sube al repositorio.
+# ============================================================
+.env
+.env.*
+!.env.example
+
+# Archivos que arrancar.ps1 genera a partir del .env
+docker/pgadmin/pgpass
+docker/pgadmin/servers.json
+
+# Llaves y certificados, por si alguna vez aparecen
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+*.jks
+id_rsa*
+*.ppk
+secrets/
+credentials.json
+serviceAccount*.json
+
+# Respaldos de base de datos: traen datos reales
+*.sql.gz
+*.dump
+*.bak
+
+# ============================================================
+# Dependencias y compilados
+# ============================================================
+node_modules/
+dist/
+build/
+.svelte-kit/
+*.tsbuildinfo
+.vite/
+coverage/
+
+# ============================================================
+# Registros y temporales
+# ============================================================
+*.log
+npm-debug.log*
+yarn-error.log
+pnpm-debug.log*
+tmp/
+temp/
+
+# ============================================================
+# Editor y sistema operativo
+# ============================================================
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

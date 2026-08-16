@@ -1,0 +1,110 @@
+COMANDOS DEL PROYECTO
+
+
+ARRANCAR LAS BASES DE DATOS
+--------------------------------------------------
+Desde la raiz del proyecto (Proyecto-Tienda-Base-Datos-2), NO desde backend:
+
+  cd ..
+  .\arrancar.ps1
+
+El .\ es obligatorio en PowerShell. Si escribes solo "arrancar.ps1" dice que no
+lo encuentra, porque no busca scripts en la carpeta actual por seguridad.
+
+Desde otra carpeta se puede dar la ruta:
+
+  ..\arrancar.ps1
+
+Opcion:
+
+  .\arrancar.ps1 -Reiniciar     borra los datos y empieza de cero
+
+Que hace:
+  1. arranca Docker si esta apagado y espera al engine
+  2. levanta los contenedores
+  3. espera a que PostgreSQL responda
+  4. corre las migraciones de migrations/ en orden
+  5. imprime el resumen y las URLs
+
+Se puede correr las veces que quieras. Si una migracion ya estaba aplicada lo
+avisa y sigue.
+
+
+ARRANCAR EL BACKEND
+--------------------------------------------------
+  cd backend
+  npm run start:dev
+
+Queda en http://localhost:3000
+
+Se reinicia solo cada vez que guardas un archivo. Es el que se usa mientras se
+programa; no hace falta correr build ni nada aparte.
+
+Ojo: "npm start:dev" NO funciona. El atajo sin "run" solo existe para start,
+test, stop y restart. Los scripts con nombre propio siempre llevan run.
+
+
+ARRANCAR EL FRONTEND
+--------------------------------------------------
+  cd frontend
+  npm run dev
+
+Queda en http://localhost:5173
+
+
+OTROS COMANDOS DEL BACKEND
+--------------------------------------------------
+  npm run build        compila TypeScript a dist/
+  npm run start:prod   corre el compilado de dist/
+  npm run lint         revisa el codigo
+  npm run format       formatea el codigo
+
+
+COMPROBAR QUE TODO SIRVE
+--------------------------------------------------
+  docker ps                            contenedores corriendo
+  curl http://localhost:3000           la API responde
+  curl http://localhost:3000/db        la API habla con PostgreSQL
+
+pgAdmin: http://localhost:5050
+El servidor Mesh ya viene registrado y conectado.
+
+
+ENTRAR A POSTGRES POR TERMINAL
+--------------------------------------------------
+Cambia USUARIO y BASE por los valores de tu .env (DB_USER y DB_NAME):
+
+  docker exec -it mesh-postgres psql -U USUARIO -d BASE
+
+Dentro de psql:
+
+  \dt              lista las tablas
+  \d usuarios      describe una tabla
+  \q               salir
+
+
+APAGAR
+--------------------------------------------------
+  docker compose down
+
+Con -v ademas borra los datos:
+
+  docker compose down -v
+
+
+DATOS DE CONEXION
+--------------------------------------------------
+Estan en el archivo .env de la raiz del proyecto. No se suben al repositorio.
+
+  DB_NAME      el nombre de la base
+  DB_USER      el usuario
+  DB_PASSWORD  la contrasena
+  puerto       5432
+
+Si no tienes el .env todavia:
+
+  copy .env.example .env
+
+Y pidele los valores a tu equipo, o ponganse de acuerdo en unos nuevos.
+
+Desde pgAdmin el host es "postgres", no "localhost".

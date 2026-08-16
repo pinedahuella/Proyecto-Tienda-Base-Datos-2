@@ -1,0 +1,57 @@
+# Las credenciales salen del archivo .env, que no se sube al repositorio.
+# Si falta una variable, Compose se detiene con el mensaje que va despues del "?"
+# en vez de arrancar con valores en blanco.
+
+services:
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: mesh-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:?falta DB_USER en .env}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?falta DB_PASSWORD en .env}
+      POSTGRES_DB: ${DB_NAME:?falta DB_NAME en .env}
+    ports:
+      - "5432:5432"
+    volumes:
+      # PostgreSQL 18+ guarda los datos en /var/lib/postgresql, no en .../data
+      - postgres-data:/var/lib/postgresql
+      # Los scripts SQL quedan accesibles dentro del contenedor
+      - ./migrations:/migrations:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: mesh-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_EMAIL:?falta PGADMIN_EMAIL en .env}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_PASSWORD:?falta PGADMIN_PASSWORD en .env}
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      # Deja el servidor "Mesh" ya registrado, sin tener que agregarlo a mano.
+      # Los dos archivos los genera arrancar.ps1 a partir del .env.
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin-data:/var/lib/pgadmin
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+      - ./docker/pgadmin/pgpass:/pgpass:ro
+    # pgAdmin exige que el archivo de contrasenas tenga permisos 600, y un
+    # volumen montado desde Windows no los trae. Por eso se copia a /tmp antes.
+    entrypoint: >
+      /bin/sh -c "cp -f /pgpass /tmp/pgpass && chmod 600 /tmp/pgpass
+      && chown pgadmin:root /tmp/pgpass 2>/dev/null;
+      /entrypoint.sh"
+    depends_on:
+      - postgres
+
+volumes:
+  postgres-data:
+  pgadmin-data:
