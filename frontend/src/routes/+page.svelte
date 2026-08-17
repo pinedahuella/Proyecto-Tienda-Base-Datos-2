@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import Telar from '$lib/Telar.svelte';
+	import Cabecera from '$lib/Cabecera.svelte';
+	import Pie from '$lib/Pie.svelte';
 	import { guardarSesion } from '$lib/sesion';
 
 	let correo = $state('');
@@ -34,7 +35,7 @@
 
 		entrando = true;
 		// TODO: aqui va la llamada al backend cuando exista el endpoint de login.
-		await new Promise((r) => setTimeout(r, 450));
+		await new Promise((r) => setTimeout(r, 400));
 		guardarSesion(correo.trim());
 		await goto('/panel');
 	}
@@ -44,190 +45,124 @@
 	<title>Mesh · Inicia sesion</title>
 </svelte:head>
 
-<Telar />
-
-<!-- Orillo: el borde tejido de la tela, donde va la marca del taller -->
-<div class="orillo" aria-hidden="true">
-	<span>MESH — MERCADO INDEPENDIENTE — GT</span>
-</div>
+<Cabecera />
 
 <main>
-	<a class="marca" href="/">
-		Mesh<span class="punto"></span>
-	</a>
+	<div class="env columnas">
+		<section class="acceso">
+			<h1>Inicia sesion</h1>
+			<p class="entrada">Entra para ver tus pedidos y administrar tu tienda.</p>
 
-	<section class="tarjeta">
-		<p class="antetitulo">Tu cuenta</p>
-		<h1>Inicia sesion</h1>
-		<p class="entrada">Entra para ver tus pedidos y administrar tu tienda.</p>
-
-		<form onsubmit={entrar} novalidate>
-			<div class="campo">
-				<label for="correo">Correo electronico</label>
-				<input
-					id="correo"
-					type="email"
-					autocomplete="email"
-					placeholder="tu@correo.com"
-					bind:value={correo}
-					aria-invalid={errores.correo ? 'true' : undefined}
-					aria-describedby={errores.correo ? 'error-correo' : undefined}
-				/>
-				{#if errores.correo}
-					<p class="error" id="error-correo">{errores.correo}</p>
-				{/if}
-			</div>
-
-			<div class="campo">
-				<div class="fila-etiqueta">
-					<label for="contrasena">Contrasena</label>
-					<button type="button" class="ojo" onclick={() => (verContrasena = !verContrasena)}>
-						{verContrasena ? 'Ocultar' : 'Mostrar'}
-					</button>
+			<form onsubmit={entrar} novalidate>
+				<div class="campo">
+					<label for="correo">Correo electronico</label>
+					<input
+						id="correo"
+						type="email"
+						autocomplete="email"
+						placeholder="tu@correo.com"
+						bind:value={correo}
+						aria-invalid={errores.correo ? 'true' : undefined}
+						aria-describedby={errores.correo ? 'error-correo' : undefined}
+					/>
+					{#if errores.correo}
+						<p class="error" id="error-correo">{errores.correo}</p>
+					{/if}
 				</div>
-				<input
-					id="contrasena"
-					type={verContrasena ? 'text' : 'password'}
-					autocomplete="current-password"
-					placeholder="Al menos 8 caracteres"
-					bind:value={contrasena}
-					aria-invalid={errores.contrasena ? 'true' : undefined}
-					aria-describedby={errores.contrasena ? 'error-contrasena' : undefined}
-				/>
-				{#if errores.contrasena}
-					<p class="error" id="error-contrasena">{errores.contrasena}</p>
-				{/if}
-			</div>
 
-			<button class="entrar" type="submit" disabled={entrando}>
-				{entrando ? 'Entrando' : 'Entrar'}
-			</button>
+				<div class="campo">
+					<label for="contrasena">Contrasena</label>
+					<div class="con-ojo">
+						<input
+							id="contrasena"
+							type={verContrasena ? 'text' : 'password'}
+							autocomplete="current-password"
+							placeholder="Al menos 8 caracteres"
+							bind:value={contrasena}
+							aria-invalid={errores.contrasena ? 'true' : undefined}
+							aria-describedby={errores.contrasena ? 'error-contrasena' : undefined}
+						/>
+						<button
+							type="button"
+							class="ojo"
+							onclick={() => (verContrasena = !verContrasena)}
+							aria-label={verContrasena ? 'Ocultar la contrasena' : 'Mostrar la contrasena'}
+							title={verContrasena ? 'Ocultar' : 'Mostrar'}
+						>
+							{#if verContrasena}
+								<!-- ojo tachado: la contrasena esta a la vista -->
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+									<path d="M3 3l18 18" stroke-linecap="round" />
+									<path
+										d="M10.6 5.2A9.6 9.6 0 0 1 12 5c5 0 9 4.5 10 7a15 15 0 0 1-3.3 4.2M6.4 6.5C4.2 8 2.6 10.1 2 12c1 2.5 5 7 10 7a9.7 9.7 0 0 0 4.4-1"
+										stroke-linecap="round"
+									/>
+									<path d="M9.9 10a3 3 0 0 0 4.2 4.2" stroke-linecap="round" />
+								</svg>
+							{:else}
+								<!-- ojo abierto: la contrasena esta oculta -->
+								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+									<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" stroke-linejoin="round" />
+									<circle cx="12" cy="12" r="3" />
+								</svg>
+							{/if}
+						</button>
+					</div>
+					{#if errores.contrasena}
+						<p class="error" id="error-contrasena">{errores.contrasena}</p>
+					{/if}
+				</div>
 
-			<a class="olvide" href="/">Olvide mi contrasena</a>
-		</form>
+				<button class="entrar" type="submit" disabled={entrando}>
+					{entrando ? 'Entrando' : 'Entrar'}
+				</button>
+			</form>
+		</section>
 
-		<p class="pie">
-			Primera vez en Mesh?
-			<a href="/">Crea tu cuenta</a>
-		</p>
-	</section>
+	</div>
 </main>
 
+<Pie />
+
 <style>
-	.orillo {
-		position: fixed;
-		left: 0;
-		top: 0;
-		bottom: 0;
-		width: 42px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		border-right: 1px solid var(--telar);
-		background: linear-gradient(180deg, transparent, rgba(43, 53, 99, 0.16), transparent);
-		z-index: 2;
-	}
-
-	.orillo span {
-		writing-mode: vertical-rl;
-		transform: rotate(180deg);
-		font-family: var(--letra-dato);
-		font-size: 10px;
-		letter-spacing: 0.28em;
-		color: #5a6796;
-		white-space: nowrap;
-	}
-
 	main {
-		position: relative;
-		z-index: 1;
-		min-height: 100vh;
-		padding: 32px 24px 32px 74px;
 		display: flex;
-		flex-direction: column;
 		align-items: center;
 		justify-content: center;
-		gap: 34px;
+		padding-top: 56px;
+		padding-bottom: 56px;
 	}
 
-	.marca {
-		font-family: var(--letra-titulo);
-		font-weight: 700;
-		font-size: 21px;
-		letter-spacing: -0.03em;
-		color: var(--crudo);
-		text-decoration: none;
-		display: inline-flex;
-		align-items: baseline;
-		gap: 4px;
-		animation: subir 0.7s 0.85s both cubic-bezier(0.2, 0.7, 0.3, 1);
+	.columnas {
+		display: flex;
+		justify-content: center;
 	}
 
-	/* El punto dorado: el mismo hilo del telar, hecho firma */
-	.punto {
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: var(--oro);
-	}
+	/* ── formulario ── */
 
-	.tarjeta {
-		position: relative;
+	/* Fondo solido: la trama de la pagina queda detras, no debajo del texto */
+	.acceso {
 		width: 100%;
-		max-width: 396px;
-		padding: 38px 34px 30px;
-		background: var(--tinta-alta);
-		border: 1px solid var(--telar);
-		/* Textura de tafetan: la misma trama de la pagina, dentro de la tarjeta */
-		background-image:
-			repeating-linear-gradient(90deg, rgba(43, 53, 99, 0.24) 0 1px, transparent 1px 7px),
-			repeating-linear-gradient(0deg, rgba(43, 53, 99, 0.18) 0 1px, transparent 1px 7px);
-		box-shadow:
-			0 1px 0 rgba(200, 212, 240, 0.05) inset,
-			0 30px 70px -30px rgba(0, 0, 0, 0.85);
-		animation: subir 0.8s 0.95s both cubic-bezier(0.2, 0.7, 0.3, 1);
+		max-width: 400px;
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+		padding: 36px 34px 34px;
 	}
 
-	/* Un solo borde dorado, arriba: el remate del tejido */
-	.tarjeta::before {
-		content: '';
-		position: absolute;
-		top: -1px;
-		left: 34px;
-		width: 54px;
-		height: 2px;
-		background: var(--oro);
-	}
-
-	.antetitulo {
-		margin: 0 0 10px;
-		font-family: var(--letra-dato);
-		font-size: 10px;
-		letter-spacing: 0.24em;
-		text-transform: uppercase;
-		color: #6f7cad;
-	}
-
-	h1 {
-		margin: 0 0 8px;
-		font-family: var(--letra-titulo);
-		font-weight: 600;
-		font-size: clamp(29px, 6vw, 35px);
-		line-height: 1.06;
-		letter-spacing: -0.035em;
-		color: var(--crudo);
+	.acceso h1 {
+		margin-bottom: 8px;
 	}
 
 	.entrada {
-		margin: 0 0 26px;
-		color: #97a3ca;
-		font-size: 14px;
+		margin-bottom: 30px;
+		color: var(--gris);
 	}
 
 	form {
 		display: flex;
 		flex-direction: column;
-		gap: 17px;
+		gap: 18px;
 	}
 
 	.campo {
@@ -236,174 +171,114 @@
 		gap: 7px;
 	}
 
-	.fila-etiqueta {
-		display: flex;
-		align-items: baseline;
-		justify-content: space-between;
-		gap: 12px;
-	}
-
 	label {
-		font-family: var(--letra-dato);
-		font-size: 10px;
-		letter-spacing: 0.16em;
-		text-transform: uppercase;
-		color: #8e9ac4;
+		font-size: 0.92rem;
+		font-weight: 500;
+		color: var(--tinta);
 	}
 
 	input {
 		width: 100%;
-		padding: 12px 13px;
-		font-family: var(--letra);
-		font-size: 15px;
-		color: var(--crudo);
-		background: var(--tinta);
-		border: 1px solid var(--telar);
-		border-radius: 3px;
-		transition:
-			border-color 0.18s ease,
-			background 0.18s ease;
+		padding: 11px 13px;
+		font-family: inherit;
+		font-size: 1rem;
+		color: var(--tinta);
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		transition: border-color var(--t);
 	}
 
 	input::placeholder {
-		color: #566288;
+		color: var(--gris-2);
 	}
 
 	input:hover {
-		border-color: var(--hilo);
+		border-color: var(--gris-2);
 	}
 
 	input:focus {
 		outline: none;
-		border-color: var(--oro);
-		background: #0a0f20;
+		border-color: var(--indigo);
+		box-shadow: 0 0 0 3px var(--indigo-cl);
 	}
 
 	input[aria-invalid='true'] {
-		border-color: #b4574d;
+		border-color: var(--rojo);
+	}
+
+	/* El ojo va dentro del campo, por eso el input reserva espacio a la derecha */
+	.con-ojo {
+		position: relative;
+	}
+
+	.con-ojo input {
+		padding-right: 44px;
 	}
 
 	.ojo {
+		position: absolute;
+		right: 6px;
+		top: 50%;
+		transform: translateY(-50%);
+		width: 32px;
+		height: 32px;
+		display: grid;
+		place-items: center;
 		background: none;
-		border: none;
-		padding: 0;
+		border: 0;
+		border-radius: var(--r);
+		color: var(--gris);
 		cursor: pointer;
-		font-family: var(--letra-dato);
-		font-size: 10px;
-		letter-spacing: 0.14em;
-		text-transform: uppercase;
-		color: #6f7cad;
-		transition: color 0.16s ease;
+		transition: color var(--t);
 	}
 
 	.ojo:hover {
-		color: var(--oro);
+		color: var(--indigo);
+	}
+
+	.ojo svg {
+		width: 19px;
+		height: 19px;
 	}
 
 	.error {
-		margin: 0;
-		font-size: 12.5px;
-		color: #e08b81;
+		font-size: 0.88rem;
+		color: var(--rojo);
 	}
 
+	/* El boton principal usa el color de la marca, que es lo que se ve en los
+	   dos temas. El texto va del color de la superficie para que contraste. */
 	.entrar {
-		margin-top: 7px;
-		padding: 13px 18px;
-		font-family: var(--letra);
-		font-size: 14.5px;
-		font-weight: 600;
-		letter-spacing: 0.01em;
-		color: var(--tinta);
-		background: var(--oro);
-		border: none;
-		border-radius: 3px;
+		margin-top: 4px;
+		padding: 12px 20px;
+		font-family: inherit;
+		font-size: 1rem;
+		font-weight: 500;
+		color: var(--blanco);
+		background: var(--indigo);
+		border: 0;
+		border-radius: var(--r);
 		cursor: pointer;
-		transition:
-			transform 0.16s cubic-bezier(0.2, 0.7, 0.3, 1),
-			background 0.16s ease;
+		transition: background var(--t);
 	}
 
 	.entrar:hover:not(:disabled) {
-		background: #f0bc57;
-		transform: translateY(-1px);
-	}
-
-	.entrar:active:not(:disabled) {
-		transform: translateY(0);
+		background: var(--indigo-os);
 	}
 
 	.entrar:disabled {
-		opacity: 0.62;
+		opacity: 0.6;
 		cursor: progress;
 	}
 
-	.olvide {
-		align-self: center;
-		font-size: 13px;
-		color: #8e9ac4;
-		text-decoration: none;
-		border-bottom: 1px solid transparent;
-		transition: color 0.16s ease;
-	}
-
-	.olvide:hover {
-		color: var(--crudo);
-		border-bottom-color: var(--hilo);
-	}
-
-	.pie {
-		margin: 26px 0 0;
-		padding-top: 19px;
-		border-top: 1px solid var(--telar);
-		text-align: center;
-		font-size: 13.5px;
-		color: #7f8bb5;
-	}
-
-	.pie a {
-		color: var(--crudo);
-		text-decoration: none;
-		border-bottom: 1px solid var(--oro);
-		padding-bottom: 1px;
-	}
-
-	.pie a:hover {
-		color: var(--oro);
-	}
-
-	@keyframes subir {
-		from {
-			opacity: 0;
-			transform: translateY(14px);
-		}
-		to {
-			opacity: 1;
-			transform: none;
-		}
-	}
-
-	@media (max-width: 560px) {
-		.orillo {
-			display: none;
-		}
+	@media (max-width: 620px) {
 		main {
-			padding: 26px 18px;
+			padding-top: 34px;
+			padding-bottom: 34px;
 		}
-		.tarjeta {
-			padding: 30px 22px 24px;
-		}
-		.tarjeta::before {
-			left: 22px;
-		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.marca,
-		.tarjeta {
-			animation: none;
-		}
-		.entrar:hover:not(:disabled) {
-			transform: none;
+		.acceso {
+			padding: 28px 22px 26px;
 		}
 	}
 </style>

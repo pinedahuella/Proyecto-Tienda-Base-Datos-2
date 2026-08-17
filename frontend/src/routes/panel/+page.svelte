@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import Telar from '$lib/Telar.svelte';
+	import Cabecera from '$lib/Cabecera.svelte';
+	import Pie from '$lib/Pie.svelte';
 	import { leerSesion, cerrarSesion, nombreDesdeCorreo } from '$lib/sesion';
 
 	let correo = $state<string | null>(null);
@@ -15,17 +16,16 @@
 	});
 
 	let nombre = $derived(correo ? nombreDesdeCorreo(correo) : '');
-	let inicial = $derived(nombre ? nombre.charAt(0) : '');
 
 	function salir() {
 		cerrarSesion();
 		goto('/');
 	}
 
-	const secciones = [
-		{ rotulo: 'Pedidos', vacio: 'Aun no hay pedidos.' },
-		{ rotulo: 'Productos', vacio: 'Todavia no has publicado nada.' },
-		{ rotulo: 'Inventario', vacio: 'Sin movimientos registrados.' }
+	const resumen = [
+		{ rotulo: 'Pedidos', cifra: '0', nota: 'Aun no hay pedidos.' },
+		{ rotulo: 'Productos', cifra: '0', nota: 'Todavia no has publicado nada.' },
+		{ rotulo: 'Inventario', cifra: '0', nota: 'Sin movimientos registrados.' }
 	];
 </script>
 
@@ -33,312 +33,127 @@
 	<title>Mesh · Panel</title>
 </svelte:head>
 
-<Telar densidad={44} />
+<Cabecera sesion={correo} alSalir={salir} />
 
 {#if correo}
-	<div class="lienzo">
-		<header>
-			<a class="marca" href="/panel">
-				Mesh<span class="punto"></span>
-			</a>
-
-			<div class="cuenta">
-				<span class="ficha" aria-hidden="true">{inicial}</span>
-				<span class="correo">{correo}</span>
-				<button type="button" onclick={salir}>Salir</button>
-			</div>
-		</header>
-
-		<main>
+	<main>
+		<div class="env">
 			<div class="saludo">
-				<p class="antetitulo">Tu tienda</p>
 				<h1>Hola, {nombre}</h1>
-				<p class="entrada">
-					Tu tienda esta lista. Publica tu primer producto para que aparezca en el catalogo.
-				</p>
+				<p>Tu tienda esta lista. Publica tu primer producto para que aparezca en el catalogo.</p>
 			</div>
 
-			<div class="rejilla">
-				{#each secciones as seccion}
+			<div class="resumen">
+				{#each resumen as tarjeta}
 					<article>
-						<h2>{seccion.rotulo}</h2>
-						<p class="cifra">0</p>
-						<p class="vacio">{seccion.vacio}</p>
+						<h3>{tarjeta.rotulo}</h3>
+						<p class="cifra">{tarjeta.cifra}</p>
+						<p class="nota">{tarjeta.nota}</p>
 					</article>
 				{/each}
 			</div>
 
 			<section class="invitacion">
-				<div>
-					<h2>Empieza por un producto</h2>
-					<p>
-						Ponle nombre, precio y una foto. Cuando lo publiques, tus pedidos y tu inventario
-						empiezan a llenarse solos.
-					</p>
-				</div>
-				<button type="button" class="publicar">Publicar producto</button>
+				<h2>Tu tienda esta vacia por ahora</h2>
+				<p>
+					Cuando publiques tu primer producto, los pedidos y los movimientos de inventario
+					empiezan a aparecer aqui.
+				</p>
 			</section>
-		</main>
-	</div>
+		</div>
+	</main>
 {/if}
 
+<Pie />
+
 <style>
-	.lienzo {
-		position: relative;
-		z-index: 1;
-		min-height: 100vh;
-		display: flex;
-		flex-direction: column;
-	}
-
-	header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 20px;
-		padding: 18px 30px;
-		border-bottom: 1px solid var(--telar);
-		background: rgba(13, 18, 38, 0.86);
-		backdrop-filter: blur(8px);
-	}
-
-	.marca {
-		font-family: var(--letra-titulo);
-		font-weight: 700;
-		font-size: 19px;
-		letter-spacing: -0.03em;
-		color: var(--crudo);
-		text-decoration: none;
-		display: inline-flex;
-		align-items: baseline;
-		gap: 4px;
-	}
-
-	.punto {
-		width: 5px;
-		height: 5px;
-		border-radius: 50%;
-		background: var(--oro);
-	}
-
-	.cuenta {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-	}
-
-	.ficha {
-		width: 27px;
-		height: 27px;
-		display: grid;
-		place-items: center;
-		border-radius: 50%;
-		background: var(--oro);
-		color: var(--tinta);
-		font-family: var(--letra-titulo);
-		font-weight: 700;
-		font-size: 13px;
-	}
-
-	.correo {
-		font-family: var(--letra-dato);
-		font-size: 11.5px;
-		color: #8e9ac4;
-	}
-
-	.cuenta button {
-		background: none;
-		border: 1px solid var(--telar);
-		border-radius: 3px;
-		padding: 6px 12px;
-		font-family: var(--letra-dato);
-		font-size: 10px;
-		letter-spacing: 0.16em;
-		text-transform: uppercase;
-		color: #8e9ac4;
-		cursor: pointer;
-		transition:
-			color 0.16s ease,
-			border-color 0.16s ease;
-	}
-
-	.cuenta button:hover {
-		color: var(--oro);
-		border-color: var(--oro);
-	}
-
 	main {
-		flex: 1;
-		width: 100%;
-		max-width: 960px;
-		margin: 0 auto;
-		padding: 58px 30px 70px;
+		padding-top: 48px;
+		min-height: 50vh;
 	}
 
 	.saludo {
-		max-width: 520px;
-		margin-bottom: 44px;
-		animation: subir 0.7s 0.9s both cubic-bezier(0.2, 0.7, 0.3, 1);
+		max-width: 560px;
+		margin-bottom: 36px;
 	}
 
-	.antetitulo {
-		margin: 0 0 10px;
-		font-family: var(--letra-dato);
-		font-size: 10px;
-		letter-spacing: 0.24em;
-		text-transform: uppercase;
-		color: #6f7cad;
+	.saludo h1 {
+		margin-bottom: 10px;
 	}
 
-	h1 {
-		margin: 0 0 12px;
-		font-family: var(--letra-titulo);
-		font-weight: 600;
-		font-size: clamp(32px, 6vw, 44px);
-		line-height: 1.04;
-		letter-spacing: -0.04em;
-		color: var(--crudo);
+	.saludo p {
+		color: var(--gris);
 	}
 
-	.entrada {
-		margin: 0;
-		color: #97a3ca;
-		font-size: 15px;
-	}
-
-	.rejilla {
+	.resumen {
 		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-		gap: 1px;
-		background: var(--telar);
-		border: 1px solid var(--telar);
-		margin-bottom: 30px;
-		animation: subir 0.7s 1.02s both cubic-bezier(0.2, 0.7, 0.3, 1);
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: 20px;
+		margin-bottom: 28px;
 	}
 
-	.rejilla article {
-		padding: 24px 22px 22px;
-		background: var(--tinta-alta);
+	.resumen article {
+		padding: 22px 24px;
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
 	}
 
-	.rejilla h2 {
-		margin: 0 0 14px;
-		font-family: var(--letra-dato);
-		font-size: 10px;
+	.resumen h3 {
+		font-size: 0.95rem;
 		font-weight: 500;
-		letter-spacing: 0.2em;
-		text-transform: uppercase;
-		color: #8e9ac4;
+		color: var(--gris);
+		margin-bottom: 10px;
 	}
 
 	.cifra {
-		margin: 0 0 6px;
-		font-family: var(--letra-titulo);
-		font-weight: 500;
-		font-size: 42px;
+		font-size: 2.4rem;
 		line-height: 1;
-		letter-spacing: -0.045em;
-		color: #3d4a80;
+		color: var(--tinta);
+		margin-bottom: 8px;
 	}
 
-	.vacio {
-		margin: 0;
-		font-size: 13px;
-		color: #6f7cad;
+	.nota {
+		font-size: 0.92rem;
+		color: var(--gris-2);
 	}
 
 	.invitacion {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 28px;
-		flex-wrap: wrap;
-		padding: 26px 26px 26px 28px;
-		background: var(--tinta-alta);
-		border: 1px solid var(--telar);
-		position: relative;
-		animation: subir 0.7s 1.14s both cubic-bezier(0.2, 0.7, 0.3, 1);
-	}
-
-	/* El hilo dorado otra vez, esta vez como remate lateral */
-	.invitacion::before {
-		content: '';
-		position: absolute;
-		left: -1px;
-		top: 26px;
-		bottom: 26px;
-		width: 2px;
-		background: var(--oro);
+		padding: 30px 32px;
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
 	}
 
 	.invitacion h2 {
-		margin: 0 0 6px;
-		font-family: var(--letra-titulo);
-		font-weight: 600;
-		font-size: 19px;
-		letter-spacing: -0.02em;
-		color: var(--crudo);
+		font-size: 1.3rem;
+		margin-bottom: 6px;
 	}
 
 	.invitacion p {
-		margin: 0;
-		max-width: 460px;
-		font-size: 14px;
-		color: #97a3ca;
-	}
-
-	.publicar {
-		padding: 12px 20px;
-		font-family: var(--letra);
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--tinta);
-		background: var(--oro);
-		border: none;
-		border-radius: 3px;
-		cursor: pointer;
-		white-space: nowrap;
-		transition:
-			transform 0.16s cubic-bezier(0.2, 0.7, 0.3, 1),
-			background 0.16s ease;
-	}
-
-	.publicar:hover {
-		background: #f0bc57;
-		transform: translateY(-1px);
-	}
-
-	@keyframes subir {
-		from {
-			opacity: 0;
-			transform: translateY(14px);
-		}
-		to {
-			opacity: 1;
-			transform: none;
-		}
+		max-width: 560px;
+		color: var(--texto);
 	}
 
 	@media (max-width: 620px) {
-		header {
-			padding: 14px 18px;
-		}
-		.correo {
-			display: none;
-		}
 		main {
-			padding: 40px 18px 54px;
+			padding-top: 32px;
 		}
-	}
-
-	@media (prefers-reduced-motion: reduce) {
-		.saludo,
-		.rejilla,
+		.saludo {
+			margin-bottom: 26px;
+		}
+		.resumen {
+			gap: 14px;
+			margin-bottom: 20px;
+		}
+		.resumen article {
+			padding: 18px 20px;
+		}
+		.cifra {
+			font-size: 2rem;
+		}
 		.invitacion {
-			animation: none;
-		}
-		.publicar:hover {
-			transform: none;
+			padding: 24px 20px;
 		}
 	}
 </style>

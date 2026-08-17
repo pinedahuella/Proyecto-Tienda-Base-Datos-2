@@ -17,6 +17,7 @@ docker-compose.yml  Bases de datos
 | [docs/instalacion.md](docs/instalacion.md) | Que instalar, como levantar el proyecto, errores comunes |
 | [docs/base-de-datos.md](docs/base-de-datos.md) | El modelo relacional y por que quedo asi |
 | [docs/api.md](docs/api.md) | Estandar de respuestas y endpoints |
+| [docs/frontend.md](docs/frontend.md) | Paginas, paleta y tema claro/oscuro |
 | [migrations/README.md](migrations/README.md) | Como se nombran y se corren las migraciones |
 | [comandos.txt](comandos.txt) | Todos los comandos, con lo que hace cada uno |
 
