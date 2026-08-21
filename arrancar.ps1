@@ -47,6 +47,17 @@ Ok "Credenciales leidas"
 
 # pgAdmin necesita estos dos archivos para conectarse solo. Se generan aqui a
 # partir del .env para que las contrasenas no queden en el repositorio.
+#
+# OJO: pgAdmin lee servers.json UNA SOLA VEZ, cuando crea su base de configuracion
+# en el volumen pgadmin-data. Si ya existe, este archivo se regenera pero pgAdmin
+# ni lo mira, y el arbol sigue como estaba. Para que un cambio de aqui surta
+# efecto hay que recrear ese volumen:
+#
+#   docker compose rm -sf pgadmin
+#   docker volume rm proyecto-tienda-base-datos-2_pgadmin-data
+#   docker compose up -d pgadmin
+#
+# Eso NO toca la base de datos: el volumen de pgAdmin solo guarda sus preferencias.
 Paso "Generando la configuracion de pgAdmin"
 
 $carpetaPgadmin = "$PSScriptRoot\docker\pgadmin"
@@ -68,8 +79,16 @@ $servidores = @{
         }
     }
 }
-$servidores | ConvertTo-Json -Depth 5 |
-    Set-Content -LiteralPath "$carpetaPgadmin\servers.json" -Encoding utf8 -NoNewline
+# Se escribe con WriteAllText y no con Set-Content a proposito. En PowerShell 5.1
+# "-Encoding utf8" mete un BOM al inicio del archivo, y pgAdmin lo rechaza con
+# "Unexpected UTF-8 BOM": el servidor no queda registrado y su arbol sale vacio
+# aunque las tablas existan. UTF8Encoding($false) es el que no pone BOM.
+$json = $servidores | ConvertTo-Json -Depth 5
+[System.IO.File]::WriteAllText(
+    "$carpetaPgadmin\servers.json",
+    $json,
+    (New-Object System.Text.UTF8Encoding($false))
+)
 
 # Formato del pgpass: servidor:puerto:base:usuario:contrasena
 # El * en la base hace que sirva para todas, no solo para la principal.
@@ -148,7 +167,50 @@ Ok "PostgreSQL respondiendo"
 
 
 # ------------------------------------------------------------
-# 4. Migraciones
+# 4. Contrasena
+# ------------------------------------------------------------
+Paso "Sincronizando la contrasena"
+
+# POSTGRES_PASSWORD del docker-compose solo se aplica UNA vez: cuando el volumen
+# esta vacio y la base se crea. Si despues se edita el .env, el contenedor informa
+# la contrasena nueva pero la base sigue guardando la vieja. Desde dentro no se
+# nota (pg_hba.conf usa "trust" y no pregunta nada), pero el backend se conecta
+# desde fuera, donde si se valida, y falla con:
+#
+#   28P01: la autentificacion password fallo para el usuario "..."
+#
+# Justamente porque desde dentro es "trust", aqui se puede reescribir sin conocer
+# la anterior. Si ya coincidia no cambia nada, asi que correrlo siempre es seguro.
+#
+# Va contra la base "postgres", que existe siempre, y no contra DB_NAME: asi el
+# paso tambien funciona cuando la base del proyecto todavia no esta creada.
+
+$usuario = $env_["DB_USER"]
+# Se duplican las comillas simples por si la contrasena lleva una
+$clave = $env_["DB_PASSWORD"].Replace("'", "''")
+$sql = 'ALTER USER "{0}" WITH PASSWORD ''{1}'';' -f $usuario, $clave
+
+# La sentencia entra por stdin y no por -c para que la contrasena no quede
+# escrita en la linea de comandos del proceso
+$salidaClave = $sql | docker exec -i mesh-postgres psql -U $usuario -d postgres -v ON_ERROR_STOP=1 -q 2>&1 | Out-String
+
+if ($LASTEXITCODE -eq 0) {
+    Ok "Contrasena al dia"
+} elseif ($salidaClave -match "does not exist|no existe") {
+    # El volumen se creo con OTRO usuario: no hay nada que reescribir
+    Error1 "El usuario '$usuario' no existe en la base."
+    Error1 "El volumen se creo con otras credenciales. Para empezar de cero:"
+    Error1 "   .\arrancar.ps1 -Reiniciar"
+    exit 1
+} else {
+    Error1 "No se pudo fijar la contrasena:"
+    Write-Host $salidaClave -ForegroundColor Red
+    exit 1
+}
+
+
+# ------------------------------------------------------------
+# 5. Migraciones
 # ------------------------------------------------------------
 Paso "Corriendo migraciones"
 
@@ -175,7 +237,7 @@ if ($scripts.Count -eq 0) {
 
 
 # ------------------------------------------------------------
-# 5. Resumen
+# 6. Resumen
 # ------------------------------------------------------------
 Paso "Listo"
 docker ps --format "   {{.Names}}  {{.Status}}"
