@@ -13,8 +13,20 @@ Como dejar Mesh corriendo en una PC nueva.
 Nada mas. PostgreSQL y pgAdmin no se instalan: estan en el `docker-compose.yml`
 y Docker los baja solo.
 
-Si la PC ya tiene PostgreSQL instalado, hay que detener su servicio. Usa el
-puerto 5432 y choca con el contenedor.
+Si la PC ya tiene PostgreSQL instalado, hay que detener su servicio antes de
+empezar. Usa el puerto 5432 y se pelea con el contenedor. En PowerShell como
+administrador:
+
+```powershell
+Get-Service postgresql* | Stop-Service -Force
+Get-Service postgresql* | Set-Service -StartupType Manual
+```
+
+Lo segundo es para que no vuelva solo al reiniciar la PC. Si hace falta para otra
+clase, se levanta a mano con `Start-Service postgresql*`.
+
+Esto no da un error claro y cuesta encontrarlo. Esta explicado abajo, en
+"El backend dice que la contrasena esta mal".
 
 ## Pasos
 
@@ -182,6 +194,86 @@ Counter to that, there appears to be PostgreSQL data in:
 PostgreSQL 18 cambio la ruta de los datos. El volumen va montado en
 `/var/lib/postgresql`, no en `/var/lib/postgresql/data`. Ya esta corregido en el
 `docker-compose.yml`; no revertirlo.
+
+**El backend dice que la contrasena esta mal**
+
+```
+ERROR [BaseDatosService] 28P01: la autentificacion password fallo para el usuario "meme"
+```
+
+Casi siempre es una de estas tres, en este orden.
+
+*Hay otro PostgreSQL escuchando en el 5432.* Es la mas dificil de ver, porque
+todo lo demas funciona: el contenedor arranca, las migraciones corren y
+`docker exec ... psql` entra sin problema. Pasa que el PostgreSQL instalado en
+Windows se ata a `127.0.0.1` y el contenedor a `0.0.0.0`; cuando el backend pide
+`localhost`, Windows le da el mas especifico, o sea el nativo. El backend nunca
+llega al contenedor. Se ve asi:
+
+```powershell
+Get-NetTCPConnection -LocalPort 5432 -State Listen |
+  ForEach-Object { Get-Process -Id $_.OwningProcess } |
+  Select-Object -Unique Id, ProcessName
+```
+
+Si ademas de `com.docker.backend` aparece `postgres`, es eso. Se detiene el
+servicio con los comandos del inicio de este archivo.
+
+Para confirmarlo, este comando sale al 5432 del host igual que el backend:
+
+```powershell
+$p = (Get-Content backend\.env | Select-String '^DB_PASSWORD=').ToString().Split('=')[1]
+docker exec -e PGPASSWORD=$p mesh-postgres psql -h host.docker.internal -p 5432 -U meme -d mesh -c "select current_database();"
+```
+
+Tiene que responder `mesh`. Si da 28P01, esta llegando a otro servidor.
+
+Ojo con el mensaje: PostgreSQL responde "password fallo" **tambien cuando el
+usuario no existe**, a proposito, para no delatar que usuarios tiene. Asi que
+28P01 no significa que la contrasena este mal; significa que ese servidor no te
+deja entrar.
+
+*Los dos .env no dicen lo mismo.* Son dos archivos: el de la raiz crea la base y
+`backend/.env` es con el que la API se conecta. Se comprueba sin ensenar la
+contrasena:
+
+```powershell
+$a = (Get-Content .env         | Select-String '^DB_PASSWORD=').ToString()
+$b = (Get-Content backend\.env | Select-String '^DB_PASSWORD=').ToString()
+if ($a -eq $b) { "COINCIDEN" } else { "NO COINCIDEN" }
+```
+
+*El backend quedo con el valor viejo en memoria.* `npm run start:dev` se
+reinicia al guardar un `.ts`, pero no al cambiar el `.env`. Despues de editarlo
+hay que cortar con Ctrl+C y volver a levantarlo.
+
+**En pgAdmin no aparece ningun servidor**
+
+pgAdmin lee `servers.json` una sola vez, cuando crea su base de configuracion en
+el volumen `pgadmin-data`. Si el volumen ya existe, `arrancar.ps1` regenera el
+archivo pero pgAdmin ni lo mira. Para que un cambio surta efecto hay que recrear
+ese volumen:
+
+```powershell
+docker compose rm -sf pgadmin
+docker volume rm proyecto-tienda-base-datos-2_pgadmin-data
+docker compose up -d pgadmin
+```
+
+Primero `.\arrancar.ps1`, que regenera el `servers.json`, y despues el borrado.
+Al reves no sirve. Esto no toca la base de datos: el volumen de pgAdmin solo
+guarda sus preferencias.
+
+Para ver si lo cargo bien:
+
+```powershell
+docker logs mesh-pgadmin | Select-String "Loading servers", "servers.json"
+```
+
+**En pgAdmin no se ven las tablas**
+
+Estan en la base `mesh`, en `Databases > mesh > Schemas > public > Tables`. La
+base `postgres`, que es la que pgAdmin abre por defecto, esta vacia de verdad.
 
 **pgAdmin no conecta**
 
