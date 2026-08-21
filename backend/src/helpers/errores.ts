@@ -15,3 +15,6 @@ export class ErrorConflicto extends Error {}
 
 /** La base de datos no respondio. El controlador la traduce a HTTP 503. */
 export class ErrorConexion extends Error {}
+
+/** El token de sesion no vino, no es valido o ya vencio. HTTP 401. */
+export class ErrorSesion extends Error {}

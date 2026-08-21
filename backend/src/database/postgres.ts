@@ -1,24 +1,8 @@
 import { Logger } from '@nestjs/common';
 import { Pool } from 'pg';
+import { obligatoria } from '../helpers/entorno';
 
 const logger = new Logger('Postgres');
-
-/**
- * Lee una variable de entorno y corta el arranque si no existe.
- *
- * Es a proposito: si la contrasena viniera con un valor por defecto escrito
- * aqui, esa contrasena quedaria en el repositorio. Mejor que el backend no
- * arranque y diga que falta, a que arranque con una credencial publicada.
- */
-function obligatoria(nombre: string): string {
-  const valor = process.env[nombre];
-  if (!valor) {
-    throw new Error(
-      `Falta la variable ${nombre}. Copia backend/.env.example como backend/.env y llenalo.`,
-    );
-  }
-  return valor;
-}
 
 /**
  * La conexion a PostgreSQL. Todo el backend consulta la base por aqui.

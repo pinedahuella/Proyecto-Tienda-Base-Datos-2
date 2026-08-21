@@ -1,16 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { pool } from '../database/postgres';
-import { hashearContrasena } from '../helpers/contrasena';
+import { compararContrasena, hashearContrasena } from '../helpers/contrasena';
 import {
   ErrorConexion,
   ErrorConflicto,
+  ErrorSesion,
   ErrorValidacion,
 } from '../helpers/errores';
+import { firmarToken } from '../helpers/token';
 import { ExistenciaUsuario } from '../models/existencia-usuario';
+import { LoginUsuarioPeticion } from '../models/login-usuario';
 import {
   RegistroUsuarioPeticion,
   UsuarioRegistrado,
 } from '../models/registro-usuario';
+import { Usuario } from '../models/usuario';
 
 // Catalogo rol_usuario: comprador se inserta primero en la migracion 001, y
 // por eso su id es 1. Todo usuario nuevo entra como comprador; para vender
@@ -29,6 +33,11 @@ interface FilaExistente {
   usuario: string;
 }
 
+interface ResultadoLogin {
+  usuario: UsuarioRegistrado;
+  token: string;
+}
+
 /**
  * Servicio de las rutas /usuario.
  *
@@ -36,7 +45,13 @@ interface FilaExistente {
  * usuario no esten repetidos, hashea la contrasena y crea la fila en
  * usuarios. GET /usuario/registros-existentes hace esa misma comprobacion
  * de disponibilidad, pero sola, para que el frontend la use mientras el
- * usuario todavia esta llenando el formulario.
+ * usuario todavia esta llenando el formulario. POST /usuario/login revisa
+ * el correo y la contrasena contra lo guardado y, si coinciden, firma el
+ * token de sesion. GET /usuario/yo trae el perfil completo a partir del id
+ * que ya vino verificado en el token (lo pone ahi SesionGuard).
+ *
+ * POST /usuario/logout no usa este servicio: borrar la cookie no necesita
+ * tocar la base de datos, asi que esa ruta vive entera en el controller.
  */
 @Injectable()
 export class UsuarioService {
@@ -80,6 +95,107 @@ export class UsuarioService {
     } catch (error) {
       this.manejarErrorBaseDatos(error);
     }
+  }
+
+  /**
+   * Revisa el identificador (correo o usuario) y la contrasena contra la
+   * base y, si coinciden, firma un token de sesion.
+   *
+   * Lanza ErrorSesion tanto si el identificador no existe como si la
+   * contrasena no coincide, y con el mismo mensaje en los dos casos: si se
+   * distinguiera, cualquiera podria usar este endpoint para averiguar que
+   * correos o usuarios estan registrados probando uno por uno.
+   */
+  async iniciarSesion(datos: LoginUsuarioPeticion): Promise<ResultadoLogin> {
+    if (!this.esTextoNoVacio(datos.identificador)) {
+      throw new ErrorValidacion(
+        'El correo electronico o el usuario es obligatorio',
+      );
+    }
+    if (!this.esTextoNoVacio(datos.contrasena)) {
+      throw new ErrorValidacion('La contrasena es obligatoria');
+    }
+
+    let fila: Usuario | undefined;
+    try {
+      const resultado = await pool.query<Usuario>(
+        `SELECT id_usuario, correo_electronico, usuario, nombre, apellido,
+                contrasena_hash, fecha_nacimiento, fecha_creacion,
+                id_rol_usuario, id_estado_usuario
+         FROM usuarios
+         WHERE correo_electronico = $1 OR usuario = $1`,
+        [datos.identificador],
+      );
+      fila = resultado.rows[0];
+    } catch (error) {
+      this.manejarErrorBaseDatos(error);
+    }
+
+    const coincide =
+      fila != null &&
+      (await compararContrasena(datos.contrasena, fila.contrasena_hash));
+
+    if (!coincide) {
+      throw new ErrorSesion(
+        'Correo electronico, usuario o contrasena incorrectos',
+      );
+    }
+
+    // A este punto TypeScript ya sabe que fila no es undefined: "coincide"
+    // solo puede ser true si fila existe, y si no coincide ya se lanzo.
+    const usuario = fila;
+    const token = await firmarToken({
+      id_usuario: usuario.id_usuario,
+      id_rol_usuario: usuario.id_rol_usuario,
+    });
+
+    return { usuario: this.aUsuarioRegistrado(usuario), token };
+  }
+
+  /**
+   * Trae el perfil completo a partir del id que vino en el token. La usa
+   * GET /usuario/yo, ya detras de SesionGuard.
+   *
+   * Si el id no existe (la cuenta se borro despues de firmar el token, algo
+   * raro pero posible) se trata igual que un token invalido: la sesion ya
+   * no sirve.
+   */
+  async obtenerPorId(idUsuario: string): Promise<UsuarioRegistrado> {
+    let fila: Usuario | undefined;
+    try {
+      const resultado = await pool.query<Usuario>(
+        `SELECT id_usuario, correo_electronico, usuario, nombre, apellido,
+                contrasena_hash, fecha_nacimiento, fecha_creacion,
+                id_rol_usuario, id_estado_usuario
+         FROM usuarios
+         WHERE id_usuario = $1`,
+        [idUsuario],
+      );
+      fila = resultado.rows[0];
+    } catch (error) {
+      this.manejarErrorBaseDatos(error);
+    }
+
+    if (fila == null) {
+      throw new ErrorSesion('Token invalido o expirado');
+    }
+
+    return this.aUsuarioRegistrado(fila);
+  }
+
+  /** Quita el hash de la contrasena antes de mandar el usuario para afuera. */
+  private aUsuarioRegistrado(fila: Usuario): UsuarioRegistrado {
+    return {
+      id_usuario: fila.id_usuario,
+      correo_electronico: fila.correo_electronico,
+      usuario: fila.usuario,
+      nombre: fila.nombre,
+      apellido: fila.apellido,
+      fecha_nacimiento: fila.fecha_nacimiento,
+      fecha_creacion: fila.fecha_creacion,
+      id_rol_usuario: fila.id_rol_usuario,
+      id_estado_usuario: fila.id_estado_usuario,
+    };
   }
 
   /** Revisa presencia, tipo y formato de cada campo. */

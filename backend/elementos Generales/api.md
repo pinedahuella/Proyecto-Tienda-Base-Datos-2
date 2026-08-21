@@ -50,6 +50,8 @@ El codigo y `ok` siempre concuerdan.
 | 200 | Todo bien | true |
 | 201 | Se creo algo | true |
 | 400 | El cliente mando datos invalidos | false |
+| 401 | No hay sesion, o el correo/usuario/contrasena/token no son validos | false |
+| 403 | Hay sesion, pero el rol no alcanza para esto | false |
 | 404 | No existe lo que se pidio | false |
 | 409 | Conflicto, por ejemplo stock insuficiente | false |
 | 503 | Una base de datos no responde | false |
@@ -142,12 +144,48 @@ src/
   services/      la logica y las consultas
   models/        la forma de cada tabla y de cada respuesta
   helpers/       utilidades compartidas
-  middlewares/   codigo que corre antes de llegar al controlador
+  guards/        deciden si una peticion puede pasar antes de llegar al controlador
+  decorators/    atajos para leer datos dentro de un controller o marcar una ruta
   database/      la conexion
+  types/         ampliaciones de tipos de librerias externas (nada que se ejecute)
 ```
 
-Las carpetas usan los nombres estandar del framework. Todo lo que escribimos
-nosotros (archivos, clases y funciones) esta en espanol.
+Las carpetas usan los nombres estandar del framework (o los mas parecidos:
+Nest no trae una carpeta "guards" ni "decorators" por defecto, pero es como
+las llama su propia documentacion). Todo lo que escribimos nosotros
+(archivos, clases y funciones) esta en espanol.
+
+### Guards y decorators (sesion)
+
+No hay middleware clasico en este proyecto: proteger una ruta se hace con
+un **Guard**, que en Nest corre antes del controller y ya sabe a que ruta
+va la peticion (un middleware normal no lo sabe).
+
+| Archivo | Que es |
+|---|---|
+| `guards/sesion.guard.ts` | `SesionGuard`. Lee la cookie del token, la verifica, y si la ruta tiene `@Roles(...)` tambien revisa el rol |
+| `decorators/roles.decorator.ts` | `@Roles(...ids)`, marca una ruta como restringida a ciertos `id_rol_usuario` |
+| `decorators/usuario-actual.decorator.ts` | `@UsuarioActual()`, le da al controller el usuario que `SesionGuard` ya verifico |
+| `types/fastify.d.ts` | le agrega el campo `usuario` al `request` de Fastify, para que `SesionGuard` lo pueda guardar ahi |
+
+Para proteger una ruta:
+
+```ts
+@UseGuards(SesionGuard)
+@Get('yo')
+obtenerYo(@UsuarioActual() usuario: TokenUsuario) { ... }
+```
+
+Y para ademas restringirla a un rol (por ejemplo, solo admin):
+
+```ts
+@Roles(3)
+@UseGuards(SesionGuard)
+@Get('solo-admin')
+```
+
+`SesionGuard` no se registra en `app.module.ts`: Nest lo instancia solo
+cuando lo ve en un `@UseGuards(...)`.
 
 ### Cada archivo y que hace
 
