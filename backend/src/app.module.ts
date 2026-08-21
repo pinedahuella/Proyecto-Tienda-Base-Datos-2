@@ -3,6 +3,8 @@ import { InicioController } from './controllers/inicio.controller';
 import { InicioService } from './services/inicio.service';
 import { BaseDatosController } from './controllers/base-datos.controller';
 import { BaseDatosService } from './services/base-datos.service';
+import { UsuarioController } from './controllers/usuario.controller';
+import { UsuarioService } from './services/usuario.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -12,7 +14,7 @@ import { BaseDatosService } from './services/base-datos.service';
  */
 @Module({
   imports: [],
-  controllers: [InicioController, BaseDatosController],
-  providers: [InicioService, BaseDatosService],
+  controllers: [InicioController, BaseDatosController, UsuarioController],
+  providers: [InicioService, BaseDatosService, UsuarioService],
 })
 export class AppModule {}
