@@ -260,6 +260,30 @@ de una o varias tablas, y el payload del token de sesion.
 Una forma rapida de saber donde va algo nuevo: si tiene un `CREATE TABLE`
 en `migrations/`, es un modelo. Si no, es un DTO.
 
+### Los logs (log_registro, log_login)
+
+`services/log.service.ts` (`LogService`) escribe en esas dos tablas. Las
+llama `UsuarioController`, no `UsuarioService`: despues de que `registrar()`
+o `iniciarSesion()` ya tuvieron exito, el controller le pasa el id del
+usuario y la IP de la peticion (`request.ip`, de Fastify).
+
+Nunca lanza error. Si el `INSERT` del log falla, se loguea el detalle
+tecnico y ahi se queda: un log que no se pudo guardar no puede tumbar un
+registro, un login o un logout que si funcionaron. Por eso no cambia nada
+de la respuesta que ya devolvian esas rutas.
+
+`log_login` guarda entradas y salidas (`login` y `logout`). Para el logout
+hay un detalle: `POST /usuario/logout` no tiene `SesionGuard` (tiene que
+funcionar aunque el token ya haya vencido), asi que antes de borrar la
+cookie intenta verificar el token nada mas para saber a quien atribuirle
+el logout. Si no hay cookie, o el token ya no sirve, simplemente no se
+guarda ese log — la ruta sigue respondiendo 200 igual, cerrar sesion nunca
+depende de que el log se haya podido escribir.
+
+Ojo con esto al limpiar datos de prueba a mano: `usuarios` tiene `ON DELETE
+RESTRICT` desde `log_login` y `log_registro`, asi que no se puede borrar un
+usuario que ya tenga logs sin borrar esas filas primero.
+
 ### El recorrido de una peticion
 
 ```
