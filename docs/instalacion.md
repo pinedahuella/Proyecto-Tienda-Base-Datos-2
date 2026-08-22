@@ -107,6 +107,22 @@ La carpeta `migrations/` esta montada dentro del contenedor de PostgreSQL en
 Lo mismo con `mongo/`, montada en el contenedor de MongoDB en `/mongo`. Ahi van
 los scripts que crean las colecciones.
 
+## El catalogo en MongoDB
+
+Los productos se disenan y se cargan en PostgreSQL, y de ahi se migran a MongoDB
+con el ETL de `etl/`. En Mongo quedan dos colecciones: `productos`, con un
+documento por producto, y `productos_eventos`, con su historial de cambios.
+
+`arrancar.ps1` lo corre solo cuando la coleccion `productos` esta vacia, que es
+el caso de una maquina recien montada. Despues no lo vuelve a correr, para no
+pisar lo que haya en Mongo en cada arranque. Para volver a migrarlo a mano:
+
+```powershell
+.rrancar.ps1 -Etl
+```
+
+El detalle esta en [etl/README.md](../etl/README.md).
+
 ## Accesos de desarrollo
 
 | Servicio | Usuario | Contrasena |

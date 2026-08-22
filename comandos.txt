@@ -19,6 +19,8 @@ Opciones:
 
   .\arrancar.ps1 -Reiniciar        borra TODOS los datos y empieza de cero
   .\arrancar.ps1 -ReiniciarMongo   rehace solo MongoDB, sin tocar PostgreSQL
+  .\arrancar.ps1 -Mongo            abre la consola de MongoDB
+  .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a MongoDB
 
 Que hace:
   1. arranca Docker si esta apagado y espera al engine
@@ -29,7 +31,8 @@ Que hace:
   6. comprueba el acceso a MongoDB y, si la contrasena del .env ya no es
      la que tiene la base, la reescribe sola sin borrar el catalogo
   7. corre los scripts de mongo/ que crean las colecciones
-  8. imprime el resumen y las URLs
+  8. migra el catalogo a MongoDB con el ETL, si la coleccion esta vacia
+  9. imprime el resumen y las URLs
 
 Se puede correr las veces que quieras. Si una migracion ya estaba aplicada lo
 avisa y sigue.
@@ -86,6 +89,20 @@ Dentro de psql:
   \dt              lista las tablas
   \d usuarios      describe una tabla
   \q               salir
+
+
+MIGRAR EL CATALOGO A MONGO (el ETL)
+--------------------------------------------------
+Lo corre arrancar.ps1 solo, la primera vez. Para volver a correrlo:
+
+  .\arrancar.ps1 -Etl
+
+O directo desde Git Bash, no desde PowerShell:
+
+  bash etl/correr.sh
+
+Correrlo dos veces no duplica nada: cada documento se escribe con su mismo
+identificador. Lo explicado esta en etl/README.md.
 
 
 VER MONGO EN EL NAVEGADOR

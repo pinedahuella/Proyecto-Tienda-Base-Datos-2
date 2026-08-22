@@ -5,11 +5,13 @@
 #   .\arrancar.ps1 -Reiniciar        borra TODOS los datos y empieza de cero
 #   .\arrancar.ps1 -ReiniciarMongo   rehace solo MongoDB, sin tocar PostgreSQL
 #   .\arrancar.ps1 -Mongo            abre la consola de MongoDB y ya
+#   .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a MongoDB
 
 param(
     [switch]$Reiniciar,
     [switch]$ReiniciarMongo,
-    [switch]$Mongo
+    [switch]$Mongo,
+    [switch]$Etl
 )
 
 Set-Location -LiteralPath $PSScriptRoot
@@ -76,6 +78,26 @@ function Comando-Mongo($resto) {
            ' -p $MONGO_INITDB_ROOT_PASSWORD' +
            ' --authenticationDatabase admin' +
            ' $MONGO_INITDB_DATABASE ' + $resto
+}
+
+
+# El ETL corre en bash porque PowerShell se come las comillas al llamar a
+# docker. Y OJO: "bash" a secas en el PATH de Windows es el de WSL, no el de
+# Git, y ahi no hay docker ni las mismas rutas. Se busca al lado de git.exe,
+# que esta instalado si o si en cualquier maquina que haya clonado el repo.
+function Buscar-Bash {
+    $git = (Get-Command git -ErrorAction SilentlyContinue).Source
+    if ($git) {
+        $alLado = Join-Path (Split-Path (Split-Path $git)) 'bin\bash.exe'
+        if (Test-Path $alLado) { return $alLado }
+    }
+    foreach ($ruta in @(
+        "C:\Program Files\Git\bin\bash.exe",
+        "C:\Program Files (x86)\Git\bin\bash.exe",
+        "$env:LOCALAPPDATA\Programs\Git\bin\bash.exe")) {
+        if (Test-Path $ruta) { return $ruta }
+    }
+    return $null
 }
 
 # Nombre del volumen de Mongo. Compose lo arma con el nombre de la carpeta del
@@ -456,6 +478,44 @@ if ($coleccionesJs.Count -eq 0) {
         } else {
             Error1 "$($j.Name) FALLO"
             Write-Host $salidaJs -ForegroundColor Red
+            exit 1
+        }
+    }
+}
+
+
+# ------------------------------------------------------------
+# 7. El catalogo en MongoDB
+# ------------------------------------------------------------
+# El ETL lee los productos de PostgreSQL y los escribe en Mongo: el documento
+# de cada producto y su historial convertido en eventos.
+#
+# Se corre solo cuando la coleccion esta vacia, o cuando se pide con -Etl. No
+# se corre siempre a proposito: el dia que se agreguen productos desde la
+# aplicacion, correrlo en cada arranque pisaria lo que haya en Mongo.
+
+Paso "Catalogo en MongoDB"
+
+$cuenta = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.countDocuments()'") 2>&1 | Out-String).Trim()
+
+if (-not $Etl -and $cuenta -ne "0") {
+    Ok "Ya cargado ($cuenta productos). Para volver a migrarlo: .\arrancar.ps1 -Etl"
+} else {
+    $bash = Buscar-Bash
+    if (-not $bash) {
+        Aviso "No encuentro el bash de Git, me salto el ETL."
+        Aviso "Instala Git para Windows y corre despues:  .\arrancar.ps1 -Etl"
+    } else {
+        # Git Bash no entiende las rutas con contrabarra de Windows
+        $rutaBash = $PSScriptRoot -replace '\\', '/'
+        $salidaEtl = & $bash -c "cd '$rutaBash' && ./etl/correr.sh" 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            foreach ($linea in ($salidaEtl -split "`n")) {
+                if ($linea.Trim()) { Ok $linea.Trim() }
+            }
+        } else {
+            Error1 "El ETL fallo:"
+            Write-Host $salidaEtl -ForegroundColor Red
             exit 1
         }
     }
