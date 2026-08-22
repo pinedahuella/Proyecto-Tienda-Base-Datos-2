@@ -235,6 +235,9 @@ TABLE` para algo, su interfaz no va aqui.
 | `models/tipo-login.ts` | `TipoLogin` | `tipo_login` |
 | `models/log-login.ts` | `LogLogin` | `log_login` |
 | `models/log-registro.ts` | `LogRegistro` | `log_registro` |
+| `models/estado-direccion.ts` | `EstadoDireccion` | `estado_direccion` |
+| `models/direccion.ts` | `Direccion` | `direcciones` |
+| `models/direccion-historial.ts` | `DireccionHistorial` | `direccion_historial` |
 
 Los `id` de las tablas grandes van tipados como `string` y no como `number`.
 Son `bigserial`, y el driver `pg` entrega los `bigint` como texto para no perder
@@ -282,7 +285,22 @@ depende de que el log se haya podido escribir.
 
 Ojo con esto al limpiar datos de prueba a mano: `usuarios` tiene `ON DELETE
 RESTRICT` desde `log_login` y `log_registro`, asi que no se puede borrar un
-usuario que ya tenga logs sin borrar esas filas primero.
+usuario que ya tenga logs sin borrar esas filas primero. Lo mismo pasa con
+`direcciones` y `direccion_historial`.
+
+### Transacciones (crear una direccion)
+
+`POST /direccion-usuario` es la primera ruta que necesita dos `INSERT` que
+tienen que pasar juntos o no pasar ninguno: crear la fila en `direcciones`
+y su primera version en `direccion_historial`. Para eso `pool.query(...)`
+no alcanza (cada llamada podria ir a una conexion distinta del pool);
+`DireccionUsuarioService.crear()` pide un cliente dedicado con
+`pool.connect()` y hace `BEGIN` / `COMMIT`, con un `ROLLBACK` en el catch
+si algo sale mal. El cliente se libera en un `finally`, para devolverlo al
+pool pase lo que pase.
+
+Si algun dia otra ruta necesita "dos o mas escrituras que van juntas",
+este metodo es el ejemplo a seguir.
 
 ### El recorrido de una peticion
 

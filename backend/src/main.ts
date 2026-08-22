@@ -32,6 +32,7 @@ async function bootstrap() {
   app.enableCors({
     origin: 'http://localhost:5173',
     credentials: true,
+    methods: ['GET', 'HEAD', 'POST', 'PATCH', 'PUT', 'DELETE'],
   });
 
   // Lee la cookie de cada peticion y la deja en request.cookies. No firma

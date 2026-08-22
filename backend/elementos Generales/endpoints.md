@@ -694,3 +694,157 @@ activa:
 ```json
 { "ok": false, "mensaje": "No se pudo actualizar la contrasena", "payload": null }
 ```
+
+---
+
+## POST /direccion-usuario
+
+Requiere la cookie `mesh_token`. Crea una direccion para el usuario
+logueado (el id sale del token, no del cuerpo). Siempre entra con estado
+activa, y de paso crea su primera fila en `direccion_historial` (el
+snapshot inicial) — las dos cosas pasan juntas, en una sola transaccion.
+
+```json
+{
+  "pais": "Guatemala",
+  "departamento": "Guatemala",
+  "ciudad": "Guatemala",
+  "codigo_postal": "01001"
+}
+```
+
+`codigo_postal` es opcional.
+
+**201**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Direccion creada correctamente",
+  "payload": {
+    "id_direccion": "1",
+    "id_usuario": "23",
+    "pais": "Guatemala",
+    "departamento": "Guatemala",
+    "ciudad": "Guatemala",
+    "codigo_postal": "01001",
+    "fecha_creacion": "2026-08-22T03:03:20.679Z",
+    "id_estado_direccion": 1
+  }
+}
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "El pais es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El pais no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El departamento es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El departamento no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La ciudad es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La ciudad no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El codigo postal no puede tener mas de 20 caracteres", "payload": null }
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo crear la direccion", "payload": null }
+```
+
+---
+
+## PATCH /direccion-usuario/:id
+
+Requiere la cookie `mesh_token`. Edita `pais`, `departamento`, `ciudad`
+y/o `codigo_postal` de una direccion **propia**. Cada campo es
+independiente: el que venga en `null` (o no venga) no se toca. Debe venir
+al menos uno.
+
+Solo puede editar sus propias direcciones: una direccion de otro usuario
+da el mismo 404 que un id que no existe (no hay forma de usar esta ruta
+para confirmar que direcciones tiene otra persona).
+
+Deja una fila nueva en `direccion_historial` con el estado **completo** de
+la direccion despues del cambio (no solo los campos que llegaron en la
+peticion) — es el mismo comportamiento de `POST /direccion-usuario`, en
+una sola transaccion.
+
+```json
+{
+  "ciudad": "Mixco"
+}
+```
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Direccion actualizada correctamente",
+  "payload": {
+    "id_direccion": "3",
+    "id_usuario": "24",
+    "pais": "Guatemala",
+    "departamento": "Guatemala",
+    "ciudad": "Mixco",
+    "codigo_postal": "01001",
+    "fecha_creacion": "2026-08-22T03:17:18.338Z",
+    "id_estado_direccion": 1
+  }
+}
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "Debes enviar al menos un campo para actualizar", "payload": null }
+{ "ok": false, "mensaje": "El pais es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El pais no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El departamento es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El departamento no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La ciudad es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La ciudad no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El codigo postal no puede tener mas de 20 caracteres", "payload": null }
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**404** — no existe una direccion con ese id (o no es tuya):
+
+```json
+{ "ok": false, "mensaje": "No existe una direccion con ese id", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo actualizar la direccion", "payload": null }
+```

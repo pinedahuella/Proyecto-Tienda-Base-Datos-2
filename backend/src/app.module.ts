@@ -12,6 +12,8 @@ import { AdminCatalogosService } from './services/admin/admin-catalogos.service'
 import { PerfilController } from './controllers/perfil.controller';
 import { PerfilService } from './services/perfil.service';
 import { LogService } from './services/log.service';
+import { DireccionUsuarioController } from './controllers/direccion-usuario.controller';
+import { DireccionUsuarioService } from './services/direccion-usuario.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -28,6 +30,7 @@ import { LogService } from './services/log.service';
     AdminUsuariosController,
     AdminCatalogosController,
     PerfilController,
+    DireccionUsuarioController,
   ],
   providers: [
     InicioService,
@@ -37,6 +40,7 @@ import { LogService } from './services/log.service';
     AdminCatalogosService,
     PerfilService,
     LogService,
+    DireccionUsuarioService,
   ],
 })
 export class AppModule {}
