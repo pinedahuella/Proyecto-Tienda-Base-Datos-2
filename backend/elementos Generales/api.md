@@ -140,15 +140,24 @@ docker start mesh-postgres
 
 ```
 src/
-  controllers/   reciben la peticion y devuelven la respuesta
-  services/      la logica y las consultas
-  models/        la forma de cada tabla y de cada respuesta
-  helpers/       utilidades compartidas
-  guards/        deciden si una peticion puede pasar antes de llegar al controlador
-  decorators/    atajos para leer datos dentro de un controller o marcar una ruta
-  database/      la conexion
-  types/         ampliaciones de tipos de librerias externas (nada que se ejecute)
+  controllers/       reciben la peticion y devuelven la respuesta
+    admin/           controllers de /admin/*
+  services/          la logica y las consultas
+    admin/           services de /admin/*
+  models/            la forma de cada tabla, tal cual existe en la base de datos
+  dto/               formas que solo existen dentro de la app (peticiones, respuestas, el token)
+  helpers/           utilidades compartidas
+  guards/            deciden si una peticion puede pasar antes de llegar al controlador
+  decorators/        atajos para leer datos dentro de un controller o marcar una ruta
+  database/          la conexion
+  types/             ampliaciones de tipos de librerias externas (nada que se ejecute)
 ```
+
+`admin/` es una subcarpeta dentro de `controllers/` y otra dentro de
+`services/`, no una carpeta aparte a su mismo nivel: asi todo lo que recibe
+una peticion sigue estando en `controllers/` (facil de recorrer completo),
+y adentro se nota de un vistazo cual es para el usuario normal y cual es
+solo para un admin.
 
 Las carpetas usan los nombres estandar del framework (o los mas parecidos:
 Nest no trae una carpeta "guards" ni "decorators" por defecto, pero es como
@@ -176,16 +185,28 @@ Para proteger una ruta:
 obtenerYo(@UsuarioActual() usuario: TokenUsuario) { ... }
 ```
 
-Y para ademas restringirla a un rol (por ejemplo, solo admin):
+Y para ademas restringirla a un rol (por ejemplo, solo admin), lo normal es
+ponerlo en la clase, para que proteja todas las rutas del controller de
+una sola vez:
 
 ```ts
-@Roles(3)
+@Controller('admin/usuarios')
 @UseGuards(SesionGuard)
-@Get('solo-admin')
+@Roles(ID_ROL_ADMIN)
+export class AdminUsuariosController { ... }
 ```
 
 `SesionGuard` no se registra en `app.module.ts`: Nest lo instancia solo
 cuando lo ve en un `@UseGuards(...)`.
+
+Detalle tecnico si algun dia `@Roles(...)` da problemas: adentro,
+`SesionGuard` busca esa metadata con `reflector.getAllAndOverride(...)`
+revisando primero el metodo y despues la clase. Si buscara solo el metodo
+(`reflector.get(ROLES_KEY, contexto.getHandler())`), un `@Roles(...)`
+puesto en la clase nunca se encontraria y la restriccion de rol quedaria
+sin efecto en silencio, aunque el token siga verificandose bien. Esto paso
+de verdad al construir `/admin/usuarios`: cualquiera logueado, sin importar
+el rol, pasaba el guard.
 
 ### Cada archivo y que hace
 
@@ -202,7 +223,9 @@ cuando lo ve en un `@UseGuards(...)`.
 
 ### Los modelos
 
-Uno por cada tabla de la base, con el mismo nombre.
+`models/` es solo lo que existe en la base de datos: una interfaz por cada
+tabla, con el mismo nombre y las mismas columnas. Si no hay un `CREATE
+TABLE` para algo, su interfaz no va aqui.
 
 | Archivo | Interfaz | Tabla |
 |---|---|---|
@@ -212,14 +235,30 @@ Uno por cada tabla de la base, con el mismo nombre.
 | `models/tipo-login.ts` | `TipoLogin` | `tipo_login` |
 | `models/log-login.ts` | `LogLogin` | `log_login` |
 | `models/log-registro.ts` | `LogRegistro` | `log_registro` |
-| `models/estado-api.ts` | `EstadoApi` | ninguna, es la respuesta de `GET /` |
-| `models/info-conexion.ts` | `InfoConexion` | ninguna, es la respuesta de `GET /db` |
 
 Los `id` de las tablas grandes van tipados como `string` y no como `number`.
 Son `bigserial`, y el driver `pg` entrega los `bigint` como texto para no perder
 precision. Si se declaran `number`, una comparacion como `id === 1` falla en
 silencio porque lo que llega es `"1"`. Los catalogos si van como `number`
 porque son `smallserial`.
+
+### Los DTO
+
+`dto/` es todo lo demas: formas de datos que la app usa para funcionar pero
+que no son ninguna tabla. Cuerpos de peticion, respuestas armadas a partir
+de una o varias tablas, y el payload del token de sesion.
+
+| Archivo | Interfaz | Que es |
+|---|---|---|
+| `dto/estado-api.ts` | `EstadoApi` | respuesta de `GET /` |
+| `dto/info-conexion.ts` | `InfoConexion` | respuesta de `GET /db` |
+| `dto/registro-usuario.ts` | `RegistroUsuarioPeticion`, `UsuarioRegistrado` | cuerpo y respuesta de `POST /usuario/registro` (`UsuarioRegistrado` tambien la usan login y `GET /usuario/yo`) |
+| `dto/existencia-usuario.ts` | `ExistenciaUsuario` | respuesta de `GET /usuario/registros-existentes` |
+| `dto/login-usuario.ts` | `LoginUsuarioPeticion` | cuerpo de `POST /usuario/login` |
+| `dto/token-usuario.ts` | `TokenUsuario` | lo que va firmado dentro del JWT |
+
+Una forma rapida de saber donde va algo nuevo: si tiene un `CREATE TABLE`
+en `migrations/`, es un modelo. Si no, es un DTO.
 
 ### El recorrido de una peticion
 

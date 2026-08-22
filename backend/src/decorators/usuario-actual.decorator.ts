@@ -1,6 +1,6 @@
 import { createParamDecorator, ExecutionContext } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { TokenUsuario } from '../models/token-usuario';
+import { TokenUsuario } from '../dto/token-usuario';
 
 /**
  * Da acceso, dentro de un controller, al usuario que SesionGuard ya

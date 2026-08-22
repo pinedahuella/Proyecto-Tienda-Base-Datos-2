@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { exito, RespuestaApi } from '../helpers/respuesta';
-import { EstadoApi } from '../models/estado-api';
+import { EstadoApi } from '../dto/estado-api';
 
 /**
  * Servicio de la ruta raiz.

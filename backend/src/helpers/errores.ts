@@ -18,3 +18,6 @@ export class ErrorConexion extends Error {}
 
 /** El token de sesion no vino, no es valido o ya vencio. HTTP 401. */
 export class ErrorSesion extends Error {}
+
+/** No existe lo que se pidio. El controlador la traduce a HTTP 404. */
+export class ErrorNoEncontrado extends Error {}

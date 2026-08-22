@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { pool } from '../database/postgres';
 import { exito, fallo, RespuestaApi } from '../helpers/respuesta';
-import { InfoConexion } from '../models/info-conexion';
+import { InfoConexion } from '../dto/info-conexion';
 
 /**
  * Servicio que comprueba si el backend puede hablar con PostgreSQL.

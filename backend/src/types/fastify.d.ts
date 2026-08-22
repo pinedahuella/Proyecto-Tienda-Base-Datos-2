@@ -1,4 +1,4 @@
-import { TokenUsuario } from '../models/token-usuario';
+import { TokenUsuario } from '../dto/token-usuario';
 
 /**
  * Le agrega el campo "usuario" al request de Fastify. Nadie lo llena solo:

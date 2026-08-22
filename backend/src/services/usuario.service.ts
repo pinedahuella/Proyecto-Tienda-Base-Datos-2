@@ -2,31 +2,29 @@ import { Injectable, Logger } from '@nestjs/common';
 import { pool } from '../database/postgres';
 import { compararContrasena, hashearContrasena } from '../helpers/contrasena';
 import {
-  ErrorConexion,
   ErrorConflicto,
   ErrorSesion,
   ErrorValidacion,
 } from '../helpers/errores';
+import { manejarErrorConexion } from '../helpers/manejar-error-db';
 import { firmarToken } from '../helpers/token';
-import { ExistenciaUsuario } from '../models/existencia-usuario';
-import { LoginUsuarioPeticion } from '../models/login-usuario';
+import {
+  esTextoNoVacio,
+  validarApellido,
+  validarFechaNacimiento,
+  validarNombre,
+} from '../helpers/validaciones-perfil';
+import { ExistenciaUsuario } from '../dto/existencia-usuario';
+import { LoginUsuarioPeticion } from '../dto/login-usuario';
 import {
   RegistroUsuarioPeticion,
   UsuarioRegistrado,
-} from '../models/registro-usuario';
+} from '../dto/registro-usuario';
 import { Usuario } from '../models/usuario';
-
-// Catalogo rol_usuario: comprador se inserta primero en la migracion 001, y
-// por eso su id es 1. Todo usuario nuevo entra como comprador; para vender
-// hace falta otro paso que todavia no existe.
-const ID_ROL_COMPRADOR = 1;
-
-// Catalogo estado_usuario: activo se inserta primero en la migracion 001,
-// por eso su id es 1. Una cuenta nueva entra activa de una vez.
-const ID_ESTADO_ACTIVO = 1;
+import { ID_ROL_COMPRADOR } from '../models/rol-usuario';
+import { ID_ESTADO_ACTIVO } from '../models/estado-usuario';
 
 const REGEX_CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
 interface FilaExistente {
   correo_electronico: string;
@@ -99,20 +97,22 @@ export class UsuarioService {
 
   /**
    * Revisa el identificador (correo o usuario) y la contrasena contra la
-   * base y, si coinciden, firma un token de sesion.
+   * base y, si coinciden y la cuenta esta activa, firma un token de sesion.
    *
-   * Lanza ErrorSesion tanto si el identificador no existe como si la
-   * contrasena no coincide, y con el mismo mensaje en los dos casos: si se
-   * distinguiera, cualquiera podria usar este endpoint para averiguar que
-   * correos o usuarios estan registrados probando uno por uno.
+   * Lanza ErrorSesion, con el mismo mensaje, si el identificador no existe,
+   * si la contrasena no coincide, o si la cuenta no esta activa. Es a
+   * proposito que las tres den el mismo mensaje: si la cuenta suspendida
+   * dijera algo distinto, cualquiera podria usar este endpoint para
+   * confirmar la contrasena de una cuenta que no puede usar, probando
+   * contrasenas hasta que el mensaje cambiara.
    */
   async iniciarSesion(datos: LoginUsuarioPeticion): Promise<ResultadoLogin> {
-    if (!this.esTextoNoVacio(datos.identificador)) {
+    if (!esTextoNoVacio(datos.identificador)) {
       throw new ErrorValidacion(
         'El correo electronico o el usuario es obligatorio',
       );
     }
-    if (!this.esTextoNoVacio(datos.contrasena)) {
+    if (!esTextoNoVacio(datos.contrasena)) {
       throw new ErrorValidacion('La contrasena es obligatoria');
     }
 
@@ -144,6 +144,13 @@ export class UsuarioService {
     // A este punto TypeScript ya sabe que fila no es undefined: "coincide"
     // solo puede ser true si fila existe, y si no coincide ya se lanzo.
     const usuario = fila;
+
+    if (usuario.id_estado_usuario !== ID_ESTADO_ACTIVO) {
+      throw new ErrorSesion(
+        'Correo electronico, usuario o contrasena incorrectos',
+      );
+    }
+
     const token = await firmarToken({
       id_usuario: usuario.id_usuario,
       id_rol_usuario: usuario.id_rol_usuario,
@@ -183,6 +190,29 @@ export class UsuarioService {
     return this.aUsuarioRegistrado(fila);
   }
 
+  /**
+   * Dice si la cuenta sigue activa ahora mismo. La usa SesionGuard en cada
+   * peticion protegida, no solo en el login: el token es valido por 2 horas
+   * sin importar lo que pase con la cuenta mientras tanto, asi que si a
+   * alguien lo suspenden a mitad de esas 2 horas, su token seguiria
+   * pasando la verificacion de firma. Esta consulta es la unica forma de
+   * cortarlo antes de que expire solo.
+   */
+  async estaActivo(idUsuario: string): Promise<boolean> {
+    let fila: { id_estado_usuario: number } | undefined;
+    try {
+      const resultado = await pool.query<{ id_estado_usuario: number }>(
+        'SELECT id_estado_usuario FROM usuarios WHERE id_usuario = $1',
+        [idUsuario],
+      );
+      fila = resultado.rows[0];
+    } catch (error) {
+      this.manejarErrorBaseDatos(error);
+    }
+
+    return fila != null && fila.id_estado_usuario === ID_ESTADO_ACTIVO;
+  }
+
   /** Quita el hash de la contrasena antes de mandar el usuario para afuera. */
   private aUsuarioRegistrado(fila: Usuario): UsuarioRegistrado {
     return {
@@ -200,7 +230,7 @@ export class UsuarioService {
 
   /** Revisa presencia, tipo y formato de cada campo. */
   private validar(datos: RegistroUsuarioPeticion): void {
-    if (!this.esTextoNoVacio(datos.correo_electronico)) {
+    if (!esTextoNoVacio(datos.correo_electronico)) {
       throw new ErrorValidacion('El correo electronico es obligatorio');
     }
     if (datos.correo_electronico.length > 255) {
@@ -212,7 +242,7 @@ export class UsuarioService {
       throw new ErrorValidacion('El correo electronico no es valido');
     }
 
-    if (!this.esTextoNoVacio(datos.usuario)) {
+    if (!esTextoNoVacio(datos.usuario)) {
       throw new ErrorValidacion('El usuario es obligatorio');
     }
     if (datos.usuario.length > 50) {
@@ -221,26 +251,10 @@ export class UsuarioService {
       );
     }
 
-    if (!this.esTextoNoVacio(datos.nombre)) {
-      throw new ErrorValidacion('El nombre es obligatorio');
-    }
-    if (datos.nombre.length > 100) {
-      throw new ErrorValidacion(
-        'El nombre no puede tener mas de 100 caracteres',
-      );
-    }
+    validarNombre(datos.nombre);
+    validarApellido(datos.apellido);
 
-    if (
-      datos.apellido != null &&
-      datos.apellido !== '' &&
-      datos.apellido.length > 100
-    ) {
-      throw new ErrorValidacion(
-        'El apellido no puede tener mas de 100 caracteres',
-      );
-    }
-
-    if (!this.esTextoNoVacio(datos.contrasena)) {
+    if (!esTextoNoVacio(datos.contrasena)) {
       throw new ErrorValidacion('La contrasena es obligatoria');
     }
     if (datos.contrasena.length < 8) {
@@ -259,31 +273,7 @@ export class UsuarioService {
       );
     }
 
-    if (datos.fecha_nacimiento != null && datos.fecha_nacimiento !== '') {
-      if (!REGEX_FECHA.test(datos.fecha_nacimiento)) {
-        throw new ErrorValidacion(
-          'La fecha de nacimiento debe tener el formato AAAA-MM-DD',
-        );
-      }
-      if (Number.isNaN(Date.parse(datos.fecha_nacimiento))) {
-        throw new ErrorValidacion('La fecha de nacimiento no es valida');
-      }
-      if (!this.esMayorDeEdad(datos.fecha_nacimiento)) {
-        throw new ErrorValidacion('El usuario debe ser mayor de 18 anos');
-      }
-    }
-  }
-
-  /**
-   * Le suma 18 anos a la fecha de nacimiento y compara contra hoy. Usar
-   * setUTCFullYear en vez de restar anos a mano evita errores con anos
-   * bisiestos: si nacio el 29 de febrero, Date ajusta sola la fecha limite.
-   */
-  private esMayorDeEdad(fechaNacimiento: string): boolean {
-    const nacimiento = new Date(`${fechaNacimiento}T00:00:00Z`);
-    const limite = new Date(nacimiento);
-    limite.setUTCFullYear(limite.getUTCFullYear() + 18);
-    return new Date() >= limite;
+    validarFechaNacimiento(datos.fecha_nacimiento);
   }
 
   /** Busca si el correo o el usuario ya estan tomados y dice cual. */
@@ -325,8 +315,8 @@ export class UsuarioService {
     correo?: string,
     usuario?: string,
   ): Promise<ExistenciaUsuario> {
-    const correoLimpio = this.esTextoNoVacio(correo) ? correo : null;
-    const usuarioLimpio = this.esTextoNoVacio(usuario) ? usuario : null;
+    const correoLimpio = esTextoNoVacio(correo) ? correo : null;
+    const usuarioLimpio = esTextoNoVacio(usuario) ? usuario : null;
 
     if (correoLimpio == null && usuarioLimpio == null) {
       throw new ErrorValidacion(
@@ -368,23 +358,16 @@ export class UsuarioService {
     }
   }
 
-  private esTextoNoVacio(valor: unknown): valor is string {
-    return typeof valor === 'string' && valor.trim().length > 0;
-  }
-
   /**
    * Convierte cualquier error que venga de una consulta en el error de
-   * dominio correcto, y lo deja logueado. Se llama desde cada catch que
-   * envuelve un pool.query.
+   * dominio correcto. Se llama desde cada catch que envuelve un pool.query.
    *
    * 23505 es una violacion de restriccion unica: aunque comprobarDisponibilidad
    * ya reviso antes, dos peticiones pueden pasar esa comprobacion al mismo
-   * tiempo, y la base de datos es la que de verdad lo impide.
-   *
-   * El resto de codigos de conexion (el pool no logra hablar con Postgres, o
-   * las credenciales del backend estan mal) se agrupan en ErrorConexion: el
-   * detalle tecnico se loguea, pero al cliente solo le interesa que la base
-   * no esta disponible ahora mismo.
+   * tiempo, y la base de datos es la que de verdad lo impide. Es especifico
+   * de este servicio (nace de un INSERT en usuarios), por eso se revisa
+   * aqui y no en el helper compartido. Todo lo demas (conexion, y loguear
+   * el detalle tecnico) lo resuelve manejarErrorConexion.
    */
   private manejarErrorBaseDatos(error: unknown): never {
     if (this.tieneCodigo(error, '23505')) {
@@ -393,13 +376,7 @@ export class UsuarioService {
       );
     }
 
-    this.logger.error(this.describirError(error));
-
-    if (this.esFalloDeConexion(error)) {
-      throw new ErrorConexion('No se pudo conectar con PostgreSQL');
-    }
-
-    throw error;
+    manejarErrorConexion(this.logger, error);
   }
 
   private tieneCodigo(error: unknown, codigo: string): boolean {
@@ -408,48 +385,5 @@ export class UsuarioService {
       error !== null &&
       (error as { code?: string }).code === codigo
     );
-  }
-
-  /**
-   * 08*: clase de error de conexion de Postgres. 28P01: contrasena
-   * incorrecta. 3D000: la base no existe. Los demas (ECONNREFUSED,
-   * ETIMEDOUT, ENOTFOUND) los tira el driver, no Postgres, cuando ni
-   * siquiera logra abrir el socket. AggregateError aparece cuando el driver
-   * intenta varias direcciones y todas fallan.
-   */
-  private esFalloDeConexion(error: unknown): boolean {
-    if (error instanceof AggregateError) {
-      return true;
-    }
-
-    const codigo = (error as NodeJS.ErrnoException | undefined)?.code;
-    if (!codigo) {
-      return false;
-    }
-
-    return (
-      codigo.startsWith('08') ||
-      codigo === '28P01' ||
-      codigo === '3D000' ||
-      codigo === 'ECONNREFUSED' ||
-      codigo === 'ETIMEDOUT' ||
-      codigo === 'ENOTFOUND'
-    );
-  }
-
-  /** Igual que en BaseDatosService: desempaqueta el error para el log. */
-  private describirError(error: unknown): string {
-    if (error instanceof AggregateError) {
-      const causas = error.errors
-        .map((e) => this.describirError(e))
-        .filter(Boolean);
-      return causas.join(' | ') || 'Error de conexion desconocido';
-    }
-
-    if (error instanceof Error) {
-      const codigo = (error as NodeJS.ErrnoException).code;
-      return codigo ? `${codigo}: ${error.message}` : error.message;
-    }
-    return String(error);
   }
 }

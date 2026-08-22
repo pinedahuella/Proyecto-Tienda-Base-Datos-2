@@ -1,4 +1,4 @@
-import { Usuario } from './usuario';
+import { Usuario } from '../models/usuario';
 
 /** Cuerpo esperado en POST /usuario/registro. */
 export interface RegistroUsuarioPeticion {

@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify, JWTPayload } from 'jose';
 import { obligatoria } from './entorno';
 import { ErrorSesion } from './errores';
-import { TokenUsuario } from '../models/token-usuario';
+import { TokenUsuario } from '../dto/token-usuario';
 
 const ALGORITMO = 'HS256';
 
