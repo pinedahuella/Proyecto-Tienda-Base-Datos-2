@@ -6,6 +6,7 @@ Proyecto de Bases de Datos 2.
 backend/            API en NestJS
 frontend/           Interfaz en SvelteKit
 migrations/         Scripts SQL del esquema
+etl/                Migracion del catalogo a MongoDB
 docs/               Documentacion
 docker-compose.yml  Bases de datos
 ```
@@ -19,6 +20,7 @@ docker-compose.yml  Bases de datos
 | [docs/api.md](docs/api.md) | Estandar de respuestas y endpoints |
 | [docs/frontend.md](docs/frontend.md) | Paginas, paleta y tema claro/oscuro |
 | [migrations/README.md](migrations/README.md) | Como se nombran y se corren las migraciones |
+| [etl/README.md](etl/README.md) | Como se migra el catalogo de PostgreSQL a MongoDB |
 | [comandos.txt](comandos.txt) | Todos los comandos, con lo que hace cada uno |
 
 ## Arranque rapido
@@ -30,6 +32,7 @@ cd backend  ; npm run start:dev    # http://localhost:3000
 cd frontend ; npm run dev          # http://localhost:5173
 ```
 
-pgAdmin queda en http://localhost:5050 con el servidor ya conectado.
+pgAdmin queda en http://localhost:5050 con el servidor ya conectado, y DbGate
+en http://localhost:3001 para MongoDB.
 
 Detalle completo en [docs/instalacion.md](docs/instalacion.md).
