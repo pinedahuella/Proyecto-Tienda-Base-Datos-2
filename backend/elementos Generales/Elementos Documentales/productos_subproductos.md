@@ -104,18 +104,18 @@ vinieron las llaves del documento.
 | **Modelo** | `String` | `"IdeaPad 5 15IAL7"` |
 | **Fabricante** | `String` | `"Lenovo Group Limited"` |
 | **País de origen** | `String` | `"China"` |
-| **Garantía** | `Boolean / Object` | `{ disponible: true, tipo: "Fabricante" }` |
-| **Duración de la garantía** | `Number / Object` | `{ valor: 12, unidad: "meses" }` |
+| **Garantía** | `Object` | `{ disponible: true, tipo: "Fabricante" }` |
+| **Duración de la garantía** | `Object` | `{ valor: 12, unidad: "meses" }` |
 | **Condiciones de garantía** | `String` | `"Cubre defectos de fabricación..."` |
 | **Materiales principales** | `Array<String>` | `["Aluminio", "Plástico"]` |
 | **Características técnicas** | `Object` | `{ procesador: "Intel i5", nucleos: 10, frecuencia: "4.4 GHz" }` |
 | **Especificaciones** | `Object` | `{ pantalla: "15.6 pulgadas", resolucion: "1920x1080" }` |
 | **Contenido del paquete** | `Array<String>` | `["Laptop", "Cargador", "Manual"]` |
 | **Dimensiones generales** | `Object` | `{ largo: 35.9, ancho: 23.7, alto: 1.8, unidad: "cm" }` |
-| **Peso** | `Number / Object` | `{ valor: 1.85, unidad: "kg" }` |
+| **Peso** | `Object` | `{ valor: 1.85, unidad: "kg" }` |
 | **Unidad de medida** | `String` | `"unidad"` |
-| **Edad recomendada** | `Object / String` | `{ minimo: 12, maximo: null, unidad: "años" }` |
-| **Uso recomendado** | `String / Array<String>` | `["Uso académico", "Trabajo", "Ofimática"]` |
+| **Edad recomendada** | `Object` | `{ minimo: 12, maximo: null, unidad: "años" }` |
+| **Uso recomendado** | `Array<String>` | `["Uso académico", "Trabajo", "Ofimática"]` |
 | **Instrucciones de uso** | `String` | `"Conectar el cargador antes del primer uso..."` |
 | **Advertencias** | `Array<String>` | `["No exponer al agua", "Mantener fuera del alcance de niños"]` |
 | **Certificaciones** | `Array<Object>` | `[{ nombre: "CE", organismo: "European Commission" }]` |
@@ -134,25 +134,25 @@ vinieron las llaves del documento.
 
 | Característica | Tipo de dato | Estructura aproximada |
 | --- | --- | --- |
-| **Color** | `String / Object` | `"Negro"` o `{ nombre: "Negro", codigoHex: "#000000" }` |
+| **Color** | `Object` | `{ nombre: "Negro", codigoHex: "#000000" }` |
 | **Talla** | `String` | `"M"` |
-| **Tamaño** | `String / Object` | `"15.6 pulgadas"` |
-| **Capacidad** | `Number / Object` | `{ valor: 500, unidad: "ml" }` |
-| **Memoria RAM** | `Number / Object` | `{ valor: 16, unidad: "GB" }` |
-| **Almacenamiento** | `Number / Object` | `{ valor: 512, unidad: "GB", tipo: "SSD" }` |
-| **Peso de presentación** | `Number / Object` | `{ valor: 500, unidad: "g" }` |
-| **Volumen** | `Number / Object` | `{ valor: 1.5, unidad: "L" }` |
+| **Tamaño** | `Object` | `{ valor: 15.6, unidad: "pulgadas" }` |
+| **Capacidad** | `Object` | `{ valor: 500, unidad: "ml" }` |
+| **Memoria RAM** | `Object` | `{ valor: 16, unidad: "GB" }` |
+| **Almacenamiento** | `Object` | `{ valor: 512, unidad: "GB", tipo: "SSD" }` |
+| **Peso de presentación** | `Object` | `{ valor: 500, unidad: "g" }` |
+| **Volumen** | `Object` | `{ valor: 1.5, unidad: "L" }` |
 | **Dimensiones** | `Object` | `{ largo: 30, ancho: 20, alto: 5, unidad: "cm" }` |
 | **Sabor** | `String` | `"Chocolate"` |
 | **Aroma** | `String` | `"Vainilla"` |
 | **Fragancia** | `String` | `"Floral"` |
-| **Diseño / estampado** | `String / Object` | `"Rayas"` o `{ tipo: "Estampado", nombre: "Rayas azules" }` |
+| **Diseño / estampado** | `Object` | `{ tipo: "Estampado", nombre: "Rayas azules" }` |
 | **Material** | `String` | `"Algodón"` |
 | **Acabado** | `String` | `"Mate"` |
 | **Modelo específico** | `String` | `"iPhone 17 Pro Max 256GB"` |
-| **Voltaje** | `Number / Object` | `{ valor: 110, unidad: "V" }` |
-| **Potencia** | `Number / Object` | `{ valor: 1500, unidad: "W" }` |
-| **Presentación** | `String / Object` | `"Paquete"` o `{ tipo: "Caja", descripcion: "Caja de 12 unidades" }` |
+| **Voltaje** | `Object` | `{ valor: 110, unidad: "V" }` |
+| **Potencia** | `Object` | `{ valor: 1500, unidad: "W" }` |
+| **Presentación** | `Object` | `{ tipo: "Caja", descripcion: "Caja de 12 unidades" }` |
 | **Cantidad por paquete** | `Number` | `12` |
 | **Número de unidades** | `Number` | `1` |
 | **Edición** | `String` | `"Edición limitada"` |
@@ -161,3 +161,43 @@ vinieron las llaves del documento.
 | **Código SKU** | `String` | `"LAP-LEN-I7-16-512-GRY"` |
 | **Código de barras** | `String` | `"7501234567890"` |
 | **Porcentaje de descuento** | `Number (entero, 0–100, %)` | `10` |
+
+---
+
+## Personalizadas (las agrega quien crea el producto)
+
+Van al final a propósito: son distintas de las dos tablas de arriba. Las de
+las Tablas 1 y 2 salen de un catálogo de la app (`caracteristica` y
+`caracteristica_variante`, con su `tipo_dato`), y se validan contra eso.
+Las personalizadas no salen de ningún catálogo: las inventa quien está
+creando el producto, con el nombre y el valor que quiera.
+
+Van en un campo aparte, `caracteristicas_personalizadas`, separado de
+`caracteristicas_adicionales` — no mezcladas con las de la app:
+
+- En la raíz del documento de `productos`
+  (`productos.caracteristicas_personalizadas`).
+- En cada elemento del array `variantes`
+  (`variantes[].caracteristicas_personalizadas`).
+
+**Solo nombre y valor, nada más.** A diferencia de las de las Tablas 1 y 2
+(que sí admiten `Object` o `Array`), una característica personalizada es
+siempre un par simple: el valor es `String`, `Number` o `Boolean`, nunca un
+array ni un objeto.
+
+```json
+"caracteristicas_personalizadas": {
+  "hecho_a_mano": true,
+  "temporada": "Invierno 2026",
+  "unidades_por_lote": 24
+}
+```
+
+**No son filtrables.** `GET /productos` y `GET /productos/paginacion` (ver
+[endpoints-productos.md](../endpoints-productos.md)) solo filtran contra
+`caracteristicas_adicionales`; nunca contra `caracteristicas_personalizadas`.
+No es una regla que haya que recordar aplicar: el filtro dinámico de esas
+rutas nunca arma una consulta hacia ese campo, así que no hay forma de que
+un query param lo alcance, sin importar qué nombre le pongan. Sí se
+devuelven normalmente como parte del producto o la variante en la
+respuesta — simplemente no se puede buscar por ellas.

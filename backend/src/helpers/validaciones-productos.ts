@@ -42,6 +42,17 @@ export function validarDespuesDe(valor: string | undefined): number | null {
   return Number(valor);
 }
 
+/** pagina es el numero de pagina (1 es la primera). Opcional, por defecto 1. */
+export function validarPagina(valor: string | undefined): number {
+  if (valor == null || valor === '') {
+    return 1;
+  }
+  if (!REGEX_ENTERO.test(valor) || Number(valor) < 1) {
+    throw new ErrorValidacion('La pagina debe ser un numero entero mayor a 0');
+  }
+  return Number(valor);
+}
+
 /** Para id_categoria e id_vendedor: enteros positivos, opcionales. */
 export function validarEnteroPositivo(
   valor: string | undefined,
