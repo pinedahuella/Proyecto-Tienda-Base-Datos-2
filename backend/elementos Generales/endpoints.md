@@ -786,7 +786,10 @@ una sola transaccion.
 
 ```json
 {
-  "ciudad": "Mixco"
+  "pais": null,
+  "departamento": null,
+  "ciudad": "Mixco",
+  "codigo_postal": null
 }
 ```
 
