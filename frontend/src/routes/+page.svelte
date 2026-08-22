@@ -1,28 +1,37 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
 	import { guardarSesion } from '$lib/sesion';
+	import { conJson, pedir } from '$lib/api';
 
-	let correo = $state('');
+	// La pagina de registro manda aqui con ?registrado=1 despues de crear la
+	// cuenta: el registro no abre sesion, asi que hay que iniciarla.
+	let recienRegistrado = $derived(page.url.searchParams.get('registrado') === '1');
+
+	/**
+	 * identificador es el correo O el usuario, indistintamente: el backend
+	 * revisa contra los dos y decide cual es. Por eso este campo no valida
+	 * formato de correo, solo que traiga algo; si validara, no dejaria entrar
+	 * a quien escriba su nombre de usuario.
+	 */
+	let identificador = $state('');
 	let contrasena = $state('');
 	let verContrasena = $state(false);
 	let entrando = $state(false);
-	let errores = $state<{ correo?: string; contrasena?: string }>({});
+	let errorGeneral = $state('');
+	let errores = $state<{ identificador?: string; contrasena?: string }>({});
 
 	function validar() {
 		const nuevos: typeof errores = {};
 
-		if (!correo.trim()) {
-			nuevos.correo = 'Escribe tu correo.';
-		} else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(correo.trim())) {
-			nuevos.correo = 'Ese correo no tiene un formato valido.';
+		// Los mismos mensajes que devuelve el backend en su 400
+		if (!identificador.trim()) {
+			nuevos.identificador = 'El correo electronico o el usuario es obligatorio';
 		}
-
 		if (!contrasena) {
-			nuevos.contrasena = 'Escribe tu contrasena.';
-		} else if (contrasena.length < 8) {
-			nuevos.contrasena = 'La contrasena necesita al menos 8 caracteres.';
+			nuevos.contrasena = 'La contrasena es obligatoria';
 		}
 
 		errores = nuevos;
@@ -31,12 +40,31 @@
 
 	async function entrar(evento: SubmitEvent) {
 		evento.preventDefault();
+		errorGeneral = '';
 		if (!validar()) return;
 
 		entrando = true;
-		// TODO: aqui va la llamada al backend cuando exista el endpoint de login.
-		await new Promise((r) => setTimeout(r, 400));
-		guardarSesion(correo.trim());
+
+		const respuesta = await pedir<{ correo_electronico: string }>(
+			'/usuario/login',
+			conJson('POST', { identificador: identificador.trim(), contrasena })
+		);
+
+		entrando = false;
+
+		// El 401 sale como aviso general y no debajo de un campo a proposito:
+		// el backend manda el mismo mensaje si el identificador no existe, si
+		// la contrasena no coincide o si la cuenta esta suspendida, para no
+		// delatar cual de las tres fue. Marcar un campo lo delataria igual.
+		if (!respuesta.ok || !respuesta.payload) {
+			errorGeneral = respuesta.mensaje;
+			return;
+		}
+
+		// La sesion de verdad es la cookie mesh_token que acaba de dejar el
+		// backend, y es httpOnly: no se puede leer desde aqui. Esto solo
+		// guarda el correo para que el panel sepa a quien saludar.
+		guardarSesion(respuesta.payload.correo_electronico);
 		await goto('/panel');
 	}
 </script>
@@ -53,20 +81,30 @@
 			<h1>Inicia sesion</h1>
 			<p class="entrada">Entra para ver tus pedidos y administrar tu tienda.</p>
 
+			{#if recienRegistrado}
+				<p class="creada" role="status">Tu cuenta quedo creada. Ya puedes entrar.</p>
+			{/if}
+
+			{#if errorGeneral}
+				<p class="aviso" role="alert">{errorGeneral}</p>
+			{/if}
+
 			<form onsubmit={entrar} novalidate>
 				<div class="campo">
-					<label for="correo">Correo electronico</label>
+					<label for="identificador">Correo electronico o usuario</label>
+					<!-- type text y no email: aqui tambien vale el nombre de usuario,
+					     y con type email el navegador rechazaria uno sin arroba -->
 					<input
-						id="correo"
-						type="email"
-						autocomplete="email"
-						placeholder="tu@correo.com"
-						bind:value={correo}
-						aria-invalid={errores.correo ? 'true' : undefined}
-						aria-describedby={errores.correo ? 'error-correo' : undefined}
+						id="identificador"
+						type="text"
+						autocomplete="username"
+						placeholder="tu@correo.com o tu usuario"
+						bind:value={identificador}
+						aria-invalid={errores.identificador ? 'true' : undefined}
+						aria-describedby={errores.identificador ? 'error-identificador' : undefined}
 					/>
-					{#if errores.correo}
-						<p class="error" id="error-correo">{errores.correo}</p>
+					{#if errores.identificador}
+						<p class="error" id="error-identificador">{errores.identificador}</p>
 					{/if}
 				</div>
 
@@ -117,6 +155,8 @@
 					{entrando ? 'Entrando' : 'Entrar'}
 				</button>
 			</form>
+
+			<p class="pie-form">No tienes cuenta? <a href="/registro">Crea una</a></p>
 		</section>
 
 	</div>
@@ -245,6 +285,40 @@
 	.error {
 		font-size: 0.88rem;
 		color: var(--rojo);
+	}
+
+	/* Error que no pertenece a ningun campo: credenciales incorrectas, 503,
+	   500 o el backend apagado */
+	.aviso {
+		margin-bottom: 20px;
+		padding: 11px 14px;
+		font-size: 0.92rem;
+		color: var(--rojo);
+		background: var(--off);
+		border: 1px solid var(--rojo);
+		border-radius: var(--r);
+	}
+
+	/* Aviso de que la cuenta se creo, al volver del registro */
+	.creada {
+		margin-bottom: 20px;
+		padding: 11px 14px;
+		font-size: 0.92rem;
+		color: var(--tinta);
+		background: var(--indigo-cl);
+		border: 1px solid var(--indigo);
+		border-radius: var(--r);
+	}
+
+	.pie-form {
+		margin-top: 22px;
+		font-size: 0.92rem;
+		color: var(--gris);
+	}
+
+	.pie-form a {
+		color: var(--indigo);
+		font-weight: 500;
 	}
 
 	/* El boton principal usa el color de la marca, que es lo que se ve en los

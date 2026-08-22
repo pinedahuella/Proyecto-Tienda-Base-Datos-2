@@ -15,16 +15,21 @@ Desde otra carpeta se puede dar la ruta:
 
   ..\arrancar.ps1
 
-Opcion:
+Opciones:
 
-  .\arrancar.ps1 -Reiniciar     borra los datos y empieza de cero
+  .\arrancar.ps1 -Reiniciar        borra TODOS los datos y empieza de cero
+  .\arrancar.ps1 -ReiniciarMongo   rehace solo MongoDB, sin tocar PostgreSQL
 
 Que hace:
   1. arranca Docker si esta apagado y espera al engine
   2. levanta los contenedores
   3. espera a que PostgreSQL responda
   4. corre las migraciones de migrations/ en orden
-  5. imprime el resumen y las URLs
+  5. espera a que MongoDB responda
+  6. comprueba el acceso a MongoDB y, si la contrasena del .env ya no es
+     la que tiene la base, la reescribe sola sin borrar el catalogo
+  7. corre los scripts de mongo/ que crean las colecciones
+  8. imprime el resumen y las URLs
 
 Se puede correr las veces que quieras. Si una migracion ya estaba aplicada lo
 avisa y sigue.
@@ -83,6 +88,47 @@ Dentro de psql:
   \q               salir
 
 
+VER MONGO EN EL NAVEGADOR
+--------------------------------------------------
+DbGate: http://localhost:3001
+Entra directo, sin usuario. Es la ventana de MongoDB, lo que pgAdmin es para
+PostgreSQL: el arbol de bases y colecciones a la izquierda, y un panel para
+escribir consultas. Lo levanta arrancar.ps1 junto con lo demas.
+
+Para escribir una consulta: click derecho en la base > New query.
+
+Si prefieres MongoDB Compass (aplicacion de escritorio, se instala aparte), la
+cadena de conexion es:
+
+  mongodb://USUARIO:CONTRASENA@localhost:27018/mesh?authSource=admin
+
+OJO con el puerto: es 27018. Si pones 27017 te conectas al MongoDB que Windows
+pueda tener instalado, que es otra base, esta vacia y no pide contrasena.
+
+
+ENTRAR A MONGO POR TERMINAL
+--------------------------------------------------
+El atajo:
+
+  .\arrancar.ps1 -Mongo
+
+O el comando completo. El usuario y la contrasena ya estan dentro del
+contenedor, no hay que escribirlos:
+
+  docker exec -it mesh-mongo sh -c 'mongosh -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin $MONGO_INITDB_DATABASE'
+
+Dentro de mongosh:
+
+  show collections           lista las colecciones
+  db.productos.countDocuments()   cuantos documentos hay
+  db.productos.find()        los documentos
+  exit                       salir
+
+Ojo con las comillas: desde PowerShell, lo que lleve parentesis va en comillas
+SIMPLES. Con comillas dobles la shell del contenedor contesta
+"Syntax error: ( unexpected", porque PowerShell se las come antes de enviarlas.
+
+
 APAGAR
 --------------------------------------------------
   docker compose down
@@ -96,10 +142,15 @@ DATOS DE CONEXION
 --------------------------------------------------
 Estan en el archivo .env de la raiz del proyecto. No se suben al repositorio.
 
-  DB_NAME      el nombre de la base
-  DB_USER      el usuario
-  DB_PASSWORD  la contrasena
-  puerto       5432
+  DB_NAME         el nombre de la base de PostgreSQL
+  DB_USER         el usuario de PostgreSQL
+  DB_PASSWORD     la contrasena de PostgreSQL
+  puerto          5432
+
+  MONGO_DB        el nombre de la base de MongoDB
+  MONGO_USER      el usuario de MongoDB
+  MONGO_PASSWORD  la contrasena de MongoDB
+  puerto          27018   (no 27017: ese lo puede tener Windows ocupado)
 
 Si no tienes el .env todavia:
 

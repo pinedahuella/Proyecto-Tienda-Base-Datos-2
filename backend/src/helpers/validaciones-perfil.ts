@@ -3,10 +3,11 @@ import { ErrorValidacion } from './errores';
 const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * Reglas de nombre, apellido y fecha de nacimiento: van aqui, sueltas de
- * UsuarioService, porque las usa mas de un lugar (POST /usuario/registro y
- * PATCH /admin/usuarios/:id) y tienen que dar exactamente los mismos
- * mensajes en los dos. Si alguna regla cambia, cambia en un solo sitio.
+ * Reglas de nombre, apellido, fecha de nacimiento y contrasena: van aqui,
+ * sueltas de UsuarioService, porque las usa mas de un lugar (POST
+ * /usuario/registro, PATCH /admin/usuarios/:id, PATCH /perfil, PATCH
+ * /perfil/contrasena) y tienen que dar exactamente los mismos mensajes en
+ * todos. Si alguna regla cambia, cambia en un solo sitio.
  */
 
 export function esTextoNoVacio(valor: unknown): valor is string {
@@ -49,6 +50,25 @@ export function validarFechaNacimiento(
   }
   if (!esMayorDeEdad(fechaNacimiento)) {
     throw new ErrorValidacion('El usuario debe ser mayor de 18 anos');
+  }
+}
+
+export function validarContrasena(contrasena: string): void {
+  if (!esTextoNoVacio(contrasena)) {
+    throw new ErrorValidacion('La contrasena es obligatoria');
+  }
+  if (contrasena.length < 8) {
+    throw new ErrorValidacion('La contrasena debe tener al menos 8 caracteres');
+  }
+  if (!/[A-Z]/.test(contrasena)) {
+    throw new ErrorValidacion(
+      'La contrasena debe tener al menos una letra mayuscula',
+    );
+  }
+  if (!/[^A-Za-z0-9]/.test(contrasena)) {
+    throw new ErrorValidacion(
+      'La contrasena debe tener al menos un caracter especial',
+    );
   }
 }
 

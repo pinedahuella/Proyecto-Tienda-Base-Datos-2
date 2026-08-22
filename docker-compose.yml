@@ -52,6 +52,61 @@ services:
     depends_on:
       - postgres
 
+  mongo:
+    image: mongo:8
+    container_name: mesh-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:?falta MONGO_USER en .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?falta MONGO_PASSWORD en .env}
+      # Base que usa el proyecto. Los scripts de mongo/ se corren contra esta.
+      MONGO_INITDB_DATABASE: ${MONGO_DB:?falta MONGO_DB en .env}
+    ports:
+      # 27018 afuera y no 27017: Windows puede tener un MongoDB instalado como
+      # servicio, que ya ocupa el 27017. Los dos pueden escuchar a la vez sin
+      # dar error, y el que contesta en localhost es el de Windows: Compass y
+      # el backend acaban hablando con la base equivocada, vacia y sin
+      # contrasena. Se comprueba con la version: la nuestra es la del
+      # contenedor, la otra es la que tenga instalada la maquina.
+      # Adentro de la red de Docker se sigue usando el 27017 de siempre.
+      - "27018:27017"
+    volumes:
+      - mongo-data:/data/db
+      # Los scripts de las colecciones quedan accesibles dentro del
+      # contenedor, igual que las migraciones de PostgreSQL
+      - ./mongo:/mongo:ro
+    healthcheck:
+      # ping no pide autenticacion, asi que sirve de latido sin credenciales
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # La ventana de MongoDB, lo que pgAdmin es para PostgreSQL: arbol de bases y
+  # colecciones a la izquierda, panel para escribir consultas, y se pueden
+  # crear bases y colecciones desde ahi.
+  dbgate:
+    image: dbgate/dbgate:latest
+    container_name: mesh-dbgate
+    restart: unless-stopped
+    environment:
+      CONNECTIONS: mongo
+
+      # Se conecta por el nombre del servicio y por el puerto de ADENTRO, no
+      # por localhost ni por el 27018: dbgate esta en la misma red de Docker.
+      LABEL_mongo: Mesh MongoDB
+      ENGINE_mongo: mongo@dbgate-plugin-mongo
+      URL_mongo: mongodb://${MONGO_USER:?falta MONGO_USER en .env}:${MONGO_PASSWORD:?falta MONGO_PASSWORD en .env}@mongo:27017/?authSource=admin
+    ports:
+      - "3001:3000"
+    volumes:
+      # Guarda las consultas que uno deja escritas
+      - dbgate-data:/root/.dbgate
+    depends_on:
+      - mongo
+
 volumes:
   postgres-data:
   pgadmin-data:
+  mongo-data:
+  dbgate-data:

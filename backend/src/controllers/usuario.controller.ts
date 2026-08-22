@@ -6,18 +6,24 @@ import {
   HttpStatus,
   Post,
   Query,
+  Req,
   Res,
   UseGuards,
 } from '@nestjs/common';
-import type { FastifyReply } from 'fastify';
+import type { FastifyReply, FastifyRequest } from 'fastify';
 import { UsuarioActual } from '../decorators/usuario-actual.decorator';
 import { SesionGuard } from '../guards/sesion.guard';
 import { exito } from '../helpers/respuesta';
 import { manejarErrorHttp } from '../helpers/manejar-error-http';
-import { NOMBRE_COOKIE_TOKEN, OPCIONES_COOKIE_TOKEN } from '../helpers/token';
+import {
+  NOMBRE_COOKIE_TOKEN,
+  OPCIONES_COOKIE_TOKEN,
+  verificarToken,
+} from '../helpers/token';
 import type { LoginUsuarioPeticion } from '../dto/login-usuario';
 import type { RegistroUsuarioPeticion } from '../dto/registro-usuario';
 import type { TokenUsuario } from '../dto/token-usuario';
+import { LogService } from '../services/log.service';
 import { UsuarioService } from '../services/usuario.service';
 
 /**
@@ -25,18 +31,25 @@ import { UsuarioService } from '../services/usuario.service';
  *
  * El controlador no valida ni consulta nada: eso vive en UsuarioService.
  * Aqui solo se traduce lo que el servicio lanza a un codigo HTTP (con
- * manejarErrorHttp), y es quien pone y borra la cookie del token (login y
- * logout).
+ * manejarErrorHttp), es quien pone y borra la cookie del token (login y
+ * logout), y quien deja el log de cada registro y cada login (LogService).
  */
 @Controller('usuario')
 export class UsuarioController {
-  constructor(private readonly usuarioService: UsuarioService) {}
+  constructor(
+    private readonly usuarioService: UsuarioService,
+    private readonly logService: LogService,
+  ) {}
 
   // POST /usuario/registro
   @Post('registro')
-  async registrar(@Body() cuerpo: RegistroUsuarioPeticion) {
+  async registrar(
+    @Body() cuerpo: RegistroUsuarioPeticion,
+    @Req() request: FastifyRequest,
+  ) {
     try {
       const usuario = await this.usuarioService.registrar(cuerpo);
+      await this.logService.registrarRegistro(usuario.id_usuario, request.ip);
       return exito(usuario, 'Usuario registrado correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo registrar el usuario');
@@ -67,6 +80,7 @@ export class UsuarioController {
   @HttpCode(HttpStatus.OK)
   async iniciarSesion(
     @Body() cuerpo: LoginUsuarioPeticion,
+    @Req() request: FastifyRequest,
     @Res({ passthrough: true }) reply: FastifyReply,
   ) {
     // passthrough: true dice que este metodo no maneja la respuesta el
@@ -76,6 +90,7 @@ export class UsuarioController {
       const { usuario, token } =
         await this.usuarioService.iniciarSesion(cuerpo);
       reply.setCookie(NOMBRE_COOKIE_TOKEN, token, OPCIONES_COOKIE_TOKEN);
+      await this.logService.registrarLogin(usuario.id_usuario, request.ip);
       return exito(usuario, 'Sesion iniciada correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo iniciar sesion');
@@ -84,10 +99,27 @@ export class UsuarioController {
 
   // POST /usuario/logout
   // Sin SesionGuard a proposito: cerrar sesion tiene que funcionar incluso
-  // si el token ya vencio o vino mal. Solo borra la cookie del navegador.
+  // si el token ya vencio o vino mal. Siempre borra la cookie y responde
+  // 200 igual; el intento de leer quien era (para el log) es aparte y no
+  // cambia ese resultado.
   @Post('logout')
   @HttpCode(HttpStatus.OK)
-  cerrarSesion(@Res({ passthrough: true }) reply: FastifyReply) {
+  async cerrarSesion(
+    @Req() request: FastifyRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ) {
+    const token = request.cookies[NOMBRE_COOKIE_TOKEN];
+    if (token) {
+      try {
+        const usuario = await verificarToken(token);
+        await this.logService.registrarLogout(usuario.id_usuario, request.ip);
+      } catch {
+        // Token invalido o ya vencido: no hay a quien atribuirle el
+        // logout, asi que no se guarda nada. No es un error de la
+        // peticion, sigue cerrando sesion normal.
+      }
+    }
+
     reply.clearCookie(NOMBRE_COOKIE_TOKEN, {
       path: OPCIONES_COOKIE_TOKEN.path,
     });

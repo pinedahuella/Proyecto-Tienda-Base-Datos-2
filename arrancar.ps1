@@ -1,11 +1,15 @@
 # arrancar.ps1
 # Levanta todo el ambiente de Mesh de una sola vez.
 #
-#   .\arrancar.ps1              levanta PostgreSQL y pgAdmin
-#   .\arrancar.ps1 -Reiniciar   borra los datos y empieza de cero
+#   .\arrancar.ps1                   levanta PostgreSQL, pgAdmin y MongoDB
+#   .\arrancar.ps1 -Reiniciar        borra TODOS los datos y empieza de cero
+#   .\arrancar.ps1 -ReiniciarMongo   rehace solo MongoDB, sin tocar PostgreSQL
+#   .\arrancar.ps1 -Mongo            abre la consola de MongoDB y ya
 
 param(
-    [switch]$Reiniciar
+    [switch]$Reiniciar,
+    [switch]$ReiniciarMongo,
+    [switch]$Mongo
 )
 
 Set-Location -LiteralPath $PSScriptRoot
@@ -14,6 +18,146 @@ function Paso($t)  { Write-Host "`n>> $t" -ForegroundColor Cyan }
 function Ok($t)    { Write-Host "   $t"   -ForegroundColor Green }
 function Aviso($t) { Write-Host "   $t"   -ForegroundColor Yellow }
 function Error1($t){ Write-Host "   $t"   -ForegroundColor Red }
+
+
+# ------------------------------------------------------------
+# Atajo: abrir la consola de MongoDB
+# ------------------------------------------------------------
+# Sin esto habria que acordarse de la linea completa con -u, -p y
+# --authenticationDatabase. El usuario y la contrasena no se escriben: ya estan
+# dentro del contenedor, puestos por el compose desde el .env.
+
+if ($Mongo) {
+    $corriendo = docker ps --filter "name=mesh-mongo" --filter "status=running" --format "{{.Names}}" 2>&1
+    if ("$corriendo" -notmatch "mesh-mongo") {
+        Error1 "MongoDB no esta corriendo. Corre primero:  .\arrancar.ps1"
+        exit 1
+    }
+    # -it necesita una terminal de verdad. Si a este script lo llama otro
+    # script (o algo sin consola), docker corta con "cannot attach stdin to a
+    # TTY-enabled container". Con la entrada redirigida se usa solo -i.
+    $banderas = if ([Console]::IsInputRedirected) { '-i' } else { '-it' }
+
+    docker exec $banderas mesh-mongo sh -c 'mongosh -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin $MONGO_INITDB_DATABASE'
+    exit $LASTEXITCODE
+}
+
+
+# ------------------------------------------------------------
+# Como se le habla a mongosh desde aqui
+# ------------------------------------------------------------
+# Las dos reglas salieron de probarlo, y las dos fallan de forma que enganan:
+#
+# 1. El comando va como argumento de "sh -c", NUNCA por la tuberia
+#    (| docker exec -i). PowerShell 5.1 codifica lo que manda por la tuberia
+#    con [Console]::OutputEncoding, que en Windows es UTF-8 CON BOM, y le pega
+#    los bytes EF BB BF al inicio. La shell del contenedor los lee pegados al
+#    primer comando y contesta "mongosh: not found" con un caracter invisible
+#    delante. Cambiar [Console]::OutputEncoding a media corrida NO lo arregla:
+#    PowerShell ya creo el escritor y lo sigue mandando.
+#    Se comprueba asi:   'hola' | docker exec -i mesh-mongo od -c
+#
+# 2. Todo lo que lleve parentesis va en COMILLAS SIMPLES. PowerShell se come
+#    las comillas dobles al armar la linea de un programa externo, y la shell
+#    recibe los parentesis sueltos:  sh: 1: Syntax error: "(" unexpected
+#
+# psql no sufre lo primero: se traga el BOM sin quejarse, y por eso la
+# contrasena de PostgreSQL si puede ir por tuberia mas abajo.
+#
+# El usuario y la contrasena no se escriben aqui: ya estan dentro del
+# contenedor como variables de entorno, puestas por el compose desde el .env.
+# Las expande la shell de adentro, asi que la contrasena nunca aparece en la
+# lista de procesos de Windows. Van sin comillas porque los valores del .env
+# no llevan espacios.
+
+function Comando-Mongo($resto) {
+    return 'mongosh --quiet' +
+           ' -u $MONGO_INITDB_ROOT_USERNAME' +
+           ' -p $MONGO_INITDB_ROOT_PASSWORD' +
+           ' --authenticationDatabase admin' +
+           ' $MONGO_INITDB_DATABASE ' + $resto
+}
+
+# Nombre del volumen de Mongo. Compose lo arma con el nombre de la carpeta del
+# proyecto en minusculas, asi que se calcula igual y no se escribe a mano: si
+# alguien clona el repo en una carpeta con otro nombre, esto lo sigue.
+$proyecto     = (Split-Path -Leaf $PSScriptRoot).ToLower()
+$volumenMongo = "${proyecto}_mongo-data"
+
+
+# Reescribe el usuario de Mongo con lo que dice el .env, SIN borrar los datos.
+#
+# La contrasena de Mongo no vive en el contenedor, vive en el volumen, y solo
+# se valida si mongod arranca con autenticacion. Asi que se levanta un mongod
+# temporal sobre el MISMO volumen con --noauth, se reescribe el usuario desde
+# adentro, y se vuelve a levantar el de siempre. El catalogo no se toca.
+#
+# Es el equivalente al ALTER USER que se le hace a PostgreSQL mas arriba.
+function Reparar-Mongo {
+    Aviso "La contrasena del .env no es la que tiene la base. Reparando..."
+
+    docker compose stop mongo 2>&1 | Out-Null
+    docker rm -f mesh-mongo-reparar 2>&1 | Out-Null
+
+    # --env-file y no -e: asi la contrasena no queda escrita en la linea de
+    # comandos de Windows, igual que en el resto del script.
+    docker run -d --name mesh-mongo-reparar `
+        --env-file "$PSScriptRoot\.env" `
+        -v "${volumenMongo}:/data/db" `
+        mongo:8 mongod --noauth --bind_ip 127.0.0.1 2>&1 | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "No se pudo levantar el contenedor temporal de reparacion"
+        docker compose up -d mongo 2>&1 | Out-Null
+        return $false
+    }
+
+    $vivo = $false
+    for ($i = 0; $i -lt 30; $i++) {
+        docker exec mesh-mongo-reparar mongosh --quiet --eval 'db.adminCommand({ ping: 1 }).ok' 2>&1 | Out-Null
+        if ($LASTEXITCODE -eq 0) { $vivo = $true; break }
+        Start-Sleep -Seconds 2
+    }
+
+    if (-not $vivo) {
+        Error1 "El mongod temporal no respondio"
+        docker rm -f mesh-mongo-reparar 2>&1 | Out-Null
+        docker compose up -d mongo 2>&1 | Out-Null
+        return $false
+    }
+
+    # El usuario y la contrasena salen del .env que se le paso al contenedor,
+    # no de esta linea. Las comillas simples van dobladas porque toda la
+    # cadena es de comillas simples de PowerShell.
+    $js = 'var u = process.env.MONGO_USER, p = process.env.MONGO_PASSWORD;' +
+          ' var a = db.getSiblingDB(''admin'');' +
+          ' if (a.getUser(u)) { a.updateUser(u, { pwd: p }); print(''usuario actualizado''); }' +
+          ' else { a.createUser({ user: u, pwd: p, roles: [ { role: ''root'', db: ''admin'' } ] }); print(''usuario creado''); }'
+
+    $resultado = docker exec mesh-mongo-reparar mongosh --quiet --eval $js 2>&1 | Out-String
+    $codigo = $LASTEXITCODE
+
+    docker rm -f mesh-mongo-reparar 2>&1 | Out-Null
+    docker compose up -d mongo 2>&1 | Out-Null
+
+    if ($codigo -ne 0) {
+        Error1 "No se pudo reescribir el usuario:"
+        Write-Host $resultado -ForegroundColor Red
+        return $false
+    }
+
+    Ok $resultado.Trim()
+
+    # Esperar a que el contenedor normal vuelva a estar sano
+    for ($i = 0; $i -lt 60; $i++) {
+        $estado = docker inspect -f "{{.State.Health.Status}}" mesh-mongo 2>&1
+        if ("$estado".Trim() -eq "healthy") { return $true }
+        Start-Sleep -Seconds 2
+    }
+
+    Error1 "MongoDB no volvio a levantar despues de la reparacion"
+    return $false
+}
 
 
 # ------------------------------------------------------------
@@ -37,7 +181,8 @@ foreach ($linea in Get-Content "$PSScriptRoot\.env") {
     if ($partes.Count -eq 2) { $env_[$partes[0].Trim()] = $partes[1].Trim() }
 }
 
-foreach ($obligatoria in @("DB_USER", "DB_PASSWORD", "DB_NAME")) {
+foreach ($obligatoria in @("DB_USER", "DB_PASSWORD", "DB_NAME",
+                          "MONGO_USER", "MONGO_PASSWORD", "MONGO_DB")) {
     if (-not $env_[$obligatoria] -or $env_[$obligatoria] -eq "cambiame") {
         Error1 "Falta llenar $obligatoria en el .env"
         exit 1
@@ -135,6 +280,13 @@ if ($Reiniciar) {
     Paso "Borrando datos anteriores"
     docker compose down -v 2>&1 | Out-Null
     Ok "Volumenes eliminados"
+}
+
+if ($ReiniciarMongo) {
+    Paso "Rehaciendo solo MongoDB"
+    docker compose rm -sf mongo 2>&1 | Out-Null
+    docker volume rm $volumenMongo 2>&1 | Out-Null
+    Ok "Volumen de MongoDB eliminado. PostgreSQL no se toco."
 }
 
 Paso "Levantando contenedores"
@@ -237,16 +389,95 @@ if ($scripts.Count -eq 0) {
 
 
 # ------------------------------------------------------------
-# 6. Resumen
+# 6. MongoDB
+# ------------------------------------------------------------
+# El contenedor ya subio con el "docker compose up -d" de arriba. Aqui se
+# espera a que responda, se comprueba el acceso y se corren los scripts de
+# mongo/ que crean las colecciones.
+
+Paso "Esperando a MongoDB"
+
+$listoMongo = $false
+for ($i = 0; $i -lt 60; $i++) {
+    $estado = docker inspect -f "{{.State.Health.Status}}" mesh-mongo 2>&1
+    if ("$estado".Trim() -eq "healthy") { $listoMongo = $true; break }
+    Start-Sleep -Seconds 2
+}
+
+if (-not $listoMongo) {
+    Error1 "MongoDB no respondio. Mira el log:"
+    Error1 "   docker logs mesh-mongo --tail 30"
+    exit 1
+}
+Ok "MongoDB respondiendo"
+
+
+Paso "Comprobando el acceso"
+
+# MONGO_INITDB_ROOT_* solo se aplica cuando el volumen esta vacio. Si despues
+# se edita el .env, el contenedor informa la contrasena nueva pero la base
+# sigue guardando la vieja, y todo falla con "Authentication failed".
+#
+# PostgreSQL se arregla solo mas arriba porque desde dentro es "trust". Mongo
+# no tiene eso, pero tiene otra puerta: la contrasena vive en el volumen, y el
+# volumen se puede abrir sin autenticacion. Eso es lo que hace Reparar-Mongo.
+
+docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.getName()'") 2>&1 | Out-Null
+
+if ($LASTEXITCODE -ne 0) {
+    if (-not (Reparar-Mongo)) { exit 1 }
+
+    docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.getName()'") 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "MongoDB sigue sin aceptar las credenciales del .env."
+        Error1 "Para rehacer SOLO Mongo (borra el catalogo, no toca PostgreSQL):"
+        Error1 "   .\arrancar.ps1 -ReiniciarMongo"
+        exit 1
+    }
+    Ok "Contrasena reparada"
+} else {
+    Ok "Acceso correcto"
+}
+
+
+Paso "Creando colecciones"
+
+$coleccionesJs = @(Get-ChildItem -LiteralPath "$PSScriptRoot\mongo" -Filter "*.js" -ErrorAction SilentlyContinue | Sort-Object Name)
+
+if ($coleccionesJs.Count -eq 0) {
+    Aviso "No hay archivos .js en mongo/"
+} else {
+    foreach ($j in $coleccionesJs) {
+        $comandoJs = Comando-Mongo ('--file /mongo/' + $j.Name)
+        $salidaJs = docker exec mesh-mongo sh -c $comandoJs 2>&1 | Out-String
+
+        if ($LASTEXITCODE -eq 0) {
+            Ok "$($j.Name)  $($salidaJs.Trim())"
+        } else {
+            Error1 "$($j.Name) FALLO"
+            Write-Host $salidaJs -ForegroundColor Red
+            exit 1
+        }
+    }
+}
+
+
+# ------------------------------------------------------------
+# 7. Resumen
 # ------------------------------------------------------------
 Paso "Listo"
 docker ps --format "   {{.Names}}  {{.Status}}"
 
 Write-Host ""
-Write-Host "   pgAdmin      http://localhost:5050" -ForegroundColor White
-Write-Host "   PostgreSQL   localhost:5432   base $($env_['DB_NAME'])   usuario $($env_['DB_USER'])" -ForegroundColor White
+Write-Host "   pgAdmin        http://localhost:5050    ventana de PostgreSQL" -ForegroundColor White
+Write-Host "   DbGate         http://localhost:3001    ventana de MongoDB" -ForegroundColor White
+Write-Host ""
+Write-Host "   PostgreSQL     localhost:5432   base $($env_['DB_NAME'])   usuario $($env_['DB_USER'])" -ForegroundColor White
+Write-Host "   MongoDB        localhost:27018  base $($env_['MONGO_DB'])   usuario $($env_['MONGO_USER'])" -ForegroundColor White
 Write-Host ""
 Write-Host "   Falta arrancar a mano:" -ForegroundColor DarkGray
 Write-Host "     cd backend  ; npm run start:dev" -ForegroundColor DarkGray
 Write-Host "     cd frontend ; npm run dev" -ForegroundColor DarkGray
+Write-Host "" 
+Write-Host "   Consola de MongoDB:  .\arrancar.ps1 -Mongo" -ForegroundColor DarkGray
 Write-Host ""

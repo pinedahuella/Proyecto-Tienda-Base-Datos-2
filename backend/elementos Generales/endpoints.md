@@ -513,3 +513,341 @@ Requiere la cookie `mesh_token` y rol admin. Trae el catalogo completo de
 ```json
 { "ok": false, "mensaje": "No se pudo obtener los estados", "payload": null }
 ```
+
+---
+
+## GET /perfil
+
+Requiere la cookie `mesh_token` (cualquier usuario logueado, no solo
+admin). Es distinta de `GET /usuario/yo`: trae los mismos datos, mas el
+nombre del rol y del estado (no solo el id), para mostrarlos directo en un
+perfil sin tener que ir a `/admin/roles` o `/admin/estados` (que ademas son
+solo para admin).
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Perfil obtenido",
+  "payload": {
+    "id_usuario": "1",
+    "correo_electronico": "ana@correo.com",
+    "usuario": "ana99",
+    "nombre": "Ana",
+    "apellido": "Gomez",
+    "fecha_nacimiento": "2000-05-14",
+    "fecha_creacion": "2026-08-21T20:10:00.000Z",
+    "id_rol_usuario": 1,
+    "id_estado_usuario": 1,
+    "rol_usuario_nombre": "comprador",
+    "estado_usuario_nombre": "activo"
+  }
+}
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo obtener el perfil", "payload": null }
+```
+
+---
+
+## PATCH /perfil
+
+Requiere la cookie `mesh_token`. Deja que el usuario cambie su propio
+`nombre` y/o `apellido`. Cada campo es independiente: el que venga en
+`null` (o no venga) no se toca. Debe venir al menos uno.
+
+Mismas reglas y mensajes que en `POST /usuario/registro` (comparten
+`validarNombre` y `validarApellido`).
+
+```json
+{
+  "nombre": "Ana",
+  "apellido": null
+}
+```
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Perfil actualizado correctamente",
+  "payload": {
+    "id_usuario": "1",
+    "correo_electronico": "ana@correo.com",
+    "usuario": "ana99",
+    "nombre": "Ana",
+    "apellido": "Gomez",
+    "fecha_nacimiento": "2000-05-14",
+    "fecha_creacion": "2026-08-21T20:10:00.000Z",
+    "id_rol_usuario": 1,
+    "id_estado_usuario": 1,
+    "rol_usuario_nombre": "comprador",
+    "estado_usuario_nombre": "activo"
+  }
+}
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "Debes enviar al menos un campo para actualizar", "payload": null }
+{ "ok": false, "mensaje": "El nombre es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El nombre no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El apellido no puede tener mas de 100 caracteres", "payload": null }
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo actualizar el perfil", "payload": null }
+```
+
+---
+
+## PATCH /perfil/contrasena
+
+Requiere la cookie `mesh_token`. Cambia la propia contrasena. Pide la
+actual (para confirmar identidad) y la nueva dos veces (contrasena y
+confirmacion), para agarrar un error de tipeo.
+
+La nueva contrasena sigue las mismas reglas que en el registro (8
+caracteres minimo, una mayuscula, un caracter especial), y ademas tiene
+que ser distinta de la actual.
+
+```json
+{
+  "contrasena_actual": "ClaveVieja123!",
+  "contrasena_nueva": "ClaveNueva456!",
+  "contrasena_nueva_confirmacion": "ClaveNueva456!"
+}
+```
+
+**200**
+
+```json
+{ "ok": true, "mensaje": "Contrasena actualizada correctamente", "payload": null }
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "La contrasena actual es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La nueva contrasena es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La confirmacion de la nueva contrasena es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "Las contrasenas nuevas no coinciden", "payload": null }
+{ "ok": false, "mensaje": "La contrasena actual no es correcta", "payload": null }
+{ "ok": false, "mensaje": "La nueva contrasena debe ser diferente a la actual", "payload": null }
+{ "ok": false, "mensaje": "La contrasena debe tener al menos 8 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La contrasena debe tener al menos una letra mayuscula", "payload": null }
+{ "ok": false, "mensaje": "La contrasena debe tener al menos un caracter especial", "payload": null }
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo actualizar la contrasena", "payload": null }
+```
+
+---
+
+## POST /direccion-usuario
+
+Requiere la cookie `mesh_token`. Crea una direccion para el usuario
+logueado (el id sale del token, no del cuerpo). Siempre entra con estado
+activa, y de paso crea su primera fila en `direccion_historial` (el
+snapshot inicial) — las dos cosas pasan juntas, en una sola transaccion.
+
+```json
+{
+  "pais": "Guatemala",
+  "departamento": "Guatemala",
+  "ciudad": "Guatemala",
+  "codigo_postal": "01001"
+}
+```
+
+`codigo_postal` es opcional.
+
+**201**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Direccion creada correctamente",
+  "payload": {
+    "id_direccion": "1",
+    "id_usuario": "23",
+    "pais": "Guatemala",
+    "departamento": "Guatemala",
+    "ciudad": "Guatemala",
+    "codigo_postal": "01001",
+    "fecha_creacion": "2026-08-22T03:03:20.679Z",
+    "id_estado_direccion": 1
+  }
+}
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "El pais es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El pais no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El departamento es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El departamento no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La ciudad es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La ciudad no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El codigo postal no puede tener mas de 20 caracteres", "payload": null }
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo crear la direccion", "payload": null }
+```
+
+---
+
+## PATCH /direccion-usuario/:id
+
+Requiere la cookie `mesh_token`. Edita `pais`, `departamento`, `ciudad`
+y/o `codigo_postal` de una direccion **propia**. Cada campo es
+independiente: el que venga en `null` (o no venga) no se toca. Debe venir
+al menos uno.
+
+Solo puede editar sus propias direcciones: una direccion de otro usuario
+da el mismo 404 que un id que no existe (no hay forma de usar esta ruta
+para confirmar que direcciones tiene otra persona).
+
+Deja una fila nueva en `direccion_historial` con el estado **completo** de
+la direccion despues del cambio (no solo los campos que llegaron en la
+peticion) — es el mismo comportamiento de `POST /direccion-usuario`, en
+una sola transaccion.
+
+```json
+{
+  "pais": null,
+  "departamento": null,
+  "ciudad": "Mixco",
+  "codigo_postal": null
+}
+```
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Direccion actualizada correctamente",
+  "payload": {
+    "id_direccion": "3",
+    "id_usuario": "24",
+    "pais": "Guatemala",
+    "departamento": "Guatemala",
+    "ciudad": "Mixco",
+    "codigo_postal": "01001",
+    "fecha_creacion": "2026-08-22T03:17:18.338Z",
+    "id_estado_direccion": 1
+  }
+}
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "Debes enviar al menos un campo para actualizar", "payload": null }
+{ "ok": false, "mensaje": "El pais es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El pais no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El departamento es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El departamento no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La ciudad es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La ciudad no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El codigo postal no puede tener mas de 20 caracteres", "payload": null }
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**404** — no existe una direccion con ese id (o no es tuya):
+
+```json
+{ "ok": false, "mensaje": "No existe una direccion con ese id", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo actualizar la direccion", "payload": null }
+```
