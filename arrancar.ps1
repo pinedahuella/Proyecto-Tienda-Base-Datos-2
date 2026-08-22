@@ -470,7 +470,7 @@ docker ps --format "   {{.Names}}  {{.Status}}"
 
 Write-Host ""
 Write-Host "   pgAdmin        http://localhost:5050    ventana de PostgreSQL" -ForegroundColor White
-Write-Host "   mongo-express  http://localhost:8082    ventana de MongoDB" -ForegroundColor White
+Write-Host "   DbGate         http://localhost:3001    ventana de MongoDB" -ForegroundColor White
 Write-Host ""
 Write-Host "   PostgreSQL     localhost:5432   base $($env_['DB_NAME'])   usuario $($env_['DB_USER'])" -ForegroundColor White
 Write-Host "   MongoDB        localhost:27018  base $($env_['MONGO_DB'])   usuario $($env_['MONGO_USER'])" -ForegroundColor White

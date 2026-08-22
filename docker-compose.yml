@@ -82,24 +82,26 @@ services:
       timeout: 5s
       retries: 5
 
-  mongo-express:
-    image: mongo-express:1.0.2
-    container_name: mesh-mongo-express
+  # La ventana de MongoDB, lo que pgAdmin es para PostgreSQL: arbol de bases y
+  # colecciones a la izquierda, panel para escribir consultas, y se pueden
+  # crear bases y colecciones desde ahi.
+  dbgate:
+    image: dbgate/dbgate:latest
+    container_name: mesh-dbgate
     restart: unless-stopped
     environment:
-      # Se conecta por el nombre del servicio, no por localhost: para este
-      # contenedor localhost es el mismo contenedor. Igual que pgAdmin con
-      # "postgres".
-      ME_CONFIG_MONGODB_SERVER: mongo
-      ME_CONFIG_MONGODB_PORT: "27017"
-      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER:?falta MONGO_USER en .env}
-      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:?falta MONGO_PASSWORD en .env}
-      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
-      # Sin contrasena para entrar a la pagina, como pgAdmin. Es solo local.
-      ME_CONFIG_BASICAUTH: "false"
+      CONNECTIONS: mongo
+
+      # Se conecta por el nombre del servicio y por el puerto de ADENTRO, no
+      # por localhost ni por el 27018: dbgate esta en la misma red de Docker.
+      LABEL_mongo: Mesh MongoDB
+      ENGINE_mongo: mongo@dbgate-plugin-mongo
+      URL_mongo: mongodb://${MONGO_USER:?falta MONGO_USER en .env}:${MONGO_PASSWORD:?falta MONGO_PASSWORD en .env}@mongo:27017/?authSource=admin
     ports:
-      # 8082 y no el 8081 de siempre: ese puerto ya lo usa otro proyecto
-      - "8082:8081"
+      - "3001:3000"
+    volumes:
+      # Guarda las consultas que uno deja escritas
+      - dbgate-data:/root/.dbgate
     depends_on:
       - mongo
 
@@ -107,3 +109,4 @@ volumes:
   postgres-data:
   pgadmin-data:
   mongo-data:
+  dbgate-data:

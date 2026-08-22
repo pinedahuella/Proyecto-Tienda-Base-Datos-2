@@ -91,7 +91,7 @@ docker exec mesh-postgres psql -U $DB_USER -d $DB_NAME -f /migrations/001_usuari
 | PostgreSQL | mesh-postgres | pgvector/pgvector:pg18 | 5432 |
 | pgAdmin | mesh-pgadmin | dpage/pgadmin4 | 5050 |
 | MongoDB | mesh-mongo | mongo:8 | 27018 |
-| mongo-express | mesh-mongo-express | mongo-express:1.0.2 | 8082 |
+| DbGate | mesh-dbgate | dbgate/dbgate:latest | 3001 |
 
 Apagar todo:
 
@@ -114,7 +114,7 @@ los scripts que crean las colecciones.
 | PostgreSQL | `DB_USER` del .env | `DB_PASSWORD` del .env |
 | pgAdmin | `PGADMIN_EMAIL` del .env | `PGADMIN_PASSWORD` del .env |
 | MongoDB | `MONGO_USER` del .env | `MONGO_PASSWORD` del .env |
-| mongo-express | entra directo, sin usuario | |
+| DbGate | entra directo, sin usuario | |
 
 **Ninguna contrasena esta escrita en el repositorio.** Todas viven en el archivo
 `.env`, que git ignora. Por eso el primer paso de la instalacion es copiar
@@ -184,8 +184,8 @@ docker exec mesh-mongo mongosh --quiet --eval "db.adminCommand({buildInfo:1}).ve
 
 Si una conexion no pide contrasena, no es la del proyecto.
 
-Dentro de la red de Docker no cambia nada: mongo-express y cualquier otro
-contenedor siguen usando `mongo:27017`.
+Dentro de la red de Docker no cambia nada: DbGate y cualquier otro contenedor
+siguen usando `mongo:27017`.
 
 
 **npm no corre en PowerShell**

@@ -90,9 +90,12 @@ Dentro de psql:
 
 VER MONGO EN EL NAVEGADOR
 --------------------------------------------------
-mongo-express: http://localhost:8082
-Entra directo, sin usuario. Es la ventana de MongoDB, como pgAdmin lo es de
-PostgreSQL. Lo levanta arrancar.ps1 junto con lo demas.
+DbGate: http://localhost:3001
+Entra directo, sin usuario. Es la ventana de MongoDB, lo que pgAdmin es para
+PostgreSQL: el arbol de bases y colecciones a la izquierda, y un panel para
+escribir consultas. Lo levanta arrancar.ps1 junto con lo demas.
+
+Para escribir una consulta: click derecho en la base > New query.
 
 Si prefieres MongoDB Compass (aplicacion de escritorio, se instala aparte), la
 cadena de conexion es:
