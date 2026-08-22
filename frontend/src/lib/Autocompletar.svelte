@@ -51,21 +51,34 @@
 	let libre = $derived(opciones.length === 0);
 
 	/**
-	 * Cuando el padre limpia el valor (por ejemplo la ciudad, porque cambio el
-	 * pais), la caja tiene que quedar vacia tambien.
+	 * La caja tiene que seguir al valor cuando lo cambia el padre: al limpiar la
+	 * ciudad porque cambio el pais, y sobre todo al abrir una direccion para
+	 * editarla, donde los tres campos llegan ya llenos desde la base.
 	 *
-	 * Por eso escribir NO borra el valor: si lo hiciera, este efecto se
-	 * dispararia con cada tecla y borraria lo que la persona esta escribiendo
-	 * encima de algo ya elegido. El valor viejo se sostiene hasta que se elige
-	 * otro o hasta que se sale del campo sin elegir.
+	 * Pero solo cuando lo cambia el PADRE. Si el efecto reaccionara tambien a
+	 * los cambios que hace este componente, cada tecla reescribiria la caja y
+	 * no se podria escribir encima de algo ya elegido. De ahi este apunte, que
+	 * a proposito no es reactivo: solo sirve para comparar.
 	 */
+	let ultimoValorVisto = '';
+
 	$effect(() => {
-		if (valor === '') {
-			escrito = '';
+		const v = valor;
+		if (v === ultimoValorVisto) return;
+		ultimoValorVisto = v;
+
+		escrito = v === '' ? '' : mostrar(v);
+		if (v === '') {
 			sugerencias = [];
 			aviso = '';
 		}
 	});
+
+	/** El texto que le toca a un valor. Difieren en los departamentos. */
+	function mostrar(v: string): string {
+		const o = opciones.find((x) => x.valor === v);
+		return o ? o.texto : v;
+	}
 
 	function alEscribir() {
 		aviso = '';
@@ -73,6 +86,7 @@
 		if (libre) {
 			// Texto libre: lo escrito es el valor, sin lista que consultar
 			valor = escrito.trim();
+			ultimoValorVisto = valor;
 			elegido = escrito.trim().length > 0;
 			return;
 		}
@@ -88,6 +102,7 @@
 	function elegir(o: Opcion) {
 		escrito = o.texto;
 		valor = o.valor;
+		ultimoValorVisto = o.valor;
 		elegido = true;
 		sugerencias = [];
 		aviso = '';

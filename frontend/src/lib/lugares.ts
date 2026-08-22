@@ -91,6 +91,19 @@ export function paraLeer(departamento: string): string {
 }
 
 /**
+ * Para comparar nombres sin que un acento los separe. Lo guardado puede decir
+ * "Sacatepequez" y la API "Sacatepequez" con tilde; son el mismo lugar y al
+ * reabrir una direccion para editarla tienen que reconocerse.
+ */
+export function comparable(texto: string): string {
+	return texto
+		.normalize('NFD')
+		.replace(/[̀-ͯ]/g, '')
+		.trim()
+		.toLowerCase();
+}
+
+/**
  * Como rotular el campo para el pais que se eligio. Se mira que palabra usan
  * sus divisiones y se traduce; si no traen ninguna se pone algo neutro, porque
  * inventarle "Departamento" a Mexico seria decir algo falso.

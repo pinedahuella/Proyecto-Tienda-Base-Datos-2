@@ -6,6 +6,7 @@
 		cargarPaises,
 		ciudadesDeDepartamento,
 		ciudadesDePais,
+		comparable,
 		etiquetaDivision,
 		paraLeer,
 		type Pais
@@ -15,6 +16,7 @@
 	 * Las direcciones de envio del usuario.
 	 *
 	 *   GET   /direccion-usuario      las del usuario logueado
+	 *   GET   /direccion-usuario/:id  una, con todas sus versiones
 	 *   POST  /direccion-usuario      crea una
 	 *   PATCH /direccion-usuario/:id  edita pais, departamento, ciudad o codigo postal
 	 *
@@ -45,6 +47,22 @@
 		id_estado_direccion: number;
 	}
 
+	/** Una version guardada de la direccion. Solo se agregan, nunca se editan. */
+	interface Version {
+		id_direccion_historial: string;
+		pais: string;
+		departamento: string;
+		ciudad: string;
+		codigo_postal: string | null;
+		fecha_creacion: string;
+	}
+
+	/** Lo que devuelve GET /direccion-usuario/:id */
+	interface DireccionConHistorial {
+		direccion: Direccion;
+		historial: Version[];
+	}
+
 	interface Opcion {
 		texto: string;
 		valor: string;
@@ -59,6 +77,7 @@
 	type Modo = 'lista' | 'nueva' | 'editar';
 	let modo = $state<Modo>('lista');
 	let editando = $state<string | null>(null);
+	let versiones = $state<Version[]>([]);
 
 	// --- Las listas de lugares
 	let paises = $state<Pais[]>([]);
@@ -172,15 +191,33 @@
 	}
 
 	/**
-	 * Al editar se parte de lo guardado. El pais viene tal cual, pero el
-	 * departamento se guardo ya legible ("Sacatepequez") y en la API se llama
-	 * de otra forma ("Sacatepequez Department"), asi que hay que buscarlo.
+	 * Al editar se parte de lo guardado, pedido con GET /direccion-usuario/:id
+	 * en vez de reusar la fila de la lista: asi los datos son los de este
+	 * momento y de paso llega el historial, que se ensena debajo del
+	 * formulario. Si esa peticion falla se sigue con la fila que ya se tenia,
+	 * que es peor que nada pero mejor que no dejar editar.
+	 *
+	 * El pais viene tal cual, pero el departamento se guardo legible
+	 * ("Sacatepequez") y en la API se llama de otra forma ("Sacatepequez
+	 * Department"), asi que hay que buscarlo, y sin que un acento los separe.
 	 */
-	async function abrirEditar(d: Direccion) {
+	async function abrirEditar(fila: Direccion) {
 		limpiar();
 		hecho = '';
-		editando = d.id_direccion;
+		versiones = [];
+		editando = fila.id_direccion;
 		modo = 'editar';
+
+		let d = fila;
+		const respuesta = await pedir<DireccionConHistorial>(
+			'/direccion-usuario/' + fila.id_direccion
+		);
+		if (respuesta.ok && respuesta.payload) {
+			d = respuesta.payload.direccion;
+			versiones = respuesta.payload.historial;
+		} else if (vencida(respuesta.estado)) {
+			return;
+		}
 
 		codigoPostal = d.codigo_postal ?? '';
 
@@ -188,7 +225,9 @@
 		paisElegido = true;
 		await alElegirPais(d.pais);
 
-		const enLista = opcionesDepartamento.find((o) => o.texto === d.departamento);
+		const enLista = opcionesDepartamento.find(
+			(o) => comparable(o.texto) === comparable(d.departamento)
+		);
 		departamento = enLista ? enLista.valor : d.departamento;
 		departamentoElegido = true;
 		if (enLista) await alElegirDepartamento(enLista.valor);
@@ -200,7 +239,29 @@
 	function cancelar() {
 		limpiar();
 		editando = null;
+		versiones = [];
 		modo = 'lista';
+	}
+
+	/**
+	 * La linea de una version. Se arma aqui y no en el marcado porque ahi el
+	 * bloque {#if} del codigo postal se come el espacio de antes y queda
+	 * "Guatemala- 03001" pegado.
+	 */
+	function resumen(v: Version): string {
+		const base = v.ciudad + ', ' + v.departamento + ', ' + v.pais;
+		return v.codigo_postal ? base + ' — ' + v.codigo_postal : base;
+	}
+
+	/** Solo para ensenar: dia y hora en corto. */
+	function cuando(iso: string): string {
+		return new Date(iso).toLocaleString('es-GT', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
 	}
 
 	/**
@@ -412,6 +473,26 @@
 				<button type="button" onclick={cancelar} disabled={guardando}>Cancelar</button>
 			</div>
 		</form>
+
+		{#if modo === 'editar' && versiones.length > 0}
+			<!--
+				Cada vez que se guarda un cambio queda una version nueva y ninguna
+				se sobrescribe. Se ensenan para que se vea que el historial existe
+				de verdad, y porque es lo que un pedido va a recordar: la direccion
+				tal como estaba el dia del envio, no como esta hoy.
+			-->
+			<div class="versiones">
+				<h3>Versiones guardadas ({versiones.length})</h3>
+				<ol>
+					{#each versiones as v (v.id_direccion_historial)}
+						<li>
+							<span class="cuando">{cuando(v.fecha_creacion)}</span>
+							<span class="que">{resumen(v)}</span>
+						</li>
+					{/each}
+				</ol>
+			</div>
+		{/if}
 	{/if}
 </section>
 
@@ -646,6 +727,46 @@
 		background: var(--indigo-cl);
 		border: 1px solid var(--indigo);
 		border-radius: var(--r);
+	}
+
+	.versiones {
+		margin-top: 24px;
+		padding-top: 18px;
+		border-top: 1px solid var(--linea);
+	}
+
+	.versiones h3 {
+		margin: 0 0 12px;
+		font-size: 0.95rem;
+		font-weight: 500;
+		color: var(--tinta);
+	}
+
+	.versiones ol {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		display: flex;
+		flex-direction: column;
+		gap: 8px;
+	}
+
+	.versiones li {
+		display: flex;
+		gap: 14px;
+		flex-wrap: wrap;
+		font-size: 0.88rem;
+	}
+
+	.cuando {
+		flex-shrink: 0;
+		min-width: 168px;
+		color: var(--gris);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.que {
+		color: var(--tinta);
 	}
 
 	@media (max-width: 620px) {
