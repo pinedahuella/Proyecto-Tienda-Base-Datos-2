@@ -1,6 +1,8 @@
 import { ErrorValidacion } from './errores';
 import { esTextoNoVacio } from './validaciones-perfil';
 
+const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Reglas de pais, departamento, ciudad y codigo_postal: van aqui, sueltas
  * de DireccionUsuarioService, porque las usa mas de un lugar (POST
@@ -45,5 +47,21 @@ export function validarCodigoPostal(
     throw new ErrorValidacion(
       'El codigo postal no puede tener mas de 20 caracteres',
     );
+  }
+}
+
+/**
+ * fecha es obligatoria en GET /direccion-usuario/historial: sin ella no hay
+ * a que momento reconstruir.
+ */
+export function validarFechaHistorial(fecha: string | undefined): void {
+  if (!esTextoNoVacio(fecha)) {
+    throw new ErrorValidacion('La fecha es obligatoria');
+  }
+  if (!REGEX_FECHA.test(fecha)) {
+    throw new ErrorValidacion('La fecha debe tener el formato AAAA-MM-DD');
+  }
+  if (Number.isNaN(Date.parse(fecha))) {
+    throw new ErrorValidacion('La fecha no es valida');
   }
 }

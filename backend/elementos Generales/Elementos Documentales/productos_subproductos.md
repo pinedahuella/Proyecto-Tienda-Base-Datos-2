@@ -73,7 +73,15 @@ Un ejemplo completo de cómo queda el documento está en
 
 ## Opcionales
 
-Según la categoría. Un producto puede traer todas, algunas o ninguna.
+Según la categoría. Un producto puede traer todas, algunas o ninguna. Cada
+característica opcional vive directamente en el objeto al que pertenece: las
+de la Tabla 1 van sueltas en la raíz del documento de `productos`, junto a los
+campos obligatorios; las de la Tabla 2 van sueltas dentro de cada elemento del
+array `variantes`. No hay un campo contenedor tipo `atributos` o
+`caracteristicas` que las agrupe.
+
+Cada variante puede traer sus propios campos personalizados: no tienen que
+coincidir entre las variantes de un mismo producto.
 
 ## Tabla 1 — Características generales
 
@@ -81,8 +89,6 @@ Según la categoría. Un producto puede traer todas, algunas o ninguna.
 | --- | --- | --- |
 | **Marca** | `String` | `"Lenovo"` |
 | **Modelo** | `String` | `"IdeaPad 5 15IAL7"` |
-| **Categoría** | `Object / String` | `{ id: "cat_001", nombre: "Electrónicos" }` |
-| **Subcategoría** | `Object / String` | `{ id: "sub_001", nombre: "Laptops" }` |
 | **Fabricante** | `String` | `"Lenovo Group Limited"` |
 | **País de origen** | `String` | `"China"` |
 | **Garantía** | `Boolean / Object` | `{ disponible: true, tipo: "Fabricante" }` |

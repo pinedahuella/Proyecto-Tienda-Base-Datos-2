@@ -41,6 +41,29 @@
 
 ---
 
+## GET /documental
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Conexion establecida con MongoDB",
+  "payload": {
+    "base": "mesh",
+    "version": "MongoDB 8.2.12"
+  }
+}
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+---
+
 ## POST /usuario/registro
 
 Cuerpo:
@@ -850,4 +873,203 @@ activa:
 
 ```json
 { "ok": false, "mensaje": "No se pudo actualizar la direccion", "payload": null }
+```
+
+---
+
+## GET /direccion-usuario
+
+Requiere la cookie `mesh_token`. Trae las direcciones vigentes del usuario
+logueado, mas recientes primero. Solo las suyas: no hay forma de traer las
+de otra persona.
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Direcciones obtenidas",
+  "payload": [
+    {
+      "id_direccion": "4",
+      "id_usuario": "27",
+      "pais": "Guatemala",
+      "departamento": "Guatemala",
+      "ciudad": "Mixco",
+      "codigo_postal": "01001",
+      "fecha_creacion": "2026-08-22T18:15:02.423Z",
+      "id_estado_direccion": 1
+    }
+  ]
+}
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo obtener las direcciones", "payload": null }
+```
+
+---
+
+## GET /direccion-usuario/:id
+
+Requiere la cookie `mesh_token`. Trae la version vigente de una direccion
+propia mas todo su historial de cambios completo, mas reciente primero (no
+una fecha puntual: todas las versiones por las que ha pasado). Solo la
+suya: una direccion de otro usuario da el mismo 404 que un id que no
+existe.
+
+```
+GET /direccion-usuario/4
+```
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Direccion obtenida",
+  "payload": {
+    "direccion": {
+      "id_direccion": "4",
+      "id_usuario": "27",
+      "pais": "Guatemala",
+      "departamento": "Guatemala",
+      "ciudad": "Mixco",
+      "codigo_postal": "01001",
+      "fecha_creacion": "2026-08-22T18:15:02.423Z",
+      "id_estado_direccion": 1
+    },
+    "historial": [
+      {
+        "id_direccion_historial": "9",
+        "id_direccion": "4",
+        "pais": "Guatemala",
+        "departamento": "Guatemala",
+        "ciudad": "Mixco",
+        "codigo_postal": "01001",
+        "fecha_creacion": "2026-08-22T18:15:09.808Z"
+      },
+      {
+        "id_direccion_historial": "8",
+        "id_direccion": "4",
+        "pais": "Guatemala",
+        "departamento": "Guatemala",
+        "ciudad": "Guatemala",
+        "codigo_postal": "01001",
+        "fecha_creacion": "2026-08-22T18:15:02.423Z"
+      }
+    ]
+  }
+}
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**404** — no existe una direccion con ese id (o no es tuya):
+
+```json
+{ "ok": false, "mensaje": "No existe una direccion con ese id", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo obtener la direccion", "payload": null }
+```
+
+---
+
+## GET /direccion-usuario/historial
+
+Requiere la cookie `mesh_token`. Reconstruye como estaban las direcciones
+del usuario logueado en una fecha especifica: para cada una, la version de
+`direccion_historial` mas reciente que ya regia ese dia. Si una direccion se
+creo despues de esa fecha, no sale (todavia no existia). Solo las suyas.
+
+Query params: `fecha`, obligatorio, formato `AAAA-MM-DD`.
+
+```
+GET /direccion-usuario/historial?fecha=2026-08-22
+```
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Historial de direcciones obtenido",
+  "payload": [
+    {
+      "id_direccion_historial": "9",
+      "id_direccion": "4",
+      "pais": "Guatemala",
+      "departamento": "Guatemala",
+      "ciudad": "Mixco",
+      "codigo_postal": "01001",
+      "fecha_creacion": "2026-08-22T18:15:09.808Z"
+    }
+  ]
+}
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "La fecha es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La fecha debe tener el formato AAAA-MM-DD", "payload": null }
+{ "ok": false, "mensaje": "La fecha no es valida", "payload": null }
+```
+
+**401** — no hay cookie, o el token no es valido, o la cuenta ya no esta
+activa:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+**500**
+
+```json
+{ "ok": false, "mensaje": "No se pudo obtener el historial de direcciones", "payload": null }
 ```
