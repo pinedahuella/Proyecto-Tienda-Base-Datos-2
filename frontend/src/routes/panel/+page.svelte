@@ -3,6 +3,7 @@
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
 	import { conJson, pedir } from '$lib/api';
+	import Direcciones from '$lib/Direcciones.svelte';
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import {
 		cerrarSesion,
@@ -419,6 +420,8 @@
 					</form>
 				{/if}
 			</section>
+
+			<Direcciones alExpirarSesion={expiro} />
 
 			{#if esAdmin}
 				<PanelAdmin alExpirarSesion={expiro} />
