@@ -7,6 +7,7 @@ import {
   FastifyAdapter,
   NestFastifyApplication,
 } from '@nestjs/platform-fastify';
+import fastifyCookie from '@fastify/cookie';
 import { AppModule } from './app.module';
 
 /**
@@ -24,7 +25,18 @@ async function bootstrap() {
 
   // Permite que el frontend (puerto 5173) le hable al backend (puerto 3000).
   // Sin esto el navegador bloquea las peticiones por ser de otro origen.
-  app.enableCors();
+  //
+  // credentials: true es obligatorio para que el navegador mande la cookie
+  // del token en cada peticion. Con eso, el origen ya no puede ser "*" (el
+  // navegador lo rechaza), tiene que ser uno explicito.
+  app.enableCors({
+    origin: 'http://localhost:5173',
+    credentials: true,
+  });
+
+  // Lee la cookie de cada peticion y la deja en request.cookies. No firma
+  // la cookie en si (eso ya lo hace el JWT de adentro), solo la parsea.
+  await app.register(fastifyCookie);
 
   // 0.0.0.0 y no localhost: asi tambien responde desde un contenedor
   await app.listen(process.env.PORT ?? 3000, '0.0.0.0');
