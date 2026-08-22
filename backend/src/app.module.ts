@@ -9,6 +9,8 @@ import { AdminUsuariosController } from './controllers/admin/admin-usuarios.cont
 import { AdminUsuariosService } from './services/admin/admin-usuarios.service';
 import { AdminCatalogosController } from './controllers/admin/admin-catalogos.controller';
 import { AdminCatalogosService } from './services/admin/admin-catalogos.service';
+import { PerfilController } from './controllers/perfil.controller';
+import { PerfilService } from './services/perfil.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -24,6 +26,7 @@ import { AdminCatalogosService } from './services/admin/admin-catalogos.service'
     UsuarioController,
     AdminUsuariosController,
     AdminCatalogosController,
+    PerfilController,
   ],
   providers: [
     InicioService,
@@ -31,6 +34,7 @@ import { AdminCatalogosService } from './services/admin/admin-catalogos.service'
     UsuarioService,
     AdminUsuariosService,
     AdminCatalogosService,
+    PerfilService,
   ],
 })
 export class AppModule {}

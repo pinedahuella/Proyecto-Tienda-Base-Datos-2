@@ -11,6 +11,7 @@ import { firmarToken } from '../helpers/token';
 import {
   esTextoNoVacio,
   validarApellido,
+  validarContrasena,
   validarFechaNacimiento,
   validarNombre,
 } from '../helpers/validaciones-perfil';
@@ -254,25 +255,7 @@ export class UsuarioService {
     validarNombre(datos.nombre);
     validarApellido(datos.apellido);
 
-    if (!esTextoNoVacio(datos.contrasena)) {
-      throw new ErrorValidacion('La contrasena es obligatoria');
-    }
-    if (datos.contrasena.length < 8) {
-      throw new ErrorValidacion(
-        'La contrasena debe tener al menos 8 caracteres',
-      );
-    }
-    if (!/[A-Z]/.test(datos.contrasena)) {
-      throw new ErrorValidacion(
-        'La contrasena debe tener al menos una letra mayuscula',
-      );
-    }
-    if (!/[^A-Za-z0-9]/.test(datos.contrasena)) {
-      throw new ErrorValidacion(
-        'La contrasena debe tener al menos un caracter especial',
-      );
-    }
-
+    validarContrasena(datos.contrasena);
     validarFechaNacimiento(datos.fecha_nacimiento);
   }
 
