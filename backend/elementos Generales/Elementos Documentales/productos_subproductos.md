@@ -1,5 +1,80 @@
 # Características de Producto
 
+Este documento tiene dos partes.
+
+**Arriba, lo obligatorio.** Son los campos que todo documento de producto lleva
+siempre, sin importar la categoría. No son una propuesta: ya existen en el modelo
+relacional y son los que el ETL escribe hoy en MongoDB. Si un documento no los
+trae, está incompleto.
+
+**Abajo, lo opcional.** Las características que cada categoría puede traer o no.
+Los atributos de una laptop no se parecen a los de una camisa, y esa es
+precisamente la razón por la que el catálogo se migró a una base documental.
+
+---
+
+## Obligatorias
+
+Lo que lleva todo producto, siempre.
+
+### Raíz del documento
+
+| Campo | Tipo | Ejemplo | De dónde sale |
+| --- | --- | --- | --- |
+| `_id` | `Number` | `1` | Es el `id_producto` de PostgreSQL, no uno que genere Mongo |
+| `nombre` | `String` | `"Camisa de lino manga larga"` | `productos.nombre` |
+| `descripcion` | `String` | `"Camisa de lino de corte regular"` | `productos.descripcion` |
+| `fecha_creacion` | `Date` | `2026-01-10T15:00:00Z` | `productos.fecha_creacion` |
+| `estado` | `String` | `"activo"` | Catálogo `estado_producto` |
+| `vendedor` | `Object` | ver abajo | `usuarios`, por `productos.id_usuario` |
+| `categoria` | `Object` | ver abajo | `categorias`, por `productos.id_categoria` |
+| `variantes` | `Array<Object>` | ver abajo | `productos_variantes` |
+
+### vendedor
+
+| Campo | Tipo | Ejemplo |
+| --- | --- | --- |
+| `id_usuario` | `Number` | `5` |
+| `usuario` | `String` | `"vendedor_prueba"` |
+| `nombre` | `String` | `"Carlos"` |
+| `apellido` | `String` | `"Ramirez"` |
+
+### categoria
+
+| Campo | Tipo | Ejemplo |
+| --- | --- | --- |
+| `id_categoria` | `Number` | `7` |
+| `nombre` | `String` | `"Cocina"` |
+| `categoria_padre` | `String` | `"Hogar"` |
+| `porcentaje_comision` | `Decimal128` | `7.50` |
+
+### Cada elemento de variantes
+
+| Campo | Tipo | Ejemplo |
+| --- | --- | --- |
+| `id_producto_variante` | `Number` | `1` |
+| `nombre_variante` | `String` | `"M azul"` |
+| `precio` | `Decimal128` | `169.00` |
+| `descripcion` | `String` | `"Talla M, color azul"` |
+| `fecha_creacion` | `Date` | `2026-01-10T15:00:00Z` |
+| `estado` | `String` | `"activa"` |
+| `imagenes` | `Array<String>` | `["https://.../camisa.jpg"]` |
+
+**Sobre el dinero.** `precio` y `porcentaje_comision` van en `Decimal128`, no en
+`Number`. Con punto flotante los centavos se redondean mal y el error se acumula.
+
+**Sobre `descripcion`.** Es el único campo obligatorio de la lista que en
+PostgreSQL acepta nulo. Hoy los tres productos de prueba lo traen.
+
+Un ejemplo completo de cómo queda el documento está en
+[ejemplos_bson_productos.md](ejemplos_bson_productos.md).
+
+---
+
+## Opcionales
+
+Según la categoría. Un producto puede traer todas, algunas o ninguna.
+
 ## Tabla 1 — Características generales
 
 | Característica | Tipo de dato | Estructura aproximada |
