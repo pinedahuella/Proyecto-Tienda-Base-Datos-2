@@ -39,7 +39,7 @@ Este es el producto 3 entero, como sale de la base:
   "_id": 3,
   "nombre": "Cafetera de goteo",
   "descripcion": "Cafetera de goteo con jarra de vidrio y filtro permanente",
-  "fecha_creacion": "2026-02-01T14:00:00.000Z",
+  "fecha_creacion": { "$date": "2026-02-01T14:00:00.000Z" },
   "estado": "activo",
   "vendedor": {
     "nombre": "Carlos",
@@ -66,7 +66,7 @@ Este es el producto 3 entero, como sale de la base:
         "https://upload.wikimedia.org/wikipedia/commons/thumb/b/b9/Our_new_coffee_maker_%282006%29_Hamilton_Beach.jpg/960px-Our_new_coffee_maker_%282006%29_Hamilton_Beach.jpg"
       ],
       "descripcion": "Jarra de 1.2 litros, rinde 10 tazas",
-      "fecha_creacion": "2026-02-01T14:00:00.000Z",
+      "fecha_creacion": { "$date": "2026-02-01T14:00:00.000Z" },
       "nombre_variante": "1.2 litros",
       "id_producto_variante": 5
     }
@@ -83,6 +83,8 @@ Tres cosas que conviene notar:
   con el producto, son pocos campos y cambian poco.
 - **El dinero es `$numberDecimal`**, o sea `Decimal128`. Con punto flotante los
   centavos se redondean mal.
+- **Las fechas son `Date` de Mongo**, o sea que en crudo se ven como
+  `{ "$date": "..." }`, igual que el dinero se ve como `$numberDecimal`.
 
 ## Cómo está organizado un evento
 
@@ -94,7 +96,7 @@ cambio agrega uno nuevo.
 | `_id` | `"<id_producto>-<numero>"`. Determinista, para que el ETL no duplique. |
 | `id_producto` | A qué producto pertenece |
 | `numero` | El orden: 1 es el nacimiento |
-| `fecha` | Cuándo pasó |
+| `fecha` | Cuándo pasó. `Date`, en crudo aparece como `{ "$date": "..." }` |
 | `operacion` | `"creacion"` o `"modificacion"` |
 | `datos` | Solo en la creación. El estado **completo**. |
 | `cambios` | Solo en las modificaciones. **Solo lo que cambió.** |
@@ -110,7 +112,7 @@ distintos en fechas distintas.
     "_id": "1-1",
     "id_producto": 1,
     "numero": 1,
-    "fecha": "2026-01-10T15:00:00.000Z",
+    "fecha": { "$date": "2026-01-10T15:00:00.000Z" },
     "operacion": "creacion",
     "datos": {
       "nombre": "Camisa de lino",
@@ -145,7 +147,7 @@ distintos en fechas distintas.
     "_id": "1-2",
     "id_producto": 1,
     "numero": 2,
-    "fecha": "2026-02-05T17:00:00.000Z",
+    "fecha": { "$date": "2026-02-05T17:00:00.000Z" },
     "operacion": "modificacion",
     "cambios": {
       "variantes": [
@@ -172,7 +174,7 @@ distintos en fechas distintas.
     "_id": "1-3",
     "id_producto": 1,
     "numero": 3,
-    "fecha": "2026-02-10T20:00:00.000Z",
+    "fecha": { "$date": "2026-02-10T20:00:00.000Z" },
     "operacion": "modificacion",
     "cambios": {
       "nombre": "Camisa de lino manga larga"
@@ -182,7 +184,7 @@ distintos en fechas distintas.
     "_id": "1-4",
     "id_producto": 1,
     "numero": 4,
-    "fecha": "2026-03-01T15:00:00.000Z",
+    "fecha": { "$date": "2026-03-01T15:00:00.000Z" },
     "operacion": "modificacion",
     "cambios": {
       "categoria": {

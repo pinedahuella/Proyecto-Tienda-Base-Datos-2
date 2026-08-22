@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Get,
   Param,
   Patch,
   Post,
+  Query,
   UseGuards,
 } from '@nestjs/common';
 import { UsuarioActual } from '../decorators/usuario-actual.decorator';
@@ -18,8 +20,8 @@ import { DireccionUsuarioService } from '../services/direccion-usuario.service';
 /**
  * Controlador de las rutas /direccion-usuario.
  *
- * Protegido en la clase: cualquier usuario logueado puede crear y editar
- * sus propias direcciones, no hace falta ser admin.
+ * Protegido en la clase: cualquier usuario logueado puede ver, crear y
+ * editar sus propias direcciones, no hace falta ser admin.
  */
 @Controller('direccion-usuario')
 @UseGuards(SesionGuard)
@@ -27,6 +29,53 @@ export class DireccionUsuarioController {
   constructor(
     private readonly direccionUsuarioService: DireccionUsuarioService,
   ) {}
+
+  // GET /direccion-usuario
+  @Get()
+  async listar(@UsuarioActual() usuarioActual: TokenUsuario) {
+    try {
+      const direcciones = await this.direccionUsuarioService.listar(
+        usuarioActual.id_usuario,
+      );
+      return exito(direcciones, 'Direcciones obtenidas');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo obtener las direcciones');
+    }
+  }
+
+  // GET /direccion-usuario/historial
+  @Get('historial')
+  async obtenerHistorial(
+    @Query('fecha') fecha: string | undefined,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const direcciones = await this.direccionUsuarioService.obtenerHistorial(
+        usuarioActual.id_usuario,
+        fecha,
+      );
+      return exito(direcciones, 'Historial de direcciones obtenido');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo obtener el historial de direcciones');
+    }
+  }
+
+  // GET /direccion-usuario/:id
+  @Get(':id')
+  async obtener(
+    @Param('id') id: string,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const resultado = await this.direccionUsuarioService.obtenerConHistorial(
+        id,
+        usuarioActual.id_usuario,
+      );
+      return exito(resultado, 'Direccion obtenida');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo obtener la direccion');
+    }
+  }
 
   // POST /direccion-usuario
   @Post()

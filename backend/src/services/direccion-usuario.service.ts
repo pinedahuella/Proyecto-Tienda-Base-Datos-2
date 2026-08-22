@@ -7,12 +7,15 @@ import {
   validarCiudad,
   validarCodigoPostal,
   validarDepartamento,
+  validarFechaHistorial,
   validarPais,
 } from '../helpers/validaciones-direccion';
 import { esTextoNoVacio } from '../helpers/validaciones-perfil';
 import { CrearDireccionPeticion } from '../dto/crear-direccion';
+import { DireccionConHistorial } from '../dto/direccion-con-historial';
 import { EditarDireccionPeticion } from '../dto/editar-direccion';
 import { Direccion } from '../models/direccion';
+import { DireccionHistorial } from '../models/direccion-historial';
 import { ID_ESTADO_DIRECCION_ACTIVA } from '../models/estado-direccion';
 
 const REGEX_ID = /^\d+$/;
@@ -164,6 +167,107 @@ export class DireccionUsuarioService {
       manejarErrorConexion(this.logger, error);
     } finally {
       cliente.release();
+    }
+  }
+
+  /**
+   * Lista las direcciones vigentes del usuario logueado. Solo las suyas: el
+   * WHERE exige ese id_usuario, asi que no hay forma de traer direcciones de
+   * otra persona.
+   */
+  async listar(idUsuario: string): Promise<Direccion[]> {
+    try {
+      const resultado = await pool.query<Direccion>(
+        `SELECT id_direccion, id_usuario, pais, departamento, ciudad,
+                codigo_postal, fecha_creacion, id_estado_direccion
+         FROM direcciones
+         WHERE id_usuario = $1
+         ORDER BY fecha_creacion DESC`,
+        [idUsuario],
+      );
+      return resultado.rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Trae una direccion del usuario logueado con todo su historial de
+   * cambios (mas reciente primero). Solo si es suya: el WHERE de la
+   * direccion exige ese id_usuario, asi que la de otra persona da el mismo
+   * ErrorNoEncontrado que un id que no existe.
+   */
+  async obtenerConHistorial(
+    idDireccion: string,
+    idUsuario: string,
+  ): Promise<DireccionConHistorial> {
+    if (!REGEX_ID.test(idDireccion)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+
+    try {
+      const resultadoDireccion = await pool.query<Direccion>(
+        `SELECT id_direccion, id_usuario, pais, departamento, ciudad,
+                codigo_postal, fecha_creacion, id_estado_direccion
+         FROM direcciones
+         WHERE id_direccion = $1 AND id_usuario = $2`,
+        [idDireccion, idUsuario],
+      );
+      const direccion = resultadoDireccion.rows[0];
+
+      if (direccion == null) {
+        throw new ErrorNoEncontrado('No existe una direccion con ese id');
+      }
+
+      const resultadoHistorial = await pool.query<DireccionHistorial>(
+        `SELECT id_direccion_historial, id_direccion, pais, departamento,
+                ciudad, codigo_postal, fecha_creacion
+         FROM direccion_historial
+         WHERE id_direccion = $1
+         ORDER BY fecha_creacion DESC`,
+        [idDireccion],
+      );
+
+      return { direccion, historial: resultadoHistorial.rows };
+    } catch (error) {
+      if (error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Reconstruye como estaban las direcciones del usuario logueado en una
+   * fecha especifica: para cada una, la version de direccion_historial mas
+   * reciente que ya regia ese dia (DISTINCT ON se queda con la primera fila
+   * de cada id_direccion, y el ORDER BY deja esa fila como la mas reciente).
+   * Si una direccion se creo despues de esa fecha, no sale: todavia no
+   * existia.
+   *
+   * Solo las suyas: el JOIN exige que la direccion sea de ese id_usuario.
+   */
+  async obtenerHistorial(
+    idUsuario: string,
+    fecha: string | undefined,
+  ): Promise<DireccionHistorial[]> {
+    validarFechaHistorial(fecha);
+
+    try {
+      const resultado = await pool.query<DireccionHistorial>(
+        `SELECT DISTINCT ON (dh.id_direccion)
+                dh.id_direccion_historial, dh.id_direccion, dh.pais,
+                dh.departamento, dh.ciudad, dh.codigo_postal, dh.fecha_creacion
+         FROM direccion_historial dh
+         JOIN direcciones d ON d.id_direccion = dh.id_direccion
+         WHERE d.id_usuario = $1
+           AND dh.fecha_creacion < ($2::date + interval '1 day')
+         ORDER BY dh.id_direccion, dh.fecha_creacion DESC`,
+        [idUsuario, fecha],
+      );
+      return resultado.rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
     }
   }
 

@@ -3,6 +3,8 @@ import { InicioController } from './controllers/inicio.controller';
 import { InicioService } from './services/inicio.service';
 import { BaseDatosController } from './controllers/base-datos.controller';
 import { BaseDatosService } from './services/base-datos.service';
+import { BaseDatosDocumentalController } from './controllers/base-datos-documental.controller';
+import { BaseDatosDocumentalService } from './services/base-datos-documental.service';
 import { UsuarioController } from './controllers/usuario.controller';
 import { UsuarioService } from './services/usuario.service';
 import { AdminUsuariosController } from './controllers/admin/admin-usuarios.controller';
@@ -26,6 +28,7 @@ import { DireccionUsuarioService } from './services/direccion-usuario.service';
   controllers: [
     InicioController,
     BaseDatosController,
+    BaseDatosDocumentalController,
     UsuarioController,
     AdminUsuariosController,
     AdminCatalogosController,
@@ -35,6 +38,7 @@ import { DireccionUsuarioService } from './services/direccion-usuario.service';
   providers: [
     InicioService,
     BaseDatosService,
+    BaseDatosDocumentalService,
     UsuarioService,
     AdminUsuariosService,
     AdminCatalogosService,
