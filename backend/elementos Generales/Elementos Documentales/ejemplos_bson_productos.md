@@ -259,6 +259,10 @@ algunas de las características de las Tablas 1 y 2 de
     "garantia": { "disponible": true, "tipo": "Fabricante" },
     "duracion_garantia": { "valor": 12, "unidad": "meses" }
   },
+  "caracteristicas_personalizadas": {
+    "temporada": "Otono 2026",
+    "unidades_disponibles_en_bodega": 40
+  },
   "variantes": [
     {
       "id_producto_variante": 3,
@@ -271,6 +275,9 @@ algunas de las características de las Tablas 1 y 2 de
       "caracteristicas_adicionales": {
         "memoria_ram": { "valor": 8, "unidad": "GB" },
         "almacenamiento": { "valor": 256, "unidad": "GB", "tipo": "SSD" }
+      },
+      "caracteristicas_personalizadas": {
+        "color_exacto_del_lote": "Gris grafito mate"
       }
     },
     {
@@ -298,6 +305,13 @@ Dos cosas para notar:
 - Cada variante trae su propio `caracteristicas_adicionales`, distinto del de
   la otra variante: la de 8 GB no tiene por qué traer los mismos campos que
   la de 16 GB.
+- `caracteristicas_personalizadas` es un campo aparte, no una parte de
+  `caracteristicas_adicionales`: en este ejemplo el producto trae
+  `temporada` y `unidades_disponibles_en_bodega`, y la variante de 8 GB trae
+  además `color_exacto_del_lote` — nombres que el vendedor inventó, no del
+  catálogo de la app, y siempre valores sueltos (texto, número o boolean),
+  nunca un array ni un objeto. Ver más en
+  [productos_subproductos.md](productos_subproductos.md#personalizadas-las-agrega-quien-crea-el-producto).
 
 ## Eventos sobre `caracteristicas_adicionales` (ejemplo inventado)
 

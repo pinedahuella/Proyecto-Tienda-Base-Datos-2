@@ -8,6 +8,14 @@ La forma de los documentos que devuelven estas rutas está explicada en
 [Elementos Documentales/productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)
 y [Elementos Documentales/ejemplos_bson_productos.md](Elementos%20Documentales/ejemplos_bson_productos.md).
 
+Hay dos formas de listar el catálogo, con exactamente los mismos filtros y
+el mismo comportamiento (mismos estados ocultos, mismas reglas de
+validación): `GET /productos` pagina por cursor (scroll infinito) y
+`GET /productos/paginacion` pagina por número de página (con salto directo).
+Los filtros están documentados una sola vez, en la sección
+["Ejemplo de cada filtro por separado"](#ejemplo-de-cada-filtro-por-separado),
+y aplican igual a las dos rutas.
+
 ---
 
 ## GET /productos
@@ -121,6 +129,22 @@ siempre se antepone `caracteristicas_adicionales.` al nombre que llega, un
 nombre con `$` intentando inyectar un operador de Mongo (`$where`, etc.) se
 rechaza con 400 en vez de ejecutarse.
 
+### `caracteristicas_personalizadas` — se devuelven, pero no se filtran
+
+Además de `caracteristicas_adicionales` (el catálogo de la app), un producto
+o una variante puede traer `caracteristicas_personalizadas`: pares
+nombre-valor sueltos que agregó quien creó el producto, fuera de cualquier
+catálogo (ver
+[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md#personalizadas-las-agrega-quien-crea-el-producto)).
+
+Esta ruta **sí** las devuelve como parte normal del producto o la variante
+en la respuesta — no se ocultan. Lo que no hacen es participar del filtro
+dinámico: los filtros de arriba solo arman condiciones contra
+`caracteristicas_adicionales`, nunca contra `caracteristicas_personalizadas`.
+No es una validación que rechace el intento con un 400 — simplemente esa
+ruta de campo nunca se construye, así que un filtro con ese nombre no
+encuentra nada, en vez de encontrar algo que no debería.
+
 ### 200
 
 ```json
@@ -173,6 +197,82 @@ del catálogo (o de lo que quedaba despues de aplicar los filtros).
 ```json
 { "ok": false, "mensaje": "El limite debe ser un numero entero mayor a 0", "payload": null }
 { "ok": false, "mensaje": "despues_de debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "id_categoria debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "id_vendedor debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "precio_min debe ser un numero valido, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "precio_max debe ser un numero valido, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "El filtro \"<nombre>\" no es un nombre de caracteristica valido", "payload": null }
+```
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudieron obtener los productos", "payload": null }
+```
+
+---
+
+## GET /productos/paginacion
+
+Pública, igual que `GET /productos`. Lista el mismo catálogo, con los
+mismos filtros fijos y dinámicos, la misma exclusión de `inactivo`/`borrador`
+y las mismas reglas de validación — la única diferencia es **cómo se
+pagina**: en vez de un cursor (`despues_de`), se pide un número de página
+(`pagina`) y un tamaño de página (`limite`), y sí se puede saltar
+directo a cualquier página sin haber pedido las anteriores.
+
+A cambio de ese salto directo, esta ruta sí necesita contar cuántos
+productos hay en total (`countDocuments`) para calcular `total_paginas`, que
+es justo el costo que `GET /productos` evita al no permitir saltos.
+
+### Query params
+
+| Param | Tipo | Obligatorio | Qué hace |
+| --- | --- | --- | --- |
+| `pagina` | entero | No (por defecto 1) | Qué página pedir, 1 es la primera |
+| `limite` | entero | No (por defecto 20, tope 100) | Cuántos productos trae cada página |
+| `nombre`, `estado`, `id_categoria`, `id_vendedor`, `precio_min`, `precio_max`, `estado_variante` | — | No | Los mismos filtros fijos de `GET /productos` |
+| _cualquier otro nombre_ | texto | No | Filtro dinámico sobre `caracteristicas_adicionales`, igual que en `GET /productos` |
+
+### Ejemplo
+
+```
+GET /productos/paginacion?limite=5&pagina=1    -> productos 1 a 5
+GET /productos/paginacion?limite=5&pagina=2    -> productos 6 a 10
+GET /productos/paginacion?limite=5&pagina=8    -> salta directo, sin pedir las 7 paginas anteriores
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Productos obtenidos",
+  "payload": {
+    "productos": [ "... mismos documentos que GET /productos ..." ],
+    "pagina": 1,
+    "limite": 5,
+    "total_productos": 3,
+    "total_paginas": 1
+  }
+}
+```
+
+Una página más allá del final (por ejemplo `pagina=99` cuando solo hay 3
+páginas) no es un error: da `200` con `productos: []`, y `total_paginas`
+sigue diciendo cuántas páginas hay de verdad.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "La pagina debe ser un numero entero mayor a 0", "payload": null }
+{ "ok": false, "mensaje": "El limite debe ser un numero entero mayor a 0", "payload": null }
 { "ok": false, "mensaje": "id_categoria debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "id_vendedor debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "precio_min debe ser un numero valido, con hasta 2 decimales", "payload": null }

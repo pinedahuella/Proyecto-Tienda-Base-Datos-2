@@ -10,23 +10,32 @@ import {
   validarDespuesDe,
   validarEnteroPositivo,
   validarLimite,
+  validarPagina,
   validarPrecio,
 } from '../../helpers/validaciones-productos';
 import {
   ListarProductosQuery,
   ProductosPagina,
 } from '../../dto/listar-productos';
+import {
+  PaginarProductosQuery,
+  ProductosPaginados,
+} from '../../dto/paginar-productos';
 import { Producto } from '../../models/producto';
 import { ESTADOS_PRODUCTO_OCULTOS } from '../../models/estado-producto';
 
 /**
- * Query params fijos de GET /productos. Cualquier otro que llegue se trata
- * como un filtro dinamico de caracteristicas_adicionales (ver
- * validaciones-productos.ts).
+ * Query params fijos de GET /productos y GET /productos/paginacion.
+ * Cualquier otro que llegue se trata como un filtro dinamico de
+ * caracteristicas_adicionales (ver validaciones-productos.ts). Las dos
+ * rutas comparten esta misma lista: "pagina" no le estorba a la ruta por
+ * cursor ni "despues_de" a la de paginacion, porque cada una simplemente no
+ * manda el query param de la otra.
  */
 const CLAVES_RESERVADAS = new Set([
   'limite',
   'despues_de',
+  'pagina',
   'nombre',
   'estado',
   'id_categoria',
@@ -35,6 +44,9 @@ const CLAVES_RESERVADAS = new Set([
   'precio_max',
   'estado_variante',
 ]);
+
+/** Los filtros que las dos rutas de listado tienen en comun. */
+type FiltrosProductosQuery = Record<string, string | undefined>;
 
 @Injectable()
 export class ProductosService {
@@ -53,26 +65,16 @@ export class ProductosService {
   async listar(query: ListarProductosQuery): Promise<ProductosPagina> {
     const limite = validarLimite(query.limite);
     const despuesDe = validarDespuesDe(query.despues_de);
-    const idCategoria = validarEnteroPositivo(
-      query.id_categoria,
-      'id_categoria',
-    );
-    const idVendedor = validarEnteroPositivo(query.id_vendedor, 'id_vendedor');
-    const precioMin = validarPrecio(query.precio_min, 'precio_min');
-    const precioMax = validarPrecio(query.precio_max, 'precio_max');
+    const filtro = this.construirFiltro(query);
 
-    const filtro = this.construirFiltro(query, {
-      despuesDe,
-      idCategoria,
-      idVendedor,
-      precioMin,
-      precioMax,
-    });
+    if (despuesDe != null) {
+      filtro._id = { $gt: despuesDe };
+    }
 
     try {
       const productos = await mongoDb
         .collection<Producto>('productos')
-        .find(filtro)
+        .find(filtro as Filter<Producto>)
         .sort({ _id: 1 })
         .limit(limite)
         .toArray();
@@ -88,22 +90,65 @@ export class ProductosService {
     }
   }
 
-  /** Arma el filtro de Mongo a partir de los query params ya validados. */
+  /**
+   * Lo mismo que listar(), mismos filtros y mismo comportamiento, pero
+   * paginado por numero de pagina en vez de por cursor: admite saltar
+   * directo a cualquier pagina, a cambio de tener que contar cuantos
+   * productos hay en total (countDocuments) para calcular total_paginas.
+   */
+  async listarPaginado(
+    query: PaginarProductosQuery,
+  ): Promise<ProductosPaginados> {
+    const limite = validarLimite(query.limite);
+    const pagina = validarPagina(query.pagina);
+    const filtro = this.construirFiltro(query) as Filter<Producto>;
+    const saltar = (pagina - 1) * limite;
+
+    try {
+      const coleccion = mongoDb.collection<Producto>('productos');
+      const [productos, totalProductos] = await Promise.all([
+        coleccion
+          .find(filtro)
+          .sort({ _id: 1 })
+          .skip(saltar)
+          .limit(limite)
+          .toArray(),
+        coleccion.countDocuments(filtro),
+      ]);
+
+      const totalPaginas =
+        totalProductos === 0 ? 0 : Math.ceil(totalProductos / limite);
+
+      return {
+        productos,
+        pagina,
+        limite,
+        total_productos: totalProductos,
+        total_paginas: totalPaginas,
+      };
+    } catch (error) {
+      manejarErrorConexionMongo(this.logger, error);
+    }
+  }
+
+  /**
+   * Arma el filtro de Mongo a partir de los query params ya validados. Lo
+   * comparten listar() y listarPaginado(): los mismos filtros fijos y
+   * dinamicos aplican en las dos rutas, solo cambia como se pagina despues.
+   */
   private construirFiltro(
-    query: ListarProductosQuery,
-    fijos: {
-      despuesDe: number | null;
-      idCategoria: number | null;
-      idVendedor: number | null;
-      precioMin: string | null;
-      precioMax: string | null;
-    },
-  ): Filter<Producto> {
+    query: FiltrosProductosQuery,
+  ): Record<string, unknown> {
+    const idCategoria = validarEnteroPositivo(
+      query.id_categoria,
+      'id_categoria',
+    );
+    const idVendedor = validarEnteroPositivo(query.id_vendedor, 'id_vendedor');
+    const precioMin = validarPrecio(query.precio_min, 'precio_min');
+    const precioMax = validarPrecio(query.precio_max, 'precio_max');
+
     const filtro: Record<string, unknown> = {};
 
-    if (fijos.despuesDe != null) {
-      filtro._id = { $gt: fijos.despuesDe };
-    }
     if (query.nombre) {
       filtro.nombre = { $regex: escaparRegex(query.nombre), $options: 'i' };
     }
@@ -116,11 +161,11 @@ export class ProductosService {
       condicionEstado.$eq = query.estado;
     }
     filtro.estado = condicionEstado;
-    if (fijos.idCategoria != null) {
-      filtro['categoria.id_categoria'] = fijos.idCategoria;
+    if (idCategoria != null) {
+      filtro['categoria.id_categoria'] = idCategoria;
     }
-    if (fijos.idVendedor != null) {
-      filtro['vendedor.id_usuario'] = fijos.idVendedor;
+    if (idVendedor != null) {
+      filtro['vendedor.id_usuario'] = idVendedor;
     }
 
     // estado_variante y el rango de precio describen la MISMA variante, asi
@@ -130,13 +175,13 @@ export class ProductosService {
     if (query.estado_variante) {
       elemMatchVariante.estado = query.estado_variante;
     }
-    if (fijos.precioMin != null || fijos.precioMax != null) {
+    if (precioMin != null || precioMax != null) {
       const rango: Record<string, Decimal128> = {};
-      if (fijos.precioMin != null) {
-        rango.$gte = Decimal128.fromString(fijos.precioMin);
+      if (precioMin != null) {
+        rango.$gte = Decimal128.fromString(precioMin);
       }
-      if (fijos.precioMax != null) {
-        rango.$lte = Decimal128.fromString(fijos.precioMax);
+      if (precioMax != null) {
+        rango.$lte = Decimal128.fromString(precioMax);
       }
       elemMatchVariante.precio = rango;
     }
@@ -153,11 +198,19 @@ export class ProductosService {
       filtro.$and = condicionesDinamicas;
     }
 
-    return filtro as Filter<Producto>;
+    return filtro;
   }
 
+  /**
+   * A proposito, esto solo arma condiciones contra "caracteristicas_adicionales"
+   * (del catalogo de la app), nunca contra "caracteristicas_personalizadas"
+   * (las que agrega quien crea el producto): esas no son filtrables, por
+   * diseno. No hace falta una lista negra que las excluya a mano: como esta
+   * funcion nunca construye una ruta hacia ese campo, no hay forma de que un
+   * query param llegue a tocarlo, sin importar que nombre le pongan.
+   */
   private construirFiltrosDinamicos(
-    query: ListarProductosQuery,
+    query: FiltrosProductosQuery,
   ): Record<string, unknown>[] {
     const condiciones: Record<string, unknown>[] = [];
 
