@@ -4,10 +4,12 @@
 #   .\arrancar.ps1                   levanta PostgreSQL, pgAdmin y MongoDB
 #   .\arrancar.ps1 -Reiniciar        borra TODOS los datos y empieza de cero
 #   .\arrancar.ps1 -ReiniciarMongo   rehace solo MongoDB, sin tocar PostgreSQL
+#   .\arrancar.ps1 -Mongo            abre la consola de MongoDB y ya
 
 param(
     [switch]$Reiniciar,
-    [switch]$ReiniciarMongo
+    [switch]$ReiniciarMongo,
+    [switch]$Mongo
 )
 
 Set-Location -LiteralPath $PSScriptRoot
@@ -16,6 +18,29 @@ function Paso($t)  { Write-Host "`n>> $t" -ForegroundColor Cyan }
 function Ok($t)    { Write-Host "   $t"   -ForegroundColor Green }
 function Aviso($t) { Write-Host "   $t"   -ForegroundColor Yellow }
 function Error1($t){ Write-Host "   $t"   -ForegroundColor Red }
+
+
+# ------------------------------------------------------------
+# Atajo: abrir la consola de MongoDB
+# ------------------------------------------------------------
+# Sin esto habria que acordarse de la linea completa con -u, -p y
+# --authenticationDatabase. El usuario y la contrasena no se escriben: ya estan
+# dentro del contenedor, puestos por el compose desde el .env.
+
+if ($Mongo) {
+    $corriendo = docker ps --filter "name=mesh-mongo" --filter "status=running" --format "{{.Names}}" 2>&1
+    if ("$corriendo" -notmatch "mesh-mongo") {
+        Error1 "MongoDB no esta corriendo. Corre primero:  .\arrancar.ps1"
+        exit 1
+    }
+    # -it necesita una terminal de verdad. Si a este script lo llama otro
+    # script (o algo sin consola), docker corta con "cannot attach stdin to a
+    # TTY-enabled container". Con la entrada redirigida se usa solo -i.
+    $banderas = if ([Console]::IsInputRedirected) { '-i' } else { '-it' }
+
+    docker exec $banderas mesh-mongo sh -c 'mongosh -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin $MONGO_INITDB_DATABASE'
+    exit $LASTEXITCODE
+}
 
 
 # ------------------------------------------------------------
@@ -444,11 +469,15 @@ Paso "Listo"
 docker ps --format "   {{.Names}}  {{.Status}}"
 
 Write-Host ""
-Write-Host "   pgAdmin      http://localhost:5050" -ForegroundColor White
-Write-Host "   PostgreSQL   localhost:5432   base $($env_['DB_NAME'])   usuario $($env_['DB_USER'])" -ForegroundColor White
-Write-Host "   MongoDB      localhost:27017  base $($env_['MONGO_DB'])   usuario $($env_['MONGO_USER'])" -ForegroundColor White
+Write-Host "   pgAdmin        http://localhost:5050    ventana de PostgreSQL" -ForegroundColor White
+Write-Host "   mongo-express  http://localhost:8082    ventana de MongoDB" -ForegroundColor White
+Write-Host ""
+Write-Host "   PostgreSQL     localhost:5432   base $($env_['DB_NAME'])   usuario $($env_['DB_USER'])" -ForegroundColor White
+Write-Host "   MongoDB        localhost:27018  base $($env_['MONGO_DB'])   usuario $($env_['MONGO_USER'])" -ForegroundColor White
 Write-Host ""
 Write-Host "   Falta arrancar a mano:" -ForegroundColor DarkGray
 Write-Host "     cd backend  ; npm run start:dev" -ForegroundColor DarkGray
 Write-Host "     cd frontend ; npm run dev" -ForegroundColor DarkGray
+Write-Host "" 
+Write-Host "   Consola de MongoDB:  .\arrancar.ps1 -Mongo" -ForegroundColor DarkGray
 Write-Host ""

@@ -88,10 +88,29 @@ Dentro de psql:
   \q               salir
 
 
+VER MONGO EN EL NAVEGADOR
+--------------------------------------------------
+mongo-express: http://localhost:8082
+Entra directo, sin usuario. Es la ventana de MongoDB, como pgAdmin lo es de
+PostgreSQL. Lo levanta arrancar.ps1 junto con lo demas.
+
+Si prefieres MongoDB Compass (aplicacion de escritorio, se instala aparte), la
+cadena de conexion es:
+
+  mongodb://USUARIO:CONTRASENA@localhost:27018/mesh?authSource=admin
+
+OJO con el puerto: es 27018. Si pones 27017 te conectas al MongoDB que Windows
+pueda tener instalado, que es otra base, esta vacia y no pide contrasena.
+
+
 ENTRAR A MONGO POR TERMINAL
 --------------------------------------------------
-El usuario y la contrasena ya estan dentro del contenedor, no hay que
-escribirlos:
+El atajo:
+
+  .\arrancar.ps1 -Mongo
+
+O el comando completo. El usuario y la contrasena ya estan dentro del
+contenedor, no hay que escribirlos:
 
   docker exec -it mesh-mongo sh -c 'mongosh -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin $MONGO_INITDB_DATABASE'
 
@@ -128,7 +147,7 @@ Estan en el archivo .env de la raiz del proyecto. No se suben al repositorio.
   MONGO_DB        el nombre de la base de MongoDB
   MONGO_USER      el usuario de MongoDB
   MONGO_PASSWORD  la contrasena de MongoDB
-  puerto          27017
+  puerto          27018   (no 27017: ese lo puede tener Windows ocupado)
 
 Si no tienes el .env todavia:
 

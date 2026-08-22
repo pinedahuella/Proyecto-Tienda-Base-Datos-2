@@ -62,7 +62,14 @@ services:
       # Base que usa el proyecto. Los scripts de mongo/ se corren contra esta.
       MONGO_INITDB_DATABASE: ${MONGO_DB:?falta MONGO_DB en .env}
     ports:
-      - "27017:27017"
+      # 27018 afuera y no 27017: Windows puede tener un MongoDB instalado como
+      # servicio, que ya ocupa el 27017. Los dos pueden escuchar a la vez sin
+      # dar error, y el que contesta en localhost es el de Windows: Compass y
+      # el backend acaban hablando con la base equivocada, vacia y sin
+      # contrasena. Se comprueba con la version: la nuestra es la del
+      # contenedor, la otra es la que tenga instalada la maquina.
+      # Adentro de la red de Docker se sigue usando el 27017 de siempre.
+      - "27018:27017"
     volumes:
       - mongo-data:/data/db
       # Los scripts de las colecciones quedan accesibles dentro del
@@ -74,6 +81,27 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  mongo-express:
+    image: mongo-express:1.0.2
+    container_name: mesh-mongo-express
+    restart: unless-stopped
+    environment:
+      # Se conecta por el nombre del servicio, no por localhost: para este
+      # contenedor localhost es el mismo contenedor. Igual que pgAdmin con
+      # "postgres".
+      ME_CONFIG_MONGODB_SERVER: mongo
+      ME_CONFIG_MONGODB_PORT: "27017"
+      ME_CONFIG_MONGODB_ADMINUSERNAME: ${MONGO_USER:?falta MONGO_USER en .env}
+      ME_CONFIG_MONGODB_ADMINPASSWORD: ${MONGO_PASSWORD:?falta MONGO_PASSWORD en .env}
+      ME_CONFIG_MONGODB_ENABLE_ADMIN: "true"
+      # Sin contrasena para entrar a la pagina, como pgAdmin. Es solo local.
+      ME_CONFIG_BASICAUTH: "false"
+    ports:
+      # 8082 y no el 8081 de siempre: ese puerto ya lo usa otro proyecto
+      - "8082:8081"
+    depends_on:
+      - mongo
 
 volumes:
   postgres-data:

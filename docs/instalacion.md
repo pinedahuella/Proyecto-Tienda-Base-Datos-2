@@ -90,7 +90,8 @@ docker exec mesh-postgres psql -U $DB_USER -d $DB_NAME -f /migrations/001_usuari
 |---|---|---|---|
 | PostgreSQL | mesh-postgres | pgvector/pgvector:pg18 | 5432 |
 | pgAdmin | mesh-pgadmin | dpage/pgadmin4 | 5050 |
-| MongoDB | mesh-mongo | mongo:8 | 27017 |
+| MongoDB | mesh-mongo | mongo:8 | 27018 |
+| mongo-express | mesh-mongo-express | mongo-express:1.0.2 | 8082 |
 
 Apagar todo:
 
@@ -113,6 +114,7 @@ los scripts que crean las colecciones.
 | PostgreSQL | `DB_USER` del .env | `DB_PASSWORD` del .env |
 | pgAdmin | `PGADMIN_EMAIL` del .env | `PGADMIN_PASSWORD` del .env |
 | MongoDB | `MONGO_USER` del .env | `MONGO_PASSWORD` del .env |
+| mongo-express | entra directo, sin usuario | |
 
 **Ninguna contrasena esta escrita en el repositorio.** Todas viven en el archivo
 `.env`, que git ignora. Por eso el primer paso de la instalacion es copiar
@@ -159,6 +161,32 @@ TypeScript
 Los scripts con nombre propio siempre llevan `run`. `npm start:dev` no existe.
 
 ## Errores comunes
+
+**Compass o el backend ven una base de Mongo vacia y sin contrasena**
+
+Windows puede tener un MongoDB instalado como servicio, y ese ya ocupa el
+27017. Los dos pueden escuchar a la vez sin dar ningun error, pero el que
+contesta en `localhost` es el de Windows: Compass conecta, no pide contrasena, y
+ensena una base que no es la del proyecto.
+
+Por eso el contenedor publica el **27018**, no el 27017. La cadena de conexion
+del proyecto es:
+
+```
+mongodb://<MONGO_USER>:<MONGO_PASSWORD>@localhost:27018/mesh?authSource=admin
+```
+
+Para saber con cual estas hablando, mira la version y si te pide contrasena:
+
+```bash
+docker exec mesh-mongo mongosh --quiet --eval "db.adminCommand({buildInfo:1}).version"
+```
+
+Si una conexion no pide contrasena, no es la del proyecto.
+
+Dentro de la red de Docker no cambia nada: mongo-express y cualquier otro
+contenedor siguen usando `mongo:27017`.
+
 
 **npm no corre en PowerShell**
 
