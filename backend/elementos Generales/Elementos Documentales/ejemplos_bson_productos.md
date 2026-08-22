@@ -221,3 +221,158 @@ nombre nuevo pero el precio viejo, porque el cambio del 5 de febrero se saltó. 
 eventos guardan solo lo que cambió, así que hay que aplicarlos todos.
 
 La consulta ya está escrita en `etl/reconstruir.js`.
+
+---
+
+## Un producto con `caracteristicas_adicionales` (ejemplo inventado)
+
+A diferencia de todo lo de arriba, esto **no** está copiado de la base: hoy
+ninguno de los tres productos de prueba trae `caracteristicas_adicionales`
+todavía. Es solo para mostrar la forma, usando la laptop (`_id: 2`) y
+algunas de las características de las Tablas 1 y 2 de
+[productos_subproductos.md](productos_subproductos.md).
+
+```json
+{
+  "_id": 2,
+  "nombre": "Laptop 14 pulgadas",
+  "descripcion": "Laptop de 14 pulgadas para trabajo y estudio",
+  "fecha_creacion": { "$date": "2026-01-15T17:30:00.000Z" },
+  "estado": "activo",
+  "vendedor": {
+    "id_usuario": 5,
+    "usuario": "vendedor_prueba",
+    "nombre": "Carlos",
+    "apellido": "Ramirez"
+  },
+  "categoria": {
+    "id_categoria": 3,
+    "nombre": "Computadoras",
+    "categoria_padre": "Electronica",
+    "porcentaje_comision": { "$numberDecimal": "6.00" }
+  },
+  "caracteristicas_adicionales": {
+    "marca": "Lenovo",
+    "modelo": "IdeaPad 5 15IAL7",
+    "fabricante": "Lenovo Group Limited",
+    "pais_origen": "China",
+    "garantia": { "disponible": true, "tipo": "Fabricante" },
+    "duracion_garantia": { "valor": 12, "unidad": "meses" }
+  },
+  "variantes": [
+    {
+      "id_producto_variante": 3,
+      "nombre_variante": "8 GB RAM",
+      "precio": { "$numberDecimal": "4299.00" },
+      "descripcion": "Pantalla de 14 pulgadas, 8 GB de RAM, 256 GB SSD",
+      "fecha_creacion": { "$date": "2026-01-15T17:30:00.000Z" },
+      "estado": "activa",
+      "imagenes": [],
+      "caracteristicas_adicionales": {
+        "memoria_ram": { "valor": 8, "unidad": "GB" },
+        "almacenamiento": { "valor": 256, "unidad": "GB", "tipo": "SSD" }
+      }
+    },
+    {
+      "id_producto_variante": 4,
+      "nombre_variante": "16 GB RAM",
+      "precio": { "$numberDecimal": "5199.00" },
+      "descripcion": "Pantalla de 14 pulgadas, 16 GB de RAM, 512 GB SSD",
+      "fecha_creacion": { "$date": "2026-01-15T17:30:00.000Z" },
+      "estado": "activa",
+      "imagenes": [],
+      "caracteristicas_adicionales": {
+        "memoria_ram": { "valor": 16, "unidad": "GB" },
+        "almacenamiento": { "valor": 512, "unidad": "GB", "tipo": "SSD" }
+      }
+    }
+  ]
+}
+```
+
+Dos cosas para notar:
+
+- `caracteristicas_adicionales` es un objeto normal: cada campo adentro usa el
+  tipo que le corresponda (`duracion_garantia.valor` y `memoria_ram.valor` son
+  `Number`, no dinero, así que no necesitan `$numberDecimal`).
+- Cada variante trae su propio `caracteristicas_adicionales`, distinto del de
+  la otra variante: la de 8 GB no tiene por qué traer los mismos campos que
+  la de 16 GB.
+
+## Eventos sobre `caracteristicas_adicionales` (ejemplo inventado)
+
+También inventados: dos eventos más para esta misma laptop, siguiendo a los
+tres reales que ya tiene en la tabla de arriba (numeros 1, 2 y 3).
+
+**Un cambio en las características del producto en sí** (no de una variante,
+no de la categoría) — por ejemplo, extender la garantía:
+
+```json
+{
+  "_id": "2-4",
+  "id_producto": 2,
+  "numero": 4,
+  "fecha": { "$date": "2026-04-01T10:00:00.000Z" },
+  "operacion": "modificacion",
+  "cambios": {
+    "caracteristicas_adicionales": {
+      "marca": "Lenovo",
+      "modelo": "IdeaPad 5 15IAL7",
+      "fabricante": "Lenovo Group Limited",
+      "pais_origen": "China",
+      "garantia": { "disponible": true, "tipo": "Fabricante" },
+      "duracion_garantia": { "valor": 24, "unidad": "meses" }
+    }
+  }
+}
+```
+
+Mismo patrón que ya usan los eventos reales de categoría (`"1-4"`) y de
+variantes (`"1-2"`): aunque solo cambió `duracion_garantia`, el evento guarda
+`caracteristicas_adicionales` completo, no solo el campo que cambió. La
+unidad de "qué cambió" es el sub-objeto entero, no cada llave suelta adentro.
+
+**Un cambio en las características de una variante específica** — por
+ejemplo, corregir el almacenamiento real de la variante de 16 GB:
+
+```json
+{
+  "_id": "2-5",
+  "id_producto": 2,
+  "numero": 5,
+  "fecha": { "$date": "2026-04-10T14:00:00.000Z" },
+  "operacion": "modificacion",
+  "cambios": {
+    "variantes": [
+      {
+        "id_producto_variante": 3,
+        "nombre_variante": "8 GB RAM",
+        "precio": { "$numberDecimal": "4299.00" },
+        "descripcion": "Pantalla de 14 pulgadas, 8 GB de RAM, 256 GB SSD",
+        "caracteristicas_adicionales": {
+          "memoria_ram": { "valor": 8, "unidad": "GB" },
+          "almacenamiento": { "valor": 256, "unidad": "GB", "tipo": "SSD" }
+        }
+      },
+      {
+        "id_producto_variante": 4,
+        "nombre_variante": "16 GB RAM",
+        "precio": { "$numberDecimal": "5199.00" },
+        "descripcion": "Pantalla de 14 pulgadas, 16 GB de RAM, 512 GB SSD",
+        "caracteristicas_adicionales": {
+          "memoria_ram": { "valor": 16, "unidad": "GB" },
+          "almacenamiento": { "valor": 1, "unidad": "TB", "tipo": "SSD" }
+        }
+      }
+    ]
+  }
+}
+```
+
+Igual que el evento real `"2-3"` (el que sube el SSD de la variante de 16 GB
+a 1 TB): cuando cambia algo dentro de `variantes`, el evento trae el array
+completo, no solo la variante que cambió ni solo el campo de adentro.
+
+**¿Y un cambio de categoría?** Eso ya está documentado arriba y no hace falta
+inventarlo: es el evento real `"1-4"`, donde sube el `porcentaje_comision` de
+Camisas sin que nadie tocara la camisa ese día.

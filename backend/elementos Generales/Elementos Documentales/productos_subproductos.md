@@ -73,15 +73,28 @@ Un ejemplo completo de cómo queda el documento está en
 
 ## Opcionales
 
-Según la categoría. Un producto puede traer todas, algunas o ninguna. Cada
-característica opcional vive directamente en el objeto al que pertenece: las
-de la Tabla 1 van sueltas en la raíz del documento de `productos`, junto a los
-campos obligatorios; las de la Tabla 2 van sueltas dentro de cada elemento del
-array `variantes`. No hay un campo contenedor tipo `atributos` o
-`caracteristicas` que las agrupe.
+Según la categoría. Un producto puede traer todas, algunas o ninguna. Van
+agrupadas en un solo campo contenedor, `caracteristicas_adicionales`, en vez
+de sueltas junto a los campos obligatorios:
 
-Cada variante puede traer sus propios campos personalizados: no tienen que
-coincidir entre las variantes de un mismo producto.
+- Las de la Tabla 1 van dentro de `caracteristicas_adicionales` en la raíz
+  del documento de `productos` (`productos.caracteristicas_adicionales`).
+- Las de la Tabla 2 van dentro de `caracteristicas_adicionales` de cada
+  elemento del array `variantes` (`variantes[].caracteristicas_adicionales`).
+
+Cada variante puede traer su propio `caracteristicas_adicionales`, con
+campos personalizados que no tienen que coincidir entre las variantes de un
+mismo producto.
+
+**Sobre el orden en que aparecen.** El orden de las llaves de un documento de
+Mongo (y del JSON que sale en la respuesta) es el orden en que se insertaron,
+no algo fijo de una vez para siempre: un producto se pudo crear con `marca`
+antes que `modelo`, y otro de la misma categoría al revés, o edité despues y
+le sumé un campo nuevo al final. Por eso el orden en que el frontend muestra
+estas características no debe leerse del JSON tal como llega: el frontend
+define su propio orden fijo por categoría (una lista de qué atributos
+mostrar y en qué secuencia) y la aplica él mismo, sin importar en qué orden
+vinieron las llaves del documento.
 
 ## Tabla 1 — Características generales
 
