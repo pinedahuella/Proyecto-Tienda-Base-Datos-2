@@ -6,9 +6,9 @@
 -- etl/README.md sale de aqui: si se cambia una fecha o un precio, ese
 -- ejemplo deja de cuadrar.
 --
--- Este archivo es dueno de los id 1 a 1000 en todas las tablas con id
--- escrito a mano. Ocupa del 1 al 10. Un conjunto nuevo se escribe en un
--- archivo nuevo con el bloque siguiente, y asi no hay que abrir este.
+-- Los id van escritos a mano y cuentan seguido desde 1, sin saltos. Este es el
+-- primer conjunto, asi que arranca en 1; el que sigue continua donde este
+-- termina.
 --
 -- Todo inserta con ON CONFLICT DO NOTHING. A diferencia de las migraciones,
 -- este archivo si llega a ejecutarse en cada arranque, y sin eso la segunda

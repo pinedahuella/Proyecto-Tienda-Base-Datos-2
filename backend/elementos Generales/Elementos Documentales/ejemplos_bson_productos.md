@@ -1,24 +1,28 @@
 # Documentos de producto en MongoDB, con ejemplos reales
 
-Todo lo que aparece aquí está copiado tal cual de la base, no es un boceto. Son
-los tres productos de prueba que carga el ETL de `etl/` a partir de los datos de
-`migrations/003_productos.sql`. Para verlos en tu máquina: DbGate en
+Todo lo que aparece aquí está copiado tal cual de la base, no es un boceto. El
+catálogo son 50 productos, 92 variantes y 27 categorías, que el ETL de `etl/` carga
+a partir de los conjuntos de `migrations/datos/`. Los ejemplos de abajo son los
+tres primeros productos, que son los que tienen modificaciones y por eso sirven
+para enseñar los eventos. Para verlos en tu máquina: DbGate en
 http://localhost:3001, base `mesh`.
 
 Los campos obligatorios de cada documento están explicados en
 [productos_subproductos.md](productos_subproductos.md).
 
-## Las dos colecciones
+## Las tres colecciones
 
 | Colección | Qué guarda |
 | --- | --- |
 | `productos` | Cómo está el producto **hoy**. Un documento por producto. |
 | `productos_eventos` | Cómo **ha ido cambiando**. Un documento por cambio. |
+| `categorias` | Qué características **ofrece** cada categoría. Un documento por categoría. |
 
 La primera es la que lee el catálogo. La segunda es la que responde "¿cómo estaba
-este producto el 20 de febrero?".
+este producto el 20 de febrero?". La tercera no guarda valores: es la lista de
+campos que el formulario le propone a quien publica en esa categoría.
 
-## Los tres productos de ejemplo
+## Los tres productos que se usan de ejemplo
 
 | `_id` | Nombre | Categoría | Variantes | Eventos |
 | --- | --- | --- | --- | --- |
@@ -224,169 +228,227 @@ La consulta ya está escrita en `etl/reconstruir.js`.
 
 ---
 
-## Un producto con `caracteristicas_adicionales` (ejemplo inventado)
+## Un producto con sus características
 
-A diferencia de todo lo de arriba, esto **no** está copiado de la base: hoy
-ninguno de los tres productos de prueba trae `caracteristicas_adicionales`
-todavía. Es solo para mostrar la forma, usando la laptop (`_id: 2`) y
-algunas de las características de las Tablas 1 y 2 de
-[productos_subproductos.md](productos_subproductos.md).
+Esto sí está copiado de la base. Es la laptop (`_id: 2`), recortada a las primeras
+seis características y sin las imágenes de las variantes, que son URLs largas.
 
 ```json
 {
   "_id": 2,
   "nombre": "Laptop 14 pulgadas",
   "descripcion": "Laptop de 14 pulgadas para trabajo y estudio",
-  "fecha_creacion": { "$date": "2026-01-15T17:30:00.000Z" },
+  "fecha_creacion": {
+    "$date": "2026-01-15T17:30:00Z"
+  },
   "estado": "activo",
   "vendedor": {
-    "id_usuario": 5,
-    "usuario": "vendedor_prueba",
     "nombre": "Carlos",
-    "apellido": "Ramirez"
+    "usuario": "vendedor_prueba",
+    "apellido": "Ramirez",
+    "id_usuario": 5
   },
   "categoria": {
-    "id_categoria": 3,
     "nombre": "Computadoras",
+    "id_categoria": 5,
     "categoria_padre": "Electronica",
-    "porcentaje_comision": { "$numberDecimal": "6.00" }
-  },
-  "caracteristicas_adicionales": {
-    "marca": "Lenovo",
-    "modelo": "IdeaPad 5 15IAL7",
-    "fabricante": "Lenovo Group Limited",
-    "pais_origen": "China",
-    "garantia": { "disponible": true, "tipo": "Fabricante" },
-    "duracion_garantia": { "valor": 12, "unidad": "meses" }
-  },
-  "caracteristicas_personalizadas": {
-    "temporada": "Otono 2026",
-    "unidades_disponibles_en_bodega": 40
+    "porcentaje_comision": {
+      "$numberDecimal": "6.00"
+    }
   },
   "variantes": [
     {
-      "id_producto_variante": 3,
-      "nombre_variante": "8 GB RAM",
-      "precio": { "$numberDecimal": "4299.00" },
-      "descripcion": "Pantalla de 14 pulgadas, 8 GB de RAM, 256 GB SSD",
-      "fecha_creacion": { "$date": "2026-01-15T17:30:00.000Z" },
       "estado": "activa",
-      "imagenes": [],
-      "caracteristicas_adicionales": {
-        "memoria_ram": { "valor": 8, "unidad": "GB" },
-        "almacenamiento": { "valor": 256, "unidad": "GB", "tipo": "SSD" }
+      "precio": {
+        "$numberDecimal": "4299.00"
       },
-      "caracteristicas_personalizadas": {
-        "color_exacto_del_lote": "Gris grafito mate"
-      }
+      "descripcion": "Pantalla de 14 pulgadas, 8 GB de RAM, 256 GB SSD",
+      "fecha_creacion": {
+        "$date": "2026-01-15T17:30:00Z"
+      },
+      "nombre_variante": "8 GB RAM",
+      "id_producto_variante": 3,
+      "caracteristicas_adicionales": [
+        {
+          "nombre": "Memoria RAM",
+          "valor": "8",
+          "unidad": "GB"
+        },
+        {
+          "nombre": "Almacenamiento",
+          "valor": "256",
+          "unidad": "GB"
+        },
+        {
+          "nombre": "Tipo de almacenamiento",
+          "valor": "SSD",
+          "unidad": null
+        },
+        {
+          "nombre": "Codigo SKU",
+          "valor": "L1P-2-3",
+          "unidad": null
+        }
+      ]
     },
     {
-      "id_producto_variante": 4,
-      "nombre_variante": "16 GB RAM",
-      "precio": { "$numberDecimal": "5199.00" },
-      "descripcion": "Pantalla de 14 pulgadas, 16 GB de RAM, 512 GB SSD",
-      "fecha_creacion": { "$date": "2026-01-15T17:30:00.000Z" },
       "estado": "activa",
-      "imagenes": [],
-      "caracteristicas_adicionales": {
-        "memoria_ram": { "valor": 16, "unidad": "GB" },
-        "almacenamiento": { "valor": 512, "unidad": "GB", "tipo": "SSD" }
-      }
+      "precio": {
+        "$numberDecimal": "4999.00"
+      },
+      "descripcion": "Pantalla de 14 pulgadas, 16 GB de RAM, 1 TB SSD",
+      "fecha_creacion": {
+        "$date": "2026-01-15T17:30:00Z"
+      },
+      "nombre_variante": "16 GB RAM",
+      "id_producto_variante": 4,
+      "caracteristicas_adicionales": [
+        {
+          "nombre": "Memoria RAM",
+          "valor": "16",
+          "unidad": "GB"
+        },
+        {
+          "nombre": "Almacenamiento",
+          "valor": "512",
+          "unidad": "GB"
+        },
+        {
+          "nombre": "Tipo de almacenamiento",
+          "valor": "SSD",
+          "unidad": null
+        },
+        {
+          "nombre": "Codigo SKU",
+          "valor": "L1P-2-4",
+          "unidad": null
+        }
+      ]
+    }
+  ],
+  "caracteristicas_adicionales": [
+    {
+      "nombre": "Marca",
+      "valor": "Tecno Sur",
+      "unidad": null
+    },
+    {
+      "nombre": "Modelo",
+      "valor": "TS-14A",
+      "unidad": null
+    },
+    {
+      "nombre": "Fabricante",
+      "valor": "Tecno Sur Manufacturing",
+      "unidad": null
+    },
+    {
+      "nombre": "Pais de origen",
+      "valor": "China",
+      "unidad": null
+    },
+    {
+      "nombre": "Garantia",
+      "valor": "true",
+      "unidad": null
+    },
+    {
+      "nombre": "Tipo de garantia",
+      "valor": "Fabricante",
+      "unidad": null
     }
   ]
 }
 ```
 
-Dos cosas para notar:
+Cuatro cosas para notar:
 
-- `caracteristicas_adicionales` es un objeto normal: cada campo adentro usa el
-  tipo que le corresponda (`duracion_garantia.valor` y `memoria_ram.valor` son
-  `Number`, no dinero, así que no necesitan `$numberDecimal`).
-- Cada variante trae su propio `caracteristicas_adicionales`, distinto del de
-  la otra variante: la de 8 GB no tiene por qué traer los mismos campos que
-  la de 16 GB.
-- `caracteristicas_personalizadas` es un campo aparte, no una parte de
-  `caracteristicas_adicionales`: en este ejemplo el producto trae
-  `temporada` y `unidades_disponibles_en_bodega`, y la variante de 8 GB trae
-  además `color_exacto_del_lote` — nombres que el vendedor inventó, no del
-  catálogo de la app, y siempre valores sueltos (texto, número o boolean),
-  nunca un array ni un objeto. Ver más en
-  [productos_subproductos.md](productos_subproductos.md#personalizadas-las-agrega-quien-crea-el-producto).
+- **`caracteristicas_adicionales` es un array, no un objeto.** Cada entrada tiene
+  siempre las mismas tres llaves: `nombre`, `valor` y `unidad`.
+- **El `valor` siempre es texto**, aunque sea un número: `"10"` y no `10`. De qué
+  tipo es lo dice la definición de la característica, no el dato.
+- **La unidad no va pegada al valor.** `"4.40"` con `"unidad": "GHz"`, nunca
+  `"4.40 GHz"`. Con la unidad dentro habría que partir la cadena para comparar, y
+  filtrar por rango dejaría de funcionar.
+- **La variante trae las suyas, y son otras.** Al producto se le pregunta el
+  procesador; a la variante, cuánta RAM tiene. Son dos catálogos distintos.
 
-## Eventos sobre `caracteristicas_adicionales` (ejemplo inventado)
+Un producto que no tenga ninguna característica sale **sin el campo**, no con un
+array vacío: "sin características" y "características vacías" son lo mismo.
 
-También inventados: dos eventos más para esta misma laptop, siguiendo a los
-tres reales que ya tiene en la tabla de arriba (numeros 1, 2 y 3).
+## La colección `categorias`
 
-**Un cambio en las características del producto en sí** (no de una variante,
-no de la categoría) — por ejemplo, extender la garantía:
+Es la paleta del formulario. Aquí no hay valores, solo qué se puede preguntar y de
+qué tipo. Este es Computadoras (`_id: 5`), recortado a las primeras entradas:
 
 ```json
 {
-  "_id": "2-4",
-  "id_producto": 2,
-  "numero": 4,
-  "fecha": { "$date": "2026-04-01T10:00:00.000Z" },
-  "operacion": "modificacion",
-  "cambios": {
-    "caracteristicas_adicionales": {
-      "marca": "Lenovo",
-      "modelo": "IdeaPad 5 15IAL7",
-      "fabricante": "Lenovo Group Limited",
-      "pais_origen": "China",
-      "garantia": { "disponible": true, "tipo": "Fabricante" },
-      "duracion_garantia": { "valor": 24, "unidad": "meses" }
+  "_id": 5,
+  "nombre": "Computadoras",
+  "categoria_padre": "Electronica",
+  "porcentaje_comision": {
+    "$numberDecimal": "6.00"
+  },
+  "fecha_creacion": {
+    "$date": "2026-01-05T16:20:00Z"
+  },
+  "caracteristicas": [
+    {
+      "nombre": "Marca",
+      "unidad": null,
+      "tipo_dato": "texto"
+    },
+    {
+      "nombre": "Modelo",
+      "unidad": null,
+      "tipo_dato": "texto"
+    },
+    {
+      "nombre": "Fabricante",
+      "unidad": null,
+      "tipo_dato": "texto"
+    },
+    {
+      "nombre": "Pais de origen",
+      "unidad": null,
+      "tipo_dato": "texto"
     }
-  }
+  ],
+  "caracteristicas_variante": [
+    {
+      "nombre": "Color",
+      "unidad": null,
+      "tipo_dato": "texto"
+    },
+    {
+      "nombre": "Codigo hex del color",
+      "unidad": null,
+      "tipo_dato": "texto"
+    },
+    {
+      "nombre": "Tamano",
+      "unidad": "pulgadas",
+      "tipo_dato": "decimal"
+    }
+  ]
 }
 ```
 
-Mismo patrón que ya usan los eventos reales de categoría (`"1-4"`) y de
-variantes (`"1-2"`): aunque solo cambió `duracion_garantia`, el evento guarda
-`caracteristicas_adicionales` completo, no solo el campo que cambió. La
-unidad de "qué cambió" es el sub-objeto entero, no cada llave suelta adentro.
+Ofrece 34 características de producto y 12 de variante. Ningún producto suyo las
+llena todas, y ese es el punto: la categoría propone y el producto dispone. Las
+categorías de en medio del árbol (Ropa, Electronica, Hogar) salen con las dos
+listas vacías, porque no se publica en ellas.
 
-**Un cambio en las características de una variante específica** — por
-ejemplo, corregir el almacenamiento real de la variante de 16 GB:
+## Por qué no hay eventos de características
 
-```json
-{
-  "_id": "2-5",
-  "id_producto": 2,
-  "numero": 5,
-  "fecha": { "$date": "2026-04-10T14:00:00.000Z" },
-  "operacion": "modificacion",
-  "cambios": {
-    "variantes": [
-      {
-        "id_producto_variante": 3,
-        "nombre_variante": "8 GB RAM",
-        "precio": { "$numberDecimal": "4299.00" },
-        "descripcion": "Pantalla de 14 pulgadas, 8 GB de RAM, 256 GB SSD",
-        "caracteristicas_adicionales": {
-          "memoria_ram": { "valor": 8, "unidad": "GB" },
-          "almacenamiento": { "valor": 256, "unidad": "GB", "tipo": "SSD" }
-        }
-      },
-      {
-        "id_producto_variante": 4,
-        "nombre_variante": "16 GB RAM",
-        "precio": { "$numberDecimal": "5199.00" },
-        "descripcion": "Pantalla de 14 pulgadas, 16 GB de RAM, 512 GB SSD",
-        "caracteristicas_adicionales": {
-          "memoria_ram": { "valor": 16, "unidad": "GB" },
-          "almacenamiento": { "valor": 1, "unidad": "TB", "tipo": "SSD" }
-        }
-      }
-    ]
-  }
-}
-```
+`productos_eventos` **no lleva las características**, y no es un olvido.
 
-Igual que el evento real `"2-3"` (el que sube el SSD de la variante de 16 GB
-a 1 TB): cuando cambia algo dentro de `variantes`, el evento trae el array
-completo, no solo la variante que cambió ni solo el campo de adentro.
+Un evento se arma con los tres historiales del modelo relacional: el del producto,
+el de cada variante y el de la categoría. Las características no tienen historial:
+sus tablas guardan el valor de hoy y nada más. No hay de dónde sacar qué decía una
+característica el 20 de febrero, así que escribirla en un evento sería afirmar que
+se puede reconstruir algo que nunca se guardó.
 
-**¿Y un cambio de categoría?** Eso ya está documentado arriba y no hace falta
-inventarlo: es el evento real `"1-4"`, donde sube el `porcentaje_comision` de
-Camisas sin que nadie tocara la camisa ese día.
+Reconstruir un producto a una fecha devuelve entonces su nombre, su descripción, sus
+variantes con el precio de ese día y la comisión que regía. Las características que
+se ven son las de hoy.

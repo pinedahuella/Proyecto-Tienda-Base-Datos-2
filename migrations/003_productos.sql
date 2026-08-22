@@ -78,12 +78,6 @@ CREATE TABLE productos (
     descripcion     text,
     fecha_creacion  timestamptz  NOT NULL DEFAULT now(),
 
-    -- jsonb y no una tabla de atributos: cada categoria trae su propio juego
-    -- de campos y ninguno se repite entre categorias, asi que una tabla
-    -- clave-valor solo agregaria un join para devolver lo mismo. Va nullable
-    -- porque un producto puede no tener ninguna.
-    --
-
     -- RESTRICT: no se puede borrar un usuario que todavia tiene productos
     id_usuario          bigint   NOT NULL REFERENCES usuarios(id_usuario)
                         ON DELETE RESTRICT,

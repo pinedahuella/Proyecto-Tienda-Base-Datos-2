@@ -28,6 +28,11 @@ docker exec -i mesh-postgres \
     psql -U "$DB_USER" -d "$BASE" -qtAX -f - < "$RAIZ/etl/extraer.sql" \
     | docker exec -i mesh-mongo sh -c 'cat > /tmp/mesh-productos.json'
 
+# La paleta de las categorias sale de su propia consulta y va a su propio
+# archivo. Son dos colecciones distintas y cada consulta devuelve una linea por
+# documento; mezclarlas obligaria a marcar cada linea con su tipo.
+docker exec -i mesh-postgres     psql -U "$DB_USER" -d "$BASE" -qtAX -f - < "$RAIZ/etl/extraer_categorias.sql"     | docker exec -i mesh-mongo sh -c 'cat > /tmp/mesh-categorias.json'
+
 docker exec -i mesh-mongo sh -c 'cat > /tmp/cargar.js' < "$RAIZ/etl/cargar.js"
 
 docker exec mesh-mongo sh -c 'mongosh --quiet \

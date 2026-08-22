@@ -523,6 +523,12 @@ if ($coleccionesJs.Count -eq 0) {
 # productos que PostgreSQL, o sea cuando quedo algo sin migrar. Sigue sin
 # correr cuando ya estan todos, que es lo que protegia la regla anterior.
 #
+# Se comparan las DOS colecciones que escribe el ETL, productos y categorias, y
+# basta con que una este corta para correrlo. Mirar solo los productos deja un
+# agujero: el dia que el ETL empezo a escribir tambien la paleta de categorias,
+# una maquina que ya tenia los 50 productos daba las cuentas iguales, se saltaba
+# el ETL y nunca llegaba a tener esa coleccion, diciendo "ya cargado".
+#
 # Lo que esto no ve es un cambio que no mueva la cuenta: corregir el precio de
 # un producto que ya existe deja los dos numeros iguales. Para eso esta -Etl.
 
@@ -535,12 +541,34 @@ $enMongo = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.co
 $enPostgres = ("SELECT count(*) FROM productos;" |
     docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
 
+$catEnMongo = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.categorias.countDocuments()'") 2>&1 | Out-String).Trim()
+
+$catEnPostgres = ("SELECT count(*) FROM categorias;" |
+    docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
+# Contar no alcanza: si los id se renumeran, la cuenta queda igual y el ETL
+# se saltaria dejando en Mongo los documentos con los id viejos. El _id de
+# un producto ES su id_producto, asi que comparar el mas alto de cada lado
+# delata el cambio. Sin comillas en la consulta: PowerShell se las come.
+$topEnMongo = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.find().sort({_id:-1}).limit(1).toArray().map(d=>d._id)[0]||0'") 2>&1 | Out-String).Trim()
+
+$topEnPostgres = ("SELECT COALESCE(max(id_producto), 0) FROM productos;" |
+    docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
 # Si una de las dos cuentas no salio, se corre el ETL igual. Es idempotente, y
 # saltarselo por no poder contar dejaria el catalogo a medias sin avisar.
-$cuentasLegibles = ($enMongo -match '^\d+$') -and ($enPostgres -match '^\d+$')
+$cuentasLegibles = ($enMongo -match '^\d+$') -and ($enPostgres -match '^\d+$') -and
+                   ($catEnMongo -match '^\d+$') -and ($catEnPostgres -match '^\d+$') -and
+                   ($topEnMongo -match '^\d+$') -and ($topEnPostgres -match '^\d+$')
 
-if (-not $Etl -and $cuentasLegibles -and [int]$enMongo -ge [int]$enPostgres) {
-    Ok "Ya cargado ($enMongo en Mongo, $enPostgres en PostgreSQL). Para volver a migrarlo: .\arrancar.ps1 -Etl"
+# Basta con que una de las dos colecciones este corta
+$alDia = $cuentasLegibles -and
+         ([int]$enMongo -ge [int]$enPostgres) -and
+         ([int]$catEnMongo -ge [int]$catEnPostgres) -and
+         ([int]$topEnMongo -eq [int]$topEnPostgres)
+
+if (-not $Etl -and $alDia) {
+    Ok "Ya cargado ($enMongo productos y $catEnMongo categorias en Mongo). Para volver a migrarlo: .\arrancar.ps1 -Etl"
 } else {
     $bash = Buscar-Bash
     if (-not $bash) {

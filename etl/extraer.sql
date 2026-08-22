@@ -54,6 +54,28 @@ SELECT jsonb_build_object(
         'categoria_padre',     cp.nombre
     ),
 
+    -- Las caracteristicas van como arreglo de {nombre, valor, unidad} y no
+    -- como un objeto de nombre a valor. Una caracteristica de tipo lista se
+    -- repite, y un objeto no puede tener la misma llave dos veces.
+    --
+    -- La unidad sale de la definicion, no del valor: en el relacional se dice
+    -- una vez que la RAM se mide en GB y aqui se copia a cada entrada, para
+    -- que quien lea el documento no tenga que ir a buscarla.
+    --
+    -- El orden del arreglo es el orden. Se ordena por id_caracteristica, que
+    -- es estable, y en segundo lugar por el id de la fila, para que los
+    -- elementos de una lista salgan siempre en la misma secuencia.
+    'caracteristicas_adicionales', (
+        SELECT coalesce(jsonb_agg(jsonb_build_object(
+                   'nombre', ca.nombre,
+                   'valor',  pc.valor,
+                   'unidad', ca.unidad
+               ) ORDER BY ca.id_caracteristica, pc.id_producto_caracteristica), '[]'::jsonb)
+        FROM producto_caracteristica pc
+        JOIN caracteristica ca ON ca.id_caracteristica = pc.id_caracteristica
+        WHERE pc.id_producto = p.id_producto
+    ),
+
     -- Las variantes son parte del producto: no se consultan solas y son pocas.
     -- Las imagenes van dentro de su variante porque cuelgan de ella, no del
     -- producto, y numero_orden se gasta al ordenarlas: en un arreglo la
@@ -66,6 +88,21 @@ SELECT jsonb_build_object(
                    'descripcion',          pv.descripcion,
                    'fecha_creacion',       pv.fecha_creacion,
                    'estado',               ev.estado_variante_nombre,
+                   -- Lo mismo para la variante, contra su propia tabla de
+                   -- definiciones: a una variante se le pregunta talla y color,
+                   -- no procesador.
+                   'caracteristicas_adicionales', (
+                       SELECT coalesce(jsonb_agg(jsonb_build_object(
+                                  'nombre', cv.nombre,
+                                  'valor',  pvc.valor,
+                                  'unidad', cv.unidad
+                              ) ORDER BY cv.id_caracteristica,
+                                         pvc.id_producto_variante_caracteristica_variante), '[]'::jsonb)
+                       FROM producto_variante_caracteristica_variante pvc
+                       JOIN caracteristica_variante cv
+                            ON cv.id_caracteristica = pvc.id_caracteristica_variante
+                       WHERE pvc.id_producto_variante = pv.id_producto_variante
+                   ),
                    'imagenes', (
                        SELECT coalesce(jsonb_agg(ip.imagen_producto_url
                                        ORDER BY ipv.numero_orden), '[]'::jsonb)

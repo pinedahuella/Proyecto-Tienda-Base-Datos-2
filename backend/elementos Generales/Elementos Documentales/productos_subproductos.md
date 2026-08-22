@@ -73,131 +73,166 @@ Un ejemplo completo de cómo queda el documento está en
 
 ## Opcionales
 
-Según la categoría. Un producto puede traer todas, algunas o ninguna. Van
-agrupadas en un solo campo contenedor, `caracteristicas_adicionales`, en vez
-de sueltas junto a los campos obligatorios:
+Según la categoría. Un producto puede traer todas, algunas o ninguna. Van agrupadas
+en un solo campo, `caracteristicas_adicionales`:
 
-- Las de la Tabla 1 van dentro de `caracteristicas_adicionales` en la raíz
-  del documento de `productos` (`productos.caracteristicas_adicionales`).
-- Las de la Tabla 2 van dentro de `caracteristicas_adicionales` de cada
-  elemento del array `variantes` (`variantes[].caracteristicas_adicionales`).
+- Las de la Tabla 1 van en la raíz del documento de `productos`.
+- Las de la Tabla 2 van en cada elemento del array `variantes`.
 
-Cada variante puede traer su propio `caracteristicas_adicionales`, con
-campos personalizados que no tienen que coincidir entre las variantes de un
-mismo producto.
+### La estructura, que es siempre la misma
 
-**Sobre el orden en que aparecen.** El orden de las llaves de un documento de
-Mongo (y del JSON que sale en la respuesta) es el orden en que se insertaron,
-no algo fijo de una vez para siempre: un producto se pudo crear con `marca`
-antes que `modelo`, y otro de la misma categoría al revés, o edité despues y
-le sumé un campo nuevo al final. Por eso el orden en que el frontend muestra
-estas características no debe leerse del JSON tal como llega: el frontend
-define su propio orden fijo por categoría (una lista de qué atributos
-mostrar y en qué secuencia) y la aplica él mismo, sin importar en qué orden
-vinieron las llaves del documento.
+`caracteristicas_adicionales` es un **array de objetos**, y cada objeto tiene
+exactamente tres llaves, siempre las mismas:
 
-## Tabla 1 — Características generales
+```json
+"caracteristicas_adicionales": [
+  { "nombre": "Marca",       "valor": "Tecno Sur", "unidad": null },
+  { "nombre": "Frecuencia",  "valor": "5.00",      "unidad": "GHz" },
+  { "nombre": "Nucleos",     "valor": "10",        "unidad": null }
+]
+```
 
-| Característica | Tipo de dato | Estructura aproximada |
+| Llave | Tipo | Regla |
 | --- | --- | --- |
-| **Marca** | `String` | `"Lenovo"` |
-| **Modelo** | `String` | `"IdeaPad 5 15IAL7"` |
-| **Fabricante** | `String` | `"Lenovo Group Limited"` |
-| **País de origen** | `String` | `"China"` |
-| **Garantía** | `Object` | `{ disponible: true, tipo: "Fabricante" }` |
-| **Duración de la garantía** | `Object` | `{ valor: 12, unidad: "meses" }` |
-| **Condiciones de garantía** | `String` | `"Cubre defectos de fabricación..."` |
-| **Materiales principales** | `Array<String>` | `["Aluminio", "Plástico"]` |
-| **Características técnicas** | `Object` | `{ procesador: "Intel i5", nucleos: 10, frecuencia: "4.4 GHz" }` |
-| **Especificaciones** | `Object` | `{ pantalla: "15.6 pulgadas", resolucion: "1920x1080" }` |
-| **Contenido del paquete** | `Array<String>` | `["Laptop", "Cargador", "Manual"]` |
-| **Dimensiones generales** | `Object` | `{ largo: 35.9, ancho: 23.7, alto: 1.8, unidad: "cm" }` |
-| **Peso** | `Object` | `{ valor: 1.85, unidad: "kg" }` |
-| **Unidad de medida** | `String` | `"unidad"` |
-| **Edad recomendada** | `Object` | `{ minimo: 12, maximo: null, unidad: "años" }` |
-| **Uso recomendado** | `Array<String>` | `["Uso académico", "Trabajo", "Ofimática"]` |
-| **Instrucciones de uso** | `String` | `"Conectar el cargador antes del primer uso..."` |
-| **Advertencias** | `Array<String>` | `["No exponer al agua", "Mantener fuera del alcance de niños"]` |
-| **Certificaciones** | `Array<Object>` | `[{ nombre: "CE", organismo: "European Commission" }]` |
-| **Código de fabricante / MPN** | `String` | `"82SF00XXUS"` |
-| **Código universal del producto (UPC, EAN, GTIN)** | `String` | `"0196801234567"` |
-| **Información nutricional — alimentos** | `Object` | `{ calorias: 250, proteinas: 8, grasas: 5, carbohidratos: 40, unidad: "por 100g" }` |
-| **Ingredientes — alimentos/cosméticos** | `Array<String>` | `["Agua", "Harina", "Azúcar", "Sal"]` |
-| **Compatibilidad — electrónicos, accesorios, repuestos** | `Array<String>` | `["iPhone 15", "iPhone 15 Pro"]` |
-| **Sistema operativo compatible** | `Array<String>` | `["Windows 11", "Ubuntu 24.04"]` |
-| **Potencia / voltaje — electrónicos** | `Object` | `{ potencia: 65, unidadPotencia: "W", voltaje: 110, unidadVoltaje: "V" }` |
-| **Tipo de producto** | `String` | `"Laptop"` |
-| **Características destacadas** | `Array<String>` | `["Pantalla Full HD", "SSD de 512 GB", "Wi-Fi 6"]` |
-| **Etiquetas o tags** | `Array<String>` | `["laptop", "lenovo", "oficina", "estudiante"]` |
+| `nombre` | `String` | Sale del catálogo. Es uno de los de las tablas de abajo |
+| `valor` | `String` | **Siempre texto**, aunque sea un número o un booleano |
+| `unidad` | `String` o `null` | `null` cuando la característica no se mide en nada |
 
-## Tabla 2 — Variantes del producto
+Tres cosas que no son negociables, porque de ellas depende que se pueda filtrar:
 
-| Característica | Tipo de dato | Estructura aproximada |
-| --- | --- | --- |
-| **Color** | `Object` | `{ nombre: "Negro", codigoHex: "#000000" }` |
-| **Talla** | `String` | `"M"` |
-| **Tamaño** | `Object` | `{ valor: 15.6, unidad: "pulgadas" }` |
-| **Capacidad** | `Object` | `{ valor: 500, unidad: "ml" }` |
-| **Memoria RAM** | `Object` | `{ valor: 16, unidad: "GB" }` |
-| **Almacenamiento** | `Object` | `{ valor: 512, unidad: "GB", tipo: "SSD" }` |
-| **Peso de presentación** | `Object` | `{ valor: 500, unidad: "g" }` |
-| **Volumen** | `Object` | `{ valor: 1.5, unidad: "L" }` |
-| **Dimensiones** | `Object` | `{ largo: 30, ancho: 20, alto: 5, unidad: "cm" }` |
-| **Sabor** | `String` | `"Chocolate"` |
-| **Aroma** | `String` | `"Vainilla"` |
-| **Fragancia** | `String` | `"Floral"` |
-| **Diseño / estampado** | `Object` | `{ tipo: "Estampado", nombre: "Rayas azules" }` |
-| **Material** | `String` | `"Algodón"` |
-| **Acabado** | `String` | `"Mate"` |
-| **Modelo específico** | `String` | `"iPhone 17 Pro Max 256GB"` |
-| **Voltaje** | `Object` | `{ valor: 110, unidad: "V" }` |
-| **Potencia** | `Object` | `{ valor: 1500, unidad: "W" }` |
-| **Presentación** | `Object` | `{ tipo: "Caja", descripcion: "Caja de 12 unidades" }` |
-| **Cantidad por paquete** | `Number` | `12` |
-| **Número de unidades** | `Number` | `1` |
-| **Edición** | `String` | `"Edición limitada"` |
-| **Compatibilidad específica** | `Array<String>` | `["iPhone 15 Pro", "iPhone 15 Pro Max"]` |
-| **Configuración** | `Object` | `{ ram: "16GB", almacenamiento: "512GB", procesador: "Intel i7" }` |
-| **Código SKU** | `String` | `"LAP-LEN-I7-16-512-GRY"` |
-| **Código de barras** | `String` | `"7501234567890"` |
-| **Porcentaje de descuento** | `Number (entero, 0–100, %)` | `10` |
+**El `valor` siempre es texto, incluso cuando es un número.** `"16"`, no `16`.
+`"true"`, no `true`. La columna que lo guarda en PostgreSQL es de texto y el tipo
+está en la definición de la característica, no en el dato. Quien consulta convierte
+si lo necesita.
+
+**La unidad nunca va dentro del valor.** Se guarda `"16"` con `"unidad": "GB"`, y
+nunca `"16 GB"`. Con la unidad pegada al valor hay que partir la cadena para
+comparar, y filtrar por rango deja de funcionar.
+
+**El valor no lleva objetos ni arrays anidados.** Lo que en un catálogo suele ser un
+objeto aquí se parte en varias características: las dimensiones no son
+`{ largo, ancho, alto }`, son tres entradas, `Largo`, `Ancho` y `Alto`, cada una con
+su unidad. La garantía no es `{ disponible, tipo }`, son `Garantia` (booleano) y
+`Tipo de garantia` (texto).
+
+### Las listas se repiten
+
+Una característica de tipo `lista` aparece **varias veces, con el mismo `nombre`**,
+una entrada por elemento:
+
+```json
+{ "nombre": "Contenido del paquete", "valor": "Telefono",  "unidad": null },
+{ "nombre": "Contenido del paquete", "valor": "Cable USB-C", "unidad": null },
+{ "nombre": "Contenido del paquete", "valor": "Manual",    "unidad": null }
+```
+
+No es un error de carga: es como se guarda una lista. Por eso la tabla del
+relacional no tiene una restricción que impida repetir producto y característica.
+
+### El orden
+
+**El orden del array es el orden.** Un array de Mongo conserva la posición en que se
+escribió, así que quien lo lee puede mostrarlo tal como viene sin ordenar nada. El
+ETL escribe las entradas ordenadas por el id de la característica, que es estable:
+el mismo producto sale siempre igual.
+
+Eso es una propiedad que da la base documental y que el modelo relacional no tiene.
+En PostgreSQL las filas no tienen orden propio y por eso el ER no lleva ninguna
+columna de posición: el orden aparece al migrar.
+
+## Tabla 1 — Características del producto
+
+Son las del producto entero: las que no cambian entre sus variantes.
+
+| Característica | Tipo | Unidad | Categorías que la ofrecen | Ejemplo de `valor` |
+| --- | --- | --- | --- | --- |
+| **Marca** | `texto` | — | 19 | `Lino Vivo` |
+| **Modelo** | `texto` | — | 17 | `LV-ML-01` |
+| **Fabricante** | `texto` | — | 18 | `Tecno Sur Manufacturing` |
+| **Pais de origen** | `texto` | — | 19 | `Guatemala` |
+| **Garantia** | `booleano` | — | 17 | `true` |
+| **Tipo de garantia** | `texto` | — | 5 | `Fabricante` |
+| **Duracion de la garantia** | `entero` | `meses` | 17 | `12` |
+| **Condiciones de garantia** | `texto` | — | 5 | `Cubre defectos de fabricacion, no cubre dano por liquidos` |
+| **Materiales principales** | `lista` | — | 17 | `Lino` |
+| **Procesador** | `texto` | — | 3 | `Intel Core i5-1235U` |
+| **Nucleos** | `entero` | — | 3 | `10` |
+| **Frecuencia** | `decimal` | `GHz` | 3 | `4.40` |
+| **Tamano de pantalla** | `decimal` | `pulgadas` | 3 | `14` |
+| **Resolucion** | `texto` | — | 3 | `1920x1080` |
+| **Contenido del paquete** | `lista` | — | 14 | `Laptop` |
+| **Largo** | `decimal` | `cm` | 16 | `14.0` |
+| **Ancho** | `decimal` | `cm` | 16 | `14.0` |
+| **Alto** | `decimal` | `cm` | 16 | `42.0` |
+| **Peso** | `decimal` | `kg` | 19 | `1.45` |
+| **Unidad de medida** | `texto` | — | 19 | `unidad` |
+| **Edad recomendada minima** | `entero` | `anios` | 12 | `16` |
+| **Uso recomendado** | `lista` | — | 19 | `Uso casual` |
+| **Instrucciones de uso** | `texto` | — | 19 | `Lavar a mano con agua fria y secar a la sombra` |
+| **Advertencias** | `lista` | — | 19 | `No obstruir las salidas de aire` |
+| **Certificaciones** | `lista` | — | 17 | `CE` |
+| **Codigo de fabricante** | `texto` | — | 10 | `TS14A-001` |
+| **Codigo universal del producto** | `texto` | — | 19 | `7401000000011` |
+| **Calorias** | `entero` | `kcal` | 0 | — |
+| **Proteinas** | `decimal` | `g` | 0 | — |
+| **Grasas** | `decimal` | `g` | 0 | — |
+| **Carbohidratos** | `decimal` | `g` | 0 | — |
+| **Ingredientes** | `lista` | — | 0 | — |
+| **Compatibilidad** | `lista` | — | 3 | `Cargador USB-C de 65 W` |
+| **Sistema operativo compatible** | `lista` | — | 3 | `Windows 11` |
+| **Potencia** | `decimal` | `W` | 7 | `65` |
+| **Voltaje** | `decimal` | `V` | 7 | `110` |
+| **Tipo de producto** | `texto` | — | 19 | `Camisa` |
+| **Caracteristicas destacadas** | `lista` | — | 19 | `Tela fresca` |
+| **Etiquetas** | `lista` | — | 19 | `camisa` |
+
+## Tabla 2 — Características de la variante
+
+Son las que distinguen una variante de otra.
+
+| Característica | Tipo | Unidad | Categorías que la ofrecen | Ejemplo de `valor` |
+| --- | --- | --- | --- | --- |
+| **Color** | `texto` | — | 17 | `Azul` |
+| **Codigo hex del color** | `texto` | — | 17 | `#1F3A93` |
+| **Talla** | `texto` | — | 9 | `M` |
+| **Tamano** | `decimal` | `pulgadas` | 4 | `24` |
+| **Capacidad** | `decimal` | `ml` | 2 | `1200` |
+| **Memoria RAM** | `entero` | `GB` | 4 | `8` |
+| **Almacenamiento** | `entero` | `GB` | 4 | `256` |
+| **Tipo de almacenamiento** | `texto` | — | 4 | `SSD` |
+| **Peso de presentacion** | `decimal` | `g` | 8 | `1200` |
+| **Volumen** | `decimal` | `L` | 2 | `1.2` |
+| **Largo** | `decimal` | `cm` | 1 | `300.0` |
+| **Ancho** | `decimal` | `cm` | 0 | — |
+| **Alto** | `decimal` | `cm` | 0 | — |
+| **Sabor** | `texto` | — | 0 | — |
+| **Aroma** | `texto` | — | 0 | — |
+| **Fragancia** | `texto` | — | 0 | — |
+| **Tipo de diseno** | `texto` | — | 3 | — |
+| **Nombre del diseno** | `texto` | — | 3 | — |
+| **Material** | `texto` | — | 11 | `Algodon` |
+| **Acabado** | `texto` | — | 19 | — |
+| **Modelo especifico** | `texto` | — | 5 | `Monitor de 24 pulgadas Con base` |
+| **Voltaje** | `decimal` | `V` | 0 | — |
+| **Potencia** | `decimal` | `W` | 1 | — |
+| **Tipo de presentacion** | `texto` | — | 2 | `Pasta blanda` |
+| **Descripcion de la presentacion** | `texto` | — | 0 | — |
+| **Cantidad por paquete** | `entero` | — | 19 | — |
+| **Numero de unidades** | `entero` | — | 2 | `1` |
+| **Edicion** | `texto` | — | 2 | `Segunda edicion` |
+| **Compatibilidad especifica** | `lista` | — | 0 | — |
+| **Codigo SKU** | `texto` | — | 19 | `CDL-1-1` |
+| **Codigo de barras** | `texto` | — | 19 | — |
+| **Porcentaje de descuento** | `entero` | `%` | 19 | — |
 
 ---
 
 ## Personalizadas (las agrega quien crea el producto)
 
-Van al final a propósito: son distintas de las dos tablas de arriba. Las de
-las Tablas 1 y 2 salen de un catálogo de la app (`caracteristica` y
-`caracteristica_variante`, con su `tipo_dato`), y se validan contra eso.
-Las personalizadas no salen de ningún catálogo: las inventa quien está
-creando el producto, con el nombre y el valor que quiera.
+**Todavía no existen en la base.** Cuando se agreguen usarán **exactamente la misma
+estructura** que las de arriba, el mismo array de `{ nombre, valor, unidad }`, para
+que el backend las lea con el mismo código y no haya dos formatos que mantener.
 
-Van en un campo aparte, `caracteristicas_personalizadas`, separado de
-`caracteristicas_adicionales` — no mezcladas con las de la app:
-
-- En la raíz del documento de `productos`
-  (`productos.caracteristicas_personalizadas`).
-- En cada elemento del array `variantes`
-  (`variantes[].caracteristicas_personalizadas`).
-
-**Solo nombre y valor, nada más.** A diferencia de las de las Tablas 1 y 2
-(que sí admiten `Object` o `Array`), una característica personalizada es
-siempre un par simple: el valor es `String`, `Number` o `Boolean`, nunca un
-array ni un objeto.
-
-```json
-"caracteristicas_personalizadas": {
-  "hecho_a_mano": true,
-  "temporada": "Invierno 2026",
-  "unidades_por_lote": 24
-}
-```
-
-**No son filtrables.** `GET /productos` y `GET /productos/paginacion` (ver
-[endpoints-productos.md](../endpoints-productos.md)) solo filtran contra
-`caracteristicas_adicionales`; nunca contra `caracteristicas_personalizadas`.
-No es una regla que haya que recordar aplicar: el filtro dinámico de esas
-rutas nunca arma una consulta hacia ese campo, así que no hay forma de que
-un query param lo alcance, sin importar qué nombre le pongan. Sí se
-devuelven normalmente como parte del producto o la variante en la
-respuesta — simplemente no se puede buscar por ellas.
+La única diferencia será de dónde sale el `nombre`: el de las Tablas 1 y 2 viene del
+catálogo de la aplicación y se valida contra él; el de una personalizada lo escribe
+quien publica el producto.

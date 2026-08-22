@@ -38,25 +38,31 @@ Una migracion ya corrida **no se edita**. Si algo hay que cambiar, se hace un
 archivo nuevo con el numero siguiente. Editar una vieja deja tu base distinta a la
 de los demas sin que nadie se de cuenta.
 
-del `CREATE TABLE` de `003`, asi que una base nueva ya nace con ella, pero una
-base que ya existia no la vio nunca: `003` corta en `already exists` antes de
-llegar a nada nuevo. El `004` la agrega con `ADD COLUMN IF NOT EXISTS`, no hace
-nada en una base nueva y no borra los datos de nadie.
+Cuidado con una migracion que falla a la mitad. La siguiente corrida la ve como
+"ya aplicada" y se la salta, porque su primer `CREATE TABLE` choca con
+`already exists` antes de llegar a lo que falto. Se sale borrando las tablas de
+ese archivo y volviendo a correrlo.
 
 Cada archivo hace una sola cosa y se puede leer solo.
 
 ## Reglas de los datos
 
-Un conjunto nuevo es un archivo nuevo. No se abren los anteriores.
+Un conjunto nuevo es un archivo nuevo. No se reescriben los anteriores.
 
-Cada archivo es dueno de un bloque de mil id, y los usa en **todas** las tablas
-que llevan id escrito a mano. Un solo numero que recordar por archivo:
+Los id se escriben a mano y **cuentan seguido desde 1, sin saltos**. Un archivo
+nuevo continua donde termino el anterior. Para saber donde quedo:
 
+```sql
+SELECT max(id_producto) FROM productos;
 ```
-datos/001_catalogo_base.sql       1 .. 1000
-datos/002_catalogo_ampliado.sql   1001 .. 2000
-datos/003_lo_que_venga.sql        2001 .. 3000
-```
+
+Antes cada archivo tomaba un bloque de mil (1..1000, 1001..2000) para no tener
+que mirar los otros al escribirlo. Era mas comodo de escribir y mas feo de leer:
+el catalogo contaba 1, 2, 3 y de golpe 1001. Ahora cuesta un vistazo al archivo
+anterior y la numeracion se lee.
+
+`003_caracteristicas.sql` no comparte tablas con ningun otro conjunto, asi que
+empieza en 1 sin ponerse de acuerdo con nadie.
 
 La excepcion es `usuarios`: nunca lleva id escrito a mano. Los reparte la
 aplicacion al registrarse y ya vienen salteados. Un vendedor se inserta con

@@ -12,6 +12,15 @@
 //                      la creacion y lleva el estado completo; los demas son
 //                      modificaciones y llevan solo lo que cambio.
 //
+//   categorias         la paleta: que caracteristicas ofrece cada categoria,
+//                      con su tipo y su unidad. Es lo que arma el formulario
+//                      de publicar. No lleva valores.
+//
+// Las caracteristicas de un producto NO entran en productos_eventos. En el
+// modelo relacional no tienen historial, asi que no hay de donde sacar como
+// estaban en una fecha anterior. Inventarlo aqui seria decir que se puede
+// reconstruir algo que no se guardo.
+//
 // El _id de los dos es determinista, asi que correr esto dos veces actualiza
 // en vez de duplicar.
 //
@@ -20,6 +29,7 @@
 // escriba aqui por su cuenta se pierde en la siguiente corrida.
 
 const RUTA = '/tmp/mesh-productos.json';
+const RUTA_CATEGORIAS = '/tmp/mesh-categorias.json';
 
 // ============================================================
 // El historial: de fotos completas a eventos
@@ -169,10 +179,33 @@ function documentoDe(producto) {
         }))
     };
 
-    // El campo es opcional en el modelo del backend y extraer.sql no lo manda
-    // cuando la columna esta nula. Se copia solo si vino: escribirlo en null
-    // obligaria a quien lea el documento a distinguir "sin caracteristicas" de
-    // "caracteristicas vacias", y son la misma cosa.
+    // Las llaves se vuelven a armar en orden: nombre, valor, unidad. jsonb no
+    // conserva el orden en que se escribieron, las devuelve ordenadas por
+    // longitud, y el documento saldria con el valor antes que el nombre. No
+    // cambia lo que se puede consultar, pero el documento se lee y se compara
+    // contra lo que dice productos_subproductos.md.
+    const enOrden = lista => lista.map(c => ({
+        nombre: c.nombre,
+        valor:  c.valor,
+        unidad: c.unidad
+    }));
+
+    // Las caracteristicas se copian solo si el producto tiene alguna. Escribir
+    // un arreglo vacio obligaria a quien lee el documento a distinguir "sin
+    // caracteristicas" de "caracteristicas vacias", y son la misma cosa.
+    if (producto.caracteristicas_adicionales &&
+        producto.caracteristicas_adicionales.length > 0) {
+        doc.caracteristicas_adicionales = enOrden(producto.caracteristicas_adicionales);
+    }
+    for (const variante of doc.variantes) {
+        if (!variante.caracteristicas_adicionales ||
+            variante.caracteristicas_adicionales.length === 0) {
+            delete variante.caracteristicas_adicionales;
+        } else {
+            variante.caracteristicas_adicionales = enOrden(variante.caracteristicas_adicionales);
+        }
+    }
+
     return doc;
 }
 
@@ -244,12 +277,61 @@ for (const producto of productos) {
     });
 }
 
+// ============================================================
+// La paleta de las categorias
+// ============================================================
+// Se escribe entera en cada corrida, igual que los productos: PostgreSQL es el
+// dueno. El _id es el id_categoria del relacional, asi que volver a correr
+// actualiza en vez de duplicar.
+const categorias = require('fs').readFileSync(RUTA_CATEGORIAS, 'utf8')
+    .split('\n')
+    .filter(linea => linea.trim().length > 0)
+    .map(linea => JSON.parse(linea));
+
+const escrituraCategorias = categorias.map(function (categoria) {
+    const doc = {
+        _id:                      categoria.id_categoria,
+        nombre:                   categoria.nombre,
+        categoria_padre:          categoria.categoria_padre,
+        porcentaje_comision:      categoria.porcentaje_comision,
+        fecha_creacion:           new Date(categoria.fecha_creacion),
+        caracteristicas:          categoria.caracteristicas,
+        caracteristicas_variante: categoria.caracteristicas_variante
+    };
+    return {
+        replaceOne: { filter: { _id: doc._id }, replacement: aDecimal(doc), upsert: true }
+    };
+});
+
 if (escrituraProductos.length > 0) {
     db.productos.bulkWrite(escrituraProductos);
+}
+if (escrituraCategorias.length > 0) {
+    db.categorias.bulkWrite(escrituraCategorias);
 }
 if (escrituraEventos.length > 0) {
     db.productos_eventos.bulkWrite(escrituraEventos);
 }
+
+// ============================================================
+// Lo que ya no esta en PostgreSQL tampoco se queda aqui
+// ============================================================
+// replaceOne con upsert escribe y actualiza, pero nunca borra. Un documento
+// cuyo _id ya no existe del otro lado no lo toca nadie y se queda para
+// siempre, sumando al conteo y saliendo en las consultas.
+//
+// Pasa al borrar un producto, y pasa sobre todo al RENUMERAR: el producto que
+// era 1001 ahora es 4, asi que el ETL escribe el 4 y el 1001 sigue ahi. La
+// coleccion terminaria con 97 productos y arrancar.ps1, que compara cuentas,
+// diria que todo esta al dia porque le sobran.
+//
+// PostgreSQL es el dueno: lo que no esta alla, se va.
+const idsProductos  = productos.map(p => p.id_producto);
+const idsCategorias = categorias.map(c => c.id_categoria);
+
+const sobranProductos  = db.productos.deleteMany({ _id: { $nin: idsProductos } }).deletedCount;
+const sobranEventos    = db.productos_eventos.deleteMany({ id_producto: { $nin: idsProductos } }).deletedCount;
+const sobranCategorias = db.categorias.deleteMany({ _id: { $nin: idsCategorias } }).deletedCount;
 
 // El unico indice que hace falta. La reconstruccion pide los eventos de un
 // producto hasta una fecha y los ordena por fecha: con este indice la base
@@ -262,8 +344,20 @@ db.productos_eventos.createIndex({ id_producto: 1, fecha: 1 });
 // categoria". Sin el, filtrar por categoria recorre la coleccion entera.
 db.productos.createIndex({ 'categoria.nombre': 1, estado: 1 });
 
-print('productos: ' + escrituraProductos.length);
-print('eventos:   ' + escrituraEventos.length);
+// El formulario busca la categoria por nombre para saber que ofrecer.
+db.categorias.createIndex({ nombre: 1 });
+
+const sobrantes = sobranProductos + sobranCategorias + sobranEventos;
+if (sobrantes > 0) {
+    print('borrados por no existir ya en PostgreSQL: ' +
+          sobranProductos + ' producto(s), ' +
+          sobranCategorias + ' categoria(s), ' +
+          sobranEventos + ' evento(s)');
+}
+
+print('productos:  ' + escrituraProductos.length);
+print('categorias: ' + escrituraCategorias.length);
+print('eventos:    ' + escrituraEventos.length);
 if (sinHistorial > 0) {
     print('AVISO: ' + sinHistorial + ' producto(s) sin historial, no generaron eventos');
 }
