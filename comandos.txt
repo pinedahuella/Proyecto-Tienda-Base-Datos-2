@@ -23,19 +23,32 @@ Opciones:
   .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a MongoDB
 
 Que hace:
-  1. arranca Docker si esta apagado y espera al engine
-  2. levanta los contenedores
-  3. espera a que PostgreSQL responda
-  4. corre las migraciones de migrations/ en orden
-  5. espera a que MongoDB responda
-  6. comprueba el acceso a MongoDB y, si la contrasena del .env ya no es
-     la que tiene la base, la reescribe sola sin borrar el catalogo
-  7. corre los scripts de mongo/ que crean las colecciones
-  8. migra el catalogo a MongoDB con el ETL, si la coleccion esta vacia
-  9. imprime el resumen y las URLs
+   1. arranca Docker si esta apagado y espera al engine
+   2. levanta los contenedores
+   3. espera a que PostgreSQL responda
+   4. corre las migraciones del esquema, migrations/*.sql, en orden
+   5. corre los conjuntos de datos, migrations/datos/*.sql, en orden
+   6. espera a que MongoDB responda
+   7. comprueba el acceso a MongoDB y, si la contrasena del .env ya no es
+      la que tiene la base, la reescribe sola sin borrar el catalogo
+   8. corre los scripts de mongo/ que crean las colecciones
+   9. migra el catalogo a MongoDB con el ETL, si Mongo tiene menos productos
+      que PostgreSQL
+  10. imprime el resumen y las URLs
 
 Se puede correr las veces que quieras. Si una migracion ya estaba aplicada lo
 avisa y sigue.
+
+
+LAS DOS CLASES DE MIGRACION
+--------------------------------------------------
+  migrations/*.sql        el esquema: las tablas y los catalogos de estado
+  migrations/datos/*.sql  los conjuntos de datos de prueba
+
+El esquema corre primero, porque los datos no tienen donde entrar sin el.
+
+Para meter mas productos se agrega otro archivo en migrations/datos/ y listo:
+los anteriores no se abren. Como escribirlo esta en migrations/README.md.
 
 
 ARRANCAR EL BACKEND
@@ -93,7 +106,9 @@ Dentro de psql:
 
 MIGRAR EL CATALOGO A MONGO (el ETL)
 --------------------------------------------------
-Lo corre arrancar.ps1 solo, la primera vez. Para volver a correrlo:
+Lo corre arrancar.ps1 solo cuando Mongo tiene menos productos que PostgreSQL:
+la primera vez, y tambien cuando entra un conjunto de datos nuevo. Un cambio
+que no mueva la cuenta, como corregir un precio, no lo ve. Para pedirlo:
 
   .\arrancar.ps1 -Etl
 

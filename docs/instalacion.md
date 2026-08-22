@@ -84,6 +84,24 @@ docker compose up -d
 docker exec mesh-postgres psql -U $DB_USER -d $DB_NAME -f /migrations/001_usuarios.sql
 ```
 
+## Las dos clases de migracion
+
+```
+migrations/*.sql        el esquema: las tablas y los catalogos de estado
+migrations/datos/*.sql  los conjuntos de datos de prueba
+```
+
+`arrancar.ps1` las corre en dos pasos: primero el esquema y despues los datos,
+cada paso en orden de nombre. Los estados de producto y de variante van con el
+esquema y no con los datos, porque sin ellos no se puede insertar un producto.
+
+Agregar mas productos es agregar un archivo a `migrations/datos/`. Los anteriores
+no se abren. Las reglas para escribir uno estan en
+[migrations/README.md](../migrations/README.md).
+
+Si tu base ya estaba creada de antes, la primera vez veras correr
+crea en una base nueva. No borra nada.
+
 ## Contenedores
 
 | Servicio | Contenedor | Imagen | Puerto |
@@ -113,12 +131,16 @@ Los productos se disenan y se cargan en PostgreSQL, y de ahi se migran a MongoDB
 con el ETL de `etl/`. En Mongo quedan dos colecciones: `productos`, con un
 documento por producto, y `productos_eventos`, con su historial de cambios.
 
-`arrancar.ps1` lo corre solo cuando la coleccion `productos` esta vacia, que es
-el caso de una maquina recien montada. Despues no lo vuelve a correr, para no
-pisar lo que haya en Mongo en cada arranque. Para volver a migrarlo a mano:
+`arrancar.ps1` lo corre cuando Mongo tiene menos productos que PostgreSQL, o sea
+cuando quedo algo sin migrar: una maquina recien montada, o un conjunto de datos
+nuevo en `migrations/datos/`. Si ya estan todos no lo vuelve a correr, para no
+pisar lo que haya en Mongo en cada arranque.
+
+Un cambio que no mueva la cuenta, como corregir el precio de un producto que ya
+existe, no lo detecta. Para eso se pide a mano:
 
 ```powershell
-.rrancar.ps1 -Etl
+.\arrancar.ps1 -Etl
 ```
 
 El detalle esta en [etl/README.md](../etl/README.md).

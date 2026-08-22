@@ -23,6 +23,7 @@ SET TIME ZONE 'UTC';
 -- decimal al escribirlo en Mongo. De paso, comparar texto es exacto: no hay
 -- forma de que dos precios iguales parezcan distintos por el ultimo decimal.
 
+
 SELECT jsonb_build_object(
 
     -- El estado vivo del producto. Es lo que se ve en el catalogo.
@@ -73,7 +74,8 @@ SELECT jsonb_build_object(
                             ON ip.id_imagen_producto = ipv.id_imagen_producto
                        WHERE ipv.id_producto_variante = pv.id_producto_variante
                    )
-               ) ORDER BY pv.id_producto_variante), '[]'::jsonb)
+               )
+               ORDER BY pv.id_producto_variante), '[]'::jsonb)
         FROM productos_variantes pv
         -- La llave del catalogo es id_estado_variante y la foranea que la
         -- apunta se llama id_estado_variantes, en plural. Asi esta en el

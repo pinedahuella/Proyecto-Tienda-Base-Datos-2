@@ -40,6 +40,12 @@ ordenarlas, porque en un arreglo la posicion ya es el orden.
 Las resenas no se embeben. Crecen sin techo, se escriben por su cuenta y se leen
 paginadas: se quedan en PostgreSQL.
 
+producto y la de cada variante, y se copia tal cual. Es opcional en el modelo del
+backend, asi que cuando la columna esta nula la clave no se escribe: no queda
+puesta valiendo null. Lo que hay adentro no se toca ni se interpreta, ni siquiera
+si alguna clave se llamara `precio`; son los atributos de la categoria y no
+campos de este esquema.
+
 **`productos_eventos`**, el historial. Un documento por evento.
 
 ```
@@ -76,8 +82,9 @@ producto existiera; contarlas deja un primer evento con el nombre en null.
 
 Los eventos no llevan el estado del producto (activo, agotado). En el modelo
 relacional los historiales no lo guardan: vive solo en la fila viva, y esta
-explicado en `docs/base-de-datos.md`. Lo que se reconstruye es nombre,
-descripcion, precio y comision.
+explicado en `docs/base-de-datos.md`. Tampoco llevan
+en `productos_variantes`, no en sus tablas de historial. Lo que se reconstruye es
+nombre, descripcion, precio y comision.
 
 ## Reconstruir
 

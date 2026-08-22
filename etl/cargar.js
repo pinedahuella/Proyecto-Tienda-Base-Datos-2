@@ -50,6 +50,7 @@ function vigenteEn(filas, t) {
 // historial. El estado (activo, agotado) no esta: en el modelo relacional los
 // historiales no lo guardan, vive solo en la fila viva. Esta anotado en
 // docs/base-de-datos.md y en el README de esta carpeta.
+//
 function estadoEn(producto, t) {
     const p = vigenteEn(producto.historial_producto, t);
     const c = vigenteEn(producto.historial_categoria, t);
@@ -154,7 +155,7 @@ function eventosDe(producto) {
 // El documento del producto
 // ============================================================
 function documentoDe(producto) {
-    return {
+    const doc = {
         _id:            producto.id_producto,
         nombre:         producto.nombre,
         descripcion:    producto.descripcion,
@@ -162,10 +163,17 @@ function documentoDe(producto) {
         estado:         producto.estado,
         vendedor:       producto.vendedor,
         categoria:      producto.categoria,
+        // Object.assign copia lo que traiga la variante, asi que
         variantes:      producto.variantes.map(v => Object.assign({}, v, {
             fecha_creacion: new Date(v.fecha_creacion)
         }))
     };
+
+    // El campo es opcional en el modelo del backend y extraer.sql no lo manda
+    // cuando la columna esta nula. Se copia solo si vino: escribirlo en null
+    // obligaria a quien lea el documento a distinguir "sin caracteristicas" de
+    // "caracteristicas vacias", y son la misma cosa.
+    return doc;
 }
 
 // El dinero se guarda como decimal, no como el numero de JavaScript, que es
@@ -182,9 +190,11 @@ function aDecimal(valor) {
     const salida = {};
     for (const campo of Object.keys(valor)) {
         const v = valor[campo];
-        salida[campo] = (CAMPOS_DECIMALES.indexOf(campo) !== -1 && typeof v === 'string')
-            ? NumberDecimal(v)
-            : aDecimal(v);
+        if (CAMPOS_DECIMALES.indexOf(campo) !== -1 && typeof v === 'string') {
+            salida[campo] = NumberDecimal(v);
+        } else {
+            salida[campo] = aDecimal(v);
+        }
     }
     return salida;
 }

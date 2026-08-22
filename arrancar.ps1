@@ -386,28 +386,48 @@ if ($LASTEXITCODE -eq 0) {
 # ------------------------------------------------------------
 # 5. Migraciones
 # ------------------------------------------------------------
-Paso "Corriendo migraciones"
+# Son dos clases de archivo y dos pasos, no uno:
+#
+#   migrations/*.sql        el esquema: las tablas y los catalogos de estado
+#   migrations/datos/*.sql  los conjuntos de datos de prueba
+#
+# El esquema primero, porque los datos no tienen donde entrar sin el. Cada paso
+# va en orden de nombre. El Get-ChildItem no lleva -Recurse a proposito: asi la
+# carpeta datos/ no se le cuela al primer paso y no queda un archivo de datos
+# corriendo en medio del esquema, dependiendo de como ordene los nombres.
+#
+# La carpeta esta montada dentro del contenedor en /migrations, y la de datos
+# cae sola en /migrations/datos.
 
-$scripts = @(Get-ChildItem -LiteralPath "$PSScriptRoot\migrations" -Filter "*.sql" -ErrorAction SilentlyContinue | Sort-Object Name)
+function Correr-Migraciones($carpeta, $rutaContenedor, $etiqueta) {
+    $scripts = @(Get-ChildItem -LiteralPath $carpeta -Filter "*.sql" -ErrorAction SilentlyContinue | Sort-Object Name)
 
-if ($scripts.Count -eq 0) {
-    Aviso "No hay archivos .sql en migrations/"
-} else {
+    if ($scripts.Count -eq 0) {
+        Aviso "No hay archivos .sql en $etiqueta"
+        return
+    }
+
     foreach ($s in $scripts) {
         # ON_ERROR_STOP corta si algo falla, en vez de dejar la base a medias
-        $salida = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -v ON_ERROR_STOP=1 -q -f "/migrations/$($s.Name)" 2>&1 | Out-String
+        $salida = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -v ON_ERROR_STOP=1 -q -f "$rutaContenedor/$($s.Name)" 2>&1 | Out-String
 
         if ($LASTEXITCODE -eq 0) {
-            Ok "$($s.Name)"
+            Ok "$etiqueta$($s.Name)"
         } elseif ($salida -match "already exists") {
-            Aviso "$($s.Name) ya estaba aplicada"
+            Aviso "$etiqueta$($s.Name) ya estaba aplicada"
         } else {
-            Error1 "$($s.Name) FALLO"
+            Error1 "$etiqueta$($s.Name) FALLO"
             Write-Host $salida -ForegroundColor Red
             exit 1
         }
     }
 }
+
+Paso "Corriendo migraciones del esquema"
+Correr-Migraciones "$PSScriptRoot\migrations" "/migrations" "migrations/"
+
+Paso "Corriendo conjuntos de datos"
+Correr-Migraciones "$PSScriptRoot\migrations\datos" "/migrations/datos" "migrations/datos/"
 
 
 # ------------------------------------------------------------
@@ -490,16 +510,37 @@ if ($coleccionesJs.Count -eq 0) {
 # El ETL lee los productos de PostgreSQL y los escribe en Mongo: el documento
 # de cada producto y su historial convertido en eventos.
 #
-# Se corre solo cuando la coleccion esta vacia, o cuando se pide con -Etl. No
-# se corre siempre a proposito: el dia que se agreguen productos desde la
-# aplicacion, correrlo en cada arranque pisaria lo que haya en Mongo.
+# No se corre en cada arranque a proposito: el dia que se agreguen productos
+# desde la aplicacion, correrlo siempre pisaria lo que haya en Mongo.
+#
+# La condicion era "la coleccion esta vacia", y con un solo conjunto de datos
+# alcanzaba: o la maquina era nueva o ya estaba todo. Dejo de alcanzar cuando
+# los datos se reparten en varios archivos de migrations/datos/, porque agregar
+# uno deja productos nuevos en PostgreSQL y una coleccion que ya no esta vacia:
+# el ETL no volvia a correr y esos productos no llegaban nunca a Mongo.
+#
+# Ahora se comparan las dos cuentas y se corre cuando Mongo tiene menos
+# productos que PostgreSQL, o sea cuando quedo algo sin migrar. Sigue sin
+# correr cuando ya estan todos, que es lo que protegia la regla anterior.
+#
+# Lo que esto no ve es un cambio que no mueva la cuenta: corregir el precio de
+# un producto que ya existe deja los dos numeros iguales. Para eso esta -Etl.
 
 Paso "Catalogo en MongoDB"
 
-$cuenta = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.countDocuments()'") 2>&1 | Out-String).Trim()
+$enMongo = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.countDocuments()'") 2>&1 | Out-String).Trim()
 
-if (-not $Etl -and $cuenta -ne "0") {
-    Ok "Ya cargado ($cuenta productos). Para volver a migrarlo: .\arrancar.ps1 -Etl"
+# Por stdin y no con -c: asi la consulta no pasa por el armado de linea de
+# comandos de PowerShell, que es donde se pierden las comillas y los parentesis
+$enPostgres = ("SELECT count(*) FROM productos;" |
+    docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
+# Si una de las dos cuentas no salio, se corre el ETL igual. Es idempotente, y
+# saltarselo por no poder contar dejaria el catalogo a medias sin avisar.
+$cuentasLegibles = ($enMongo -match '^\d+$') -and ($enPostgres -match '^\d+$')
+
+if (-not $Etl -and $cuentasLegibles -and [int]$enMongo -ge [int]$enPostgres) {
+    Ok "Ya cargado ($enMongo en Mongo, $enPostgres en PostgreSQL). Para volver a migrarlo: .\arrancar.ps1 -Etl"
 } else {
     $bash = Buscar-Bash
     if (-not $bash) {
@@ -523,7 +564,7 @@ if (-not $Etl -and $cuenta -ne "0") {
 
 
 # ------------------------------------------------------------
-# 7. Resumen
+# 8. Resumen
 # ------------------------------------------------------------
 Paso "Listo"
 docker ps --format "   {{.Names}}  {{.Status}}"
