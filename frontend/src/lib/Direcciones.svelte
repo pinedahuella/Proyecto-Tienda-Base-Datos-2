@@ -14,13 +14,13 @@
 	/**
 	 * Las direcciones de envio del usuario.
 	 *
+	 *   GET   /direccion-usuario      las del usuario logueado
 	 *   POST  /direccion-usuario      crea una
 	 *   PATCH /direccion-usuario/:id  edita pais, departamento, ciudad o codigo postal
 	 *
-	 * Esas son las dos rutas que existen, y son las dos que usa esta pantalla.
-	 * No hay una ruta para consultar las direcciones de un usuario, asi que la
-	 * lista se arma con lo que devuelve el POST y al recargar la pagina empieza
-	 * vacia otra vez.
+	 * La lista se pide una vez al abrir el panel. Despues no se vuelve a pedir:
+	 * crear y editar devuelven la direccion ya guardada, asi que la lista se
+	 * actualiza con eso y se ahorra un viaje.
 	 *
 	 * Pais, departamento y ciudad no se escriben libres: se eligen de listas
 	 * encadenadas, para que la ciudad pertenezca de verdad al pais. El detalle
@@ -53,6 +53,8 @@
 	let { alExpirarSesion }: { alExpirarSesion: () => void } = $props();
 
 	let direcciones = $state<Direccion[]>([]);
+	let cargando = $state(true);
+	let errorLista = $state('');
 
 	type Modo = 'lista' | 'nueva' | 'editar';
 	let modo = $state<Modo>('lista');
@@ -86,9 +88,29 @@
 	let errorForm = $state('');
 	let hecho = $state('');
 
-	onMount(async () => {
-		paises = await cargarPaises();
+	onMount(() => {
+		// Las dos cosas a la vez: la lista sale del backend y los paises de una
+		// API de fuera, y ninguna depende de la otra
+		cargarDirecciones();
+		cargarPaises().then((p) => (paises = p));
 	});
+
+	async function cargarDirecciones() {
+		cargando = true;
+		errorLista = '';
+
+		const respuesta = await pedir<Direccion[]>('/direccion-usuario');
+
+		cargando = false;
+
+		if (!respuesta.ok || !respuesta.payload) {
+			if (vencida(respuesta.estado)) return;
+			errorLista = respuesta.mensaje;
+			return;
+		}
+
+		direcciones = respuesta.payload;
+	}
 
 	/**
 	 * Cambiar el pais invalida lo de abajo: un departamento de Guatemala no
@@ -298,8 +320,15 @@
 	{/if}
 
 	{#if modo === 'lista'}
-		{#if direcciones.length === 0}
-			<p class="vacio">Aqui apareceran las direcciones que agregues en esta sesion.</p>
+		{#if cargando}
+			<p class="vacio">Cargando tus direcciones...</p>
+		{:else if errorLista}
+			<div class="malo" role="alert">
+				<p>{errorLista}</p>
+				<button type="button" onclick={cargarDirecciones}>Reintentar</button>
+			</div>
+		{:else if direcciones.length === 0}
+			<p class="vacio">Todavia no tienes ninguna direccion guardada.</p>
 		{:else}
 			<ul class="fichas">
 				{#each direcciones as d (d.id_direccion)}
@@ -578,7 +607,28 @@
 		cursor: progress;
 	}
 
+	.malo p {
+		margin: 0;
+	}
+
+	.malo button {
+		flex-shrink: 0;
+		padding: 6px 12px;
+		font-family: inherit;
+		font-size: 0.88rem;
+		color: var(--rojo);
+		background: var(--blanco);
+		border: 1px solid var(--rojo);
+		border-radius: var(--r);
+		cursor: pointer;
+	}
+
 	.malo {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
+		flex-wrap: wrap;
 		margin: 0 0 18px;
 		padding: 10px 14px;
 		font-size: 0.92rem;
