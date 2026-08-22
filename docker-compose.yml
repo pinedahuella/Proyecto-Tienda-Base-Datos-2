@@ -52,6 +52,30 @@ services:
     depends_on:
       - postgres
 
+  mongo:
+    image: mongo:8
+    container_name: mesh-mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_USER:?falta MONGO_USER en .env}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?falta MONGO_PASSWORD en .env}
+      # Base que usa el proyecto. Los scripts de mongo/ se corren contra esta.
+      MONGO_INITDB_DATABASE: ${MONGO_DB:?falta MONGO_DB en .env}
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+      # Los scripts de las colecciones quedan accesibles dentro del
+      # contenedor, igual que las migraciones de PostgreSQL
+      - ./mongo:/mongo:ro
+    healthcheck:
+      # ping no pide autenticacion, asi que sirve de latido sin credenciales
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres-data:
   pgadmin-data:
+  mongo-data:

@@ -90,6 +90,7 @@ docker exec mesh-postgres psql -U $DB_USER -d $DB_NAME -f /migrations/001_usuari
 |---|---|---|---|
 | PostgreSQL | mesh-postgres | pgvector/pgvector:pg18 | 5432 |
 | pgAdmin | mesh-pgadmin | dpage/pgadmin4 | 5050 |
+| MongoDB | mesh-mongo | mongo:8 | 27017 |
 
 Apagar todo:
 
@@ -102,12 +103,16 @@ Con `-v` ademas borra los datos de la base.
 La carpeta `migrations/` esta montada dentro del contenedor de PostgreSQL en
 `/migrations`, para poder correr los scripts sin copiarlos a mano.
 
+Lo mismo con `mongo/`, montada en el contenedor de MongoDB en `/mongo`. Ahi van
+los scripts que crean las colecciones.
+
 ## Accesos de desarrollo
 
 | Servicio | Usuario | Contrasena |
 |---|---|---|
 | PostgreSQL | `DB_USER` del .env | `DB_PASSWORD` del .env |
 | pgAdmin | `PGADMIN_EMAIL` del .env | `PGADMIN_PASSWORD` del .env |
+| MongoDB | `MONGO_USER` del .env | `MONGO_PASSWORD` del .env |
 
 **Ninguna contrasena esta escrita en el repositorio.** Todas viven en el archivo
 `.env`, que git ignora. Por eso el primer paso de la instalacion es copiar
