@@ -2,8 +2,9 @@
 
 Este archivo documenta solo las rutas de `/vendedor/*`. Las demás rutas del
 backend están en [endpoints.md](endpoints.md) (usuario, perfil, direcciones,
-admin) y [endpoints-productos.md](endpoints-productos.md) (el catálogo
-público).
+admin), [endpoints-productos.md](endpoints-productos.md) (el catálogo
+público) y [endpoints-compradores.md](endpoints-compradores.md) (comprar,
+sin exigir un rol en particular).
 
 Todas las rutas de aquí requieren la cookie `mesh_token`. Las de
 `/vendedor/categorias` aceptan vendedor o admin (`id_rol_usuario` 2 o 3);

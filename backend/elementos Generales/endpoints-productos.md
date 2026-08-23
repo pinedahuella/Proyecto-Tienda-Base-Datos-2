@@ -5,8 +5,10 @@ Este archivo documenta solo las rutas públicas de `/productos` y
 `GET /productos/paginacion`, `GET /productos/:id`, `GET /categorias` y
 `GET /categorias/:id`. Ninguna requiere sesión. Las demás rutas del
 backend (usuario, perfil, direcciones, admin) están en
-[endpoints.md](endpoints.md), y las de vendedor (que sí requieren sesión)
-en [endpoints-vendedores.md](endpoints-vendedores.md).
+[endpoints.md](endpoints.md); las de vendedor (que sí requieren sesión) en
+[endpoints-vendedores.md](endpoints-vendedores.md); y las de comprar (con
+sesión, pero sin exigir un rol en particular) en
+[endpoints-compradores.md](endpoints-compradores.md).
 
 La forma de los documentos que devuelven estas rutas está explicada en
 [Elementos Documentales/productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)

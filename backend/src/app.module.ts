@@ -24,6 +24,8 @@ import { CategoriasService } from './services/vendedores/categorias.service';
 import { ProductosVendedorController } from './controllers/vendedores/productos.controller';
 import { ProductosVendedorService } from './services/vendedores/productos.service';
 import { InventarioVendedorService } from './services/vendedores/inventario.service';
+import { PedidosCompradorController } from './controllers/compradores/pedidos.controller';
+import { PedidosCompradorService } from './services/compradores/pedidos.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -46,6 +48,7 @@ import { InventarioVendedorService } from './services/vendedores/inventario.serv
     CategoriasPublicoController,
     CategoriasController,
     ProductosVendedorController,
+    PedidosCompradorController,
   ],
   providers: [
     InicioService,
@@ -61,6 +64,7 @@ import { InventarioVendedorService } from './services/vendedores/inventario.serv
     CategoriasService,
     ProductosVendedorService,
     InventarioVendedorService,
+    PedidosCompradorService,
   ],
 })
 export class AppModule {}
