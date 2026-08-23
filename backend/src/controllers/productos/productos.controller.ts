@@ -1,4 +1,4 @@
-import { Controller, Get, Query } from '@nestjs/common';
+import { Controller, Get, Param, Query } from '@nestjs/common';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { ListarProductosQuery } from '../../dto/listar-productos';
@@ -31,6 +31,8 @@ export class ProductosController {
   }
 
   // GET /productos/paginacion
+  // Va antes de :id para que "paginacion" no se confunda con un id (aunque
+  // Fastify de por si prioriza las rutas estaticas sobre las parametricas).
   @Get('paginacion')
   async listarPaginado(@Query() query: PaginarProductosQuery) {
     try {
@@ -38,6 +40,17 @@ export class ProductosController {
       return exito(pagina, 'Productos obtenidos');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudieron obtener los productos');
+    }
+  }
+
+  // GET /productos/:id
+  @Get(':id')
+  async obtener(@Param('id') id: string) {
+    try {
+      const producto = await this.productosService.obtenerPublico(id);
+      return exito(producto, 'Producto obtenido');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo obtener el producto');
     }
   }
 }

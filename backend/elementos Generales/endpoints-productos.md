@@ -1,8 +1,12 @@
 # Endpoints de productos
 
-Este archivo documenta solo las rutas de `/productos` (la base documental,
-MongoDB). Las demás rutas del backend (usuario, perfil, direcciones, admin)
-están en [endpoints.md](endpoints.md).
+Este archivo documenta solo las rutas públicas de `/productos` y
+`/categorias` (la base documental, MongoDB) — `GET /productos`,
+`GET /productos/paginacion`, `GET /productos/:id`, `GET /categorias` y
+`GET /categorias/:id`. Ninguna requiere sesión. Las demás rutas del
+backend (usuario, perfil, direcciones, admin) están en
+[endpoints.md](endpoints.md), y las de vendedor (que sí requieren sesión)
+en [endpoints-vendedores.md](endpoints-vendedores.md).
 
 La forma de los documentos que devuelven estas rutas está explicada en
 [Elementos Documentales/productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)
@@ -55,7 +59,7 @@ catálogo público.
 | `id_vendedor` | entero | No | Igualdad exacta sobre `vendedor.id_usuario` |
 | `precio_min` / `precio_max` | decimal | No | Rango de precio, sobre `variantes[].precio` |
 | `estado_variante` | texto | No | Igualdad exacta sobre `variantes[].estado` |
-| _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada) — ver abajo |
+| _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada) — igualdad por defecto, o `min_`/`max_`/`contiene_` como prefijo — ver abajo |
 
 ### Paginación por cursor: ejemplo
 
@@ -115,8 +119,27 @@ GET /productos?Marca=Lenovo&Memoria%20RAM=16
 (los espacios del nombre van codificados en la URL: `Memoria%20RAM`, o
 `Memoria+RAM`)
 
-**El valor se compara de forma exacta**, a diferencia de `nombre` (el
-filtro fijo del producto), que sí es una búsqueda parcial.
+**Por defecto el valor se compara de forma exacta**, a diferencia de
+`nombre` (el filtro fijo del producto), que sí es una búsqueda parcial —
+salvo que el nombre del query param lleve uno de estos prefijos, que
+cambian el operador:
+
+| Prefijo | Operador | Ejemplo |
+| --- | --- | --- |
+| _(ninguno)_ | Igualdad exacta | `Marca=Lenovo` |
+| `min_` | Mayor o igual (`$gte`) | `min_Nucleos=8` |
+| `max_` | Menor o igual (`$lte`) | `max_Nucleos=16` |
+| `contiene_` | Contiene, sin distinguir mayúsculas (como `nombre`) | `contiene_Marca=Len` |
+
+`min_`/`max_` se pueden combinar en el mismo filtro (`min_Nucleos=8&max_Nucleos=16`
+es "entre 8 y 16"). El prefijo se quita del nombre antes de buscar
+(`min_Nucleos` filtra la característica `Nucleos`), y el operador se
+aplica **por igual a características del catálogo y personalizadas**, sin
+necesidad de conocer su `tipo_dato` de antemano: si el operador no tiene
+sentido contra lo que hay guardado (por ejemplo `min_` sobre una
+característica de texto), Mongo simplemente no encuentra coincidencia —
+no es un error, el filtro se aplicó, solo no encontró nada porque se usó
+mal.
 
 **Las características de tipo `lista`** aparecen como varias entradas con
 el mismo `nombre` (ver `productos_subproductos.md`). Filtrar por una de
@@ -133,7 +156,12 @@ todo como texto sin excepción (es un pendiente, ver
 [pendientes-etl-caracteristicas.md](pendientes-etl-caracteristicas.md)), así
 que el filtro busca contra **las dos formas a la vez** — el valor
 convertido y el texto tal cual — para encontrar el producto sin importar
-cuál de las dos formas tenga guardadas en este momento.
+cuál de las dos formas tenga guardadas en este momento. Esta conversión
+también se le aplica al valor de `min_`/`max_` (para que `min_Nucleos=8`
+compare contra el número `8`, no contra el texto `"8"`) — pero solo contra
+la forma convertida, sin el `$in` de las dos formas, porque `$gte`/`$lte`
+no tendría sentido comparando contra texto. `contiene_` no convierte nada:
+siempre compara el texto tal cual llegó, igual que `nombre`.
 
 **Seguridad.** El nombre de la característica y su valor nunca se usan para
 armar un nombre de campo de Mongo: siempre entran como *valores* dentro de
@@ -227,6 +255,72 @@ del catálogo (o de lo que quedaba despues de aplicar los filtros).
 
 ---
 
+## GET /productos/:id
+
+Pública, igual que `GET /productos`. Un producto completo por su `_id`, con
+la misma forma que cada elemento del array `productos` de arriba (todas sus
+variantes, características del catálogo y personalizadas incluidas).
+
+**Los productos `inactivo` o `borrador` nunca aparecen aquí tampoco**:
+pedirlos por id da el mismo 404 que un id que no existe, para no confirmar
+por otra vía que el producto existe pero está oculto.
+
+```
+GET /productos/2
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Producto obtenido",
+  "payload": {
+    "_id": 2,
+    "nombre": "Laptop 14 pulgadas",
+    "descripcion": "Laptop de 14 pulgadas para trabajo y estudio",
+    "fecha_creacion": "2026-01-15T17:30:00.000Z",
+    "estado": "activo",
+    "vendedor": { "id_usuario": 5, "usuario": "vendedor_prueba", "nombre": "Carlos", "apellido": "Ramirez" },
+    "categoria": {
+      "id_categoria": 5,
+      "nombre": "Computadoras",
+      "categoria_padre": "Electronica",
+      "porcentaje_comision": { "$numberDecimal": "6.00" }
+    },
+    "variantes": [ "..." ],
+    "caracteristicas_adicionales": [ "..." ],
+    "caracteristicas_personalizadas": [ "..." ]
+  }
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+```
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo obtener el producto", "payload": null }
+```
+
+---
+
 ## GET /productos/paginacion
 
 Pública, igual que `GET /productos`. Lista el mismo catálogo, con los
@@ -247,7 +341,7 @@ es justo el costo que `GET /productos` evita al no permitir saltos.
 | `pagina` | entero | No (por defecto 1) | Qué página pedir, 1 es la primera |
 | `limite` | entero | No (por defecto 20, tope 100) | Cuántos productos trae cada página |
 | `nombre`, `estado`, `id_categoria`, `id_vendedor`, `precio_min`, `precio_max`, `estado_variante` | — | No | Los mismos filtros fijos de `GET /productos` |
-| _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada), igual que en `GET /productos` |
+| _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada), igualdad por defecto o `min_`/`max_`/`contiene_` como prefijo, igual que en `GET /productos` |
 
 ### Ejemplo
 
@@ -303,6 +397,110 @@ sigue diciendo cuántas páginas hay de verdad.
 
 ---
 
+## GET /categorias
+
+Pública, igual que `GET /productos`. Las categorías en las que de verdad
+hay productos publicados: las que **no son raíz** (su `categoria_padre` no
+es `null`) — mismo criterio y misma fuente
+(`categorias.listarValidas()`) que usa `GET /vendedor/categorias`, solo que
+sin sesión. Pensada para armar un selector de categoría en la búsqueda.
+Ordenadas alfabéticamente por `nombre`.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Categorias obtenidas",
+  "payload": [
+    { "id_categoria": 16, "nombre": "Audifonos", "categoria_padre": "Audio" },
+    { "id_categoria": 15, "nombre": "Audio", "categoria_padre": "Electronica" },
+    { "id_categoria": 3, "nombre": "Camisas", "categoria_padre": "Ropa de hombre" }
+  ]
+}
+```
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudieron obtener las categorias", "payload": null }
+```
+
+---
+
+## GET /categorias/:id
+
+Pública, igual que `GET /productos`. Una categoría completa, con el menú
+entero de características que ofrece — tanto las de producto
+(`caracteristicas`) como las de variante (`caracteristicas_variante`), cada
+una con su `tipo_dato` y su `unidad` — pensada para armar los filtros de
+búsqueda de esa categoría (los mismos prefijos `min_`/`max_`/`contiene_` de
+`GET /productos`, ver arriba). Misma fuente que `GET /vendedor/categorias/:id`,
+sin sesión.
+
+Solo categorías válidas (no raíz): pedir una raíz (`Ropa`, `Electronica`,
+etc.) da el mismo 404 que un id que no existe.
+
+```
+GET /categorias/3
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Categoria obtenida",
+  "payload": {
+    "id_categoria": 3,
+    "nombre": "Camisas",
+    "categoria_padre": "Ropa de hombre",
+    "porcentaje_comision": { "$numberDecimal": "12.00" },
+    "fecha_creacion": "2026-01-05T16:10:00.000Z",
+    "caracteristicas": [
+      { "nombre": "Marca", "unidad": null, "tipo_dato": "texto" },
+      { "nombre": "Duracion de la garantia", "unidad": "meses", "tipo_dato": "entero" }
+    ],
+    "caracteristicas_variante": [
+      { "nombre": "Color", "unidad": null, "tipo_dato": "texto" },
+      { "nombre": "Talla", "unidad": null, "tipo_dato": "texto" }
+    ]
+  }
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una categoria con ese id", "payload": null }
+```
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo obtener la categoria", "payload": null }
+```
+
+---
+
 ## Ejemplo de cada filtro por separado
 
 Uno por uno, sin combinar (para ver cómo se combinan, ver los ejemplos de
@@ -346,3 +544,13 @@ caso (todos probados contra el catálogo real):
 | `lista` | `GET /productos?Contenido%20del%20paquete=Cargador` | Productos cuya lista de contenido incluye "Cargador" |
 | característica de variante | `GET /productos?Memoria%20RAM=16` | Productos con alguna variante de 16 GB de RAM |
 | característica personalizada | `GET /productos?Edicion%20especial=true` | Productos que tengan esa característica personalizada, con ese valor |
+
+Y un ejemplo de cada prefijo de operador, sobre una característica `entero`
+del catálogo:
+
+| Prefijo | Ejemplo de filtro | Qué trae |
+| --- | --- | --- |
+| `min_` | `GET /productos?min_Nucleos=8` | Productos cuyo procesador tiene 8 núcleos o más |
+| `max_` | `GET /productos?max_Nucleos=8` | Productos cuyo procesador tiene 8 núcleos o menos |
+| `min_` + `max_` | `GET /productos?min_Nucleos=6&max_Nucleos=10` | Productos con entre 6 y 10 núcleos |
+| `contiene_` | `GET /productos?contiene_Marca=Tec` | Productos cuya marca contiene "Tec" (sin distinguir mayúsculas) |

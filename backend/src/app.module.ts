@@ -18,6 +18,7 @@ import { DireccionUsuarioController } from './controllers/direccion-usuario.cont
 import { DireccionUsuarioService } from './services/direccion-usuario.service';
 import { ProductosController } from './controllers/productos/productos.controller';
 import { ProductosService } from './services/productos/productos.service';
+import { CategoriasPublicoController } from './controllers/productos/categorias.controller';
 import { CategoriasController } from './controllers/vendedores/categorias.controller';
 import { CategoriasService } from './services/vendedores/categorias.service';
 import { ProductosVendedorController } from './controllers/vendedores/productos.controller';
@@ -41,6 +42,7 @@ import { ProductosVendedorService } from './services/vendedores/productos.servic
     PerfilController,
     DireccionUsuarioController,
     ProductosController,
+    CategoriasPublicoController,
     CategoriasController,
     ProductosVendedorController,
   ],

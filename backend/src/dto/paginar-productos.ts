@@ -3,8 +3,9 @@ import { Producto } from '../models/producto';
 /**
  * Query params esperados en GET /productos/paginacion.
  *
- * Los mismos filtros que ListarProductosQuery (ver listar-productos.ts),
- * solo que la paginacion es por numero de pagina en vez de por cursor.
+ * Los mismos filtros que ListarProductosQuery (ver listar-productos.ts,
+ * incluyendo los prefijos min_/max_/contiene_ para caracteristicas), solo
+ * que la paginacion es por numero de pagina en vez de por cursor.
  */
 export interface PaginarProductosQuery {
   pagina?: string;

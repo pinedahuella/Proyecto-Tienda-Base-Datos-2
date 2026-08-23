@@ -134,6 +134,55 @@ export function valorParaBuscarCaracteristica(
   return { $in: [valorCoercionado, valorCrudo] };
 }
 
+const PREFIJO_MIN = 'min_';
+const PREFIJO_MAX = 'max_';
+const PREFIJO_CONTIENE = 'contiene_';
+
+/** Lo que interpretarFiltroCaracteristica saca de un query param dinamico. */
+export interface FiltroCaracteristica {
+  nombreCaracteristica: string;
+  condicionValor: unknown;
+}
+
+/**
+ * Interpreta un query param dinamico de GET /productos como un filtro
+ * "universal" sobre una caracteristica: el prefijo dice el operador
+ * (min_/max_/contiene_), el resto del nombre es la caracteristica, y sin
+ * prefijo es igualdad (como siempre). El operador se aplica tal cual contra
+ * lo que haya en Mongo -- si el tipo guardado no calza con el operador (por
+ * ejemplo min_ sobre una caracteristica de texto), simplemente no hace
+ * match, no es un error: el filtro se aplica igual a caracteristicas
+ * adicionales y personalizadas, sin necesidad de saber su tipo_dato de
+ * antemano.
+ */
+export function interpretarFiltroCaracteristica(
+  clave: string,
+  valorCrudo: string,
+): FiltroCaracteristica {
+  if (clave.startsWith(PREFIJO_MIN)) {
+    return {
+      nombreCaracteristica: clave.slice(PREFIJO_MIN.length),
+      condicionValor: { $gte: coercionarValorAtributo(valorCrudo) },
+    };
+  }
+  if (clave.startsWith(PREFIJO_MAX)) {
+    return {
+      nombreCaracteristica: clave.slice(PREFIJO_MAX.length),
+      condicionValor: { $lte: coercionarValorAtributo(valorCrudo) },
+    };
+  }
+  if (clave.startsWith(PREFIJO_CONTIENE)) {
+    return {
+      nombreCaracteristica: clave.slice(PREFIJO_CONTIENE.length),
+      condicionValor: { $regex: escaparRegex(valorCrudo), $options: 'i' },
+    };
+  }
+  return {
+    nombreCaracteristica: clave,
+    condicionValor: valorParaBuscarCaracteristica(valorCrudo),
+  };
+}
+
 /** Escapa caracteres especiales de regex antes de usar un texto en un $regex. */
 export function escaparRegex(texto: string): string {
   return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

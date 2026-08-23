@@ -1,17 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Decimal128, Filter } from 'mongodb';
 import { mongoDb } from '../../database/mongo';
-import { ErrorValidacion } from '../../helpers/errores';
+import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import {
   esNombreCaracteristicaValido,
   escaparRegex,
+  interpretarFiltroCaracteristica,
   validarDespuesDe,
   validarEnteroPositivo,
   validarLimite,
   validarPagina,
   validarPrecio,
-  valorParaBuscarCaracteristica,
 } from '../../helpers/validaciones-productos';
 import {
   ListarProductosQuery,
@@ -32,6 +32,8 @@ import { ESTADOS_PRODUCTO_OCULTOS } from '../../models/estado-producto';
  * cursor ni "despues_de" a la de paginacion, porque cada una simplemente no
  * manda el query param de la otra.
  */
+const REGEX_ID = /^\d+$/;
+
 const CLAVES_RESERVADAS = new Set([
   'limite',
   'despues_de',
@@ -132,6 +134,37 @@ export class ProductosService {
   }
 
   /**
+   * Un producto por id, publico. Igual que el listado, un producto
+   * `inactivo` o `borrador` nunca aparece aqui: pedirlo directo por id da el
+   * mismo 404 que un id que no existe, para no confirmar por otra via que
+   * el producto existe pero esta oculto.
+   */
+  async obtenerPublico(idProductoParametro: string): Promise<Producto> {
+    if (!REGEX_ID.test(idProductoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idProducto = Number(idProductoParametro);
+
+    try {
+      const producto = await mongoDb.collection<Producto>('productos').findOne({
+        _id: idProducto,
+        estado: { $nin: ESTADOS_PRODUCTO_OCULTOS },
+      });
+
+      if (producto == null) {
+        throw new ErrorNoEncontrado('No existe un producto con ese id');
+      }
+
+      return producto;
+    } catch (error) {
+      if (error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexionMongo(this.logger, error);
+    }
+  }
+
+  /**
    * Arma el filtro de Mongo a partir de los query params ya validados. Lo
    * comparten listar() y listarPaginado(): los mismos filtros fijos y
    * dinamicos aplican en las dos rutas, solo cambia como se pagina despues.
@@ -205,11 +238,18 @@ export class ProductosService {
    * caracteristicas_adicionales y caracteristicas_personalizadas son arrays
    * de { nombre, valor, unidad } (ver productos_subproductos.md): filtrar por
    * una caracteristica es buscar, dentro de ese array, un elemento cuyo
-   * "nombre" sea la clave del query param y cuyo "valor" coincida — con
+   * "nombre" sea la clave del query param (sin su prefijo de operador, ver
+   * interpretarFiltroCaracteristica) y cuyo "valor" coincida — con
    * $elemMatch, para exigir que sean del MISMO elemento y no de dos
    * distintos. Se busca en las cuatro ubicaciones posibles (adicionales y
    * personalizadas, del producto y de cada variante) sin exigir que sea la
    * misma variante entre si de otros filtros dinamicos.
+   *
+   * Filtro universal: ademas de igualdad (`ram=16`), un prefijo pide
+   * min_/max_/contiene_ (`min_ram=8`, `contiene_color=roj`), el mismo
+   * operador para adicionales y personalizadas, sin necesidad de conocer su
+   * tipo_dato de antemano — si el operador no calza con lo guardado en
+   * Mongo, simplemente no hace match.
    *
    * Nota de seguridad: la clave y el valor del query param nunca se usan
    * para armar un nombre de campo (nunca algo como `objeto[clave]`); siempre
@@ -234,14 +274,17 @@ export class ProductosService {
       if (typeof clave !== 'string' || typeof valorCrudo !== 'string') {
         continue;
       }
-      if (!esNombreCaracteristicaValido(clave)) {
+
+      const { nombreCaracteristica, condicionValor } =
+        interpretarFiltroCaracteristica(clave, valorCrudo);
+
+      if (!esNombreCaracteristicaValido(nombreCaracteristica)) {
         throw new ErrorValidacion(
-          `El filtro "${clave}" no es un nombre de caracteristica valido`,
+          `El filtro "${nombreCaracteristica}" no es un nombre de caracteristica valido`,
         );
       }
 
-      const valorBusqueda = valorParaBuscarCaracteristica(valorCrudo);
-      const elemMatch = { nombre: clave, valor: valorBusqueda };
+      const elemMatch = { nombre: nombreCaracteristica, valor: condicionValor };
 
       condiciones.push({
         $or: [

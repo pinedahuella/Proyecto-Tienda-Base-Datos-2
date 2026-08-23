@@ -4,8 +4,12 @@ import { Producto } from '../models/producto';
  * Query params esperados en GET /productos.
  *
  * Los que no estan aqui listados explicitamente (marca, ram, color, etc.)
- * son filtros dinamicos sobre caracteristicas_adicionales: cualquier query
- * param que no sea uno de estos nombres fijos se trata como uno.
+ * son filtros dinamicos sobre caracteristicas_adicionales/personalizadas:
+ * cualquier query param que no sea uno de estos nombres fijos se trata como
+ * uno. Por defecto es igualdad (`ram=16`); un prefijo `min_`, `max_` o
+ * `contiene_` en el nombre pide ese operador en vez de igualdad
+ * (`min_ram=8`, `contiene_color=roj`) — ver interpretarFiltroCaracteristica
+ * en validaciones-productos.ts.
  */
 export interface ListarProductosQuery {
   limite?: string;
