@@ -96,8 +96,9 @@ variantes del producto (calculada al responder, nunca guardada en Mongo —
 ver [cambios-etl-productos.md](cambios-etl-productos.md)), así que
 `?stock_min=10` trae un producto si la suma de todas sus variantes es al
 menos 10, sin importar cuánto tenga cada una por separado. Una variante sin
-`stock` (todavía pendiente del lado del backend para las que se publican
-desde el panel) cuenta como 0 en la suma, nunca rompe el cálculo.
+`stock` (pasa cuando se publica o se agrega sin mandar `stock_inicial` —
+ver `endpoints-vendedores.md`) cuenta como 0 en la suma, nunca rompe el
+cálculo.
 
 ### Filtros dinámicos (características, del catálogo o personalizadas)
 

@@ -59,12 +59,24 @@ Lo que lleva todo producto, siempre.
 | `fecha_creacion` | `Date` | `2026-01-10T15:00:00Z` |
 | `estado` | `String` | `"activa"` |
 | `imagenes` | `Array<String>` | `["https://.../camisa.jpg"]` |
+| `stock` | `Number` | `9` |
 
 **Sobre el dinero.** `precio` y `porcentaje_comision` van en `Decimal128`, no en
 `Number`. Con punto flotante los centavos se redondean mal y el error se acumula.
 
 **Sobre `descripcion`.** Es el único campo obligatorio de la lista que en
 PostgreSQL acepta nulo. Hoy los tres productos de prueba lo traen.
+
+**Sobre `stock`.** A diferencia de los demás campos de esta tabla, no siempre
+está: es opcional, y solo aparece una vez que esa variante tiene inventario
+creado en PostgreSQL (tabla `inventario`). Es una copia de lectura — cuántas
+unidades quedan — nunca la verdad; quien de verdad decide si alcanza para
+vender es PostgreSQL. El backend la mantiene al día (`GET/POST/PATCH
+/vendedor/productos/:id/inventario`, y `stock_inicial` al crear o editar un
+producto), pero una variante recién creada sin inventario todavía no lo
+trae. Detalle completo en
+[cambios-etl-productos.md](../cambios-etl-productos.md) y
+[endpoints-vendedores.md](../endpoints-vendedores.md).
 
 Un ejemplo completo de cómo queda el documento está en
 [ejemplos_bson_productos.md](ejemplos_bson_productos.md).
@@ -244,10 +256,27 @@ Son las que distinguen una variante de otra.
 
 ## Personalizadas (las agrega quien crea el producto)
 
-**Todavía no existen en la base.** Cuando se agreguen usarán **exactamente la misma
-estructura** que las de arriba, el mismo array de `{ nombre, valor, unidad }`, para
-que el backend las lea con el mismo código y no haya dos formatos que mantener.
+**Ya existen.** Van en `caracteristicas_personalizadas`, un campo aparte de
+`caracteristicas_adicionales` (las de las Tablas 1 y 2), tanto en la raíz del
+producto como en cada elemento de `variantes`. Usan **exactamente la misma
+estructura** que las de arriba, el mismo array de `{ nombre, valor, unidad }`,
+para que el backend las lea con el mismo código y no haya dos formatos que
+mantener.
 
-La única diferencia será de dónde sale el `nombre`: el de las Tablas 1 y 2 viene del
-catálogo de la aplicación y se valida contra él; el de una personalizada lo escribe
-quien publica el producto.
+La diferencia es de dónde sale el `nombre` y qué tan estricta es la
+validación: el de las Tablas 1 y 2 viene del catálogo de la categoría y tiene
+que ser uno de los que esa categoría ofrece, con el `valor` cumpliendo su
+`tipo_dato` exacto; el de una personalizada lo escribe quien publica el
+producto, sin ningún catálogo de por medio — solo se revisa que el formato
+sea razonable (nombre no vacío, hasta 100 caracteres, sin repetirse dentro
+del mismo producto o variante) y que el `valor` sea algo suelto (texto,
+número o verdadero/falso), nunca una lista ni un objeto anidado —
+`tipo_dato = "lista"` no existe para las personalizadas. `unidad` siempre
+sale `null`: no hay definición de catálogo de la que sacarla.
+
+**Son tan filtrables como las del catálogo.** `GET /productos` busca por
+igual en `caracteristicas_adicionales` y en `caracteristicas_personalizadas`
+(del producto y de cada variante) con el mismo `$elemMatch`, así que un
+filtro dinámico como `?Edicion especial=true` encuentra el producto sin
+importar en cuál de las dos viva esa característica — ver
+[endpoints-productos.md](../endpoints-productos.md).

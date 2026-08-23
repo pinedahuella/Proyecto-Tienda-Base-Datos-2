@@ -49,7 +49,7 @@ Este es el producto 3 entero, como sale de la base:
     "nombre": "Carlos",
     "usuario": "vendedor_prueba",
     "apellido": "Ramirez",
-    "id_usuario": 5
+    "id_usuario": 1
   },
   "categoria": {
     "nombre": "Cocina",
@@ -61,6 +61,7 @@ Este es el producto 3 entero, como sale de la base:
   },
   "variantes": [
     {
+      "stock": 15,
       "estado": "activa",
       "precio": {
         "$numberDecimal": "349.00"
@@ -72,13 +73,34 @@ Este es el producto 3 entero, como sale de la base:
       "descripcion": "Jarra de 1.2 litros, rinde 10 tazas",
       "fecha_creacion": { "$date": "2026-02-01T14:00:00.000Z" },
       "nombre_variante": "1.2 litros",
-      "id_producto_variante": 5
+      "id_producto_variante": 5,
+      "caracteristicas_adicionales": [
+        { "nombre": "Capacidad", "valor": 1200, "unidad": "ml" },
+        { "nombre": "Volumen", "valor": 1.2, "unidad": "L" },
+        { "nombre": "Material", "valor": "Acero inoxidable", "unidad": null },
+        { "nombre": "Codigo SKU", "valor": "CDG-3-5", "unidad": null }
+      ]
     }
+  ],
+  "caracteristicas_adicionales": [
+    { "nombre": "Marca", "valor": "Aroma Fina", "unidad": null },
+    { "nombre": "Modelo", "valor": "AF-GOT-12", "unidad": null },
+    { "nombre": "Pais de origen", "valor": "China", "unidad": null },
+    { "nombre": "Garantia", "valor": true, "unidad": null },
+    { "nombre": "Duracion de la garantia", "valor": 12, "unidad": "meses" },
+    { "nombre": "Materiales principales", "valor": ["Plastico", "Vidrio"], "unidad": null },
+    { "nombre": "Contenido del paquete", "valor": ["Cafetera", "Jarra de vidrio", "Filtro permanente", "Manual"], "unidad": null },
+    { "nombre": "Peso", "valor": 1.8, "unidad": "kg" },
+    { "nombre": "Unidad de medida", "valor": "unidad", "unidad": null },
+    { "nombre": "Instrucciones de uso", "valor": "Enjuagar la jarra antes del primer uso y correr un ciclo con agua sola", "unidad": null },
+    { "nombre": "Advertencias", "valor": ["Superficie caliente", "No sumergir la base"], "unidad": null },
+    { "nombre": "Tipo de producto", "valor": "Cafetera", "unidad": null },
+    { "nombre": "Etiquetas", "valor": ["cafetera", "goteo", "cocina"], "unidad": null }
   ]
 }
 ```
 
-Tres cosas que conviene notar:
+Cinco cosas que conviene notar:
 
 - **El `_id` es el `id_producto` de PostgreSQL**, no uno que genere Mongo. Por eso
   volver a correr el ETL actualiza en vez de duplicar, y se sabe de inmediato a qué
@@ -89,6 +111,10 @@ Tres cosas que conviene notar:
   centavos se redondean mal.
 - **Las fechas son `Date` de Mongo**, o sea que en crudo se ven como
   `{ "$date": "..." }`, igual que el dinero se ve como `$numberDecimal`.
+- **`variantes[].stock` es una copia de lectura, no la verdad.** El número real
+  vive en PostgreSQL (tabla `inventario`); esto solo lo refleja, y es opcional —
+  una variante sin inventario todavía creado sale sin este campo. Detalle
+  completo en [cambios-etl-productos.md](../cambios-etl-productos.md).
 
 ## Cómo está organizado un evento
 
@@ -263,6 +289,7 @@ vez de dejarlo en texto y obligar a convertir en cada consulta.
   },
   "variantes": [
     {
+      "stock": 12,
       "estado": "activa",
       "precio": {
         "$numberDecimal": "4299.00"
@@ -297,6 +324,7 @@ vez de dejarlo en texto y obligar a convertir en cada consulta.
       ]
     },
     {
+      "stock": 13,
       "estado": "activa",
       "precio": {
         "$numberDecimal": "4999.00"

@@ -13,11 +13,14 @@ propios. Un rol sin permiso recibe 403, igual que en `/admin/*`.
 
 **Todo lo de productos vive solo en MongoDB.** Las migraciones SQL
 (`003_productos.sql`, `004_caracteristicas.sql`) fueron solo para cargar los
-datos de prueba vía ETL — crear o editar un producto no toca PostgreSQL
-para nada. **La única excepción es el stock real** (tabla `inventario` de
-PostgreSQL, migración `005_pedidos_stock.sql`): las dos rutas de
-`/inventario` (ver abajo) sí lo consultan, y son las únicas de
-`/vendedor/productos` que hablan con las dos bases a la vez.
+datos de prueba vía ETL — el nombre, la categoría, las características,
+todo eso nunca toca PostgreSQL. **La única excepción es el stock real**
+(tabla `inventario` de PostgreSQL, migración `005_pedidos_stock.sql`): las
+cinco rutas de `/inventario` (ver abajo, incluyendo el catálogo de motivos
+de ajuste) hablan con las dos bases a la vez, y `POST /vendedor/productos`
+y `PATCH /vendedor/productos/:id` también tocan PostgreSQL **si** la
+petición trae `variantes[].stock_inicial` — si no lo trae, esas dos rutas
+siguen sin tocar PostgreSQL para nada, igual que siempre.
 
 ---
 
@@ -438,8 +441,10 @@ reutilizando el mismo mecanismo de
 [POST /vendedor/productos/:id/inventario](#post-vendedorproductosidinventario)
 — una variante a la vez, con su primer movimiento de `reposicion` si es
 mayor a 0. **Si esa variante ya tenía inventario, `stock_inicial` se
-ignora** — no lo sobreescribe; para eso haría falta una ruta de ajuste,
-todavía no hecha.
+ignora** — no lo sobreescribe; para subir o bajar un stock que ya existe
+está
+[PATCH /vendedor/productos/:id/inventario](#patch-vendedorproductosidinventario),
+no este campo.
 
 Se valida antes de escribir nada: un `stock_inicial` inválido en cualquier
 variante rechaza toda la edición, igual que al crear un producto.
@@ -604,13 +609,14 @@ producto):
 
 Sin productos propios, `payload` sale `[]` (no es un error).
 
-**Si una variante propia todavía no tiene fila en `inventario`** (hoy pasa
-con las que se publican desde el panel: `POST /vendedor/productos` y
-`PATCH /vendedor/productos/:id` todavía no crean esa fila, pendiente
-documentado en `cambios-etl-productos.md`), **la petición entera falla**
-con 409 — no se rellena con `0` en silencio, ni se omite esa variante y se
-muestran las demás. El mensaje nombra el producto y la variante exactos
-que faltan, para que el vendedor sepa qué arreglar:
+**Si una variante propia todavía no tiene fila en `inventario`** (pasa con
+las que se publican o se agregan sin mandar `stock_inicial` — ver
+`variantes[].stock_inicial` en `POST /vendedor/productos` y
+`PATCH /vendedor/productos/:id`), **la petición entera falla** con 409 —
+no se rellena con `0` en silencio, ni se omite esa variante y se muestran
+las demás. El mensaje nombra el producto y la variante exactos que faltan,
+para que el vendedor sepa qué arreglar: puede crearlo con
+[POST /vendedor/productos/:id/inventario](#post-vendedorproductosidinventario).
 
 ### 409
 
@@ -965,6 +971,11 @@ creación, `cambios` en cada modificación — nunca un campo suelto), fusionar
 todos en orden con `$mergeObjects` reconstruye el documento exacto de ese
 día: si algo cambió dos veces antes de la fecha pedida, se queda con el
 valor de la segunda vez, porque se fusiona después y lo sobrescribe.
+
+**Nunca trae `variantes[].stock`**, ni de la fecha pedida ni de hoy: el
+stock no es parte de ningún evento (ver `cambios-etl-productos.md`), así
+que reconstruir un producto a una fecha pasada no dice qué stock tenía en
+ese momento — eso solo lo sabe el libro `stock_movimiento` en PostgreSQL.
 
 Solo productos propios: un producto de otro vendedor da el mismo 404 que
 un id que no existe. Una fecha anterior a la creación del producto también

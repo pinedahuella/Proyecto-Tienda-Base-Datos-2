@@ -107,8 +107,8 @@ hace alguien distinto:
 | Cuándo | Quién lo escribe |
 | --- | --- |
 | Carga inicial o recarga completa | El ETL. `extraer.sql` hace el JOIN con `inventario` |
-| Después de una compra | El backend, con lo que devuelve `crear_pedido` |
-| Al publicar un producto o agregar una variante | El backend, al crear la fila de `inventario` |
+| Después de una compra o cancelación | El backend, con lo que devuelven `comprar_pedido`/`cancelar_pedido` (pendiente, ver abajo) |
+| Al publicar un producto, agregar una variante, o un ajuste manual | El backend, al crear o actualizar la fila de `inventario` (ver `endpoints-vendedores.md`) |
 
 El ETL solo alcanza lo primero: corre con `.\arrancar.ps1` y solo manda sobre
 los productos que vienen de PostgreSQL. Los otros dos momentos son de la
@@ -261,20 +261,26 @@ actualizar Mongo. Eso segundo es de quien llama.
 
 ## Lo que hay que ajustar del lado del backend
 
-**1. Al publicar un producto, crear su inventario.** `POST /vendedor/productos`
-escribe el documento pero no crea la fila de `inventario`, así que sus variantes
-salen sin `stock`. Hoy pasa con los dos productos publicados desde el panel (51
-y 52): son los únicos del catálogo cuyas variantes no traen el campo. El ETL no
-los toca — solo manda sobre los id que vienen de PostgreSQL — así que esa fila
-la tiene que crear la aplicación.
+**1. Al publicar un producto, crear su inventario. Hecho, del lado del
+vendedor.** `POST /vendedor/productos` y `PATCH /vendedor/productos/:id`
+aceptan un `stock_inicial` opcional por variante: si viene, crean la fila
+de `inventario` (y su primer movimiento de `reposicion`) justo después de
+publicar o agregar la variante — ver `endpoints-vendedores.md`. Sigue
+siendo opcional: si no se manda, la variante nace sin inventario, igual
+que antes, y se reconstruye después con
+`POST /vendedor/productos/:id/inventario`. También hay
+`PATCH /vendedor/productos/:id/inventario` para subir o bajar un stock que
+ya existe (correcciones manuales), y
+`GET /vendedor/productos/inventario/motivos-ajuste` para saber con qué
+`id_motivo_movimiento` hacerlo.
 
-Lo mismo al agregar una variante nueva en `PATCH /vendedor/productos/:id`.
-
-**2. Después de una compra, actualizar el `stock` del documento.** El descuento
-real ocurre en PostgreSQL; el número del documento hay que ponerlo al día
-después, o el catálogo seguirá mostrando el stock viejo. La función
-`crear_pedido` devuelve el stock resultante de cada variante justamente para
-eso, sin tener que volver a consultar.
+**2. Después de una compra, actualizar el `stock` del documento. Todavía
+pendiente.** El flujo de pedidos (`crear_pedido`, `agregar_linea`,
+`comprar_pedido`, `cancelar_pedido`) ya corre en PostgreSQL, pero el
+backend de Node todavía no tiene rutas que lo llamen. Cuando existan,
+`comprar_pedido`/`cancelar_pedido` devuelven el stock resultante de cada
+variante justamente para poner Mongo al día sin volver a consultar (mismo
+`$set` que ya usan las rutas de inventario de vendedor).
 
 **3. Nada más.** Los filtros de `GET /productos` y `GET /productos/paginacion`
 siguen funcionando sin tocarlos: se corrieron las 44 comprobaciones de filtros y
