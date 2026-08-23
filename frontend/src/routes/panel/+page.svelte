@@ -1,13 +1,16 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
 	import { conJson, pedir } from '$lib/api';
 	import Direcciones from '$lib/Direcciones.svelte';
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
+	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import {
 		cerrarSesion,
 		ID_ROL_ADMIN,
+		ID_ROL_VENDEDOR,
 		SesionIndeterminada,
 		verificarSesion,
 		type PerfilUsuario
@@ -40,6 +43,7 @@
 	let error = $state('');
 
 	let esAdmin = $derived(perfil?.id_rol_usuario === ID_ROL_ADMIN);
+	let esVendedor = $derived(perfil?.id_rol_usuario === ID_ROL_VENDEDOR);
 
 	type Modo = 'ver' | 'editar' | 'contrasena';
 	let modo = $state<Modo>('ver');
@@ -59,9 +63,12 @@
 	let cambiando = $state(false);
 	let errorClave = $state('');
 
-	$effect(() => {
-		cargar();
-	});
+	// onMount y no $effect: esto tiene que correr UNA vez, al abrir el panel.
+	// Con $effect se volvia a ejecutar solo (se vieron seis llamadas seguidas en
+	// el mismo instante), y como abajo todo cuelga de {#if cargando}, cada
+	// vuelta desmontaba y volvia a montar el arbol entero: el formulario de
+	// vendedor que estuviera abierto se perdia a media escritura.
+	onMount(cargar);
 
 	async function cargar() {
 		cargando = true;
@@ -71,7 +78,7 @@
 		try {
 			const sesion = await verificarSesion();
 			if (!sesion) {
-				await goto('/');
+				await goto('/entrar');
 				return;
 			}
 		} catch (fallo) {
@@ -104,13 +111,13 @@
 	/** Lo mismo que sesionVencida, para el hijo, que no devuelve el codigo. */
 	function expiro() {
 		cerrarSesion();
-		goto('/');
+		goto('/entrar');
 	}
 
 	async function sesionVencida(estado: number): Promise<boolean> {
 		if (estado !== 401) return false;
 		cerrarSesion();
-		await goto('/');
+		await goto('/entrar');
 		return true;
 	}
 
@@ -281,7 +288,10 @@
 
 <main>
 	<div class="env">
-		{#if cargando}
+		<!-- Solo la PRIMERA carga tapa la pantalla. Si se recarga el perfil con
+		     el panel ya abierto, se deja lo que hay: si no, se desmonta todo lo
+		     de abajo y lo que estuviera escrito a medias se pierde. -->
+		{#if cargando && !perfil}
 			<p class="cargando">Cargando tu panel...</p>
 		{:else if error}
 			<div class="aviso" role="alert">
@@ -425,6 +435,8 @@
 
 			{#if esAdmin}
 				<PanelAdmin alExpirarSesion={expiro} />
+			{:else if esVendedor}
+				<PanelVendedor alExpirarSesion={expiro} />
 			{:else}
 				<div class="resumen">
 					{#each resumen as tarjeta}

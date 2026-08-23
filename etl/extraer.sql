@@ -55,25 +55,48 @@ SELECT jsonb_build_object(
     ),
 
     -- Las caracteristicas van como arreglo de {nombre, valor, unidad} y no
-    -- como un objeto de nombre a valor. Una caracteristica de tipo lista se
-    -- repite, y un objeto no puede tener la misma llave dos veces.
+    -- como un objeto de nombre a valor: dos productos de la misma categoria no
+    -- traen las mismas llaves, y un objeto obligaria a preguntar por cada una.
     --
     -- La unidad sale de la definicion, no del valor: en el relacional se dice
     -- una vez que la RAM se mide en GB y aqui se copia a cada entrada, para
     -- que quien lea el documento no tenga que ir a buscarla.
     --
-    -- El orden del arreglo es el orden. Se ordena por id_caracteristica, que
-    -- es estable, y en segundo lugar por el id de la fila, para que los
-    -- elementos de una lista salgan siempre en la misma secuencia.
+    -- EL VALOR SALE CON SU TIPO, no como texto. En PostgreSQL la columna es
+    -- text para los cuatro tipos a la vez, porque una sola tabla no puede
+    -- tener una columna por tipo; pero eso es una atadura de SQL y Mongo no la
+    -- hereda. Se convierte aqui, una vez al escribir, y no en cada consulta:
+    -- asi "Nucleos" se puede comparar y sumar como numero de verdad.
+    --
+    -- Y una caracteristica de tipo lista sale como UNA entrada con un array
+    -- adentro, no como cinco entradas repetidas. Las filas repetidas son como
+    -- vive en el relacional por la 1FN; un documento si puede guardar varios
+    -- valores en un campo. De ahi el GROUP BY.
+    --
+    -- El orden del arreglo es el orden, y se ordena por id_caracteristica, que
+    -- es estable.
     'caracteristicas_adicionales', (
-        SELECT coalesce(jsonb_agg(jsonb_build_object(
-                   'nombre', ca.nombre,
-                   'valor',  pc.valor,
-                   'unidad', ca.unidad
-               ) ORDER BY ca.id_caracteristica, pc.id_producto_caracteristica), '[]'::jsonb)
-        FROM producto_caracteristica pc
-        JOIN caracteristica ca ON ca.id_caracteristica = pc.id_caracteristica
-        WHERE pc.id_producto = p.id_producto
+        SELECT coalesce(jsonb_agg(x.entrada ORDER BY x.orden), '[]'::jsonb)
+        FROM (
+            SELECT ca.id_caracteristica AS orden,
+                   jsonb_build_object(
+                       'nombre', ca.nombre,
+                       'valor',  CASE td.tipo_dato
+                           WHEN 'lista'    THEN jsonb_agg(to_jsonb(pc.valor)
+                                                ORDER BY pc.id_producto_caracteristica)
+                           WHEN 'entero'   THEN to_jsonb((array_agg(pc.valor))[1]::bigint)
+                           WHEN 'decimal'  THEN to_jsonb((array_agg(pc.valor))[1]::numeric)
+                           WHEN 'booleano' THEN to_jsonb((array_agg(pc.valor))[1]::boolean)
+                           ELSE                 to_jsonb((array_agg(pc.valor))[1])
+                       END,
+                       'unidad', ca.unidad
+                   ) AS entrada
+            FROM producto_caracteristica pc
+            JOIN caracteristica ca ON ca.id_caracteristica = pc.id_caracteristica
+            JOIN tipo_dato      td ON td.id_tipo_dato      = ca.id_tipo_dato
+            WHERE pc.id_producto = p.id_producto
+            GROUP BY ca.id_caracteristica, ca.nombre, ca.unidad, td.tipo_dato
+        ) x
     ),
 
     -- Las variantes son parte del producto: no se consultan solas y son pocas.
@@ -85,23 +108,54 @@ SELECT jsonb_build_object(
                    'id_producto_variante', pv.id_producto_variante,
                    'nombre_variante',      pv.nombre_variante,
                    'precio',               pv.precio::text,
+
+                   -- Cuantas unidades quedan. Va aqui porque el catalogo se lee
+                   -- de Mongo: sin esto, ensenar "agotado" o filtrar por
+                   -- disponible obligaria a una consulta a PostgreSQL por cada
+                   -- producto de la pagina.
+                   --
+                   -- Es una COPIA, nunca la verdad. Quien decide si alcanza es
+                   -- PostgreSQL dentro de la transaccion de la compra; si se
+                   -- decidiera con este numero, dos personas comprarian la
+                   -- ultima unidad. Aqui sirve para pintar, no para vender.
+                   --
+                   -- Una variante sin fila de inventario todavia no tiene
+                   -- mercaderia: sale en 0, no en nulo.
+                   'stock', (
+                       SELECT coalesce(inv.stock, 0)
+                       FROM inventario inv
+                       WHERE inv.id_producto_mongo          = p.id_producto
+                         AND inv.id_producto_variante_mongo = pv.id_producto_variante
+                   ),
                    'descripcion',          pv.descripcion,
                    'fecha_creacion',       pv.fecha_creacion,
                    'estado',               ev.estado_variante_nombre,
                    -- Lo mismo para la variante, contra su propia tabla de
-                   -- definiciones: a una variante se le pregunta talla y color,
-                   -- no procesador.
+                   -- definiciones y con las mismas dos reglas: el valor con su
+                   -- tipo, y una lista en una sola entrada.
                    'caracteristicas_adicionales', (
-                       SELECT coalesce(jsonb_agg(jsonb_build_object(
-                                  'nombre', cv.nombre,
-                                  'valor',  pvc.valor,
-                                  'unidad', cv.unidad
-                              ) ORDER BY cv.id_caracteristica,
-                                         pvc.id_producto_variante_caracteristica_variante), '[]'::jsonb)
-                       FROM producto_variante_caracteristica_variante pvc
-                       JOIN caracteristica_variante cv
-                            ON cv.id_caracteristica = pvc.id_caracteristica_variante
-                       WHERE pvc.id_producto_variante = pv.id_producto_variante
+                       SELECT coalesce(jsonb_agg(y.entrada ORDER BY y.orden), '[]'::jsonb)
+                       FROM (
+                           SELECT cv.id_caracteristica AS orden,
+                                  jsonb_build_object(
+                                      'nombre', cv.nombre,
+                                      'valor',  CASE tdv.tipo_dato
+                                          WHEN 'lista'    THEN jsonb_agg(to_jsonb(pvc.valor)
+                                               ORDER BY pvc.id_producto_variante_caracteristica_variante)
+                                          WHEN 'entero'   THEN to_jsonb((array_agg(pvc.valor))[1]::bigint)
+                                          WHEN 'decimal'  THEN to_jsonb((array_agg(pvc.valor))[1]::numeric)
+                                          WHEN 'booleano' THEN to_jsonb((array_agg(pvc.valor))[1]::boolean)
+                                          ELSE                 to_jsonb((array_agg(pvc.valor))[1])
+                                      END,
+                                      'unidad', cv.unidad
+                                  ) AS entrada
+                           FROM producto_variante_caracteristica_variante pvc
+                           JOIN caracteristica_variante cv
+                                ON cv.id_caracteristica = pvc.id_caracteristica_variante
+                           JOIN tipo_dato tdv ON tdv.id_tipo_dato = cv.id_tipo_dato
+                           WHERE pvc.id_producto_variante = pv.id_producto_variante
+                           GROUP BY cv.id_caracteristica, cv.nombre, cv.unidad, tdv.tipo_dato
+                       ) y
                    ),
                    'imagenes', (
                        SELECT coalesce(jsonb_agg(ip.imagen_producto_url

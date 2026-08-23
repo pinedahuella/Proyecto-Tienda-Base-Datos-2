@@ -82,12 +82,28 @@ function estadoEn(producto, t) {
             descripcion:          v.descripcion
         }));
 
-    return {
+    const foto = {
         nombre:      p ? p.nombre : null,
         descripcion: p ? p.descripcion : null,
         categoria:   c ? { nombre: c.nombre, porcentaje_comision: c.porcentaje_comision } : null,
         variantes:   variantes
     };
+
+    // Las caracteristicas van en la foto, pero NO tienen historial: sus tablas
+    // guardan el valor de hoy y nada mas. Se ponen las de hoy en todas las
+    // fotos, y eso tiene una consecuencia buena: como son iguales en todas,
+    // diferencias() nunca las ve cambiar, asi que salen enteras en el evento de
+    // creacion y jamas aparecen en "cambios".
+    //
+    // Eso es lo honesto con lo que hay. El dia que existan tablas de historial
+    // para producto_caracteristica, aqui se lee ese historial y entonces si
+    // pueden aparecer como modificacion.
+    if (producto.caracteristicas_adicionales &&
+        producto.caracteristicas_adicionales.length > 0) {
+        foto.caracteristicas_adicionales = producto.caracteristicas_adicionales;
+    }
+
+    return foto;
 }
 
 // Los campos del estado que cambiaron entre una fecha y la siguiente.
@@ -325,13 +341,31 @@ if (escrituraEventos.length > 0) {
 // coleccion terminaria con 97 productos y arrancar.ps1, que compara cuentas,
 // diria que todo esta al dia porque le sobran.
 //
-// PostgreSQL es el dueno: lo que no esta alla, se va.
+// PERO no todo lo de estas colecciones sale de PostgreSQL. Un producto que
+// publica un vendedor nace SOLO en Mongo (POST /vendedor/productos) y no tiene
+// fila en el relacional: si se borrara "todo lo que no esta alla", la primera
+// corrida del ETL se llevaria lo que la gente publico.
+//
+// Por eso el ETL solo manda sobre SU tramo: del 1 hasta el id mas alto que
+// trajo de PostgreSQL. Lo de mas arriba lo creo la aplicacion, y ahi el ETL no
+// entra ni para borrar ni para escribir.
 const idsProductos  = productos.map(p => p.id_producto);
 const idsCategorias = categorias.map(c => c.id_categoria);
 
-const sobranProductos  = db.productos.deleteMany({ _id: { $nin: idsProductos } }).deletedCount;
-const sobranEventos    = db.productos_eventos.deleteMany({ id_producto: { $nin: idsProductos } }).deletedCount;
-const sobranCategorias = db.categorias.deleteMany({ _id: { $nin: idsCategorias } }).deletedCount;
+const topeProductos  = idsProductos.length  ? Math.max.apply(null, idsProductos)  : 0;
+const topeCategorias = idsCategorias.length ? Math.max.apply(null, idsCategorias) : 0;
+
+const sobranProductos = db.productos.deleteMany({
+    _id: { $nin: idsProductos, $lte: topeProductos }
+}).deletedCount;
+
+const sobranEventos = db.productos_eventos.deleteMany({
+    id_producto: { $nin: idsProductos, $lte: topeProductos }
+}).deletedCount;
+
+const sobranCategorias = db.categorias.deleteMany({
+    _id: { $nin: idsCategorias, $lte: topeCategorias }
+}).deletedCount;
 
 // El unico indice que hace falta. La reconstruccion pide los eventos de un
 // producto hasta una fecha y los ordena por fecha: con este indice la base
@@ -349,7 +383,7 @@ db.categorias.createIndex({ nombre: 1 });
 
 const sobrantes = sobranProductos + sobranCategorias + sobranEventos;
 if (sobrantes > 0) {
-    print('borrados por no existir ya en PostgreSQL: ' +
+    print('borrados del tramo del ETL (1..' + topeProductos + '), por no existir ya en PostgreSQL: ' +
           sobranProductos + ' producto(s), ' +
           sobranCategorias + ' categoria(s), ' +
           sobranEventos + ' evento(s)');

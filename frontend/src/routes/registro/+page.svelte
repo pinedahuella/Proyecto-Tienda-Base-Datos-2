@@ -192,7 +192,7 @@
 		// El registro no abre sesion (no devuelve cookie), asi que toca
 		// iniciarla. Se avisa por la URL para que la pagina de acceso pueda
 		// decir que la cuenta quedo creada.
-		await goto('/?registrado=1');
+		await goto('/entrar?registrado=1');
 	}
 </script>
 
@@ -358,7 +358,7 @@
 				</button>
 			</form>
 
-			<p class="pie-form">Ya tienes cuenta? <a href="/">Inicia sesion</a></p>
+			<p class="pie-form">Ya tienes cuenta? <a href="/entrar">Inicia sesion</a></p>
 		</section>
 	</div>
 </main>

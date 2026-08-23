@@ -583,7 +583,15 @@ export class ProductosVendedorService {
 
       // "hasta ese dia completo": el limite es la medianoche del dia
       // siguiente, igual que en GET /direccion-usuario/historial.
-      const fechaLimite = new Date(`${fecha}T00:00:00.000Z`);
+      //
+      // El dia se cuenta en la zona de Guatemala (-06:00), no en UTC. Con UTC
+      // el corte caia seis horas antes: un producto creado a las 21:45 del 22
+      // se guarda como 03:45Z del 23, asi que preguntar por el 22 contestaba
+      // "el producto no existia en esa fecha" el mismo dia en que se publico.
+      // Cualquier cosa hecha despues de las 6 de la tarde caia en el dia
+      // siguiente. Guatemala no cambia de hora, asi que -06:00 vale todo el
+      // ano y no hace falta una libreria de zonas.
+      const fechaLimite = new Date(`${fecha}T00:00:00.000-06:00`);
       fechaLimite.setUTCDate(fechaLimite.getUTCDate() + 1);
 
       const resultado = await mongoDb

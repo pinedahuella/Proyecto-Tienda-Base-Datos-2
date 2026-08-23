@@ -546,14 +546,21 @@ $catEnMongo = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.categoria
 $catEnPostgres = ("SELECT count(*) FROM categorias;" |
     docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
 
+$topEnPostgres = ("SELECT COALESCE(max(id_producto), 0) FROM productos;" |
+    docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
 # Contar no alcanza: si los id se renumeran, la cuenta queda igual y el ETL
 # se saltaria dejando en Mongo los documentos con los id viejos. El _id de
 # un producto ES su id_producto, asi que comparar el mas alto de cada lado
-# delata el cambio. Sin comillas en la consulta: PowerShell se las come.
-$topEnMongo = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.find().sort({_id:-1}).limit(1).toArray().map(d=>d._id)[0]||0'") 2>&1 | Out-String).Trim()
-
-$topEnPostgres = ("SELECT COALESCE(max(id_producto), 0) FROM productos;" |
-    docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+# delata el cambio.
+#
+# Se mira SOLO el tramo del ETL (los id que vienen de PostgreSQL). Por
+# encima de ese tope estan los productos que publico un vendedor, que solo
+# existen en Mongo: contarlos aqui haria que el ETL se creyera desfasado y
+# volviera a correr en cada arranque. Sin comillas en la consulta:
+# PowerShell se las come.
+$consultaTope = "--eval 'db.productos.find({_id:{`$lte:$topEnPostgres}}).sort({_id:-1}).limit(1).toArray().map(d=>d._id)[0]||0'"
+$topEnMongo = (docker exec mesh-mongo sh -c (Comando-Mongo $consultaTope) 2>&1 | Out-String).Trim()
 
 # Si una de las dos cuentas no salio, se corre el ETL igual. Es idempotente, y
 # saltarselo por no poder contar dejaria el catalogo a medias sin avisar.

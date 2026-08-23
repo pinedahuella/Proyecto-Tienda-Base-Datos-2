@@ -1,164 +1,385 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
-	import { guardarSesion } from '$lib/sesion';
-	import { conJson, pedir } from '$lib/api';
-
-	// La pagina de registro manda aqui con ?registrado=1 despues de crear la
-	// cuenta: el registro no abre sesion, asi que hay que iniciarla.
-	let recienRegistrado = $derived(page.url.searchParams.get('registrado') === '1');
+	import { pedir } from '$lib/api';
 
 	/**
-	 * identificador es el correo O el usuario, indistintamente: el backend
-	 * revisa contra los dos y decide cual es. Por eso este campo no valida
-	 * formato de correo, solo que traiga algo; si validara, no dejaria entrar
-	 * a quien escriba su nombre de usuario.
+	 * El catalogo. Es la pagina de inicio y es publica: GET /productos no pide
+	 * la cookie de sesion, asi que se puede navegar sin cuenta.
+	 *
+	 * Todo el filtrado lo hace el backend. Aqui no se filtra en memoria: si se
+	 * hiciera, un filtro solo alcanzaria a los productos ya descargados y
+	 * mentiria en cuanto haya mas de una tanda.
 	 */
-	let identificador = $state('');
-	let contrasena = $state('');
-	let verContrasena = $state(false);
-	let entrando = $state(false);
-	let errorGeneral = $state('');
-	let errores = $state<{ identificador?: string; contrasena?: string }>({});
 
-	function validar() {
-		const nuevos: typeof errores = {};
-
-		// Los mismos mensajes que devuelve el backend en su 400
-		if (!identificador.trim()) {
-			nuevos.identificador = 'El correo electronico o el usuario es obligatorio';
-		}
-		if (!contrasena) {
-			nuevos.contrasena = 'La contrasena es obligatoria';
-		}
-
-		errores = nuevos;
-		return Object.keys(nuevos).length === 0;
+	interface Variante {
+		id_producto_variante: number;
+		nombre_variante: string;
+		precio: { $numberDecimal: string } | string | number;
+		descripcion: string | null;
+		estado: string;
+		imagenes: string[];
+		caracteristicas_adicionales?: Caracteristica[];
 	}
 
-	async function entrar(evento: SubmitEvent) {
-		evento.preventDefault();
-		errorGeneral = '';
-		if (!validar()) return;
+	interface Caracteristica {
+		nombre: string;
+		valor: string | number | boolean | string[];
+		unidad: string | null;
+	}
 
-		entrando = true;
+	interface Producto {
+		_id: number;
+		nombre: string;
+		descripcion: string | null;
+		estado: string;
+		vendedor: { id_usuario: number; usuario: string; nombre: string; apellido: string };
+		categoria: { id_categoria: number; nombre: string; categoria_padre: string | null };
+		variantes: Variante[];
+		caracteristicas_adicionales?: Caracteristica[];
+	}
 
-		const respuesta = await pedir<{ correo_electronico: string }>(
-			'/usuario/login',
-			conJson('POST', { identificador: identificador.trim(), contrasena })
-		);
+	interface Tanda {
+		productos: Producto[];
+		siguiente_cursor: number | null;
+	}
 
-		entrando = false;
+	/**
+	 * Las categorias van escritas aqui a proposito, por ahora. La unica ruta que
+	 * las lista es /vendedor/categorias, que pide sesion de vendedor, y esta
+	 * pagina es publica. Cuando exista una ruta publica de categorias, esta
+	 * lista se cambia por esa llamada y no hay que tocar nada mas.
+	 */
+	const CATEGORIAS = [
+		{ id: 20, nombre: 'Accesorios de computadora' },
+		{ id: 16, nombre: 'Audifonos' },
+		{ id: 12, nombre: 'Botas' },
+		{ id: 3, nombre: 'Camisas' },
+		{ id: 25, nombre: 'Ciclismo' },
+		{ id: 7, nombre: 'Cocina' },
+		{ id: 5, nombre: 'Computadoras' },
+		{ id: 22, nombre: 'Electrodomesticos de cocina' },
+		{ id: 24, nombre: 'Fitness' },
+		{ id: 28, nombre: 'Futbol' },
+		{ id: 21, nombre: 'Iluminacion' },
+		{ id: 27, nombre: 'Libros de texto' },
+		{ id: 29, nombre: 'Literatura' },
+		{ id: 19, nombre: 'Monitores' },
+		{ id: 10, nombre: 'Pantalones' },
+		{ id: 13, nombre: 'Sandalias' },
+		{ id: 18, nombre: 'Telefonos' },
+		{ id: 14, nombre: 'Tenis' },
+		{ id: 9, nombre: 'Vestidos' }
+	];
 
-		// El 401 sale como aviso general y no debajo de un campo a proposito:
-		// el backend manda el mismo mensaje si el identificador no existe, si
-		// la contrasena no coincide o si la cuenta esta suspendida, para no
-		// delatar cual de las tres fue. Marcar un campo lo delataria igual.
-		if (!respuesta.ok || !respuesta.payload) {
-			errorGeneral = respuesta.mensaje;
-			return;
+	/** Nombres de caracteristica para el desplegable del filtro dinamico. */
+	const CARACTERISTICAS = [
+		'Marca',
+		'Modelo',
+		'Pais de origen',
+		'Tipo de producto',
+		'Procesador',
+		'Memoria RAM',
+		'Talla',
+		'Color',
+		'Material',
+		'Contenido del paquete'
+	];
+
+	const POR_TANDA = 12;
+
+	let productos = $state<Producto[]>([]);
+	let cursor = $state<number | null>(null);
+	let cargando = $state(false);
+	let trayendoMas = $state(false);
+	let error = $state('');
+	let primeraVez = $state(true);
+
+	// Los filtros
+	let nombre = $state('');
+	let idCategoria = $state('');
+	let precioMin = $state('');
+	let precioMax = $state('');
+	let caracNombre = $state('');
+	let caracValor = $state('');
+
+	/** La URL que se le pide al backend. Se arma sola con lo que este puesto. */
+	function consulta(despuesDe: number | null): string {
+		const p = new URLSearchParams();
+		p.set('limite', String(POR_TANDA));
+		if (despuesDe !== null) p.set('despues_de', String(despuesDe));
+		if (nombre.trim()) p.set('nombre', nombre.trim());
+		if (idCategoria) p.set('id_categoria', idCategoria);
+		if (precioMin.trim()) p.set('precio_min', precioMin.trim());
+		if (precioMax.trim()) p.set('precio_max', precioMax.trim());
+		// El filtro dinamico: el NOMBRE de la caracteristica es el nombre del
+		// parametro. Por eso hace falta que los dos campos vengan llenos.
+		if (caracNombre.trim() && caracValor.trim()) {
+			p.set(caracNombre.trim(), caracValor.trim());
 		}
+		return `/productos?${p.toString()}`;
+	}
 
-		// La sesion de verdad es la cookie mesh_token que acaba de dejar el
-		// backend, y es httpOnly: no se puede leer desde aqui. Esto solo
-		// guarda el correo para que el panel sepa a quien saludar.
-		guardarSesion(respuesta.payload.correo_electronico);
-		await goto('/panel');
+	/** Vuelve a empezar: cambio un filtro, la lista anterior ya no vale. */
+	async function buscar() {
+		cargando = true;
+		error = '';
+		const r = await pedir<Tanda>(consulta(null));
+		if (r.ok && r.payload) {
+			productos = r.payload.productos;
+			cursor = r.payload.siguiente_cursor;
+		} else {
+			productos = [];
+			cursor = null;
+			// estado 0 quiere decir que la peticion ni salio: el backend esta apagado
+			error = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+		}
+		cargando = false;
+		primeraVez = false;
+	}
+
+	/** La siguiente tanda, sin perder lo que ya se mostro. */
+	async function verMas() {
+		if (cursor === null || trayendoMas) return;
+		trayendoMas = true;
+		const r = await pedir<Tanda>(consulta(cursor));
+		if (r.ok && r.payload) {
+			productos = [...productos, ...r.payload.productos];
+			cursor = r.payload.siguiente_cursor;
+		} else {
+			error = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+		}
+		trayendoMas = false;
+	}
+
+	/**
+	 * Al escribir no se busca en cada tecla: se espera a que la persona pare.
+	 * Sin esto, "laptop" son seis consultas y las respuestas pueden llegar
+	 * desordenadas, dejando en pantalla el resultado de "lapt".
+	 */
+	let temporizador: ReturnType<typeof setTimeout> | undefined;
+	function alEscribir() {
+		clearTimeout(temporizador);
+		temporizador = setTimeout(buscar, 350);
+	}
+
+	function limpiar() {
+		nombre = '';
+		idCategoria = '';
+		precioMin = '';
+		precioMax = '';
+		caracNombre = '';
+		caracValor = '';
+		buscar();
+	}
+
+	let hayFiltro = $derived(
+		Boolean(
+			nombre.trim() ||
+				idCategoria ||
+				precioMin.trim() ||
+				precioMax.trim() ||
+				(caracNombre.trim() && caracValor.trim())
+		)
+	);
+
+	onMount(buscar);
+
+	// ---------- lo que se ensena de cada producto ----------
+
+	/** El precio llega como Decimal128 de Mongo, no como numero. */
+	function aNumero(precio: Variante['precio']): number {
+		if (typeof precio === 'number') return precio;
+		if (typeof precio === 'string') return Number(precio);
+		return Number(precio?.$numberDecimal ?? 0);
+	}
+
+	function quetzales(n: number): string {
+		return 'Q' + n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+	}
+
+	/**
+	 * Un producto no tiene un precio: tiene el de cada variante. Se ensena el
+	 * rango, y un solo numero cuando todas cuestan lo mismo.
+	 */
+	function precio(p: Producto): string {
+		const precios = p.variantes.map((v) => aNumero(v.precio)).filter((n) => n > 0);
+		if (precios.length === 0) return 'Sin precio';
+		const min = Math.min(...precios);
+		const max = Math.max(...precios);
+		return min === max ? quetzales(min) : `${quetzales(min)} - ${quetzales(max)}`;
+	}
+
+	function portada(p: Producto): string | null {
+		for (const v of p.variantes) {
+			if (v.imagenes && v.imagenes.length > 0) return v.imagenes[0];
+		}
+		return null;
+	}
+
+	/**
+	 * Tres caracteristicas para la tarjeta. Se saltan las de tipo lista
+	 * repetidas: ensenar "Etiquetas" tres veces no dice nada.
+	 */
+	function resumen(p: Producto): Caracteristica[] {
+		const vistas = new Set<string>();
+		const salida: Caracteristica[] = [];
+		for (const c of p.caracteristicas_adicionales ?? []) {
+			if (vistas.has(c.nombre)) continue;
+			vistas.add(c.nombre);
+			salida.push(c);
+			if (salida.length === 3) break;
+		}
+		return salida;
+	}
+
+	function conUnidad(c: Caracteristica): string {
+		// Una caracteristica de tipo lista trae su valor como array
+		const texto = Array.isArray(c.valor) ? c.valor.join(', ') : String(c.valor);
+		return c.unidad ? `${texto} ${c.unidad}` : texto;
 	}
 </script>
 
 <svelte:head>
-	<title>Mesh · Inicia sesion</title>
+	<title>Mesh</title>
 </svelte:head>
 
 <Cabecera />
 
 <main>
-	<div class="env columnas">
-		<section class="acceso">
-			<h1>Inicia sesion</h1>
-			<p class="entrada">Entra para ver tus pedidos y administrar tu tienda.</p>
+	<div class="env">
+		<div class="intro">
+			<h1>El catalogo</h1>
+			<p>
+				{#if cargando}
+					Buscando...
+				{:else if error}
+					&nbsp;
+				{:else}
+					{productos.length}
+					{productos.length === 1 ? 'producto' : 'productos'}
+					{hayFiltro ? 'que coinciden' : 'en la tienda'}{cursor !== null ? ' y hay mas' : ''}
+				{/if}
+			</p>
+		</div>
 
-			{#if recienRegistrado}
-				<p class="creada" role="status">Tu cuenta quedo creada. Ya puedes entrar.</p>
+		<!-- Los filtros. Cada cambio vuelve a preguntarle al backend -->
+		<section class="filtros" aria-label="Filtros">
+			<div class="campo ancho">
+				<label for="f-nombre">Buscar</label>
+				<input
+					id="f-nombre"
+					type="text"
+					placeholder="Nombre del producto"
+					bind:value={nombre}
+					oninput={alEscribir}
+				/>
+			</div>
+
+			<div class="campo">
+				<label for="f-cat">Categoria</label>
+				<select id="f-cat" bind:value={idCategoria} onchange={buscar}>
+					<option value="">Todas</option>
+					{#each CATEGORIAS as c (c.id)}
+						<option value={String(c.id)}>{c.nombre}</option>
+					{/each}
+				</select>
+			</div>
+
+			<div class="campo corto">
+				<label for="f-min">Precio desde</label>
+				<input id="f-min" type="number" min="0" step="0.01" placeholder="0" bind:value={precioMin} oninput={alEscribir} />
+			</div>
+
+			<div class="campo corto">
+				<label for="f-max">hasta</label>
+				<input id="f-max" type="number" min="0" step="0.01" placeholder="Sin tope" bind:value={precioMax} oninput={alEscribir} />
+			</div>
+
+			<div class="campo">
+				<label for="f-car">Caracteristica</label>
+				<select id="f-car" bind:value={caracNombre} onchange={buscar}>
+					<option value="">Cualquiera</option>
+					{#each CARACTERISTICAS as c (c)}
+						<option value={c}>{c}</option>
+					{/each}
+				</select>
+			</div>
+
+			<div class="campo">
+				<label for="f-val">que valga</label>
+				<input
+					id="f-val"
+					type="text"
+					placeholder="Tecno Sur, 16, Negro..."
+					bind:value={caracValor}
+					oninput={alEscribir}
+					disabled={!caracNombre}
+				/>
+			</div>
+
+			{#if hayFiltro}
+				<button type="button" class="limpiar" onclick={limpiar}>Quitar filtros</button>
 			{/if}
-
-			{#if errorGeneral}
-				<p class="aviso" role="alert">{errorGeneral}</p>
-			{/if}
-
-			<form onsubmit={entrar} novalidate>
-				<div class="campo">
-					<label for="identificador">Correo electronico o usuario</label>
-					<!-- type text y no email: aqui tambien vale el nombre de usuario,
-					     y con type email el navegador rechazaria uno sin arroba -->
-					<input
-						id="identificador"
-						type="text"
-						autocomplete="username"
-						placeholder="tu@correo.com o tu usuario"
-						bind:value={identificador}
-						aria-invalid={errores.identificador ? 'true' : undefined}
-						aria-describedby={errores.identificador ? 'error-identificador' : undefined}
-					/>
-					{#if errores.identificador}
-						<p class="error" id="error-identificador">{errores.identificador}</p>
-					{/if}
-				</div>
-
-				<div class="campo">
-					<label for="contrasena">Contrasena</label>
-					<div class="con-ojo">
-						<input
-							id="contrasena"
-							type={verContrasena ? 'text' : 'password'}
-							autocomplete="current-password"
-							placeholder="Al menos 8 caracteres"
-							bind:value={contrasena}
-							aria-invalid={errores.contrasena ? 'true' : undefined}
-							aria-describedby={errores.contrasena ? 'error-contrasena' : undefined}
-						/>
-						<button
-							type="button"
-							class="ojo"
-							onclick={() => (verContrasena = !verContrasena)}
-							aria-label={verContrasena ? 'Ocultar la contrasena' : 'Mostrar la contrasena'}
-							title={verContrasena ? 'Ocultar' : 'Mostrar'}
-						>
-							{#if verContrasena}
-								<!-- ojo tachado: la contrasena esta a la vista -->
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-									<path d="M3 3l18 18" stroke-linecap="round" />
-									<path
-										d="M10.6 5.2A9.6 9.6 0 0 1 12 5c5 0 9 4.5 10 7a15 15 0 0 1-3.3 4.2M6.4 6.5C4.2 8 2.6 10.1 2 12c1 2.5 5 7 10 7a9.7 9.7 0 0 0 4.4-1"
-										stroke-linecap="round"
-									/>
-									<path d="M9.9 10a3 3 0 0 0 4.2 4.2" stroke-linecap="round" />
-								</svg>
-							{:else}
-								<!-- ojo abierto: la contrasena esta oculta -->
-								<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
-									<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z" stroke-linejoin="round" />
-									<circle cx="12" cy="12" r="3" />
-								</svg>
-							{/if}
-						</button>
-					</div>
-					{#if errores.contrasena}
-						<p class="error" id="error-contrasena">{errores.contrasena}</p>
-					{/if}
-				</div>
-
-				<button class="entrar" type="submit" disabled={entrando}>
-					{entrando ? 'Entrando' : 'Entrar'}
-				</button>
-			</form>
-
-			<p class="pie-form">No tienes cuenta? <a href="/registro">Crea una</a></p>
 		</section>
 
+		{#if error}
+			<p class="error">{error}</p>
+		{/if}
+
+		{#if cargando && primeraVez}
+			<p class="vacio">Cargando el catalogo...</p>
+		{:else if productos.length === 0 && !error}
+			<p class="vacio">
+				Ningun producto coincide con lo que buscaste.
+				{#if hayFiltro}<button type="button" class="enlace" onclick={limpiar}>Quitar los filtros</button>{/if}
+			</p>
+		{/if}
+
+		<div class="rejilla">
+			{#each productos as p (p._id)}
+				<a class="tarjeta" href="/producto/{p._id}">
+					<div class="foto">
+						{#if portada(p)}
+							<img src={portada(p)} alt={p.nombre} loading="lazy" />
+						{:else}
+							<span class="sin-foto">Sin imagen</span>
+						{/if}
+					</div>
+
+					<div class="cuerpo">
+						<span class="categoria">{p.categoria.nombre}</span>
+						<h2>{p.nombre}</h2>
+						<p class="desc">{p.descripcion ?? ''}</p>
+
+						{#if resumen(p).length > 0}
+							<ul class="rasgos">
+								{#each resumen(p) as c (c.nombre)}
+									<li><span>{c.nombre}</span> {conUnidad(c)}</li>
+								{/each}
+							</ul>
+						{/if}
+
+						<div class="pie-tarjeta">
+							<strong class="precio">{precio(p)}</strong>
+							<span class="variantes">
+								{p.variantes.length}
+								{p.variantes.length === 1 ? 'variante' : 'variantes'}
+							</span>
+						</div>
+					</div>
+				</a>
+			{/each}
+		</div>
+
+		{#if cursor !== null && productos.length > 0}
+			<div class="mas">
+				<button type="button" onclick={verMas} disabled={trayendoMas}>
+					{trayendoMas ? 'Trayendo...' : 'Ver mas productos'}
+				</button>
+			</div>
+		{/if}
 	</div>
 </main>
 
@@ -166,62 +387,59 @@
 
 <style>
 	main {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		padding-top: 56px;
-		padding-bottom: 56px;
+		padding: 2.5rem 0 4rem;
 	}
 
-	.columnas {
-		display: flex;
-		justify-content: center;
+	.intro {
+		margin-bottom: 1.75rem;
 	}
 
-	/* ── formulario ── */
+	.intro p {
+		color: var(--gris);
+		margin-top: 0.35rem;
+	}
 
-	/* Fondo solido: la trama de la pagina queda detras, no debajo del texto */
-	.acceso {
-		width: 100%;
-		max-width: 400px;
+	/* ---------- filtros ---------- */
+
+	.filtros {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 0.9rem;
+		padding: 1.1rem;
+		margin-bottom: 2rem;
 		background: var(--blanco);
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
-		padding: 36px 34px 34px;
-	}
-
-	.acceso h1 {
-		margin-bottom: 8px;
-	}
-
-	.entrada {
-		margin-bottom: 30px;
-		color: var(--gris);
-	}
-
-	form {
-		display: flex;
-		flex-direction: column;
-		gap: 18px;
 	}
 
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 7px;
+		gap: 0.3rem;
+		min-width: 150px;
 	}
 
-	label {
-		font-size: 0.92rem;
-		font-weight: 500;
-		color: var(--tinta);
+	.campo.ancho {
+		flex: 1 1 220px;
 	}
 
-	input {
+	.campo.corto {
+		min-width: 110px;
+		max-width: 130px;
+	}
+
+	.campo label {
+		font-size: 0.82rem;
+		color: var(--gris);
+	}
+
+	.filtros input,
+	.filtros select {
 		width: 100%;
-		padding: 11px 13px;
+		padding: 9px 11px;
 		font-family: inherit;
-		font-size: 1rem;
+		font-size: 0.95rem;
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -229,130 +447,213 @@
 		transition: border-color var(--t);
 	}
 
-	input::placeholder {
+	.filtros input:focus,
+	.filtros select:focus {
+		outline: none;
+		border-color: var(--indigo);
+	}
+
+	.filtros input:disabled {
+		background: var(--panel);
 		color: var(--gris-2);
 	}
 
-	input:hover {
-		border-color: var(--gris-2);
-	}
-
-	input:focus {
-		outline: none;
-		border-color: var(--indigo);
-		box-shadow: 0 0 0 3px var(--indigo-cl);
-	}
-
-	input[aria-invalid='true'] {
-		border-color: var(--rojo);
-	}
-
-	/* El ojo va dentro del campo, por eso el input reserva espacio a la derecha */
-	.con-ojo {
-		position: relative;
-	}
-
-	.con-ojo input {
-		padding-right: 44px;
-	}
-
-	.ojo {
-		position: absolute;
-		right: 6px;
-		top: 50%;
-		transform: translateY(-50%);
-		width: 32px;
-		height: 32px;
-		display: grid;
-		place-items: center;
+	.limpiar {
+		border-radius: 999px;
+		padding: 9px 18px;
+		font-family: inherit;
+		font-size: 0.92rem;
+		color: var(--tinta);
 		background: none;
-		border: 0;
+		border: 1px solid var(--linea);
 		border-radius: var(--r);
-		color: var(--gris);
 		cursor: pointer;
-		transition: color var(--t);
+		transition:
+			border-color var(--t),
+			color var(--t);
 	}
 
-	.ojo:hover {
+	.limpiar:hover {
+		border-color: var(--indigo);
+		color: var(--indigo);
+		background: var(--indigo-cl);
+	}
+
+	/* ---------- la rejilla ---------- */
+
+	.rejilla {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+		gap: 1.25rem;
+	}
+
+	.tarjeta {
+		display: flex;
+		flex-direction: column;
+		color: inherit;
+		text-decoration: none;
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+		overflow: hidden;
+		transition: border-color var(--t);
+	}
+
+	.tarjeta:hover {
+		border-color: var(--indigo);
+	}
+
+	.foto {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		aspect-ratio: 4 / 3;
+		background: var(--panel);
+		border-bottom: 1px solid var(--linea);
+	}
+
+	.foto img {
+		width: 100%;
+		height: 100%;
+		object-fit: cover;
+	}
+
+	.sin-foto {
+		font-size: 0.85rem;
+		color: var(--gris-2);
+	}
+
+	.cuerpo {
+		display: flex;
+		flex-direction: column;
+		flex: 1;
+		gap: 0.45rem;
+		padding: 1rem;
+	}
+
+	.categoria {
+		font-size: 0.78rem;
+		letter-spacing: 0.04em;
+		text-transform: uppercase;
 		color: var(--indigo);
 	}
 
-	.ojo svg {
-		width: 19px;
-		height: 19px;
+	.cuerpo h2 {
+		font-size: 1.05rem;
+		line-height: 1.35;
+	}
+
+	.desc {
+		font-size: 0.9rem;
+		color: var(--gris);
+		/* Dos lineas y corta: si no, una descripcion larga descuadra la rejilla */
+		display: -webkit-box;
+		-webkit-line-clamp: 2;
+		line-clamp: 2;
+		-webkit-box-orient: vertical;
+		overflow: hidden;
+	}
+
+	.rasgos {
+		list-style: none;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.35rem;
+		margin-top: 0.15rem;
+	}
+
+	.rasgos li {
+		padding: 3px 8px;
+		font-size: 0.78rem;
+		color: var(--texto);
+		background: var(--panel);
+		border-radius: var(--r);
+	}
+
+	.rasgos span {
+		color: var(--gris-2);
+	}
+
+	.pie-tarjeta {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 0.5rem;
+		margin-top: auto;
+		padding-top: 0.6rem;
+	}
+
+	.precio {
+		font-size: 1.02rem;
+		font-weight: 500;
+		color: var(--tinta);
+	}
+
+	.variantes {
+		font-size: 0.82rem;
+		color: var(--gris);
+	}
+
+	/* ---------- estados ---------- */
+
+	.vacio,
+	.error {
+		padding: 2.5rem 0;
+		text-align: center;
+		color: var(--gris);
 	}
 
 	.error {
-		font-size: 0.88rem;
 		color: var(--rojo);
 	}
 
-	/* Error que no pertenece a ningun campo: credenciales incorrectas, 503,
-	   500 o el backend apagado */
-	.aviso {
-		margin-bottom: 20px;
-		padding: 11px 14px;
-		font-size: 0.92rem;
-		color: var(--rojo);
-		background: var(--off);
-		border: 1px solid var(--rojo);
-		border-radius: var(--r);
-	}
-
-	/* Aviso de que la cuenta se creo, al volver del registro */
-	.creada {
-		margin-bottom: 20px;
-		padding: 11px 14px;
-		font-size: 0.92rem;
-		color: var(--tinta);
-		background: var(--indigo-cl);
-		border: 1px solid var(--indigo);
-		border-radius: var(--r);
-	}
-
-	.pie-form {
-		margin-top: 22px;
-		font-size: 0.92rem;
-		color: var(--gris);
-	}
-
-	.pie-form a {
-		color: var(--indigo);
-		font-weight: 500;
-	}
-
-	/* El boton principal usa el color de la marca, que es lo que se ve en los
-	   dos temas. El texto va del color de la superficie para que contraste. */
-	.entrar {
-		margin-top: 4px;
-		padding: 12px 20px;
+	.enlace {
 		font-family: inherit;
-		font-size: 1rem;
-		font-weight: 500;
+		font-size: inherit;
+		color: var(--indigo);
+		background: none;
+		border: none;
+		padding: 0;
+		cursor: pointer;
+		text-decoration: underline;
+	}
+
+	.mas {
+		display: flex;
+		justify-content: center;
+		margin-top: 2.25rem;
+	}
+
+	.mas button {
+		border-radius: 999px;
+		padding: 11px 28px;
+		font-family: inherit;
+		font-size: 0.98rem;
 		color: var(--blanco);
 		background: var(--indigo);
-		border: 0;
+		border: none;
 		border-radius: var(--r);
 		cursor: pointer;
 		transition: background var(--t);
 	}
 
-	.entrar:hover:not(:disabled) {
+	.mas button:hover:not(:disabled) {
 		background: var(--indigo-os);
 	}
 
-	.entrar:disabled {
+	.mas button:disabled {
 		opacity: 0.6;
-		cursor: progress;
+		cursor: default;
 	}
 
 	@media (max-width: 620px) {
-		main {
-			padding-top: 34px;
-			padding-bottom: 34px;
+		.campo.corto {
+			max-width: none;
+			flex: 1 1 120px;
 		}
-		.acceso {
-			padding: 28px 22px 26px;
+		.rejilla {
+			grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+			gap: 0.9rem;
 		}
 	}
 </style>

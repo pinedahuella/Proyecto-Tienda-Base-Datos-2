@@ -59,6 +59,7 @@ export interface PerfilUsuario extends UsuarioSesion {
  * alcanza. Esconder un boton no protege nada.
  */
 export const ID_ROL_ADMIN = 3;
+export const ID_ROL_VENDEDOR = 2;
 
 export function guardarSesion(correo: string) {
 	if (!browser) return;

@@ -233,14 +233,10 @@ La consulta ya está escrita en `etl/reconstruir.js`.
 Es la laptop (`_id: 2`), recortada a las primeras seis características y sin las
 imágenes de las variantes, que son URLs largas.
 
-**Con una corrección sobre lo que hay en la base ahora mismo.** El ETL que cargó
-estos datos de prueba todavía guarda `valor` siempre como texto (`"10"`,
-`"true"`), copiando tal cual la columna `text` de PostgreSQL. Eso quedó
-pendiente de arreglar: el `valor` debe salir con el tipo nativo de Mongo que le
-corresponda según `tipo_dato` (`Number` para `entero`/`decimal`, `Boolean` para
-`booleano`), no como texto — así lo de abajo ya no obliga a convertir en cada
-consulta. Lo que sigue es cómo debe quedar el documento una vez corregido eso,
-no un calco literal de lo que hay hoy en Mongo.
+El `valor` sale con el tipo que le toca según su `tipo_dato`: `Number` para
+`entero` y `decimal`, `Boolean` para `booleano`, y un array de texto cuando la
+característica es de tipo `lista`. El ETL lo convierte al escribir, una vez, en
+vez de dejarlo en texto y obligar a convertir en cada consulta.
 
 ```json
 {
@@ -453,13 +449,16 @@ listas vacías, porque no se publica en ellas.
 
 ## Las características sí van en los eventos
 
-Los ejemplos de arriba (`"1-1"` a `"1-4"`, `"2-1"` a `"2-3"`) **no traen
-características en ningún evento**, ni en la creación ni en las
-modificaciones. Eso no es a propósito: esos eventos se generaron cargando de
-golpe una cantidad grande de productos de prueba (50 productos, 92 variantes),
-y esa carga se hizo antes de que las características tuvieran su propio
-historial, así que ese pedazo quedó afuera. No es una decisión de diseño, es
-un pendiente.
+**Los eventos de creación ya traen las características.** Los 50 los traen,
+dentro de `datos`, igual que `categoria` y `variantes`. (Los ejemplos `"1-1"` a
+`"1-4"` y `"2-1"` a `"2-3"` de más arriba se copiaron antes de ese cambio y
+todavía no las muestran.)
+
+**Los de modificación no, y ahí sí falta algo de fondo.** Como las
+características no tienen historial en el relacional, el ETL solo conoce las de
+hoy: las escribe iguales en todas las fotos que arma, y por eso salen enteras en
+la creación y nunca aparecen como un cambio. No es que se hayan omitido, es que
+no hay de dónde saber que cambiaron.
 
 Una característica se comporta exactamente igual que `nombre`, `categoria` o
 `variantes`: tiene un valor, ese valor puede cambiar, y cada cambio se guarda.
@@ -483,7 +482,9 @@ historial para `producto_caracteristica` y
 `producto_variante_caracteristica_variante`, del mismo estilo que
 `productos_historial`, `productos_variantes_historial` y
 `categorias_historial` ya tienen. `004_caracteristicas.sql` todavía no lo
-incluye; hace falta agregarlo para que el ETL tenga de dónde sacar el evento.
+incluye. Y eso no se agrega sin decidirlo: esas dos tablas de historial no
+están en el diagrama entidad-relación, y el acuerdo del equipo es que el ER
+manda y no se cambia a media entrega.
 
 Mientras ese historial no exista, reconstruir un producto a una fecha pasada
 sigue devolviendo su nombre, su descripción, sus variantes con el precio de

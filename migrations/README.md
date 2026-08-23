@@ -64,10 +64,16 @@ anterior y la numeracion se lee.
 `003_caracteristicas.sql` no comparte tablas con ningun otro conjunto, asi que
 empieza en 1 sin ponerse de acuerdo con nadie.
 
-La excepcion es `usuarios`: nunca lleva id escrito a mano. Los reparte la
-aplicacion al registrarse y ya vienen salteados. Un vendedor se inserta con
-`ON CONFLICT (correo_electronico) DO NOTHING` y se referencia con un `SELECT` por
-correo.
+**La excepcion son las tablas que tambien escribe la aplicacion**: `usuarios`,
+`direcciones` y `direccion_historial`. Ahi los id los reparte la aplicacion
+cuando alguien se registra o guarda una direccion, asi que caen distintos en
+cada maquina y no se pueden escribir a mano. Se insertan comprobando que la
+fila no exista y se referencian por su llave natural -- el correo, o el usuario
+mas la fecha -- nunca por numero.
+
+Es un error facil de no ver: escribir `id_usuario = 9` funciona en la maquina
+donde ese usuario existe y revienta en cualquier otra con una violacion de
+llave foranea. Solo se nota corriendo las migraciones contra una base vacia.
 
 Todo `INSERT` lleva `ON CONFLICT DO NOTHING`, sin nombrar la restriccion. Estos
 archivos corren en cada arranque y sin eso la segunda corrida falla por llave

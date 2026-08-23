@@ -5,8 +5,9 @@
 	/**
 	 * Cabecera del sitio. Se queda pegada arriba al bajar.
 	 *
-	 * Solo lleva el logotipo. Cuando hay sesion aparecen el correo y el boton de
-	 * salir. No hay menu ni mas botones porque todavia no existen esas paginas.
+	 * Lleva el logotipo, que siempre vuelve al catalogo. Cuando hay sesion
+	 * aparecen el correo y el boton de salir; cuando no la hay, el enlace para
+	 * entrar. No hay menu porque todavia no existen mas paginas.
 	 */
 	let {
 		sesion = null,
@@ -16,12 +17,14 @@
 
 <header>
 	<div class="env barra">
-		<MarcaMesh href={sesion ? '/panel' : '/'} />
+		<MarcaMesh href="/" />
 
 		<div class="cuenta">
 			{#if sesion}
 				<span class="correo">{sesion}</span>
 				<button type="button" class="salir" onclick={alSalir}>Salir</button>
+			{:else}
+				<a class="salir" href="/entrar">Iniciar sesion</a>
 			{/if}
 			<BotonTema />
 		</div>
@@ -57,6 +60,8 @@
 	}
 
 	.salir {
+		display: inline-block;
+		text-decoration: none;
 		padding: 8px 16px;
 		font-family: inherit;
 		font-size: 0.95rem;

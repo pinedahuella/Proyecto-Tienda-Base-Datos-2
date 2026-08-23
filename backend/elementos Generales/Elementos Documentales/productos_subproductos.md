@@ -124,19 +124,25 @@ objeto aquí se parte en varias características: las dimensiones no son
 su unidad. La garantía no es `{ disponible, tipo }`, son `Garantia` (booleano) y
 `Tipo de garantia` (texto).
 
-### Las listas se repiten
+### Una lista es una sola entrada, con un array adentro
 
-Una característica de tipo `lista` aparece **varias veces, con el mismo `nombre`**,
-una entrada por elemento:
+Una característica de tipo `lista` va en **una entrada**, y su `valor` es un array
+de texto:
 
 ```json
-{ "nombre": "Contenido del paquete", "valor": "Telefono",  "unidad": null },
-{ "nombre": "Contenido del paquete", "valor": "Cable USB-C", "unidad": null },
-{ "nombre": "Contenido del paquete", "valor": "Manual",    "unidad": null }
+{ "nombre": "Contenido del paquete", "valor": ["Telefono", "Cable USB-C", "Manual"], "unidad": null }
 ```
 
-No es un error de carga: es como se guarda una lista. Por eso la tabla del
-relacional no tiene una restricción que impida repetir producto y característica.
+En PostgreSQL esa misma lista son varias filas de `producto_caracteristica` con el
+mismo producto y la misma característica: una columna no puede guardar varios
+valores, y por eso esa tabla no tiene una restricción que impida repetirlos. Pero
+esa regla es de SQL. Un documento sí puede guardar varios valores en un campo, así
+que el ETL las agrupa al escribir y aquí llegan juntas.
+
+**Filtrar sigue funcionando igual.** `?Contenido del paquete=Cargador` encuentra el
+producto, porque Mongo compara un campo array contra un valor suelto por
+contención: el `$elemMatch: { nombre, valor }` que ya usa el backend sirve para las
+dos formas sin cambiarle una línea.
 
 ### El orden
 
