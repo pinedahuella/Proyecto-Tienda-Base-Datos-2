@@ -11,14 +11,9 @@ export const LIMITE_PRODUCTOS_MAXIMO = 100;
 
 const REGEX_ENTERO = /^\d+$/;
 const REGEX_PRECIO = /^\d+(\.\d{1,2})?$/;
-/**
- * Nombre de una caracteristica adicional: letras, numeros y guion bajo, con
- * puntos opcionales para entrar un nivel en un campo anidado (por ejemplo
- * memoria_ram.valor). Nunca admite "$": como siempre se antepone
- * "caracteristicas_adicionales.", esto evita que alguien intente inyectar un
- * operador de Mongo a traves del nombre del query param.
- */
-const REGEX_CLAVE_ATRIBUTO = /^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$/;
+
+/** Igual al varchar(100) de caracteristica.nombre / caracteristica_variante.nombre en PostgreSQL. */
+const LONGITUD_MAXIMA_NOMBRE_CARACTERISTICA = 100;
 
 /** limite es opcional: si no viene, se usa el valor por defecto. */
 export function validarLimite(valor: string | undefined): number {
@@ -83,9 +78,20 @@ export function validarPrecio(
   return valor;
 }
 
-/** true si el nombre de un query param es seguro para usar como campo de Mongo. */
-export function esClaveAtributoValida(clave: string): boolean {
-  return REGEX_CLAVE_ATRIBUTO.test(clave);
+/**
+ * true si un nombre de caracteristica es razonable para buscarlo. Ya no hay
+ * que restringir que caracteres trae: el nombre nunca se usa para armar una
+ * ruta de campo de Mongo (eso exigia la restriccion de antes), se compara
+ * como un valor de texto normal dentro de un $elemMatch (`{ nombre: clave }`),
+ * asi que "Memoria RAM" o "Pais de origen" son tan validos como "marca". Solo
+ * se descarta lo que no podria ser un nombre real: vacio, o mas largo que la
+ * columna que lo guarda en PostgreSQL.
+ */
+export function esNombreCaracteristicaValido(clave: string): boolean {
+  const limpio = clave.trim();
+  return (
+    limpio.length > 0 && limpio.length <= LONGITUD_MAXIMA_NOMBRE_CARACTERISTICA
+  );
 }
 
 /**
@@ -107,6 +113,25 @@ export function coercionarValorAtributo(
     return Number(valor);
   }
   return valor;
+}
+
+/**
+ * Arma la condicion de "valor" para el $elemMatch de una caracteristica: si
+ * el texto del query param se pudo convertir a Number o Boolean, busca
+ * contra ese valor convertido Y contra el texto tal cual con $in, porque la
+ * carga actual todavia guarda todo como string (ver
+ * pendientes-etl-caracteristicas.md) y no hay que asumir que ya esta
+ * corregido. Si no se pudo convertir (ya es texto), no hace falta el $in:
+ * son el mismo valor.
+ */
+export function valorParaBuscarCaracteristica(
+  valorCrudo: string,
+): string | number | boolean | { $in: (string | number | boolean)[] } {
+  const valorCoercionado = coercionarValorAtributo(valorCrudo);
+  if (valorCoercionado === valorCrudo) {
+    return valorCrudo;
+  }
+  return { $in: [valorCoercionado, valorCrudo] };
 }
 
 /** Escapa caracteres especiales de regex antes de usar un texto en un $regex. */

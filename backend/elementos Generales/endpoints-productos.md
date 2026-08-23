@@ -55,7 +55,7 @@ catálogo público.
 | `id_vendedor` | entero | No | Igualdad exacta sobre `vendedor.id_usuario` |
 | `precio_min` / `precio_max` | decimal | No | Rango de precio, sobre `variantes[].precio` |
 | `estado_variante` | texto | No | Igualdad exacta sobre `variantes[].estado` |
-| _cualquier otro nombre_ | texto | No | Filtro dinámico sobre `caracteristicas_adicionales` — ver abajo |
+| _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada) — ver abajo |
 
 ### Paginación por cursor: ejemplo
 
@@ -83,67 +83,76 @@ GET /productos?id_categoria=5
 GET /productos?precio_min=100&precio_max=500&estado_variante=activa
 ```
 
-### Filtros dinámicos (características opcionales)
+### Filtros dinámicos (características, del catálogo o personalizadas)
 
-Como las características opcionales (Tabla 1 y Tabla 2 de
-`productos_subproductos.md`: marca, RAM, color, garantía, etc.) cambian
-según la categoría, no tienen un nombre de query param fijo cada una. En su
-lugar: **cualquier query param que no sea uno de los nombres fijos de la
-tabla de arriba se trata como un filtro sobre `caracteristicas_adicionales`**,
-buscándolo tanto en el producto como en cada una de sus variantes.
+`caracteristicas_adicionales` y `caracteristicas_personalizadas` son, las
+dos, un `Array<{ nombre, valor, unidad }>` (ver
+[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)) —
+la primera sale del catálogo de la app, la segunda la escribe quien crea el
+producto, pero comparten exactamente la misma forma. Por eso **cualquier
+query param que no sea uno de los nombres fijos de la tabla de arriba se
+trata como el `nombre` de una característica**, y se busca por igual en las
+cuatro ubicaciones posibles: las dos, tanto del producto como de cada una
+de sus variantes.
 
 ```
-GET /productos?marca=Lenovo
+GET /productos?Marca=Lenovo
 ```
 
-Busca productos donde `caracteristicas_adicionales.marca` sea `"Lenovo"`, **o**
-donde alguna de sus variantes tenga `caracteristicas_adicionales.marca`
-igual a `"Lenovo"`. No hace falta que sea la misma variante que otros
-filtros dinámicos: cada uno se busca por su cuenta, en el producto o en
-cualquier variante.
+Encuentra un producto si en cualquiera de esos cuatro lugares existe una
+entrada `{ nombre: "Marca", valor: "Lenovo", ... }`. No hace falta que sea
+la misma variante que otro filtro dinámico, ni que las dos coincidencias
+vengan del mismo campo (`caracteristicas_adicionales` vs.
+`caracteristicas_personalizadas`): cada filtro se busca por su cuenta.
 
 Se pueden combinar varios a la vez (todos deben cumplirse, cada uno por su
 lado):
 
 ```
-GET /productos?marca=Lenovo&ram=16
+GET /productos?Marca=Lenovo&Memoria%20RAM=16
 ```
 
-**Un nivel de anidamiento.** Algunas características opcionales son objetos,
-no valores sueltos (por ejemplo `memoria_ram: { valor: 16, unidad: "GB" }`).
-Para esos casos se admite un punto en el nombre del filtro:
+(los espacios del nombre van codificados en la URL: `Memoria%20RAM`, o
+`Memoria+RAM`)
 
-```
-GET /productos?memoria_ram.valor=16
-```
+**El valor se compara de forma exacta**, a diferencia de `nombre` (el
+filtro fijo del producto), que sí es una búsqueda parcial.
+
+**Las características de tipo `lista`** aparecen como varias entradas con
+el mismo `nombre` (ver `productos_subproductos.md`). Filtrar por una de
+ellas encuentra el producto si **al menos una** de esas entradas tiene ese
+valor: `?Contenido del paquete=Cargador` encuentra un producto aunque esa
+misma lista también tenga "Manual" y "Laptop".
 
 **Sobre el tipo del valor.** El texto que llega en la URL se intenta
-convertir al tipo que probablemente tiene guardado en Mongo: `"true"` /
-`"false"` a booleano, texto que parece un número a `Number`, y el resto se
-queda como texto. Sin esto, comparar `ram=16` (texto) contra un campo
-guardado como número `16` nunca haría match.
+convertir al tipo que le corresponde según cómo se ve: `"true"`/`"false"` a
+`Boolean`, texto que parece un número a `Number`, y el resto se queda como
+texto — porque así es como debe estar guardado el valor (ver
+`productos_subproductos.md`). Pero la carga de datos actual todavía guarda
+todo como texto sin excepción (es un pendiente, ver
+[pendientes-etl-caracteristicas.md](pendientes-etl-caracteristicas.md)), así
+que el filtro busca contra **las dos formas a la vez** — el valor
+convertido y el texto tal cual — para encontrar el producto sin importar
+cuál de las dos formas tenga guardadas en este momento.
 
-**Seguridad.** El nombre del filtro solo admite letras, números, guion bajo
-y puntos (`/^[a-zA-Z0-9_]+(\.[a-zA-Z0-9_]+)*$/`). Nunca admite `$`: como
-siempre se antepone `caracteristicas_adicionales.` al nombre que llega, un
-nombre con `$` intentando inyectar un operador de Mongo (`$where`, etc.) se
-rechaza con 400 en vez de ejecutarse.
+**Seguridad.** El nombre de la característica y su valor nunca se usan para
+armar un nombre de campo de Mongo: siempre entran como *valores* dentro de
+llaves fijas que escribe el propio código (`{ nombre: ..., valor: ... }`),
+nunca el usuario. Por eso no hace falta restringir qué caracteres trae el
+nombre — "Memoria RAM" o "Pais de origen" son tan válidos como cualquier
+otro texto — y tampoco hay forma de inyectar un operador de Mongo a través
+de él, sin importar qué le manden.
 
-### `caracteristicas_personalizadas` — se devuelven, pero no se filtran
+### Qué nombres se pueden usar
 
-Además de `caracteristicas_adicionales` (el catálogo de la app), un producto
-o una variante puede traer `caracteristicas_personalizadas`: pares
-nombre-valor sueltos que agregó quien creó el producto, fuera de cualquier
-catálogo (ver
-[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md#personalizadas-las-agrega-quien-crea-el-producto)).
-
-Esta ruta **sí** las devuelve como parte normal del producto o la variante
-en la respuesta — no se ocultan. Lo que no hacen es participar del filtro
-dinámico: los filtros de arriba solo arman condiciones contra
-`caracteristicas_adicionales`, nunca contra `caracteristicas_personalizadas`.
-No es una validación que rechace el intento con un 400 — simplemente esa
-ruta de campo nunca se construye, así que un filtro con ese nombre no
-encuentra nada, en vez de encontrar algo que no debería.
+Para las del catálogo, el nombre es literalmente el que aparece en la
+columna "Característica" de la Tabla 1 y la Tabla 2 de
+[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)
+— `Marca`, `Memoria RAM`, `Pais de origen`, `Duracion de la garantia`, etc.
+Esas tablas también dicen el tipo y la unidad de cada una, que es lo que
+hace falta para saber qué clase de `valor` mandar. Para las personalizadas
+no hay una lista que consultar: el nombre es el que haya escrito quien
+publicó el producto.
 
 ### 200
 
@@ -238,7 +247,7 @@ es justo el costo que `GET /productos` evita al no permitir saltos.
 | `pagina` | entero | No (por defecto 1) | Qué página pedir, 1 es la primera |
 | `limite` | entero | No (por defecto 20, tope 100) | Cuántos productos trae cada página |
 | `nombre`, `estado`, `id_categoria`, `id_vendedor`, `precio_min`, `precio_max`, `estado_variante` | — | No | Los mismos filtros fijos de `GET /productos` |
-| _cualquier otro nombre_ | texto | No | Filtro dinámico sobre `caracteristicas_adicionales`, igual que en `GET /productos` |
+| _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada), igual que en `GET /productos` |
 
 ### Ejemplo
 
@@ -297,23 +306,7 @@ sigue diciendo cuántas páginas hay de verdad.
 ## Ejemplo de cada filtro por separado
 
 Uno por uno, sin combinar (para ver cómo se combinan, ver los ejemplos de
-más arriba). Los nombres de las características opcionales no están fijados
-en ningún lado del backend — `caracteristicas_adicionales` no tiene esquema
-fijo — así que los nombres de abajo son una propuesta en snake_case de cada
-fila de las Tablas 1 y 2 de
-[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md).
-Si el producto real usa otro nombre de campo, el filtro es el nombre que de
-verdad se haya guardado, no el de esta lista.
-
-**Sobre arrays.** Cuando la característica es `Array<...>` (por ejemplo
-`tags` o `materiales_principales`), el filtro compara si el array *contiene*
-ese valor exacto: `?tags=laptop` encuentra productos donde `tags` incluya
-`"laptop"` entre otros, no que sea el único valor.
-
-**Sobre objetos.** Cuando la característica es un `Object` (por ejemplo
-`garantia` o `dimensiones`), el filtro tiene que apuntar a un campo de
-adentro con un punto, como se explicó arriba (`garantia.disponible=true`),
-no al objeto completo.
+más arriba).
 
 ### Filtros fijos
 
@@ -329,68 +322,27 @@ no al objeto completo.
 | `precio_max` | `GET /productos?precio_max=500` | Productos con alguna variante de precio <= 500 |
 | `estado_variante` | `GET /productos?estado_variante=activa` | Productos con alguna variante activa |
 
-### Filtros dinámicos — Tabla 1 (características del producto)
+### Filtros dinámicos — un ejemplo por tipo de dato
 
-| Característica | Ejemplo de filtro |
-| --- | --- |
-| Marca | `GET /productos?marca=Lenovo` |
-| Modelo | `GET /productos?modelo=IdeaPad 5 15IAL7` |
-| Fabricante | `GET /productos?fabricante=Lenovo Group Limited` |
-| País de origen | `GET /productos?pais_origen=China` |
-| Garantía | `GET /productos?garantia.disponible=true` |
-| Duración de la garantía | `GET /productos?duracion_garantia.valor=12` |
-| Condiciones de garantía | `GET /productos?condiciones_garantia=Cubre defectos de fabricacion` |
-| Materiales principales | `GET /productos?materiales_principales=Aluminio` |
-| Características técnicas | `GET /productos?caracteristicas_tecnicas.procesador=Intel i5` |
-| Especificaciones | `GET /productos?especificaciones.pantalla=15.6 pulgadas` |
-| Contenido del paquete | `GET /productos?contenido_paquete=Cargador` |
-| Dimensiones generales | `GET /productos?dimensiones_generales.unidad=cm` |
-| Peso | `GET /productos?peso.valor=1.85` |
-| Unidad de medida | `GET /productos?unidad_medida=unidad` |
-| Edad recomendada | `GET /productos?edad_recomendada.minimo=12` |
-| Uso recomendado | `GET /productos?uso_recomendado=Ofimatica` |
-| Instrucciones de uso | `GET /productos?instrucciones_uso=Conectar el cargador antes del primer uso` |
-| Advertencias | `GET /productos?advertencias=No exponer al agua` |
-| Certificaciones | `GET /productos?certificaciones.nombre=CE` |
-| Código de fabricante / MPN | `GET /productos?codigo_fabricante_mpn=82SF00XXUS` |
-| Código universal del producto (UPC, EAN, GTIN) | `GET /productos?codigo_universal=0196801234567` |
-| Información nutricional — alimentos | `GET /productos?informacion_nutricional.calorias=250` |
-| Ingredientes — alimentos/cosméticos | `GET /productos?ingredientes=Harina` |
-| Compatibilidad — electrónicos, accesorios, repuestos | `GET /productos?compatibilidad=iPhone 15` |
-| Sistema operativo compatible | `GET /productos?sistema_operativo_compatible=Windows 11` |
-| Potencia / voltaje — electrónicos | `GET /productos?potencia_voltaje.voltaje=110` |
-| Tipo de producto | `GET /productos?tipo_producto=Laptop` |
-| Características destacadas | `GET /productos?caracteristicas_destacadas=Wi-Fi 6` |
-| Etiquetas o tags | `GET /productos?tags=laptop` |
+No se repite aquí la lista completa de características: son las mismas
+filas, con los mismos nombres, tipos y unidades, de la Tabla 1 y la Tabla 2
+de
+[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md) —
+duplicar esa lista aquí sería mantener dos copias que se pueden desincronizar
+apenas se agregue o cambie una característica en el catálogo. La regla es
+siempre la misma: el nombre del query param es el nombre exacto de la
+columna "Característica" de esas tablas.
 
-### Filtros dinámicos — Tabla 2 (características de variante)
+Un ejemplo real por cada `tipo_dato`, para ver la forma del `valor` en cada
+caso (todos probados contra el catálogo real):
 
-| Característica | Ejemplo de filtro |
-| --- | --- |
-| Color | `GET /productos?color=Negro` |
-| Talla | `GET /productos?talla=M` |
-| Tamaño | `GET /productos?tamano=15.6 pulgadas` |
-| Capacidad | `GET /productos?capacidad.valor=500` |
-| Memoria RAM | `GET /productos?memoria_ram.valor=16` |
-| Almacenamiento | `GET /productos?almacenamiento.valor=512` |
-| Peso de presentación | `GET /productos?peso_presentacion.valor=500` |
-| Volumen | `GET /productos?volumen.valor=1.5` |
-| Dimensiones | `GET /productos?dimensiones.largo=30` |
-| Sabor | `GET /productos?sabor=Chocolate` |
-| Aroma | `GET /productos?aroma=Vainilla` |
-| Fragancia | `GET /productos?fragancia=Floral` |
-| Diseño / estampado | `GET /productos?diseno_estampado=Rayas` |
-| Material | `GET /productos?material=Algodon` |
-| Acabado | `GET /productos?acabado=Mate` |
-| Modelo específico | `GET /productos?modelo_especifico=iPhone 17 Pro Max 256GB` |
-| Voltaje | `GET /productos?voltaje.valor=110` |
-| Potencia | `GET /productos?potencia.valor=1500` |
-| Presentación | `GET /productos?presentacion=Paquete` |
-| Cantidad por paquete | `GET /productos?cantidad_paquete=12` |
-| Número de unidades | `GET /productos?numero_unidades=1` |
-| Edición | `GET /productos?edicion=Edicion limitada` |
-| Compatibilidad específica | `GET /productos?compatibilidad_especifica=iPhone 15 Pro` |
-| Configuración | `GET /productos?configuracion.ram=16GB` |
-| Código SKU | `GET /productos?codigo_sku=LAP-LEN-I7-16-512-GRY` |
-| Código de barras | `GET /productos?codigo_barras=7501234567890` |
-| Porcentaje de descuento | `GET /productos?porcentaje_descuento=10` |
+| `tipo_dato` | Ejemplo de filtro | Qué trae |
+| --- | --- | --- |
+| `texto` | `GET /productos?Marca=Tecno Sur` | Productos con esa marca |
+| `texto` (con espacio en el nombre) | `GET /productos?Pais%20de%20origen=China` | Productos fabricados en China |
+| `entero` | `GET /productos?Nucleos=10` | Productos cuyo procesador tiene 10 núcleos |
+| `decimal` | `GET /productos?Frecuencia=4.40` | Productos con esa frecuencia |
+| `booleano` | `GET /productos?Garantia=true` | Productos con garantía |
+| `lista` | `GET /productos?Contenido%20del%20paquete=Cargador` | Productos cuya lista de contenido incluye "Cargador" |
+| característica de variante | `GET /productos?Memoria%20RAM=16` | Productos con alguna variante de 16 GB de RAM |
+| característica personalizada | `GET /productos?Edicion%20especial=true` | Productos que tengan esa característica personalizada, con ese valor |

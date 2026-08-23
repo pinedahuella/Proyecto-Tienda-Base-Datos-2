@@ -9,4 +9,5 @@ export interface RolUsuario {
 // migracion nueva, asi que es seguro fijarlos aqui en vez de consultarlos
 // cada vez.
 export const ID_ROL_COMPRADOR = 1;
+export const ID_ROL_VENDEDOR = 2;
 export const ID_ROL_ADMIN = 3;

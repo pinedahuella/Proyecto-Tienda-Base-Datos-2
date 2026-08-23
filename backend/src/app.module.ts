@@ -18,6 +18,10 @@ import { DireccionUsuarioController } from './controllers/direccion-usuario.cont
 import { DireccionUsuarioService } from './services/direccion-usuario.service';
 import { ProductosController } from './controllers/productos/productos.controller';
 import { ProductosService } from './services/productos/productos.service';
+import { CategoriasController } from './controllers/vendedores/categorias.controller';
+import { CategoriasService } from './services/vendedores/categorias.service';
+import { ProductosVendedorController } from './controllers/vendedores/productos.controller';
+import { ProductosVendedorService } from './services/vendedores/productos.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -37,6 +41,8 @@ import { ProductosService } from './services/productos/productos.service';
     PerfilController,
     DireccionUsuarioController,
     ProductosController,
+    CategoriasController,
+    ProductosVendedorController,
   ],
   providers: [
     InicioService,
@@ -49,6 +55,8 @@ import { ProductosService } from './services/productos/productos.service';
     LogService,
     DireccionUsuarioService,
     ProductosService,
+    CategoriasService,
+    ProductosVendedorService,
   ],
 })
 export class AppModule {}

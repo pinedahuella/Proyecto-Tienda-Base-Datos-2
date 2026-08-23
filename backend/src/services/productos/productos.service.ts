@@ -4,14 +4,14 @@ import { mongoDb } from '../../database/mongo';
 import { ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import {
-  coercionarValorAtributo,
-  esClaveAtributoValida,
+  esNombreCaracteristicaValido,
   escaparRegex,
   validarDespuesDe,
   validarEnteroPositivo,
   validarLimite,
   validarPagina,
   validarPrecio,
+  valorParaBuscarCaracteristica,
 } from '../../helpers/validaciones-productos';
 import {
   ListarProductosQuery,
@@ -202,12 +202,22 @@ export class ProductosService {
   }
 
   /**
-   * A proposito, esto solo arma condiciones contra "caracteristicas_adicionales"
-   * (del catalogo de la app), nunca contra "caracteristicas_personalizadas"
-   * (las que agrega quien crea el producto): esas no son filtrables, por
-   * diseno. No hace falta una lista negra que las excluya a mano: como esta
-   * funcion nunca construye una ruta hacia ese campo, no hay forma de que un
-   * query param llegue a tocarlo, sin importar que nombre le pongan.
+   * caracteristicas_adicionales y caracteristicas_personalizadas son arrays
+   * de { nombre, valor, unidad } (ver productos_subproductos.md): filtrar por
+   * una caracteristica es buscar, dentro de ese array, un elemento cuyo
+   * "nombre" sea la clave del query param y cuyo "valor" coincida — con
+   * $elemMatch, para exigir que sean del MISMO elemento y no de dos
+   * distintos. Se busca en las cuatro ubicaciones posibles (adicionales y
+   * personalizadas, del producto y de cada variante) sin exigir que sea la
+   * misma variante entre si de otros filtros dinamicos.
+   *
+   * Nota de seguridad: la clave y el valor del query param nunca se usan
+   * para armar un nombre de campo (nunca algo como `objeto[clave]`); siempre
+   * entran como VALORES dentro de llaves fijas (`nombre`, `valor`) que
+   * escribe este codigo, nunca el usuario. Por eso no hace falta restringir
+   * que caracteres trae el nombre de una caracteristica: aunque alguien
+   * mande un query param con un "$" adentro, Mongo lo compara como texto
+   * literal, nunca como operador.
    */
   private construirFiltrosDinamicos(
     query: FiltrosProductosQuery,
@@ -218,17 +228,31 @@ export class ProductosService {
       if (CLAVES_RESERVADAS.has(clave) || valorCrudo == null) {
         continue;
       }
-      if (!esClaveAtributoValida(clave)) {
+      // Defensa adicional: si el parser de query alguna vez entrega algo
+      // que no sea texto plano (por ejemplo, un array por un parametro
+      // repetido), se descarta en vez de usarlo.
+      if (typeof clave !== 'string' || typeof valorCrudo !== 'string') {
+        continue;
+      }
+      if (!esNombreCaracteristicaValido(clave)) {
         throw new ErrorValidacion(
           `El filtro "${clave}" no es un nombre de caracteristica valido`,
         );
       }
 
-      const valor = coercionarValorAtributo(valorCrudo);
+      const valorBusqueda = valorParaBuscarCaracteristica(valorCrudo);
+      const elemMatch = { nombre: clave, valor: valorBusqueda };
+
       condiciones.push({
         $or: [
-          { [`caracteristicas_adicionales.${clave}`]: valor },
-          { [`variantes.caracteristicas_adicionales.${clave}`]: valor },
+          { caracteristicas_adicionales: { $elemMatch: elemMatch } },
+          { caracteristicas_personalizadas: { $elemMatch: elemMatch } },
+          { 'variantes.caracteristicas_adicionales': { $elemMatch: elemMatch } },
+          {
+            'variantes.caracteristicas_personalizadas': {
+              $elemMatch: elemMatch,
+            },
+          },
         ],
       });
     }

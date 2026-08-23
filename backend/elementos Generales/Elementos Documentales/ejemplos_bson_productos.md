@@ -230,8 +230,17 @@ La consulta ya está escrita en `etl/reconstruir.js`.
 
 ## Un producto con sus características
 
-Esto sí está copiado de la base. Es la laptop (`_id: 2`), recortada a las primeras
-seis características y sin las imágenes de las variantes, que son URLs largas.
+Es la laptop (`_id: 2`), recortada a las primeras seis características y sin las
+imágenes de las variantes, que son URLs largas.
+
+**Con una corrección sobre lo que hay en la base ahora mismo.** El ETL que cargó
+estos datos de prueba todavía guarda `valor` siempre como texto (`"10"`,
+`"true"`), copiando tal cual la columna `text` de PostgreSQL. Eso quedó
+pendiente de arreglar: el `valor` debe salir con el tipo nativo de Mongo que le
+corresponda según `tipo_dato` (`Number` para `entero`/`decimal`, `Boolean` para
+`booleano`), no como texto — así lo de abajo ya no obliga a convertir en cada
+consulta. Lo que sigue es cómo debe quedar el documento una vez corregido eso,
+no un calco literal de lo que hay hoy en Mongo.
 
 ```json
 {
@@ -271,12 +280,12 @@ seis características y sin las imágenes de las variantes, que son URLs largas.
       "caracteristicas_adicionales": [
         {
           "nombre": "Memoria RAM",
-          "valor": "8",
+          "valor": 8,
           "unidad": "GB"
         },
         {
           "nombre": "Almacenamiento",
-          "valor": "256",
+          "valor": 256,
           "unidad": "GB"
         },
         {
@@ -305,12 +314,12 @@ seis características y sin las imágenes de las variantes, que son URLs largas.
       "caracteristicas_adicionales": [
         {
           "nombre": "Memoria RAM",
-          "valor": "16",
+          "valor": 16,
           "unidad": "GB"
         },
         {
           "nombre": "Almacenamiento",
-          "valor": "512",
+          "valor": 512,
           "unidad": "GB"
         },
         {
@@ -349,7 +358,7 @@ seis características y sin las imágenes de las variantes, que son URLs largas.
     },
     {
       "nombre": "Garantia",
-      "valor": "true",
+      "valor": true,
       "unidad": null
     },
     {
@@ -365,9 +374,12 @@ Cuatro cosas para notar:
 
 - **`caracteristicas_adicionales` es un array, no un objeto.** Cada entrada tiene
   siempre las mismas tres llaves: `nombre`, `valor` y `unidad`.
-- **El `valor` siempre es texto**, aunque sea un número: `"10"` y no `10`. De qué
-  tipo es lo dice la definición de la característica, no el dato.
-- **La unidad no va pegada al valor.** `"4.40"` con `"unidad": "GHz"`, nunca
+- **El `valor` usa el tipo nativo que le toque, no siempre texto.** `10`
+  (`Number`), no `"10"`; `true` (`Boolean`), no `"true"`. De qué tipo es lo dice
+  `tipo_dato` en la definición de la característica, no el dato en sí — pero
+  eso decide qué tipo de Mongo usar al escribirlo, no que se escriba como texto
+  siempre. Solo el texto (y cada entrada de una lista de texto) es `String`.
+- **La unidad no va pegada al valor.** `4.40` con `"unidad": "GHz"`, nunca
   `"4.40 GHz"`. Con la unidad dentro habría que partir la cadena para comparar, y
   filtrar por rango dejaría de funcionar.
 - **La variante trae las suyas, y son otras.** Al producto se le pregunta el
@@ -439,16 +451,41 @@ llena todas, y ese es el punto: la categoría propone y el producto dispone. Las
 categorías de en medio del árbol (Ropa, Electronica, Hogar) salen con las dos
 listas vacías, porque no se publica en ellas.
 
-## Por qué no hay eventos de características
+## Las características sí van en los eventos
 
-`productos_eventos` **no lleva las características**, y no es un olvido.
+Los ejemplos de arriba (`"1-1"` a `"1-4"`, `"2-1"` a `"2-3"`) **no traen
+características en ningún evento**, ni en la creación ni en las
+modificaciones. Eso no es a propósito: esos eventos se generaron cargando de
+golpe una cantidad grande de productos de prueba (50 productos, 92 variantes),
+y esa carga se hizo antes de que las características tuvieran su propio
+historial, así que ese pedazo quedó afuera. No es una decisión de diseño, es
+un pendiente.
 
-Un evento se arma con los tres historiales del modelo relacional: el del producto,
-el de cada variante y el de la categoría. Las características no tienen historial:
-sus tablas guardan el valor de hoy y nada más. No hay de dónde sacar qué decía una
-característica el 20 de febrero, así que escribirla en un evento sería afirmar que
-se puede reconstruir algo que nunca se guardó.
+Una característica se comporta exactamente igual que `nombre`, `categoria` o
+`variantes`: tiene un valor, ese valor puede cambiar, y cada cambio se guarda.
+Nada de eso cambió con esta reestructuración — lo único que cambió fue la
+*forma* en que se guarda una característica (antes suelta dentro de
+`descripcion`, ahora con su propio catálogo tipado) y qué categorías ofrecen
+cuáles. Por eso los eventos deben tratarla como a cualquier otro campo:
 
-Reconstruir un producto a una fecha devuelve entonces su nombre, su descripción, sus
-variantes con el precio de ese día y la comisión que regía. Las características que
-se ven son las de hoy.
+- **En la creación**, `datos` debe traer `caracteristicas_adicionales`
+  completo (y el de cada variante, dentro de `variantes`), igual que ya trae
+  `categoria` y `variantes`.
+- **En una modificación**, si cambió algo dentro de las características,
+  `cambios` debe traer `caracteristicas_adicionales` **completo** (no solo la
+  característica que cambió) — el mismo criterio que ya se usa para
+  `categoria` (evento `"1-4"`) y `variantes` (evento `"1-2"`): la unidad de
+  "qué cambió" es el array entero, no cada entrada suelta adentro.
+
+Para que esto funcione de verdad — para poder reconstruir qué decía una
+característica en una fecha pasada — el modelo relacional necesita su propio
+historial para `producto_caracteristica` y
+`producto_variante_caracteristica_variante`, del mismo estilo que
+`productos_historial`, `productos_variantes_historial` y
+`categorias_historial` ya tienen. `004_caracteristicas.sql` todavía no lo
+incluye; hace falta agregarlo para que el ETL tenga de dónde sacar el evento.
+
+Mientras ese historial no exista, reconstruir un producto a una fecha pasada
+sigue devolviendo su nombre, su descripción, sus variantes con el precio de
+ese día y la comisión que regía — pero las características que se ven, por
+ahora, son las de hoy.

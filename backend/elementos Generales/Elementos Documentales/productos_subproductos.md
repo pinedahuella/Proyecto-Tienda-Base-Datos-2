@@ -87,26 +87,35 @@ exactamente tres llaves, siempre las mismas:
 ```json
 "caracteristicas_adicionales": [
   { "nombre": "Marca",       "valor": "Tecno Sur", "unidad": null },
-  { "nombre": "Frecuencia",  "valor": "5.00",      "unidad": "GHz" },
-  { "nombre": "Nucleos",     "valor": "10",        "unidad": null }
+  { "nombre": "Frecuencia",  "valor": 5.00,        "unidad": "GHz" },
+  { "nombre": "Nucleos",     "valor": 10,          "unidad": null },
+  { "nombre": "Garantia",    "valor": true,        "unidad": null }
 ]
 ```
 
 | Llave | Tipo | Regla |
 | --- | --- | --- |
 | `nombre` | `String` | Sale del catálogo. Es uno de los de las tablas de abajo |
-| `valor` | `String` | **Siempre texto**, aunque sea un número o un booleano |
+| `valor` | `String`, `Number` o `Boolean` | El tipo nativo de Mongo que corresponda al `tipo_dato` de la definición |
 | `unidad` | `String` o `null` | `null` cuando la característica no se mide en nada |
 
 Tres cosas que no son negociables, porque de ellas depende que se pueda filtrar:
 
-**El `valor` siempre es texto, incluso cuando es un número.** `"16"`, no `16`.
-`"true"`, no `true`. La columna que lo guarda en PostgreSQL es de texto y el tipo
-está en la definición de la característica, no en el dato. Quien consulta convierte
-si lo necesita.
+**El `valor` usa el tipo nativo de Mongo que le toque, no siempre texto.**
+`tipo_dato = "entero"` o `"decimal"` se guarda como `Number` (`10`, no `"10"`);
+`"booleano"` se guarda como `Boolean` (`true`, no `"true"`); solo `"texto"` (y
+cada elemento de una `"lista"` de texto) se guarda como `String`. En
+PostgreSQL `producto_caracteristica.valor` sí es una sola columna `text` para
+las cuatro clases de dato a la vez — es la única forma de tener una tabla
+para todas las características sin una columna por tipo — pero eso es una
+limitación de SQL, no una regla que Mongo tenga que heredar: al escribir el
+documento, el ETL convierte ese texto al tipo real según `tipo_dato` antes de
+guardarlo. Guardar todo como texto en Mongo también obligaría a convertir en
+cada consulta para poder comparar por rango o hacer aritmética, que es
+justo lo que se evita haciéndolo una sola vez, al escribir.
 
-**La unidad nunca va dentro del valor.** Se guarda `"16"` con `"unidad": "GB"`, y
-nunca `"16 GB"`. Con la unidad pegada al valor hay que partir la cadena para
+**La unidad nunca va dentro del valor.** Se guarda `10` con `"unidad": "GB"`, y
+nunca `"10 GB"`. Con la unidad pegada al valor hay que partir la cadena para
 comparar, y filtrar por rango deja de funcionar.
 
 **El valor no lleva objetos ni arrays anidados.** Lo que en un catálogo suele ser un

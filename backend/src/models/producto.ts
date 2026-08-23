@@ -27,12 +27,29 @@ export interface ProductoCategoria {
 }
 
 /**
- * Valor de una caracteristica personalizada: solo un dato suelto (texto,
- * numero o boolean), nunca un array ni un objeto. A diferencia de
- * caracteristicas_adicionales (que sale del catalogo de la app y admite
- * cualquier forma), esta la escribe quien crea el producto, a su gusto.
+ * El valor de una entrada de caracteristica: el tipo nativo de Mongo que le
+ * corresponda segun su tipo_dato (Number para entero/decimal, Boolean para
+ * booleano, String para texto). Ver productos_subproductos.md.
+ *
+ * Nota: la carga actual todavia guarda todos los valores como string (ver
+ * pendientes-etl-caracteristicas.md), asi que en la practica un valor
+ * "deberia" ser Number o Boolean pero hoy puede llegar como String. El tipo
+ * de aqui es el correcto/deseado; el codigo que filtra es tolerante al caso
+ * en que todavia no lo sea.
  */
-export type ValorCaracteristicaPersonalizada = string | number | boolean;
+export type ValorCaracteristica = string | number | boolean | string[];
+
+/**
+ * Una entrada de caracteristicas_adicionales o caracteristicas_personalizadas:
+ * siempre estas tres llaves, nunca mas ni menos. Es la misma forma para las
+ * dos, y para las del producto y las de la variante.
+ */
+export interface EntradaCaracteristica {
+  nombre: string;
+  valor: ValorCaracteristica;
+  /** null cuando la caracteristica no se mide en nada. */
+  unidad: string | null;
+}
 
 export interface ProductoVariante {
   id_producto_variante: number;
@@ -43,36 +60,31 @@ export interface ProductoVariante {
   estado: string;
   imagenes: string[];
   /** Opcional: caracteristicas de esta variante, del catalogo de la app. */
-  caracteristicas_adicionales?: Record<string, unknown>;
+  caracteristicas_adicionales?: EntradaCaracteristica[];
   /**
    * Opcional: caracteristicas propias que quien crea el producto le agrega
-   * a esta variante, fuera del catalogo. Nunca son filtrables en
-   * GET /productos ni GET /productos/paginacion (ver ProductosService).
+   * a esta variante, fuera del catalogo, con la misma forma que las de
+   * arriba. Tan filtrables como esas (ver ProductosService).
    */
-  caracteristicas_personalizadas?: Record<
-    string,
-    ValorCaracteristicaPersonalizada
-  >;
+  caracteristicas_personalizadas?: EntradaCaracteristica[];
 }
 
 export interface Producto {
   _id: number;
   nombre: string;
-  descripcion: string;
+  /** Unico campo obligatorio de la raiz que admite nulo. */
+  descripcion: string | null;
   fecha_creacion: Date;
   estado: string;
   vendedor: ProductoVendedor;
   categoria: ProductoCategoria;
   variantes: ProductoVariante[];
   /** Opcional: caracteristicas del producto, del catalogo de la app. */
-  caracteristicas_adicionales?: Record<string, unknown>;
+  caracteristicas_adicionales?: EntradaCaracteristica[];
   /**
    * Opcional: caracteristicas propias que quien crea el producto le agrega,
-   * fuera del catalogo. Nunca son filtrables en GET /productos ni
-   * GET /productos/paginacion (ver ProductosService).
+   * fuera del catalogo, con la misma forma que las de arriba. Tan filtrables
+   * como esas (ver ProductosService).
    */
-  caracteristicas_personalizadas?: Record<
-    string,
-    ValorCaracteristicaPersonalizada
-  >;
+  caracteristicas_personalizadas?: EntradaCaracteristica[];
 }
