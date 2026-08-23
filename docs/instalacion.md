@@ -154,9 +154,34 @@ El detalle esta en [etl/README.md](../etl/README.md).
 | MongoDB | `MONGO_USER` del .env | `MONGO_PASSWORD` del .env |
 | DbGate | entra directo, sin usuario | |
 
-**Ninguna contrasena esta escrita en el repositorio.** Todas viven en el archivo
-`.env`, que git ignora. Por eso el primer paso de la instalacion es copiar
-`.env.example` y llenarlo.
+**Ninguna contrasena de servicio esta escrita en el repositorio.** Todas viven
+en el archivo `.env`, que git ignora. Por eso el primer paso de la instalacion es
+copiar `.env.example` y llenarlo.
+
+### Las cuentas de prueba
+
+Estas si estan en el repositorio, a proposito: las crea el conjunto de datos y
+existen para poder entrar en una maquina recien montada. No son de nadie y no dan
+acceso a nada real.
+
+| Correo | Rol | Contrasena |
+|---|---|---|
+| `compradora.norte@mesh.com` | comprador | `Comprador123` |
+| `comprador.sur@mesh.com` | comprador | `Comprador123` |
+
+Los dos vendedores del catalogo (`vendedor.prueba@mesh.com` y
+`ventas.norte@mesh.com`) **no pueden entrar**: el conjunto de datos les dejo un
+hash de bcrypt y el backend usa scrypt, en formato `salt:hash`. La comparacion
+los descarta antes de mirar nada, asi que esa contrasena no existe. Para usarlos
+hay que ponerles una:
+
+```sql
+UPDATE usuarios SET contrasena_hash = 'el hash que genere el backend'
+WHERE correo_electronico = 'vendedor.prueba@mesh.com';
+```
+
+Es una de esas cosas que no dan ningun error: el login simplemente dice que la
+contrasena esta mal, para siempre.
 
 pgAdmin entra directo en http://localhost:5050 y el servidor `Mesh` ya viene
 registrado y conectado. Los dos archivos que lo logran, `servers.json` y

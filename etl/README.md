@@ -25,7 +25,7 @@ Imprime cuantos productos y cuantos eventos escribio.
 
 ## Que escribe
 
-Dos colecciones.
+Tres colecciones.
 
 **`productos`**, un documento por producto. El `_id` es el `id_producto` del
 relacional, no un ObjectId: asi la traza entre los dos sistemas es directa y
@@ -40,11 +40,31 @@ ordenarlas, porque en un arreglo la posicion ya es el orden.
 Las resenas no se embeben. Crecen sin techo, se escriben por su cuenta y se leen
 paginadas: se quedan en PostgreSQL.
 
-producto y la de cada variante, y se copia tal cual. Es opcional en el modelo del
-backend, asi que cuando la columna esta nula la clave no se escribe: no queda
-puesta valiendo null. Lo que hay adentro no se toca ni se interpreta, ni siquiera
-si alguna clave se llamara `precio`; son los atributos de la categoria y no
-campos de este esquema.
+**Las caracteristicas** van en `caracteristicas_adicionales`, en la raiz del
+producto y en cada variante, como un arreglo de `{ nombre, valor, unidad }`. Tres
+reglas al escribirlas:
+
+- **El valor sale con su tipo**, no como texto. En PostgreSQL la columna es
+  `text` para los cuatro tipos a la vez, porque una sola tabla no puede tener una
+  columna por tipo; pero esa es una atadura de SQL y Mongo no la hereda. Se
+  convierte aqui, una vez, segun el `tipo_dato` de la definicion: `entero` y
+  `decimal` a numero, `booleano` a booleano.
+- **Una caracteristica de tipo `lista` es UNA entrada con un arreglo adentro**,
+  no cinco entradas repetidas. Las filas repetidas son como vive en el relacional
+  por la 1FN; un documento si puede guardar varios valores en un campo.
+- **La unidad se copia de la definicion.** En el relacional se dice una vez que
+  la RAM se mide en GB; aqui se pone en cada entrada para que quien lea el
+  documento no tenga que ir a buscarla.
+
+**El stock** va dentro de cada variante, sacado de `inventario`. Esta ahi porque
+el catalogo se lee de Mongo: sin eso, mostrar "agotado" o filtrar por disponible
+obliga a una consulta a PostgreSQL por cada producto de la pagina. **Es una
+copia, nunca la verdad**: quien decide si alcanza es PostgreSQL, dentro de la
+transaccion de la compra.
+
+**`categorias`**, un documento por categoria: que caracteristicas ofrece, con su
+tipo y su unidad. Es la paleta del formulario de publicar y no guarda valores. La
+categoria propone, el producto dispone.
 
 **`productos_eventos`**, el historial. Un documento por evento.
 
@@ -56,6 +76,18 @@ campos de este esquema.
 
 El primero es la creacion y lleva el estado completo en `datos`. Los que siguen
 son modificaciones y llevan en `cambios` solo lo que cambio.
+
+**El stock no entra en los eventos**, a proposito. Los eventos existen para
+reconstruir el catalogo; el stock cambia con cada venta y llenaria la coleccion
+de ruido, ademas de hacer lenta la reconstruccion, que los fusiona todos. Su
+historial ya vive en `stock_movimiento`, en PostgreSQL, y con mas detalle
+(motivo, usuario, pedido). Consecuencia: reconstruir un producto a una fecha
+pasada no devuelve stock.
+
+**Las caracteristicas si entran, pero solo en la creacion.** No tienen historial
+en el relacional, asi que el ETL solo conoce las de hoy: las escribe iguales en
+todas las fotos que arma y por eso salen enteras en el evento de creacion y
+nunca como un cambio.
 
 ## De fotos a eventos
 
@@ -131,6 +163,26 @@ db.productos_eventos.createIndex({ id_producto: 1, fecha: 1 });
 Lo crea `cargar.js`. Sirve para las dos primeras etapas de la reconstruccion a la
 vez: la base entra directo al producto y lee su tramo de eventos ya ordenado, sin
 recorrer la coleccion y sin ordenar en memoria.
+
+## El ETL solo manda sobre su tramo
+
+Borra de Mongo lo que ya no esta en PostgreSQL -- hace falta, porque si no un
+documento cuyo `_id` ya no existe del otro lado se queda ahi para siempre.
+
+Pero **no todo lo de estas colecciones sale de PostgreSQL**. Un producto que
+publica un vendedor nace solo en Mongo y no tiene fila en el relacional: si se
+borrara "todo lo que no esta alla", la primera corrida se llevaria lo que la
+gente publico. Paso de verdad en pruebas: dos productos publicados desde el panel
+desaparecieron al correr el ETL.
+
+Por eso el borrado va acotado del 1 al id mas alto que trajo de PostgreSQL. Lo de
+mas arriba lo creo la aplicacion y el ETL no entra ahi ni para borrar ni para
+escribir -- ni siquiera para ponerle el stock, que en esos productos lo tiene que
+escribir la aplicacion.
+
+`arrancar.ps1` compara el id mas alto **dentro de ese tramo** por lo mismo: si
+mirara el maximo absoluto, un producto de vendedor lo haria creerse desfasado y
+volveria a migrar en cada arranque.
 
 ## Por que correrlo dos veces no duplica
 
