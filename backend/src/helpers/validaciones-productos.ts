@@ -3,7 +3,8 @@ import { ErrorValidacion } from './errores';
 /**
  * Reglas de validacion y saneamiento de GET /productos: la paginacion por
  * cursor, los filtros fijos (nombre, estado, categoria, vendedor, precio,
- * estado de variante) y los filtros dinamicos de caracteristicas_adicionales.
+ * estado de variante, stock_total) y los filtros dinamicos de
+ * caracteristicas_adicionales.
  */
 
 export const LIMITE_PRODUCTOS_DEFECTO = 20;
@@ -48,7 +49,7 @@ export function validarPagina(valor: string | undefined): number {
   return Number(valor);
 }
 
-/** Para id_categoria e id_vendedor: enteros positivos, opcionales. */
+/** Para id_categoria, id_vendedor, stock_min y stock_max: enteros positivos (o cero), opcionales. */
 export function validarEnteroPositivo(
   valor: string | undefined,
   nombreCampo: string,

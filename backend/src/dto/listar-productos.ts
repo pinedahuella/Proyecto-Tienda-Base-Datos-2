@@ -1,4 +1,4 @@
-import { Producto } from '../models/producto';
+import { ProductoConStockTotal } from '../models/producto';
 
 /**
  * Query params esperados en GET /productos.
@@ -21,12 +21,15 @@ export interface ListarProductosQuery {
   precio_min?: string;
   precio_max?: string;
   estado_variante?: string;
+  /** Filtra por stock_total: la suma de variantes[].stock del producto. */
+  stock_min?: string;
+  stock_max?: string;
   [claveAtributo: string]: string | undefined;
 }
 
 /** Respuesta de GET /productos: la tanda de productos y el cursor para pedir la siguiente. */
 export interface ProductosPagina {
-  productos: Producto[];
+  productos: ProductoConStockTotal[];
   /** El _id del ultimo producto de esta tanda. null si ya no hay mas. */
   siguiente_cursor: number | null;
 }

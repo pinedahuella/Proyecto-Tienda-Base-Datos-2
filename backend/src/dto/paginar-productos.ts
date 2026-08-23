@@ -1,4 +1,4 @@
-import { Producto } from '../models/producto';
+import { ProductoConStockTotal } from '../models/producto';
 
 /**
  * Query params esperados en GET /productos/paginacion.
@@ -17,12 +17,15 @@ export interface PaginarProductosQuery {
   precio_min?: string;
   precio_max?: string;
   estado_variante?: string;
+  /** Filtra por stock_total: la suma de variantes[].stock del producto. */
+  stock_min?: string;
+  stock_max?: string;
   [claveAtributo: string]: string | undefined;
 }
 
 /** Respuesta de GET /productos/paginacion. */
 export interface ProductosPaginados {
-  productos: Producto[];
+  productos: ProductoConStockTotal[];
   pagina: number;
   limite: number;
   total_productos: number;

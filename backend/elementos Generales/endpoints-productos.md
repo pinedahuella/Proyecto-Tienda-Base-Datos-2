@@ -59,6 +59,7 @@ catálogo público.
 | `id_vendedor` | entero | No | Igualdad exacta sobre `vendedor.id_usuario` |
 | `precio_min` / `precio_max` | decimal | No | Rango de precio, sobre `variantes[].precio` |
 | `estado_variante` | texto | No | Igualdad exacta sobre `variantes[].estado` |
+| `stock_min` / `stock_max` | entero | No | Rango sobre `stock_total` (la suma de `variantes[].stock` del producto entero, no de una variante) |
 | _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada) — igualdad por defecto, o `min_`/`max_`/`contiene_` como prefijo — ver abajo |
 
 ### Paginación por cursor: ejemplo
@@ -85,7 +86,18 @@ rango, no cuenta, porque no son la misma variante.
 GET /productos?nombre=laptop
 GET /productos?id_categoria=5
 GET /productos?precio_min=100&precio_max=500&estado_variante=activa
+GET /productos?stock_min=10
 ```
+
+**`stock_min`/`stock_max` son la excepción: no se combinan por variante,
+van sobre el producto entero.** `stock_total` no es un campo de una
+variante en particular, es la suma de `variantes[].stock` de todas las
+variantes del producto (calculada al responder, nunca guardada en Mongo —
+ver [cambios-etl-productos.md](cambios-etl-productos.md)), así que
+`?stock_min=10` trae un producto si la suma de todas sus variantes es al
+menos 10, sin importar cuánto tenga cada una por separado. Una variante sin
+`stock` (todavía pendiente del lado del backend para las que se publican
+desde el panel) cuenta como 0 en la suma, nunca rompe el cálculo.
 
 ### Filtros dinámicos (características, del catálogo o personalizadas)
 
@@ -216,15 +228,22 @@ publicó el producto.
             "descripcion": "Pantalla de 14 pulgadas, 8 GB de RAM, 256 GB SSD",
             "fecha_creacion": "2026-01-15T17:30:00.000Z",
             "estado": "activa",
-            "imagenes": ["https://..."]
+            "imagenes": ["https://..."],
+            "stock": 12
           }
-        ]
+        ],
+        "stock_total": 12
       }
     ],
     "siguiente_cursor": 2
   }
 }
 ```
+
+`stock_total` sale en cada producto sin tener que pedirlo con ningún query
+param: es la suma de `variantes[].stock` (aquí solo hay una variante, con
+12, así que `stock_total` también es 12). No se guarda en Mongo, se calcula
+al responder — ver [cambios-etl-productos.md](cambios-etl-productos.md).
 
 `siguiente_cursor` es `null` cuando esa tanda ya trajo el último producto
 del catálogo (o de lo que quedaba despues de aplicar los filtros).
@@ -238,6 +257,8 @@ del catálogo (o de lo que quedaba despues de aplicar los filtros).
 { "ok": false, "mensaje": "id_vendedor debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "precio_min debe ser un numero valido, con hasta 2 decimales", "payload": null }
 { "ok": false, "mensaje": "precio_max debe ser un numero valido, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "stock_min debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "stock_max debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "El filtro \"<nombre>\" no es un nombre de caracteristica valido", "payload": null }
 ```
 
@@ -290,10 +311,14 @@ GET /productos/2
     },
     "variantes": [ "..." ],
     "caracteristicas_adicionales": [ "..." ],
-    "caracteristicas_personalizadas": [ "..." ]
+    "caracteristicas_personalizadas": [ "..." ],
+    "stock_total": 12
   }
 }
 ```
+
+`stock_total` es la suma de `variantes[].stock`, igual que en `GET /productos`
+(ver esa ruta para el detalle de cómo se calcula).
 
 ### 400
 
@@ -331,8 +356,11 @@ pagina**: en vez de un cursor (`despues_de`), se pide un número de página
 directo a cualquier página sin haber pedido las anteriores.
 
 A cambio de ese salto directo, esta ruta sí necesita contar cuántos
-productos hay en total (`countDocuments`) para calcular `total_paginas`, que
-es justo el costo que `GET /productos` evita al no permitir saltos.
+productos hay en total para calcular `total_paginas`, que es justo el costo
+que `GET /productos` evita al no permitir saltos. Ese conteo pasa por los
+mismos filtros que la tanda, `stock_min`/`stock_max` incluido: si se pide
+`?stock_min=50`, `total_productos` es cuántos productos cumplen ese
+mínimo, no el total del catálogo entero.
 
 ### Query params
 
@@ -340,7 +368,7 @@ es justo el costo que `GET /productos` evita al no permitir saltos.
 | --- | --- | --- | --- |
 | `pagina` | entero | No (por defecto 1) | Qué página pedir, 1 es la primera |
 | `limite` | entero | No (por defecto 20, tope 100) | Cuántos productos trae cada página |
-| `nombre`, `estado`, `id_categoria`, `id_vendedor`, `precio_min`, `precio_max`, `estado_variante` | — | No | Los mismos filtros fijos de `GET /productos` |
+| `nombre`, `estado`, `id_categoria`, `id_vendedor`, `precio_min`, `precio_max`, `estado_variante`, `stock_min`, `stock_max` | — | No | Los mismos filtros fijos de `GET /productos` |
 | _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada), igualdad por defecto o `min_`/`max_`/`contiene_` como prefijo, igual que en `GET /productos` |
 
 ### Ejemplo
@@ -380,6 +408,8 @@ sigue diciendo cuántas páginas hay de verdad.
 { "ok": false, "mensaje": "id_vendedor debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "precio_min debe ser un numero valido, con hasta 2 decimales", "payload": null }
 { "ok": false, "mensaje": "precio_max debe ser un numero valido, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "stock_min debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "stock_max debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "El filtro \"<nombre>\" no es un nombre de caracteristica valido", "payload": null }
 ```
 
@@ -519,6 +549,8 @@ más arriba).
 | `precio_min` | `GET /productos?precio_min=100` | Productos con alguna variante de precio >= 100 |
 | `precio_max` | `GET /productos?precio_max=500` | Productos con alguna variante de precio <= 500 |
 | `estado_variante` | `GET /productos?estado_variante=activa` | Productos con alguna variante activa |
+| `stock_min` | `GET /productos?stock_min=10` | Productos cuya suma de `variantes[].stock` es >= 10 |
+| `stock_max` | `GET /productos?stock_max=0` | Productos cuya suma de `variantes[].stock` es 0 (agotados) |
 
 ### Filtros dinámicos — un ejemplo por tipo de dato
 

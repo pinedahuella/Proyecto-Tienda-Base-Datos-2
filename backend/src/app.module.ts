@@ -23,6 +23,7 @@ import { CategoriasController } from './controllers/vendedores/categorias.contro
 import { CategoriasService } from './services/vendedores/categorias.service';
 import { ProductosVendedorController } from './controllers/vendedores/productos.controller';
 import { ProductosVendedorService } from './services/vendedores/productos.service';
+import { InventarioVendedorService } from './services/vendedores/inventario.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -59,6 +60,7 @@ import { ProductosVendedorService } from './services/vendedores/productos.servic
     ProductosService,
     CategoriasService,
     ProductosVendedorService,
+    InventarioVendedorService,
   ],
 })
 export class AppModule {}

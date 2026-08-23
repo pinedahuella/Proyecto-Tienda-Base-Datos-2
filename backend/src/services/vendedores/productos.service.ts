@@ -18,6 +18,7 @@ import {
   validarNombreVariante,
   validarPrecioObligatorio,
 } from '../../helpers/validaciones-crear-producto';
+import { validarStockInicial } from '../../helpers/validaciones-inventario';
 import {
   CaracteristicaCatalogoPeticion,
   CaracteristicaPersonalizadaPeticion,
@@ -38,10 +39,18 @@ import {
   ProductoEventoModificacion,
 } from '../../models/producto-evento';
 import { UsuarioService } from '../../services/usuario.service';
+import { InventarioVendedorService } from '../../services/vendedores/inventario.service';
 
 const ESTADO_PRODUCTO_NUEVO = 'borrador';
 const ESTADO_VARIANTE_NUEVA = 'activa';
 const REGEX_ID = /^\d+$/;
+
+/**
+ * Sin variantes[].stock: estas rutas son las "rapidas" del panel del
+ * vendedor (listar y ver el propio, tal como esta hoy). El stock/inventario
+ * va a tener sus propios GET aparte, todavia no hechos.
+ */
+const PROYECCION_SIN_STOCK = { 'variantes.stock': 0 };
 
 /**
  * Servicio de POST /vendedor/productos.
@@ -61,7 +70,10 @@ const REGEX_ID = /^\d+$/;
 export class ProductosVendedorService {
   private readonly logger = new Logger(ProductosVendedorService.name);
 
-  constructor(private readonly usuarioService: UsuarioService) {}
+  constructor(
+    private readonly usuarioService: UsuarioService,
+    private readonly inventarioVendedorService: InventarioVendedorService,
+  ) {}
 
   async crear(idUsuario: string, datos: CrearProductoPeticion): Promise<Producto> {
     const nombre = validarNombreProducto(datos.nombre);
@@ -77,6 +89,14 @@ export class ProductosVendedorService {
       !Number.isInteger(datos.id_categoria)
     ) {
       throw new ErrorValidacion('El id de la categoria no es valido');
+    }
+    // Se valida antes de crear nada: un stock_inicial invalido rechaza toda
+    // la creacion, en vez de crear el producto y fallar despues creando su
+    // inventario a medias.
+    for (const peticionVariante of datos.variantes) {
+      if (peticionVariante?.stock_inicial != null) {
+        validarStockInicial(peticionVariante.stock_inicial);
+      }
     }
 
     const coleccionProductos = mongoDb.collection<Producto>('productos');
@@ -101,6 +121,7 @@ export class ProductosVendedorService {
         categoria,
         fechaCreacion,
         coleccionProductos,
+        null,
       );
 
       const producto: Producto = {
@@ -133,12 +154,56 @@ export class ProductosVendedorService {
       await coleccionProductos.insertOne(producto);
       await this.crearEventoCreacion(producto);
 
+      await this.crearInventariosIniciales(idProducto, idUsuario, datos.variantes, variantes);
+
       return producto;
     } catch (error) {
       if (error instanceof ErrorValidacion) {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);
+    }
+  }
+
+  /**
+   * Por cada variante que trajo stock_inicial, crea su inventario real en
+   * PostgreSQL reutilizando InventarioVendedorService.crearInicial() tal
+   * cual (mismo mecanismo que POST /vendedor/productos/:id/inventario), una
+   * variante a la vez.
+   *
+   * El producto ya esta creado y confirmado en Mongo en este punto: si
+   * crear el inventario de alguna variante fallara (por ejemplo, PostgreSQL
+   * no responde), el producto se queda creado igual — esa variante nace en
+   * el mismo estado de hoy (sin inventario, arreglable despues con
+   * POST /vendedor/productos/:id/inventario). Por eso el error solo se
+   * loguea, nunca se relanza.
+   */
+  private async crearInventariosIniciales(
+    idProducto: number,
+    idUsuario: string,
+    peticionesVariantes: VarianteCreacionPeticion[],
+    variantesCreadas: ProductoVariante[],
+  ): Promise<void> {
+    for (let i = 0; i < variantesCreadas.length; i++) {
+      const stockInicial = peticionesVariantes[i]?.stock_inicial;
+      if (stockInicial == null) {
+        continue;
+      }
+      try {
+        await this.inventarioVendedorService.crearInicial(
+          String(idProducto),
+          idUsuario,
+          {
+            id_producto_variante: variantesCreadas[i].id_producto_variante,
+            stock_inicial: stockInicial,
+          },
+        );
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo crear el inventario inicial de la variante ${variantesCreadas[i].id_producto_variante} ` +
+            `del producto ${idProducto}: ${error instanceof Error ? error.message : error}`,
+        );
+      }
     }
   }
 
@@ -188,11 +253,23 @@ export class ProductosVendedorService {
     return (resultado[0]?.maximo ?? 0) + 1;
   }
 
+  /**
+   * variantesExistentes es null en la creacion (nunca hay nada que
+   * emparejar todavia) y es productoActual.variantes en la edicion. Cuando
+   * viene, cada peticionVariante con id_producto_variante se busca ahi: si
+   * hay una variante del producto con ese id, esta CONSERVA ese mismo id
+   * (no consume uno de siguienteId) y su stock (la copia de lectura en
+   * Mongo no se pierde solo por reenviar la variante en una edicion); si no
+   * hay ninguna, se rechaza -- el id que mando el vendedor no es de este
+   * producto. Sin id_producto_variante en la peticion, es una variante
+   * nueva de verdad: id nuevo, sin stock, como siempre.
+   */
   private async construirVariantes(
     peticiones: VarianteCreacionPeticion[],
     categoria: CategoriaDocumento,
     fechaCreacion: Date,
     coleccion: Collection<Producto>,
+    variantesExistentes: ProductoVariante[] | null,
   ): Promise<ProductoVariante[]> {
     let siguienteId = await this.siguienteIdVariante(coleccion);
 
@@ -214,14 +291,34 @@ export class ProductosVendedorService {
         peticionVariante.caracteristicas_personalizadas,
       );
 
+      let idProductoVariante: number;
+      let stockExistente: number | undefined;
+
+      if (variantesExistentes != null && peticionVariante.id_producto_variante != null) {
+        const existente = variantesExistentes.find(
+          (candidata) =>
+            candidata.id_producto_variante === peticionVariante.id_producto_variante,
+        );
+        if (existente == null) {
+          throw new ErrorValidacion(
+            `La variante ${peticionVariante.id_producto_variante} no pertenece a este producto`,
+          );
+        }
+        idProductoVariante = existente.id_producto_variante;
+        stockExistente = existente.stock;
+      } else {
+        idProductoVariante = siguienteId++;
+      }
+
       const variante: ProductoVariante = {
-        id_producto_variante: siguienteId++,
+        id_producto_variante: idProductoVariante,
         nombre_variante: nombreVariante,
         precio: Decimal128.fromString(precio),
         descripcion: descripcionVariante,
         fecha_creacion: fechaCreacion,
         estado: ESTADO_VARIANTE_NUEVA,
         imagenes,
+        ...(stockExistente != null && { stock: stockExistente }),
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
         }),
@@ -261,8 +358,20 @@ export class ProductosVendedorService {
    * toca. Para las dos listas de caracteristicas, un array (aunque sea
    * vacio) reemplaza la lista completa; null es no tocarla. `variantes`
    * funciona igual salvo que no admite quedar vacio: si se manda, se
-   * reemplaza completo (mismas reglas que al crear, ids nuevos para cada
-   * una), pero siempre tiene que traer al menos una.
+   * reemplaza completo (mismas reglas que al crear), pero siempre tiene que
+   * traer al menos una.
+   *
+   * Cada variante del array puede traer su id_producto_variante viejo: si
+   * coincide con una que el producto ya tenia, esa CONSERVA su mismo id y
+   * su stock (nunca se pierde solo por reenviarla en una edicion); si no
+   * viene, es una variante nueva (id nuevo, sin stock). Un id que no le
+   * pertenece a este producto rechaza toda la edicion.
+   *
+   * Tambien puede traer stock_inicial (igual que al crear un producto): si
+   * la variante (nueva, o conservada pero sin inventario todavia) no tiene
+   * fila en inventario, se le crea de una vez, reutilizando el mismo
+   * mecanismo de POST /vendedor/productos/:id/inventario. Si ya la tenia,
+   * no pasa nada (se ignora, no se sobreescribe).
    *
    * El caso especial: si cambia la categoria, las caracteristicas (las que
    * ya tenia el producto, y las de cada variante que no se este
@@ -310,6 +419,16 @@ export class ProductosVendedorService {
     const vieneVariantes = cambios.variantes != null;
     if (vieneVariantes && cambios.variantes!.length === 0) {
       throw new ErrorValidacion('Debes enviar al menos una variante');
+    }
+    // Igual que en crear(): se valida antes de escribir nada, para que un
+    // stock_inicial invalido rechace toda la edicion en vez de dejarla a
+    // medias.
+    if (vieneVariantes) {
+      for (const peticionVariante of cambios.variantes!) {
+        if (peticionVariante?.stock_inicial != null) {
+          validarStockInicial(peticionVariante.stock_inicial);
+        }
+      }
     }
 
     if (
@@ -379,6 +498,7 @@ export class ProductosVendedorService {
           categoriaCompleta!,
           new Date(),
           coleccion,
+          productoActual.variantes,
         );
       }
 
@@ -447,6 +567,15 @@ export class ProductosVendedorService {
       await coleccion.updateOne({ _id: idProducto }, operacion);
       await this.crearEventoModificacion(idProducto, cambiosEvento);
 
+      if (variantes != null) {
+        await this.crearInventariosIniciales(
+          idProducto,
+          idUsuarioToken,
+          cambios.variantes as VarianteCreacionPeticion[],
+          variantes,
+        );
+      }
+
       return (await coleccion.findOne({ _id: idProducto })) as Producto;
     } catch (error) {
       if (error instanceof ErrorValidacion || error instanceof ErrorNoEncontrado) {
@@ -504,7 +633,10 @@ export class ProductosVendedorService {
     try {
       return await mongoDb
         .collection<Producto>('productos')
-        .find({ 'vendedor.id_usuario': Number(idUsuario) })
+        .find(
+          { 'vendedor.id_usuario': Number(idUsuario) },
+          { projection: PROYECCION_SIN_STOCK },
+        )
         .sort({ fecha_creacion: -1 })
         .toArray();
     } catch (error) {
@@ -525,7 +657,7 @@ export class ProductosVendedorService {
     try {
       const producto = await mongoDb
         .collection<Producto>('productos')
-        .findOne({ _id: idProducto });
+        .findOne({ _id: idProducto }, { projection: PROYECCION_SIN_STOCK });
 
       if (
         producto == null ||

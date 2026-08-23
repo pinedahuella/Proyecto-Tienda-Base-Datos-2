@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Decimal128, Filter } from 'mongodb';
+import { Decimal128, Document } from 'mongodb';
 import { mongoDb } from '../../database/mongo';
 import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
@@ -21,7 +21,7 @@ import {
   PaginarProductosQuery,
   ProductosPaginados,
 } from '../../dto/paginar-productos';
-import { Producto } from '../../models/producto';
+import { Producto, ProductoConStockTotal } from '../../models/producto';
 import { ESTADOS_PRODUCTO_OCULTOS } from '../../models/estado-producto';
 
 /**
@@ -45,7 +45,12 @@ const CLAVES_RESERVADAS = new Set([
   'precio_min',
   'precio_max',
   'estado_variante',
+  'stock_min',
+  'stock_max',
 ]);
+
+/** El campo agregado (no guardado en Mongo) con la suma de variantes[].stock. */
+const CAMPO_STOCK_TOTAL = 'stock_total';
 
 /** Los filtros que las dos rutas de listado tienen en comun. */
 type FiltrosProductosQuery = Record<string, string | undefined>;
@@ -61,8 +66,8 @@ export class ProductosService {
    * un numero de pagina.
    *
    * Admite filtros fijos (nombre, estado, categoria, vendedor, precio,
-   * estado de variante) y filtros dinamicos sobre caracteristicas_adicionales,
-   * tanto del producto como de sus variantes.
+   * estado de variante, stock_total) y filtros dinamicos sobre
+   * caracteristicas_adicionales, tanto del producto como de sus variantes.
    */
   async listar(query: ListarProductosQuery): Promise<ProductosPagina> {
     const limite = validarLimite(query.limite);
@@ -73,12 +78,21 @@ export class ProductosService {
       filtro._id = { $gt: despuesDe };
     }
 
+    const matchStock = this.construirMatchStockTotal(query);
+
     try {
+      const pipeline: Document[] = [
+        { $match: filtro },
+        { $addFields: { [CAMPO_STOCK_TOTAL]: { $sum: '$variantes.stock' } } },
+      ];
+      if (matchStock != null) {
+        pipeline.push({ $match: matchStock });
+      }
+      pipeline.push({ $sort: { _id: 1 } }, { $limit: limite });
+
       const productos = await mongoDb
         .collection<Producto>('productos')
-        .find(filtro as Filter<Producto>)
-        .sort({ _id: 1 })
-        .limit(limite)
+        .aggregate<ProductoConStockTotal>(pipeline)
         .toArray();
 
       const siguienteCursor =
@@ -96,33 +110,49 @@ export class ProductosService {
    * Lo mismo que listar(), mismos filtros y mismo comportamiento, pero
    * paginado por numero de pagina en vez de por cursor: admite saltar
    * directo a cualquier pagina, a cambio de tener que contar cuantos
-   * productos hay en total (countDocuments) para calcular total_paginas.
+   * productos hay en total para calcular total_paginas. El conteo tiene que
+   * pasar por el mismo $addFields/$match de stock_total que la tanda (por
+   * eso $facet en vez de countDocuments): si no, el total no cuadraria con
+   * lo que en verdad cumple el filtro de stock.
    */
   async listarPaginado(
     query: PaginarProductosQuery,
   ): Promise<ProductosPaginados> {
     const limite = validarLimite(query.limite);
     const pagina = validarPagina(query.pagina);
-    const filtro = this.construirFiltro(query) as Filter<Producto>;
+    const filtro = this.construirFiltro(query);
     const saltar = (pagina - 1) * limite;
+    const matchStock = this.construirMatchStockTotal(query);
 
     try {
-      const coleccion = mongoDb.collection<Producto>('productos');
-      const [productos, totalProductos] = await Promise.all([
-        coleccion
-          .find(filtro)
-          .sort({ _id: 1 })
-          .skip(saltar)
-          .limit(limite)
-          .toArray(),
-        coleccion.countDocuments(filtro),
-      ]);
+      const pipeline: Document[] = [
+        { $match: filtro },
+        { $addFields: { [CAMPO_STOCK_TOTAL]: { $sum: '$variantes.stock' } } },
+      ];
+      if (matchStock != null) {
+        pipeline.push({ $match: matchStock });
+      }
+      pipeline.push({
+        $facet: {
+          productos: [{ $sort: { _id: 1 } }, { $skip: saltar }, { $limit: limite }],
+          total: [{ $count: 'total' }],
+        },
+      });
 
+      const [resultado] = await mongoDb
+        .collection<Producto>('productos')
+        .aggregate<{
+          productos: ProductoConStockTotal[];
+          total: { total: number }[];
+        }>(pipeline)
+        .toArray();
+
+      const totalProductos = resultado.total[0]?.total ?? 0;
       const totalPaginas =
         totalProductos === 0 ? 0 : Math.ceil(totalProductos / limite);
 
       return {
-        productos,
+        productos: resultado.productos,
         pagina,
         limite,
         total_productos: totalProductos,
@@ -139,7 +169,9 @@ export class ProductosService {
    * mismo 404 que un id que no existe, para no confirmar por otra via que
    * el producto existe pero esta oculto.
    */
-  async obtenerPublico(idProductoParametro: string): Promise<Producto> {
+  async obtenerPublico(
+    idProductoParametro: string,
+  ): Promise<ProductoConStockTotal> {
     if (!REGEX_ID.test(idProductoParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }
@@ -155,13 +187,46 @@ export class ProductosService {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
       }
 
-      return producto;
+      return { ...producto, stock_total: this.sumarStockVariantes(producto) };
     } catch (error) {
       if (error instanceof ErrorNoEncontrado) {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);
     }
+  }
+
+  /** La suma de variantes[].stock; una variante sin stock cuenta como 0. */
+  private sumarStockVariantes(producto: Producto): number {
+    return producto.variantes.reduce(
+      (total, variante) => total + (variante.stock ?? 0),
+      0,
+    );
+  }
+
+  /**
+   * El $match de stock_min/stock_max sobre el stock_total ya agregado, o
+   * null si no vinieron. Va DESPUES del $addFields en el pipeline: Mongo no
+   * puede filtrar por un campo que todavia no existe.
+   */
+  private construirMatchStockTotal(
+    query: FiltrosProductosQuery,
+  ): Record<string, unknown> | null {
+    const stockMin = validarEnteroPositivo(query.stock_min, 'stock_min');
+    const stockMax = validarEnteroPositivo(query.stock_max, 'stock_max');
+
+    if (stockMin == null && stockMax == null) {
+      return null;
+    }
+
+    const rango: Record<string, number> = {};
+    if (stockMin != null) {
+      rango.$gte = stockMin;
+    }
+    if (stockMax != null) {
+      rango.$lte = stockMax;
+    }
+    return { [CAMPO_STOCK_TOTAL]: rango };
   }
 
   /**

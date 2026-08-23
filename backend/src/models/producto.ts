@@ -59,6 +59,13 @@ export interface ProductoVariante {
   fecha_creacion: Date;
   estado: string;
   imagenes: string[];
+  /**
+   * Cuantas unidades quedan de esta variante. Es una copia de lectura del
+   * saldo real, que vive en `inventario` de PostgreSQL (ver
+   * cambios-etl-productos.md); opcional porque las variantes publicadas
+   * desde el panel del vendedor todavia no crean su fila de inventario.
+   */
+  stock?: number;
   /** Opcional: caracteristicas de esta variante, del catalogo de la app. */
   caracteristicas_adicionales?: EntradaCaracteristica[];
   /**
@@ -87,4 +94,15 @@ export interface Producto {
    * como esas (ver ProductosService).
    */
   caracteristicas_personalizadas?: EntradaCaracteristica[];
+}
+
+/**
+ * Un Producto tal como lo devuelven las rutas publicas de listado y de
+ * detalle, con `stock_total` agregado: la suma de `variantes[].stock` (las
+ * variantes sin stock cuentan como 0). No se guarda en Mongo, se calcula al
+ * responder, para poder mostrarlo y para poder filtrar por el (ver
+ * ProductosService).
+ */
+export interface ProductoConStockTotal extends Producto {
+  stock_total: number;
 }
