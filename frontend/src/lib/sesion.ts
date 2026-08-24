@@ -1,5 +1,6 @@
 import { browser } from '$app/environment';
 import { pedir } from './api';
+import { olvidarPedidoAbierto } from './pedido';
 
 /**
  * Sesion del navegador.
@@ -74,6 +75,11 @@ export function leerSesion(): string | null {
 export function cerrarSesion() {
 	if (!browser) return;
 	localStorage.removeItem(LLAVE);
+	// El id del pedido abierto se va con la sesion. Si se queda, la siguiente
+	// persona que entre en este navegador arrastra el pedido de la anterior:
+	// el backend le contesta 404 (no es suyo) y el frontend lo trataba como
+	// "ese pedido ya no existe", que es mentira -- existe, pero es de otro.
+	olvidarPedidoAbierto();
 }
 
 /**

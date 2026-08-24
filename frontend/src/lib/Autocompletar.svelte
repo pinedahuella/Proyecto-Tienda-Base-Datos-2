@@ -30,7 +30,12 @@
 		alElegir = (_v: string) => {},
 		deshabilitado = false,
 		ayuda = '',
-		opcional = false
+		opcional = false,
+		marcador = '',
+		permitirLibre = false,
+		mostrarAlEnfocar = false,
+		limpiarSiVacio = false,
+		compacto = false
 	}: {
 		id: string;
 		etiqueta: string;
@@ -41,11 +46,38 @@
 		deshabilitado?: boolean;
 		ayuda?: string;
 		opcional?: boolean;
+		marcador?: string;
+		/**
+		 * Lo escrito vale como valor aunque no este en la lista, y las
+		 * sugerencias solo ayudan a escribirlo. Es lo que necesita el
+		 * buscador de caracteristicas del catalogo: las del catalogo si
+		 * estan en la lista, pero una caracteristica personalizada la
+		 * escribio quien publico el producto y no hay lista que consultar.
+		 */
+		permitirLibre?: boolean;
+		/** Al enfocar, ensena la lista aunque la caja este vacia (se puede ojear, no solo buscar). */
+		mostrarAlEnfocar?: boolean;
+		/**
+		 * Borrar la caja borra el valor, y se avisa al padre con alElegir('').
+		 *
+		 * Sin esto, vaciar la caja deja la caja vacia y el valor puesto: la
+		 * pantalla dice "ninguna categoria" y la busqueda sigue filtrada por
+		 * una. Solo tiene sentido donde "nada" es una respuesta valida --
+		 * "todas las categorias" lo es, "sin ciudad" no.
+		 */
+		limpiarSiVacio?: boolean;
+		/** Talla chica, para una barra de filtros en vez de un formulario. */
+		compacto?: boolean;
 	} = $props();
+
+	/** Cuantas sugerencias se ensenan a la vez. */
+	const MAXIMO_SUGERENCIAS = 8;
 
 	let escrito = $state('');
 	let sugerencias = $state<Opcion[]>([]);
 	let aviso = $state('');
+	/** Cual esta marcada con el teclado. -1 es ninguna. */
+	let resaltada = $state(-1);
 
 	/** Sin lista no hay nada que sugerir: el campo pasa a texto libre. */
 	let libre = $derived(opciones.length === 0);
@@ -74,46 +106,115 @@
 		}
 	});
 
-	/** El texto que le toca a un valor. Difieren en los departamentos. */
+	/**
+	 * El texto que le toca a un valor. Difieren en los departamentos.
+	 *
+	 * Con permitirLibre NO se traduce: ahi lo escrito ES el valor, asi que la
+	 * caja tiene que ensenar el valor tal cual. Si ensenara el texto, elegir
+	 * "Memoria RAM (GB)" dejaria la caja con la unidad pegada y la siguiente
+	 * tecla convertiria ese rotulo en el valor -- una caracteristica que no
+	 * existe, y un filtro que no encuentra nada sin decir por que. El rotulo
+	 * con la unidad se sigue viendo en la lista de sugerencias, que es donde
+	 * sirve.
+	 */
 	function mostrar(v: string): string {
+		if (permitirLibre) return v;
 		const o = opciones.find((x) => x.valor === v);
 		return o ? o.texto : v;
 	}
 
+	/** Las coincidencias de lo escrito. Con la caja vacia, la lista entera si se pidio. */
+	function calcular(texto: string): Opcion[] {
+		if (libre) return [];
+		const q = texto.trim().toLowerCase();
+		if (q === '') return mostrarAlEnfocar ? opciones.slice(0, MAXIMO_SUGERENCIAS) : [];
+		return opciones.filter((o) => o.texto.toLowerCase().includes(q)).slice(0, MAXIMO_SUGERENCIAS);
+	}
+
 	function alEscribir() {
 		aviso = '';
+		resaltada = -1;
 
-		if (libre) {
-			// Texto libre: lo escrito es el valor, sin lista que consultar
-			valor = escrito.trim();
-			ultimoValorVisto = valor;
-			elegido = escrito.trim().length > 0;
+		// Caja vacia y "nada" es una respuesta valida: se avisa al padre en el
+		// acto, sin esperar al blur, para que la pantalla no quede ensenando un
+		// filtro que ya no esta escrito en ninguna parte.
+		if (limpiarSiVacio && escrito.trim() === '') {
+			valor = '';
+			ultimoValorVisto = '';
+			elegido = false;
+			sugerencias = calcular('');
+			alElegir('');
 			return;
 		}
 
-		const q = escrito.trim().toLowerCase();
-		sugerencias = q.length < 1 ? [] : opciones.filter((o) => o.texto.toLowerCase().includes(q)).slice(0, 8);
+		if (libre || permitirLibre) {
+			// Lo escrito es el valor. Sin lista (libre) no hay nada que sugerir;
+			// con lista (permitirLibre) las sugerencias siguen saliendo, pero
+			// solo para ahorrar tecleo, no para obligar a elegir.
+			valor = escrito.trim();
+			ultimoValorVisto = valor;
+			elegido = opciones.some((o) => o.valor === valor);
+			sugerencias = calcular(escrito);
+			return;
+		}
+
+		sugerencias = calcular(escrito);
 
 		// Escribir invalida la eleccion anterior, pero el valor se deja quieto
 		// hasta que elija otro o salga del campo. Ver el comentario del efecto.
 		elegido = false;
 	}
 
+	function alEnfocar() {
+		if (!mostrarAlEnfocar) return;
+		sugerencias = calcular(escrito);
+		resaltada = -1;
+	}
+
 	function elegir(o: Opcion) {
-		escrito = o.texto;
+		escrito = mostrar(o.valor);
 		valor = o.valor;
 		ultimoValorVisto = o.valor;
 		elegido = true;
 		sugerencias = [];
+		resaltada = -1;
 		aviso = '';
 		alElegir(o.valor);
 	}
 
+	/**
+	 * Flechas para recorrer, Enter para tomar la marcada, Escape para cerrar.
+	 * Con 46 caracteristicas en una categoria, bajar con el raton a la octava
+	 * sugerencia no es forma de trabajar.
+	 */
+	function alTeclear(evento: KeyboardEvent) {
+		if (evento.key === 'Escape') {
+			sugerencias = [];
+			resaltada = -1;
+			return;
+		}
+
+		if (evento.key === 'ArrowDown' || evento.key === 'ArrowUp') {
+			if (sugerencias.length === 0) sugerencias = calcular(escrito);
+			if (sugerencias.length === 0) return;
+			evento.preventDefault();
+			const paso = evento.key === 'ArrowDown' ? 1 : -1;
+			resaltada = Math.min(sugerencias.length - 1, Math.max(0, resaltada + paso));
+			return;
+		}
+
+		if (evento.key === 'Enter' && resaltada >= 0 && sugerencias[resaltada]) {
+			evento.preventDefault();
+			elegir(sugerencias[resaltada]);
+		}
+	}
+
 	function alSalir() {
-		if (libre) return;
 		// Se da un respiro para que un clic en una sugerencia gane al blur
 		setTimeout(() => {
 			sugerencias = [];
+			resaltada = -1;
+			if (libre || permitirLibre) return;
 			if (escrito.trim() && !elegido) {
 				aviso = 'Elige una opcion de la lista';
 				escrito = '';
@@ -123,7 +224,7 @@
 	}
 </script>
 
-<div class="campo">
+<div class="campo" class:compacto>
 	<label for={id}>
 		{etiqueta}
 		{#if opcional}<span class="nota">opcional</span>{/if}
@@ -135,18 +236,30 @@
 			{id}
 			type="text"
 			autocomplete="off"
+			placeholder={marcador}
 			bind:value={escrito}
 			oninput={alEscribir}
+			onfocus={alEnfocar}
+			onkeydown={alTeclear}
 			onblur={alSalir}
 			disabled={deshabilitado}
+			role="combobox"
+			aria-autocomplete="list"
+			aria-controls={id + '-lista'}
+			aria-expanded={sugerencias.length > 0}
 			aria-invalid={aviso ? 'true' : undefined}
 		/>
 
 		{#if sugerencias.length > 0}
-			<ul>
-				{#each sugerencias as o (o.valor)}
+			<ul id={id + '-lista'}>
+				{#each sugerencias as o, i (o.valor)}
 					<li>
-						<button type="button" onmousedown={(e) => e.preventDefault()} onclick={() => elegir(o)}>
+						<button
+							type="button"
+							class:resaltada={i === resaltada}
+							onmousedown={(e) => e.preventDefault()}
+							onclick={() => elegir(o)}
+						>
 							{o.texto}
 						</button>
 					</li>
@@ -241,9 +354,31 @@
 		cursor: pointer;
 	}
 
-	li button:hover {
+	li button:hover,
+	li button.resaltada {
 		background: var(--indigo-cl);
 		color: var(--indigo-os);
+	}
+
+	/* ---------- talla chica, para la barra de filtros ---------- */
+
+	.compacto {
+		gap: 0.3rem;
+	}
+
+	.compacto label {
+		font-size: 0.82rem;
+		font-weight: 400;
+		color: var(--gris);
+	}
+
+	.compacto input {
+		padding: 9px 11px;
+		font-size: 0.95rem;
+	}
+
+	.compacto input:focus {
+		box-shadow: none;
 	}
 
 	.aviso {

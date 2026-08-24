@@ -168,6 +168,8 @@ acceso a nada real.
 |---|---|---|
 | `compradora.norte@mesh.com` | comprador | `Comprador123` |
 | `comprador.sur@mesh.com` | comprador | `Comprador123` |
+| `vendedor.prueba@mesh.com` | vendedor | `Vendedor123` (hay que ponersela, ver abajo) |
+| `ventas.norte@mesh.com` | vendedor | `Vendedor123` (hay que ponersela, ver abajo) |
 
 Los dos vendedores del catalogo (`vendedor.prueba@mesh.com` y
 `ventas.norte@mesh.com`) **no pueden entrar**: el conjunto de datos les dejo un
@@ -179,6 +181,18 @@ hay que ponerles una:
 UPDATE usuarios SET contrasena_hash = 'el hash que genere el backend'
 WHERE correo_electronico = 'vendedor.prueba@mesh.com';
 ```
+
+El hash lo genera el mismo scrypt que usa `helpers/contrasena.ts`, en formato
+`salt:hash`. Sin instalar nada:
+
+```powershell
+node -e "const {randomBytes,scrypt}=require('crypto');const {promisify}=require('util');const s=promisify(scrypt);(async()=>{const salt=randomBytes(16).toString('hex');console.log(salt+':'+(await s('Vendedor123',salt,64)).toString('hex'));})()"
+```
+
+Se pega el resultado en el `UPDATE` de arriba (para los dos vendedores, si se
+quieren los dos). En esta maquina ya esta puesto, con `Vendedor123`. Hace falta
+para probar el panel del vendedor: sin un vendedor que pueda entrar no hay forma
+de ver ni el inventario ni el formulario de publicar.
 
 Es una de esas cosas que no dan ningun error: el login simplemente dice que la
 contrasena esta mal, para siempre.

@@ -7,6 +7,7 @@
 	import Direcciones from '$lib/Direcciones.svelte';
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
+	import Pedido from '$lib/Pedido.svelte';
 	import {
 		cerrarSesion,
 		ID_ROL_ADMIN,
@@ -273,8 +274,19 @@
 		});
 	}
 
+	/**
+	 * Las tarjetas del comprador. Son ceros fijos, no datos: andamiaje de
+	 * cuando no habia nada que enseñar.
+	 *
+	 * "Pedidos" ya no esta: el pedido de verdad se ensena arriba, en el
+	 * componente Pedido, y la tarjeta afirmaba "Aun no hay pedidos" justo
+	 * debajo de un pedido con lineas y su total. Un cero inventado al lado del
+	 * dato de verdad no es andamiaje, es una contradiccion en pantalla.
+	 *
+	 * Las otras dos siguen siendo ceros fijos, y eso hay que quitarlo tambien
+	 * el dia que haya de donde sacarlos.
+	 */
 	const resumen = [
-		{ rotulo: 'Pedidos', cifra: '0', nota: 'Aun no hay pedidos.' },
 		{ rotulo: 'Productos', cifra: '0', nota: 'Todavia no has publicado nada.' },
 		{ rotulo: 'Inventario', cifra: '0', nota: 'Sin movimientos registrados.' }
 	];
@@ -432,6 +444,10 @@
 			</section>
 
 			<Direcciones alExpirarSesion={expiro} />
+
+			<!-- Va para todos, no solo para el rol comprador: /comprador/pedidos
+			     solo exige sesion, asi que un vendedor o un admin compran igual. -->
+			<Pedido alExpirarSesion={expiro} />
 
 			{#if esAdmin}
 				<PanelAdmin alExpirarSesion={expiro} />
