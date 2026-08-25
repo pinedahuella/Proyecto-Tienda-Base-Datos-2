@@ -7,7 +7,7 @@ backend, en orden. No toqué nada de `backend/src/`.
 .\arrancar.ps1 -Reiniciar
 ```
 
-Queda: 36 tablas · 34 productos · 63 variantes · **166 ofertas** · 23 categorías ·
+Queda: 36 tablas · 34 productos · 63 variantes · **168 ofertas** · 23 categorías ·
 44 eventos.
 
 ---
@@ -80,7 +80,11 @@ export interface ProductoVariante {
   imagenes: string[];
   /** Precio de la tienda para ESTA variante. Copia calculada por el ETL. */
   precio_tienda: Decimal128 | null;
-  /** Cuántos vendedores la tienen activa. Copia calculada. */
+  /** Unidades de la tienda para esta variante. 0 si no tiene o está pausada. */
+  stock_tienda: number;
+  /** Unidades entre TODOS los vendedores activos de esta variante. */
+  stock_total: number;
+  /** Cuántos vendedores la tienen activa. */
   total_ofertas: number;
   caracteristicas_adicionales?: EntradaCaracteristica[];
   caracteristicas_personalizadas?: EntradaCaracteristica[];
@@ -95,6 +99,10 @@ export interface Producto {
   categoria: ProductoCategoria;
   /** El menor de los precios de la tienda entre sus variantes. */
   precio_tienda: Decimal128 | null;
+  /** SUMA del stock de la tienda sobre todas sus variantes. */
+  stock_tienda: number;
+  /** SUMA del stock de todas las ofertas activas de todas sus variantes. */
+  stock_total: number;
   total_ofertas: number;
   variantes: ProductoVariante[];
   caracteristicas_adicionales?: EntradaCaracteristica[];
@@ -195,6 +203,22 @@ sobre `variantes.precio`. Va contra el campo calculado:
 filtro.precio_tienda = { $gte: Decimal128.fromString(min),
                          $lte: Decimal128.fromString(max) };
 ```
+
+**El filtro de disponibilidad** va contra `stock_total`, y usa el índice
+`catalogo_categoria_estado_stock` sin recorrer la colección:
+
+```ts
+// solo lo que se puede comprar hoy, de cualquier vendedor
+filtro.stock_total = { $gt: 0 };
+```
+
+Los dos campos de stock **solo cuentan ofertas `activa`**: una pausada tiene
+unidades y no se puede comprar, así que contarla haría mentir al filtro.
+
+En el conjunto de datos hay casos de los tres tipos, a propósito: 33 productos
+con existencias, 1 agotado del todo, y 9 variantes donde la tienda está en 0 —
+6 de ellas con otro vendedor que sí tiene. Ahí es donde hay que decidir qué dice
+la tarjeta: `stock_tienda = 0` pero `stock_total > 0` **no es "agotado"**.
 
 ---
 

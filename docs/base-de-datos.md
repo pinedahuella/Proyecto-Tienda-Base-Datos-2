@@ -267,36 +267,36 @@ distintos, cada uno pidiendola. Despues se llamo a `comprar_pedido` de los dos
 **a la vez**, en dos conexiones separadas:
 
 ```
-pedido 4  ->  COMPRO. total 3852.00
-pedido 3  ->  ERROR: No hay suficiente stock de "8 GB / 256 GB" (Carlos Ramirez):
+pedido 3  ->  compro. total 3856.00
+pedido 4  ->  ERROR: No hay suficiente stock de "8 GB / 256 GB" (Paola Guzman):
               quedan 0 y se pidieron 1
 ```
 
 Como quedo la oferta:
 
 ```
- id_oferta | stock | estados de los dos pedidos | ventas registradas
-         3 |     0 | pendiente, comprado        |                  2
+ id_oferta | stock | vendedor        | los dos pedidos
+         1 |     0 | ventas_poniente | 3: comprado | 4: pendiente
 ```
 
 Y su kardex:
 
 ```
  motivo      valor  cantidad  stock_resultante  pedido
- reposicion    +1        7           7            -
- venta         -1        1           6            1
- ajuste        -1        5           1            -
- venta         -1        1           0            4
+ reposicion    +1        8           8            -
+ venta         -1        1           7            1
+ ajuste        -1        6           1            -
+ venta         -1        1           0            3
 ```
 
 Tres cosas que ensena esta prueba:
 
 1. **No hubo sobreventa.** Una unidad, una venta.
 2. **La transaccion que fallo no dejo rastro.** No hay un movimiento de venta
-   del pedido 3, ni un pago, ni el pedido cambio de estado: sigue en
+   del pedido 4, ni un pago, ni el pedido cambio de estado: sigue en
    `pendiente`. Revirtio entero, no a medias.
-3. **El saldo lo explica el libro.** 7 - 1 - 5 - 1 = 0, que es lo que dice
-   `oferta.stock`. Medido sobre las 166 ofertas: **cero descuadres**.
+3. **El saldo lo explica el libro.** 8 - 1 - 6 - 1 = 0, que es lo que dice
+   `oferta.stock`. Medido sobre las 168 ofertas: **cero descuadres**.
 
 Lo que lo consigue es una sola linea, el `SELECT ... FOR UPDATE` sobre la fila
 de `Oferta` dentro de `comprar_pedido`. La segunda conexion se queda esperando
@@ -356,11 +356,34 @@ tantos vendedores. Es la **tasa de cambio**.
 reves: son cuatro campos, se leen siempre con ella ("Vendido por Carlos
 Ramirez") y casi nunca cambian.
 
-Y como la **lista** del catalogo si necesita un precio en cada tarjeta, el
-producto lleva dos numeros calculados, `precio_tienda` y `total_ofertas`. Son
-una **copia** y hay que recalcularlos cuando una oferta cambie de precio, se
+Y como la **lista** del catalogo si necesita un precio y saber si hay
+existencias en cada tarjeta, el producto lleva cuatro numeros calculados:
+
+| Campo | Que es |
+|---|---|
+| `precio_tienda` | el precio de la tienda, que es el que se ensena |
+| `stock_tienda` | unidades de la tienda |
+| `stock_total` | unidades entre todos los vendedores activos |
+| `total_ofertas` | cuantos vendedores lo tienen activo |
+
+Los tres primeros van tambien dentro de cada variante. **En el padre los dos de
+stock son SUMAS** de sus variantes, porque la tarjeta ensena un producto y no una
+variante. Y los dos cuentan **solo ofertas activas**: una pausada tiene unidades
+y no se puede comprar, asi que contarla haria que el filtro de disponibilidad
+mintiera.
+
+Sin ellos no se puede filtrar por disponibilidad sin consultar la coleccion de
+ofertas una vez por tarjeta, que es justo lo que se queria evitar.
+
+Son una **copia** y hay que recalcularlos cuando una oferta cambie de precio, se
 quede sin unidades o se pause: si no, la tarjeta va a decir un precio y la ficha
 otro.
+
+**Y hay un caso que la pantalla tiene que decidir:** `stock_tienda = 0` con
+`stock_total > 0` **no es agotado**. La tienda no tiene, pero otro vendedor si.
+En el conjunto de datos pasa en 6 variantes, a proposito: si la tienda tuviera
+existencias de todo, el filtro devolveria el catalogo entero siempre y nadie
+sabria si funciona.
 
 ### Que se puede reconstruir y que no
 

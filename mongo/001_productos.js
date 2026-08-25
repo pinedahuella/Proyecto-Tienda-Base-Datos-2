@@ -10,10 +10,11 @@
 //   uno que genere Mongo: asi volver a correr el ETL actualiza en vez de
 //   duplicar, y la traza entre las dos bases es directa.
 //
-//   NO trae vendedor, ni precio, ni stock: al volverse multi-vendedor dejaron
-//   de ser del producto. Solo trae dos numeros calculados, precio_tienda y
-//   total_ofertas, que son los que la LISTA del catalogo necesita en cada
-//   tarjeta.
+//   NO trae vendedor, ni precio, ni stock por vendedor: al volverse
+//   multi-vendedor dejaron de ser del producto. Solo trae cuatro numeros
+//   calculados, que son los que la LISTA del catalogo necesita en cada tarjeta:
+//   precio_tienda, stock_tienda, stock_total y total_ofertas. Los de stock van
+//   SUMADOS sobre todas sus variantes, y cuentan solo ofertas activas.
 //
 // ofertas
 //   Un documento por oferta: quien vende esa variante, a como y con cuantas
@@ -69,12 +70,21 @@ COLECCIONES.forEach(function (nombre) {
 // Cada uno responde a una consulta concreta de la aplicacion, no a la idea
 // general de que "conviene tener indices".
 
-// El catalogo se navega filtrando por categoria y escondiendo lo que no esta
-// activo. Es un indice COMPUESTO y en ese orden porque el estado se filtra
-// siempre y la categoria a veces: el campo que nunca falta va primero.
+// El catalogo se navega filtrando por categoria, escondiendo lo que no esta
+// activo y, muy seguido, dejando solo lo que tiene existencias. Es un indice
+// COMPUESTO y en ese orden porque el estado se filtra siempre, la categoria a
+// veces, y stock_total va al final por ser un rango: un campo de rango detras
+// de otro deja de servir para filtrar dentro del indice.
+//
+// Si existe la version anterior de este indice (sin stock_total), se cambia.
+// createIndex con el mismo nombre y otras llaves da IndexOptionsConflict.
+if (db.productos.getIndexes().some(function (i) { return i.name === 'catalogo_categoria_estado'; })) {
+    db.productos.dropIndex('catalogo_categoria_estado');
+}
+
 db.productos.createIndex(
-    { 'categoria.nombre': 1, estado: 1 },
-    { name: 'catalogo_categoria_estado' }
+    { 'categoria.nombre': 1, estado: 1, stock_total: 1 },
+    { name: 'catalogo_categoria_estado_stock' }
 );
 
 // "las ofertas de esta variante, de la mas barata a la mas cara". Es la

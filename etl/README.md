@@ -39,10 +39,22 @@ producto, son pocos campos y cambian poco. Las imagenes cuelgan de la variante,
 no del producto, y por eso van adentro de cada una; el `numero_orden` se gasta
 al ordenarlas, porque en un arreglo la posicion ya es el orden.
 
-**NO va el vendedor, ni el precio, ni el stock.** Dejaron de ser del producto al
-volverse multi-vendedor: son de cada oferta. Lo unico que queda de ellas son dos
-numeros calculados, `precio_tienda` y `total_ofertas`, que son los que la LISTA
-del catalogo necesita en cada tarjeta. Estan tambien dentro de cada variante.
+**NO va el vendedor, ni el precio, ni el stock por vendedor.** Dejaron de ser
+del producto al volverse multi-vendedor: son de cada oferta. Lo unico que queda
+de ellas son cuatro numeros calculados, que son los que la LISTA del catalogo
+necesita en cada tarjeta:
+
+| Campo | Que es |
+|---|---|
+| `precio_tienda` | el precio de la tienda, que es el que se ensena |
+| `stock_tienda` | unidades de la tienda |
+| `stock_total` | unidades entre todos los vendedores activos |
+| `total_ofertas` | cuantos vendedores lo tienen activo |
+
+Los tres primeros estan tambien dentro de cada variante. **En el padre los dos
+de stock son SUMAS** de sus variantes, porque la tarjeta ensena un producto y no
+una variante. Y los dos cuentan **solo ofertas activas**: una pausada tiene
+unidades y no se puede comprar.
 
 Son una **copia** y hay que recalcularlos cuando una oferta cambie de precio, se
 quede sin unidades o se pause. Si no, la tarjeta dice un precio y la ficha otro.

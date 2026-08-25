@@ -20,12 +20,18 @@
 -- El producto ya NO trae vendedor ni precio ni stock, porque dejaron de ser
 -- suyos: son de cada oferta, y las ofertas viven en su propia coleccion.
 --
--- Lo unico que se queda embebido de las ofertas son dos numeros calculados:
+-- Lo unico que se queda embebido de las ofertas son cuatro numeros calculados:
 --
 --   precio_tienda   el precio de la tienda, que es el que se ensena en la
 --                   pagina. Lo pidio el profesor: el primero siempre es el de
 --                   la pagina.
---   total_ofertas   cuantos vendedores distintos la tienen activa.
+--   stock_tienda    unidades que tiene la tienda
+--   stock_total     unidades entre TODOS los vendedores activos
+--   total_ofertas   cuantos vendedores distintos la tienen activa
+--
+-- Los tres primeros van tambien dentro de cada variante. En el padre son
+-- SUMAS de sus variantes: la tarjeta del catalogo ensena un producto, no una
+-- variante.
 --
 -- Se embeben porque la LISTA del catalogo los necesita en cada tarjeta, y sin
 -- ellos habria que consultar la coleccion de ofertas una vez por producto de
@@ -86,6 +92,31 @@ SELECT jsonb_build_object(
         JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante
         WHERE pv2.id_producto = p.id_producto
           AND o.id_usuario = (SELECT id_usuario FROM tienda)
+    ),
+
+    -- Las existencias, SUMADAS sobre todas las variantes del producto. Son
+    -- campos del padre a proposito: la tarjeta del catalogo ensena un producto,
+    -- no una variante, y sin ellos no se puede filtrar por disponibilidad sin
+    -- consultar la coleccion de ofertas una vez por tarjeta.
+    --
+    -- Las dos cuentan SOLO ofertas activas, porque las dos significan lo mismo:
+    -- unidades que se pueden comprar hoy. Una oferta pausada tiene stock y no
+    -- se puede comprar; contarla haria que el filtro "disponible" mintiera.
+    'stock_tienda', (
+        SELECT coalesce(sum(o.stock), 0)
+        FROM oferta o
+        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante
+        WHERE pv2.id_producto = p.id_producto
+          AND o.id_usuario = (SELECT id_usuario FROM tienda)
+          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+    ),
+
+    'stock_total', (
+        SELECT coalesce(sum(o.stock), 0)
+        FROM oferta o
+        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante
+        WHERE pv2.id_producto = p.id_producto
+          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
     ),
 
     -- Cuantos vendedores distintos lo tienen activo. Cuenta vendedores y no
@@ -160,6 +191,20 @@ SELECT jsonb_build_object(
                        SELECT o.precio::text FROM oferta o
                        WHERE o.id_producto_variante = pv.id_producto_variante
                          AND o.id_usuario = (SELECT id_usuario FROM tienda)
+                   ),
+                   -- Lo mismo por variante. Aqui stock_tienda NO es una suma:
+                   -- el UNIQUE de oferta garantiza que la tienda tiene a lo
+                   -- sumo una por variante.
+                   'stock_tienda', coalesce((
+                       SELECT o.stock FROM oferta o
+                       WHERE o.id_producto_variante = pv.id_producto_variante
+                         AND o.id_usuario = (SELECT id_usuario FROM tienda)
+                         AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                   ), 0),
+                   'stock_total', (
+                       SELECT coalesce(sum(o.stock), 0) FROM oferta o
+                       WHERE o.id_producto_variante = pv.id_producto_variante
+                         AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
                    ),
                    'total_ofertas', (
                        SELECT count(*) FROM oferta o

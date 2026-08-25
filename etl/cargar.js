@@ -186,11 +186,18 @@ function documentoDe(producto) {
         estado:         producto.estado,
         categoria:      producto.categoria,
 
-        // Los dos calculados. Son una COPIA de lo que dicen las ofertas, y hay
-        // que recalcularlos cuando una oferta cambie de precio, se quede sin
-        // unidades o se pause. Si no, la tarjeta va a decir un precio y la
+        // Los cuatro calculados. Son una COPIA de lo que dicen las ofertas, y
+        // hay que recalcularlos cuando una oferta cambie de precio, se quede
+        // sin unidades o se pause. Si no, la tarjeta va a decir un precio y la
         // ficha otro.
+        //
+        // Los dos de stock van SUMADOS sobre todas las variantes, porque la
+        // tarjeta del catalogo ensena un producto y no una variante. Y solo
+        // cuentan ofertas activas: las dos significan "unidades que se pueden
+        // comprar hoy".
         precio_tienda:  producto.precio_tienda,
+        stock_tienda:   producto.stock_tienda,
+        stock_total:    producto.stock_total,
         total_ofertas:  producto.total_ofertas,
 
         variantes:      producto.variantes.map(v => Object.assign({}, v, {

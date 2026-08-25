@@ -1011,10 +1011,18 @@ const OFERTAS = [];
 VARIANTES.forEach((v) => {
   const precioTienda = Math.round(v.precioBase * v.factor);
 
-  // La tienda: siempre, y es la que se ensena en la pagina
+  // La tienda: siempre, y es la que se ensena en la pagina.
+  //
+  // Una de cada diez sale SIN unidades, a proposito. Si la tienda tuviera
+  // stock en todo, el filtro de disponibilidad devolveria el catalogo entero
+  // siempre y nadie sabria si funciona: no habria un solo producto agotado que
+  // ensenar, ni el caso de "la tienda no tiene pero otro vendedor si", que es
+  // el que hace falta para decidir que dice la tarjeta.
   OFERTAS.push({
     correo: TIENDA.correo, producto: v.producto, variante: v.nombre,
-    precio: precioTienda, stock: entre(4, 40), estado: 'activa', fecha: v.fecha,
+    precio: precioTienda,
+    stock: azar() < 0.10 ? 0 : entre(3, 40),
+    estado: 'activa', fecha: v.fecha,
   });
 
   // Los otros: cada uno entra con probabilidad, y a un precio cercano
