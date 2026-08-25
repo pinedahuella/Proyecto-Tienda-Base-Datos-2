@@ -42,10 +42,11 @@ interface FilaOferta {
   fecha_actualizacion: Date;
 }
 
-/** Los cuatro numeros calculados de una variante, ya agregados por Postgres. */
+/** Los cinco numeros calculados de una variante, ya agregados por Postgres. */
 interface FilaCalculoVariante {
   id_producto_variante_mongo: string;
   precio_tienda: string | null;
+  precio_desde: string | null;
   stock_tienda: number;
   stock_total: number;
   total_ofertas: number;
@@ -185,8 +186,8 @@ export class ProductosService {
    * mismo 404 que un id que no existe, para no confirmar por otra via que
    * el producto existe pero esta oculto.
    *
-   * Trae el documento de Mongo (los cuatro numeros calculados de la
-   * tienda/el total) y le agrega sus ofertas reales -- quien la vende, a
+   * Trae el documento de Mongo (los cinco numeros calculados de la
+   * tienda/el total/lo mas barato) y le agrega sus ofertas reales -- quien la vende, a
    * como y con cuantas unidades -- pedidas a PostgreSQL en el momento, con
    * una sola consulta indexada (ver docs/base-de-datos.md, "El catalogo se
    * mudo a MongoDB"). No se copian a Mongo: precio, stock y estado cambian
@@ -269,7 +270,7 @@ export class ProductosService {
   }
 
   /**
-   * Recalcula precio_tienda/stock_tienda/stock_total/total_ofertas (raiz y
+   * Recalcula precio_tienda/precio_desde/stock_tienda/stock_total/total_ofertas (raiz y
    * cada variante) de estos productos contra las ofertas reales de
    * PostgreSQL, y los deja al dia en Mongo con $set. Hay que llamarla
    * despues de cualquier cosa que cambie una oferta: comprar, cancelar,
@@ -302,6 +303,8 @@ export class ProductosService {
              o.id_producto_variante_mongo,
              MAX(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
                       THEN o.precio END)::text AS precio_tienda,
+             MIN(CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                      THEN o.precio END)::text AS precio_desde,
              COALESCE(SUM(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
                                AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
                           THEN o.stock ELSE 0 END), 0)::int AS stock_tienda,
@@ -335,6 +338,17 @@ export class ProductosService {
         .map(Number);
       const precioTiendaRaiz =
         precios.length > 0 ? Math.min(...precios).toFixed(2) : null;
+
+      // El minimo de los minimos de cada variante es el minimo del producto
+      // entero: mismo resultado que consultarlo aparte sin agrupar por
+      // variante (ver etl/extraer.sql), sin una segunda consulta.
+      const preciosDesde = porVariante.rows
+        .map((fila) => fila.precio_desde)
+        .filter((precio): precio is string => precio != null)
+        .map(Number);
+      const precioDesdeRaiz =
+        preciosDesde.length > 0 ? Math.min(...preciosDesde).toFixed(2) : null;
+
       const stockTiendaRaiz = porVariante.rows.reduce(
         (total, fila) => total + fila.stock_tienda,
         0,
@@ -349,6 +363,10 @@ export class ProductosService {
           precioTiendaRaiz != null
             ? Decimal128.fromString(precioTiendaRaiz)
             : null,
+        precio_desde:
+          precioDesdeRaiz != null
+            ? Decimal128.fromString(precioDesdeRaiz)
+            : null,
         stock_tienda: stockTiendaRaiz,
         stock_total: stockTotalRaiz,
         total_ofertas: totalEnRaiz.rows[0]?.total_ofertas ?? 0,
@@ -360,6 +378,10 @@ export class ProductosService {
         conjuntoSet[`variantes.$[${marcador}].precio_tienda`] =
           fila.precio_tienda != null
             ? Decimal128.fromString(fila.precio_tienda)
+            : null;
+        conjuntoSet[`variantes.$[${marcador}].precio_desde`] =
+          fila.precio_desde != null
+            ? Decimal128.fromString(fila.precio_desde)
             : null;
         conjuntoSet[`variantes.$[${marcador}].stock_tienda`] = fila.stock_tienda;
         conjuntoSet[`variantes.$[${marcador}].stock_total`] = fila.stock_total;

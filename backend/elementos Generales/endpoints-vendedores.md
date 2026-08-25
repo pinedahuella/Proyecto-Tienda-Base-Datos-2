@@ -8,20 +8,28 @@ sin exigir un rol en particular).
 
 Todas las rutas de aquí requieren la cookie `mesh_token`. Las de
 `/vendedor/categorias` aceptan vendedor o admin (`id_rol_usuario` 2 o 3);
-todas las de `/vendedor/productos` son solo para vendedor (2) — un producto
-siempre pertenece a quien lo crea, y un admin no es dueño de productos
-propios. Un rol sin permiso recibe 403, igual que en `/admin/*`.
+todas las de `/vendedor/productos` y `/vendedor/ofertas` son solo para
+vendedor (2). Un rol sin permiso recibe 403, igual que en `/admin/*`.
 
-**Todo lo de productos vive solo en MongoDB.** Las migraciones SQL
-(`003_productos.sql`, `004_caracteristicas.sql`) fueron solo para cargar los
-datos de prueba vía ETL — el nombre, la categoría, las características,
-todo eso nunca toca PostgreSQL. **La única excepción es el stock real**
-(tabla `inventario` de PostgreSQL, migración `005_pedidos_stock.sql`): las
-cinco rutas de `/inventario` (ver abajo, incluyendo el catálogo de motivos
-de ajuste) hablan con las dos bases a la vez, y `POST /vendedor/productos`
-y `PATCH /vendedor/productos/:id` también tocan PostgreSQL **si** la
-petición trae `variantes[].stock_inicial` — si no lo trae, esas dos rutas
-siguen sin tocar PostgreSQL para nada, igual que siempre.
+**Modelo multi-vendedor: `/vendedor/productos` y `/vendedor/ofertas` ya no
+son la misma cosa.** El catálogo (`/vendedor/productos`) es compartido y
+**solo lo crea/edita la cuenta de la tienda** (`tienda@mesh.com` — ver
+`cambios-multivendedor.md`, sección 9); un producto ya no pertenece a quien
+lo crea. Lo que sí es de cualquier vendedor es la **oferta**: publicar un
+precio y un stock propios sobre una variante del catálogo que ya existe.
+Esa parte (`GET /vendedor/ofertas`, al final de este archivo) ya está
+construida contra el modelo nuevo, con las ofertas viviendo en PostgreSQL
+(tabla `oferta`) y el catálogo en Mongo.
+
+**Todo lo de `/vendedor/productos` de aquí abajo (menos `GET .../:id/historial`
+y el menú de categorías) sigue documentando el modelo VIEJO de un-vendedor-
+por-producto** — precio y stock por variante, `inventario` en vez de
+`oferta`, sin restricción de "solo tienda". Esas rutas tienen un parche
+mínimo en el código para que compilen, pero `POST/PATCH /vendedor/productos`
+y las cinco de `/inventario` (que hablan de una tabla `inventario` que ya
+no existe en PostgreSQL) todavía no están rediseñadas contra el modelo
+multi-vendedor — se documentan tal cual porque es lo que hay, no porque
+sea lo correcto hoy.
 
 ---
 
@@ -1016,3 +1024,224 @@ GET /vendedor/productos/52/historial?fecha=2026-01-07
 ### 401 / 403 / 503 / 500
 
 Mismos casos que las demás rutas.
+
+---
+
+# Las ofertas: modelo multi-vendedor
+
+Todo lo de aquí abajo (`/vendedor/ofertas`) **sí** está construido contra el
+modelo nuevo — nada de parche. Las ofertas viven solo en PostgreSQL (tabla
+`oferta`, `migrations/005_ofertas.sql`); el catálogo (nombre, variantes,
+imágenes) vive solo en Mongo. Las dos rutas de aquí cruzan las dos bases:
+Postgres dice qué es mío, Mongo le pone nombre.
+
+**Cualquier vendedor, no solo la tienda.** A diferencia de crear un
+producto del catálogo (solo `tienda@mesh.com`), publicar una oferta sobre
+un producto que ya existe es lo que cualquier cuenta con rol vendedor
+puede hacer — es el corazón del modelo multi-vendedor. Por ahora solo hay
+rutas de lectura: crear, editar el precio/estado de una oferta y reponer
+stock (`POST/PATCH /vendedor/ofertas`, `POST /vendedor/ofertas/:id/stock`)
+todavía no están hechas.
+
+---
+
+## GET /vendedor/ofertas
+
+Todas mis ofertas — **en cualquier estado** (`activa`, `pausada` o
+`retirada`: es mi panel, tengo que poder ver las tres, a diferencia de la
+ficha pública de `GET /productos/:id`, que solo enseña las activas). Cada
+una trae el nombre del producto y de la variante, y su portada, para no
+tener que pedir cada producto aparte. Ordenadas por la más recién tocada
+primero (`fecha_actualizacion`).
+
+Dos consultas nada más, sin importar cuántas ofertas haya: una a Postgres
+por todas mis filas de `oferta`, y una sola a Mongo por todos los
+productos distintos que aparecen ahí (con `$in`) — nunca una consulta a
+Mongo por oferta.
+
+Sin paginación por ahora: para un vendedor de prueba son decenas de
+ofertas, no miles (mismo criterio que `GET /vendedor/productos` hoy).
+
+```
+GET /vendedor/ofertas
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Ofertas obtenidas",
+  "payload": [
+    {
+      "id_oferta": "5",
+      "id_producto": 2,
+      "id_producto_variante": 2,
+      "nombre_producto": "Laptop Bastion 16",
+      "nombre_variante": "64 GB / 2 TB",
+      "imagen": null,
+      "precio": "13803.00",
+      "stock": 15,
+      "estado": "pausada",
+      "fecha_creacion": "2026-01-09T16:22:00.000Z",
+      "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
+    },
+    {
+      "id_oferta": "14",
+      "id_producto": 3,
+      "id_producto_variante": 5,
+      "nombre_producto": "Laptop Aurora 14",
+      "nombre_variante": "16 GB / 512 GB",
+      "imagen": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Laptop-hard-drive-exposed.jpg/960px-Laptop-hard-drive-exposed.jpg",
+      "precio": "6343.00",
+      "stock": 4,
+      "estado": "activa",
+      "fecha_creacion": "2026-01-04T16:52:00.000Z",
+      "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
+    }
+  ]
+}
+```
+
+`id_oferta` sale como texto (`bigint` de Postgres, ver el resto de la API);
+`id_producto`/`id_producto_variante` como número, porque son los `_id` de
+Mongo. `imagen` es la primera de `variantes[].imagenes` de esa variante, o
+`null` si no tiene ninguna. Si un producto o una variante no aparecieran en
+Mongo (no debería pasar nunca: el catálogo no borra, solo desactiva), la
+oferta sale igual con `"(producto no encontrado)"`/`"(variante no
+encontrada)"` en vez de romper la lista entera por una fila huérfana.
+
+Un vendedor sin ninguna oferta recibe `[]`, no un error.
+
+### 401
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+### 403
+
+```json
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudieron obtener las ofertas", "payload": null }
+```
+
+---
+
+## GET /vendedor/ofertas/producto/:idProducto
+
+Un producto completo del catálogo — misma forma que `GET /productos/:id`
+(sin `ofertas`, que es una lista de vendedores para la ficha pública, no
+para esto) — **pero sin excluir `inactivo`/`borrador`**: un vendedor tiene
+que poder ver un producto oculto para decidir si le conviene ofertarlo,
+aunque todavía no esté publicado. Cada variante trae `mi_oferta` embebida:
+mi oferta sobre esa variante si tengo una, o `null` si no.
+
+El segmento `producto` en la ruta es literal, a propósito: `:id` va a ser
+`id_oferta` en `PATCH /vendedor/ofertas/:id` (todavía no construida), y
+esta ruta necesita distinguirse por `id_producto` sin chocar con esa.
+
+```
+GET /vendedor/ofertas/producto/2
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Producto obtenido",
+  "payload": {
+    "_id": 2,
+    "nombre": "Laptop Bastion 16",
+    "descripcion": "Estacion de trabajo de 16 pulgadas para render y compilacion.",
+    "estado": "activo",
+    "categoria": { "nombre": "Laptops", "id_categoria": 7, "categoria_padre": "Electronica" },
+    "precio_tienda": { "$numberDecimal": "9400.00" },
+    "precio_desde": { "$numberDecimal": "9400.00" },
+    "stock_tienda": 46,
+    "stock_total": 68,
+    "total_ofertas": 2,
+    "variantes": [
+      {
+        "id_producto_variante": 2,
+        "nombre_variante": "64 GB / 2 TB",
+        "estado": "activa",
+        "mi_oferta": {
+          "id_oferta": "5",
+          "precio": "13803.00",
+          "stock": 15,
+          "estado": "pausada",
+          "fecha_creacion": "2026-01-09T16:22:00.000Z",
+          "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
+        }
+      },
+      {
+        "id_producto_variante": 3,
+        "nombre_variante": "32 GB / 1 TB",
+        "estado": "activa",
+        "mi_oferta": null
+      }
+    ]
+  }
+}
+```
+
+Un producto donde no tengo ninguna oferta todavía sale igual, con
+`mi_oferta: null` en todas sus variantes — no es un error, es la señal de
+"todavía no publicaste nada aquí".
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+```
+
+### 401
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+### 403
+
+```json
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+```
+
+Sin el matiz de siempre de "mismo 404 que ajeno": el catálogo no es de
+nadie, así que un id que no existe es sencillamente eso, sin nada que
+ocultar.
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo obtener el producto", "payload": null }
+```
