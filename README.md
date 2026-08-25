@@ -21,6 +21,26 @@ precio es el que se ensena en la pagina.
 
 El detalle esta en [docs/base-de-datos.md](docs/base-de-datos.md).
 
+## El conjunto de datos
+
+**102 productos** en 17 categorias hoja (ninguna con menos de 5, para que
+filtrar por categoria signifique algo), 202 variantes, **552 ofertas** y 8
+cuentas. Todos los productos tienen imagen, verificada una por una.
+
+No se edita a mano: lo escribe `node migrations/datos/generador.js`, con semilla
+fija, y el archivo se comprueba a si mismo al cargar.
+
+## Que se puede hacer hoy
+
+Buscar en el catalogo (por nombre, categoria, precio, disponibilidad y
+caracteristicas, con las dos formas de paginar), abrir la ficha y ver las
+ofertas de cada vendedor, agregar al carrito, elegir a donde se entrega, pagar
+con la tarjeta simulada, y ver el historial de pedidos con el detalle de cada
+uno -- incluido **como se veia el producto el dia en que se compro**.
+
+Del lado del vendedor: publicar ofertas, y cambiar su precio, su estado y sus
+existencias.
+
 ## Documentacion
 
 | Archivo | Contenido |
