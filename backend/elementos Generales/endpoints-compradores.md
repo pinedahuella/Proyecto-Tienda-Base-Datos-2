@@ -14,11 +14,11 @@ vendedor (2) o admin (3) — un vendedor también compra en la tienda, y un
 admin también podría probarla. Por eso ninguna ruta de aquí lleva
 `@Roles(...)`, solo `@UseGuards(SesionGuard)`.
 
-El flujo de pedido vive en PostgreSQL, en seis funciones
+El flujo de pedido vive en PostgreSQL, en siete funciones
 (`migrations/007_flujo_pedido.sql`, explicadas en `docs/base-de-datos.md`):
-`crear_pedido`, `agregar_linea`, `quitar_linea`, `comprar_pedido`,
-`cancelar_pedido` y `reponer_stock` (esta última es del panel del
-vendedor, no de aquí). Las cinco primeras ya tienen ruta.
+`crear_pedido`, `agregar_linea`, `quitar_linea`, `cambiar_direccion_pedido`,
+`comprar_pedido`, `cancelar_pedido` y `reponer_stock` (esta última es del
+panel del vendedor, no de aquí). Las seis primeras ya tienen ruta.
 
 **Ninguna de las funciones comprueba de quién es el pedido** — eso lo hace
 el backend antes de llamar a cada una, en una consulta aparte: un pedido
@@ -326,6 +326,63 @@ del estado de hoy, a diferencia del precio.
 ```json
 { "ok": false, "mensaje": "No se pudo obtener el pedido", "payload": null }
 ```
+
+---
+
+## PATCH /comprador/pedidos/:id
+
+Cambia a qué dirección apunta un pedido, llamando a
+`cambiar_direccion_pedido(id_pedido, id_direccion_historial)`. **Solo
+mientras el pedido sigue `pendiente`** — mismo criterio que agregar/quitar
+una línea: una vez `comprado`, `id_direccion_historial` ya es la versión
+que regía cuando se pagó, y cambiarla después reescribiría a dónde se dijo
+que se mandó de verdad.
+
+Mismo `id_direccion` que `POST /comprador/pedidos` (no
+`id_direccion_historial`): el backend resuelve internamente cuál es la
+versión más reciente en `direccion_historial`, exigiendo de paso que esa
+dirección sea de quien está logueado — una dirección ajena o inexistente
+da el mismo 404. Un pedido ajeno también da el mismo 404 que uno que no
+existe.
+
+```
+PATCH /comprador/pedidos/14
+{ "id_direccion": 4 }
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Direccion actualizada correctamente",
+  "payload": { "id_pedido": 14, "id_direccion": 4 }
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "El id_direccion es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un pedido con ese id", "payload": null }
+{ "ok": false, "mensaje": "No existe una direccion con ese id", "payload": null }
+```
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "El pedido 14 esta comprado y ya no se puede cambiar", "payload": null }
+```
+
+### 401 / 503 / 500
+
+Mismos casos que las demás rutas.
 
 ---
 

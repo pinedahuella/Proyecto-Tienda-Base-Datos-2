@@ -9,6 +9,10 @@ import { validarIdOferta } from '../../helpers/validaciones-pedido';
 import { validarYCobrarTarjeta } from '../../helpers/validaciones-tarjeta';
 import { AgregarLineaPeticion, LineaPedidoResultado } from '../../dto/agregar-linea-pedido';
 import { CrearPedidoPeticion } from '../../dto/crear-pedido';
+import {
+  CambiarDireccionPedidoPeticion,
+  PedidoDireccionCambiada,
+} from '../../dto/cambiar-direccion-pedido';
 import { PedidoCompleto } from '../../dto/pedido-completo';
 import { PedidoResumen } from '../../dto/listar-pedidos';
 import {
@@ -65,19 +69,76 @@ export class PedidosCompradorService {
    * criterio que ya usa DireccionUsuarioService).
    */
   async crear(idUsuario: string, datos: CrearPedidoPeticion): Promise<string> {
-    // Se acepta tambien como texto, y no es laxitud: id_direccion es un
-    // bigint, y el driver pg los devuelve como STRING para no perder
-    // precision. O sea que GET /direccion-usuario responde
-    // { "id_direccion": "2" }, y exigir aqui un number rechazaba justo lo que
-    // esta misma API acababa de entregar: el cliente hacia lo obvio -- tomar
-    // el id de la lista y mandarlo -- y recibia un 400.
-    //
-    // Se comprueba que sea un entero positivo, venga como sea; lo que no se
-    // acepta es texto que no sea un numero.
+    const idDireccion = this.resolverIdDireccionPeticion(datos.id_direccion);
+    const idDireccionHistorial = await this.resolverDireccionHistorial(
+      idUsuario,
+      idDireccion,
+    );
+
+    try {
+      const resultado = await pool.query<{ crear_pedido: string }>(
+        'SELECT crear_pedido($1, $2)',
+        [idUsuario, idDireccionHistorial],
+      );
+
+      return resultado.rows[0].crear_pedido;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Cambia la direccion de un pedido pendiente, llamando a
+   * cambiar_direccion_pedido(id_pedido, id_direccion_historial). Solo
+   * mientras esta pendiente -- comprado, enviado o cancelado rechazan con
+   * 409, misma logica que agregar_linea/quitar_linea. Un pedido ajeno da
+   * el mismo 404 que uno que no existe (verificarPedidoPropio), y una
+   * direccion ajena o inexistente tambien (resolverDireccionHistorial).
+   */
+  async cambiarDireccion(
+    idPedidoParametro: string,
+    idUsuario: string,
+    datos: CambiarDireccionPedidoPeticion,
+  ): Promise<PedidoDireccionCambiada> {
+    if (!REGEX_ID.test(idPedidoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idPedido = Number(idPedidoParametro);
+
+    const idDireccion = this.resolverIdDireccionPeticion(datos.id_direccion);
+
+    await this.verificarPedidoPropio(idPedido, idUsuario);
+
+    const idDireccionHistorial = await this.resolverDireccionHistorial(
+      idUsuario,
+      idDireccion,
+    );
+
+    try {
+      await pool.query('SELECT cambiar_direccion_pedido($1, $2)', [
+        idPedido,
+        idDireccionHistorial,
+      ]);
+    } catch (error) {
+      if (this.esErrorDeNegocio(error)) {
+        throw new ErrorConflicto((error as Error).message);
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+
+    return { id_pedido: idPedido, id_direccion: idDireccion };
+  }
+
+  /**
+   * id_direccion es un bigint, y el driver pg lo devuelve como STRING para
+   * no perder precision -- GET /direccion-usuario responde
+   * { "id_direccion": "2" }, y exigir aqui solo number rechazaba justo lo
+   * que esa misma API acababa de entregar. Se acepta number o ese string;
+   * lo que no se acepta es texto que no sea un numero.
+   */
+  private resolverIdDireccionPeticion(valor: number | string): number {
     const idDireccion =
-      typeof datos.id_direccion === 'string' && /^\d+$/.test(datos.id_direccion)
-        ? Number(datos.id_direccion)
-        : datos.id_direccion;
+      typeof valor === 'string' && /^\d+$/.test(valor) ? Number(valor) : valor;
 
     if (
       typeof idDireccion !== 'number' ||
@@ -88,11 +149,20 @@ export class PedidosCompradorService {
         'El id_direccion es obligatorio y debe ser un numero entero mayor a 0',
       );
     }
+    return idDireccion;
+  }
 
+  /**
+   * La version mas reciente de esa direccion en direccion_historial --
+   * exige de paso que sea del usuario logueado, asi que una direccion
+   * ajena da el mismo 404 que una que no existe.
+   */
+  private async resolverDireccionHistorial(
+    idUsuario: string,
+    idDireccion: number,
+  ): Promise<string> {
     try {
-      const resultadoHistorial = await pool.query<{
-        id_direccion_historial: string;
-      }>(
+      const resultado = await pool.query<{ id_direccion_historial: string }>(
         `SELECT dh.id_direccion_historial
          FROM direccion_historial dh
          JOIN direcciones d ON d.id_direccion = dh.id_direccion
@@ -101,18 +171,13 @@ export class PedidosCompradorService {
          LIMIT 1`,
         [idDireccion, idUsuario],
       );
-      const historial = resultadoHistorial.rows[0];
+      const historial = resultado.rows[0];
 
       if (historial == null) {
         throw new ErrorNoEncontrado('No existe una direccion con ese id');
       }
 
-      const resultado = await pool.query<{ crear_pedido: string }>(
-        'SELECT crear_pedido($1, $2)',
-        [idUsuario, historial.id_direccion_historial],
-      );
-
-      return resultado.rows[0].crear_pedido;
+      return historial.id_direccion_historial;
     } catch (error) {
       if (error instanceof ErrorNoEncontrado) {
         throw error;

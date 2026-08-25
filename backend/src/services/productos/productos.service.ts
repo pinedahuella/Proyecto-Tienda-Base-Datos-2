@@ -6,6 +6,7 @@ import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { CORREO_TIENDA } from '../../helpers/constantes';
+import { validarFechaHistorial } from '../../helpers/validaciones-direccion';
 import {
   esNombreCaracteristicaValido,
   escaparRegex,
@@ -222,6 +223,101 @@ export class ProductosService {
     const ofertas = await this.obtenerOfertasReales(idProducto);
 
     return { ...producto, ofertas };
+  }
+
+  /**
+   * Reconstruye un producto **como estaba en una fecha específica**: toma
+   * el evento de creación y todos los de modificación anteriores a esa
+   * fecha (o de ese mismo día), en orden, y los fusiona uno encima del
+   * otro con el framework de agregación de Mongo ($match, $sort, $group,
+   * $reduce, $mergeObjects) -- sin traer los eventos a Node.js para
+   * combinarlos ahí.
+   *
+   * Ruta general, sin restricción de rol ni de dueño: cualquiera con
+   * sesión puede pedir el historial de cualquier producto (el mismo
+   * criterio que GET /productos/:id, público). Por eso no filtra por
+   * estado ni por vendedor -- a diferencia de obtenerPublico(), tampoco
+   * oculta `borrador`/`inactivo`: un pedido viejo tiene que poder mostrar
+   * el producto tal como se veía al comprarlo, aunque hoy esté oculto o ya
+   * no exista en el catálogo activo. Es la misma reconstrucción que ya
+   * usaba `ProductosVendedorService.obtenerHistorialPropio` (antes
+   * restringida a la tienda); ahora vive aquí porque ya no es una acción
+   * de administración del catálogo, es solo lectura de un dato histórico.
+   *
+   * Cada evento aporta "datos" (solo la creación) o "cambios" (solo las
+   * modificaciones); como cada uno es el estado completo de lo que cambió
+   * (nunca un campo suelto), fusionarlos en orden con $mergeObjects
+   * reconstruye el documento tal como estaba ese día.
+   */
+  async reconstruirEnFecha(
+    idProductoParametro: string,
+    fecha: string | undefined,
+  ): Promise<Producto> {
+    if (!REGEX_ID.test(idProductoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    validarFechaHistorial(fecha);
+    const idProducto = Number(idProductoParametro);
+
+    try {
+      const productoActual = await mongoDb
+        .collection<Producto>('productos')
+        .findOne({ _id: idProducto });
+
+      if (productoActual == null) {
+        throw new ErrorNoEncontrado('No existe un producto con ese id');
+      }
+
+      // "hasta ese dia completo": el limite es la medianoche del dia
+      // siguiente, igual que en GET /direccion-usuario/historial. El dia
+      // se cuenta en la zona de Guatemala (-06:00), no en UTC (ver el
+      // mismo razonamiento en ProductosVendedorService.obtenerHistorialPropio).
+      const fechaLimite = new Date(`${fecha}T00:00:00.000-06:00`);
+      fechaLimite.setUTCDate(fechaLimite.getUTCDate() + 1);
+
+      const resultado = await mongoDb
+        .collection('productos_eventos')
+        .aggregate([
+          { $match: { id_producto: idProducto, fecha: { $lt: fechaLimite } } },
+          { $sort: { numero: 1 } },
+          {
+            $group: {
+              _id: '$id_producto',
+              eventos: { $push: { datos: '$datos', cambios: '$cambios' } },
+            },
+          },
+          {
+            $project: {
+              _id: 0,
+              producto: {
+                $reduce: {
+                  input: '$eventos',
+                  initialValue: {},
+                  in: {
+                    $mergeObjects: [
+                      '$$value',
+                      { $ifNull: ['$$this.datos', {}] },
+                      { $ifNull: ['$$this.cambios', {}] },
+                    ],
+                  },
+                },
+              },
+            },
+          },
+        ])
+        .toArray();
+
+      if (resultado.length === 0) {
+        throw new ErrorNoEncontrado('El producto no existia en esa fecha');
+      }
+
+      return { _id: idProducto, ...(resultado[0].producto as object) } as Producto;
+    } catch (error) {
+      if (error instanceof ErrorValidacion || error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexionMongo(this.logger, error);
+    }
   }
 
   /**

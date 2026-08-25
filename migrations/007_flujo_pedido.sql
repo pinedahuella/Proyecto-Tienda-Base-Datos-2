@@ -274,6 +274,50 @@ COMMENT ON FUNCTION quitar_linea(bigint, bigint) IS
 
 
 -- ============================================================
+-- cambiar_direccion_pedido
+-- ============================================================
+-- Cambia a donde apunta un pedido pendiente. Solo mientras esta pendiente,
+-- igual que agregar_linea/quitar_linea: una vez comprado, id_direccion_historial
+-- ya es la version que regia cuando se compro, y cambiarla despues reescribiria
+-- a donde se dijo que se mando de verdad.
+--
+-- La ownership de la direccion (que sea del mismo usuario) ya se resolvio en
+-- el backend antes de llamar aqui -- p_id_direccion_historial ya es la fila
+-- correcta, no un id_direccion suelto.
+CREATE OR REPLACE FUNCTION cambiar_direccion_pedido(
+    p_id_pedido               bigint,
+    p_id_direccion_historial  bigint
+) RETURNS void
+LANGUAGE plpgsql
+AS $fn$
+DECLARE
+    v_estado  varchar;
+BEGIN
+    SELECT ep.estado_pedido_nombre INTO v_estado
+    FROM pedido p JOIN estado_pedido ep USING (id_estado_pedido)
+    WHERE p.id_pedido = p_id_pedido;
+
+    IF v_estado IS NULL THEN
+        RAISE EXCEPTION 'No existe el pedido %', p_id_pedido
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    IF v_estado <> 'pendiente' THEN
+        RAISE EXCEPTION 'El pedido % esta % y ya no se puede cambiar',
+                        p_id_pedido, v_estado
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    UPDATE pedido SET id_direccion_historial = p_id_direccion_historial
+    WHERE id_pedido = p_id_pedido;
+END;
+$fn$;
+
+COMMENT ON FUNCTION cambiar_direccion_pedido(bigint, bigint) IS
+    'Cambia la direccion de un pedido pendiente';
+
+
+-- ============================================================
 -- comprar_pedido
 -- ============================================================
 -- Aqui si se vende. Se vuelve a mirar el stock de cada linea, se descuenta, se

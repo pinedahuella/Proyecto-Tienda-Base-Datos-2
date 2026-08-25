@@ -717,10 +717,13 @@ Mismos casos que las demás rutas.
 ## GET /vendedor/productos/:id/historial
 
 **Solo `tienda@mesh.com`**, igual que las demás rutas de
-`/vendedor/productos`. Reconstruye un producto **como estaba en una fecha
-específica**: toma el evento de creación y todos los de modificación
-anteriores a esa fecha (o de ese mismo día), en orden, y los fusiona uno
-encima del otro.
+`/vendedor/productos`. Misma reconstrucción, mismo resultado, que
+`GET /productos/:id/historial` (endpoints-productos.md), pública y sin
+restricción de dueño — esta ruta solo le suma el chequeo de "solo
+tienda" antes de delegar. Reconstruye un producto **como estaba en una
+fecha específica**: toma el evento de creación y todos los de
+modificación anteriores a esa fecha (o de ese mismo día), en orden, y los
+fusiona uno encima del otro.
 
 **Se arma con el framework de agregación de Mongo, no en el código del
 backend**: la búsqueda, el orden y la fusión de eventos pasan dentro de un

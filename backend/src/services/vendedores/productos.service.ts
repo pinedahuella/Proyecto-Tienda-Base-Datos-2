@@ -4,9 +4,6 @@ import { mongoDb } from '../../database/mongo';
 import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
-// Reusada tal cual: la fecha de un historial se valida igual aqui que en
-// GET /direccion-usuario/historial (formato AAAA-MM-DD, fecha real).
-import { validarFechaHistorial } from '../../helpers/validaciones-direccion';
 import {
   validarCaracteristicasCatalogo,
   validarCaracteristicasExistentesContraCategoria,
@@ -37,6 +34,7 @@ import {
   ProductoEventoModificacion,
 } from '../../models/producto-evento';
 import { UsuarioService } from '../../services/usuario.service';
+import { ProductosService } from '../../services/productos/productos.service';
 import { CORREO_TIENDA } from '../../helpers/constantes';
 
 const ESTADO_PRODUCTO_NUEVO = 'borrador';
@@ -61,7 +59,10 @@ const REGEX_ID = /^\d+$/;
 export class ProductosVendedorService {
   private readonly logger = new Logger(ProductosVendedorService.name);
 
-  constructor(private readonly usuarioService: UsuarioService) {}
+  constructor(
+    private readonly usuarioService: UsuarioService,
+    private readonly productosService: ProductosService,
+  ) {}
 
   async crear(idUsuario: string, datos: CrearProductoPeticion): Promise<Producto> {
     const nombre = validarNombreProducto(datos.nombre);
@@ -644,97 +645,19 @@ export class ProductosVendedorService {
   }
 
   /**
-   * Reconstruye un producto del catalogo (solo la tienda) como estaba en una fecha especifica:
-   * toma el evento de creacion y todos los de modificacion anteriores a
-   * esa fecha (o de ese mismo dia), en orden, y los va fusionando uno
-   * encima del otro con el framework de agregacion de Mongo ($match,
-   * $sort, $group, $reduce, $mergeObjects) — sin traer los eventos a
-   * Node.js para combinarlos ahi.
-   *
-   * Cada evento aporta "datos" (solo la creacion) o "cambios" (solo las
-   * modificaciones); como cada uno es el estado completo de lo que cambio
-   * (nunca un campo suelto), fusionarlos en orden con $mergeObjects
-   * reconstruye el documento tal como estaba ese dia. Igual que ya se
-   * explica en ejemplos_bson_productos.md, pero aplicado por la propia
-   * base de datos en vez de en el codigo.
+   * Reconstruye un producto del catalogo (solo la tienda) como estaba en
+   * una fecha especifica. La reconstruccion en si (el pipeline de
+   * agregacion de Mongo sobre productos_eventos) vive en
+   * ProductosService.reconstruirEnFecha() -- ya no es exclusiva de la
+   * tienda (ver GET /productos/:id/historial, general), asi que esta
+   * funcion solo agrega el chequeo de "solo tienda" antes de delegar.
    */
   async obtenerHistorialPropio(
     idProductoParametro: string,
     idUsuario: string,
     fecha: string | undefined,
   ): Promise<Producto> {
-    if (!REGEX_ID.test(idProductoParametro)) {
-      throw new ErrorValidacion('El id no es valido');
-    }
-    validarFechaHistorial(fecha);
-    const idProducto = Number(idProductoParametro);
-
     await this.exigirTienda(idUsuario);
-
-    try {
-      const productoActual = await mongoDb
-        .collection<Producto>('productos')
-        .findOne({ _id: idProducto });
-
-      if (productoActual == null) {
-        throw new ErrorNoEncontrado('No existe un producto con ese id');
-      }
-
-      // "hasta ese dia completo": el limite es la medianoche del dia
-      // siguiente, igual que en GET /direccion-usuario/historial.
-      //
-      // El dia se cuenta en la zona de Guatemala (-06:00), no en UTC. Con UTC
-      // el corte caia seis horas antes: un producto creado a las 21:45 del 22
-      // se guarda como 03:45Z del 23, asi que preguntar por el 22 contestaba
-      // "el producto no existia en esa fecha" el mismo dia en que se publico.
-      // Cualquier cosa hecha despues de las 6 de la tarde caia en el dia
-      // siguiente. Guatemala no cambia de hora, asi que -06:00 vale todo el
-      // ano y no hace falta una libreria de zonas.
-      const fechaLimite = new Date(`${fecha}T00:00:00.000-06:00`);
-      fechaLimite.setUTCDate(fechaLimite.getUTCDate() + 1);
-
-      const resultado = await mongoDb
-        .collection('productos_eventos')
-        .aggregate([
-          { $match: { id_producto: idProducto, fecha: { $lt: fechaLimite } } },
-          { $sort: { numero: 1 } },
-          {
-            $group: {
-              _id: '$id_producto',
-              eventos: { $push: { datos: '$datos', cambios: '$cambios' } },
-            },
-          },
-          {
-            $project: {
-              _id: 0,
-              producto: {
-                $reduce: {
-                  input: '$eventos',
-                  initialValue: {},
-                  in: {
-                    $mergeObjects: [
-                      '$$value',
-                      { $ifNull: ['$$this.datos', {}] },
-                      { $ifNull: ['$$this.cambios', {}] },
-                    ],
-                  },
-                },
-              },
-            },
-          },
-        ])
-        .toArray();
-
-      if (resultado.length === 0) {
-        throw new ErrorNoEncontrado('El producto no existia en esa fecha');
-      }
-
-      return { _id: idProducto, ...(resultado[0].producto as object) } as Producto;
-    } catch (error) {
-      if (error instanceof ErrorValidacion || error instanceof ErrorNoEncontrado) {
-        throw error;
-      }
-      manejarErrorConexionMongo(this.logger, error);
-    }
+    return this.productosService.reconstruirEnFecha(idProductoParametro, fecha);
   }
 }

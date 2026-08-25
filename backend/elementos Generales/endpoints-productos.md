@@ -434,6 +434,69 @@ un producto que no se va a mostrar.
 
 ---
 
+## GET /productos/:id/historial
+
+**Pública, sin restricción de rol ni de dueño** — a diferencia de la
+versión que usa la tienda para administrar el catálogo
+(`GET /vendedor/productos/:id/historial`), esta no exige ser
+`tienda@mesh.com`: es solo lectura de un dato histórico, cualquiera con
+sesión puede pedirlo. Pensada para mostrar el detalle de un pedido viejo
+tal como se veía el producto en el momento de comprarlo — por eso, a
+diferencia de `GET /productos/:id`, **no oculta** productos en `borrador`
+o `inactivo`: un pedido tiene que poder mostrar su producto aunque hoy ya
+no esté visible en el catálogo activo.
+
+Reconstruye el producto **como estaba en una fecha específica**: toma el
+evento de creación y todos los de modificación anteriores a esa fecha (o
+de ese mismo día), en orden, y los fusiona uno encima del otro con el
+framework de agregación de Mongo — mismo mecanismo, mismo resultado, que
+`GET /vendedor/productos/:id/historial` (ver ese archivo para el detalle
+del pipeline).
+
+```
+GET /productos/2/historial?fecha=2026-01-10
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Producto reconstruido correctamente",
+  "payload": { "_id": 2, "nombre": "Laptop Bastion 16", "...": "..." }
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "La fecha es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La fecha debe tener el formato AAAA-MM-DD", "payload": null }
+{ "ok": false, "mensaje": "La fecha no es valida", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+{ "ok": false, "mensaje": "El producto no existia en esa fecha", "payload": null }
+```
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo reconstruir el producto", "payload": null }
+```
+
+---
+
 ## GET /productos/paginacion
 
 Pública, igual que `GET /productos`. Lista el mismo catálogo, con los

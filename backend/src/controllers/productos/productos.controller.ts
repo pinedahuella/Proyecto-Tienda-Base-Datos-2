@@ -43,6 +43,21 @@ export class ProductosController {
     }
   }
 
+  // GET /productos/:id/historial
+  // Va antes de :id para que "historial" no se confunda con un id.
+  @Get(':id/historial')
+  async obtenerHistorial(
+    @Param('id') id: string,
+    @Query('fecha') fecha: string | undefined,
+  ) {
+    try {
+      const producto = await this.productosService.reconstruirEnFecha(id, fecha);
+      return exito(producto, 'Producto reconstruido correctamente');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo reconstruir el producto');
+    }
+  }
+
   // GET /productos/:id
   @Get(':id')
   async obtener(@Param('id') id: string) {

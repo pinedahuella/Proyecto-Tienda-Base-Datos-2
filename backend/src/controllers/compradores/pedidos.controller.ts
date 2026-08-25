@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Patch,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -13,6 +14,7 @@ import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { AgregarLineaPeticion } from '../../dto/agregar-linea-pedido';
 import type { CrearPedidoPeticion } from '../../dto/crear-pedido';
+import type { CambiarDireccionPedidoPeticion } from '../../dto/cambiar-direccion-pedido';
 import type { ComprarPedidoPeticion } from '../../dto/comprar-pedido';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import { PedidosCompradorService } from '../../services/compradores/pedidos.service';
@@ -88,6 +90,25 @@ export class PedidosCompradorController {
       return exito(pedido, 'Pedido obtenido correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo obtener el pedido');
+    }
+  }
+
+  // PATCH /comprador/pedidos/:id
+  @Patch(':id')
+  async cambiarDireccion(
+    @Param('id') id: string,
+    @Body() cuerpo: CambiarDireccionPedidoPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const pedido = await this.pedidosCompradorService.cambiarDireccion(
+        id,
+        usuarioActual.id_usuario,
+        cuerpo,
+      );
+      return exito(pedido, 'Direccion actualizada correctamente');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo actualizar la direccion del pedido');
     }
   }
 
