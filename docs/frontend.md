@@ -33,7 +33,7 @@ si se hiciera, un filtro solo alcanzaria a los productos ya descargados y
 mentiria en cuanto haya mas de una tanda.
 
 El panel muestra una cosa u otra segun el rol: un admin ve la gestion de
-usuarios, un vendedor ve sus productos, y un comprador el resumen. Esconder un
+usuarios, un vendedor ve sus ofertas y sus productos, y un comprador el resumen. Esconder un
 panel no da permisos -- quien decide es el backend, que responde 403.
 
 ## Archivos
@@ -48,6 +48,7 @@ panel no da permisos -- quien decide es el backend, que responde 403.
 | `src/routes/registro/+page.svelte` | crear cuenta |
 | `src/routes/panel/+page.svelte` | panel |
 | `src/lib/PanelAdmin.svelte` | gestion de usuarios, dentro del panel |
+| `src/lib/OfertasVendedor.svelte` | las ofertas del vendedor: verlas, editar precio/estado/stock y publicar |
 | `src/lib/PanelVendedor.svelte` | los productos del vendedor, dentro del panel |
 | `src/lib/Direcciones.svelte` | direcciones, dentro del panel |
 | `src/lib/Pedido.svelte` | el pedido abierto y sus lineas, dentro del panel |
@@ -220,51 +221,51 @@ un boton que los pasa a "contiene". Es la queja mas facil de tener: se escribe
 operador no se toco -- exacto es exacto, que es lo que dice la API -- lo que se
 arreglo es que la pantalla lo diga en vez de dejar a la persona adivinando.
 
-## El inventario del vendedor: dos modos
+## Las ofertas del vendedor
 
-La pantalla de Inventario del panel del vendedor **no ensena siempre lo mismo**,
-y no es un capricho de diseno: es la unica forma honesta de pintar lo que el
-backend contesta.
+`OfertasVendedor.svelte`, dentro del panel y **encima** de sus productos: en el
+modelo multi-vendedor el producto es del catalogo compartido y no es de nadie,
+mientras que la oferta -- precio, existencias y estado -- si es del vendedor.
 
-`GET /vendedor/productos/inventario` es **todo o nada**. Con que a UNA variante
-le falte su fila en `inventario`, la peticion entera se cae con 409 y no
-devuelve el stock de ninguna. Y el mensaje del 409 nombra **una sola** variante,
-aunque falten diez.
+Reemplaza a la vieja pantalla de Inventario, que leia la tabla `inventario`.
+Esa tabla ya no existe: el stock se fue a `oferta.stock`. Con ella se fue toda
+su maquinaria de dos modos, que existia porque
+`GET /vendedor/productos/inventario` era todo o nada y habia que deducir de un
+409 que variante faltaba. `GET /vendedor/ofertas` devuelve un arreglo plano y
+no hace falta deducir nada.
 
-De ahi los dos modos:
+Trae las ofertas en **los tres estados** (`activa`, `pausada`, `retirada`),
+porque es el panel del duenno; la ficha publica solo ensena las activas. El
+filtro por estado es local, sobre lo que ya se trajo.
 
-| Modo | Cuando | Que ensena |
-|---|---|---|
-| **pendientes** | falta alguna existencia | solo lo que falta, y un mensaje con los **ids** de los productos incompletos |
-| **catalogo** | ya no falta nada | todos los productos agrupados, con sus variantes y su stock real |
+**El ajuste de existencias es un DELTA, no el total.** Es la trampa de esta
+pantalla y por eso se dice dos veces: en la ayuda del campo y en un renglon que
+se actualiza mientras se escribe (`15 -> 18 unidades`). El backend recibe
+`ajuste_stock`, un entero con signo que nunca es 0: positivo llama a
+`reponer_stock(..., 'reposicion', ...)` y negativo a `'ajuste'`. Un campo que
+dijera "existencias: 15" invitaria a escribir 18 para dejar 18, y terminaria en
+33 sin que nada avisara.
 
-Ensenar el catalogo entero mientras algo falta es lo que hacia que no se viera
-que arreglar: 31 productos sanos tapando la unica variante rota.
+Un ajuste que dejaria el stock bajo cero se corta aqui, en rojo y con el numero
+en pantalla, sin gastar la peticion: el backend lo rechazaria igual con el 409
+de `reponer_stock()`.
 
-**Como se sabe QUE variante falta.** El backend recorre `producto.variantes` en
-el orden del documento y se detiene en la primera sin fila de inventario. Asi
-que de un solo 409 se deducen tres cosas, y solo tres:
+**Al publicar, la variante que ya se oferta sale deshabilitada.** `oferta` tiene
+`UNIQUE (id_usuario, id_producto_mongo, id_producto_variante_mongo)`, asi que un
+vendedor tiene una sola oferta por variante. `GET /vendedor/ofertas/producto/:id`
+trae `mi_oferta` en cada una, y con eso la ya tomada se ensena apagada y con su
+precio en vez de dejar intentarlo para recibir un 409.
 
-- las variantes **anteriores** a la nombrada: si tienen inventario
-- la **nombrada**: no lo tiene
-- las **posteriores**: no se sabe todavia
+**Crear la variante sigue siendo solo de la tienda.** Un vendedor solo puede
+ofertar sobre lo que ya esta publicado, asi que el alta no es un formulario de
+producto: es buscar en el catalogo (`GET /productos?nombre=`), elegir variante,
+y ponerle precio y unidades iniciales.
 
-Lo que no se sabe sale como "por revisar", nunca como "sin existencias":
-afirmar lo segundo seria inventarse un hecho. Se termina de saber solo, porque
-al crear la que falta el siguiente 409 nombra a la siguiente.
-
-El id de la variante sale de parsear el texto del 409 (`varianteDelMensaje()`).
-Es fragil a proposito y esta contenido: si el texto cambia, la funcion devuelve
-`null` y la pantalla cae al caso honesto -- el producto queda marcado incompleto
-y todas sus variantes salen "por revisar". Se pierde precision, no se gana una
-mentira.
-
-**Vacio y 0 no son lo mismo.** Al publicar, `stock_inicial: 0` **si** crea la
-fila de inventario (queda en cero, que es un dato: agotado). Dejar el campo
-vacio no la crea, y esa es la variante que despues aparece como pendiente. Por
-eso al crear un producto dejando alguna vacia sale un aviso con el id del
-producto y un boton para ir a arreglarlo: antes solo decia "Producto creado" y
-el 409 aparecia dias despues.
+**Un precio llega de dos formas en la misma respuesta.** De PostgreSQL sale como
+texto (`"13803.00"`, el driver `pg` no lo convierte para no perder precision) y
+de Mongo como Decimal128 (`{ $numberDecimal: "..." }`). `quetzales()` aguanta
+las dos: con solo la primera, los campos calculados del catalogo se pintaban
+`Q[object Object]`.
 
 ## El pedido
 
@@ -336,9 +337,10 @@ decir por que.
 
 ## Lo que todavia falta
 
-**No se puede cerrar la compra.** Falta la ruta del backend que llame a
-`comprar_pedido()` / `cancelar_pedido()`. La pantalla del pedido ya esta y lo
-avisa.
+**No se puede cerrar la compra desde la pantalla.** Las rutas del backend YA
+existen (`POST /comprador/pedidos/:id/comprar` y `/cancelar`); lo que falta son
+los botones en `Pedido.svelte`. El comentario de ese archivo que dice que no hay
+ruta esta caducado.
 
 **No se puede bajar la cantidad de una linea.** `agregar_linea()` SUMA a lo que
 ya habia, y no hay forma de fijar un total. Para bajar hay que quitar la linea

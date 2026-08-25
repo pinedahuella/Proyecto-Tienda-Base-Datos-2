@@ -7,6 +7,7 @@
 	import Direcciones from '$lib/Direcciones.svelte';
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
+	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
 	import Pedido from '$lib/Pedido.svelte';
 	import {
 		cerrarSesion,
@@ -452,6 +453,11 @@
 			{#if esAdmin}
 				<PanelAdmin alExpirarSesion={expiro} />
 			{:else if esVendedor}
+				<!-- Las ofertas van PRIMERO y aparte de los productos: en el modelo
+				     multi-vendedor el producto es del catalogo compartido y no es de
+				     nadie, mientras que la oferta -- precio, existencias y estado --
+				     si es del vendedor. Es lo suyo, asi que va arriba. -->
+				<OfertasVendedor alExpirarSesion={expiro} />
 				<PanelVendedor alExpirarSesion={expiro} />
 			{:else}
 				<div class="resumen">
