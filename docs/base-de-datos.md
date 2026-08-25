@@ -215,8 +215,9 @@ tambien es defendible, pero obliga a soltar las reservas de los pedidos que
 nadie termina, y eso pide un proceso que las vaya venciendo. No se hizo.
 
 Todo esto vive en funciones de la base (`migrations/007_flujo_pedido.sql`):
-`crear_pedido`, `agregar_linea`, `quitar_linea`, `cambiar_direccion_pedido`,
-`comprar_pedido`, `cancelar_pedido` y `reponer_stock`. Estan ahi y no en la aplicacion por dos
+`crear_pedido`, `agregar_linea`, `restar_linea`, `quitar_linea`,
+`cambiar_direccion_pedido`, `comprar_pedido`, `cancelar_pedido` y
+`reponer_stock`. Estan ahi y no en la aplicacion por dos
 motivos: una funcion de PostgreSQL corre dentro de una transaccion, asi que
 nadie puede olvidarse de abrirla; y el `SELECT ... FOR UPDATE` -- lo unico que
 impide que dos personas compren la ultima unidad -- queda donde estan los datos,

@@ -8,6 +8,7 @@ import { validarCantidadMovimiento } from '../../helpers/validaciones-inventario
 import { validarIdOferta } from '../../helpers/validaciones-pedido';
 import { validarYCobrarTarjeta } from '../../helpers/validaciones-tarjeta';
 import { AgregarLineaPeticion, LineaPedidoResultado } from '../../dto/agregar-linea-pedido';
+import { RestarLineaPeticion, LineaRestada } from '../../dto/restar-linea-pedido';
 import { CrearPedidoPeticion } from '../../dto/crear-pedido';
 import {
   CambiarDireccionPedidoPeticion,
@@ -256,6 +257,44 @@ export class PedidosCompradorService {
         [idPedido, JSON.stringify(linea)],
       );
       return resultado.rows[0].agregar_linea;
+    } catch (error) {
+      if (this.esErrorDeNegocio(error)) {
+        throw new ErrorConflicto((error as Error).message);
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * El "-1" de agregarLinea: resta cantidad de una oferta que ya esta en
+   * el pedido, llamando a restar_linea(id_pedido, id_oferta, cantidad).
+   * Si la resta deja la cantidad en 0 o menos, la linea se borra entera
+   * (mismo resultado que quitarLinea, disparado por llegar a 0). Un
+   * pedido ajeno da el mismo 404 de siempre; una oferta que no esta en
+   * el pedido, o un pedido que ya no admite cambios, dan 409 -- los
+   * resuelve la propia funcion de Postgres.
+   */
+  async restarLinea(
+    idPedidoParametro: string,
+    idUsuario: string,
+    datos: RestarLineaPeticion,
+  ): Promise<LineaRestada> {
+    if (!REGEX_ID.test(idPedidoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idPedido = Number(idPedidoParametro);
+
+    const idOferta = validarIdOferta(datos.id_oferta);
+    const cantidad = validarCantidadMovimiento(datos.cantidad);
+
+    await this.verificarPedidoPropio(idPedido, idUsuario);
+
+    try {
+      const resultado = await pool.query<{ restar_linea: LineaRestada }>(
+        'SELECT restar_linea($1, $2, $3)',
+        [idPedido, idOferta, cantidad],
+      );
+      return resultado.rows[0].restar_linea;
     } catch (error) {
       if (this.esErrorDeNegocio(error)) {
         throw new ErrorConflicto((error as Error).message);

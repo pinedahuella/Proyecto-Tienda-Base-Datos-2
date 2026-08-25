@@ -232,6 +232,90 @@ COMMENT ON FUNCTION agregar_linea(bigint, jsonb) IS
 
 
 -- ============================================================
+-- restar_linea
+-- ============================================================
+-- El "-1" de agregar_linea: resta cantidad de una oferta que ya esta en
+-- el pedido, en vez de sumarla. Si la resta deja la cantidad en 0 o
+-- menos, la linea se borra entera -- mismo resultado final que
+-- quitar_linea, disparado por llegar a 0 en vez de un DELETE aparte.
+--
+-- Sin chequeo de stock: restar unidades nunca puede dejar sin stock a
+-- nadie, a diferencia de agregar_linea.
+CREATE OR REPLACE FUNCTION restar_linea(
+    p_id_pedido  bigint,
+    p_id_oferta  bigint,
+    p_cantidad   integer
+) RETURNS jsonb
+LANGUAGE plpgsql
+AS $fn$
+DECLARE
+    v_estado_pedido  varchar;
+    v_id_linea       bigint;
+    v_actual         integer;
+    v_nueva          integer;
+BEGIN
+    SELECT ep.estado_pedido_nombre INTO v_estado_pedido
+    FROM pedido p JOIN estado_pedido ep USING (id_estado_pedido)
+    WHERE p.id_pedido = p_id_pedido;
+
+    IF v_estado_pedido IS NULL THEN
+        RAISE EXCEPTION 'No existe el pedido %', p_id_pedido
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    IF v_estado_pedido <> 'pendiente' THEN
+        RAISE EXCEPTION 'El pedido % esta % y ya no se puede cambiar',
+                        p_id_pedido, v_estado_pedido
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF p_cantidad IS NULL OR p_cantidad <= 0 THEN
+        RAISE EXCEPTION 'La cantidad tiene que ser mayor a 0'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT pp.id_pedido_producto, pp.cantidad INTO v_id_linea, v_actual
+    FROM pedido_producto pp
+    JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+    WHERE pp.id_pedido = p_id_pedido
+      AND ph.id_oferta = p_id_oferta;
+
+    IF v_id_linea IS NULL THEN
+        RAISE EXCEPTION 'La oferta % no esta en el pedido %', p_id_oferta, p_id_pedido
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    v_nueva := v_actual - p_cantidad;
+
+    IF v_nueva <= 0 THEN
+        DELETE FROM pedido_producto WHERE id_pedido_producto = v_id_linea;
+
+        RETURN jsonb_build_object(
+            'id_pedido', p_id_pedido,
+            'id_oferta', p_id_oferta,
+            'cantidad', 0,
+            'eliminada', true
+        );
+    END IF;
+
+    UPDATE pedido_producto SET cantidad = v_nueva
+    WHERE id_pedido_producto = v_id_linea;
+
+    RETURN jsonb_build_object(
+        'id_pedido', p_id_pedido,
+        'id_pedido_producto', v_id_linea,
+        'id_oferta', p_id_oferta,
+        'cantidad', v_nueva,
+        'eliminada', false
+    );
+END;
+$fn$;
+
+COMMENT ON FUNCTION restar_linea(bigint, bigint, integer) IS
+    'Resta cantidad de una linea del pedido pendiente; si llega a 0 la borra';
+
+
+-- ============================================================
 -- quitar_linea
 -- ============================================================
 CREATE OR REPLACE FUNCTION quitar_linea(

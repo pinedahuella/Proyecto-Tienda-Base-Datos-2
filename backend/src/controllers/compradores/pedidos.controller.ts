@@ -13,6 +13,7 @@ import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { AgregarLineaPeticion } from '../../dto/agregar-linea-pedido';
+import type { RestarLineaPeticion } from '../../dto/restar-linea-pedido';
 import type { CrearPedidoPeticion } from '../../dto/crear-pedido';
 import type { CambiarDireccionPedidoPeticion } from '../../dto/cambiar-direccion-pedido';
 import type { ComprarPedidoPeticion } from '../../dto/comprar-pedido';
@@ -128,6 +129,30 @@ export class PedidosCompradorController {
       return exito(linea, 'Producto agregado al pedido');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo agregar el producto al pedido');
+    }
+  }
+
+  // PATCH /comprador/pedidos/:id/detalles
+  @Patch(':id/detalles')
+  async restarLinea(
+    @Param('id') id: string,
+    @Body() cuerpo: RestarLineaPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const linea = await this.pedidosCompradorService.restarLinea(
+        id,
+        usuarioActual.id_usuario,
+        cuerpo,
+      );
+      return exito(
+        linea,
+        linea.eliminada
+          ? 'Producto quitado del pedido'
+          : 'Cantidad actualizada',
+      );
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo actualizar la cantidad');
     }
   }
 

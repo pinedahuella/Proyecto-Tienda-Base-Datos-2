@@ -14,11 +14,12 @@ vendedor (2) o admin (3) — un vendedor también compra en la tienda, y un
 admin también podría probarla. Por eso ninguna ruta de aquí lleva
 `@Roles(...)`, solo `@UseGuards(SesionGuard)`.
 
-El flujo de pedido vive en PostgreSQL, en siete funciones
+El flujo de pedido vive en PostgreSQL, en ocho funciones
 (`migrations/007_flujo_pedido.sql`, explicadas en `docs/base-de-datos.md`):
-`crear_pedido`, `agregar_linea`, `quitar_linea`, `cambiar_direccion_pedido`,
-`comprar_pedido`, `cancelar_pedido` y `reponer_stock` (esta última es del
-panel del vendedor, no de aquí). Las seis primeras ya tienen ruta.
+`crear_pedido`, `agregar_linea`, `restar_linea`, `quitar_linea`,
+`cambiar_direccion_pedido`, `comprar_pedido`, `cancelar_pedido` y
+`reponer_stock` (esta última es del panel del vendedor, no de aquí). Las
+siete primeras ya tienen ruta.
 
 **Ninguna de las funciones comprueba de quién es el pedido** — eso lo hace
 el backend antes de llamar a cada una, en una consulta aparte: un pedido
@@ -517,6 +518,83 @@ esta llamada.
 ```json
 { "ok": false, "mensaje": "No se pudo agregar el producto al pedido", "payload": null }
 ```
+
+---
+
+## PATCH /comprador/pedidos/:id/detalles
+
+El "-1" de la ruta anterior: **resta** cantidad de una oferta que ya está
+en el pedido, llamando a `restar_linea(id_pedido, id_oferta, cantidad)`.
+Mismo cuerpo que `POST /comprador/pedidos/:id/detalles` (`id_oferta` +
+`cantidad`), pero resta en vez de sumar.
+
+**Si la resta deja la cantidad en 0 o menos, la línea se borra entera**
+— incluso si `cantidad` pide restar más de lo que había: no es un error,
+simplemente la quita del pedido (`eliminada: true` en la respuesta, sin
+`id_pedido_producto`). No hace falta pedir
+`DELETE .../detalles/:idDetalle` aparte para ese caso.
+
+Solo mientras el pedido sigue `pendiente` — mismo criterio que las demás
+rutas que modifican un pedido. Una oferta que no está en el pedido, o un
+pedido que ya no admite cambios, dan 409. Un pedido ajeno da el mismo 404
+de siempre.
+
+```
+PATCH /comprador/pedidos/15/detalles
+{ "id_oferta": 3, "cantidad": 1 }
+```
+
+### 200 (queda con cantidad > 0)
+
+```json
+{
+  "ok": true,
+  "mensaje": "Cantidad actualizada",
+  "payload": {
+    "id_pedido": 15,
+    "id_pedido_producto": 16,
+    "id_oferta": 3,
+    "cantidad": 2,
+    "eliminada": false
+  }
+}
+```
+
+### 200 (la resta la borro)
+
+```json
+{
+  "ok": true,
+  "mensaje": "Producto quitado del pedido",
+  "payload": { "id_pedido": 15, "id_oferta": 3, "cantidad": 0, "eliminada": true }
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "El id_oferta es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
+{ "ok": false, "mensaje": "La cantidad es obligatoria y debe ser un numero entero mayor a 0", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un pedido con ese id", "payload": null }
+```
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "El pedido 15 esta comprado y ya no se puede cambiar", "payload": null }
+{ "ok": false, "mensaje": "La oferta 6 no esta en el pedido 15", "payload": null }
+```
+
+### 401 / 503 / 500
+
+Mismos casos que las demás rutas (el 500 es
+`"No se pudo actualizar la cantidad"`).
 
 ---
 
