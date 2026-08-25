@@ -22,8 +22,13 @@ import { ProductosVendedorService } from '../../services/vendedores/productos.se
 /**
  * Controlador de las rutas /vendedor/productos.
  *
- * Solo vendedor (no admin): un producto siempre pertenece a quien lo crea,
- * y un admin no es dueno de productos propios.
+ * Un producto ya no pertenece a ningun vendedor: el catalogo es compartido
+ * (modelo multi-vendedor). Estas rutas son el panel de administracion del
+ * catalogo completo, y por eso estan restringidas a la cuenta de la tienda
+ * (`tienda@mesh.com`, ver exigirTienda en ProductosVendedorService) -- no
+ * a "vendedor" como rol en general. Un vendedor que no es la tienda no
+ * tiene "sus productos" aqui; lo que tiene es su oferta sobre una
+ * variante del catalogo (ver /vendedor/ofertas).
  */
 @Controller('vendedor/productos')
 @UseGuards(SesionGuard)

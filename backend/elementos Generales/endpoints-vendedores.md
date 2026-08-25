@@ -6,20 +6,51 @@ admin), [endpoints-productos.md](endpoints-productos.md) (el catálogo
 público) y [endpoints-compradores.md](endpoints-compradores.md) (comprar,
 sin exigir un rol en particular).
 
-Todas las rutas de aquí requieren la cookie `mesh_token`. Las de
-`/vendedor/categorias` aceptan vendedor o admin (`id_rol_usuario` 2 o 3);
-todas las de `/vendedor/productos` y `/vendedor/ofertas` son solo para
-vendedor (2). Un rol sin permiso recibe 403, igual que en `/admin/*`.
+Todas las rutas de aquí requieren la cookie `mesh_token`. Hay **dos niveles**
+de restricción, y no son lo mismo:
 
-**Modelo multi-vendedor: `/vendedor/productos` y `/vendedor/ofertas` ya no
-son la misma cosa.** El catálogo (`/vendedor/productos`) es compartido y
-**solo lo crea/edita la cuenta de la tienda** (`tienda@mesh.com` — ver
-`cambios-multivendedor.md`, sección 9); un producto ya no pertenece a quien
-lo crea. Lo que sí es de cualquier vendedor es la **oferta**: publicar un
-precio y un stock propios sobre una variante del catálogo que ya existe.
-Esa parte (`GET /vendedor/ofertas`, al final de este archivo) ya está
-construida contra el modelo nuevo, con las ofertas viviendo en PostgreSQL
-(tabla `oferta`) y el catálogo en Mongo.
+1. **Por rol** (`id_rol_usuario`, lo revisa el guard `@Roles` antes de entrar
+   al controlador): un rol sin permiso recibe 403, igual que en `/admin/*`.
+2. **Por cuenta especifica** (solo dentro de `/vendedor/productos`, lo revisa
+   `exigirTienda()` a mano, por correo contra la base en cada petición, nunca
+   por el token): no es un 403 — ver la nota mas abajo de por qué.
+
+| Ruta | Rol exigido | Cuenta exigida |
+| --- | --- | --- |
+| `GET /vendedor/categorias` | vendedor **o** admin (2 o 3) | cualquiera |
+| `GET /vendedor/categorias/:id` | vendedor **o** admin (2 o 3) | cualquiera |
+| `GET /vendedor/productos` | vendedor (2) | **solo `tienda@mesh.com`** |
+| `GET /vendedor/productos/:id` | vendedor (2) | **solo `tienda@mesh.com`** |
+| `GET /vendedor/productos/:id/historial` | vendedor (2) | **solo `tienda@mesh.com`** |
+| `POST /vendedor/productos` | vendedor (2) | **solo `tienda@mesh.com`** |
+| `PATCH /vendedor/productos/:id` | vendedor (2) | **solo `tienda@mesh.com`** |
+| `GET /vendedor/ofertas` | vendedor (2) | cualquier vendedor |
+| `GET /vendedor/ofertas/producto/:idProducto` | vendedor (2) | cualquier vendedor |
+| `POST /vendedor/ofertas` | vendedor (2) | cualquier vendedor |
+| `PATCH /vendedor/ofertas/:id` | vendedor (2) | cualquier vendedor, pero solo sobre **su propia** oferta |
+
+**`/vendedor/productos` es el panel de administración del catálogo
+completo, no "mis productos".** Con el giro a multi-vendedor, un producto
+dejó de pertenecer a quien lo crea — el catálogo (`productos`/`variantes`
+en Mongo) es compartido, y por decisión explícita con el profesor **solo
+la cuenta de la tienda lo administra** (`cambios-multivendedor.md`, sección
+9). Las cinco rutas de arriba llaman a `ProductosVendedorService.exigirTienda()`,
+que compara el correo del usuario logueado contra `tienda@mesh.com` —
+cualquier otro vendedor recibe el **mismo 404** que si el recurso no
+existiera (`"No existe un producto con ese id"` en las rutas con `:id`;
+en `GET /vendedor/productos`, que no lleva ningún id, ese mismo mensaje
+sale igual, reutilizado tal cual). Es a propósito, para no revelar que la
+restricción existe — el mismo patrón que ya usa el resto de la API para
+"un recurso ajeno da el mismo 404 que uno inexistente" — solo que aquí no
+hay ningún dueño de por medio, es una cuenta fija.
+
+**Lo que sí es de cualquier vendedor es la oferta**: publicar (y editar)
+un precio y un stock propios sobre una variante del catálogo que ya
+existe. Es la respuesta real a "¿cuáles son mis productos?" para un
+vendedor que no es la tienda — no hay tal cosa como "productos propios",
+pero `GET /vendedor/ofertas` da la lista de productos sobre los que sí
+tiene algo (una oferta), en cualquier estado. Vive en PostgreSQL (tabla
+`oferta`), el catálogo sigue en Mongo.
 
 **`POST`/`PATCH /vendedor/productos` ya están rediseñadas contra el modelo
 multi-vendedor**: ya no piden ni guardan `precio` ni `stock_inicial` por
@@ -487,9 +518,9 @@ Casos probados contra la base real:
 - Un id de variante que no pertenece al producto se sigue rechazando con
   400, igual que siempre.
 
-Un producto de otro vendedor da el mismo 404 que un id que no existe — no
-hay forma de usar esta ruta para confirmar que productos tiene otra
-persona.
+Un id que no existe, o cualquier vendedor que no sea la tienda: mismo
+404 — no hay forma de usar esta ruta para confirmar qué productos existen
+si no eres la tienda.
 
 Un mismo evento de modificación puede traer varias llaves en `cambios` a
 la vez, una por cada cosa que cambió en esa edición (por ejemplo, `nombre`
@@ -592,13 +623,19 @@ personalizada inválido — ver arriba). Si el cuerpo trae `precio` o
 
 ## GET /vendedor/productos
 
-Todos los productos del vendedor logueado, **en cualquier estado**
-(`borrador`, `activo` e `inactivo` — a diferencia del catálogo público, que
-oculta `borrador` e `inactivo`). Es el panel de "mis productos": el
-vendedor tiene que poder ver y administrar los que todavía no ha
-publicado, no solo los que ya están activos. Ordenados por
+**Solo `tienda@mesh.com`**, igual que `POST /vendedor/productos` — no es
+"mis productos", es el catálogo completo para administrarlo. Cualquier
+otro vendedor recibe el mismo 404 genérico que las demás rutas de
+`/vendedor/productos` (ver la tabla al principio de este archivo), aunque
+aquí no haya ningún `id` de por medio: el mensaje es el mismo
+`"No existe un producto con ese id"`, reutilizado tal cual.
+
+Todo el catálogo, **en cualquier estado** (`borrador`, `activo` e
+`inactivo` — a diferencia del catálogo público, que oculta `borrador` e
+`inactivo`): la tienda tiene que poder ver y administrar lo que todavía
+no se ha publicado, no solo lo que ya está activo. Ordenados por
 `fecha_creacion`, más reciente primero. Sin paginación ni filtros — trae
-todos de una vez.
+todo de una vez.
 
 **Sin `variantes[].stock`, a propósito.** Esta es una ruta "rápida": no
 toca PostgreSQL. El stock real es de cada oferta, no del producto — ver
@@ -616,6 +653,16 @@ toca PostgreSQL. El stock real es de cada oferta, no del producto — ver
 }
 ```
 
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+```
+
+Este es el que sale para **cualquier vendedor que no sea la tienda** — el
+mismo mensaje que usan las rutas con `:id`, aunque aquí no se haya
+mandado ningún id.
+
 ### 401 / 403 / 503 / 500
 
 Mismos casos que las demás rutas de `/vendedor/productos` (ver arriba).
@@ -624,14 +671,16 @@ Mismos casos que las demás rutas de `/vendedor/productos` (ver arriba).
 
 ## GET /vendedor/productos/:id
 
-Un producto propio tal como está **hoy**, con todos sus detalles (el mismo
+**Solo `tienda@mesh.com`**, igual que las demás rutas de
+`/vendedor/productos` (ver la tabla al principio del archivo). Un
+producto tal como está **hoy**, con todos sus detalles (el mismo
 documento completo que devuelven las rutas de creación y edición). A
 diferencia del catálogo público (que no tiene una ruta de detalle por id
 todavía, y de cualquier forma solo mostraría productos `activo`), esta
-funciona sin importar el estado — sirve justo para ver un producto propio
-en `borrador` o `inactivo` antes de publicarlo.
+funciona sin importar el estado — sirve justo para ver un producto en
+`borrador` o `inactivo` antes de publicarlo.
 
-Un producto de otro vendedor da el mismo 404 que un id que no existe.
+Un id que no existe, o cualquier vendedor que no sea la tienda: mismo 404.
 
 **Sin `variantes[].stock`, a propósito** — mismo motivo que
 `GET /vendedor/productos` (ver arriba): el stock real es de cada oferta,
@@ -667,9 +716,11 @@ Mismos casos que las demás rutas.
 
 ## GET /vendedor/productos/:id/historial
 
-Reconstruye un producto propio **como estaba en una fecha específica**:
-toma el evento de creación y todos los de modificación anteriores a esa
-fecha (o de ese mismo día), en orden, y los fusiona uno encima del otro.
+**Solo `tienda@mesh.com`**, igual que las demás rutas de
+`/vendedor/productos`. Reconstruye un producto **como estaba en una fecha
+específica**: toma el evento de creación y todos los de modificación
+anteriores a esa fecha (o de ese mismo día), en orden, y los fusiona uno
+encima del otro.
 
 **Se arma con el framework de agregación de Mongo, no en el código del
 backend**: la búsqueda, el orden y la fusión de eventos pasan dentro de un
@@ -688,10 +739,9 @@ stock no es parte de ningún evento (ver `cambios-etl-productos.md`), así
 que reconstruir un producto a una fecha pasada no dice qué stock tenía en
 ese momento — eso solo lo sabe el libro `stock_movimiento` en PostgreSQL.
 
-Solo productos propios: un producto de otro vendedor da el mismo 404 que
-un id que no existe. Una fecha anterior a la creación del producto también
-da 404, con un mensaje distinto (el producto sencillamente no existía
-todavía).
+Un id que no existe, o cualquier vendedor que no sea la tienda: mismo 404.
+Una fecha anterior a la creación del producto también da 404, con un
+mensaje distinto (el producto sencillamente no existía todavía).
 
 ```
 GET /vendedor/productos/52/historial?fecha=2026-01-07

@@ -340,7 +340,7 @@ export class ProductosVendedorService {
   }
 
   /**
-   * Edita un producto propio: cualquier campo que tenga sentido cambiar
+   * Edita un producto del catalogo (solo la tienda): cualquier campo que tenga sentido cambiar
    * (nombre, descripcion, estado, categoria, sus caracteristicas, las
    * personalizadas, y las variantes).
    *
@@ -644,7 +644,7 @@ export class ProductosVendedorService {
   }
 
   /**
-   * Reconstruye un producto propio como estaba en una fecha especifica:
+   * Reconstruye un producto del catalogo (solo la tienda) como estaba en una fecha especifica:
    * toma el evento de creacion y todos los de modificacion anteriores a
    * esa fecha (o de ese mismo dia), en orden, y los va fusionando uno
    * encima del otro con el framework de agregacion de Mongo ($match,
