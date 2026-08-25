@@ -1,12 +1,20 @@
 // cargar.js
-// Toma lo que saco extraer.sql y lo escribe en Mongo. Corre dentro de
-// mesh-mongo con mongosh, que trae Node adentro: no hay nada que instalar.
+// Toma lo que sacaron los tres extraer_*.sql y lo escribe en Mongo. Corre
+// dentro de mesh-mongo con mongosh, que trae Node adentro: no hay nada que
+// instalar.
 //
-// Escribe dos colecciones:
+// Escribe cuatro colecciones:
 //
 //   productos          un documento por producto, con la categoria, las
-//                      variantes, las imagenes y el vendedor embebidos.
-//                      El _id es el id_producto del relacional.
+//                      variantes, sus imagenes y sus caracteristicas
+//                      embebidas. El _id es el id_producto del relacional.
+//
+//   ofertas            un documento por oferta: quien vende esa variante, a
+//                      como y con cuantas unidades. El _id es el id_oferta.
+//                      NO van embebidas en el producto: el stock cambia en
+//                      cada venta y Mongo reescribe el documento entero, asi
+//                      que comprar una camisa reescribiria el catalogo de la
+//                      camisa. Ver el encabezado de extraer_ofertas.sql.
 //
 //   productos_eventos  el historial, un documento por evento. El primero es
 //                      la creacion y lleva el estado completo; los demas son
@@ -16,20 +24,29 @@
 //                      con su tipo y su unidad. Es lo que arma el formulario
 //                      de publicar. No lleva valores.
 //
-// Las caracteristicas de un producto NO entran en productos_eventos. En el
-// modelo relacional no tienen historial, asi que no hay de donde sacar como
-// estaban en una fecha anterior. Inventarlo aqui seria decir que se puede
-// reconstruir algo que no se guardo.
+// Dos cosas NO entran en productos_eventos, y las dos por el mismo motivo: no
+// se pueden reconstruir porque no se guardaron.
 //
-// El _id de los dos es determinista, asi que correr esto dos veces actualiza
-// en vez de duplicar.
+//   Las caracteristicas. En el relacional no tienen historial, asi que no hay
+//   de donde sacar como estaban en una fecha anterior.
 //
-// El ETL es el unico dueno de estas dos colecciones: cada documento se
-// reemplaza entero, porque PostgreSQL manda. Un campo que la aplicacion
-// escriba aqui por su cuenta se pierde en la siguiente corrida.
+//   El PRECIO. Dejo de ser del catalogo al volverse multi-vendedor: ahora es
+//   de cada oferta, y su historia vive en precio_historial, en PostgreSQL. Un
+//   producto ya no tiene "un precio" que reconstruir; tiene tantos como
+//   vendedores. Esto hay que decirlo en el informe: el enunciado pide
+//   reconstruir "precio, descripcion y disponibilidad", y el precio ahora se
+//   contesta desde el otro lado.
+//
+// El _id de las cuatro es determinista, asi que correr esto dos veces
+// actualiza en vez de duplicar.
+//
+// El ETL es el unico dueno de estas colecciones: cada documento se reemplaza
+// entero, porque PostgreSQL manda. Un campo que la aplicacion escriba aqui por
+// su cuenta se pierde en la siguiente corrida.
 
 const RUTA = '/tmp/mesh-productos.json';
 const RUTA_CATEGORIAS = '/tmp/mesh-categorias.json';
+const RUTA_OFERTAS = '/tmp/mesh-ofertas.json';
 
 // ============================================================
 // El historial: de fotos completas a eventos
@@ -37,36 +54,39 @@ const RUTA_CATEGORIAS = '/tmp/mesh-categorias.json';
 // En el relacional cada fila de historial es una foto completa de esa entidad
 // en esa fecha. Aqui hace falta lo contrario: una lista de cambios.
 //
-// Y son tres historiales que corren por separado y con fechas distintas: el
-// del producto, el de cada variante y el de la categoria. Un cambio de
-// comision no escribe nada en el historial del producto.
+// Y son dos historiales que corren por separado y con fechas distintas: el del
+// producto y el de cada variante. Renombrar el producto no escribe nada en el
+// historial de sus variantes.
 //
 // Por eso el evento no sale de una tabla: sale de juntar las fechas de las
-// tres, y en cada fecha volver a armar el estado completo del producto.
+// dos, y en cada fecha volver a armar el estado completo del producto.
 
 // La fila que regia en la fecha t: la ultima con fecha <= t. Las filas ya
 // vienen ordenadas de extraer.sql.
 function vigenteEn(filas, t) {
-    let encontrada = null;
+    let salida = null;
     for (const fila of filas) {
-        if (Date.parse(fila.fecha) <= t) {
-            encontrada = fila;
-        }
+        if (Date.parse(fila.fecha) <= t) salida = fila;
+        else break;
     }
-    return encontrada;
+    return salida;
 }
 
 // El estado completo del producto en la fecha t, con los campos que si tienen
-// historial. El estado (activo, agotado) no esta: en el modelo relacional los
-// historiales no lo guardan, vive solo en la fila viva. Esta anotado en
+// historial.
+//
+// El estado (activo, inactivo) no esta: en el modelo relacional los historiales
+// no lo guardan, vive solo en la fila viva. Esta anotado en
 // docs/base-de-datos.md y en el README de esta carpeta.
 //
+// La CATEGORIA si esta, y es nueva: productos_historial ahora guarda en cual
+// estaba el producto ese dia. Antes no, y por eso mover un producto de
+// categoria reescribia su pasado.
 function estadoEn(producto, t) {
     const p = vigenteEn(producto.historial_producto, t);
-    const c = vigenteEn(producto.historial_categoria, t);
 
-    // Las variantes se agrupan por id: cada una tiene su propia linea de
-    // tiempo. Una variante que todavia no existia en t no aparece.
+    // Una variante puede haber nacido despues: solo entran las que ya existian
+    // en t. Se agrupa por id para quedarse con la ultima version de cada una.
     const porVariante = new Map();
     for (const fila of producto.historial_variantes) {
         if (Date.parse(fila.fecha) > t) continue;
@@ -78,32 +98,15 @@ function estadoEn(producto, t) {
         .map(v => ({
             id_producto_variante: v.id_producto_variante,
             nombre_variante:      v.nombre_variante,
-            precio:               v.precio,
             descripcion:          v.descripcion
         }));
 
-    const foto = {
+    return {
         nombre:      p ? p.nombre : null,
         descripcion: p ? p.descripcion : null,
-        categoria:   c ? { nombre: c.nombre, porcentaje_comision: c.porcentaje_comision } : null,
+        categoria:   p ? p.categoria : null,
         variantes:   variantes
     };
-
-    // Las caracteristicas van en la foto, pero NO tienen historial: sus tablas
-    // guardan el valor de hoy y nada mas. Se ponen las de hoy en todas las
-    // fotos, y eso tiene una consecuencia buena: como son iguales en todas,
-    // diferencias() nunca las ve cambiar, asi que salen enteras en el evento de
-    // creacion y jamas aparecen en "cambios".
-    //
-    // Eso es lo honesto con lo que hay. El dia que existan tablas de historial
-    // para producto_caracteristica, aqui se lee ese historial y entonces si
-    // pueden aparecer como modificacion.
-    if (producto.caracteristicas_adicionales &&
-        producto.caracteristicas_adicionales.length > 0) {
-        foto.caracteristicas_adicionales = producto.caracteristicas_adicionales;
-    }
-
-    return foto;
 }
 
 // Los campos del estado que cambiaron entre una fecha y la siguiente.
@@ -124,24 +127,18 @@ function diferencias(antes, ahora) {
 }
 
 function eventosDe(producto) {
-    // La categoria casi siempre es mas vieja que el producto: se creo antes y
-    // ya cambio de comision alguna vez. Esas fechas anteriores no son eventos
-    // de este producto, todavia no existia; si se cuentan, el primer evento
-    // sale con el nombre en null y sin variantes.
-    //
     // El producto nace con su primera fila de historial. Si no tiene ninguna,
     // se usa la fecha de la fila viva.
     const nacimiento = producto.historial_producto.length > 0
         ? Date.parse(producto.historial_producto[0].fecha)
         : Date.parse(producto.fecha_creacion);
 
-    // Todas las fechas de los tres historiales, sin repetir y en orden. Se
+    // Todas las fechas de los dos historiales, sin repetir y en orden. Se
     // comparan como numero y no como texto: asi da igual con que zona horaria
     // se haya extraido.
     const fechas = [
         ...producto.historial_producto,
-        ...producto.historial_variantes,
-        ...producto.historial_categoria
+        ...producto.historial_variantes
     ].map(f => Date.parse(f.fecha));
 
     const orden = [...new Set(fechas)]
@@ -187,9 +184,15 @@ function documentoDe(producto) {
         descripcion:    producto.descripcion,
         fecha_creacion: new Date(producto.fecha_creacion),
         estado:         producto.estado,
-        vendedor:       producto.vendedor,
         categoria:      producto.categoria,
-        // Object.assign copia lo que traiga la variante, asi que
+
+        // Los dos calculados. Son una COPIA de lo que dicen las ofertas, y hay
+        // que recalcularlos cuando una oferta cambie de precio, se quede sin
+        // unidades o se pause. Si no, la tarjeta va a decir un precio y la
+        // ficha otro.
+        precio_tienda:  producto.precio_tienda,
+        total_ofertas:  producto.total_ofertas,
+
         variantes:      producto.variantes.map(v => Object.assign({}, v, {
             fecha_creacion: new Date(v.fecha_creacion)
         }))
@@ -229,7 +232,7 @@ function documentoDe(producto) {
 // punto flotante y redondea. Postgres lo mando como texto justo para esto: se
 // compara como texto mientras se calculan los cambios, y se convierte una sola
 // vez al final, cuando ya no queda nada que comparar.
-const CAMPOS_DECIMALES = ['precio', 'porcentaje_comision'];
+const CAMPOS_DECIMALES = ['precio', 'precio_tienda'];
 
 function aDecimal(valor) {
     if (Array.isArray(valor)) return valor.map(aDecimal);
@@ -248,15 +251,17 @@ function aDecimal(valor) {
     return salida;
 }
 
-// ============================================================
-// Cargar
-// ============================================================
-const texto = require('fs').readFileSync(RUTA, 'utf8');
+function leerLineas(ruta) {
+    return require('fs').readFileSync(ruta, 'utf8')
+        .split('\n')
+        .filter(linea => linea.trim().length > 0)
+        .map(linea => JSON.parse(linea));
+}
 
-// extraer.sql devuelve una linea por producto, no un arreglo
-const productos = texto.split('\n')
-    .filter(linea => linea.trim().length > 0)
-    .map(linea => JSON.parse(linea));
+// ============================================================
+// Cargar los productos y sus eventos
+// ============================================================
+const productos = leerLineas(RUTA);
 
 const escrituraProductos = [];
 const escrituraEventos = [];
@@ -294,22 +299,44 @@ for (const producto of productos) {
 }
 
 // ============================================================
+// Las ofertas
+// ============================================================
+const ofertas = leerLineas(RUTA_OFERTAS);
+
+const escrituraOfertas = ofertas.map(function (o) {
+    const doc = {
+        _id:                  o.id_oferta,
+        id_producto:          o.id_producto,
+        id_producto_variante: o.id_producto_variante,
+        nombre_producto:      o.nombre_producto,
+        nombre_variante:      o.nombre_variante,
+        vendedor:             o.vendedor,
+        es_tienda:            o.es_tienda,
+        precio:               o.precio,
+        stock:                o.stock,
+        estado:               o.estado,
+        fecha_creacion:       new Date(o.fecha_creacion),
+        fecha_actualizacion:  new Date(o.fecha_actualizacion)
+    };
+    return {
+        replaceOne: { filter: { _id: doc._id }, replacement: aDecimal(doc), upsert: true }
+    };
+});
+
+// ============================================================
 // La paleta de las categorias
 // ============================================================
 // Se escribe entera en cada corrida, igual que los productos: PostgreSQL es el
 // dueno. El _id es el id_categoria del relacional, asi que volver a correr
 // actualiza en vez de duplicar.
-const categorias = require('fs').readFileSync(RUTA_CATEGORIAS, 'utf8')
-    .split('\n')
-    .filter(linea => linea.trim().length > 0)
-    .map(linea => JSON.parse(linea));
+const categorias = leerLineas(RUTA_CATEGORIAS);
 
 const escrituraCategorias = categorias.map(function (categoria) {
     const doc = {
         _id:                      categoria.id_categoria,
         nombre:                   categoria.nombre,
         categoria_padre:          categoria.categoria_padre,
-        porcentaje_comision:      categoria.porcentaje_comision,
+        es_raiz:                  categoria.es_raiz,
         fecha_creacion:           new Date(categoria.fecha_creacion),
         caracteristicas:          categoria.caracteristicas,
         caracteristicas_variante: categoria.caracteristicas_variante
@@ -319,79 +346,35 @@ const escrituraCategorias = categorias.map(function (categoria) {
     };
 });
 
-if (escrituraProductos.length > 0) {
-    db.productos.bulkWrite(escrituraProductos);
-}
-if (escrituraCategorias.length > 0) {
-    db.categorias.bulkWrite(escrituraCategorias);
-}
-if (escrituraEventos.length > 0) {
-    db.productos_eventos.bulkWrite(escrituraEventos);
-}
+// ============================================================
+// Escribir, y barrer lo que sobro
+// ============================================================
+if (escrituraProductos.length > 0)  db.productos.bulkWrite(escrituraProductos);
+if (escrituraOfertas.length > 0)    db.ofertas.bulkWrite(escrituraOfertas);
+if (escrituraCategorias.length > 0) db.categorias.bulkWrite(escrituraCategorias);
+if (escrituraEventos.length > 0)    db.productos_eventos.bulkWrite(escrituraEventos);
 
-// ============================================================
-// Lo que ya no esta en PostgreSQL tampoco se queda aqui
-// ============================================================
-// replaceOne con upsert escribe y actualiza, pero nunca borra. Un documento
-// cuyo _id ya no existe del otro lado no lo toca nadie y se queda para
-// siempre, sumando al conteo y saliendo en las consultas.
+// Un upsert actualiza y agrega, pero NO borra: un documento que ya no existe
+// en PostgreSQL se quedaria aqui para siempre, y las cuentas seguirian
+// cuadrando porque nadie las mira. Ya paso una vez con 47 productos fantasma.
 //
-// Pasa al borrar un producto, y pasa sobre todo al RENUMERAR: el producto que
-// era 1001 ahora es 4, asi que el ETL escribe el 4 y el 1001 sigue ahi. La
-// coleccion terminaria con 97 productos y arrancar.ps1, que compara cuentas,
-// diria que todo esta al dia porque le sobran.
-//
-// PERO no todo lo de estas colecciones sale de PostgreSQL. Un producto que
-// publica un vendedor nace SOLO en Mongo (POST /vendedor/productos) y no tiene
-// fila en el relacional: si se borrara "todo lo que no esta alla", la primera
-// corrida del ETL se llevaria lo que la gente publico.
-//
-// Por eso el ETL solo manda sobre SU tramo: del 1 hasta el id mas alto que
-// trajo de PostgreSQL. Lo de mas arriba lo creo la aplicacion, y ahi el ETL no
-// entra ni para borrar ni para escribir.
+// Solo se barren los documentos cuyo _id viene del relacional. Un producto que
+// nacio en Mongo (publicado desde el panel) no tiene fila alla y no se toca.
 const idsProductos  = productos.map(p => p.id_producto);
+const idsOfertas    = ofertas.map(o => o.id_oferta);
 const idsCategorias = categorias.map(c => c.id_categoria);
 
-const topeProductos  = idsProductos.length  ? Math.max.apply(null, idsProductos)  : 0;
-const topeCategorias = idsCategorias.length ? Math.max.apply(null, idsCategorias) : 0;
+const borradas = db.ofertas.deleteMany({
+    _id: { $nin: idsOfertas, $lte: Math.max(0, ...idsOfertas) }
+});
+const catBorradas = db.categorias.deleteMany({
+    _id: { $nin: idsCategorias, $lte: Math.max(0, ...idsCategorias) }
+});
 
-const sobranProductos = db.productos.deleteMany({
-    _id: { $nin: idsProductos, $lte: topeProductos }
-}).deletedCount;
-
-const sobranEventos = db.productos_eventos.deleteMany({
-    id_producto: { $nin: idsProductos, $lte: topeProductos }
-}).deletedCount;
-
-const sobranCategorias = db.categorias.deleteMany({
-    _id: { $nin: idsCategorias, $lte: topeCategorias }
-}).deletedCount;
-
-// El unico indice que hace falta. La reconstruccion pide los eventos de un
-// producto hasta una fecha y los ordena por fecha: con este indice la base
-// entra directo al producto, lee el tramo que le toca y ya sale ordenado, sin
-// recorrer la coleccion ni ordenar en memoria.
-db.productos_eventos.createIndex({ id_producto: 1, fecha: 1 });
-
-// El indice del catalogo. El patron de consulta es el que nombra el documento
-// del curso: "consulta del catalogo por parte del cliente, con filtros por
-// categoria". Sin el, filtrar por categoria recorre la coleccion entera.
-db.productos.createIndex({ 'categoria.nombre': 1, estado: 1 });
-
-// El formulario busca la categoria por nombre para saber que ofrecer.
-db.categorias.createIndex({ nombre: 1 });
-
-const sobrantes = sobranProductos + sobranCategorias + sobranEventos;
-if (sobrantes > 0) {
-    print('borrados del tramo del ETL (1..' + topeProductos + '), por no existir ya en PostgreSQL: ' +
-          sobranProductos + ' producto(s), ' +
-          sobranCategorias + ' categoria(s), ' +
-          sobranEventos + ' evento(s)');
-}
-
-print('productos:  ' + escrituraProductos.length);
-print('categorias: ' + escrituraCategorias.length);
-print('eventos:    ' + escrituraEventos.length);
+print('productos   ' + productos.length);
+print('ofertas     ' + ofertas.length + (borradas.deletedCount ? '  (' + borradas.deletedCount + ' borradas)' : ''));
+print('categorias  ' + categorias.length + (catBorradas.deletedCount ? '  (' + catBorradas.deletedCount + ' borradas)' : ''));
+print('eventos     ' + escrituraEventos.length);
 if (sinHistorial > 0) {
-    print('AVISO: ' + sinHistorial + ' producto(s) sin historial, no generaron eventos');
+    print('AVISO: ' + sinHistorial + ' productos sin ninguna fila de historial: no se pueden reconstruir');
 }

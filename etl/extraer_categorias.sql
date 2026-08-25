@@ -10,10 +10,14 @@
 -- producto dispone: por eso una categoria ofrece mas de lo que cualquier
 -- producto suyo llena, y por eso el catalogo sale disparejo.
 --
--- Salen las 27 categorias, tambien las que no ofrecen nada. Las de en medio
--- del arbol (Ropa, Electronica, Hogar) no tienen productos y por eso su lista
--- va vacia; se escriben igual para que el arbol este completo y el formulario
--- pueda recorrerlo sin huecos.
+-- Salen TODAS las categorias, tambien las raices. Una raiz (Electronica,
+-- Hogar) no ofrece ninguna caracteristica y no lleva productos: es un rotulo
+-- para agrupar, y su lista sale vacia a proposito. Se escribe igual para que
+-- el arbol quede completo y el formulario pueda recorrerlo sin huecos.
+--
+-- El arbol tiene dos niveles y solo dos, garantizado por el trigger del 003.
+-- Asi que 'categoria_padre' es NULL en las raices y siempre una raiz en las
+-- hojas: no hace falta recorrer nada hacia arriba.
 
 SET TIME ZONE 'UTC';
 
@@ -21,8 +25,8 @@ SELECT jsonb_build_object(
 
     'id_categoria',        c.id_categoria,
     'nombre',              c.nombre,
-    'porcentaje_comision', c.porcentaje_comision::text,
     'categoria_padre',     cp.nombre,
+    'es_raiz',             (c.id_categoria_padre IS NULL),
     'fecha_creacion',      c.fecha_creacion,
 
     -- Cada entrada trae el tipo y la unidad, que es lo que el formulario

@@ -7,7 +7,7 @@
 #
 # No hay archivo intermedio en el disco: la salida de psql entra directo al
 # contenedor de Mongo. La carpeta etl/ no esta montada en ningun contenedor,
-# asi que los dos archivos se meten por la entrada estandar.
+# asi que los archivos se meten por la entrada estandar.
 
 set -euo pipefail
 
@@ -22,16 +22,24 @@ set +a
 # argumento, para correr el ETL contra una copia sin tocar la de trabajo.
 BASE="${1:-$DB_NAME}"
 
+# Son TRES consultas y tres archivos, uno por coleccion. Cada una devuelve una
+# linea por documento; mezclarlas obligaria a marcar cada linea con su tipo y a
+# separarlas otra vez del otro lado.
+#
 # -q sin mensajes, -t sin encabezado ni conteo de filas, -A sin relleno de
 # columnas, -X ignorando el .psqlrc de quien lo corra. Lo que sale es JSON.
+
 docker exec -i mesh-postgres \
     psql -U "$DB_USER" -d "$BASE" -qtAX -f - < "$RAIZ/etl/extraer.sql" \
     | docker exec -i mesh-mongo sh -c 'cat > /tmp/mesh-productos.json'
 
-# La paleta de las categorias sale de su propia consulta y va a su propio
-# archivo. Son dos colecciones distintas y cada consulta devuelve una linea por
-# documento; mezclarlas obligaria a marcar cada linea con su tipo.
-docker exec -i mesh-postgres     psql -U "$DB_USER" -d "$BASE" -qtAX -f - < "$RAIZ/etl/extraer_categorias.sql"     | docker exec -i mesh-mongo sh -c 'cat > /tmp/mesh-categorias.json'
+docker exec -i mesh-postgres \
+    psql -U "$DB_USER" -d "$BASE" -qtAX -f - < "$RAIZ/etl/extraer_categorias.sql" \
+    | docker exec -i mesh-mongo sh -c 'cat > /tmp/mesh-categorias.json'
+
+docker exec -i mesh-postgres \
+    psql -U "$DB_USER" -d "$BASE" -qtAX -f - < "$RAIZ/etl/extraer_ofertas.sql" \
+    | docker exec -i mesh-mongo sh -c 'cat > /tmp/mesh-ofertas.json'
 
 docker exec -i mesh-mongo sh -c 'cat > /tmp/cargar.js' < "$RAIZ/etl/cargar.js"
 

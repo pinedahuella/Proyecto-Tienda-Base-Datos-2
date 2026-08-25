@@ -1,5 +1,15 @@
 # Frontend
 
+> **Este documento describe el frontend ANTERIOR al cambio a multi-vendedor, y
+> todavia no se actualizo.** El modelo cambio debajo de el: el producto ya no
+> tiene `vendedor`, ni `variantes[].precio`, ni `variantes[].stock`. Eso rompe
+> el catalogo (el filtro por rango de precio y el boton "Ver todo de X"), la
+> ficha (la fila "Vendedor") y el panel del vendedor entero, que giraba
+> alrededor del inventario.
+>
+> Se arregla cuando el backend este al dia. Lo que cambia esta en
+> [backend/elementos Generales/cambios-multivendedor.md](../backend/elementos%20Generales/cambios-multivendedor.md).
+
 SvelteKit.
 
 ## Las paginas

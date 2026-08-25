@@ -20,10 +20,25 @@ const FECHA = new Date((typeof corte !== 'undefined') ? corte : Date.now());
 // ============================================================
 // Reconstruir NO es tomar la creacion y encimarle la ultima modificacion. Cada
 // modificacion guarda solo los campos que ella toco: si una cambio el nombre y
-// otra la comision, quedarse con la ultima pierde el nombre. Hay que aplicarlas
-// todas, en orden, desde la creacion hasta la fecha pedida.
+// otra la categoria, quedarse con la ultima pierde el nombre. Hay que
+// aplicarlas todas, en orden, desde la creacion hasta la fecha pedida.
 //
 // Eso es exactamente lo que hacen estas cinco etapas.
+//
+// Lo que esto NO contesta es el precio, y hay que decirlo: al volverse
+// multi-vendedor el precio dejo de ser del producto. Un producto no tiene "un
+// precio" que reconstruir, tiene tantos como vendedores, y cada uno vive en
+// precio_historial, en PostgreSQL:
+//
+//   SELECT precio FROM precio_historial
+//   WHERE id_oferta = ? AND fecha_creacion <= ?
+//   ORDER BY fecha_creacion DESC LIMIT 1;
+//
+// La disponibilidad de esa fecha sale del kardex, tambien en PostgreSQL:
+//
+//   SELECT stock_resultante FROM stock_movimiento
+//   WHERE id_oferta = ? AND fecha_movimiento <= ?
+//   ORDER BY fecha_movimiento DESC LIMIT 1;
 function reconstruir(id, fecha) {
     return db.productos_eventos.aggregate([
 

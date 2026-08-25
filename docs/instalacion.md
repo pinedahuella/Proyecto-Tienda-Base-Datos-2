@@ -95,8 +95,16 @@ migrations/datos/*.sql  los conjuntos de datos de prueba
 cada paso en orden de nombre. Los estados de producto y de variante van con el
 esquema y no con los datos, porque sin ellos no se puede insertar un producto.
 
-Agregar mas productos es agregar un archivo a `migrations/datos/`. Los anteriores
-no se abren. Las reglas para escribir uno estan en
+El conjunto de datos lo escribe un generador, no se edita a mano:
+
+```bash
+node migrations/datos/generador.js
+```
+
+El contenido (que categorias, que productos, que caracteristicas) se escribe a
+mano dentro del generador; el reparto (que vendedor oferta que, con cuanto stock
+y a que precio) lo calcula el, con una semilla fija para que dos corridas den el
+mismo archivo. Las reglas estan en
 [migrations/README.md](../migrations/README.md).
 
 Si tu base ya estaba creada de antes, la primera vez veras correr
@@ -128,13 +136,23 @@ los scripts que crean las colecciones.
 ## El catalogo en MongoDB
 
 Los productos se disenan y se cargan en PostgreSQL, y de ahi se migran a MongoDB
-con el ETL de `etl/`. En Mongo quedan dos colecciones: `productos`, con un
-documento por producto, y `productos_eventos`, con su historial de cambios.
+con el ETL de `etl/`. En Mongo quedan **cuatro colecciones**:
 
-`arrancar.ps1` lo corre cuando Mongo tiene menos productos que PostgreSQL, o sea
-cuando quedo algo sin migrar: una maquina recien montada, o un conjunto de datos
-nuevo en `migrations/datos/`. Si ya estan todos no lo vuelve a correr, para no
-pisar lo que haya en Mongo en cada arranque.
+| Coleccion | Que trae |
+|---|---|
+| `productos` | un documento por producto, con sus variantes y caracteristicas |
+| `ofertas` | quien vende cada variante, a como y con cuantas unidades |
+| `categorias` | la paleta: que caracteristicas ofrece cada categoria |
+| `productos_eventos` | el historial del catalogo, como eventos |
+
+`arrancar.ps1` lo corre cuando **alguna** de esas colecciones tiene menos
+documentos que su tabla en PostgreSQL, o sea cuando quedo algo sin migrar: una
+maquina recien montada, o datos nuevos en `migrations/datos/`. Si ya estan todos
+no lo vuelve a correr, para no pisar lo que haya en Mongo en cada arranque.
+
+La comparacion va contra una **lista** de colecciones y no coleccion por
+coleccion escrita a mano: ese chequeo ya fallo dos veces por mirar de menos, y
+la segunda dejo maquinas sin la coleccion de categorias diciendo "ya cargado".
 
 Un cambio que no mueva la cuenta, como corregir el precio de un producto que ya
 existe, no lo detecta. Para eso se pide a mano:
@@ -161,41 +179,37 @@ copiar `.env.example` y llenarlo.
 ### Las cuentas de prueba
 
 Estas si estan en el repositorio, a proposito: las crea el conjunto de datos y
-existen para poder entrar en una maquina recien montada. No son de nadie y no dan
-acceso a nada real.
+existen para poder entrar en una maquina recien montada. No son de nadie y no
+dan acceso a nada real.
 
 | Correo | Rol | Contrasena |
 |---|---|---|
+| `tienda@mesh.com` | vendedor | `Vendedor123` |
+| `ventas.norte@mesh.com` | vendedor | `Vendedor123` |
+| `ventas.sur@mesh.com` | vendedor | `Vendedor123` |
+| `ventas.oriente@mesh.com` | vendedor | `Vendedor123` |
+| `ventas.poniente@mesh.com` | vendedor | `Vendedor123` |
 | `compradora.norte@mesh.com` | comprador | `Comprador123` |
 | `comprador.sur@mesh.com` | comprador | `Comprador123` |
-| `vendedor.prueba@mesh.com` | vendedor | `Vendedor123` (hay que ponersela, ver abajo) |
-| `ventas.norte@mesh.com` | vendedor | `Vendedor123` (hay que ponersela, ver abajo) |
+| `admin@mesh.com` | admin | `Admin123` |
 
-Los dos vendedores del catalogo (`vendedor.prueba@mesh.com` y
-`ventas.norte@mesh.com`) **no pueden entrar**: el conjunto de datos les dejo un
-hash de bcrypt y el backend usa scrypt, en formato `salt:hash`. La comparacion
-los descarta antes de mirar nada, asi que esa contrasena no existe. Para usarlos
-hay que ponerles una:
+**Todas entran.** Antes los vendedores del catalogo no podian: el conjunto de
+datos les dejaba un hash de bcrypt y el backend usa scrypt, en formato
+`salt:hash`, asi que la comparacion los descartaba antes de mirar nada y esa
+contrasena no existia para nadie. Habia que ponersela a mano despues de cada
+`-Reiniciar`.
 
-```sql
-UPDATE usuarios SET contrasena_hash = 'el hash que genere el backend'
-WHERE correo_electronico = 'vendedor.prueba@mesh.com';
-```
+Ahora los hashes los genera el mismo scrypt que usa
+`backend/src/helpers/contrasena.ts`, con un salt fijo para que el generador
+escriba siempre el mismo archivo. Ya no hay nada que hacer despues de reiniciar.
 
-El hash lo genera el mismo scrypt que usa `helpers/contrasena.ts`, en formato
-`salt:hash`. Sin instalar nada:
+Es una de esas cosas que no daban ningun error: el login simplemente decia que
+la contrasena estaba mal, para siempre.
 
-```powershell
-node -e "const {randomBytes,scrypt}=require('crypto');const {promisify}=require('util');const s=promisify(scrypt);(async()=>{const salt=randomBytes(16).toString('hex');console.log(salt+':'+(await s('Vendedor123',salt,64)).toString('hex'));})()"
-```
-
-Se pega el resultado en el `UPDATE` de arriba (para los dos vendedores, si se
-quieren los dos). En esta maquina ya esta puesto, con `Vendedor123`. Hace falta
-para probar el panel del vendedor: sin un vendedor que pueda entrar no hay forma
-de ver ni el inventario ni el formulario de publicar.
-
-Es una de esas cosas que no dan ningun error: el login simplemente dice que la
-contrasena esta mal, para siempre.
+**`tienda@mesh.com` es la cuenta de la pagina.** Tiene oferta de todas las
+variantes del catalogo, y su precio es el que se ensena: lo pidio el profesor,
+el primero siempre es el de la pagina. Los otros cuatro vendedores ofertan un
+subconjunto, asi que hay productos con un solo precio y otros con cinco.
 
 pgAdmin entra directo en http://localhost:5050 y el servidor `Mesh` ya viene
 registrado y conectado. Los dos archivos que lo logran, `servers.json` y

@@ -3,10 +3,12 @@
 Pasa el catalogo de PostgreSQL a MongoDB.
 
 ```
-extraer.sql      la consulta que saca el JSON de PostgreSQL
-cargar.js        arma los documentos y los escribe en Mongo
-reconstruir.js   que decia un producto tal dia
-correr.sh        los dos primeros, uno detras del otro
+extraer.sql             saca el JSON de cada producto
+extraer_ofertas.sql     saca el JSON de cada oferta
+extraer_categorias.sql  saca la paleta de cada categoria
+cargar.js               arma los documentos y los escribe en Mongo
+reconstruir.js          que decia un producto tal dia
+correr.sh               todo lo anterior, uno detras del otro
 ```
 
 No hay nada que instalar. PostgreSQL arma el JSON solo con `jsonb_build_object`,
@@ -21,24 +23,29 @@ docker y la consulta llega partida.
 bash etl/correr.sh
 ```
 
-Imprime cuantos productos y cuantos eventos escribio.
+Imprime cuantos productos, ofertas, categorias y eventos escribio.
 
 ## Que escribe
 
-Tres colecciones.
+Cuatro colecciones.
 
 **`productos`**, un documento por producto. El `_id` es el `id_producto` del
 relacional, no un ObjectId: asi la traza entre los dos sistemas es directa y
 volver a correr el ETL actualiza el mismo documento.
 
-Van embebidos la categoria, las variantes, las imagenes de cada variante y el
-vendedor. Los tres cumplen lo mismo: se leen siempre junto con el producto, son
-pocos campos y cambian poco. Las imagenes cuelgan de la variante, no del
-producto, y por eso van adentro de cada una; el `numero_orden` se gasta al
-ordenarlas, porque en un arreglo la posicion ya es el orden.
+Van embebidas la categoria, las variantes, las imagenes de cada variante y las
+caracteristicas. Las cuatro cumplen lo mismo: se leen siempre junto con el
+producto, son pocos campos y cambian poco. Las imagenes cuelgan de la variante,
+no del producto, y por eso van adentro de cada una; el `numero_orden` se gasta
+al ordenarlas, porque en un arreglo la posicion ya es el orden.
 
-Las resenas no se embeben. Crecen sin techo, se escriben por su cuenta y se leen
-paginadas: se quedan en PostgreSQL.
+**NO va el vendedor, ni el precio, ni el stock.** Dejaron de ser del producto al
+volverse multi-vendedor: son de cada oferta. Lo unico que queda de ellas son dos
+numeros calculados, `precio_tienda` y `total_ofertas`, que son los que la LISTA
+del catalogo necesita en cada tarjeta. Estan tambien dentro de cada variante.
+
+Son una **copia** y hay que recalcularlos cuando una oferta cambie de precio, se
+quede sin unidades o se pause. Si no, la tarjeta dice un precio y la ficha otro.
 
 **Las caracteristicas** van en `caracteristicas_adicionales`, en la raiz del
 producto y en cada variante, como un arreglo de `{ nombre, valor, unidad }`. Tres
@@ -56,11 +63,32 @@ reglas al escribirlas:
   la RAM se mide en GB; aqui se pone en cada entrada para que quien lea el
   documento no tenga que ir a buscarla.
 
-**El stock** va dentro de cada variante, sacado de `inventario`. Esta ahi porque
-el catalogo se lee de Mongo: sin eso, mostrar "agotado" o filtrar por disponible
-obliga a una consulta a PostgreSQL por cada producto de la pagina. **Es una
-copia, nunca la verdad**: quien decide si alcanza es PostgreSQL, dentro de la
-transaccion de la compra.
+**`ofertas`**, un documento por oferta: quien vende esa variante, a como y con
+cuantas unidades. El `_id` es el `id_oferta` del relacional.
+
+```
+{ _id: 12, id_producto: 3, id_producto_variante: 5,
+  nombre_producto: "Laptop Aurora 14", nombre_variante: "16 GB / 512 GB",
+  vendedor: { id_usuario: 2, usuario: "ventas_norte",
+              nombre: "Carlos", apellido: "Ramirez" },
+  es_tienda: false, precio: NumberDecimal("6100.00"), stock: 9,
+  estado: "activa" }
+```
+
+**Es la decision de modelado de esta entrega, y el motivo no es el volumen.** Un
+documento de Mongo aguanta 16 MB y ningun producto va a tener tantos vendedores.
+Es la **tasa de cambio**: el stock cambia en cada venta y Mongo reescribe el
+documento entero en cada actualizacion. Embebidas, comprar una camisa
+reescribiria el documento completo de la camisa -- sus variantes, sus
+caracteristicas, sus imagenes -- y dos vendedores vendiendo a la vez pelearian
+por el mismo documento, que es lo contrario de lo que pide la Entrega 2.
+
+**El vendedor si va embebido dentro de la oferta**, y por lo contrario: cuatro
+campos, se leen siempre con ella ("Vendido por Carlos Ramirez") y casi nunca
+cambian. La misma pregunta contestada al reves porque el caso es distinto.
+
+Las resenas tampoco se embeben. Crecen sin techo, se escriben por su cuenta y se
+leen paginadas.
 
 **`categorias`**, un documento por categoria: que caracteristicas ofrece, con su
 tipo y su unidad. Es la paleta del formulario de publicar y no guarda valores. La
@@ -77,12 +105,18 @@ categoria propone, el producto dispone.
 El primero es la creacion y lleva el estado completo en `datos`. Los que siguen
 son modificaciones y llevan en `cambios` solo lo que cambio.
 
-**El stock no entra en los eventos**, a proposito. Los eventos existen para
-reconstruir el catalogo; el stock cambia con cada venta y llenaria la coleccion
-de ruido, ademas de hacer lenta la reconstruccion, que los fusiona todos. Su
-historial ya vive en `stock_movimiento`, en PostgreSQL, y con mas detalle
-(motivo, usuario, pedido). Consecuencia: reconstruir un producto a una fecha
-pasada no devuelve stock.
+**Ni el stock ni el precio entran en los eventos**, a proposito. Los eventos
+existen para reconstruir el CATALOGO, y ninguno de los dos es del catalogo: son
+de la oferta. Ademas cambian con cada venta y llenarian la coleccion de ruido,
+haciendo lenta la reconstruccion, que los fusiona todos.
+
+Sus historiales ya viven en PostgreSQL y con mas detalle: `stock_movimiento`
+(con motivo, usuario y pedido) y `precio_historial` (con quien lo cambio).
+
+Consecuencia, y hay que decirla en el informe: reconstruir un producto a una
+fecha pasada devuelve su nombre, su descripcion, su categoria y sus variantes,
+pero **no un precio**, porque un producto ya no tiene uno: tiene tantos como
+vendedores.
 
 **Las caracteristicas si entran, pero solo en la creacion.** No tienen historial
 en el relacional, asi que el ETL solo conoce las de hoy: las escribe iguales en
@@ -93,11 +127,17 @@ nunca como un cambio.
 
 En el relacional cada fila de historial es una foto completa de esa entidad en
 esa fecha, que es lo natural en SQL. Aqui hace falta lo contrario, y ademas son
-tres historiales que corren por separado: el del producto, el de cada variante y
-el de la categoria. Subir la comision no escribe nada en el historial del
-producto.
+**dos** historiales que corren por separado: el del producto y el de cada
+variante. Renombrar el producto no escribe nada en el historial de sus
+variantes.
 
-El ETL junta las fechas de las tres tablas, y en cada fecha vuelve a armar el
+(Antes eran tres. El tercero era el de la categoria, que existia solo para
+congelar la comision del dia de la venta; la comision salio del alcance y la
+tabla se fue con ella. En su lugar, cada fila del historial del producto dice en
+que categoria estaba ese dia, que ademas arregla un hueco viejo: antes, mover un
+producto de categoria reescribia su pasado.)
+
+El ETL junta las fechas de las dos tablas, y en cada fecha vuelve a armar el
 estado completo del producto con la fila mas reciente de cada historial. La
 primera fecha es la creacion; cada una despues se compara contra la anterior y
 solo se guarda lo que difiere.
@@ -108,25 +148,19 @@ arreglo de variantes entero. Es a proposito: la reconstruccion junta los eventos
 con `$mergeObjects`, que mezcla superficial, y media categoria borraria la otra
 mitad al mezclarse.
 
-Las fechas de la categoria anteriores al nacimiento del producto se descartan. La
-categoria casi siempre es mas vieja y ya cambio de comision antes de que el
-producto existiera; contarlas deja un primer evento con el nombre en null.
+Los eventos **no llevan el estado** del producto (activo, inactivo). En el
+modelo relacional los historiales no lo guardan: vive solo en la fila viva, y
+esta explicado en `docs/base-de-datos.md`.
 
-Los eventos no llevan el estado del producto (activo, agotado). En el modelo
-relacional los historiales no lo guardan: vive solo en la fila viva, y esta
-explicado en `docs/base-de-datos.md`. Tampoco llevan
-en `productos_variantes`, no en sus tablas de historial. Lo que se reconstruye es
-nombre, descripcion, precio y comision.
+Lo que se reconstruye es **nombre, descripcion, categoria y variantes**. El
+precio no, y no es un olvido: dejo de ser del producto al volverse
+multi-vendedor.
 
 ## Reconstruir
 
 ```bash
 docker exec -i mesh-mongo sh -c 'cat > /tmp/reconstruir.js' < etl/reconstruir.js
-docker exec mesh-mongo sh -c 'mongosh --quiet \
-    -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" \
-    --authenticationDatabase admin "$MONGO_INITDB_DATABASE" \
-    --eval "var producto = 1, corte = \"2026-03-15\"" \
-    --file /tmp/reconstruir.js'
+docker exec mesh-mongo sh -c 'mongosh --quiet     -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD"     --authenticationDatabase admin "$MONGO_INITDB_DATABASE"     --eval "var producto = 19, corte = \"2026-06-01\""     --file /tmp/reconstruir.js'
 ```
 
 La consulta es esta:
@@ -142,27 +176,82 @@ db.productos_eventos.aggregate([
 ```
 
 Reconstruir **no** es la creacion mas la ultima modificacion. Cada modificacion
-guarda solo los campos que ella toco, asi que quedarse con la ultima pierde todas
-las anteriores. Con los datos de prueba se ve al 15 de marzo: el nombre cambio el
-10 de febrero y la comision el 1 de marzo.
+guarda solo los campos que ella toco, asi que quedarse con la ultima pierde
+todas las anteriores.
+
+Con los datos que carga el conjunto se ve en el producto 19, la camisa de lino,
+que tiene cuatro eventos:
 
 ```
-creacion + TODAS en orden         Camisa de lino manga larga | comision 12.00
-creacion + solo la ultima (mal)   Camisa de lino             | comision 12.00
+#1  12 ene  creacion       nombre "Camisa de lino", descripcion "...de corte regular."
+#2   4 mar  modificacion   solo la descripcion: "Lino lavado ... con cuello italiano."
+#3  12 mar  modificacion   solo las variantes: se renombro "Mediana azul" a "M azul"
+#4   4 may  modificacion   solo el nombre: "Camisa de lino manga larga"
+```
+
+Al 1 de junio:
+
+```
+creacion + TODAS en orden      Camisa de lino manga larga | Lino lavado ... cuello italiano
+creacion + solo la ultima      Camisa de lino manga larga | Camisa de lino de corte regular
+                               (mal: se perdio el cambio de descripcion del 4 de marzo)
 ```
 
 `$mergeObjects` es lo que aplica todas en orden: toma el valor del ultimo evento
 que traiga el campo y deja intactos los que nadie volvio a tocar.
 
-## El indice
+### Y el otro producto, el que cambio de categoria
 
-```js
-db.productos_eventos.createIndex({ id_producto: 1, fecha: 1 });
+El balon de futbol nacio mal clasificado, en Fitness, y se movio a Futbol en
+abril. Es el caso que justifica `id_categoria` en `productos_historial`:
+
+```
+reconstruido al 1 de mayo    categoria: Fitness
+reconstruido al 20 de agosto categoria: Futbol
 ```
 
-Lo crea `cargar.js`. Sirve para las dos primeras etapas de la reconstruccion a la
-vez: la base entra directo al producto y lee su tramo de eventos ya ordenado, sin
-recorrer la coleccion y sin ordenar en memoria.
+Sin esa columna las dos dirian Futbol, porque el historial no sabria en que
+categoria estaba el producto ese dia.
+
+### El precio y la disponibilidad se preguntan del otro lado
+
+```sql
+-- a como estaba esta oferta el 3 de marzo
+SELECT precio FROM precio_historial
+WHERE id_oferta = 42 AND fecha_creacion <= '2026-03-03'
+ORDER BY fecha_creacion DESC LIMIT 1;
+
+-- cuantas unidades habia ese dia
+SELECT stock_resultante FROM stock_movimiento
+WHERE id_oferta = 42 AND fecha_movimiento <= '2026-03-03'
+ORDER BY fecha_movimiento DESC LIMIT 1;
+```
+
+## Los indices
+
+Los crea `mongo/001_productos.js`, no el ETL: son parte de la forma de la base y
+no de la carga, igual que un `CREATE INDEX` vive en la migracion y no en el
+`INSERT`.
+
+```js
+db.productos.createIndex({ 'categoria.nombre': 1, estado: 1 })
+db.ofertas.createIndex({ id_producto_variante: 1, precio: 1 })
+db.ofertas.createIndex({ id_producto: 1, estado: 1 })
+db.ofertas.createIndex({ 'vendedor.id_usuario': 1 })
+db.productos_eventos.createIndex({ id_producto: 1, fecha: 1 })
+db.categorias.createIndex({ nombre: 1 })
+```
+
+Cada uno responde a una consulta concreta, no a la idea general de que conviene
+tener indices:
+
+- **catalogo** el estado se filtra siempre y la categoria a veces, asi que el
+  campo que nunca falta va primero
+- **ofertas por variante y precio** es la lista de la ficha del producto, y sale
+  ordenada sin ordenar nada: el indice ya viene en ese orden
+- **eventos** sirve para las dos primeras etapas de la reconstruccion a la vez:
+  la base entra directo al producto y lee su tramo ya ordenado, sin recorrer la
+  coleccion y sin ordenar en memoria
 
 ## El ETL solo manda sobre su tramo
 
