@@ -137,13 +137,18 @@ export class PedidosCompradorService {
       throw new ErrorNoEncontrado('No existe una variante con ese id en este producto');
     }
 
+    // PARCHE MINIMO: agregar_linea (007_flujo_pedido.sql) ya cambio de
+    // firma con el giro multi-vendedor -- ahora recibe id_oferta (no
+    // precio_unitario ni porcentaje_comision, que ya ni siquiera existen:
+    // el precio lo busca ella misma en precio_historial y la comision salio
+    // del alcance). Este servicio entero necesita reescribirse contra
+    // ofertas antes de poder comprar de verdad; por ahora solo se ajusta
+    // para que compile, sin id_oferta todavia.
     const linea = {
       id_producto: idProducto,
       id_producto_variante: idProductoVariante,
       nombre_producto: producto.nombre,
       nombre_variante: variante.nombre_variante,
-      precio_unitario: variante.precio.toString(),
-      porcentaje_comision: producto.categoria.porcentaje_comision.toString(),
       cantidad,
     };
 

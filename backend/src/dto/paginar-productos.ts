@@ -1,4 +1,4 @@
-import { ProductoConStockTotal } from '../models/producto';
+import { Producto } from '../models/producto';
 
 /**
  * Query params esperados en GET /productos/paginacion.
@@ -13,19 +13,22 @@ export interface PaginarProductosQuery {
   nombre?: string;
   estado?: string;
   id_categoria?: string;
-  id_vendedor?: string;
+  /** Filtra por precio_tienda. */
   precio_min?: string;
   precio_max?: string;
   estado_variante?: string;
-  /** Filtra por stock_total: la suma de variantes[].stock del producto. */
+  /** Filtra por stock_total: existencias activas entre todos los vendedores. */
   stock_min?: string;
   stock_max?: string;
+  /** Filtra por stock_tienda: existencias activas solo de la tienda. */
+  stock_tienda_min?: string;
+  stock_tienda_max?: string;
   [claveAtributo: string]: string | undefined;
 }
 
 /** Respuesta de GET /productos/paginacion. */
 export interface ProductosPaginados {
-  productos: ProductoConStockTotal[];
+  productos: Producto[];
   pagina: number;
   limite: number;
   total_productos: number;

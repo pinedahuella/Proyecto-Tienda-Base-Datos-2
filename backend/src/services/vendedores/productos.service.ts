@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Collection, Decimal128 } from 'mongodb';
+import { Collection } from 'mongodb';
 import { mongoDb } from '../../database/mongo';
 import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
@@ -40,17 +40,22 @@ import {
 } from '../../models/producto-evento';
 import { UsuarioService } from '../../services/usuario.service';
 import { InventarioVendedorService } from '../../services/vendedores/inventario.service';
+import { CORREO_TIENDA } from '../../helpers/constantes';
 
 const ESTADO_PRODUCTO_NUEVO = 'borrador';
 const ESTADO_VARIANTE_NUEVA = 'activa';
 const REGEX_ID = /^\d+$/;
 
 /**
- * Sin variantes[].stock: estas rutas son las "rapidas" del panel del
- * vendedor (listar y ver el propio, tal como esta hoy). El stock/inventario
- * va a tener sus propios GET aparte, todavia no hechos.
+ * PARCHE MINIMO: este archivo entero sigue con la forma vieja de
+ * "productos propios de un vendedor" (crea con precio y stock por
+ * variante, historial, etc.) solo para que el proyecto compile despues del
+ * cambio de modelo. Lo que antes era "es tuyo" ahora es "sos la tienda"
+ * (CORREO_TIENDA, ver cambios-multivendedor.md seccion 9), y ya no se
+ * guardan precio/stock en la variante (eso es de la oferta). Este servicio
+ * necesita un rediseno de verdad cuando se ataque la creacion de ofertas --
+ * no es la solucion final.
  */
-const PROYECCION_SIN_STOCK = { 'variantes.stock': 0 };
 
 /**
  * Servicio de POST /vendedor/productos.
@@ -112,7 +117,7 @@ export class ProductosVendedorService {
         datos.caracteristicas_personalizadas,
       );
 
-      const vendedor = await this.usuarioService.obtenerPorId(idUsuario);
+      await this.exigirTienda(idUsuario);
 
       const idProducto = await this.siguienteIdProducto(coleccionProductos);
       const fechaCreacion = new Date();
@@ -130,18 +135,18 @@ export class ProductosVendedorService {
         descripcion,
         fecha_creacion: fechaCreacion,
         estado: ESTADO_PRODUCTO_NUEVO,
-        vendedor: {
-          id_usuario: Number(vendedor.id_usuario),
-          usuario: vendedor.usuario,
-          nombre: vendedor.nombre,
-          apellido: vendedor.apellido ?? '',
-        },
         categoria: {
           id_categoria: categoria._id,
           nombre: categoria.nombre,
           categoria_padre: categoria.categoria_padre as string,
-          porcentaje_comision: categoria.porcentaje_comision,
         },
+        // Los cuatro calculados nacen en 0/null: todavia no existe ninguna
+        // oferta sobre este producto (eso es de otro servicio, sobre
+        // `oferta` en PostgreSQL).
+        precio_tienda: null,
+        stock_tienda: 0,
+        stock_total: 0,
+        total_ofertas: 0,
         variantes,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
@@ -204,6 +209,19 @@ export class ProductosVendedorService {
             `del producto ${idProducto}: ${error instanceof Error ? error.message : error}`,
         );
       }
+    }
+  }
+
+  /**
+   * Solo la cuenta de la tienda crea/edita/consulta el catalogo por estas
+   * rutas (ver la nota de CORREO_TIENDA arriba). Mismo 404 generico que el
+   * resto del proyecto usa para "no es tuyo": no hay que confirmarle a un
+   * vendedor cualquiera que la ruta existe.
+   */
+  private async exigirTienda(idUsuario: string): Promise<void> {
+    const usuario = await this.usuarioService.obtenerPorId(idUsuario);
+    if (usuario.correo_electronico !== CORREO_TIENDA) {
+      throw new ErrorNoEncontrado('No existe un producto con ese id');
     }
   }
 
@@ -277,7 +295,10 @@ export class ProductosVendedorService {
       const nombreVariante = validarNombreVariante(
         peticionVariante.nombre_variante,
       );
-      const precio = validarPrecioObligatorio(peticionVariante.precio);
+      // Se sigue validando el formato del precio que manda el cliente
+      // (compatibilidad con el body de hoy), pero ya no se guarda en la
+      // variante: el precio es de la oferta, no del catalogo.
+      validarPrecioObligatorio(peticionVariante.precio);
       const descripcionVariante = validarDescripcionVariante(
         peticionVariante.descripcion,
       );
@@ -292,7 +313,6 @@ export class ProductosVendedorService {
       );
 
       let idProductoVariante: number;
-      let stockExistente: number | undefined;
 
       if (variantesExistentes != null && peticionVariante.id_producto_variante != null) {
         const existente = variantesExistentes.find(
@@ -305,7 +325,6 @@ export class ProductosVendedorService {
           );
         }
         idProductoVariante = existente.id_producto_variante;
-        stockExistente = existente.stock;
       } else {
         idProductoVariante = siguienteId++;
       }
@@ -313,12 +332,16 @@ export class ProductosVendedorService {
       const variante: ProductoVariante = {
         id_producto_variante: idProductoVariante,
         nombre_variante: nombreVariante,
-        precio: Decimal128.fromString(precio),
         descripcion: descripcionVariante,
         fecha_creacion: fechaCreacion,
         estado: ESTADO_VARIANTE_NUEVA,
         imagenes,
-        ...(stockExistente != null && { stock: stockExistente }),
+        // Nacen en 0/null, igual que el producto: todavia no existe ninguna
+        // oferta sobre esta variante.
+        precio_tienda: null,
+        stock_tienda: 0,
+        stock_total: 0,
+        total_ofertas: 0,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
         }),
@@ -446,11 +469,10 @@ export class ProductosVendedorService {
     const coleccion = mongoDb.collection<Producto>('productos');
 
     try {
+      await this.exigirTienda(idUsuarioToken);
+
       const productoActual = await coleccion.findOne({ _id: idProducto });
-      if (
-        productoActual == null ||
-        Number(productoActual.vendedor.id_usuario) !== Number(idUsuarioToken)
-      ) {
+      if (productoActual == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
       }
 
@@ -530,7 +552,6 @@ export class ProductosVendedorService {
           id_categoria: categoriaCompleta._id,
           nombre: categoriaCompleta.nombre,
           categoria_padre: categoriaCompleta.categoria_padre as string,
-          porcentaje_comision: categoriaCompleta.porcentaje_comision,
         };
         conjuntoSet.categoria = categoriaEmbebida;
         cambiosEvento.categoria = categoriaEmbebida;
@@ -628,15 +649,19 @@ export class ProductosVendedorService {
       .insertOne(evento);
   }
 
-  /** Todos los productos del vendedor logueado, en cualquier estado (incluyendo borrador e inactivo). */
+  /**
+   * Todo el catalogo, en cualquier estado (incluyendo borrador e inactivo).
+   * Antes era "los productos del vendedor logueado"; con el catalogo
+   * compartido y solo la tienda creando/editando, "propio" paso a ser "todo
+   * el catalogo, si sos la tienda".
+   */
   async listarPropios(idUsuario: string): Promise<Producto[]> {
+    await this.exigirTienda(idUsuario);
+
     try {
       return await mongoDb
         .collection<Producto>('productos')
-        .find(
-          { 'vendedor.id_usuario': Number(idUsuario) },
-          { projection: PROYECCION_SIN_STOCK },
-        )
+        .find({})
         .sort({ fecha_creacion: -1 })
         .toArray();
     } catch (error) {
@@ -644,7 +669,7 @@ export class ProductosVendedorService {
     }
   }
 
-  /** Un producto propio, tal como esta hoy. Solo si es del vendedor logueado. */
+  /** Un producto del catalogo, tal como esta hoy. Solo la tienda puede pedirlo por esta ruta. */
   async obtenerPropio(
     idProductoParametro: string,
     idUsuario: string,
@@ -654,15 +679,14 @@ export class ProductosVendedorService {
     }
     const idProducto = Number(idProductoParametro);
 
+    await this.exigirTienda(idUsuario);
+
     try {
       const producto = await mongoDb
         .collection<Producto>('productos')
-        .findOne({ _id: idProducto }, { projection: PROYECCION_SIN_STOCK });
+        .findOne({ _id: idProducto });
 
-      if (
-        producto == null ||
-        Number(producto.vendedor.id_usuario) !== Number(idUsuario)
-      ) {
+      if (producto == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
       }
 
@@ -701,15 +725,14 @@ export class ProductosVendedorService {
     validarFechaHistorial(fecha);
     const idProducto = Number(idProductoParametro);
 
+    await this.exigirTienda(idUsuario);
+
     try {
       const productoActual = await mongoDb
         .collection<Producto>('productos')
         .findOne({ _id: idProducto });
 
-      if (
-        productoActual == null ||
-        Number(productoActual.vendedor.id_usuario) !== Number(idUsuario)
-      ) {
+      if (productoActual == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
       }
 

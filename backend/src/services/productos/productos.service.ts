@@ -1,8 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Decimal128, Document } from 'mongodb';
 import { mongoDb } from '../../database/mongo';
+import { pool } from '../../database/postgres';
 import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
+import { manejarErrorConexion } from '../../helpers/manejar-error-db';
+import { CORREO_TIENDA } from '../../helpers/constantes';
 import {
   esNombreCaracteristicaValido,
   escaparRegex,
@@ -21,8 +24,23 @@ import {
   PaginarProductosQuery,
   ProductosPaginados,
 } from '../../dto/paginar-productos';
-import { Producto, ProductoConStockTotal } from '../../models/producto';
+import { Producto, ProductoConOfertas } from '../../models/producto';
+import { OfertaVendedor } from '../../models/oferta';
 import { ESTADOS_PRODUCTO_OCULTOS } from '../../models/estado-producto';
+
+/** Fila cruda que devuelve la consulta de ofertas, antes de agrupar el vendedor. */
+interface FilaOferta {
+  id_oferta: string;
+  id_producto_variante_mongo: string;
+  id_usuario: string;
+  usuario: string;
+  nombre: string;
+  apellido: string | null;
+  es_tienda: boolean;
+  precio: string;
+  stock: number;
+  fecha_actualizacion: Date;
+}
 
 /**
  * Query params fijos de GET /productos y GET /productos/paginacion.
@@ -41,16 +59,14 @@ const CLAVES_RESERVADAS = new Set([
   'nombre',
   'estado',
   'id_categoria',
-  'id_vendedor',
   'precio_min',
   'precio_max',
   'estado_variante',
   'stock_min',
   'stock_max',
+  'stock_tienda_min',
+  'stock_tienda_max',
 ]);
-
-/** El campo agregado (no guardado en Mongo) con la suma de variantes[].stock. */
-const CAMPO_STOCK_TOTAL = 'stock_total';
 
 /** Los filtros que las dos rutas de listado tienen en comun. */
 type FiltrosProductosQuery = Record<string, string | undefined>;
@@ -65,9 +81,13 @@ export class ProductosService {
    * scroll infinito: cada tanda trae el cursor para pedir la siguiente, no
    * un numero de pagina.
    *
-   * Admite filtros fijos (nombre, estado, categoria, vendedor, precio,
-   * estado de variante, stock_total) y filtros dinamicos sobre
-   * caracteristicas_adicionales, tanto del producto como de sus variantes.
+   * Admite filtros fijos (nombre, estado, categoria, precio de la tienda,
+   * estado de variante, stock total y stock de la tienda) y filtros
+   * dinamicos sobre caracteristicas_adicionales, tanto del producto como de
+   * sus variantes. precio_tienda, stock_tienda, stock_total y total_ofertas
+   * ya vienen calculados en el documento (los mantiene al dia el ETL y el
+   * backend cuando cambia una oferta), asi que filtrar por ellos es un
+   * $match directo, sin agregacion previa.
    */
   async listar(query: ListarProductosQuery): Promise<ProductosPagina> {
     const limite = validarLimite(query.limite);
@@ -78,21 +98,12 @@ export class ProductosService {
       filtro._id = { $gt: despuesDe };
     }
 
-    const matchStock = this.construirMatchStockTotal(query);
-
     try {
-      const pipeline: Document[] = [
-        { $match: filtro },
-        { $addFields: { [CAMPO_STOCK_TOTAL]: { $sum: '$variantes.stock' } } },
-      ];
-      if (matchStock != null) {
-        pipeline.push({ $match: matchStock });
-      }
-      pipeline.push({ $sort: { _id: 1 } }, { $limit: limite });
-
       const productos = await mongoDb
         .collection<Producto>('productos')
-        .aggregate<ProductoConStockTotal>(pipeline)
+        .find(filtro)
+        .sort({ _id: 1 })
+        .limit(limite)
         .toArray();
 
       const siguienteCursor =
@@ -110,10 +121,9 @@ export class ProductosService {
    * Lo mismo que listar(), mismos filtros y mismo comportamiento, pero
    * paginado por numero de pagina en vez de por cursor: admite saltar
    * directo a cualquier pagina, a cambio de tener que contar cuantos
-   * productos hay en total para calcular total_paginas. El conteo tiene que
-   * pasar por el mismo $addFields/$match de stock_total que la tanda (por
-   * eso $facet en vez de countDocuments): si no, el total no cuadraria con
-   * lo que en verdad cumple el filtro de stock.
+   * productos hay en total para calcular total_paginas. Se usa $facet para
+   * que la tanda y el conteo salgan de la misma foto del filtro, en vez de
+   * dos consultas separadas que podrian ver estados distintos.
    */
   async listarPaginado(
     query: PaginarProductosQuery,
@@ -122,27 +132,22 @@ export class ProductosService {
     const pagina = validarPagina(query.pagina);
     const filtro = this.construirFiltro(query);
     const saltar = (pagina - 1) * limite;
-    const matchStock = this.construirMatchStockTotal(query);
 
     try {
       const pipeline: Document[] = [
         { $match: filtro },
-        { $addFields: { [CAMPO_STOCK_TOTAL]: { $sum: '$variantes.stock' } } },
-      ];
-      if (matchStock != null) {
-        pipeline.push({ $match: matchStock });
-      }
-      pipeline.push({
-        $facet: {
-          productos: [{ $sort: { _id: 1 } }, { $skip: saltar }, { $limit: limite }],
-          total: [{ $count: 'total' }],
+        {
+          $facet: {
+            productos: [{ $sort: { _id: 1 } }, { $skip: saltar }, { $limit: limite }],
+            total: [{ $count: 'total' }],
+          },
         },
-      });
+      ];
 
       const [resultado] = await mongoDb
         .collection<Producto>('productos')
         .aggregate<{
-          productos: ProductoConStockTotal[];
+          productos: Producto[];
           total: { total: number }[];
         }>(pipeline)
         .toArray();
@@ -168,65 +173,88 @@ export class ProductosService {
    * `inactivo` o `borrador` nunca aparece aqui: pedirlo directo por id da el
    * mismo 404 que un id que no existe, para no confirmar por otra via que
    * el producto existe pero esta oculto.
+   *
+   * Trae el documento de Mongo (los cuatro numeros calculados de la
+   * tienda/el total) y le agrega sus ofertas reales -- quien la vende, a
+   * como y con cuantas unidades -- pedidas a PostgreSQL en el momento, con
+   * una sola consulta indexada (ver docs/base-de-datos.md, "El catalogo se
+   * mudo a MongoDB"). No se copian a Mongo: precio, stock y estado cambian
+   * en cada venta, y una copia ahi se desfasaria.
    */
   async obtenerPublico(
     idProductoParametro: string,
-  ): Promise<ProductoConStockTotal> {
+  ): Promise<ProductoConOfertas> {
     if (!REGEX_ID.test(idProductoParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }
     const idProducto = Number(idProductoParametro);
 
+    let producto: Producto;
     try {
-      const producto = await mongoDb.collection<Producto>('productos').findOne({
+      const encontrado = await mongoDb.collection<Producto>('productos').findOne({
         _id: idProducto,
         estado: { $nin: ESTADOS_PRODUCTO_OCULTOS },
       });
 
-      if (producto == null) {
+      if (encontrado == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
       }
-
-      return { ...producto, stock_total: this.sumarStockVariantes(producto) };
+      producto = encontrado;
     } catch (error) {
       if (error instanceof ErrorNoEncontrado) {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);
     }
-  }
 
-  /** La suma de variantes[].stock; una variante sin stock cuenta como 0. */
-  private sumarStockVariantes(producto: Producto): number {
-    return producto.variantes.reduce(
-      (total, variante) => total + (variante.stock ?? 0),
-      0,
-    );
+    const ofertas = await this.obtenerOfertasReales(idProducto);
+
+    return { ...producto, ofertas };
   }
 
   /**
-   * El $match de stock_min/stock_max sobre el stock_total ya agregado, o
-   * null si no vinieron. Va DESPUES del $addFields en el pipeline: Mongo no
-   * puede filtrar por un campo que todavia no existe.
+   * Las ofertas de verdad de un producto: quien lo vende, a como y con
+   * cuantas unidades, con el vendedor ya resuelto (JOIN a usuarios). Solo
+   * las activas -- una pausada o retirada no se puede comprar, y ensenarla
+   * en la ficha publica confundiria a quien compra. Ordenadas por variante
+   * y despues por precio (la mas barata primero): el indice
+   * idx_oferta_catalogo_precio de 005_ofertas.sql ya viene en ese orden.
    */
-  private construirMatchStockTotal(
-    query: FiltrosProductosQuery,
-  ): Record<string, unknown> | null {
-    const stockMin = validarEnteroPositivo(query.stock_min, 'stock_min');
-    const stockMax = validarEnteroPositivo(query.stock_max, 'stock_max');
+  private async obtenerOfertasReales(
+    idProducto: number,
+  ): Promise<OfertaVendedor[]> {
+    try {
+      const resultado = await pool.query<FilaOferta>(
+        `SELECT o.id_oferta, o.id_producto_variante_mongo, o.id_usuario,
+                u.usuario, u.nombre, u.apellido,
+                (u.correo_electronico = $2) AS es_tienda,
+                o.precio, o.stock, o.fecha_actualizacion
+         FROM oferta o
+         JOIN usuarios u ON u.id_usuario = o.id_usuario
+         JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+         WHERE o.id_producto_mongo = $1
+           AND eo.estado_oferta_nombre = 'activa'
+         ORDER BY o.id_producto_variante_mongo, o.precio`,
+        [idProducto, CORREO_TIENDA],
+      );
 
-    if (stockMin == null && stockMax == null) {
-      return null;
+      return resultado.rows.map((fila) => ({
+        id_oferta: fila.id_oferta,
+        id_producto_variante_mongo: fila.id_producto_variante_mongo,
+        vendedor: {
+          id_usuario: fila.id_usuario,
+          usuario: fila.usuario,
+          nombre: fila.nombre,
+          apellido: fila.apellido,
+        },
+        es_tienda: fila.es_tienda,
+        precio: fila.precio,
+        stock: fila.stock,
+        fecha_actualizacion: fila.fecha_actualizacion,
+      }));
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
     }
-
-    const rango: Record<string, number> = {};
-    if (stockMin != null) {
-      rango.$gte = stockMin;
-    }
-    if (stockMax != null) {
-      rango.$lte = stockMax;
-    }
-    return { [CAMPO_STOCK_TOTAL]: rango };
   }
 
   /**
@@ -241,9 +269,18 @@ export class ProductosService {
       query.id_categoria,
       'id_categoria',
     );
-    const idVendedor = validarEnteroPositivo(query.id_vendedor, 'id_vendedor');
     const precioMin = validarPrecio(query.precio_min, 'precio_min');
     const precioMax = validarPrecio(query.precio_max, 'precio_max');
+    const stockMin = validarEnteroPositivo(query.stock_min, 'stock_min');
+    const stockMax = validarEnteroPositivo(query.stock_max, 'stock_max');
+    const stockTiendaMin = validarEnteroPositivo(
+      query.stock_tienda_min,
+      'stock_tienda_min',
+    );
+    const stockTiendaMax = validarEnteroPositivo(
+      query.stock_tienda_max,
+      'stock_tienda_max',
+    );
 
     const filtro: Record<string, unknown> = {};
 
@@ -262,17 +299,10 @@ export class ProductosService {
     if (idCategoria != null) {
       filtro['categoria.id_categoria'] = idCategoria;
     }
-    if (idVendedor != null) {
-      filtro['vendedor.id_usuario'] = idVendedor;
-    }
 
-    // estado_variante y el rango de precio describen la MISMA variante, asi
-    // que van juntos en un $elemMatch: sin esto, "activa" y "precio >= X"
-    // podrian cumplirse en dos variantes distintas del mismo producto.
-    const elemMatchVariante: Record<string, unknown> = {};
-    if (query.estado_variante) {
-      elemMatchVariante.estado = query.estado_variante;
-    }
+    // El precio de la tarjeta es el de la tienda, ya calculado en la raiz
+    // del documento: no hace falta (ni se puede, desde el giro
+    // multi-vendedor) filtrar por el precio de una variante suelta.
     if (precioMin != null || precioMax != null) {
       const rango: Record<string, Decimal128> = {};
       if (precioMin != null) {
@@ -281,10 +311,36 @@ export class ProductosService {
       if (precioMax != null) {
         rango.$lte = Decimal128.fromString(precioMax);
       }
-      elemMatchVariante.precio = rango;
+      filtro.precio_tienda = rango;
     }
-    if (Object.keys(elemMatchVariante).length > 0) {
-      filtro.variantes = { $elemMatch: elemMatchVariante };
+
+    if (query.estado_variante) {
+      filtro.variantes = { $elemMatch: { estado: query.estado_variante } };
+    }
+
+    // stock_total (entre todos los vendedores activos) y stock_tienda (solo
+    // la tienda) ya vienen calculados en la raiz: son dos preguntas
+    // distintas ("hay quien lo venda" contra "lo tiene la tienda"), asi que
+    // van en dos campos y no se combinan.
+    if (stockMin != null || stockMax != null) {
+      const rango: Record<string, number> = {};
+      if (stockMin != null) {
+        rango.$gte = stockMin;
+      }
+      if (stockMax != null) {
+        rango.$lte = stockMax;
+      }
+      filtro.stock_total = rango;
+    }
+    if (stockTiendaMin != null || stockTiendaMax != null) {
+      const rango: Record<string, number> = {};
+      if (stockTiendaMin != null) {
+        rango.$gte = stockTiendaMin;
+      }
+      if (stockTiendaMax != null) {
+        rango.$lte = stockTiendaMax;
+      }
+      filtro.stock_tienda = rango;
     }
 
     // Filtros dinamicos: cualquier query param que no sea uno de los fijos

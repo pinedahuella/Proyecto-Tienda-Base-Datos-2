@@ -2,9 +2,13 @@
 -- Las caracteristicas de producto y de variante: su definicion, cuales
 -- ofrece cada categoria, y que valor les pone cada producto.
 --
--- Son las siete tablas que se agregaron al ER. Resuelven lo que el 003 dejo
--- abierto: hasta hoy toda caracteristica variable caia dentro de
+-- Son las siete tablas que se agregaron al ER. Resuelven el problema del que
+-- trata la Entrega 1: sin ellas toda caracteristica variable cae dentro de
 -- productos.descripcion, que es texto libre y no se puede filtrar.
+--
+-- Las caracteristicas son del CATALOGO, no del vendedor: los cuatro que
+-- venden la misma laptop describen la misma laptop. Por eso cuelgan de
+-- productos y de productos_variantes, y no de oferta.
 --
 -- Solo esquema. Los valores de tipo_dato se quedan aqui, como los estados
 -- del 003, porque sin ellos no se puede definir ni una caracteristica. Las
@@ -21,7 +25,11 @@
 -- ============================================================
 -- Una caracteristica se define una vez (nombre, de que tipo es, en que
 -- unidad se mide) y se usa muchas. La categoria dice cuales ofrece y el
--- producto dice cuales usa y con que valor. La categoria no sabe que
+-- producto dice cuales usa y con que valor.
+--
+-- Quien ofrece caracteristicas es siempre una categoria HOJA. Las raices son
+-- rotulos para agrupar y no llevan ninguna: por eso tampoco llevan productos.
+-- Lo garantiza el trigger del 003. La categoria no sabe que
 -- caracteristicas tiene un producto concreto, porque de las que ofrece no
 -- se llenan todas.
 --
@@ -241,17 +249,6 @@ INSERT INTO tipo_dato (tipo_dato) VALUES
     ('decimal'),
     ('booleano'),
     ('lista');
-
-
--- ============================================================
--- Lo que cambia del 003
--- ============================================================
--- En el 003, productos.descripcion lleva escrito que ahi cae toda
--- caracteristica variable, porque cuando se escribio no habia otro sitio
--- donde ponerla. Ya no es cierto. Se corrige aqui y no alla porque una
--- migracion ya corrida no se edita.
-
-COMMENT ON COLUMN productos.descripcion IS 'Prosa del producto. Las caracteristicas con nombre y valor van en producto_caracteristica';
 
 
 -- ============================================================
