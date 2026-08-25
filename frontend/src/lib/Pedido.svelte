@@ -183,9 +183,10 @@
 		if (!pedido) return;
 		trabajando = true;
 		error = '';
+		// Sobre la MISMA oferta, no sobre la variante: sumar una unidad tiene
+		// que comprarsela al mismo vendedor y al precio que ya se congelo.
 		const r = await agregarLinea(pedido.pedido.id_pedido, {
-			id_producto: Number(linea.id_producto_mongo),
-			id_producto_variante: Number(linea.id_producto_variante_mongo),
+			id_oferta: Number(linea.id_oferta),
 			cantidad: 1
 		});
 		trabajando = false;

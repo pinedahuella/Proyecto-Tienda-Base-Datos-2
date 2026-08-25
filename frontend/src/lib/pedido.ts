@@ -39,9 +39,16 @@ export interface LineaPedido {
 	id_producto_variante_mongo: string;
 	nombre_producto: string;
 	nombre_variante: string;
+	/** Como se llamaba el vendedor ese dia. Se copia porque el nombre cambia. */
+	nombre_vendedor: string;
+	/**
+	 * La oferta a la que se le compro. Con ella se suma otra unidad al mismo
+	 * vendedor; sumarla por variante compraria a cualquiera.
+	 */
+	id_oferta: string;
+	id_usuario_vendedor: string;
 	/** Decimal de PostgreSQL: viaja como texto para no perder centavos. */
 	precio_unitario: string;
-	porcentaje_comision: string;
 	cantidad: number;
 }
 
@@ -79,8 +86,9 @@ export interface PedidoCompleto {
 /** Lo que devuelve POST /comprador/pedidos/:id/detalles. */
 export interface LineaAgregada {
 	id_pedido: number;
-	id_producto: number;
-	id_producto_variante: number;
+	id_oferta: number;
+	id_usuario_vendedor: number;
+	id_pedido_producto: number;
 	/** La cantidad ACUMULADA de esa variante en el pedido, no la de esta llamada. */
 	cantidad: number;
 	stock_disponible: number;
@@ -113,9 +121,18 @@ export function traerPedido(idPedido: string) {
 	return pedir<PedidoCompleto>(`/comprador/pedidos/${idPedido}`);
 }
 
+/**
+ * Agrega una OFERTA al pedido, no un producto.
+ *
+ * Desde el giro multi-vendedor la misma variante la puede vender media
+ * docena de personas, cada una a su precio: hay que decir a cual se le
+ * compra. El backend resuelve solo el producto, la variante, el nombre y el
+ * precio a partir de la oferta, asi que desde aqui no se manda ninguno --
+ * y por eso nadie puede mandar un precio falso.
+ */
 export function agregarLinea(
 	idPedido: string,
-	linea: { id_producto: number; id_producto_variante: number; cantidad: number }
+	linea: { id_oferta: number; cantidad: number }
 ) {
 	return pedir<LineaAgregada>(
 		`/comprador/pedidos/${idPedido}/detalles`,
