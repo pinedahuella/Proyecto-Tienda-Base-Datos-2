@@ -2,35 +2,49 @@ import { browser } from '$app/environment';
 import { pedir, conJson, type RespuestaApi } from './api';
 
 /**
- * El pedido abierto, y lo minimo para hablar con /comprador/pedidos.
+ * El pedido abierto, y todo lo que hace falta para hablar con
+ * /comprador/pedidos.
  *
- * Las cuatro rutas que expuso el backend (ninguna pide rol, solo sesion:
- * comprar no es privilegio de un rol, cualquiera con cuenta compra):
- *   POST   /comprador/pedidos                        abre un pedido
- *   GET    /comprador/pedidos/:id                    el pedido, su direccion y sus lineas
- *   POST   /comprador/pedidos/:id/detalles           agrega (o suma) una linea
+ * Las ocho rutas (ninguna pide un rol, solo sesion: comprar no es privilegio
+ * de nadie, cualquiera con cuenta compra -- tambien un vendedor o un admin):
+ *
+ *   POST   /comprador/pedidos                         abre un pedido
+ *   GET    /comprador/pedidos                         los mios, resumidos
+ *   GET    /comprador/pedidos/metodos-pago            el catalogo de formas de pago
+ *   GET    /comprador/pedidos/:id                     el pedido, su direccion y sus lineas
+ *   PATCH  /comprador/pedidos/:id                     cambia la direccion de entrega
+ *   POST   /comprador/pedidos/:id/detalles            agrega (o suma) una linea
  *   DELETE /comprador/pedidos/:id/detalles/:idDetalle quita una linea
+ *   POST   /comprador/pedidos/:id/comprar             cierra la compra
+ *   POST   /comprador/pedidos/:id/cancelar            cancela (y devuelve stock si ya se compro)
  *
- * OJO, dos cosas que cambian como hay que escribir el frontend:
- *
- * 1. NO hay ruta para listar los pedidos de uno, solo GET por id. Asi que el
- *    id del pedido abierto hay que recordarlo aqui; si se pierde, el pedido
- *    sigue existiendo en la base pero desde el navegador ya no se llega a el.
- *    Por eso vive en localStorage y no en memoria.
- *
- * 2. NO hay ruta para cerrar la compra. La funcion comprar_pedido() existe en
- *    PostgreSQL, pero el backend todavia no la expone: el pedido se queda en
- *    su estado inicial. Agregar lineas tampoco descuenta stock -- solo lo lee
- *    para avisar. Nada de esto se puede tapar desde aqui, asi que la pantalla
- *    lo dice tal cual en vez de ensenar un boton de "Comprar" que no existe.
+ * Se compra una OFERTA, nunca un producto ni una variante: la misma
+ * presentacion la venden varias personas a precios distintos. El precio se
+ * congela al agregar la linea (`agregar_linea` guarda el id de la fila
+ * vigente de `precio_historial`, que no se actualiza nunca), asi que si el
+ * vendedor lo sube despues, quien ya la tenia en el carrito paga el viejo.
  */
 
 /**
  * El id del pedido abierto vive en localStorage, no en una cookie ni en la
  * URL: no es un secreto (el backend comprueba que el pedido sea tuyo y da 404
  * si no lo es) y tiene que sobrevivir a recargar la pagina.
+ *
+ * Ya existe `GET /comprador/pedidos`, asi que perderlo dejo de ser fatal: se
+ * puede volver a encontrar el pendiente en esa lista. Se sigue guardando
+ * porque evita esa consulta en cada carga.
  */
 const LLAVE = 'mesh.pedido';
+
+/**
+ * Que lineas del carrito estan marcadas para comprar.
+ *
+ * Vive SOLO en el navegador, y es a proposito: el backend no tiene ninguna
+ * idea de "seleccionado" -- un pedido se compra entero. Marcar y desmarcar es
+ * una ayuda para decidir, y al comprar hay que quitar de verdad lo que no se
+ * quiera (ver Carrito.svelte, que lo avisa antes de hacerlo).
+ */
+const LLAVE_MARCADAS = 'mesh.pedido.marcadas';
 
 export interface LineaPedido {
 	id_pedido_producto: string;
@@ -50,6 +64,8 @@ export interface LineaPedido {
 	/** Decimal de PostgreSQL: viaja como texto para no perder centavos. */
 	precio_unitario: string;
 	cantidad: number;
+	/** El id de la fila de precio_historial que congelo el precio de esta linea. */
+	id_precio_historial?: string;
 }
 
 export interface CabeceraPedido {
@@ -83,6 +99,25 @@ export interface PedidoCompleto {
 	detalles: LineaPedido[];
 }
 
+/**
+ * Una fila de GET /comprador/pedidos: el pedido resumido, sin sus lineas.
+ *
+ * Los tres campos del pago salen `null` mientras sigue `pendiente`: el pago
+ * nace recien al comprar.
+ */
+export interface ResumenPedido {
+	id_pedido: string;
+	fecha_creacion: string;
+	id_estado_pedido: number;
+	estado_pedido_nombre: string;
+	/** Suma de precio congelado * cantidad. "0.00" si no tiene lineas. */
+	total: string;
+	cantidad_lineas: number;
+	metodo_pago: string | null;
+	estado_pago: string | null;
+	fecha_cancelacion: string | null;
+}
+
 /** Lo que devuelve POST /comprador/pedidos/:id/detalles. */
 export interface LineaAgregada {
 	id_pedido: number;
@@ -94,6 +129,65 @@ export interface LineaAgregada {
 	stock_disponible: number;
 }
 
+export interface MetodoPago {
+	id_metodo_pago: number;
+	/** Esto es lo que hay que mandar en `metodo_pago` al comprar, NO el id. */
+	metodo_nombre: string;
+}
+
+/** El mock de tarjeta. No se guarda en ninguna tabla: no hay columna para eso. */
+export interface DatosTarjeta {
+	numero: string;
+	/** MM/AA */
+	vencimiento: string;
+	cvv: string;
+	titular: string;
+}
+
+/**
+ * Una linea cuyo precio de hoy ya no es el que quedo congelado.
+ *
+ * NO bloquea la compra: se cobra el congelado igual. Pero se avisa antes de
+ * cobrar, y para seguir hay que repetir la peticion con confirmar_cambios.
+ */
+export interface AvisoDePrecio {
+	id_pedido_producto: number;
+	nombre_producto: string;
+	nombre_variante: string;
+	precio_congelado: string;
+	precio_actual: string;
+}
+
+/** El saldo que le quedo a cada oferta tocada. */
+export interface StockResultante {
+	id_oferta: number;
+	id_usuario: number;
+	id_producto: number;
+	id_producto_variante: number;
+	stock: number;
+}
+
+/**
+ * Lo que devuelve comprar. Ojo con `comprado`: puede venir `ok: true` con
+ * `comprado: false`, que quiere decir "no compre nada todavia, mira estos
+ * avisos y vuelve a mandarlo con confirmar_cambios".
+ */
+export interface ResultadoCompra {
+	comprado: boolean;
+	id_pedido?: number;
+	total?: string;
+	stock?: StockResultante[];
+	avisos?: AvisoDePrecio[];
+}
+
+export interface ResultadoCancelacion {
+	id_pedido: number;
+	estado_previo: string;
+	/** Vacio si el pedido estaba pendiente: no habia nada que devolver. */
+	stock: StockResultante[];
+}
+
+// ------------------------------------------------------------ el id guardado
 export function leerPedidoAbierto(): string | null {
 	if (!browser) return null;
 	return localStorage.getItem(LLAVE);
@@ -107,18 +201,135 @@ export function guardarPedidoAbierto(idPedido: string) {
 export function olvidarPedidoAbierto() {
 	if (!browser) return;
 	localStorage.removeItem(LLAVE);
+	localStorage.removeItem(LLAVE_MARCADAS);
+}
+
+// ------------------------------------------------------------ que esta marcado
+/**
+ * Los id de linea marcados para comprar.
+ *
+ * Se guarda lo DESMARCADO y no lo marcado: una linea nueva tiene que nacer
+ * marcada, y con la lista de marcadas habria que acordarse de agregarla en
+ * cada sitio donde se agrega una. Guardando lo desmarcado, lo que no aparece
+ * esta marcado, que es justo el caso normal.
+ */
+export function leerDesmarcadas(): string[] {
+	if (!browser) return [];
+	try {
+		const crudo = localStorage.getItem(LLAVE_MARCADAS);
+		const lista: unknown = crudo ? JSON.parse(crudo) : [];
+		return Array.isArray(lista) ? lista.filter((x): x is string => typeof x === 'string') : [];
+	} catch {
+		// Si alguien lo dejo corrupto, se empieza de cero: perder que estaba
+		// desmarcado es molesto, reventar la pantalla del carrito es peor.
+		return [];
+	}
+}
+
+export function guardarDesmarcadas(ids: string[]) {
+	if (!browser) return;
+	localStorage.setItem(LLAVE_MARCADAS, JSON.stringify(ids));
+}
+
+// ------------------------------------------------------------ las rutas
+/**
+ * Una direccion del usuario, tal como la devuelve GET /direccion-usuario.
+ *
+ * Es la fila VIVA, la que se puede editar. La que guarda un pedido es otra
+ * cosa: una version congelada en `direccion_historial` (ver DireccionDelPedido),
+ * para que el pedido siempre diga a donde se mando de verdad aunque despues se
+ * corrija la direccion.
+ */
+export interface DireccionUsuario {
+	id_direccion: string;
+	id_usuario: string;
+	pais: string;
+	departamento: string;
+	ciudad: string;
+	codigo_postal: string | null;
+	fecha_creacion: string;
+	id_estado_direccion: number;
+}
+
+/** Las direcciones propias. Un usuario sin ninguna recibe [], no un error. */
+export function traerDirecciones() {
+	return pedir<DireccionUsuario[]>('/direccion-usuario');
+}
+
+/** Crea una direccion. El codigo postal es lo unico opcional. */
+export function crearDireccion(datos: {
+	pais: string;
+	departamento: string;
+	ciudad: string;
+	codigo_postal?: string | null;
+}) {
+	return pedir<DireccionUsuario>('/direccion-usuario', conJson('POST', datos));
+}
+
+/** Como se lee una direccion en una linea. */
+export function direccionEnUnaLinea(d: {
+	ciudad: string;
+	departamento: string;
+	pais: string;
+	codigo_postal?: string | null;
+}): string {
+	const partes = [d.ciudad, d.departamento, d.pais].filter(Boolean);
+	const texto = partes.join(', ');
+	return d.codigo_postal ? `${texto} (${d.codigo_postal})` : texto;
+}
+
+/**
+ * Reconstruye un producto tal como estaba en una fecha.
+ *
+ * Publica, y a diferencia de GET /productos/:id **no oculta** los productos
+ * en borrador o inactivos: un pedido viejo tiene que poder ensenar su producto
+ * aunque hoy ya no este en el catalogo.
+ *
+ * La fecha va como AAAA-MM-DD.
+ */
+export function traerProductoEnFecha(idProducto: string | number, fecha: string) {
+	return pedir<{ _id: number; nombre: string; descripcion: string | null }>(
+		`/productos/${idProducto}/historial?fecha=${encodeURIComponent(fecha)}`
+	);
 }
 
 /** Abre un pedido nuevo sobre una direccion del usuario. */
 export function crearPedido(idDireccion: string | number) {
 	return pedir<{ id_pedido: string }>(
 		'/comprador/pedidos',
-		conJson('POST', { id_direccion: Number(idDireccion) })
+		// Se manda TAL CUAL, sin Number(). El backend lo declara `number | string`
+		// a proposito (dto/cambiar-direccion-pedido.ts) y lo resuelve el mismo:
+		// es un bigint que el driver entrega como texto para no perder precision,
+		// y convertirlo aqui vuelve a meter justo la perdida que el backend evita.
+		conJson('POST', { id_direccion: idDireccion })
 	);
+}
+
+/** Todos los pedidos propios, resumidos, del mas nuevo al mas viejo. */
+export function listarPedidos() {
+	return pedir<ResumenPedido[]>('/comprador/pedidos');
 }
 
 export function traerPedido(idPedido: string) {
 	return pedir<PedidoCompleto>(`/comprador/pedidos/${idPedido}`);
+}
+
+/** El catalogo cerrado de formas de pago. Se pide, no se escribe a mano. */
+export function traerMetodosPago() {
+	return pedir<MetodoPago[]>('/comprador/pedidos/metodos-pago');
+}
+
+/**
+ * Cambia a donde se entrega un pedido que sigue pendiente.
+ *
+ * Recibe el `id_direccion` normal, no el del historial: el backend resuelve
+ * cual es la version vigente antes de aplicarlo.
+ */
+export function cambiarDireccionPedido(idPedido: string, idDireccion: string | number) {
+	return pedir<{ id_pedido: number; id_direccion: number }>(
+		`/comprador/pedidos/${idPedido}`,
+		conJson('PATCH', { id_direccion: idDireccion })
+	);
 }
 
 /**
@@ -140,12 +351,80 @@ export function agregarLinea(
 	);
 }
 
+/** Lo que devuelve PATCH /comprador/pedidos/:id/detalles. */
+export interface LineaRestada {
+	id_pedido: number;
+	/** Ausente cuando la resta dejo la linea en 0 y se borro. */
+	id_pedido_producto?: number;
+	id_oferta: number;
+	cantidad: number;
+	/** true si la resta llego a 0 y la linea se quito del pedido. */
+	eliminada: boolean;
+}
+
+/**
+ * El "-1" de agregarLinea: resta unidades en vez de sumarlas.
+ *
+ * Si la resta deja la cantidad en 0 o menos, **la linea se borra sola** y
+ * devuelve `eliminada: true` -- no hace falta llamar despues a quitarLinea.
+ * Por eso quien lo llame tiene que releer el pedido y no dar por hecho que la
+ * linea sigue ahi.
+ *
+ * No comprueba stock, y no le hace falta: restar unidades nunca puede dejar
+ * sin existencias a nadie.
+ */
+export function restarLinea(
+	idPedido: string,
+	linea: { id_oferta: number; cantidad: number }
+) {
+	return pedir<LineaRestada>(
+		`/comprador/pedidos/${idPedido}/detalles`,
+		conJson('PATCH', linea)
+	);
+}
+
 export function quitarLinea(idPedido: string, idDetalle: string) {
 	return pedir<null>(`/comprador/pedidos/${idPedido}/detalles/${idDetalle}`, {
 		method: 'DELETE'
 	});
 }
 
+/**
+ * Cierra la compra.
+ *
+ * `tarjeta` solo va cuando el metodo es "tarjeta". `confirmar_cambios` se
+ * manda en el SEGUNDO intento, cuando el primero contesto con avisos de
+ * precio: sin el, el backend vuelve a avisar y no compra.
+ *
+ * Codigos que hay que distinguir arriba:
+ *   402  el cobro simulado no paso (tarjeta rechazada, sin fondos...)
+ *   409  la oferta se pauso o ya no hay stock. Esto NO se salta con nada.
+ */
+export function comprarPedido(
+	idPedido: string,
+	cuerpo: { metodo_pago: string; tarjeta?: DatosTarjeta; confirmar_cambios?: boolean }
+) {
+	return pedir<ResultadoCompra>(
+		`/comprador/pedidos/${idPedido}/comprar`,
+		conJson('POST', cuerpo)
+	);
+}
+
+/**
+ * Cancela un pedido propio.
+ *
+ * Si estaba comprado, devuelve las unidades con un movimiento de
+ * `devolucion` y el pago pasa a reembolsado; el libro mayor no se corrige
+ * borrando renglones. Si estaba pendiente no toca stock, porque nunca se
+ * descontó.
+ */
+export function cancelarPedido(idPedido: string) {
+	return pedir<ResultadoCancelacion>(`/comprador/pedidos/${idPedido}/cancelar`, {
+		method: 'POST'
+	});
+}
+
+// ------------------------------------------------------------ cuentas
 /**
  * Lo que cuesta una linea. El precio viaja como texto (es un decimal de
  * PostgreSQL) y hay que convertirlo aqui, no antes: hacerlo en el backend

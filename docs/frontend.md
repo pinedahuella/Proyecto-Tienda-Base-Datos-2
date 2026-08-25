@@ -1,16 +1,18 @@
 # Frontend
 
-> **Al dia a medias.** El catalogo y la ficha ya corren contra el modelo
-> multi-vendedor; el panel del vendedor no, y lo que dice este documento de el
-> sigue siendo lo viejo.
+> **Todo corre contra el modelo multi-vendedor.** El flujo completo -- buscar,
+> agregar al carrito, elegir a donde se entrega y pagar -- esta construido y
+> probado contra el backend real.
 >
 > | Pantalla | Estado |
 > |---|---|
-> | `/` catalogo | al dia |
-> | `/producto/[id]` ficha | al dia, lista las ofertas |
-> | `/panel` perfil, direcciones, admin | sin cambios, siguen bien |
-> | `/panel` vendedor | **roto**: espera rutas `/vendedor/ofertas` que no existen |
-> | `Pedido.svelte` | pendiente los botones de comprar y cancelar |
+> | `/` catalogo | al dia. Dos formas de paginar: cursor y por numero de pagina |
+> | `/producto/[id]` ficha | al dia, lista las ofertas de cada vendedor |
+> | `/pedidos` | el pedido abierto y el historial, con su detalle |
+> | `/panel` perfil, direcciones, admin | al dia |
+> | `/panel` vendedor | al dia: ofertas propias, publicar, precio, estado y stock |
+> | `Carrito.svelte` | panel lateral, con seleccion por linea |
+> | `Checkout.svelte` | forma de pago, direccion de entrega y el mock de tarjeta |
 
 SvelteKit.
 
@@ -22,7 +24,8 @@ SvelteKit.
 | `/producto/[id]` | la ficha de un producto | no |
 | `/entrar` | iniciar sesion | no |
 | `/registro` | crear cuenta | no |
-| `/panel` | perfil, direcciones, y segun el rol la gestion o los productos | si |
+| `/pedidos` | el pedido abierto y todos los anteriores | si |
+| `/panel` | perfil, direcciones, y segun el rol la gestion o las ofertas | si |
 
 El catalogo es la pagina de inicio y es publica: `GET /productos` no pide la
 cookie, asi que se puede navegar la tienda sin cuenta. Por eso el inicio de
@@ -48,6 +51,11 @@ panel no da permisos -- quien decide es el backend, que responde 403.
 | `src/routes/registro/+page.svelte` | crear cuenta |
 | `src/routes/panel/+page.svelte` | panel |
 | `src/lib/PanelAdmin.svelte` | gestion de usuarios, dentro del panel |
+| `src/routes/pedidos/+page.svelte` | el pedido abierto y el historial, en su propia pagina |
+| `src/lib/Carrito.svelte` | el carrito lateral, con casilla por linea |
+| `src/lib/Checkout.svelte` | pagar: forma de pago, direccion de entrega y tarjeta simulada |
+| `src/lib/MisPedidos.svelte` | los pedidos anteriores, con detalle, cancelar e historial del producto |
+| `src/lib/estadoCarrito.svelte.ts` | si el carrito esta abierto y cuantas lineas lleva, compartido |
 | `src/lib/OfertasVendedor.svelte` | las ofertas del vendedor: verlas, editar precio/estado/stock y publicar |
 | `src/lib/PanelVendedor.svelte` | los productos del vendedor, dentro del panel |
 | `src/lib/Direcciones.svelte` | direcciones, dentro del panel |
@@ -335,16 +343,79 @@ decir por que.
 
 ---
 
+## El carrito y el pago
+
+`Carrito.svelte` es un panel que entra desde la derecha y vive en el layout, no
+en cada pagina: es UNO solo para todo el sitio. Se abre desde el boton de la
+cabecera y solo al agregar algo desde una ficha.
+
+**La seleccion por linea es del navegador, no del backend.** Aqui hay una
+costura que conviene entender: el backend NO tiene ninguna idea de
+"seleccionado" -- un pedido se compra ENTERO. Las casillas son una ayuda para
+decidir, y se guardan en `localStorage`. Por eso, al comprar con lineas
+desmarcadas, hay un paso de confirmacion que dice cuantas se van a QUITAR del
+pedido: no hay forma de pagar una parte y dejar el resto guardado, y quitarlas
+es un DELETE que no se deshace.
+
+Se guarda lo DESMARCADO y no lo marcado, a proposito: una linea nueva tiene que
+nacer marcada, y con la lista de marcadas habria que acordarse de agregarla en
+cada sitio donde se agrega una.
+
+`Checkout.svelte` es la ventana de pagar. Trae:
+
+- **Las formas de pago se PIDEN**, no se escriben a mano: son un catalogo
+  cerrado de la base (`GET /comprador/pedidos/metodos-pago`), y se manda
+  `metodo_nombre`, nunca el id.
+- **La direccion de entrega**, que se ve y se puede cambiar sin salir de ahi
+  (`PATCH /comprador/pedidos/:id`), incluso agregando una nueva. Antes se pagaba
+  sin verla: el pedido se abria con la PRIMERA direccion del usuario y no habia
+  ni donde mirarla. Tras cambiarla se vuelve a LEER el pedido, y se pinta lo que
+  quedo, no lo que se creyo mandar.
+- **El mock de tarjeta**, que valida forma y Luhn antes de salir a la red.
+
+Los cuatro finales del cobro son distintos y se tratan distinto:
+
+| Que paso | Como llega | Que hace la pantalla |
+|---|---|---|
+| Comprado | `ok` con `comprado: true` | cierra, vacia el carrito |
+| El precio cambio | `ok` con `comprado: false` y `avisos` | ensena congelado vs actual y deja repetir con `confirmar_cambios` |
+| El cobro no paso | 402 | el mensaje del backend, se puede reintentar |
+| Sin stock o pausada | 409 | NO se ofrece seguir: hay que arreglar el carrito |
+
+El segundo es el que mas facil se lee mal: `ok` sigue en `true` y no se compro
+nada. Se cobra el precio CONGELADO en los dos casos; el aviso existe para que
+nadie pague creyendo otra cosa.
+
+## Los pedidos
+
+`/pedidos` es su propia pagina, no una seccion del panel. Comprar y administrar
+la cuenta son cosas distintas, y tenerlas juntas obligaba a bajar por el perfil
+y las direcciones para llegar a lo que uno venia a ver.
+
+Arriba el pedido abierto; abajo los anteriores, que se despliegan de a uno y
+solo entonces piden su detalle (`GET /comprador/pedidos/:id`). Lo ya cargado se
+cachea.
+
+**"Como se veia al comprarlo"** reconstruye el producto a la fecha del pedido
+con `GET /productos/:id/historial?fecha=`. Esa ruta, a diferencia del catalogo,
+NO oculta los productos inactivos o en borrador: un pedido tiene que poder
+ensenar su producto aunque hoy ya no se venda. Es el criterio de mas peso de la
+Entrega 1 puesto donde se ve.
+
+Ojo con un dato que se lee mal: `metodo_pago`, `estado_pago` y
+`fecha_cancelacion` vienen `null` mientras el pedido sigue `pendiente`. No es un
+fallo: el pago nace recien al comprar.
+
 ## Lo que todavia falta
 
-**No se puede cerrar la compra desde la pantalla.** Las rutas del backend YA
-existen (`POST /comprador/pedidos/:id/comprar` y `/cancelar`); lo que falta son
-los botones en `Pedido.svelte`. El comentario de ese archivo que dice que no hay
-ruta esta caducado.
+**Se puede comprar de punta a punta.** El carrito lleva al checkout, el
+checkout cobra con la tarjeta simulada y el pedido queda `comprado`. Probado
+contra la base: el stock baja lo justo, el kardex cuadra y el pago se escribe.
 
-**No se puede bajar la cantidad de una linea.** `agregar_linea()` SUMA a lo que
-ya habia, y no hay forma de fijar un total. Para bajar hay que quitar la linea
-entera y volver a agregarla.
+**No se puede FIJAR una cantidad, solo subirla o bajarla de a una.**
+`agregar_linea()` suma y `restar_linea()` resta; ninguna acepta un total. Al
+llegar a 0, la linea se borra sola (el backend contesta `eliminada: true`), asi
+que el `-1` y el `Quitar` acaban siendo lo mismo cuando queda una unidad.
 
 **El filtro "Sin unidades disponibles" del catalogo mezcla dos casos.** Va sobre
 `stock_max=0`, y ahi caen tanto el producto agotado como el que nunca registro

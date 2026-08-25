@@ -1,7 +1,58 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import Trama from '$lib/Trama.svelte';
+	import Carrito from '$lib/Carrito.svelte';
+	import Checkout from '$lib/Checkout.svelte';
+	import { carrito } from '$lib/estadoCarrito.svelte';
+	import { cerrarSesion } from '$lib/sesion';
+	import { olvidarPedidoAbierto, type LineaPedido, type ResultadoCompra } from '$lib/pedido';
 
 	let { children } = $props();
+
+	/**
+	 * El carrito y el checkout viven AQUI, no en cada pagina.
+	 *
+	 * Son uno solo para todo el sitio: se abren desde la ficha al agregar algo,
+	 * desde el boton de la cabecera y desde el panel. Montados por pagina,
+	 * cambiar de pantalla cerraria el carrito a media compra, y la burbuja de
+	 * la cabecera contaria una cosa distinta de la que el panel ensena.
+	 */
+	let checkoutAbierto = $state(false);
+	let idPedidoAComprar = $state<string | null>(null);
+	let lineasAComprar = $state<LineaPedido[]>([]);
+
+	/**
+	 * El carrito no compra: avisa de que hay que comprar y se aparta.
+	 *
+	 * Para cuando llega aqui, el carrito ya dejo el pedido con EXACTAMENTE las
+	 * lineas marcadas (las demas las quito, con su paso de confirmacion). El
+	 * backend compra el pedido entero, asi que las lineas que se pasan sirven
+	 * para pintar el resumen del checkout, no para elegir que se cobra.
+	 */
+	function alPedirComprar(idPedido: string, lineas: LineaPedido[]) {
+		idPedidoAComprar = idPedido;
+		lineasAComprar = lineas;
+		carrito.cerrar();
+		checkoutAbierto = true;
+	}
+
+	function alComprado(_resultado: ResultadoCompra) {
+		checkoutAbierto = false;
+		// El pedido dejo de estar pendiente, asi que ya no es "el carrito". Sin
+		// olvidarlo, el panel volveria a abrir un pedido comprado como si fuera
+		// el carrito y el backend contestaria 409 al intentar comprarlo de nuevo.
+		olvidarPedidoAbierto();
+		carrito.fijarCuenta(0);
+		idPedidoAComprar = null;
+		lineasAComprar = [];
+	}
+
+	function sesionExpirada() {
+		cerrarSesion();
+		carrito.olvidar();
+		checkoutAbierto = false;
+		goto('/entrar');
+	}
 </script>
 
 <!-- La trama va fija detras de todo: es el fondo de la marca -->
@@ -11,6 +62,22 @@
 <div class="sitio">
 	{@render children()}
 </div>
+
+<Carrito
+	abierto={carrito.abierto}
+	alCerrar={() => carrito.cerrar()}
+	alExpirarSesion={sesionExpirada}
+	{alPedirComprar}
+/>
+
+<Checkout
+	abierto={checkoutAbierto}
+	idPedido={idPedidoAComprar}
+	lineas={lineasAComprar}
+	alCerrar={() => (checkoutAbierto = false)}
+	{alComprado}
+	alExpirarSesion={sesionExpirada}
+/>
 
 <style>
 	/* ══════════════════════════════════════════════════════════
@@ -159,10 +226,27 @@
 		}
 	}
 
-	/* Chrome pinta de blanco los campos que autocompleta; se fija el color del
-	   texto para que no cambie de tono. */
-	:global(input:-webkit-autofill) {
+	/* Chrome pinta de blanco los campos que autocompleta, y en tema oscuro eso
+	   dejaba letra clara sobre fondo blanco: no se veia lo que se escribia.
+
+	   Los CUATRO estados, no solo el base: Chrome vuelve a pintar su fondo al
+	   pasar el raton, al enfocar y al pulsar, asi que cubrir solo
+	   `:-webkit-autofill` arregla el campo hasta que alguien lo toca.
+
+	   La transicion larguisima es el remedio conocido para lo mismo: el fondo
+	   de autofill se aplica con una transicion, y estirarla tanto hace que
+	   nunca llegue. El caret va aparte porque no lo cubre text-fill-color, y
+	   sin el el cursor se pierde sobre el fondo oscuro. */
+	:global(input:-webkit-autofill),
+	:global(input:-webkit-autofill:hover),
+	:global(input:-webkit-autofill:focus),
+	:global(input:-webkit-autofill:active),
+	:global(textarea:-webkit-autofill),
+	:global(select:-webkit-autofill) {
 		-webkit-text-fill-color: var(--tinta);
 		-webkit-box-shadow: 0 0 0 1000px var(--blanco) inset;
+		box-shadow: 0 0 0 1000px var(--blanco) inset;
+		caret-color: var(--tinta);
+		transition: background-color 100000s ease-in-out 0s;
 	}
 </style>
