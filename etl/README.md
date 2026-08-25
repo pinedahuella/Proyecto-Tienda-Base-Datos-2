@@ -40,12 +40,13 @@ al ordenarlas, porque en un arreglo la posicion ya es el orden.
 
 **NO va el vendedor, ni el precio, ni el stock por vendedor.** Dejaron de ser
 del producto al volverse multi-vendedor: son de cada oferta. Lo unico que queda
-de ellas son cuatro numeros calculados, que son los que la LISTA del catalogo
+de ellas son cinco numeros calculados, que son los que la LISTA del catalogo
 necesita en cada tarjeta:
 
 | Campo | Que es |
 |---|---|
 | `precio_tienda` | el precio de la tienda, que es el que se ensena |
+| `precio_desde` | el mas barato al que se ofrece, de cualquier vendedor |
 | `stock_tienda` | unidades de la tienda |
 | `stock_total` | unidades entre todos los vendedores activos |
 | `total_ofertas` | cuantos vendedores lo tienen activo |

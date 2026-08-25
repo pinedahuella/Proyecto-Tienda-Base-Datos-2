@@ -219,7 +219,7 @@ function documentoDe(producto) {
         estado:         producto.estado,
         categoria:      producto.categoria,
 
-        // Los cuatro calculados. Son una COPIA de lo que dicen las ofertas, y
+        // Los cinco calculados. Son una COPIA de lo que dicen las ofertas, y
         // hay que recalcularlos cuando una oferta cambie de precio, se quede
         // sin unidades o se pause. Si no, la tarjeta va a decir un precio y la
         // ficha otro.
@@ -229,6 +229,7 @@ function documentoDe(producto) {
         // cuentan ofertas activas: las dos significan "unidades que se pueden
         // comprar hoy".
         precio_tienda:  producto.precio_tienda,
+        precio_desde:   producto.precio_desde,
         stock_tienda:   producto.stock_tienda,
         stock_total:    producto.stock_total,
         total_ofertas:  producto.total_ofertas,
@@ -272,7 +273,7 @@ function documentoDe(producto) {
 // punto flotante y redondea. Postgres lo mando como texto justo para esto: se
 // compara como texto mientras se calculan los cambios, y se convierte una sola
 // vez al final, cuando ya no queda nada que comparar.
-const CAMPOS_DECIMALES = ['precio', 'precio_tienda'];
+const CAMPOS_DECIMALES = ['precio', 'precio_tienda', 'precio_desde'];
 
 function aDecimal(valor) {
     if (Array.isArray(valor)) return valor.map(aDecimal);

@@ -58,6 +58,12 @@ export interface ProductoVariante {
   imagenes: string[];
   /** El precio de la oferta de la tienda para esta variante. Copia calculada; null si la tienda no la oferta. */
   precio_tienda: Decimal128 | null;
+  /**
+   * El precio mas barato que se puede PAGAR hoy por esta variante: la oferta
+   * activa mas barata con unidades, de cualquier vendedor. null si nadie la
+   * tiene disponible. Copia calculada.
+   */
+  precio_desde: Decimal128 | null;
   /** Unidades activas de la oferta de la tienda para esta variante. Copia calculada. */
   stock_tienda: number;
   /** Unidades activas sumadas entre TODOS los vendedores de esta variante. Copia calculada. */
@@ -84,6 +90,14 @@ export interface Producto {
   categoria: ProductoCategoria;
   /** El precio de la tienda; a nivel de producto es el menor entre sus variantes. Copia calculada. */
   precio_tienda: Decimal128 | null;
+  /**
+   * El mas barato que se puede PAGAR hoy, de cualquier vendedor. Es distinto
+   * de precio_tienda en 21 de los 34 productos del conjunto de datos: la
+   * tarjeta ENSENA precio_tienda (regla del profesor) pero el filtro de precio
+   * del buscador usa este, porque quien busca "hasta Q4000" quiere lo que
+   * puede pagar con eso. null cuando nadie lo tiene disponible.
+   */
+  precio_desde: Decimal128 | null;
   /** Unidades activas de la tienda, SUMADAS sobre todas las variantes. Copia calculada. */
   stock_tienda: number;
   /** Unidades activas entre TODOS los vendedores, SUMADAS sobre todas las variantes. Copia calculada. */

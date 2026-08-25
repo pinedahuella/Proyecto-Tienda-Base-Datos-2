@@ -144,6 +144,7 @@ export class ProductosVendedorService {
         // oferta sobre este producto (eso es de otro servicio, sobre
         // `oferta` en PostgreSQL).
         precio_tienda: null,
+        precio_desde: null,
         stock_tienda: 0,
         stock_total: 0,
         total_ofertas: 0,
@@ -339,6 +340,7 @@ export class ProductosVendedorService {
         // Nacen en 0/null, igual que el producto: todavia no existe ninguna
         // oferta sobre esta variante.
         precio_tienda: null,
+        precio_desde: null,
         stock_tienda: 0,
         stock_total: 0,
         total_ofertas: 0,

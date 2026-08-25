@@ -214,12 +214,20 @@ WHERE pp.id_pedido = $1;
 ```
 
 **El filtro por rango de precio del catálogo** ya no puede ir con `$elemMatch`
-sobre `variantes.precio`. Va contra el campo calculado:
+sobre `variantes.precio`. Va contra `precio_desde`, que es el más barato al que
+se ofrece — **no** contra `precio_tienda`:
 
 ```ts
-filtro.precio_tienda = { $gte: Decimal128.fromString(min),
-                         $lte: Decimal128.fromString(max) };
+filtro.precio_desde = { $gte: Decimal128.fromString(min),
+                        $lte: Decimal128.fromString(max) };
 ```
+
+La tarjeta **enseña** `precio_tienda` (regla del profesor) pero el buscador
+filtra por lo que se puede **pagar**. En 21 de los 34 productos alguien lo vende
+más barato que la tienda; con el filtro sobre `precio_tienda` esos quedaban
+fuera de la búsqueda aunque sí le sirvieran a quien puso un tope. Ya está
+arreglado en `productos.service.ts`, y quedó `precio_tienda_min/max` por si
+alguna pantalla quiere el filtro estricto de la tienda.
 
 **El filtro de disponibilidad** va contra `stock_total`, y usa el índice
 `catalogo_categoria_estado_stock` sin recorrer la colección:
