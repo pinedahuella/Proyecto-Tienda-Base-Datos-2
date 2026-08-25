@@ -1038,10 +1038,9 @@ Postgres dice qué es mío, Mongo le pone nombre.
 **Cualquier vendedor, no solo la tienda.** A diferencia de crear un
 producto del catálogo (solo `tienda@mesh.com`), publicar una oferta sobre
 un producto que ya existe es lo que cualquier cuenta con rol vendedor
-puede hacer — es el corazón del modelo multi-vendedor. Por ahora solo hay
-rutas de lectura: crear, editar el precio/estado de una oferta y reponer
-stock (`POST/PATCH /vendedor/ofertas`, `POST /vendedor/ofertas/:id/stock`)
-todavía no están hechas.
+puede hacer — es el corazón del modelo multi-vendedor. `POST
+/vendedor/ofertas` (crear) y `PATCH /vendedor/ofertas/:id` (editar precio,
+estado y/o stock) ya están hechos.
 
 ---
 
@@ -1244,4 +1243,262 @@ ocultar.
 
 ```json
 { "ok": false, "mensaje": "No se pudo obtener el producto", "payload": null }
+```
+
+---
+
+## POST /vendedor/ofertas
+
+Publica una oferta sobre una variante que **ya existe** en el catálogo
+compartido. Cualquier vendedor, no solo la tienda — crear la variante
+misma sigue siendo solo de `tienda@mesh.com` (`POST /vendedor/productos`),
+pero ofertar sobre una que ya está publicada es lo que hace a alguien
+vendedor en este modelo.
+
+**Nace siempre `activa`** — sin aprobación previa de la tienda: eso quedó
+pendiente de diseñar más adelante (fecha límite del profesor obligó a
+priorizar el flujo directo primero, se retoma después). Y **nace siempre
+con `stock = 0`**, nunca con `stock_inicial` puesto directo: el kardex
+(`stock_movimiento`) tiene que explicar cada unidad, así que si viene
+`stock_inicial > 0` se repone aparte, con `reponer_stock`, justo después
+de que la oferta nazca.
+
+**Solo sobre productos activos.** Un producto `inactivo`/`borrador` da el
+mismo 404 que uno que no existe — mismo criterio que `GET /productos/:id`
+y `agregar_linea`: nadie más lo ve, no debería poder recibir una oferta
+nueva tampoco.
+
+```
+POST /vendedor/ofertas
+```
+
+```json
+{
+  "id_producto": 1,
+  "id_producto_variante": 1,
+  "precio": "3950.00",
+  "stock_inicial": 7
+}
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `id_producto` | Sí | El `_id` de Mongo. Entero > 0 |
+| `id_producto_variante` | Sí | Tiene que ser una variante de ese producto. Entero > 0 |
+| `precio` | Sí | Numero > 0, hasta 2 decimales, como texto (mismo formato que `POST /vendedor/productos`) |
+| `stock_inicial` | No (por defecto 0) | Entero ≥ 0 |
+
+### 201
+
+```json
+{
+  "ok": true,
+  "mensaje": "Oferta creada",
+  "payload": {
+    "id_oferta": "169",
+    "id_producto": 1,
+    "id_producto_variante": 1,
+    "nombre_producto": "Laptop Nimbo 13",
+    "nombre_variante": "8 GB / 256 GB",
+    "imagen": null,
+    "precio": "3950.00",
+    "stock": 7,
+    "estado": "activa",
+    "fecha_creacion": "2026-08-25T17:10:24.348Z",
+    "fecha_actualizacion": "2026-08-25T17:10:24.348Z"
+  }
+}
+```
+
+Misma forma que cada elemento de `GET /vendedor/ofertas`. Deja al día en
+Mongo los cinco campos calculados del producto y la variante afectados
+(`precio_tienda`/`precio_desde`/`stock_tienda`/`stock_total`/`total_ofertas`,
+ver `ProductosService.recalcularCamposCalculados`).
+
+Probado en vivo el 25 de agosto de 2026 contra la base real, con un
+vendedor de prueba (`ventas.norte@mesh.com`): la oferta nace `activa` con
+`id_estado_oferta = 1`, el kardex registra la reposición del
+`stock_inicial` con `id_pedido NULL` y `id_usuario_modifico` del vendedor,
+`precio_historial` registra el precio de nacimiento, y `total_ofertas`/
+`stock_total` del producto en Mongo suben lo esperado.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id_producto es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
+{ "ok": false, "mensaje": "El id_producto_variante es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
+{ "ok": false, "mensaje": "El precio es obligatorio y debe ser un numero mayor a 0, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "El stock_inicial es obligatorio y debe ser un numero entero mayor o igual a 0", "payload": null }
+```
+
+### 401
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+### 403
+
+```json
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+{ "ok": false, "mensaje": "No existe una variante con ese id en este producto", "payload": null }
+```
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "Ya tenes una oferta sobre esta variante -- para cambiarla hay que editar la existente, no crear otra", "payload": null }
+```
+
+Del `UNIQUE (id_usuario, id_producto_mongo, id_producto_variante_mongo)` de
+`oferta` (`005_ofertas.sql`): un vendedor tiene una sola oferta por
+variante.
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo crear la oferta", "payload": null }
+```
+
+---
+
+## PATCH /vendedor/ofertas/:id
+
+Edita una oferta propia: precio, estado, y/o un ajuste manual de stock.
+Los tres campos son independientes — se puede mandar uno, dos o los tres
+juntos — pero al menos uno tiene que venir. `:id` es `id_oferta`.
+
+Cada campo registra su cambio en la tabla que le corresponde, nunca a
+mano desde esta ruta:
+
+- **`precio`** — un `UPDATE` sobre `oferta.precio`. El trigger
+  `trg_oferta_registrar_precio` (`005_ofertas.sql`) escribe solo la fila
+  nueva en `precio_historial`.
+- **`estado`** — un `UPDATE` sobre `oferta.id_estado_oferta`. Sin
+  restricción sobre a cuál: el dueño maneja su oferta como quiera,
+  incluido volver de `retirada` a `activa`.
+- **`ajuste_stock`** — un entero con signo, nunca `0`. Positivo llama a
+  `reponer_stock(..., 'reposicion', ...)` (sube el stock); negativo llama
+  con `'ajuste'` y la magnitud (resta). Son los mismos dos motivos que
+  `reponer_stock()` ya admitía fuera del flujo del pedido — la misma
+  corrección manual (sube o baja) que existía en el modelo viejo de
+  inventario, ahora sobre la oferta.
+
+**Solo el dueño de la oferta** — una ajena da el mismo 404 genérico que
+una que no existe, mismo criterio de siempre.
+
+```
+PATCH /vendedor/ofertas/174
+```
+
+```json
+{ "precio": "550.00", "ajuste_stock": -2, "estado": "activa" }
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `precio` | No | Mismo formato que al crear: número > 0, hasta 2 decimales |
+| `estado` | No | Uno de `activa`/`pausada`/`retirada` |
+| `ajuste_stock` | No | Entero != 0. Positivo repone, negativo corrige a la baja |
+
+Al menos uno de los tres tiene que venir.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Oferta actualizada",
+  "payload": {
+    "id_oferta": "174",
+    "id_producto": 6,
+    "id_producto_variante": 11,
+    "nombre_producto": "Audifonos Estudio 900",
+    "nombre_variante": "Cable 3 m",
+    "imagen": null,
+    "precio": "550.00",
+    "stock": 6,
+    "estado": "activa",
+    "fecha_creacion": "2026-08-25T17:10:44.377Z",
+    "fecha_actualizacion": "2026-08-25T17:18:46.987Z"
+  }
+}
+```
+
+Misma forma que `POST /vendedor/ofertas`. Deja al día en Mongo los cinco
+campos calculados del producto y la variante afectados.
+
+Probado en vivo el 25 de agosto de 2026 contra la base real: precio
+(verificado que `precio_historial` registró la fila nueva), pausar y
+reactivar, ajuste positivo (`reponer_stock` con `'reposicion'`) y negativo
+(`'ajuste'`) — verificado el kardex fila por fila
+(`reposicion +3 → 3`, `reposicion +5 → 8`, `ajuste -2 → 6`) — y que una
+oferta ajena (probado contra la de `mesh_tienda`) da 404 sin tocar nada.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "Debes enviar al menos un campo para actualizar", "payload": null }
+{ "ok": false, "mensaje": "El precio es obligatorio y debe ser un numero mayor a 0, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "El estado debe ser uno de: activa, pausada, retirada", "payload": null }
+{ "ok": false, "mensaje": "El ajuste_stock debe ser un numero entero distinto de 0", "payload": null }
+```
+
+### 401
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+### 403
+
+```json
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
+```
+
+Mismo mensaje para una que no existe y para una que es de otro vendedor —
+no hay nada que confirmar por esta vía.
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "El ajuste dejaria la oferta 174 en -993 unidades", "payload": null }
+```
+
+Mensaje de `reponer_stock()` tal cual, cuando el ajuste negativo deja el
+stock por debajo de 0.
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo actualizar la oferta", "payload": null }
 ```

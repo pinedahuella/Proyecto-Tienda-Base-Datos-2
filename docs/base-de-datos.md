@@ -228,6 +228,16 @@ no se hizo.
 Cancelar un pedido comprado **no borra la salida**: escribe la entrada contraria
 con motivo `devolucion`. Un libro mayor no se corrige quitando renglones.
 
+**El chequeo de que la oferta siga `activa` no vive dentro de `comprar_pedido`.**
+La funcion SQL, al comprar, solo vuelve a mirar el stock (con el `FOR UPDATE` de
+arriba); que la oferta siga activa se comprueba antes, en el backend
+(`PedidosCompradorService.revisarCambiosAntesDeComprar`), con una consulta sin
+bloqueo. Queda una ventana angosta: si alguien pausa o retira la oferta justo
+entre ese chequeo y la llamada a `comprar_pedido`, la compra pasa igual -- el
+stock sigue correcto (el `FOR UPDATE` no se salta), pero el estado no se
+revalida dentro de la misma transaccion. Pendiente de decidir si vale la pena
+cerrar esa ventana metiendo el chequeo de estado dentro de la funcion.
+
 ---
 
 ## El stock, con kardex

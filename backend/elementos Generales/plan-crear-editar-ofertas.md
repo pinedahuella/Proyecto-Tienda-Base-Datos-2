@@ -1,9 +1,26 @@
 # Plan: crear/editar productos y ofertas
 
-Estado al 25 de agosto de 2026. Esto es lo que sigue después de los GET de
-`/vendedor/ofertas` (ya construidos, ver `endpoints-vendedores.md`). No es
-código, es el plan para escribirlo — confirmar el diseño con el equipo
-antes de implementar, igual que se hizo con los GET.
+Estado al 25 de agosto de 2026. Los puntos 1 y 2 **ya están construidos y
+probados**, ver `endpoints-vendedores.md`. Los puntos 3 a 5 siguen siendo
+plan, no código.
+
+**El punto 2 no se implementó tal como está escrito abajo.** En vez de dos
+rutas separadas (`PATCH /vendedor/ofertas/:id` para precio/estado, `POST
+/vendedor/ofertas/:id/stock` aparte), se fusionó todo en un solo `PATCH
+/vendedor/ofertas/:id` que admite `precio`, `estado` y `ajuste_stock`
+(entero con signo) juntos o por separado. El punto 3 de abajo, tal como
+está escrito, ya no aplica — lo que hacía (`reponer_stock` con
+`'reposicion'`/`'ajuste'`) quedó cubierto por `ajuste_stock` del PATCH.
+
+**Decisión pendiente de retomar, no descartada:** se había discutido que
+crear/editar una oferta pasara por una aprobación de la tienda (nace
+`pausada`, la tienda la activa). El profesor dio una fecha límite nueva a
+mitad de sesión y no alcanzó el tiempo para resolver el diseño completo
+(qué marca "pendiente de aprobar" sin romperse con `reponer_stock`, quién
+puede activar qué, etc. — quedó discutido pero sin cerrar). Se decidió
+seguir con creación directa (nace `activa`, tal como estaba en este plan
+desde el principio) para no perder tiempo, y retomar la aprobación después
+como su propio cambio.
 
 Contexto que ya existe y hay que reusar, no repensar:
 
