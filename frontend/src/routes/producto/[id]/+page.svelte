@@ -35,21 +35,43 @@
 		unidad: string | null;
 	}
 
+	/** Como llega numeric(12,2) de Postgres: en un objeto, no como numero. */
+	type Decimal = { $numberDecimal: string } | string | number;
+
 	interface Variante {
 		id_producto_variante: number;
 		nombre_variante: string;
-		precio: { $numberDecimal: string } | string | number;
 		descripcion: string | null;
 		estado: string;
 		imagenes: string[];
-		/**
-		 * Unidades de ESTA variante. Opcional: una variante publicada desde el
-		 * panel del vendedor sin `stock_inicial` no trae el campo, que no es lo
-		 * mismo que traerlo en 0.
-		 */
-		stock?: number;
+		/** El precio de la tienda para esta variante. null si la tienda no la oferta. */
+		precio_tienda: Decimal | null;
+		/** El mas barato al que se ofrece, de cualquier vendedor. */
+		precio_desde: Decimal | null;
+		stock_tienda: number;
+		stock_total: number;
+		total_ofertas: number;
 		caracteristicas_adicionales?: Caracteristica[];
 		caracteristicas_personalizadas?: Caracteristica[];
+	}
+
+	/**
+	 * Una oferta de verdad: quien vende esta variante, a como y con cuantas.
+	 *
+	 * NO viene del documento del producto. Las ofertas viven en PostgreSQL y
+	 * el backend las trae con una consulta aparte al pedir la ficha, porque
+	 * precio y stock cambian en cada venta y una copia en la base documental
+	 * se desfasaria. En el listado del catalogo no estan: alli solo van los
+	 * numeros agregados.
+	 */
+	interface Oferta {
+		id_oferta: string;
+		id_producto_variante_mongo: string;
+		vendedor: { id_usuario: string; usuario: string; nombre: string; apellido: string | null };
+		/** La oferta de la cuenta de la tienda: es la que se ensena por defecto. */
+		es_tienda: boolean;
+		precio: string;
+		stock: number;
 	}
 
 	interface Producto {
@@ -58,13 +80,19 @@
 		descripcion: string | null;
 		fecha_creacion: string;
 		estado: string;
-		vendedor: { id_usuario: number; usuario: string; nombre: string; apellido: string };
 		categoria: { id_categoria: number; nombre: string; categoria_padre: string | null };
 		variantes: Variante[];
 		caracteristicas_adicionales?: Caracteristica[];
 		caracteristicas_personalizadas?: Caracteristica[];
-		/** La suma de variantes[].stock. La calcula el backend al responder. */
-		stock_total?: number;
+		/** El precio de la tienda, que es el que se ensena. */
+		precio_tienda: Decimal | null;
+		/** El mas barato al que se ofrece, de cualquier vendedor. */
+		precio_desde: Decimal | null;
+		stock_tienda: number;
+		stock_total: number;
+		total_ofertas: number;
+		/** Las ofertas de verdad, que solo trae esta ruta y no el listado. */
+		ofertas: Oferta[];
 	}
 
 	let id = $derived(Number(page.params.id));
@@ -124,10 +152,11 @@
 		});
 	});
 
-	function aNumero(precio: Variante['precio']): number {
+	function aNumero(precio: Decimal | null | undefined): number {
+		if (precio == null) return 0;
 		if (typeof precio === 'number') return precio;
 		if (typeof precio === 'string') return Number(precio);
-		return Number(precio?.$numberDecimal ?? 0);
+		return Number(precio.$numberDecimal ?? 0);
 	}
 
 	function quetzales(n: number): string {
@@ -154,13 +183,28 @@
 		return vistas;
 	}
 
-	/** El rango de precio del producto, que es el de sus variantes. */
+	/**
+	 * El precio del encabezado: el de la tienda, que es el que se ensena.
+	 * Regla del profesor, el primero siempre es el de la pagina.
+	 */
 	function rango(p: Producto): string {
-		const precios = p.variantes.map((v) => aNumero(v.precio)).filter((n) => n > 0);
-		if (precios.length === 0) return 'Sin precio';
-		const min = Math.min(...precios);
-		const max = Math.max(...precios);
-		return min === max ? quetzales(min) : `${quetzales(min)} - ${quetzales(max)}`;
+		const n = aNumero(p.precio_tienda);
+		return n > 0 ? quetzales(n) : 'Sin precio';
+	}
+
+	/** Lo que se puede pagar, si alguien lo tiene mas barato que la tienda. */
+	function desde(p: Producto): string | null {
+		const t = aNumero(p.precio_tienda);
+		const d = aNumero(p.precio_desde);
+		if (d <= 0 || (t > 0 && d >= t)) return null;
+		return quetzales(d);
+	}
+
+	/** Las ofertas de una variante, de la mas barata a la mas cara. */
+	function ofertasDe(v: Variante): Oferta[] {
+		return (producto?.ofertas ?? []).filter(
+			(o) => Number(o.id_producto_variante_mongo) === v.id_producto_variante
+		);
 	}
 
 	/**
@@ -193,28 +237,21 @@
 	}
 
 	/**
-	 * Que decir del stock. Son CUATRO casos, no dos, y stock_total no los
-	 * separa: el backend suma contando como 0 las variantes que no traen el
-	 * campo `stock`, asi que "se vendio todo" y "nadie registro nada" dan el
-	 * mismo 0.
+	 * Que decir del stock. Tres casos, y ahora salen de dos numeros de verdad
+	 * en vez de deducirse contando variantes:
 	 *
 	 *   hay          stock_total > 0
-	 *   sin-dato     NINGUNA presentacion trae el campo
-	 *   agotado      todas lo traen y suman 0
-	 *   ninguno      mixto: unas en 0 y otras sin registrar
+	 *   sin-oferta   nadie lo vende todavia
+	 *   agotado      hay vendedores, pero ninguno tiene unidades
 	 *
-	 * El mixto es el que se colaba: bastaba UNA presentacion registrada en 0
-	 * para dar el producto entero por inventariado y decir "Agotado", que es
-	 * afirmar que se vendio lo que nunca se registro. Mismo criterio que el
-	 * catalogo (routes/+page.svelte).
+	 * Antes stock_total se sumaba de variantes[].stock, que era OPCIONAL, y
+	 * "se vendio todo" daba el mismo 0 que "nadie registro nada". Mismo
+	 * criterio que el catalogo (routes/+page.svelte).
 	 */
-	let estadoStock = $derived.by((): 'hay' | 'sin-dato' | 'agotado' | 'ninguno' => {
-		if (producto == null) return 'sin-dato';
-		if ((producto.stock_total ?? 0) > 0) return 'hay';
-		const registradas = producto.variantes.filter((v) => v.stock !== undefined).length;
-		if (registradas === 0) return 'sin-dato';
-		if (registradas === producto.variantes.length) return 'agotado';
-		return 'ninguno';
+	let estadoStock = $derived.by((): 'hay' | 'sin-oferta' | 'agotado' => {
+		if (producto == null) return 'sin-oferta';
+		if (producto.stock_total > 0) return 'hay';
+		return producto.total_ofertas === 0 ? 'sin-oferta' : 'agotado';
 	});
 
 	// ------------------------------------------------------------- al pedido
@@ -285,12 +322,18 @@
 		return rPedido.payload.id_pedido;
 	}
 
-	async function alPedido(v: Variante) {
+	/**
+	 * Se agrega una OFERTA, no una variante: la misma presentacion la pueden
+	 * vender varias personas a precios distintos, asi que hay que decir a
+	 * cual se le compra. El backend saca el producto, la variante, el nombre
+	 * y el precio de la propia oferta.
+	 */
+	async function alPedido(v: Variante, o: Oferta) {
 		avisoPedido = '';
 		errorPedido = '';
 		varianteDelAviso = v.id_producto_variante;
 
-		const escrito = cantidades[v.id_producto_variante];
+		const escrito = cantidades[Number(o.id_oferta)];
 		// El campo esta vacio casi siempre: agregar de a uno es lo normal.
 		const cantidad = escrito == null || String(escrito).trim() === '' ? 1 : Number(escrito);
 		if (!Number.isInteger(cantidad) || cantidad <= 0) {
@@ -306,17 +349,16 @@
 		}
 
 		const r = await agregarLinea(idPedido, {
-			id_producto: id,
-			id_producto_variante: v.id_producto_variante,
+			id_oferta: Number(o.id_oferta),
 			cantidad
 		});
 		agregando = 0;
 
 		if (r.ok && r.payload) {
 			avisoPedido =
-				`"${v.nombre_variante}" queda en ${r.payload.cantidad} en tu pedido ` +
-				`(hay ${r.payload.stock_disponible} en existencia). Se ve en tu panel.`;
-			cantidades[v.id_producto_variante] = '';
+				`"${v.nombre_variante}" de ${o.vendedor.usuario} queda en ${r.payload.cantidad} ` +
+				`en tu pedido (le quedan ${r.payload.stock_disponible}). Se ve en tu panel.`;
+			cantidades[Number(o.id_oferta)] = '';
 		} else if (r.estado === 401) {
 			haySesion = false;
 			errorPedido = 'Se acabo tu sesion. Vuelve a entrar para seguir.';
@@ -401,26 +443,28 @@
 					</span>
 					<h1>{producto.nombre}</h1>
 					<p class="precio">{rango(producto)}</p>
+					{#if desde(producto)}
+						<p class="desde-p">
+							desde <strong>{desde(producto)}</strong> con otro vendedor
+						</p>
+					{/if}
+					{#if producto.total_ofertas > 1}
+						<p class="desde-p">{producto.total_ofertas} vendedores lo tienen</p>
+					{/if}
 					<p class="desc">{producto.descripcion ?? ''}</p>
 
 					<!-- Las existencias, que es lo primero que se pregunta -->
 					<div
 						class="existencias"
-						class:agotado={estadoStock === 'agotado' || estadoStock === 'ninguno'}
-						class:sin-dato={estadoStock === 'sin-dato'}
+						class:agotado={estadoStock === 'agotado'}
+						class:sin-dato={estadoStock === 'sin-oferta'}
 					>
-						{#if estadoStock === 'sin-dato'}
-							<strong>Sin registrar</strong>
-							<span>Este producto todavia no tiene existencias cargadas</span>
+						{#if estadoStock === 'sin-oferta'}
+							<strong>Sin vendedores</strong>
+							<span>Nadie ofrece este producto todavia</span>
 						{:else if estadoStock === 'agotado'}
 							<strong>Agotado</strong>
-							<span>Ninguna presentacion tiene unidades</span>
-						{:else if estadoStock === 'ninguno'}
-							<strong>Sin unidades</strong>
-							<span>
-								Unas presentaciones estan agotadas y a otras nadie les ha registrado
-								existencias
-							</span>
+							<span>Hay vendedores, pero ninguno tiene unidades</span>
 						{:else}
 							<strong>{producto.stock_total}</strong>
 							<span>
@@ -434,9 +478,6 @@
 
 					<dl class="datos">
 						<div>
-							<dt>Vendedor</dt>
-							<dd>{producto.vendedor.nombre} {producto.vendedor.apellido}</dd>
-						</div>
 						<div><dt>Publicado</dt><dd>{fecha(producto.fecha_creacion)}</dd></div>
 						<div>
 							<dt>Variantes</dt>
@@ -459,7 +500,7 @@
 
 			{#if propias.length > 0}
 				<section>
-					<h2>Otros datos del vendedor</h2>
+					<h2>Otros datos</h2>
 					<dl class="ficha">
 						{#each propias as c (c.nombre)}
 							<div><dt>{c.nombre}</dt><dd>{c.valor}</dd></div>
@@ -472,22 +513,31 @@
 				<h2>Presentaciones</h2>
 
 				{#each producto.variantes as v (v.id_producto_variante)}
+					<!-- Las ofertas de esta presentacion, de la mas barata a la mas
+					     cara. Un {@const} tiene que ser hijo directo del bloque. -->
+					{@const ofertas = ofertasDe(v)}
 					<article class="variante">
 						<div class="cabeza-variante">
 							<div>
 								<h3>{v.nombre_variante}</h3>
 								<p class="desc">{v.descripcion ?? ''}</p>
 							</div>
-							<div class="lado-variante">
-								<strong class="precio-v">{quetzales(aNumero(v.precio))}</strong>
-								{#if v.stock === undefined}
-									<span class="stock-v sin-dato">Sin registrar</span>
-								{:else if v.stock === 0}
+						<div class="lado-variante">
+								<!-- El resumen de la presentacion. El detalle por vendedor va
+								     abajo, en la lista de ofertas. -->
+								{#if aNumero(v.precio_tienda) > 0}
+									<strong class="precio-v">{quetzales(aNumero(v.precio_tienda))}</strong>
+								{:else if aNumero(v.precio_desde) > 0}
+									<strong class="precio-v">{quetzales(aNumero(v.precio_desde))}</strong>
+								{/if}
+								{#if v.total_ofertas === 0}
+									<span class="stock-v sin-dato">Sin vendedores</span>
+								{:else if v.stock_total === 0}
 									<span class="stock-v agotado">Agotada</span>
 								{:else}
 									<span class="stock-v">
-										{v.stock}
-										{v.stock === 1 ? 'unidad' : 'unidades'}
+										{v.stock_total}
+										{v.stock_total === 1 ? 'unidad' : 'unidades'}
 									</span>
 								{/if}
 							</div>
@@ -501,47 +551,71 @@
 							</dl>
 						{/if}
 
-						<!-- Solo con sesion: /comprador/pedidos la exige (no el rol). Sin
-						     ella se ensena el enlace en vez de un boton que daria 401. -->
-						{#if haySesion}
-							<div class="al-pedido">
-								<label class="oculto" for={'cant-' + v.id_producto_variante}>
-									Cantidad de {v.nombre_variante}
-								</label>
-								<input
-									id={'cant-' + v.id_producto_variante}
-									type="number"
-									min="1"
-									step="1"
-									bind:value={cantidades[v.id_producto_variante]}
-									placeholder="1"
-								/>
-								<button
-									type="button"
-									onclick={() => alPedido(v)}
-									disabled={agregando !== 0}
-								>
-									{agregando === v.id_producto_variante ? 'Agregando...' : 'Agregar al pedido'}
-								</button>
-								{#if v.stock === undefined}
-									<span class="nota">
-										Esta presentacion todavia no tiene existencias registradas; el pedido la
-										va a rechazar hasta que su vendedor se las cree.
-									</span>
-								{/if}
-
-								<!-- La respuesta va pegada al boton que la produjo, no arriba de todo. -->
-								{#if varianteDelAviso === v.id_producto_variante && avisoPedido}
-									<p class="aviso-pedido ok" role="status">{avisoPedido}</p>
-								{/if}
-								{#if varianteDelAviso === v.id_producto_variante && errorPedido}
-									<p class="aviso-pedido malo" role="alert">{errorPedido}</p>
-								{/if}
-							</div>
+						<!-- Una fila por OFERTA: la misma presentacion la pueden vender
+						     varias personas a precios distintos, y hay que poder elegir a
+						     cual comprarle. Las trae GET /productos/:id desde PostgreSQL,
+						     no del documento: precio y stock cambian en cada venta. -->
+						{#if ofertas.length === 0}
+							<p class="nota">Nadie vende esta presentacion todavia.</p>
 						{:else}
-							<p class="nota">
-								<a href="/entrar">Inicia sesion</a> para agregarla a un pedido.
-							</p>
+							<ul class="ofertas">
+								{#each ofertas as o (o.id_oferta)}
+									<li class:tienda={o.es_tienda}>
+										<div class="quien">
+											<strong>{o.vendedor.nombre} {o.vendedor.apellido ?? ''}</strong>
+											{#if o.es_tienda}<span class="sello">la tienda</span>{/if}
+											<span class="usuario">{o.vendedor.usuario}</span>
+										</div>
+
+										<div class="cuanto">
+											<strong class="precio-v">{quetzales(Number(o.precio))}</strong>
+											{#if o.stock === 0}
+												<span class="stock-v agotado">Agotada</span>
+											{:else}
+												<span class="stock-v">{o.stock} {o.stock === 1 ? 'unidad' : 'unidades'}</span>
+											{/if}
+										</div>
+
+										{#if haySesion}
+											<div class="al-pedido">
+												<label class="oculto" for={'cant-' + o.id_oferta}>
+													Cantidad de {v.nombre_variante} de {o.vendedor.usuario}
+												</label>
+												<input
+													id={'cant-' + o.id_oferta}
+													type="number"
+													min="1"
+													step="1"
+													bind:value={cantidades[Number(o.id_oferta)]}
+													placeholder="1"
+													disabled={o.stock === 0}
+												/>
+												<button
+													type="button"
+													onclick={() => alPedido(v, o)}
+													disabled={agregando !== 0 || o.stock === 0}
+												>
+													{agregando === v.id_producto_variante ? 'Agregando...' : 'Agregar'}
+												</button>
+											</div>
+										{/if}
+									</li>
+								{/each}
+							</ul>
+
+							{#if !haySesion}
+								<p class="nota">
+									<a href="/entrar">Inicia sesion</a> para agregar al pedido.
+								</p>
+							{/if}
+
+							<!-- La respuesta va pegada a la presentacion que la produjo. -->
+							{#if varianteDelAviso === v.id_producto_variante && avisoPedido}
+								<p class="aviso-pedido ok" role="status">{avisoPedido}</p>
+							{/if}
+							{#if varianteDelAviso === v.id_producto_variante && errorPedido}
+								<p class="aviso-pedido malo" role="alert">{errorPedido}</p>
+							{/if}
 						{/if}
 					</article>
 				{/each}
@@ -845,6 +919,75 @@
 	}
 
 	/* ---------- agregar al pedido ---------- */
+
+	/* ---------- las ofertas de una presentacion ---------- */
+
+	.ofertas {
+		margin: 10px 0 0;
+		padding: 0;
+		list-style: none;
+		display: grid;
+		gap: 6px;
+	}
+
+	.ofertas li {
+		display: grid;
+		grid-template-columns: 1fr auto;
+		align-items: center;
+		gap: 4px 1rem;
+		padding: 10px 12px;
+		background: var(--off);
+		border: 1px solid var(--linea);
+		border-radius: 6px;
+	}
+
+	/* La de la tienda se marca, porque es la que se ensena en el catalogo */
+	.ofertas li.tienda {
+		background: var(--indigo-cl);
+		border-color: var(--indigo);
+	}
+
+	.quien {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: 6px;
+		font-size: 0.9rem;
+	}
+
+	.quien .usuario {
+		font-size: 0.8rem;
+		color: var(--gris);
+	}
+
+	.sello {
+		padding: 1px 7px;
+		font-size: 0.7rem;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		color: var(--blanco);
+		background: var(--indigo);
+		border-radius: 999px;
+	}
+
+	.cuanto {
+		display: flex;
+		align-items: baseline;
+		gap: 10px;
+		white-space: nowrap;
+	}
+
+	/* El formulario de comprar ocupa las dos columnas, debajo */
+	.ofertas .al-pedido {
+		grid-column: 1 / -1;
+		margin-top: 4px;
+	}
+
+	@media (max-width: 560px) {
+		.ofertas li {
+			grid-template-columns: 1fr;
+		}
+	}
 
 	.al-pedido {
 		display: flex;

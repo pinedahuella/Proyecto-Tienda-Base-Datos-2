@@ -64,10 +64,24 @@ export class PedidosCompradorService {
    * criterio que ya usa DireccionUsuarioService).
    */
   async crear(idUsuario: string, datos: CrearPedidoPeticion): Promise<string> {
+    // Se acepta tambien como texto, y no es laxitud: id_direccion es un
+    // bigint, y el driver pg los devuelve como STRING para no perder
+    // precision. O sea que GET /direccion-usuario responde
+    // { "id_direccion": "2" }, y exigir aqui un number rechazaba justo lo que
+    // esta misma API acababa de entregar: el cliente hacia lo obvio -- tomar
+    // el id de la lista y mandarlo -- y recibia un 400.
+    //
+    // Se comprueba que sea un entero positivo, venga como sea; lo que no se
+    // acepta es texto que no sea un numero.
+    const idDireccion =
+      typeof datos.id_direccion === 'string' && /^\d+$/.test(datos.id_direccion)
+        ? Number(datos.id_direccion)
+        : datos.id_direccion;
+
     if (
-      typeof datos.id_direccion !== 'number' ||
-      !Number.isInteger(datos.id_direccion) ||
-      datos.id_direccion <= 0
+      typeof idDireccion !== 'number' ||
+      !Number.isInteger(idDireccion) ||
+      idDireccion <= 0
     ) {
       throw new ErrorValidacion(
         'El id_direccion es obligatorio y debe ser un numero entero mayor a 0',
@@ -84,7 +98,7 @@ export class PedidosCompradorService {
          WHERE dh.id_direccion = $1 AND d.id_usuario = $2
          ORDER BY dh.fecha_creacion DESC
          LIMIT 1`,
-        [datos.id_direccion, idUsuario],
+        [idDireccion, idUsuario],
       );
       const historial = resultadoHistorial.rows[0];
 

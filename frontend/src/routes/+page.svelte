@@ -17,7 +17,9 @@
 	 * esta en backend/elementos Generales/endpoints-productos.md:
 	 *
 	 *   fijos      nombre (parcial, sin distinguir mayusculas), id_categoria,
-	 *              id_vendedor, precio_min, precio_max, estado_variante
+	 *              precio_min, precio_max (van sobre precio_desde, el mas
+	 *              barato al que se ofrece), precio_tienda_min/max,
+	 *              estado_variante, stock_min/max, stock_tienda_min/max
 	 *   dinamicos  cualquier OTRO nombre de parametro es el nombre de una
 	 *              caracteristica, y su prefijo decide el operador:
 	 *                (sin prefijo)  igualdad exacta
@@ -56,14 +58,22 @@
 		unidad: string | null;
 	}
 
+	/** Como llega numeric(12,2) de Postgres a traves de Mongo. */
+	type Decimal = { $numberDecimal: string } | string | number;
+
 	interface Variante {
 		id_producto_variante: number;
 		nombre_variante: string;
-		precio: { $numberDecimal: string } | string | number;
 		descripcion: string | null;
 		estado: string;
 		imagenes: string[];
-		stock?: number;
+		/** El precio de la tienda para esta variante. null si la tienda no la oferta. */
+		precio_tienda: Decimal | null;
+		/** El mas barato al que se ofrece, de cualquier vendedor. */
+		precio_desde: Decimal | null;
+		stock_tienda: number;
+		stock_total: number;
+		total_ofertas: number;
 		caracteristicas_adicionales?: Caracteristica[];
 	}
 
@@ -72,17 +82,31 @@
 		nombre: string;
 		descripcion: string | null;
 		estado: string;
-		vendedor: { id_usuario: number; usuario: string; nombre: string; apellido: string };
 		categoria: { id_categoria: number; nombre: string; categoria_padre: string | null };
 		variantes: Variante[];
 		caracteristicas_adicionales?: Caracteristica[];
 		caracteristicas_personalizadas?: Caracteristica[];
+
 		/**
-		 * La suma de variantes[].stock. No se guarda en Mongo: la calcula el
-		 * backend al responder, y por eso viene siempre, sin pedirla. Una
-		 * variante sin stock cuenta como 0.
+		 * Los cinco calculados. El producto ya NO tiene vendedor ni precio ni
+		 * stock propios: son de cada oferta, y las ofertas viven en PostgreSQL.
+		 * Estos cinco son lo unico que viaja al documento, y son justo lo que
+		 * la tarjeta necesita para pintarse sin pedir nada mas.
+		 *
+		 * precio_tienda es el que se ENSENA (regla del profesor: el primero
+		 * siempre es el de la pagina) y precio_desde el mas barato al que
+		 * alguien lo ofrece. Cuando el segundo es menor, la tarjeta dice los
+		 * dos: si solo dijera el de la tienda, estaria escondiendo que se
+		 * puede pagar menos.
 		 */
-		stock_total?: number;
+		precio_tienda: Decimal | null;
+		precio_desde: Decimal | null;
+		/** Unidades de la tienda, sumadas sobre todas sus variantes. */
+		stock_tienda: number;
+		/** Unidades entre TODOS los vendedores activos. Es el que dice si hay o no. */
+		stock_total: number;
+		/** Cuantos vendedores distintos lo tienen activo. */
+		total_ofertas: number;
 	}
 
 	interface Tanda {
@@ -106,12 +130,15 @@
 		'nombre',
 		'estado',
 		'id_categoria',
-		'id_vendedor',
 		'precio_min',
 		'precio_max',
+		'precio_tienda_min',
+		'precio_tienda_max',
 		'estado_variante',
 		'stock_min',
-		'stock_max'
+		'stock_max',
+		'stock_tienda_min',
+		'stock_tienda_max'
 	]);
 
 	/** Igual al varchar(100) de caracteristica.nombre, que es lo que valida el backend. */
@@ -238,8 +265,6 @@
 	let precioMin = $state<Campo>('');
 	let precioMax = $state<Campo>('');
 	let soloVariantesActivas = $state(false);
-	let idVendedor = $state('');
-	let vendedorRotulo = $state('');
 
 	/**
 	 * El filtro de stock. Los tres primeros casos son los que la gente pide de
@@ -339,7 +364,10 @@
 
 		if (texto(nombre)) p.set('nombre', texto(nombre));
 		if (idCategoria) p.set('id_categoria', idCategoria);
-		if (idVendedor) p.set('id_vendedor', idVendedor);
+		// precio_min/precio_max van sobre precio_desde, el mas barato al que se
+		// ofrece. La tarjeta ensena el de la tienda, pero quien pone un tope
+		// quiere lo que puede pagar: si la tienda pide Q4100 y otro vendedor lo
+		// tiene en Q3856, buscar "hasta Q4000" tiene que encontrarlo.
 		if (texto(precioMin)) p.set('precio_min', texto(precioMin));
 		if (texto(precioMax)) p.set('precio_max', texto(precioMax));
 		// estado_variante y el rango de precio describen la MISMA variante: el
@@ -528,26 +556,12 @@
 		buscar();
 	}
 
-	function filtrarPorVendedor(p: Producto) {
-		idVendedor = String(p.vendedor.id_usuario);
-		vendedorRotulo = p.vendedor.usuario;
-		buscar();
-	}
-
-	function quitarVendedor() {
-		idVendedor = '';
-		vendedorRotulo = '';
-		buscar();
-	}
-
 	function limpiar() {
 		nombre = '';
 		idCategoria = '';
 		precioMin = '';
 		precioMax = '';
 		soloVariantesActivas = false;
-		idVendedor = '';
-		vendedorRotulo = '';
 		disponibilidad = 'cualquiera';
 		stockMin = '';
 		stockMax = '';
@@ -566,7 +580,6 @@
 		Boolean(
 			texto(nombre) ||
 				idCategoria ||
-				idVendedor ||
 				texto(precioMin) ||
 				texto(precioMax) ||
 				soloVariantesActivas ||
@@ -582,11 +595,16 @@
 
 	// ---------- lo que se ensena de cada producto ----------
 
-	/** El precio llega como Decimal128 de Mongo, no como numero. */
-	function aNumero(precio: Variante['precio']): number {
+	/**
+	 * El dinero llega como Decimal128 de Mongo, no como numero: viaja en
+	 * { $numberDecimal: "4100.00" }. Se guarda asi a proposito, porque el
+	 * numero de JavaScript es punto flotante y pierde centavos.
+	 */
+	function aNumero(precio: Decimal | null | undefined): number {
+		if (precio == null) return 0;
 		if (typeof precio === 'number') return precio;
 		if (typeof precio === 'string') return Number(precio);
-		return Number(precio?.$numberDecimal ?? 0);
+		return Number(precio.$numberDecimal ?? 0);
 	}
 
 	function quetzales(n: number): string {
@@ -594,39 +612,57 @@
 	}
 
 	/**
-	 * Un producto no tiene un precio: tiene el de cada variante. Se ensena el
-	 * rango, y un solo numero cuando todas cuestan lo mismo.
+	 * El precio que va en la tarjeta: el de la tienda. Es la regla del
+	 * profesor, el primero siempre es el de la pagina.
+	 *
+	 * Ya no se calcula recorriendo las variantes. Desde el giro multi-vendedor
+	 * el producto no tiene "un precio" que deducir: cada vendedor pone el
+	 * suyo, y el documento trae el de la tienda ya resuelto.
 	 */
 	function precio(p: Producto): string {
-		const precios = p.variantes.map((v) => aNumero(v.precio)).filter((n) => n > 0);
-		if (precios.length === 0) return 'Sin precio';
-		const min = Math.min(...precios);
-		const max = Math.max(...precios);
-		return min === max ? quetzales(min) : `${quetzales(min)} - ${quetzales(max)}`;
+		const n = aNumero(p.precio_tienda);
+		return n > 0 ? quetzales(n) : 'Sin precio';
 	}
 
 	/**
-	 * Que decir del stock de un producto. Son TRES casos, no dos, y
-	 * stock_total no los separa: el backend suma las variantes contando como 0
-	 * las que no traen el campo `stock`, asi que "se vendio todo" y "nadie le
-	 * ha registrado existencias" dan el mismo 0.
+	 * Lo que se puede pagar, cuando alguien lo tiene mas barato que la tienda.
+	 * Devuelve null si el de la tienda ya es el mejor: en ese caso la tarjeta
+	 * ensena un solo numero y no dos iguales.
+	 *
+	 * Existe porque esconderlo seria mentir por omision. La tarjeta dice
+	 * Q4100 y el producto se puede comprar en Q3856; si el buscador lo
+	 * devuelve por un tope de Q4000 (que lo hace, filtra por este) y la
+	 * tarjeta solo dijera Q4100, el resultado pareceria un error.
+	 */
+	function precioDesde(p: Producto): string | null {
+		const tienda = aNumero(p.precio_tienda);
+		const desde = aNumero(p.precio_desde);
+		if (desde <= 0) return null;
+		if (tienda > 0 && desde >= tienda) return null;
+		return quetzales(desde);
+	}
+
+	/**
+	 * Que decir del stock. Siguen siendo tres casos, pero ahora salen de dos
+	 * numeros de verdad en vez de deducirse contando variantes:
 	 *
 	 *   hay          stock_total > 0
-	 *   sin-dato     NINGUNA variante trae el campo: nadie registro nada
-	 *   agotado      todas lo traen y suman 0: de verdad no queda ninguna
-	 *   ninguno      mixto: unas registradas en 0 y otras sin registrar
+	 *   sin-oferta   nadie lo vende todavia (total_ofertas === 0)
+	 *   agotado      hay vendedores, pero ninguno tiene unidades
 	 *
-	 * El cuarto caso es el que se colaba: con un `every()` bastaba UNA variante
-	 * registrada en 0 para que el producto entero se diera por inventariado y
-	 * saliera "Agotado" en rojo, afirmando que se vendio lo que nunca se
-	 * registro. Se nombra por lo que consta y ya.
+	 * Antes esto era peor. stock_total se sumaba de variantes[].stock, que era
+	 * OPCIONAL, asi que "se vendio todo" y "nadie registro existencias" daban
+	 * el mismo 0 y habia que ir a contar cuantas variantes traian el campo. De
+	 * ahi salio el bug del `every()`: bastaba UNA variante en 0 para dar el
+	 * producto entero por agotado, afirmando que se vendio lo que nunca se
+	 * registro.
+	 *
+	 * Ahora los dos numeros vienen calculados del lado de la base y ninguno
+	 * falta, asi que la pregunta se contesta mirando, no deduciendo.
 	 */
-	function estadoStock(p: Producto): 'hay' | 'sin-dato' | 'agotado' | 'ninguno' {
-		if ((p.stock_total ?? 0) > 0) return 'hay';
-		const registradas = p.variantes.filter((v) => v.stock !== undefined).length;
-		if (registradas === 0) return 'sin-dato';
-		if (registradas === p.variantes.length) return 'agotado';
-		return 'ninguno';
+	function estadoStock(p: Producto): 'hay' | 'sin-oferta' | 'agotado' {
+		if (p.stock_total > 0) return 'hay';
+		return p.total_ofertas === 0 ? 'sin-oferta' : 'agotado';
 	}
 
 	function portada(p: Producto): string | null {
@@ -899,20 +935,8 @@
 					<p class="aviso">{errorFiltro}</p>
 				{/if}
 
-				{#if filtros.length > 0 || idVendedor}
+				{#if filtros.length > 0}
 					<ul class="etiquetas">
-						{#if idVendedor}
-							<li>
-								<span>Vendedor: {vendedorRotulo}</span>
-								<button
-									type="button"
-									onclick={quitarVendedor}
-									aria-label="Quitar el filtro de vendedor"
-								>
-									&times;
-								</button>
-							</li>
-						{/if}
 						{#each filtros as f (f.id)}
 							<li>
 								<span>{describir(f)}</span>
@@ -994,33 +1018,39 @@
 								</span>
 							</div>
 
+							<!-- El segundo precio solo aparece cuando alguien lo tiene mas
+							     barato que la tienda. Si no, no se pintan dos numeros
+							     iguales. -->
+							{#if precioDesde(p)}
+								<p class="desde">
+									desde <strong>{precioDesde(p)}</strong> con otro vendedor
+								</p>
+							{/if}
+
+							{#if p.total_ofertas > 1}
+								<p class="ofertas">{p.total_ofertas} vendedores lo tienen</p>
+							{/if}
+
 							<!-- stock_total viene siempre, no hay que pedirlo con nada.
 							     Pero 0 no siempre quiere decir "agotado": ver estadoStock(). -->
 							{#if p.stock_total !== undefined}
 								{@const estado = estadoStock(p)}
 								<span
 									class="stock"
-									class:agotado={estado === 'agotado' || estado === 'ninguno'}
-									class:sin-dato={estado === 'sin-dato'}
+									class:agotado={estado === 'agotado'}
+									class:sin-dato={estado === 'sin-oferta'}
 								>
 									{#if estado === 'hay'}
 										{p.stock_total} en existencia
-									{:else if estado === 'sin-dato'}
-										Sin existencias registradas
-									{:else if estado === 'agotado'}
-										Agotado
+									{:else if estado === 'sin-oferta'}
+										Nadie lo vende todavia
 									{:else}
-										Sin unidades disponibles
+										Agotado
 									{/if}
 								</span>
 							{/if}
 						</div>
 					</a>
-
-					<!-- Va fuera del enlace: un boton dentro de un <a> no es HTML valido -->
-					<button type="button" class="vendedor" onclick={() => filtrarPorVendedor(p)}>
-						Ver todo de {p.vendedor.usuario}
-					</button>
 				</article>
 			{/each}
 		</div>
@@ -1380,25 +1410,23 @@
 		font-style: italic;
 	}
 
-	.vendedor {
-		width: 100%;
-		padding: 8px 1rem;
-		font-family: inherit;
+	.desde {
+		margin: 0;
+		padding: 0 1rem 2px;
 		font-size: 0.8rem;
-		text-align: left;
 		color: var(--gris);
-		background: var(--off);
-		border: none;
-		border-top: 1px solid var(--linea);
-		cursor: pointer;
-		transition:
-			color var(--t),
-			background var(--t);
 	}
 
-	.vendedor:hover {
+	.desde strong {
+		font-weight: 500;
 		color: var(--indigo);
-		background: var(--indigo-cl);
+	}
+
+	.ofertas {
+		margin: 0;
+		padding: 0 1rem 4px;
+		font-size: 0.75rem;
+		color: var(--gris);
 	}
 
 	/* ---------- estados ---------- */

@@ -7,7 +7,12 @@
  * direccion_historial antes de llamar a crear_pedido().
  */
 export interface CrearPedidoPeticion {
-  id_direccion: number;
+  /**
+   * Se acepta number o el string que devuelve GET /direccion-usuario: es un
+   * bigint y el driver pg lo entrega como texto para no perder precision.
+   * Exigir solo number rechazaba lo que esta misma API acababa de dar.
+   */
+  id_direccion: number | string;
 }
 
 /** Respuesta de POST /comprador/pedidos. */
