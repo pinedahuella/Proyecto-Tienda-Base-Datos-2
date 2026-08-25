@@ -1,8 +1,8 @@
 # Plan: crear/editar productos y ofertas
 
-Estado al 25 de agosto de 2026. Los puntos 1 y 2 **ya están construidos y
-probados**, ver `endpoints-vendedores.md`. Los puntos 3 a 5 siguen siendo
-plan, no código.
+Estado al 25 de agosto de 2026. Los puntos 1, 2 y 4 **ya están construidos
+y probados**, ver `endpoints-vendedores.md`. Solo el punto 5 sigue siendo
+plan, no código (el 3 quedó absorbido por el 2, ver nota abajo).
 
 **El punto 2 no se implementó tal como está escrito abajo.** En vez de dos
 rutas separadas (`PATCH /vendedor/ofertas/:id` para precio/estado, `POST
@@ -166,29 +166,64 @@ dueño de la oferta.
 
 ---
 
-## 4. Rediseñar `POST`/`PATCH /vendedor/productos` de verdad
+## 4. Rediseñar `POST`/`PATCH /vendedor/productos` de verdad — HECHO
 
-Hoy es un parche mínimo (ver la nota al inicio de
-`services/vendedores/productos.service.ts`): sigue aceptando `precio` y
-`stock_inicial` por variante y los tira a la basura silenciosamente
-(los guarda como `null`/`0` fijo). Hay que limpiarlo:
+**Completado y probado en vivo el 25 de agosto de 2026.** Los cinco pasos
+de abajo ya están aplicados tal como se habían planeado:
 
-1. **Quitar `precio` de `VarianteCreacionPeticion`** (`dto/crear-producto.ts`)
-   y de `EditarProductoPeticion` si aplica — ya no es un dato que se
-   pida, el precio es de la oferta.
-2. **Quitar `validarPrecioObligatorio` del flujo de crear/editar producto**
-   (`services/vendedores/productos.service.ts`, función
-   `construirVariantes`) — ese validador se **reusa** para el `precio` de
-   `POST /vendedor/ofertas` (punto 1), no se borra el helper, solo se dejan
-   de llamar desde aquí.
-3. **Quitar `stock_inicial` y toda la lógica de
-   `crearInventariosIniciales`** — ya no tiene sentido: crear un producto
-   del catálogo no crea ninguna oferta, así que no hay nada a lo que
-   ponerle stock todavía. Con esto se puede quitar también la dependencia
-   de `InventarioVendedorService` en este archivo.
-4. La restricción de "solo tienda" (`exigirTienda`) ya está — no tocar.
-5. Los cuatro campos calculados siguen naciendo en `null`/`0` al crear
-   (correcto: sin ofertas, no hay nada que calcular).
+1. ~~Quitar `precio` de `VarianteCreacionPeticion`~~ — hecho, y
+   `EditarProductoPeticion` la reusa, así que quedó limpio también ahí sin
+   tocarla aparte.
+2. ~~Quitar `validarPrecioObligatorio` del flujo de crear/editar
+   producto~~ — hecho. El helper sigue vivo, lo reusa `POST
+   /vendedor/ofertas`.
+3. ~~Quitar `stock_inicial` y `crearInventariosIniciales`~~ — hecho, el
+   método entero se borró y `InventarioVendedorService` salió del
+   constructor de `ProductosVendedorService`.
+4. La restricción de "solo tienda" (`exigirTienda`) — sin tocar, seguía
+   funcionando; de paso se notó que la documentación (`endpoints-vendedores.md`)
+   decía "cualquier vendedor" cuando el código siempre exigió tienda — ya
+   se corrigió el texto.
+5. Los cinco campos calculados (no cuatro) siguen naciendo en `null`/`0`
+   al crear — confirmado.
+
+Si el cliente manda `precio`/`stock_inicial` de todos modos (formato
+viejo), se ignoran en silencio — no rechaza la petición, tampoco los
+guarda. Probado: crear sin esos campos, crear mandándolos a propósito,
+editar (agregar variante + cambiar nombre) y confirmar los eventos en
+`productos_eventos`, reconstruir con `GET .../historial` después del
+cambio, y el ciclo completo producto→oferta (crear producto sin precio,
+activarlo, ofertarlo con `POST /vendedor/ofertas`, ver que los cinco
+campos calculados se activan recién ahí).
+
+**Bug encontrado de paso — corregido y probado el mismo 25 de agosto de
+2026, en una sesión aparte inmediatamente después.** `construirVariantes`
+reinicializaba `precio_tienda`/`precio_desde`/`stock_tienda`/`stock_total`/
+`total_ofertas`, `fecha_creacion` y `estado` de **cada** variante que
+viniera en el array de un PATCH, incluida una "conservada" por
+`id_producto_variante` sin ningún cambio real — le borraba las ofertas
+activas que tuviera, y de paso dejaba la raíz del producto con números que
+ya no coincidían con sus propias variantes.
+
+La corrección: cuando una variante se conserva (se encuentra por
+`id_producto_variante` entre las que el producto ya tenía),
+`construirVariantes` copia esos siete campos de la variante existente en
+vez de reinicializarlos — solo una variante genuinamente nueva nace con
+los valores por defecto (`activa`, hoy, `null`/`0`). `nombre_variante`,
+`descripcion`, `imagenes` y las características siguen viniendo completas
+de la petición, como siempre — esos sí los controla quien edita.
+
+Probado contra la base real: producto con oferta activa + edición de
+**otra** variante ya no le borra nada a la primera; agregar una variante
+nueva junto a las existentes solo inicializa la nueva; editar de verdad
+`nombre_variante`/`descripcion` de una variante con oferta cambia esos dos
+campos y conserva los demás; una variante con `estado: "inactiva"`
+(forzada a mano para la prueba, ninguna ruta la pone hoy) sobrevive varias
+ediciones seguidas sin volver a `activa` sola; la reconstrucción de
+`GET .../historial` se reprobó después del fix y sigue devolviendo el
+estado correcto; el rechazo por id de variante ajena (400) sigue igual.
+Documentado con el detalle completo en `endpoints-vendedores.md`, sección
+`PATCH /vendedor/productos/:id`.
 
 ---
 

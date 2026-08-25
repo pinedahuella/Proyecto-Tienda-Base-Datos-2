@@ -16,9 +16,7 @@ import {
   validarImagenes,
   validarNombreProducto,
   validarNombreVariante,
-  validarPrecioObligatorio,
 } from '../../helpers/validaciones-crear-producto';
-import { validarStockInicial } from '../../helpers/validaciones-inventario';
 import {
   CaracteristicaCatalogoPeticion,
   CaracteristicaPersonalizadaPeticion,
@@ -39,23 +37,11 @@ import {
   ProductoEventoModificacion,
 } from '../../models/producto-evento';
 import { UsuarioService } from '../../services/usuario.service';
-import { InventarioVendedorService } from '../../services/vendedores/inventario.service';
 import { CORREO_TIENDA } from '../../helpers/constantes';
 
 const ESTADO_PRODUCTO_NUEVO = 'borrador';
 const ESTADO_VARIANTE_NUEVA = 'activa';
 const REGEX_ID = /^\d+$/;
-
-/**
- * PARCHE MINIMO: este archivo entero sigue con la forma vieja de
- * "productos propios de un vendedor" (crea con precio y stock por
- * variante, historial, etc.) solo para que el proyecto compile despues del
- * cambio de modelo. Lo que antes era "es tuyo" ahora es "sos la tienda"
- * (CORREO_TIENDA, ver cambios-multivendedor.md seccion 9), y ya no se
- * guardan precio/stock en la variante (eso es de la oferta). Este servicio
- * necesita un rediseno de verdad cuando se ataque la creacion de ofertas --
- * no es la solucion final.
- */
 
 /**
  * Servicio de POST /vendedor/productos.
@@ -75,10 +61,7 @@ const REGEX_ID = /^\d+$/;
 export class ProductosVendedorService {
   private readonly logger = new Logger(ProductosVendedorService.name);
 
-  constructor(
-    private readonly usuarioService: UsuarioService,
-    private readonly inventarioVendedorService: InventarioVendedorService,
-  ) {}
+  constructor(private readonly usuarioService: UsuarioService) {}
 
   async crear(idUsuario: string, datos: CrearProductoPeticion): Promise<Producto> {
     const nombre = validarNombreProducto(datos.nombre);
@@ -94,14 +77,6 @@ export class ProductosVendedorService {
       !Number.isInteger(datos.id_categoria)
     ) {
       throw new ErrorValidacion('El id de la categoria no es valido');
-    }
-    // Se valida antes de crear nada: un stock_inicial invalido rechaza toda
-    // la creacion, en vez de crear el producto y fallar despues creando su
-    // inventario a medias.
-    for (const peticionVariante of datos.variantes) {
-      if (peticionVariante?.stock_inicial != null) {
-        validarStockInicial(peticionVariante.stock_inicial);
-      }
     }
 
     const coleccionProductos = mongoDb.collection<Producto>('productos');
@@ -160,56 +135,12 @@ export class ProductosVendedorService {
       await coleccionProductos.insertOne(producto);
       await this.crearEventoCreacion(producto);
 
-      await this.crearInventariosIniciales(idProducto, idUsuario, datos.variantes, variantes);
-
       return producto;
     } catch (error) {
       if (error instanceof ErrorValidacion) {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);
-    }
-  }
-
-  /**
-   * Por cada variante que trajo stock_inicial, crea su inventario real en
-   * PostgreSQL reutilizando InventarioVendedorService.crearInicial() tal
-   * cual (mismo mecanismo que POST /vendedor/productos/:id/inventario), una
-   * variante a la vez.
-   *
-   * El producto ya esta creado y confirmado en Mongo en este punto: si
-   * crear el inventario de alguna variante fallara (por ejemplo, PostgreSQL
-   * no responde), el producto se queda creado igual — esa variante nace en
-   * el mismo estado de hoy (sin inventario, arreglable despues con
-   * POST /vendedor/productos/:id/inventario). Por eso el error solo se
-   * loguea, nunca se relanza.
-   */
-  private async crearInventariosIniciales(
-    idProducto: number,
-    idUsuario: string,
-    peticionesVariantes: VarianteCreacionPeticion[],
-    variantesCreadas: ProductoVariante[],
-  ): Promise<void> {
-    for (let i = 0; i < variantesCreadas.length; i++) {
-      const stockInicial = peticionesVariantes[i]?.stock_inicial;
-      if (stockInicial == null) {
-        continue;
-      }
-      try {
-        await this.inventarioVendedorService.crearInicial(
-          String(idProducto),
-          idUsuario,
-          {
-            id_producto_variante: variantesCreadas[i].id_producto_variante,
-            stock_inicial: stockInicial,
-          },
-        );
-      } catch (error) {
-        this.logger.warn(
-          `No se pudo crear el inventario inicial de la variante ${variantesCreadas[i].id_producto_variante} ` +
-            `del producto ${idProducto}: ${error instanceof Error ? error.message : error}`,
-        );
-      }
     }
   }
 
@@ -296,10 +227,6 @@ export class ProductosVendedorService {
       const nombreVariante = validarNombreVariante(
         peticionVariante.nombre_variante,
       );
-      // Se sigue validando el formato del precio que manda el cliente
-      // (compatibilidad con el body de hoy), pero ya no se guarda en la
-      // variante: el precio es de la oferta, no del catalogo.
-      validarPrecioObligatorio(peticionVariante.precio);
       const descripcionVariante = validarDescripcionVariante(
         peticionVariante.descripcion,
       );
@@ -314,9 +241,17 @@ export class ProductosVendedorService {
       );
 
       let idProductoVariante: number;
+      // undefined para una variante nueva de verdad: ahi si nace con los
+      // valores por defecto de abajo. Si se encuentra, es la MISMA variante
+      // de siempre, solo con nombre/descripcion/imagenes/caracteristicas
+      // posiblemente editados -- todo lo que esta ruta no pregunta (cuando
+      // nacio, su estado real, y los cinco campos calculados que solo
+      // conoce ProductosService.recalcularCamposCalculados) tiene que
+      // seguir siendo lo que ya era, no lo que esta funcion adivine.
+      let existente: ProductoVariante | undefined;
 
       if (variantesExistentes != null && peticionVariante.id_producto_variante != null) {
-        const existente = variantesExistentes.find(
+        existente = variantesExistentes.find(
           (candidata) =>
             candidata.id_producto_variante === peticionVariante.id_producto_variante,
         );
@@ -334,16 +269,25 @@ export class ProductosVendedorService {
         id_producto_variante: idProductoVariante,
         nombre_variante: nombreVariante,
         descripcion: descripcionVariante,
-        fecha_creacion: fechaCreacion,
-        estado: ESTADO_VARIANTE_NUEVA,
+        // Una variante nueva nace hoy y activa. Una conservada mantiene su
+        // fecha de nacimiento real y el estado que ya tenia -- ninguno de
+        // los dos es un dato que esta ruta pida (VarianteCreacionPeticion
+        // no tiene ni "fecha_creacion" ni "estado"), asi que no hay de
+        // donde mas sacarlos que de la variante que ya existia.
+        fecha_creacion: existente?.fecha_creacion ?? fechaCreacion,
+        estado: existente?.estado ?? ESTADO_VARIANTE_NUEVA,
         imagenes,
-        // Nacen en 0/null, igual que el producto: todavia no existe ninguna
-        // oferta sobre esta variante.
-        precio_tienda: null,
-        precio_desde: null,
-        stock_tienda: 0,
-        stock_total: 0,
-        total_ofertas: 0,
+        // Una variante nueva nace en 0/null: todavia no existe ninguna
+        // oferta sobre ella. Una conservada mantiene lo que ya tenia
+        // calculado -- estos cinco campos son copias de lo que hay en
+        // PostgreSQL (ver ProductosService.recalcularCamposCalculados) y
+        // esta ruta no toca ofertas, asi que nunca le corresponde
+        // reiniciarlos a mitad de una edicion que no tiene nada que ver.
+        precio_tienda: existente?.precio_tienda ?? null,
+        precio_desde: existente?.precio_desde ?? null,
+        stock_tienda: existente?.stock_tienda ?? 0,
+        stock_total: existente?.stock_total ?? 0,
+        total_ofertas: existente?.total_ofertas ?? 0,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
         }),
@@ -387,16 +331,9 @@ export class ProductosVendedorService {
    * traer al menos una.
    *
    * Cada variante del array puede traer su id_producto_variante viejo: si
-   * coincide con una que el producto ya tenia, esa CONSERVA su mismo id y
-   * su stock (nunca se pierde solo por reenviarla en una edicion); si no
-   * viene, es una variante nueva (id nuevo, sin stock). Un id que no le
-   * pertenece a este producto rechaza toda la edicion.
-   *
-   * Tambien puede traer stock_inicial (igual que al crear un producto): si
-   * la variante (nueva, o conservada pero sin inventario todavia) no tiene
-   * fila en inventario, se le crea de una vez, reutilizando el mismo
-   * mecanismo de POST /vendedor/productos/:id/inventario. Si ya la tenia,
-   * no pasa nada (se ignora, no se sobreescribe).
+   * coincide con una que el producto ya tenia, esa CONSERVA su mismo id; si
+   * no viene, es una variante nueva (id nuevo). Un id que no le pertenece a
+   * este producto rechaza toda la edicion.
    *
    * El caso especial: si cambia la categoria, las caracteristicas (las que
    * ya tenia el producto, y las de cada variante que no se este
@@ -444,16 +381,6 @@ export class ProductosVendedorService {
     const vieneVariantes = cambios.variantes != null;
     if (vieneVariantes && cambios.variantes!.length === 0) {
       throw new ErrorValidacion('Debes enviar al menos una variante');
-    }
-    // Igual que en crear(): se valida antes de escribir nada, para que un
-    // stock_inicial invalido rechace toda la edicion en vez de dejarla a
-    // medias.
-    if (vieneVariantes) {
-      for (const peticionVariante of cambios.variantes!) {
-        if (peticionVariante?.stock_inicial != null) {
-          validarStockInicial(peticionVariante.stock_inicial);
-        }
-      }
     }
 
     if (
@@ -589,15 +516,6 @@ export class ProductosVendedorService {
 
       await coleccion.updateOne({ _id: idProducto }, operacion);
       await this.crearEventoModificacion(idProducto, cambiosEvento);
-
-      if (variantes != null) {
-        await this.crearInventariosIniciales(
-          idProducto,
-          idUsuarioToken,
-          cambios.variantes as VarianteCreacionPeticion[],
-          variantes,
-        );
-      }
 
       return (await coleccion.findOne({ _id: idProducto })) as Producto;
     } catch (error) {

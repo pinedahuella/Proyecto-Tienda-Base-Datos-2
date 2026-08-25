@@ -19,31 +19,28 @@ export interface CaracteristicaPersonalizadaPeticion {
   valor: unknown;
 }
 
-/** Una variante dentro de POST /vendedor/productos o PATCH /vendedor/productos/:id. */
+/**
+ * Una variante dentro de POST /vendedor/productos o PATCH /vendedor/productos/:id.
+ *
+ * Sin precio ni stock: eso es de la oferta (ver POST /vendedor/ofertas),
+ * no del catalogo. Publicar un producto (o agregarle una variante) no crea
+ * ninguna oferta -- nace sin nadie que lo venda todavia.
+ */
 export interface VarianteCreacionPeticion {
   /**
    * Solo tiene efecto en PATCH (POST la ignora: ahi nunca hay una variante
    * previa que emparejar). Si viene y coincide con una variante que el
    * producto ya tenia, esa variante CONSERVA su mismo id_producto_variante
-   * (no se le asigna uno nuevo) y su stock -- ver ProductosVendedorService.
-   * Si viene y no coincide con ninguna, se rechaza la edicion completa. Si
-   * no viene, es una variante nueva: id nuevo, sin stock.
+   * (no se le asigna uno nuevo) -- ver ProductosVendedorService. Si viene y
+   * no coincide con ninguna, se rechaza la edicion completa. Si no viene,
+   * es una variante nueva: id nuevo.
    */
   id_producto_variante?: number;
   nombre_variante: string;
-  precio: string;
   descripcion: string;
   imagenes?: string[];
   caracteristicas_adicionales?: CaracteristicaCatalogoPeticion[];
   caracteristicas_personalizadas?: CaracteristicaPersonalizadaPeticion[];
-  /**
-   * Opcional, solo en POST /vendedor/productos. Si viene, se crea el
-   * inventario inicial de esa variante en PostgreSQL justo despues de crear
-   * el producto (mismo mecanismo que
-   * POST /vendedor/productos/:id/inventario). Si no viene, la variante
-   * nace sin inventario, igual que hoy.
-   */
-  stock_inicial?: number;
 }
 
 /** Cuerpo esperado en POST /vendedor/productos. */

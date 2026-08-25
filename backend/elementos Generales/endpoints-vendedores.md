@@ -163,10 +163,20 @@ GET /vendedor/categorias/3
 
 ## POST /vendedor/productos
 
-Solo vendedor (`id_rol_usuario` 2), no admin. Crea un producto **con al
-menos una variante** — no existe un producto sin ninguna, porque el precio
-vive en la variante. El vendedor sale del token, no del cuerpo: no se puede
-crear un producto a nombre de otro usuario.
+**Solo `tienda@mesh.com`** (ver `helpers/constantes.ts`, `CORREO_TIENDA`) —
+no cualquier vendedor, ni siquiera con `id_rol_usuario` 2: en el modelo
+multi-vendedor el catálogo es compartido, y si cualquiera pudiera crear
+productos dos vendedores acabarían duplicando el mismo artículo. Cualquier
+otro vendedor recibe el mismo 404 genérico que "no existe" — nunca 403, ni
+confirmación de que la ruta existe. Crea un producto **con al menos una
+variante**.
+
+**Sin precio ni stock: eso es de la oferta, no del catálogo.** Publicar un
+producto (por esta ruta) no crea ninguna oferta — nace sin nadie que lo
+venda todavía. Para que alguien pueda comprarlo hace falta un segundo paso,
+aparte: `POST /vendedor/ofertas` (ver la sección "Las ofertas: modelo
+multi-vendedor" más abajo), que es donde de verdad se ponen el precio y el
+stock inicial — y ahí sí, cualquier vendedor, incluida la tienda.
 
 Nace siempre en estado `borrador` (por eso `GET /productos` y
 `GET /productos/paginacion` nunca lo muestran hasta que alguien lo publique
@@ -200,7 +210,6 @@ transacción (Mongo no está en modo replica set).
   "variantes": [
     {
       "nombre_variante": "M azul",
-      "precio": "169.00",
       "descripcion": "Talla M, color azul",
       "imagenes": ["https://..."],
       "caracteristicas_adicionales": [
@@ -222,38 +231,14 @@ transacción (Mongo no está en modo replica set).
 | `descripcion` | No | Acepta null |
 | `caracteristicas_adicionales` | No | Del catálogo de la categoría — ver abajo |
 | `caracteristicas_personalizadas` | No | Libres — ver abajo |
-| `variantes` | Sí, al menos 1 | Cada una con `nombre_variante`, `precio` y `descripcion` obligatorios |
+| `variantes` | Sí, al menos 1 | Cada una con `nombre_variante` y `descripcion` obligatorios |
 | `variantes[].imagenes` | No | Array de URLs, vacío si no viene |
-| `variantes[].stock_inicial` | No | Entero mayor o igual a 0 — ver abajo |
 
-### El stock inicial de una variante (`variantes[].stock_inicial`)
-
-Opcional, y por variante: si viene, apenas se crea el producto se crea
-también su inventario real en PostgreSQL, reutilizando el mismo mecanismo
-de
-[POST /vendedor/productos/:id/inventario](#post-vendedorproductosidinventario)
-(fila en `inventario`, más su primer movimiento de `reposicion` si es
-mayor a 0, más el `$set` de `variantes[].stock` en Mongo) — una variante a
-la vez, nunca en lote.
-
-Si no viene, esa variante nace **sin inventario**, exactamente como
-funcionaba antes de que existiera esta ruta: el vendedor la publica y
-arregla el inventario después, con el POST de arriba, o consultando
-`GET /vendedor/productos/:id/inventario` para ver cuáles le hacen falta
-(le va a contestar 409 hasta que las cree).
-
-**Se valida antes de crear nada.** Si alguna variante trae un
-`stock_inicial` inválido (negativo, no entero), toda la petición se
-rechaza con 400 y **no se crea ningún producto** — no tendría sentido
-crear el producto y fallar a medias intentando su inventario.
-
-**Si el producto sí se crea pero crear el inventario de alguna variante
-fallara** (por ejemplo, PostgreSQL no responde en ese instante), **el
-producto queda creado igual**: esa variante en particular se queda sin
-inventario, en el mismo estado de "pendiente" de siempre, arreglable
-después con el POST de inventario. La respuesta de esta ruta no cambia de
-forma para avisar esto — sigue siendo el producto completo, tal como
-estaba antes de que existiera `stock_inicial`.
+Si el cuerpo trae `precio` o `stock_inicial` en alguna variante (formato
+viejo, de antes del giro multi-vendedor), **se ignoran en silencio** — no
+rechazan la petición, pero tampoco se guardan en ningún lado. Para poner
+precio y stock hay que crear una oferta aparte, ver
+`POST /vendedor/ofertas` más abajo.
 
 ### Características del catálogo (`caracteristicas_adicionales`)
 
@@ -293,22 +278,29 @@ verdadero/falso), nunca un array ni un objeto. Siempre se guardan con
     "descripcion": "Camisa de lino de corte regular",
     "fecha_creacion": { "$date": "2026-08-23T01:19:20.964Z" },
     "estado": "borrador",
-    "vendedor": { "id_usuario": 8, "usuario": "vendtest", "nombre": "Test", "apellido": "Vendedor" },
     "categoria": {
       "id_categoria": 3,
       "nombre": "Camisas",
-      "categoria_padre": "Ropa de hombre",
-      "porcentaje_comision": { "$numberDecimal": "12.00" }
+      "categoria_padre": "Ropa de hombre"
     },
+    "precio_tienda": null,
+    "precio_desde": null,
+    "stock_tienda": 0,
+    "stock_total": 0,
+    "total_ofertas": 0,
     "variantes": [
       {
         "id_producto_variante": 93,
         "nombre_variante": "M azul",
-        "precio": { "$numberDecimal": "169.00" },
         "descripcion": "Talla M, color azul",
         "fecha_creacion": { "$date": "2026-08-23T01:19:20.964Z" },
         "estado": "activa",
         "imagenes": ["https://..."],
+        "precio_tienda": null,
+        "precio_desde": null,
+        "stock_tienda": 0,
+        "stock_total": 0,
+        "total_ofertas": 0,
         "caracteristicas_adicionales": [
           { "nombre": "Color", "valor": "Azul", "unidad": null },
           { "nombre": "Talla", "valor": "M", "unidad": null }
@@ -331,10 +323,22 @@ verdadero/falso), nunca un array ni un objeto. Siempre se guardan con
 }
 ```
 
+Los cinco campos calculados (`precio_tienda`, `precio_desde`, `stock_tienda`,
+`stock_total`, `total_ofertas`) nacen siempre en `null`/`0`, a nivel del
+producto y de cada variante: todavía no existe ninguna oferta. Se activan
+recién cuando alguien crea una oferta sobre esta variante (`POST
+/vendedor/ofertas`).
+
 También se crea, en `productos_eventos`, el primer evento
 (`_id: "51-1"`, `numero: 1`, `operacion: "creacion"`) con `datos` siendo la
 copia completa del producto recién creado (sin `_id`, ese ya va en
 `id_producto`).
+
+Probado en vivo el 25 de agosto de 2026: crear un producto sin
+`precio`/`stock_inicial` (201, los cinco campos en `null`/`0`), crear otro
+mandándolos igual a propósito (formato viejo) y confirmar que no rechaza
+la petición ni los guarda en ningún lado, y verificado directo en Mongo
+que el evento de `productos_eventos` tampoco los tiene.
 
 ### 400
 
@@ -346,9 +350,7 @@ copia completa del producto recién creado (sin `_id`, ese ya va en
 { "ok": false, "mensaje": "Debes enviar al menos una variante", "payload": null }
 { "ok": false, "mensaje": "El nombre de la variante es obligatorio", "payload": null }
 { "ok": false, "mensaje": "La descripcion de la variante es obligatoria", "payload": null }
-{ "ok": false, "mensaje": "El precio es obligatorio y debe ser un numero mayor a 0, con hasta 2 decimales", "payload": null }
 { "ok": false, "mensaje": "imagenes debe ser una lista de URLs de texto", "payload": null }
-{ "ok": false, "mensaje": "El stock_inicial es obligatorio y debe ser un numero entero mayor o igual a 0", "payload": null }
 { "ok": false, "mensaje": "Cada caracteristica necesita un nombre", "payload": null }
 { "ok": false, "mensaje": "La caracteristica \"<nombre>\" viene repetida", "payload": null }
 { "ok": false, "mensaje": "\"<nombre>\" no es una caracteristica de esta categoria", "payload": null }
@@ -375,6 +377,18 @@ copia completa del producto recién creado (sin `_id`, ese ya va en
 { "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
 ```
 
+Cuando el token ni siquiera tiene rol vendedor (por ejemplo, un comprador).
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+```
+
+Cuando el token sí es de un vendedor, pero no es la cuenta de la tienda —
+mismo mensaje genérico que un id que no existe, para no confirmarle a un
+vendedor cualquiera que la ruta funciona.
+
 ### 503
 
 ```json
@@ -391,11 +405,14 @@ copia completa del producto recién creado (sin `_id`, ese ya va en
 
 ## PATCH /vendedor/productos/:id
 
-Solo el vendedor dueño del producto (no otro vendedor, no admin). Edita
-cualquier campo que tenga sentido cambiar: `nombre`, `descripcion`,
-`estado`, `id_categoria`, `caracteristicas_adicionales`,
-`caracteristicas_personalizadas` y **`variantes`** — sí, las variantes se
-editan aquí mismo, como un campo más del producto, no en una ruta aparte.
+**Solo `tienda@mesh.com`**, igual que `POST /vendedor/productos` — mismo
+404 genérico para cualquier otro vendedor. Edita cualquier campo que tenga
+sentido cambiar: `nombre`, `descripcion`, `estado`, `id_categoria`,
+`caracteristicas_adicionales`, `caracteristicas_personalizadas` y
+**`variantes`** — sí, las variantes se editan aquí mismo, como un campo
+más del producto, no en una ruta aparte. Sin precio ni stock, igual que al
+crear: eso se edita en la oferta (`PATCH /vendedor/ofertas/:id`), nunca
+aquí.
 
 Cada campo es independiente: el que venga en `null` (o no venga) no se
 toca. Debe venir al menos uno. Para las dos listas de características, un
@@ -405,7 +422,7 @@ igual que si nunca hubiera tenido características).
 
 **`variantes` se comporta distinto: no admite quedar vacío.** Si se manda,
 reemplaza el array completo — mismas reglas que al crear el producto
-(`nombre_variante`, `precio` y `descripcion` obligatorios, características
+(`nombre_variante` y `descripcion` obligatorios, características
 validadas contra `caracteristicas_variante` de la categoría vigente) —
 pero siempre tiene que traer al menos una: un producto nunca se queda sin
 ninguna variante, ni siquiera al editar.
@@ -418,14 +435,15 @@ Cada variante del array puede traer, opcionalmente, el
 misma, editada" o como una completamente nueva:
 
 - **Si lo manda y coincide con una variante que el producto ya tenía**, esa
-  variante **conserva ese mismo id** — no se le asigna uno nuevo — y
-  también **conserva su `stock`** (la copia de lectura que se ve en el
-  catálogo público no se pierde solo por reenviar la variante en una
-  edición). PostgreSQL ni se entera: su fila de `inventario` sigue
-  apuntando al mismo id de siempre, no hace falta tocarla.
+  variante **conserva ese mismo id, su `fecha_creacion`, su `estado` real y
+  sus cinco campos calculados** (`precio_tienda`/`precio_desde`/
+  `stock_tienda`/`stock_total`/`total_ofertas`) — solo `nombre_variante`,
+  `descripcion`, `imagenes` y las características cambian a lo que venga
+  en la petición, porque son los únicos datos de la variante que esta ruta
+  de verdad pregunta.
 - **Si no lo manda**, es una variante nueva de verdad: le toca un
-  `id_producto_variante` nuevo, y nace sin stock — exactamente como una
-  variante agregada en `POST /vendedor/productos`.
+  `id_producto_variante` nuevo, nace `activa`, hoy, y con los cinco campos
+  calculados en `null`/`0` (todavía no existe ninguna oferta sobre ella).
 - **Si lo manda y no coincide con ninguna variante actual del producto**,
   la edición completa se rechaza (400) — no se crea una variante nueva
   ignorando el id que se mandó, ni se adivina a cuál se refería.
@@ -434,29 +452,42 @@ misma, editada" o como una completamente nueva:
 PATCH /vendedor/productos/53
 {
   "variantes": [
-    { "id_producto_variante": 5, "nombre_variante": "M azul (renombrada)", "precio": "175.00", "descripcion": "..." },
-    { "nombre_variante": "Talla XL", "precio": "175.00", "descripcion": "..." }
+    { "id_producto_variante": 5, "nombre_variante": "M azul (renombrada)", "descripcion": "..." },
+    { "nombre_variante": "Talla XL", "descripcion": "..." }
   ]
 }
--> la variante 5 conserva su id y su stock; "Talla XL" nace con id nuevo y sin stock
+-> la variante 5 conserva su id, fecha de creacion, estado y campos calculados; "Talla XL" nace con id nuevo
 ```
 
-### El stock de una variante al editar (`variantes[].stock_inicial`)
+**Corregido y probado en vivo el 25 de agosto de 2026** (antes de esto,
+`construirVariantes` reiniciaba `precio_tienda`/`precio_desde`/
+`stock_tienda`/`stock_total`/`total_ofertas`, `fecha_creacion` y `estado`
+de **cualquier** variante que viniera en el array, incluida una
+"conservada" sin ningún cambio real — le borraba las ofertas activas que
+tuviera y, de paso, la raíz del producto quedaba con números viejos que ya
+no coincidían con sus propias variantes). La corrección: para una variante
+conservada (encontrada por `id_producto_variante`), esos siete campos se
+copian de la variante existente en vez de reinicializarse; solo una
+variante genuinamente nueva nace con los valores por defecto.
 
-Igual que en `POST /vendedor/productos`: si una variante del array trae
-`stock_inicial` y todavía no tiene fila en `inventario` (porque es nueva,
-o porque ya existía pero nunca se le creó), se le crea de una vez,
-reutilizando el mismo mecanismo de
-[POST /vendedor/productos/:id/inventario](#post-vendedorproductosidinventario)
-— una variante a la vez, con su primer movimiento de `reposicion` si es
-mayor a 0. **Si esa variante ya tenía inventario, `stock_inicial` se
-ignora** — no lo sobreescribe; para subir o bajar un stock que ya existe
-está
-[PATCH /vendedor/productos/:id/inventario](#patch-vendedorproductosidinventario),
-no este campo.
-
-Se valida antes de escribir nada: un `stock_inicial` inválido en cualquier
-variante rechaza toda la edición, igual que al crear un producto.
+Casos probados contra la base real:
+- Producto con una oferta activa (precio 120.00, stock 10) sobre una
+  variante — editar el nombre de **otra** variante del mismo producto ya
+  no le borra nada a la primera (antes sí, aunque ni se mencionaba en la
+  petición más que para conservarla).
+- Agregar una variante nueva junto a las que ya existían: la nueva nace
+  en `null`/`0`/`activa`/hoy: las viejas no se mueven ni un campo.
+- Editar de verdad el `nombre_variante`/`descripcion` de la variante con
+  oferta: esos dos cambian, los cinco calculados y la fecha de creación
+  siguen intactos.
+- Caso extremo: una variante con `estado: "inactiva"` (no lo pone ninguna
+  ruta hoy, se forzó a mano para la prueba) sobrevive intacta a varias
+  ediciones seguidas del producto — antes del fix, cualquier edición la
+  hubiera vuelto `activa` sola.
+- La reconstrucción de historial (`GET .../historial`) se probó de nuevo
+  después de la corrección: sigue devolviendo el estado correcto.
+- Un id de variante que no pertenece al producto se sigue rechazando con
+  400, igual que siempre.
 
 Un producto de otro vendedor da el mismo 404 que un id que no existe — no
 hay forma de usar esta ruta para confirmar que productos tiene otra
@@ -487,7 +518,7 @@ PATCH /vendedor/productos/53
 -> rechazado si alguna variante tenia "Color" y la categoria nueva no lo ofrece
 
 PATCH /vendedor/productos/53
-{ "id_categoria": 27, "variantes": [{ "nombre_variante": "Edicion unica", "precio": "15.00", "descripcion": "Libro" }] }
+{ "id_categoria": 27, "variantes": [{ "nombre_variante": "Edicion unica", "descripcion": "Libro" }] }
 -> aceptado: categoria y variantes cambian juntas, en el mismo evento
 ```
 
@@ -519,13 +550,14 @@ completa (el array entero, no un diff adentro) — mismo criterio que ya usan
 { "ok": false, "mensaje": "La categoria no existe o no es valida para publicar", "payload": null }
 { "ok": false, "mensaje": "\"<nombre>\" ya no es una caracteristica valida para la nueva categoria", "payload": null }
 { "ok": false, "mensaje": "Debes enviar al menos una variante", "payload": null }
-{ "ok": false, "mensaje": "El stock_inicial es obligatorio y debe ser un numero entero mayor o igual a 0", "payload": null }
 { "ok": false, "mensaje": "La variante <id> no pertenece a este producto", "payload": null }
 ```
 
 Más los mismos errores de característica que `POST /vendedor/productos`
 (nombre repetido, tipo incorrecto, no pertenece a la categoría, formato de
-personalizada inválido — ver arriba).
+personalizada inválido — ver arriba). Si el cuerpo trae `precio` o
+`stock_inicial` en alguna variante, se ignoran en silencio, igual que en
+`POST /vendedor/productos`.
 
 ### 401
 
@@ -618,10 +650,10 @@ producto):
 
 Sin productos propios, `payload` sale `[]` (no es un error).
 
-**Si una variante propia todavía no tiene fila en `inventario`** (pasa con
-las que se publican o se agregan sin mandar `stock_inicial` — ver
-`variantes[].stock_inicial` en `POST /vendedor/productos` y
-`PATCH /vendedor/productos/:id`), **la petición entera falla** con 409 —
+**Si una variante propia todavía no tiene fila en `inventario`** — y desde
+que `POST`/`PATCH /vendedor/productos` dejaron de aceptar `stock_inicial`
+(ver arriba), **ninguna** nace con inventario ya creado — **la petición
+entera falla** con 409 —
 no se rellena con `0` en silencio, ni se omite esa variante y se muestran
 las demás. El mensaje nombra el producto y la variante exactos que faltan,
 para que el vendedor sepa qué arreglar: puede crearlo con
