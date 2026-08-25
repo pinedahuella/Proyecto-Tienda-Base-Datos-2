@@ -1,14 +1,16 @@
 # Frontend
 
-> **Este documento describe el frontend ANTERIOR al cambio a multi-vendedor, y
-> todavia no se actualizo.** El modelo cambio debajo de el: el producto ya no
-> tiene `vendedor`, ni `variantes[].precio`, ni `variantes[].stock`. Eso rompe
-> el catalogo (el filtro por rango de precio y el boton "Ver todo de X"), la
-> ficha (la fila "Vendedor") y el panel del vendedor entero, que giraba
-> alrededor del inventario.
+> **Al dia a medias.** El catalogo y la ficha ya corren contra el modelo
+> multi-vendedor; el panel del vendedor no, y lo que dice este documento de el
+> sigue siendo lo viejo.
 >
-> Se arregla cuando el backend este al dia. Lo que cambia esta en
-> [backend/elementos Generales/cambios-multivendedor.md](../backend/elementos%20Generales/cambios-multivendedor.md).
+> | Pantalla | Estado |
+> |---|---|
+> | `/` catalogo | al dia |
+> | `/producto/[id]` ficha | al dia, lista las ofertas |
+> | `/panel` perfil, direcciones, admin | sin cambios, siguen bien |
+> | `/panel` vendedor | **roto**: espera rutas `/vendedor/ofertas` que no existen |
+> | `Pedido.svelte` | pendiente los botones de comprar y cancelar |
 
 SvelteKit.
 
@@ -40,6 +42,7 @@ panel no da permisos -- quien decide es el backend, que responde 403.
 |---|---|
 | `src/routes/+layout.svelte` | la paleta, los estilos globales y el armazon de la pagina |
 | `src/routes/+page.svelte` | el catalogo, con sus filtros |
+| — | la tarjeta ensena `precio_tienda`, y `precio_desde` debajo cuando otro vendedor lo tiene mas barato |
 | `src/routes/producto/[id]/+page.svelte` | la ficha: la foto arriba y el detalle debajo |
 | `src/routes/entrar/+page.svelte` | inicio de sesion |
 | `src/routes/registro/+page.svelte` | crear cuenta |
@@ -295,6 +298,41 @@ pedido con lineas inalcanzable para siempre.
 mismo navegador arrastra el pedido de la anterior: el backend le contesta 404
 porque no es suyo, y la pantalla lo leia como "ese pedido ya no existe", que es
 mentira -- existe, y es de otro.
+
+## El catalogo y la ficha con varios vendedores
+
+**La tarjeta ensena el precio de la TIENDA** (`precio_tienda`), que es la regla
+del profesor: el primero siempre es el de la pagina. Y debajo, solo cuando
+alguien lo tiene mas barato, `desde Q3,856.00 con otro vendedor`. Esconderlo
+seria mentir por omision: el buscador filtra por `precio_desde`, asi que un tope
+de Q4000 devuelve productos cuya tarjeta dice Q4100.
+
+**El stock ya no se deduce contando variantes.** `stock_total` y `total_ofertas`
+vienen calculados, y con eso los tres casos salen de mirar y no de deducir:
+
+```
+hay          stock_total > 0
+sin-oferta   nadie lo vende todavia (total_ofertas === 0)
+agotado      hay vendedores, pero ninguno tiene unidades
+```
+
+Antes `stock_total` se sumaba de `variantes[].stock`, que era OPCIONAL, y "se
+vendio todo" daba el mismo 0 que "nadie registro nada". De ahi salio el bug del
+`every()`, que daba por agotado un producto entero porque UNA variante estaba en
+0. Ese problema desaparecio con el modelo, no se arreglo con mas codigo.
+
+**En la ficha se compra una OFERTA, no una variante.** Cada vendedor tiene su
+fila con su precio, sus unidades y su boton; la de la tienda va marcada. Las
+ofertas NO vienen del documento del producto: las trae
+`GET /productos/:id` desde PostgreSQL, porque precio y stock cambian en cada
+venta.
+
+**El filtro por vendedor se fue** del catalogo, y con el el boton "Ver todo de
+X". Ojo si se reactiva: `id_vendedor` ya no es un filtro fijo del backend, asi
+que mandarlo lo convierte en un filtro de caracteristica y devuelve cero sin
+decir por que.
+
+---
 
 ## Lo que todavia falta
 
