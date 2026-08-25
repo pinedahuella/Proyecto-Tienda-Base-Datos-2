@@ -4,7 +4,6 @@ Pasa el catalogo de PostgreSQL a MongoDB.
 
 ```
 extraer.sql             saca el JSON de cada producto
-extraer_ofertas.sql     saca el JSON de cada oferta
 extraer_categorias.sql  saca la paleta de cada categoria
 cargar.js               arma los documentos y los escribe en Mongo
 reconstruir.js          que decia un producto tal dia
@@ -23,11 +22,11 @@ docker y la consulta llega partida.
 bash etl/correr.sh
 ```
 
-Imprime cuantos productos, ofertas, categorias y eventos escribio.
+Imprime cuantos productos, categorias y eventos escribio.
 
 ## Que escribe
 
-Cuatro colecciones.
+Tres colecciones. **Las ofertas no**: ver mas abajo.
 
 **`productos`**, un documento por producto. El `_id` es el `id_producto` del
 relacional, no un ObjectId: asi la traza entre los dos sistemas es directa y
@@ -75,29 +74,28 @@ reglas al escribirlas:
   la RAM se mide en GB; aqui se pone en cada entrada para que quien lea el
   documento no tenga que ir a buscarla.
 
-**`ofertas`**, un documento por oferta: quien vende esa variante, a como y con
-cuantas unidades. El `_id` es el `id_oferta` del relacional.
+**Las ofertas NO viajan a Mongo**, y es LA decision de modelado de esta entrega.
 
-```
-{ _id: 12, id_producto: 3, id_producto_variante: 5,
-  nombre_producto: "Laptop Aurora 14", nombre_variante: "16 GB / 512 GB",
-  vendedor: { id_usuario: 2, usuario: "ventas_norte",
-              nombre: "Carlos", apellido: "Ramirez" },
-  es_tienda: false, precio: NumberDecimal("6100.00"), stock: 9,
-  estado: "activa" }
-```
+Se quedan en `oferta`, en PostgreSQL. El motivo no es el tamano -- un documento
+aguanta 16 MB y ningun producto va a tener tantos vendedores. Son dos:
 
-**Es la decision de modelado de esta entrega, y el motivo no es el volumen.** Un
-documento de Mongo aguanta 16 MB y ningun producto va a tener tantos vendedores.
-Es la **tasa de cambio**: el stock cambia en cada venta y Mongo reescribe el
-documento entero en cada actualizacion. Embebidas, comprar una camisa
-reescribiria el documento completo de la camisa -- sus variantes, sus
-caracteristicas, sus imagenes -- y dos vendedores vendiendo a la vez pelearian
-por el mismo documento, que es lo contrario de lo que pide la Entrega 2.
+- **Precio, stock y estado cambian en cada venta.** Copiarlos aqui obligaria a
+  sostenerlos al dia en dos bases a la vez, y ese es justo el riesgo de
+  inconsistencia que el proyecto entero quiere evitar. Ademas PostgreSQL es
+  donde se decide si alcanza para vender, dentro de la transaccion: tener una
+  segunda copia que se puede desfasar solo agrega formas de mentir.
+- **Embeberlas dentro del producto seria peor todavia.** Mongo reescribe el
+  documento entero en cada actualizacion, asi que comprar una camisa
+  reescribiria su catalogo completo -- variantes, caracteristicas, imagenes --
+  y dos vendedores vendiendo a la vez pelearian por el mismo documento, que es
+  lo contrario de lo que pide la Entrega 2.
 
-**El vendedor si va embebido dentro de la oferta**, y por lo contrario: cuatro
-campos, se leen siempre con ella ("Vendido por Carlos Ramirez") y casi nunca
-cambian. La misma pregunta contestada al reves porque el caso es distinto.
+Lo que si viaja son los cuatro numeros AGREGADOS de arriba. Esos tambien son
+copias, pero de un dato agregado y para pintar una tarjeta: si quedan viejos la
+lista miente un rato, no se vende de mas.
+
+La ficha del producto, que si necesita las ofertas de verdad (quien vende, a
+como, cuantas quedan), las pide a PostgreSQL con una consulta directa.
 
 Las resenas tampoco se embeben. Crecen sin techo, se escriben por su cuenta y se
 leen paginadas.
@@ -247,9 +245,6 @@ no de la carga, igual que un `CREATE INDEX` vive en la migracion y no en el
 
 ```js
 db.productos.createIndex({ 'categoria.nombre': 1, estado: 1 })
-db.ofertas.createIndex({ id_producto_variante: 1, precio: 1 })
-db.ofertas.createIndex({ id_producto: 1, estado: 1 })
-db.ofertas.createIndex({ 'vendedor.id_usuario': 1 })
 db.productos_eventos.createIndex({ id_producto: 1, fecha: 1 })
 db.categorias.createIndex({ nombre: 1 })
 ```
@@ -259,8 +254,6 @@ tener indices:
 
 - **catalogo** el estado se filtra siempre y la categoria a veces, asi que el
   campo que nunca falta va primero
-- **ofertas por variante y precio** es la lista de la ficha del producto, y sale
-  ordenada sin ordenar nada: el indice ya viene en ese orden
 - **eventos** sirve para las dos primeras etapas de la reconstruccion a la vez:
   la base entra directo al producto y lee su tramo ya ordenado, sin recorrer la
   coleccion y sin ordenar en memoria

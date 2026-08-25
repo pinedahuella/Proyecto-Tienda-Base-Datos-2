@@ -22,9 +22,16 @@ set +a
 # argumento, para correr el ETL contra una copia sin tocar la de trabajo.
 BASE="${1:-$DB_NAME}"
 
-# Son TRES consultas y tres archivos, uno por coleccion. Cada una devuelve una
-# linea por documento; mezclarlas obligaria a marcar cada linea con su tipo y a
-# separarlas otra vez del otro lado.
+# Son DOS consultas y dos archivos, uno por coleccion.
+#
+# Las OFERTAS no se migran: se quedan en PostgreSQL. Precio, stock y estado
+# cambian en cada venta, y copiarlos aqui obligaria a sostenerlos al dia en dos
+# bases a la vez. Lo que si viaja son cuatro numeros agregados por producto
+# (precio_tienda, stock_tienda, stock_total, total_ofertas), que los calcula
+# extraer.sql y son los que la LISTA del catalogo necesita en cada tarjeta.
+#
+# Cada consulta devuelve una linea por documento; mezclarlas obligaria a marcar
+# cada linea con su tipo y a separarlas otra vez del otro lado.
 #
 # -q sin mensajes, -t sin encabezado ni conteo de filas, -A sin relleno de
 # columnas, -X ignorando el .psqlrc de quien lo corra. Lo que sale es JSON.
@@ -36,10 +43,6 @@ docker exec -i mesh-postgres \
 docker exec -i mesh-postgres \
     psql -U "$DB_USER" -d "$BASE" -qtAX -f - < "$RAIZ/etl/extraer_categorias.sql" \
     | docker exec -i mesh-mongo sh -c 'cat > /tmp/mesh-categorias.json'
-
-docker exec -i mesh-postgres \
-    psql -U "$DB_USER" -d "$BASE" -qtAX -f - < "$RAIZ/etl/extraer_ofertas.sql" \
-    | docker exec -i mesh-mongo sh -c 'cat > /tmp/mesh-ofertas.json'
 
 docker exec -i mesh-mongo sh -c 'cat > /tmp/cargar.js' < "$RAIZ/etl/cargar.js"
 

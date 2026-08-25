@@ -136,14 +136,20 @@ los scripts que crean las colecciones.
 ## El catalogo en MongoDB
 
 Los productos se disenan y se cargan en PostgreSQL, y de ahi se migran a MongoDB
-con el ETL de `etl/`. En Mongo quedan **cuatro colecciones**:
+con el ETL de `etl/`. En Mongo quedan **tres colecciones**:
 
 | Coleccion | Que trae |
 |---|---|
 | `productos` | un documento por producto, con sus variantes y caracteristicas |
-| `ofertas` | quien vende cada variante, a como y con cuantas unidades |
 | `categorias` | la paleta: que caracteristicas ofrece cada categoria |
 | `productos_eventos` | el historial del catalogo, como eventos |
+
+**Las ofertas NO se migran**: se quedan en `oferta`, en PostgreSQL. Precio,
+stock y estado cambian en cada venta, y copiarlos obligaria a sostenerlos al
+dia en dos bases a la vez. Lo que si viaja son cuatro numeros agregados dentro
+del producto (`precio_tienda`, `stock_tienda`, `stock_total`, `total_ofertas`),
+para que la lista del catalogo se pinte sin salir de Mongo. La ficha de un
+producto pide sus ofertas a PostgreSQL.
 
 `arrancar.ps1` lo corre cuando **alguna** de esas colecciones tiene menos
 documentos que su tabla en PostgreSQL, o sea cuando quedo algo sin migrar: una

@@ -89,7 +89,7 @@ SELECT jsonb_build_object(
     'precio_tienda', (
         SELECT min(o.precio)::text
         FROM oferta o
-        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante
+        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante_mongo
         WHERE pv2.id_producto = p.id_producto
           AND o.id_usuario = (SELECT id_usuario FROM tienda)
     ),
@@ -105,7 +105,7 @@ SELECT jsonb_build_object(
     'stock_tienda', (
         SELECT coalesce(sum(o.stock), 0)
         FROM oferta o
-        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante
+        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante_mongo
         WHERE pv2.id_producto = p.id_producto
           AND o.id_usuario = (SELECT id_usuario FROM tienda)
           AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
@@ -114,7 +114,7 @@ SELECT jsonb_build_object(
     'stock_total', (
         SELECT coalesce(sum(o.stock), 0)
         FROM oferta o
-        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante
+        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante_mongo
         WHERE pv2.id_producto = p.id_producto
           AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
     ),
@@ -125,7 +125,7 @@ SELECT jsonb_build_object(
     'total_ofertas', (
         SELECT count(DISTINCT o.id_usuario)
         FROM oferta o
-        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante
+        JOIN productos_variantes pv2 ON pv2.id_producto_variante = o.id_producto_variante_mongo
         WHERE pv2.id_producto = p.id_producto
           AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
     ),
@@ -189,7 +189,7 @@ SELECT jsonb_build_object(
 
                    'precio_tienda', (
                        SELECT o.precio::text FROM oferta o
-                       WHERE o.id_producto_variante = pv.id_producto_variante
+                       WHERE o.id_producto_variante_mongo = pv.id_producto_variante
                          AND o.id_usuario = (SELECT id_usuario FROM tienda)
                    ),
                    -- Lo mismo por variante. Aqui stock_tienda NO es una suma:
@@ -197,18 +197,18 @@ SELECT jsonb_build_object(
                    -- sumo una por variante.
                    'stock_tienda', coalesce((
                        SELECT o.stock FROM oferta o
-                       WHERE o.id_producto_variante = pv.id_producto_variante
+                       WHERE o.id_producto_variante_mongo = pv.id_producto_variante
                          AND o.id_usuario = (SELECT id_usuario FROM tienda)
                          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
                    ), 0),
                    'stock_total', (
                        SELECT coalesce(sum(o.stock), 0) FROM oferta o
-                       WHERE o.id_producto_variante = pv.id_producto_variante
+                       WHERE o.id_producto_variante_mongo = pv.id_producto_variante
                          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
                    ),
                    'total_ofertas', (
                        SELECT count(*) FROM oferta o
-                       WHERE o.id_producto_variante = pv.id_producto_variante
+                       WHERE o.id_producto_variante_mongo = pv.id_producto_variante
                          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
                    ),
 

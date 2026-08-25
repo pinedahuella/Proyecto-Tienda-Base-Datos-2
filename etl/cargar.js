@@ -1,20 +1,13 @@
 // cargar.js
-// Toma lo que sacaron los tres extraer_*.sql y lo escribe en Mongo. Corre
+// Toma lo que sacaron los dos extraer_*.sql y lo escribe en Mongo. Corre
 // dentro de mesh-mongo con mongosh, que trae Node adentro: no hay nada que
 // instalar.
 //
-// Escribe cuatro colecciones:
+// Escribe tres colecciones:
 //
 //   productos          un documento por producto, con la categoria, las
 //                      variantes, sus imagenes y sus caracteristicas
 //                      embebidas. El _id es el id_producto del relacional.
-//
-//   ofertas            un documento por oferta: quien vende esa variante, a
-//                      como y con cuantas unidades. El _id es el id_oferta.
-//                      NO van embebidas en el producto: el stock cambia en
-//                      cada venta y Mongo reescribe el documento entero, asi
-//                      que comprar una camisa reescribiria el catalogo de la
-//                      camisa. Ver el encabezado de extraer_ofertas.sql.
 //
 //   productos_eventos  el historial, un documento por evento. El primero es
 //                      la creacion y lleva el estado completo; los demas son
@@ -24,11 +17,13 @@
 //                      con su tipo y su unidad. Es lo que arma el formulario
 //                      de publicar. No lleva valores.
 //
-// Dos cosas NO entran en productos_eventos, y las dos por el mismo motivo: no
-// se pueden reconstruir porque no se guardaron.
+// Las CARACTERISTICAS si entran, pero solo en el evento de creacion. En el
+// relacional no tienen historial, asi que el ETL solo conoce las de hoy: las
+// escribe iguales en todas las fotos que arma y por eso salen enteras en la
+// creacion y nunca como un cambio. Reconstruir a una fecha devuelve las de HOY,
+// y eso hay que decirlo.
 //
-//   Las caracteristicas. En el relacional no tienen historial, asi que no hay
-//   de donde sacar como estaban en una fecha anterior.
+// Lo que NO entra:
 //
 //   El PRECIO. Dejo de ser del catalogo al volverse multi-vendedor: ahora es
 //   de cada oferta, y su historia vive en precio_historial, en PostgreSQL. Un
@@ -37,8 +32,21 @@
 //   reconstruir "precio, descripcion y disponibilidad", y el precio ahora se
 //   contesta desde el otro lado.
 //
-// El _id de las cuatro es determinista, asi que correr esto dos veces
-// actualiza en vez de duplicar.
+// LAS OFERTAS NO SE COPIAN AQUI, y es deliberado. Precio, stock y estado
+// cambian en cada venta; sostenerlos al dia en dos bases a la vez es
+// exactamente el riesgo de inconsistencia que el proyecto quiere evitar. Se
+// quedan en PostgreSQL, que es donde ademas se decide si alcanza para vender.
+//
+// Lo unico que viaja de ellas son cuatro numeros AGREGADOS por producto
+// (precio_tienda, stock_tienda, stock_total, total_ofertas), que los calcula
+// extraer.sql. Esos si son copias, pero de un dato agregado y para pintar una
+// tarjeta: si quedan viejos la lista miente un rato, no se vende de mas.
+//
+// La ficha del producto, que si necesita las ofertas de verdad, las pide a
+// PostgreSQL.
+//
+// El _id de las tres es determinista, asi que correr esto dos veces actualiza
+// en vez de duplicar.
 //
 // El ETL es el unico dueno de estas colecciones: cada documento se reemplaza
 // entero, porque PostgreSQL manda. Un campo que la aplicacion escriba aqui por
@@ -46,7 +54,6 @@
 
 const RUTA = '/tmp/mesh-productos.json';
 const RUTA_CATEGORIAS = '/tmp/mesh-categorias.json';
-const RUTA_OFERTAS = '/tmp/mesh-ofertas.json';
 
 // ============================================================
 // El historial: de fotos completas a eventos
@@ -93,20 +100,46 @@ function estadoEn(producto, t) {
         porVariante.set(fila.id_producto_variante, fila);
     }
 
+    // Las caracteristicas NO tienen historial en el relacional: solo se conocen
+    // las de hoy. Se ponen iguales en todas las fotos que arma el ETL, y por eso
+    // salen enteras en el evento de creacion y NUNCA como un cambio: diferencias()
+    // nunca las ve moverse.
+    //
+    // Es a proposito, y hay que decirlo en el informe: reconstruir un producto a
+    // una fecha devuelve las caracteristicas de HOY, no las de ese dia. Para que
+    // una modificacion las mostrara harian falta dos tablas de historial que no
+    // estan en el ER.
+    const caracteristicasHoy = new Map();
+    for (const v of producto.variantes) {
+        caracteristicasHoy.set(v.id_producto_variante, v.caracteristicas_adicionales || []);
+    }
+
     const variantes = [...porVariante.values()]
         .sort((a, b) => a.id_producto_variante - b.id_producto_variante)
-        .map(v => ({
-            id_producto_variante: v.id_producto_variante,
-            nombre_variante:      v.nombre_variante,
-            descripcion:          v.descripcion
-        }));
+        .map(v => {
+            const salida = {
+                id_producto_variante: v.id_producto_variante,
+                nombre_variante:      v.nombre_variante,
+                descripcion:          v.descripcion
+            };
+            const cars = caracteristicasHoy.get(v.id_producto_variante);
+            if (cars && cars.length > 0) salida.caracteristicas_adicionales = cars;
+            return salida;
+        });
 
-    return {
+    const estado = {
         nombre:      p ? p.nombre : null,
         descripcion: p ? p.descripcion : null,
         categoria:   p ? p.categoria : null,
         variantes:   variantes
     };
+
+    if (producto.caracteristicas_adicionales &&
+        producto.caracteristicas_adicionales.length > 0) {
+        estado.caracteristicas_adicionales = producto.caracteristicas_adicionales;
+    }
+
+    return estado;
 }
 
 // Los campos del estado que cambiaron entre una fecha y la siguiente.
@@ -306,31 +339,6 @@ for (const producto of productos) {
 }
 
 // ============================================================
-// Las ofertas
-// ============================================================
-const ofertas = leerLineas(RUTA_OFERTAS);
-
-const escrituraOfertas = ofertas.map(function (o) {
-    const doc = {
-        _id:                  o.id_oferta,
-        id_producto:          o.id_producto,
-        id_producto_variante: o.id_producto_variante,
-        nombre_producto:      o.nombre_producto,
-        nombre_variante:      o.nombre_variante,
-        vendedor:             o.vendedor,
-        es_tienda:            o.es_tienda,
-        precio:               o.precio,
-        stock:                o.stock,
-        estado:               o.estado,
-        fecha_creacion:       new Date(o.fecha_creacion),
-        fecha_actualizacion:  new Date(o.fecha_actualizacion)
-    };
-    return {
-        replaceOne: { filter: { _id: doc._id }, replacement: aDecimal(doc), upsert: true }
-    };
-});
-
-// ============================================================
 // La paleta de las categorias
 // ============================================================
 // Se escribe entera en cada corrida, igual que los productos: PostgreSQL es el
@@ -357,7 +365,6 @@ const escrituraCategorias = categorias.map(function (categoria) {
 // Escribir, y barrer lo que sobro
 // ============================================================
 if (escrituraProductos.length > 0)  db.productos.bulkWrite(escrituraProductos);
-if (escrituraOfertas.length > 0)    db.ofertas.bulkWrite(escrituraOfertas);
 if (escrituraCategorias.length > 0) db.categorias.bulkWrite(escrituraCategorias);
 if (escrituraEventos.length > 0)    db.productos_eventos.bulkWrite(escrituraEventos);
 
@@ -367,19 +374,13 @@ if (escrituraEventos.length > 0)    db.productos_eventos.bulkWrite(escrituraEven
 //
 // Solo se barren los documentos cuyo _id viene del relacional. Un producto que
 // nacio en Mongo (publicado desde el panel) no tiene fila alla y no se toca.
-const idsProductos  = productos.map(p => p.id_producto);
-const idsOfertas    = ofertas.map(o => o.id_oferta);
 const idsCategorias = categorias.map(c => c.id_categoria);
 
-const borradas = db.ofertas.deleteMany({
-    _id: { $nin: idsOfertas, $lte: Math.max(0, ...idsOfertas) }
-});
 const catBorradas = db.categorias.deleteMany({
     _id: { $nin: idsCategorias, $lte: Math.max(0, ...idsCategorias) }
 });
 
 print('productos   ' + productos.length);
-print('ofertas     ' + ofertas.length + (borradas.deletedCount ? '  (' + borradas.deletedCount + ' borradas)' : ''));
 print('categorias  ' + categorias.length + (catBorradas.deletedCount ? '  (' + catBorradas.deletedCount + ' borradas)' : ''));
 print('eventos     ' + escrituraEventos.length);
 if (sinHistorial > 0) {

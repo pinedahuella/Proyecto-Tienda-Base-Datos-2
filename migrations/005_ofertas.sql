@@ -10,9 +10,15 @@
 --   Oferta             la laptop de 16 GB que vende Juan a Q5000, con 9
 --                      unidades. Y otra fila para la de Maria a Q4800.
 --
--- El orden importa: primero el catalogo de estado, luego oferta (que
--- referencia usuarios del 001 y productos_variantes del 003) y al final su
--- historial de precio.
+-- El orden importa: primero el catalogo de estado, luego oferta (que referencia
+-- usuarios, del 001) y al final su historial de precio.
+--
+-- La oferta apunta al catalogo por los ids de MongoDB y sin llave foranea,
+-- igual que pedido_producto: una sola forma de identificar una variante en todo
+-- el sistema. Y NO se copia a MongoDB: precio, stock y estado cambian en cada
+-- venta, y sostenerlos al dia en dos bases a la vez es el riesgo de
+-- inconsistencia que el proyecto quiere evitar. La ficha del producto pide sus
+-- ofertas aqui.
 
 
 -- ============================================================
@@ -65,13 +71,27 @@ COMMENT ON TABLE estado_oferta IS 'Catalogo de estados de una oferta: activa, pa
 CREATE TABLE oferta (
     id_oferta  bigserial PRIMARY KEY,
 
-    -- RESTRICT en los dos: ni el vendedor ni la variante se borran mientras
-    -- exista una oferta. Es lo que sostiene que la linea del pedido pueda
-    -- llegar al vendedor sin copiar su id.
-    id_producto_variante  bigint NOT NULL REFERENCES productos_variantes(id_producto_variante)
-                          ON DELETE RESTRICT,
-    id_usuario            bigint NOT NULL REFERENCES usuarios(id_usuario)
-                          ON DELETE RESTRICT,
+    -- Los dos id del catalogo, con el sufijo _mongo y SIN llave foranea, igual
+    -- que en pedido_producto. El catalogo se lee desde MongoDB y PostgreSQL no
+    -- puede garantizar integridad referencial contra otra base; el sufijo esta
+    -- para que quien lea la tabla lo sepa de un vistazo y no busque una FK que
+    -- no existe.
+    --
+    -- Se guardan los DOS, producto y variante, no solo el de la variante: en
+    -- Mongo las variantes van embebidas dentro del producto y no hay indice
+    -- unico sobre variantes.id_producto_variante. El par si es inequivoco.
+    --
+    -- El precio de tener una sola forma de identificar la variante en todo el
+    -- sistema es que la base ya no puede rechazar una oferta sobre una variante
+    -- que no existe. Eso pasa a ser trabajo de la aplicacion.
+    id_producto_mongo           bigint NOT NULL,
+    id_producto_variante_mongo  bigint NOT NULL,
+
+    -- RESTRICT: el vendedor no se borra mientras exista una oferta suya. Es lo
+    -- que sostiene que la linea del pedido pueda llegar al vendedor sin copiar
+    -- su id.
+    id_usuario  bigint NOT NULL REFERENCES usuarios(id_usuario)
+                ON DELETE RESTRICT,
 
     precio  numeric(12,2) NOT NULL CHECK (precio >= 0),
     stock   integer       NOT NULL DEFAULT 0 CHECK (stock >= 0),
@@ -84,18 +104,30 @@ CREATE TABLE oferta (
 
     -- LA restriccion del modelo. Un vendedor tiene UNA oferta por variante:
     -- dos filas serian dos precios para lo mismo y nadie sabria cual rige.
-    UNIQUE (id_usuario, id_producto_variante)
+    UNIQUE (id_usuario, id_producto_variante_mongo)
 );
 
 COMMENT ON TABLE oferta IS 'Quien vende que variante, a que precio y con cuantas unidades';
+COMMENT ON COLUMN oferta.id_producto_mongo IS 'Del catalogo en MongoDB. NO es llave foranea: PostgreSQL no puede garantizarla contra otra base';
+COMMENT ON COLUMN oferta.id_producto_variante_mongo IS 'Del catalogo en MongoDB. NO es llave foranea, igual que en pedido_producto';
 COMMENT ON COLUMN oferta.precio IS 'numeric y no float: el dinero no admite el redondeo binario';
 COMMENT ON COLUMN oferta.stock IS 'Saldo. Se DERIVA del kardex de stock_movimiento, no al reves';
 COMMENT ON COLUMN oferta.fecha_creacion IS 'Cuando nacio la oferta';
 COMMENT ON COLUMN oferta.fecha_actualizacion IS 'Ultimo cambio de precio, stock o estado. La mantiene un trigger';
 
 -- "las ofertas de esta variante, de la mas barata a la mas cara": es la
--- consulta de la ficha del producto y la que elige que precio se ensena
-CREATE INDEX idx_oferta_variante_precio ON oferta(id_producto_variante, precio);
+-- consulta de la ficha del producto y la que elige que precio se ensena.
+--
+-- La ficha la pide AQUI y no a Mongo. Las ofertas no se copian a la base
+-- documental: precio, stock y estado cambian en cada venta, y mantenerlos al
+-- dia en dos bases a la vez es justo el riesgo de inconsistencia que el
+-- proyecto quiere evitar. Lo unico que viaja a Mongo son cuatro numeros
+-- agregados que la LISTA del catalogo necesita en cada tarjeta.
+CREATE INDEX idx_oferta_variante_precio
+    ON oferta(id_producto_variante_mongo, precio);
+
+-- "todas las ofertas de este producto": la ficha completa
+CREATE INDEX idx_oferta_producto ON oferta(id_producto_mongo);
 
 -- "las ofertas de este vendedor": su panel
 CREATE INDEX idx_oferta_usuario ON oferta(id_usuario);

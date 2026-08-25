@@ -47,6 +47,14 @@ vendan. Comparar precios se vuelve posible porque hay algo que comparar.
 | `productos_variantes.precio` | `oferta.precio` |
 | la tabla `inventario` | `oferta.stock` |
 
+`Oferta` apunta al catalogo por `id_producto_mongo` e
+`id_producto_variante_mongo`, **sin llave foranea**, igual que la linea del
+pedido. La razon es la misma: el catalogo se lee desde MongoDB y PostgreSQL no
+puede garantizar integridad referencial contra otra base. Lo que se gana es una
+sola forma de identificar una variante en todo el sistema; lo que se paga es que
+la base ya no puede rechazar una oferta sobre una variante que no existe, y eso
+pasa a ser trabajo de la aplicacion.
+
 Y aparece una pregunta que antes no existia: **de todos los precios, cual se
 ensena.** La respuesta la puso el profesor: **el primero siempre es el de la
 pagina**. La cuenta `tienda@mesh.com` tiene oferta de todas las variantes y su
@@ -341,20 +349,35 @@ pocas y cambian al ritmo del catalogo, que es lento.
 producto. `numero_orden` se gasta al ordenarlas: en un arreglo la posicion ya es
 el orden.
 
-**Las ofertas: referenciadas, en su propia coleccion.** Y el motivo **no es el
+**Las ofertas: NO se migran.** Se quedan en `oferta`, en PostgreSQL, y ni
+siquiera tienen coleccion propia en la base documental. El motivo **no es el
 volumen**: un documento de Mongo aguanta 16 MB y ningun producto va a tener
-tantos vendedores. Es la **tasa de cambio**.
+tantos vendedores. Son dos, y el primero pesa mas que el segundo:
 
-> El stock cambia en **cada venta**, y Mongo reescribe el documento entero en
-> cada actualizacion. Embebidas, comprar una camisa reescribiria el documento
-> completo de la camisa: sus variantes, sus caracteristicas y sus imagenes. Y
-> dos vendedores vendiendo a la vez pelearian por el mismo documento, que es lo
-> contrario de lo que pide la Entrega 2 con la venta de unidades limitadas bajo
-> concurrencia.
+> **Precio, stock y estado cambian en cada venta.** Copiarlos a la base
+> documental obligaria a sostenerlos al dia en dos bases a la vez, y ese es
+> justo el riesgo de inconsistencia que el proyecto entero quiere evitar.
+> PostgreSQL es donde se decide si alcanza para vender, dentro de la
+> transaccion; una segunda copia que se puede desfasar solo agrega formas de
+> mentir.
+>
+> **Y embeberlas dentro del producto seria peor.** Mongo reescribe el documento
+> entero en cada actualizacion, asi que comprar una camisa reescribiria el
+> documento completo de la camisa: sus variantes, sus caracteristicas y sus
+> imagenes. Dos vendedores vendiendo a la vez pelearian por el mismo documento,
+> que es lo contrario de lo que pide la Entrega 2 con la venta de unidades
+> limitadas bajo concurrencia.
 
-**El vendedor: embebido dentro de la oferta.** La misma pregunta, contestada al
-reves: son cuatro campos, se leen siempre con ella ("Vendido por Carlos
-Ramirez") y casi nunca cambian.
+La ficha de un producto, que si necesita las ofertas de verdad, las pide a
+PostgreSQL con una sola consulta indexada. Es un cruce entre las dos bases que
+resuelve la aplicacion, no una llave foranea -- y eso es exactamente lo que la
+entrega pide documentar.
+
+**El caso simetrico, para que se vea que la pregunta se contesta por caso y no
+por costumbre:** si algun dia hiciera falta llevar las ofertas a Mongo, el
+vendedor iria **embebido dentro de cada una**. Son cuatro campos, se leen
+siempre con ella ("Vendido por Carlos Ramirez") y casi nunca cambian. La misma
+pregunta, respuesta contraria.
 
 Y como la **lista** del catalogo si necesita un precio y saber si hay
 existencias en cada tarjeta, el producto lleva cuatro numeros calculados:

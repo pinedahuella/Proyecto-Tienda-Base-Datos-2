@@ -16,17 +16,21 @@
 //   precio_tienda, stock_tienda, stock_total y total_ofertas. Los de stock van
 //   SUMADOS sobre todas sus variantes, y cuentan solo ofertas activas.
 //
-// ofertas
-//   Un documento por oferta: quien vende esa variante, a como y con cuantas
-//   unidades. El _id es el id_oferta de PostgreSQL.
+// LAS OFERTAS NO ESTAN AQUI, y es LA decision de modelado de esta entrega.
 //
-//   Van aparte y no embebidas dentro del producto, y es LA decision de modelado
-//   de esta entrega. El motivo no es el tamano: es la tasa de cambio. El stock
-//   cambia en cada venta y Mongo reescribe el documento entero en cada
-//   actualizacion, asi que embeberlas haria que comprar una camisa reescribiera
-//   el documento completo de la camisa, con sus variantes, sus caracteristicas
-//   y sus imagenes. Y dos vendedores vendiendo a la vez pelearian por el mismo
-//   documento, que es justo lo contrario de lo que pide la Entrega 2.
+// Se quedan en PostgreSQL. El motivo no es el tamano: es la tasa de cambio.
+// Precio, stock y estado cambian en cada venta, y copiarlos a la base
+// documental obligaria a sostenerlos al dia en dos bases a la vez -- justo el
+// riesgo de inconsistencia que el proyecto quiere evitar. Ademas Mongo
+// reescribe el documento entero en cada actualizacion, asi que embeberlas
+// dentro del producto haria que comprar una camisa reescribiera su catalogo
+// completo, y dos vendedores vendiendo a la vez pelearian por el mismo
+// documento: lo contrario de lo que pide la Entrega 2.
+//
+// Lo que si viaja son cuatro numeros AGREGADOS dentro del producto
+// (precio_tienda, stock_tienda, stock_total, total_ofertas), para que la LISTA
+// del catalogo se pinte sin salir de aqui. La ficha, que necesita las ofertas
+// de verdad, las pide a PostgreSQL.
 //
 // productos_eventos
 //   El historial. Un documento por evento, y los eventos solo se agregan:
@@ -45,7 +49,7 @@
 // En PostgreSQL el mismo historial se guarda como snapshot, que es lo natural
 // en SQL. La traduccion de snapshot a eventos la hace el ETL.
 
-const COLECCIONES = ['productos', 'ofertas', 'productos_eventos', 'categorias'];
+const COLECCIONES = ['productos', 'productos_eventos', 'categorias'];
 
 // createCollection revienta si la coleccion ya existe, y esto se corre en cada
 // arranque. Por eso se pregunta primero.
@@ -87,26 +91,6 @@ db.productos.createIndex(
     { name: 'catalogo_categoria_estado_stock' }
 );
 
-// "las ofertas de esta variante, de la mas barata a la mas cara". Es la
-// consulta de la ficha del producto, y con este indice sale ordenada sin
-// ordenar nada: el indice ya viene en ese orden.
-db.ofertas.createIndex(
-    { id_producto_variante: 1, precio: 1 },
-    { name: 'ofertas_por_variante_precio' }
-);
-
-// "todas las ofertas de este producto", para la ficha completa
-db.ofertas.createIndex(
-    { id_producto: 1, estado: 1 },
-    { name: 'ofertas_por_producto_estado' }
-);
-
-// "las ofertas de este vendedor": su panel
-db.ofertas.createIndex(
-    { 'vendedor.id_usuario': 1 },
-    { name: 'ofertas_por_vendedor' }
-);
-
 // "el estado de este producto el 3 de marzo": se leen sus eventos hasta esa
 // fecha, en orden. El compuesto sirve para las dos cosas a la vez, filtrar por
 // producto y recorrer por fecha.
@@ -120,5 +104,12 @@ db.categorias.createIndex(
     { nombre: 1 },
     { name: 'categorias_por_nombre' }
 );
+
+// Si quedo de una version anterior, se va: las ofertas viven en PostgreSQL y
+// una copia vieja aqui es peor que no tenerla, porque parece al dia.
+if (db.getCollectionNames().indexOf('ofertas') !== -1) {
+    db.ofertas.drop();
+    print('ofertas: coleccion vieja eliminada, ahora viven solo en PostgreSQL');
+}
 
 print('indices al dia');

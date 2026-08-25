@@ -534,8 +534,7 @@ if ($coleccionesJs.Count -eq 0) {
 
 $COLECCIONES_ETL = @(
     @{ mongo = 'productos';  sql = 'SELECT count(*) FROM productos;'  },
-    @{ mongo = 'categorias'; sql = 'SELECT count(*) FROM categorias;' },
-    @{ mongo = 'ofertas';    sql = 'SELECT count(*) FROM oferta;'     }
+    @{ mongo = 'categorias'; sql = 'SELECT count(*) FROM categorias;' }
 )
 
 Paso "Catalogo en MongoDB"

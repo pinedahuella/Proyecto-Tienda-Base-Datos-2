@@ -7,8 +7,9 @@ backend, en orden. No toqué nada de `backend/src/`.
 .\arrancar.ps1 -Reiniciar
 ```
 
-Queda: 36 tablas · 34 productos · 63 variantes · **168 ofertas** · 23 categorías ·
-44 eventos.
+Queda en PostgreSQL: 36 tablas · 34 productos · 63 variantes · **168 ofertas** ·
+220 filas de precio · 153 movimientos de stock.
+Y en Mongo: `productos` 34 · `categorias` 23 · `productos_eventos` 44.
 
 ---
 
@@ -39,20 +40,36 @@ La comisión salió del alcance: se fue entera.
 | tabla `categorias_historial` | — |
 | `pedido_producto.precio_unitario` | vía `id_precio_historial` |
 | `pedido_producto.porcentaje_comision` | — |
-| `producto.vendedor` (Mongo) | colección `ofertas` |
-| `variantes[].precio` (Mongo) | colección `ofertas` |
-| `variantes[].stock` (Mongo) | colección `ofertas` |
+| `producto.vendedor` (Mongo) | tabla `oferta`, en PostgreSQL |
+| `variantes[].precio` (Mongo) | tabla `oferta`, en PostgreSQL |
+| `variantes[].stock` (Mongo) | tabla `oferta`, en PostgreSQL |
 
 **Tablas nuevas** (`migrations/005_ofertas.sql`):
 
 ```
 estado_oferta     activa | pausada | retirada
-oferta            id_oferta, id_producto_variante, id_usuario, precio, stock,
-                  id_estado_oferta, fecha_creacion, fecha_actualizacion
-                  UNIQUE (id_usuario, id_producto_variante)
+oferta            id_oferta, id_producto_mongo, id_producto_variante_mongo,
+                  id_usuario, precio, stock, id_estado_oferta,
+                  fecha_creacion, fecha_actualizacion
+                  UNIQUE (id_usuario, id_producto_variante_mongo)
 precio_historial  id_precio_historial, id_oferta, precio, id_usuario_modifico,
                   fecha_creacion
 ```
+
+**`oferta` apunta al catálogo por los ids de Mongo y SIN llave foránea**, igual
+que `pedido_producto`: una sola forma de identificar una variante en todo el
+sistema. La contra: la base ya no rechaza una oferta sobre una variante que no
+existe — eso lo tiene que comprobar la aplicación al publicar.
+
+### Las ofertas NO están en Mongo
+
+Se quedan solo en PostgreSQL. Copiarlas obligaría a sostener precio, stock y
+estado al día en dos bases a la vez, que es el riesgo de inconsistencia que
+queremos evitar — y PostgreSQL es donde se decide si alcanza para vender.
+
+En Mongo solo hay cuatro números **agregados** dentro del producto, para que la
+lista del catálogo se pinte sin salir de ahí. **La ficha de un producto pide sus
+ofertas a PostgreSQL.**
 
 ---
 
@@ -114,27 +131,20 @@ export interface Producto {
 
 ### `models/oferta.ts` — nuevo
 
-```ts
-import { Decimal128 } from 'mongodb';
+Es una fila de **PostgreSQL**, no un documento. Va con el resto de los modelos
+relacionales, y los `bigint` llegan como `string` porque así los entrega `pg`.
 
-/** Documentos de la colección `ofertas`. _id es el id_oferta de PostgreSQL. */
+```ts
+/** Tabla oferta. Quien vende una variante, a qué precio y con cuántas unidades. */
 export interface Oferta {
-  _id: number;
-  id_producto: number;
-  id_producto_variante: number;
-  nombre_producto: string;
-  nombre_variante: string;
-  vendedor: {
-    id_usuario: number;
-    usuario: string;
-    nombre: string;
-    apellido: string;
-  };
-  /** true en la oferta de tienda@mesh.com, que es la que se enseña. */
-  es_tienda: boolean;
-  precio: Decimal128;
+  id_oferta: string;
+  /** Del catálogo en MongoDB. NO es llave foránea. */
+  id_producto_mongo: string;
+  id_producto_variante_mongo: string;
+  id_usuario: string;
+  precio: string;
   stock: number;
-  estado: 'activa' | 'pausada' | 'retirada';
+  id_estado_oferta: number;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -161,30 +171,24 @@ export interface PedidoProducto {
 
 ## 4. Las consultas que necesitás
 
-**Las ofertas de una variante, de la más barata a la más cara** (tiene índice):
+**Las ofertas de una variante, de la más barata a la más cara** (tiene índice).
+Es la consulta de la ficha, y va a **PostgreSQL**:
 
-```ts
-db.collection<Oferta>('ofertas')
-  .find({ id_producto_variante: idVariante, estado: 'activa' })
-  .sort({ precio: 1 })
-  .toArray();
+```sql
+SELECT o.id_oferta, o.precio, o.stock, eo.estado_oferta_nombre AS estado,
+       u.id_usuario, u.usuario, u.nombre, u.apellido
+FROM oferta o
+JOIN usuarios      u  ON u.id_usuario        = o.id_usuario
+JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+WHERE o.id_producto_variante_mongo = $1
+  AND eo.estado_oferta_nombre = 'activa'
+ORDER BY o.precio;
 ```
 
-**Todas las ofertas de un producto**, para la ficha:
+**Todas las ofertas de un producto**, para la ficha completa: lo mismo con
+`WHERE o.id_producto_mongo = $1`.
 
-```ts
-db.collection<Oferta>('ofertas')
-  .find({ id_producto: idProducto, estado: 'activa' })
-  .toArray();
-```
-
-**Las ofertas de un vendedor**, para su panel:
-
-```ts
-db.collection<Oferta>('ofertas')
-  .find({ 'vendedor.id_usuario': idUsuario })
-  .toArray();
-```
+**Las ofertas de un vendedor**, para su panel: `WHERE o.id_usuario = $1`.
 
 **El precio y el vendedor de una línea del pedido** (SQL):
 
@@ -277,7 +281,10 @@ volver a consultar:
                "id_producto_variante": 5, "stock": 7 } ] }
 ```
 
-El `$set` va sobre la colección `ofertas`, por `_id: id_oferta`.
+Con eso hay que **recalcular los cuatro agregados** del producto en Mongo
+(`precio_tienda`, `stock_tienda`, `stock_total`, `total_ofertas`) y hacerles
+`$set` en su documento. Es lo único que se sincroniza a Mongo después de una
+venta.
 
 ### `reponer_stock`
 

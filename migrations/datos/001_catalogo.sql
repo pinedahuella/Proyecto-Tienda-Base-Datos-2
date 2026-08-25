@@ -1015,6 +1015,11 @@ JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_vari
 -- Aqui vive el precio y el stock. Una fila por vendedor y variante, que es
 -- lo que garantiza el UNIQUE del 005.
 --
+-- Apunta al catalogo por los ids de MongoDB y sin llave foranea, igual que
+-- pedido_producto: una sola forma de identificar una variante en todo el
+-- sistema. Aqui se resuelven contra productos_variantes porque el conjunto
+-- de datos se escribe antes de que exista el documento, y son el mismo id.
+--
 -- La tienda tiene oferta de todas: por eso ningun producto se queda sin
 -- precio que ensenar. Los otros cuatro entran a veces si y a veces no, con
 -- una semilla fija, asi que hay variantes con un solo precio y otras con
@@ -1022,8 +1027,8 @@ JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_vari
 -- activas y con stock, la pantalla nunca ensenaria los casos que si van a
 -- pasar de verdad.
 
-INSERT INTO oferta (id_producto_variante, id_usuario, precio, stock, id_estado_oferta, fecha_creacion, fecha_actualizacion)
-SELECT pv.id_producto_variante, u.id_usuario, v.precio, v.stock, eo.id_estado_oferta, v.fecha::timestamptz, v.fecha::timestamptz
+INSERT INTO oferta (id_producto_mongo, id_producto_variante_mongo, id_usuario, precio, stock, id_estado_oferta, fecha_creacion, fecha_actualizacion)
+SELECT p.id_producto, pv.id_producto_variante, u.id_usuario, v.precio, v.stock, eo.id_estado_oferta, v.fecha::timestamptz, v.fecha::timestamptz
 FROM (VALUES
     ('tienda@mesh.com', 'Laptop Aurora 14', '16 GB / 512 GB', 6200.00, 10, 'activa', '2026-01-04 10:52:00-06'),
     ('ventas.norte@mesh.com', 'Laptop Aurora 14', '16 GB / 512 GB', 6343.00, 4, 'activa', '2026-01-04 10:52:00-06'),
@@ -1436,7 +1441,7 @@ FROM (VALUES
 JOIN usuarios            u  ON u.correo_electronico = v.correo
 JOIN productos           p  ON p.nombre = v.producto
 JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_variante = v.variante
-JOIN oferta              o  ON o.id_producto_variante = pv.id_producto_variante AND o.id_usuario = u.id_usuario;
+JOIN oferta              o  ON o.id_producto_variante_mongo = pv.id_producto_variante AND o.id_usuario = u.id_usuario;
 
 -- La oferta se pone en su precio de HOY, que es el ultimo de su historial.
 -- Se deriva del historial en vez de escribirse otra vez: si se escribiera
@@ -1492,7 +1497,7 @@ BEGIN
     FOR v_of IN
         SELECT o.id_oferta, p.id_producto, pv.id_producto_variante, p.nombre AS np, pv.nombre_variante AS nv
         FROM oferta o
-        JOIN productos_variantes pv ON pv.id_producto_variante = o.id_producto_variante
+        JOIN productos_variantes pv ON pv.id_producto_variante = o.id_producto_variante_mongo
         JOIN productos p            ON p.id_producto = pv.id_producto
         JOIN estado_oferta eo       ON eo.id_estado_oferta = o.id_estado_oferta
         WHERE eo.estado_oferta_nombre = 'activa' AND o.stock >= 2
@@ -1520,7 +1525,7 @@ BEGIN
     SELECT o.id_oferta, p.id_producto, pv.id_producto_variante, p.nombre AS np, pv.nombre_variante AS nv
     INTO v_of
     FROM oferta o
-    JOIN productos_variantes pv ON pv.id_producto_variante = o.id_producto_variante
+    JOIN productos_variantes pv ON pv.id_producto_variante = o.id_producto_variante_mongo
     JOIN productos p            ON p.id_producto = pv.id_producto
     JOIN estado_oferta eo       ON eo.id_estado_oferta = o.id_estado_oferta
     WHERE eo.estado_oferta_nombre = 'activa' AND o.stock >= 3
@@ -1586,7 +1591,7 @@ BEGIN
     WHERE NOT EXISTS (
         SELECT 1 FROM oferta o
         JOIN usuarios u ON u.id_usuario = o.id_usuario
-        WHERE o.id_producto_variante = pv.id_producto_variante
+        WHERE o.id_producto_variante_mongo = pv.id_producto_variante
           AND u.correo_electronico = 'tienda@mesh.com'
     );
 
