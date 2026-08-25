@@ -20,11 +20,15 @@
 -- El producto ya NO trae vendedor ni precio ni stock, porque dejaron de ser
 -- suyos: son de cada oferta, y las ofertas viven en su propia coleccion.
 --
--- Lo unico que se queda embebido de las ofertas son cuatro numeros calculados:
+-- Lo unico que se queda embebido de las ofertas son cinco numeros calculados:
 --
 --   precio_tienda   el precio de la tienda, que es el que se ensena en la
 --                   pagina. Lo pidio el profesor: el primero siempre es el de
 --                   la pagina.
+--   precio_desde    el mas barato al que se ofrece, de cualquier vendedor
+--                   activo. Es el que usa el FILTRO de precio del buscador:
+--                   la tarjeta ensena uno y se puede pagar otro. No mira el
+--                   stock: de la disponibilidad se encargan los de abajo.
 --   stock_tienda    unidades que tiene la tienda
 --   stock_total     unidades entre TODOS los vendedores activos
 --   total_ofertas   cuantos vendedores distintos la tienen activa
@@ -93,6 +97,28 @@ SELECT jsonb_build_object(
                                     AND pv2.id_producto_variante = o.id_producto_variante_mongo
         WHERE pv2.id_producto = p.id_producto
           AND o.id_usuario = (SELECT id_usuario FROM tienda)
+    ),
+
+    -- El precio mas barato al que se ofrece, de cualquier vendedor activo.
+    --
+    -- Va aparte de precio_tienda y no lo reemplaza, porque contestan dos
+    -- preguntas distintas. La tarjeta ENSENA precio_tienda, que es la regla del
+    -- profesor. Pero el filtro de precio del buscador tiene que usar este: si
+    -- alguien busca "hasta Q4000" y la tienda pide 4100 mientras otro vendedor
+    -- lo tiene en 3856, el producto SI le sirve y no puede quedar fuera.
+    --
+    -- NO lleva la condicion de tener unidades, y es a proposito: si la
+    -- llevara, un rango de precio estaria filtrando ademas por
+    -- disponibilidad sin que nadie lo pida, y para eso ya estan stock_total y
+    -- stock_tienda. Cada filtro contesta UNA pregunta y se combinan; mezclarlos
+    -- deja al buscador escondiendo resultados por un motivo que no se ve.
+    --
+    -- Sale NULL solo cuando el producto no tiene ninguna oferta activa.
+    'precio_desde', (
+        SELECT min(o.precio)::text
+        FROM oferta o
+        WHERE o.id_producto_mongo = p.id_producto
+          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
     ),
 
     -- Las existencias, SUMADAS sobre todas las variantes del producto. Son
@@ -200,6 +226,12 @@ SELECT jsonb_build_object(
                    -- Lo mismo por variante. Aqui stock_tienda NO es una suma:
                    -- el UNIQUE de oferta garantiza que la tienda tiene a lo
                    -- sumo una por variante.
+                   'precio_desde', (
+                       SELECT min(o.precio)::text FROM oferta o
+                       WHERE o.id_producto_mongo          = p.id_producto
+                         AND o.id_producto_variante_mongo = pv.id_producto_variante
+                         AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                   ),
                    'stock_tienda', coalesce((
                        SELECT o.stock FROM oferta o
                        WHERE o.id_producto_mongo          = p.id_producto

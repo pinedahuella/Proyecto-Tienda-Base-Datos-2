@@ -61,6 +61,8 @@ const CLAVES_RESERVADAS = new Set([
   'id_categoria',
   'precio_min',
   'precio_max',
+  'precio_tienda_min',
+  'precio_tienda_max',
   'estado_variante',
   'stock_min',
   'stock_max',
@@ -271,6 +273,14 @@ export class ProductosService {
     );
     const precioMin = validarPrecio(query.precio_min, 'precio_min');
     const precioMax = validarPrecio(query.precio_max, 'precio_max');
+    const precioTiendaMin = validarPrecio(
+      query.precio_tienda_min,
+      'precio_tienda_min',
+    );
+    const precioTiendaMax = validarPrecio(
+      query.precio_tienda_max,
+      'precio_tienda_max',
+    );
     const stockMin = validarEnteroPositivo(query.stock_min, 'stock_min');
     const stockMax = validarEnteroPositivo(query.stock_max, 'stock_max');
     const stockTiendaMin = validarEnteroPositivo(
@@ -300,18 +310,30 @@ export class ProductosService {
       filtro['categoria.id_categoria'] = idCategoria;
     }
 
-    // El precio de la tarjeta es el de la tienda, ya calculado en la raiz
-    // del documento: no hace falta (ni se puede, desde el giro
-    // multi-vendedor) filtrar por el precio de una variante suelta.
-    if (precioMin != null || precioMax != null) {
-      const rango: Record<string, Decimal128> = {};
-      if (precioMin != null) {
-        rango.$gte = Decimal128.fromString(precioMin);
-      }
-      if (precioMax != null) {
-        rango.$lte = Decimal128.fromString(precioMax);
-      }
-      filtro.precio_tienda = rango;
+    // Los dos precios ya vienen calculados en la raiz del documento: no hace
+    // falta (ni se puede, desde el giro multi-vendedor) filtrar por el precio
+    // de una variante suelta.
+    //
+    // precio_min/precio_max van sobre precio_desde, el mas barato que se puede
+    // PAGAR, y no sobre el de la tienda. Es lo que espera quien busca: la
+    // tarjeta ensena el precio de la tienda, pero si otro vendedor lo tiene
+    // mas barato, el producto si le sirve a quien puso un tope. Con el filtro
+    // sobre precio_tienda quedaban fuera 21 de los 34 productos del conjunto
+    // de datos, cada uno con alguien vendiendolo mas barato.
+    //
+    // Quien de verdad quiera filtrar solo lo de la tienda tiene
+    // precio_tienda_min/max, igual que stock_tienda_min/max para el stock.
+    const rangoPrecio = this.construirRangoDecimal(precioMin, precioMax);
+    if (rangoPrecio != null) {
+      filtro.precio_desde = rangoPrecio;
+    }
+
+    const rangoPrecioTienda = this.construirRangoDecimal(
+      precioTiendaMin,
+      precioTiendaMax,
+    );
+    if (rangoPrecioTienda != null) {
+      filtro.precio_tienda = rangoPrecioTienda;
     }
 
     if (query.estado_variante) {
@@ -353,6 +375,32 @@ export class ProductosService {
     }
 
     return filtro;
+  }
+
+  /**
+   * Un rango de Mongo a partir de un minimo y un maximo ya validados, o null
+   * si no vino ninguno de los dos. Existe para no repetir el mismo armado en
+   * cada filtro de precio.
+   *
+   * El dinero se compara como Decimal128 y no como numero de JavaScript: el
+   * documento lo guarda asi, y comparar decimal contra double obliga a Mongo a
+   * convertir y puede perder centavos en el borde del rango.
+   */
+  private construirRangoDecimal(
+    min: string | null,
+    max: string | null,
+  ): Record<string, Decimal128> | null {
+    if (min == null && max == null) {
+      return null;
+    }
+    const rango: Record<string, Decimal128> = {};
+    if (min != null) {
+      rango.$gte = Decimal128.fromString(min);
+    }
+    if (max != null) {
+      rango.$lte = Decimal128.fromString(max);
+    }
+    return rango;
   }
 
   /**

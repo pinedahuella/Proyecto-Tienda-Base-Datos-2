@@ -393,10 +393,23 @@ existencias en cada tarjeta, el producto lleva cuatro numeros calculados:
 
 | Campo | Que es |
 |---|---|
-| `precio_tienda` | el precio de la tienda, que es el que se ensena |
+| `precio_tienda` | el precio de la tienda, que es el que se **ensena** |
+| `precio_desde` | el mas barato al que se ofrece, de cualquier vendedor |
 | `stock_tienda` | unidades de la tienda |
 | `stock_total` | unidades entre todos los vendedores activos |
 | `total_ofertas` | cuantos vendedores lo tienen activo |
+
+**Por que hay dos precios y no uno.** La tarjeta ensena el de la tienda, que es
+la regla del profesor. Pero el FILTRO del buscador usa `precio_desde`: quien
+busca "hasta Q4000" quiere lo que puede pagar con eso, y en 21 de los 34
+productos del conjunto hay alguien vendiendolo mas barato que la tienda. Con el
+filtro sobre `precio_tienda` esos quedaban fuera de la busqueda aunque si le
+sirvieran. Es un fallo que solo se ve buscando, no leyendo el modelo.
+
+Y `precio_desde` **no mira el stock**, a proposito: si lo mirara, un rango de
+precio estaria filtrando ademas por disponibilidad sin que nadie lo pida, y para
+eso ya estan los dos campos de stock. Cada filtro contesta una pregunta y se
+combinan.
 
 Los tres primeros van tambien dentro de cada variante. **En el padre los dos de
 stock son SUMAS** de sus variantes, porque la tarjeta ensena un producto y no una

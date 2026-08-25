@@ -13,8 +13,13 @@
 //   NO trae vendedor, ni precio, ni stock por vendedor: al volverse
 //   multi-vendedor dejaron de ser del producto. Solo trae cuatro numeros
 //   calculados, que son los que la LISTA del catalogo necesita en cada tarjeta:
-//   precio_tienda, stock_tienda, stock_total y total_ofertas. Los de stock van
-//   SUMADOS sobre todas sus variantes, y cuentan solo ofertas activas.
+//   precio_tienda, precio_desde, stock_tienda, stock_total y total_ofertas.
+//   Los de stock van SUMADOS sobre todas sus variantes, y cuentan solo ofertas
+//   activas.
+//
+//   precio_tienda es el que se ENSENA (regla del profesor) y precio_desde el
+//   mas barato que se puede PAGAR. Son dos porque contestan dos preguntas: la
+//   tarjeta usa el primero y el filtro del buscador el segundo.
 //
 // LAS OFERTAS NO ESTAN AQUI, y es LA decision de modelado de esta entrega.
 //
@@ -74,22 +79,51 @@ COLECCIONES.forEach(function (nombre) {
 // Cada uno responde a una consulta concreta de la aplicacion, no a la idea
 // general de que "conviene tener indices".
 
-// El catalogo se navega filtrando por categoria, escondiendo lo que no esta
-// activo y, muy seguido, dejando solo lo que tiene existencias. Es un indice
-// COMPUESTO y en ese orden porque el estado se filtra siempre, la categoria a
-// veces, y stock_total va al final por ser un rango: un campo de rango detras
-// de otro deja de servir para filtrar dentro del indice.
+// Los dos indices del catalogo salieron de MEDIR, no de suponer. Se probaron
+// tres y solo dos se ganaron el puesto: un indice que nunca se usa no es
+// gratis, cuesta en cada escritura.
 //
-// Si existe la version anterior de este indice (sin stock_total), se cambia.
-// createIndex con el mismo nombre y otras llaves da IndexOptionsConflict.
-if (db.productos.getIndexes().some(function (i) { return i.name === 'catalogo_categoria_estado'; })) {
-    db.productos.dropIndex('catalogo_categoria_estado');
-}
+//   catalogo_categoria      examina 3 documentos para devolver 3
+//   catalogo_precio         examina 21 claves en vez de 34
+//   catalogo_disponibilidad examinaba 34 para devolver 33  <- se quito
 
+// "los productos de esta categoria, sin los ocultos, ordenados por id". Es la
+// navegacion normal del catalogo.
+//
+// El orden importa: id_categoria va PRIMERO porque es igualdad; estado
+// despues, que se filtra siempre pero con $nin y no descarta casi nada; y _id
+// al final, que es por donde se ordena y asi sale ordenado del indice, sin
+// ordenar en memoria.
+//
+// Va sobre categoria.id_categoria y NO sobre categoria.nombre: el backend
+// filtra por id. Un indice sobre el campo equivocado se ve igual de bien en la
+// lista de indices y no lo usa nadie.
 db.productos.createIndex(
-    { 'categoria.nombre': 1, estado: 1, stock_total: 1 },
-    { name: 'catalogo_categoria_estado_stock' }
+    { 'categoria.id_categoria': 1, estado: 1, _id: 1 },
+    { name: 'catalogo_categoria' }
 );
+
+// "los productos entre tal y tal precio". Va sobre precio_desde, que es el mas
+// barato que se puede pagar, y no sobre precio_tienda: quien busca "hasta
+// Q4000" quiere lo que puede pagar con eso, aunque la tarjeta ensene otro
+// numero.
+//
+// Aqui el _id no puede ir al final: detras de un rango, un indice ya no sirve
+// para ordenar. Se paga un orden en memoria a cambio de leer solo lo que
+// coincide, y medido conviene.
+db.productos.createIndex(
+    { estado: 1, precio_desde: 1 },
+    { name: 'catalogo_precio' }
+);
+
+// Los indices de versiones anteriores, si quedaron, se van
+['catalogo_categoria_estado', 'catalogo_categoria_estado_stock', 'catalogo_disponibilidad']
+    .forEach(function (viejo) {
+        if (db.productos.getIndexes().some(function (i) { return i.name === viejo; })) {
+            db.productos.dropIndex(viejo);
+            print('indice ' + viejo + ' eliminado');
+        }
+    });
 
 // "el estado de este producto el 3 de marzo": se leen sus eventos hasta esa
 // fecha, en orden. El compuesto sirve para las dos cosas a la vez, filtrar por
