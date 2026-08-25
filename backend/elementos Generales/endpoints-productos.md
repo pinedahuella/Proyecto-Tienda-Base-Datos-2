@@ -58,10 +58,10 @@ catálogo público.
 | `nombre` | texto | No | Búsqueda parcial (sin distinguir mayúsculas) sobre `nombre` |
 | `estado` | texto | No | Igualdad exacta sobre `estado` del producto |
 | `id_categoria` | entero | No | Igualdad exacta sobre `categoria.id_categoria` |
-| `id_vendedor` | entero | No | Igualdad exacta sobre `vendedor.id_usuario` |
-| `precio_min` / `precio_max` | decimal | No | Rango de precio, sobre `variantes[].precio` |
+| `precio_min` / `precio_max` | decimal | No | Rango sobre `precio_tienda` |
 | `estado_variante` | texto | No | Igualdad exacta sobre `variantes[].estado` |
-| `stock_min` / `stock_max` | entero | No | Rango sobre `stock_total` (la suma de `variantes[].stock` del producto entero, no de una variante) |
+| `stock_min` / `stock_max` | entero | No | Rango sobre `stock_total` (existencias activas entre TODOS los vendedores, ya sumadas sobre las variantes) |
+| `stock_tienda_min` / `stock_tienda_max` | entero | No | Rango sobre `stock_tienda` (existencias activas solo de la tienda, ya sumadas sobre las variantes) |
 | _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada) — igualdad por defecto, o `min_`/`max_`/`contiene_` como prefijo — ver abajo |
 
 ### Paginación por cursor: ejemplo
@@ -78,11 +78,7 @@ hay más: `siguiente_cursor` sale en `null` y el frontend deja de pedir.
 ### Filtros fijos
 
 Son los campos que existen siempre, sin importar la categoría (los
-"Obligatorios" de `productos_subproductos.md`). `estado_variante` y el rango
-de precio se combinan entre sí exigiendo que sea **la misma variante** la que
-cumpla las dos condiciones (por ejemplo, "una variante activa Y que cueste
-entre 100 y 500"): si una variante está activa y otra distinta cuesta en ese
-rango, no cuenta, porque no son la misma variante.
+"Obligatorios" de `productos_subproductos.md`).
 
 ```
 GET /productos?nombre=laptop
@@ -91,16 +87,30 @@ GET /productos?precio_min=100&precio_max=500&estado_variante=activa
 GET /productos?stock_min=10
 ```
 
-**`stock_min`/`stock_max` son la excepción: no se combinan por variante,
-van sobre el producto entero.** `stock_total` no es un campo de una
-variante en particular, es la suma de `variantes[].stock` de todas las
-variantes del producto (calculada al responder, nunca guardada en Mongo —
-ver [cambios-etl-productos.md](cambios-etl-productos.md)), así que
-`?stock_min=10` trae un producto si la suma de todas sus variantes es al
-menos 10, sin importar cuánto tenga cada una por separado. Una variante sin
-`stock` (pasa cuando se publica o se agrega sin mandar `stock_inicial` —
-ver `endpoints-vendedores.md`) cuenta como 0 en la suma, nunca rompe el
-cálculo.
+**Modelo multi-vendedor** (ver `docs/base-de-datos.md` en la raíz del
+repo, "El catálogo se mudó a MongoDB"): el producto ya no tiene un precio
+ni un stock propios — cada vendedor pone los suyos en su oferta, que vive
+solo en PostgreSQL. Lo que trae el documento son cuatro números ya
+calculados (nunca agregados al vuelo en la consulta): `precio_tienda`,
+`stock_tienda`, `stock_total` y `total_ofertas`, tanto en la raíz del
+producto como dentro de cada variante — son los que necesita la tarjeta
+del catálogo sin ir a pedir las ofertas reales.
+
+- **`precio_min`/`precio_max`** van sobre `precio_tienda`: el precio de la
+  oferta de la tienda (a nivel de producto, el menor entre sus variantes).
+  Ya no se puede filtrar por el precio de un vendedor cualquiera desde
+  aquí — para eso está la lista de `ofertas` de `GET /productos/:id`.
+- **`estado_variante`** sigue siendo `variantes[].estado` (si la
+  presentación está activa o inactiva), pero ya **no se combina** con el
+  rango de precio en la misma variante: como el precio ahora es un campo
+  calculado de la raíz y no de cada variante, las dos condiciones se
+  evalúan por separado.
+- **`stock_min`/`stock_max`** van sobre `stock_total`: existencias activas
+  entre TODOS los vendedores, ya sumadas sobre las variantes del producto.
+  **`stock_tienda_min`/`stock_tienda_max`** son la misma idea pero solo
+  con las existencias de la tienda (`stock_tienda`). Los dos son campos ya
+  calculados en el documento — filtrar por ellos es directo, no hace falta
+  ninguna agregación previa.
 
 ### Filtros dinámicos (características, del catálogo o personalizadas)
 
@@ -199,6 +209,8 @@ publicó el producto.
 
 ### 200
 
+Ejemplo real, contra el catálogo cargado hoy (`GET /productos?limite=1`):
+
 ```json
 {
   "ok": true,
@@ -206,47 +218,58 @@ publicó el producto.
   "payload": {
     "productos": [
       {
-        "_id": 2,
-        "nombre": "Laptop 14 pulgadas",
-        "descripcion": "Laptop de 14 pulgadas para trabajo y estudio",
-        "fecha_creacion": "2026-01-15T17:30:00.000Z",
+        "_id": 1,
+        "nombre": "Laptop Nimbo 13",
+        "descripcion": "Equipo de entrada para estudio y oficina, silencioso y sin ventilador.",
+        "fecha_creacion": "2026-01-14T16:32:00.000Z",
         "estado": "activo",
-        "vendedor": {
-          "id_usuario": 5,
-          "usuario": "vendedor_prueba",
-          "nombre": "Carlos",
-          "apellido": "Ramirez"
-        },
         "categoria": {
-          "id_categoria": 5,
-          "nombre": "Computadoras",
-          "categoria_padre": "Electronica",
-          "porcentaje_comision": { "$numberDecimal": "6.00" }
+          "nombre": "Laptops",
+          "id_categoria": 7,
+          "categoria_padre": "Electronica"
         },
+        "precio_tienda": { "$numberDecimal": "4100.00" },
+        "stock_tienda": 22,
+        "stock_total": 43,
+        "total_ofertas": 3,
         "variantes": [
           {
-            "id_producto_variante": 3,
-            "nombre_variante": "8 GB RAM",
-            "precio": { "$numberDecimal": "4299.00" },
-            "descripcion": "Pantalla de 14 pulgadas, 8 GB de RAM, 256 GB SSD",
-            "fecha_creacion": "2026-01-15T17:30:00.000Z",
+            "id_producto_variante": 1,
+            "nombre_variante": "8 GB / 256 GB",
+            "descripcion": null,
+            "fecha_creacion": "2026-01-14T16:32:00.000Z",
             "estado": "activa",
-            "imagenes": ["https://..."],
-            "stock": 12
+            "imagenes": [],
+            "precio_tienda": { "$numberDecimal": "4100.00" },
+            "stock_tienda": 22,
+            "stock_total": 43,
+            "total_ofertas": 3,
+            "caracteristicas_adicionales": [
+              { "nombre": "Memoria RAM", "valor": 8, "unidad": "GB" }
+            ]
           }
         ],
-        "stock_total": 12
+        "caracteristicas_adicionales": [
+          { "nombre": "Marca", "valor": "Nimbo", "unidad": null }
+        ]
       }
     ],
-    "siguiente_cursor": 2
+    "siguiente_cursor": 1
   }
 }
 ```
 
-`stock_total` sale en cada producto sin tener que pedirlo con ningún query
-param: es la suma de `variantes[].stock` (aquí solo hay una variante, con
-12, así que `stock_total` también es 12). No se guarda en Mongo, se calcula
-al responder — ver [cambios-etl-productos.md](cambios-etl-productos.md).
+**Modelo multi-vendedor.** Ya no viene `vendedor` (el producto no es de
+nadie) ni `porcentaje_comision` (salió del alcance), y las variantes ya no
+traen `precio` ni `stock` propios — eso es de cada oferta, que vive solo
+en PostgreSQL (ver `docs/base-de-datos.md`). Lo que sí trae, sin tener que
+pedirlo con ningún query param, son cuatro números ya calculados —
+`precio_tienda`, `stock_tienda`, `stock_total`, `total_ofertas` — tanto en
+la raíz del producto como dentro de cada variante; en la raíz, los dos de
+stock son la SUMA de las variantes. Son una copia (se recalculan cuando
+una oferta cambia de precio, se queda sin unidades o se pausa), no la
+verdad: la ficha completa, con las ofertas reales de cada vendedor, está
+en `GET /productos/:id`.
 
 `siguiente_cursor` es `null` cuando esa tanda ya trajo el último producto
 del catálogo (o de lo que quedaba despues de aplicar los filtros).
@@ -257,11 +280,12 @@ del catálogo (o de lo que quedaba despues de aplicar los filtros).
 { "ok": false, "mensaje": "El limite debe ser un numero entero mayor a 0", "payload": null }
 { "ok": false, "mensaje": "despues_de debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "id_categoria debe ser un numero entero", "payload": null }
-{ "ok": false, "mensaje": "id_vendedor debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "precio_min debe ser un numero valido, con hasta 2 decimales", "payload": null }
 { "ok": false, "mensaje": "precio_max debe ser un numero valido, con hasta 2 decimales", "payload": null }
 { "ok": false, "mensaje": "stock_min debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "stock_max debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "stock_tienda_min debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "stock_tienda_max debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "El filtro \"<nombre>\" no es un nombre de caracteristica valido", "payload": null }
 ```
 
@@ -283,45 +307,101 @@ del catálogo (o de lo que quedaba despues de aplicar los filtros).
 
 Pública, igual que `GET /productos`. Un producto completo por su `_id`, con
 la misma forma que cada elemento del array `productos` de arriba (todas sus
-variantes, características del catálogo y personalizadas incluidas).
+variantes, características del catálogo y personalizadas incluidas) — **más
+un campo que no está en el listado**, `ofertas`: la lista real de quién lo
+vende, a cómo y con cuántas unidades.
 
 **Los productos `inactivo` o `borrador` nunca aparecen aquí tampoco**:
 pedirlos por id da el mismo 404 que un id que no existe, para no confirmar
 por otra vía que el producto existe pero está oculto.
 
 ```
-GET /productos/2
+GET /productos/1
 ```
 
+### `ofertas`: de dónde sale y qué trae
+
+A diferencia de todo lo demás del documento, `ofertas` no viene de Mongo:
+se pide a PostgreSQL en el momento, con una sola consulta indexada por
+`id_producto_mongo` (tabla `oferta`, `migrations/005_ofertas.sql`), y se
+arma solo para responder esta ruta — no se guarda en ningún lado. La razón
+está en `docs/base-de-datos.md`: precio, stock y estado de una oferta
+cambian en cada venta, así que copiarlos a Mongo obligaría a sostenerlos al
+día en dos bases a la vez.
+
+Solo trae las ofertas **activas** (una pausada o retirada no se puede
+comprar, y confundiría a quien compra), ordenadas por variante y, dentro de
+cada variante, de la más barata a la más cara.
+
+| Campo | Qué es |
+| --- | --- |
+| `id_oferta` | El id de la oferta en PostgreSQL |
+| `id_producto_variante_mongo` | A qué variante de `variantes[]` pertenece esta oferta |
+| `vendedor` | `{ id_usuario, usuario, nombre, apellido }` de quien la vende |
+| `es_tienda` | `true` solo en la oferta de la cuenta de la tienda (`tienda@mesh.com`) — es la que se enseña como `precio_tienda` en el resto del documento |
+| `precio` | Precio de esta oferta en particular, como texto (`"4100.00"`) |
+| `stock` | Unidades disponibles de esta oferta |
+| `fecha_actualizacion` | Último cambio de precio, stock o estado de esta oferta |
+
 ### 200
+
+Ejemplo real (`GET /productos/1`):
 
 ```json
 {
   "ok": true,
   "mensaje": "Producto obtenido",
   "payload": {
-    "_id": 2,
-    "nombre": "Laptop 14 pulgadas",
-    "descripcion": "Laptop de 14 pulgadas para trabajo y estudio",
-    "fecha_creacion": "2026-01-15T17:30:00.000Z",
+    "_id": 1,
+    "nombre": "Laptop Nimbo 13",
+    "descripcion": "Equipo de entrada para estudio y oficina, silencioso y sin ventilador.",
+    "fecha_creacion": "2026-01-14T16:32:00.000Z",
     "estado": "activo",
-    "vendedor": { "id_usuario": 5, "usuario": "vendedor_prueba", "nombre": "Carlos", "apellido": "Ramirez" },
-    "categoria": {
-      "id_categoria": 5,
-      "nombre": "Computadoras",
-      "categoria_padre": "Electronica",
-      "porcentaje_comision": { "$numberDecimal": "6.00" }
-    },
-    "variantes": [ "..." ],
+    "categoria": { "nombre": "Laptops", "id_categoria": 7, "categoria_padre": "Electronica" },
+    "precio_tienda": { "$numberDecimal": "4100.00" },
+    "stock_tienda": 22,
+    "stock_total": 43,
+    "total_ofertas": 3,
+    "variantes": [ "... misma forma que en GET /productos ..." ],
     "caracteristicas_adicionales": [ "..." ],
-    "caracteristicas_personalizadas": [ "..." ],
-    "stock_total": 12
+    "ofertas": [
+      {
+        "id_oferta": "1",
+        "id_producto_variante_mongo": "1",
+        "vendedor": { "id_usuario": "1", "usuario": "ventas_poniente", "nombre": "Paola", "apellido": "Guzman" },
+        "es_tienda": false,
+        "precio": "3856.00",
+        "stock": 7,
+        "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
+      },
+      {
+        "id_oferta": "2",
+        "id_producto_variante_mongo": "1",
+        "vendedor": { "id_usuario": "6", "usuario": "ventas_sur", "nombre": "Lucia", "apellido": "Morales" },
+        "es_tienda": false,
+        "precio": "4029.00",
+        "stock": 14,
+        "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
+      },
+      {
+        "id_oferta": "3",
+        "id_producto_variante_mongo": "1",
+        "vendedor": { "id_usuario": "2", "usuario": "mesh_tienda", "nombre": "Mesh", "apellido": "Tienda" },
+        "es_tienda": true,
+        "precio": "4100.00",
+        "stock": 22,
+        "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
+      }
+    ]
   }
 }
 ```
 
-`stock_total` es la suma de `variantes[].stock`, igual que en `GET /productos`
-(ver esa ruta para el detalle de cómo se calcula).
+`id_oferta`, `id_producto_variante_mongo` y `vendedor.id_usuario` salen
+como texto: son `bigint` de PostgreSQL, y el driver los devuelve como
+string para no perder precisión (el mismo motivo por el que `id_usuario`
+es string en el resto del backend). Si un producto no tiene ninguna oferta
+activa, `ofertas` sale como un array vacío, no falta el campo.
 
 ### 400
 
@@ -335,10 +415,15 @@ GET /productos/2
 { "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
 ```
 
+Un id inexistente o de un producto oculto (`inactivo`/`borrador`) da 404
+antes de siquiera consultar PostgreSQL: no tiene sentido pedir ofertas de
+un producto que no se va a mostrar.
+
 ### 503
 
 ```json
 { "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
 ```
 
 ### 500
@@ -371,7 +456,7 @@ mínimo, no el total del catálogo entero.
 | --- | --- | --- | --- |
 | `pagina` | entero | No (por defecto 1) | Qué página pedir, 1 es la primera |
 | `limite` | entero | No (por defecto 20, tope 100) | Cuántos productos trae cada página |
-| `nombre`, `estado`, `id_categoria`, `id_vendedor`, `precio_min`, `precio_max`, `estado_variante`, `stock_min`, `stock_max` | — | No | Los mismos filtros fijos de `GET /productos` |
+| `nombre`, `estado`, `id_categoria`, `precio_min`, `precio_max`, `estado_variante`, `stock_min`, `stock_max`, `stock_tienda_min`, `stock_tienda_max` | — | No | Los mismos filtros fijos de `GET /productos` |
 | _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada), igualdad por defecto o `min_`/`max_`/`contiene_` como prefijo, igual que en `GET /productos` |
 
 ### Ejemplo
@@ -408,11 +493,12 @@ sigue diciendo cuántas páginas hay de verdad.
 { "ok": false, "mensaje": "La pagina debe ser un numero entero mayor a 0", "payload": null }
 { "ok": false, "mensaje": "El limite debe ser un numero entero mayor a 0", "payload": null }
 { "ok": false, "mensaje": "id_categoria debe ser un numero entero", "payload": null }
-{ "ok": false, "mensaje": "id_vendedor debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "precio_min debe ser un numero valido, con hasta 2 decimales", "payload": null }
 { "ok": false, "mensaje": "precio_max debe ser un numero valido, con hasta 2 decimales", "payload": null }
 { "ok": false, "mensaje": "stock_min debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "stock_max debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "stock_tienda_min debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "stock_tienda_max debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "El filtro \"<nombre>\" no es un nombre de caracteristica valido", "payload": null }
 ```
 
@@ -548,12 +634,13 @@ más arriba).
 | `nombre` | `GET /productos?nombre=laptop` | Productos cuyo nombre contenga "laptop" |
 | `estado` | `GET /productos?estado=activo` | Productos con estado exactamente "activo" |
 | `id_categoria` | `GET /productos?id_categoria=7` | Productos de la categoría 7 |
-| `id_vendedor` | `GET /productos?id_vendedor=5` | Productos del vendedor 5 |
-| `precio_min` | `GET /productos?precio_min=100` | Productos con alguna variante de precio >= 100 |
-| `precio_max` | `GET /productos?precio_max=500` | Productos con alguna variante de precio <= 500 |
+| `precio_min` | `GET /productos?precio_min=100` | Productos con `precio_tienda` >= 100 |
+| `precio_max` | `GET /productos?precio_max=500` | Productos con `precio_tienda` <= 500 |
 | `estado_variante` | `GET /productos?estado_variante=activa` | Productos con alguna variante activa |
-| `stock_min` | `GET /productos?stock_min=10` | Productos cuya suma de `variantes[].stock` es >= 10 |
-| `stock_max` | `GET /productos?stock_max=0` | Productos cuya suma de `variantes[].stock` es 0 (agotados) |
+| `stock_min` | `GET /productos?stock_min=10` | Productos con `stock_total` (entre todos los vendedores) >= 10 |
+| `stock_max` | `GET /productos?stock_max=0` | Productos con `stock_total` = 0 (agotados en todos lados) |
+| `stock_tienda_min` | `GET /productos?stock_tienda_min=10` | Productos con `stock_tienda` >= 10 |
+| `stock_tienda_max` | `GET /productos?stock_tienda_max=0` | Productos sin existencias de la tienda (aunque otro vendedor sí tenga) |
 
 ### Filtros dinámicos — un ejemplo por tipo de dato
 
