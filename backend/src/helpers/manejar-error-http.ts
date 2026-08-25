@@ -3,6 +3,7 @@ import {
   ErrorConexion,
   ErrorConflicto,
   ErrorNoEncontrado,
+  ErrorPago,
   ErrorSesion,
   ErrorValidacion,
 } from './errores';
@@ -29,6 +30,9 @@ export function manejarErrorHttp(
   }
   if (error instanceof ErrorNoEncontrado) {
     throw new HttpException(fallo(error.message), HttpStatus.NOT_FOUND);
+  }
+  if (error instanceof ErrorPago) {
+    throw new HttpException(fallo(error.message), HttpStatus.PAYMENT_REQUIRED);
   }
   if (error instanceof ErrorConexion) {
     throw new HttpException(

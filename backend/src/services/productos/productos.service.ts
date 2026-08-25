@@ -42,6 +42,15 @@ interface FilaOferta {
   fecha_actualizacion: Date;
 }
 
+/** Los cuatro numeros calculados de una variante, ya agregados por Postgres. */
+interface FilaCalculoVariante {
+  id_producto_variante_mongo: string;
+  precio_tienda: string | null;
+  stock_tienda: number;
+  stock_total: number;
+  total_ofertas: number;
+}
+
 /**
  * Query params fijos de GET /productos y GET /productos/paginacion.
  * Cualquier otro que llegue se trata como un filtro dinamico de
@@ -254,6 +263,125 @@ export class ProductosService {
       }));
     } catch (error) {
       manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Recalcula precio_tienda/stock_tienda/stock_total/total_ofertas (raiz y
+   * cada variante) de estos productos contra las ofertas reales de
+   * PostgreSQL, y los deja al dia en Mongo con $set. Hay que llamarla
+   * despues de cualquier cosa que cambie una oferta: comprar, cancelar,
+   * publicar una oferta nueva, cambiarle el precio o el estado. Son
+   * copias, no la verdad (ver docs/base-de-datos.md) -- por eso hay que
+   * recalcularlas a mano en vez de esperar a la proxima corrida del ETL.
+   *
+   * Un producto a la vez: despues de comprar_pedido()/cancelar_pedido()
+   * normalmente son uno o dos productos distintos, nunca el catalogo
+   * entero, asi que no hace falta una sola consulta masiva.
+   */
+  async recalcularCamposCalculados(idsProductoMongo: number[]): Promise<void> {
+    const idsUnicos = [...new Set(idsProductoMongo)];
+    for (const idProducto of idsUnicos) {
+      await this.recalcularUnProducto(idProducto);
+    }
+  }
+
+  private async recalcularUnProducto(idProducto: number): Promise<void> {
+    try {
+      const [porVariante, totalEnRaiz] = await Promise.all([
+        pool.query<FilaCalculoVariante>(
+          `WITH tienda AS (
+             SELECT id_usuario FROM usuarios WHERE correo_electronico = $2
+           ),
+           activa AS (
+             SELECT id_estado_oferta FROM estado_oferta WHERE estado_oferta_nombre = 'activa'
+           )
+           SELECT
+             o.id_producto_variante_mongo,
+             MAX(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
+                      THEN o.precio END)::text AS precio_tienda,
+             COALESCE(SUM(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
+                               AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                          THEN o.stock ELSE 0 END), 0)::int AS stock_tienda,
+             COALESCE(SUM(CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                          THEN o.stock ELSE 0 END), 0)::int AS stock_total,
+             COUNT(DISTINCT CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                             THEN o.id_usuario END)::int AS total_ofertas
+           FROM oferta o
+           WHERE o.id_producto_mongo = $1
+           GROUP BY o.id_producto_variante_mongo`,
+          [idProducto, CORREO_TIENDA],
+        ),
+        pool.query<{ total_ofertas: number }>(
+          `SELECT COUNT(DISTINCT o.id_usuario)::int AS total_ofertas
+           FROM oferta o
+           JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+           WHERE o.id_producto_mongo = $1 AND eo.estado_oferta_nombre = 'activa'`,
+          [idProducto],
+        ),
+      ]);
+
+      // Sin ofertas (nunca deberia pasar para un producto que ya tuvo una
+      // compra, pero por si acaso): no hay nada que recalcular.
+      if (porVariante.rows.length === 0) {
+        return;
+      }
+
+      const precios = porVariante.rows
+        .map((fila) => fila.precio_tienda)
+        .filter((precio): precio is string => precio != null)
+        .map(Number);
+      const precioTiendaRaiz =
+        precios.length > 0 ? Math.min(...precios).toFixed(2) : null;
+      const stockTiendaRaiz = porVariante.rows.reduce(
+        (total, fila) => total + fila.stock_tienda,
+        0,
+      );
+      const stockTotalRaiz = porVariante.rows.reduce(
+        (total, fila) => total + fila.stock_total,
+        0,
+      );
+
+      const conjuntoSet: Record<string, unknown> = {
+        precio_tienda:
+          precioTiendaRaiz != null
+            ? Decimal128.fromString(precioTiendaRaiz)
+            : null,
+        stock_tienda: stockTiendaRaiz,
+        stock_total: stockTotalRaiz,
+        total_ofertas: totalEnRaiz.rows[0]?.total_ofertas ?? 0,
+      };
+      const arrayFilters: Record<string, unknown>[] = [];
+
+      porVariante.rows.forEach((fila, indice) => {
+        const marcador = `v${indice}`;
+        conjuntoSet[`variantes.$[${marcador}].precio_tienda`] =
+          fila.precio_tienda != null
+            ? Decimal128.fromString(fila.precio_tienda)
+            : null;
+        conjuntoSet[`variantes.$[${marcador}].stock_tienda`] = fila.stock_tienda;
+        conjuntoSet[`variantes.$[${marcador}].stock_total`] = fila.stock_total;
+        conjuntoSet[`variantes.$[${marcador}].total_ofertas`] = fila.total_ofertas;
+        arrayFilters.push({
+          [`${marcador}.id_producto_variante`]: Number(
+            fila.id_producto_variante_mongo,
+          ),
+        });
+      });
+
+      await mongoDb
+        .collection<Producto>('productos')
+        .updateOne({ _id: idProducto }, { $set: conjuntoSet }, { arrayFilters });
+    } catch (error) {
+      // No se relanza: cuando esto se llama, la compra o la cancelacion ya
+      // se confirmaron en PostgreSQL. Que falle la actualizacion de la
+      // copia de lectura no puede deshacer una venta ya hecha -- dejar la
+      // tarjeta del catalogo con un numero viejo un rato es peor UI, no un
+      // dato incorrecto en la base de verdad.
+      this.logger.error(
+        `No se pudo recalcular precio_tienda/stock del producto ${idProducto}: ` +
+          (error instanceof Error ? error.message : String(error)),
+      );
     }
   }
 

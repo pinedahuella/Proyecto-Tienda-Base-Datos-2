@@ -1,21 +1,45 @@
 /**
- * Tabla pedido_producto. Una linea del pedido: que se llevo, cuanto y a
- * que precio, con lo acordado copiado tal como estaba ese dia.
+ * Tabla pedido_producto (migrations/006_pedidos.sql). Una linea del pedido:
+ * que se llevo, cuanto y de quien -- pero ya no el precio directo.
+ *
+ * Modelo multi-vendedor: el precio y el vendedor NO se copian aqui. El
+ * unico puntero que hace falta es `id_precio_historial`:
+ *
+ *   pedido_producto.id_precio_historial
+ *     -> precio_historial.precio      cuanto se cobro
+ *     -> precio_historial.id_oferta
+ *          -> oferta.id_usuario       quien vendio
+ *
+ * Funciona porque cada eslabon es INMUTABLE (ver docs/base-de-datos.md).
+ * Lo que SI se copia es `nombre_vendedor`, junto con nombre_producto y
+ * nombre_variante: esos tres cambian con el tiempo y no se pueden deducir,
+ * a diferencia del precio.
  *
  * id_producto_mongo e id_producto_variante_mongo no son llaves foraneas
- * (el producto vive en MongoDB, no en PostgreSQL): estan aqui solo para
- * poder volver al documento si hace falta. Para mostrar la linea no hace
- * falta -- nombre_producto, nombre_variante, precio_unitario y
- * porcentaje_comision ya estan copiados al lado.
+ * (el catalogo vive en MongoDB, no en PostgreSQL): estan aqui solo para
+ * poder volver al documento si hace falta.
  */
 export interface PedidoProducto {
   id_pedido_producto: string;
   id_pedido: string;
+  id_precio_historial: string;
   id_producto_mongo: string;
   id_producto_variante_mongo: string;
+  cantidad: number;
   nombre_producto: string;
   nombre_variante: string;
+  nombre_vendedor: string;
+}
+
+/**
+ * Una linea de pedido con el precio y la oferta ya resueltos (JOIN contra
+ * precio_historial y oferta), tal como los necesita GET
+ * /comprador/pedidos/:id para mostrar la orden completa. Ver
+ * PedidosCompradorService.obtener().
+ */
+export interface DetallePedido extends PedidoProducto {
+  /** El precio congelado al agregar esta linea al carrito. numeric(12,2) de Postgres: string. */
   precio_unitario: string;
-  porcentaje_comision: string;
-  cantidad: number;
+  id_oferta: string;
+  id_usuario_vendedor: string;
 }

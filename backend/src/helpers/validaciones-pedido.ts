@@ -1,15 +1,16 @@
 import { ErrorValidacion } from './errores';
 
 /**
- * Reglas de POST /comprador/pedidos/:id/detalles: el id_producto de la
- * linea. id_producto_variante y cantidad reutilizan validarIdProductoVariante
- * y validarCantidadMovimiento de validaciones-inventario.ts -- son las
- * mismas reglas (entero positivo), no hace falta duplicarlas.
+ * Reglas de los pedidos del comprador. cantidad reutiliza
+ * validarCantidadMovimiento de validaciones-inventario.ts -- es la misma
+ * regla (entero positivo), no hace falta duplicarla.
  */
-export function validarIdProducto(valor: unknown): number {
+
+/** El id_oferta de POST /comprador/pedidos/:id/detalles. */
+export function validarIdOferta(valor: unknown): number {
   if (typeof valor !== 'number' || !Number.isInteger(valor) || valor <= 0) {
     throw new ErrorValidacion(
-      'El id_producto es obligatorio y debe ser un numero entero mayor a 0',
+      'El id_oferta es obligatorio y debe ser un numero entero mayor a 0',
     );
   }
   return valor;

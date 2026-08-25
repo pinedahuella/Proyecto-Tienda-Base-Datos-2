@@ -2,31 +2,47 @@ import { Injectable, Logger } from '@nestjs/common';
 import { pool } from '../../database/postgres';
 import { ErrorConflicto, ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
-import {
-  validarCantidadMovimiento,
-  validarIdProductoVariante,
-} from '../../helpers/validaciones-inventario';
-import { validarIdProducto } from '../../helpers/validaciones-pedido';
+import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
+import { validarCantidadMovimiento } from '../../helpers/validaciones-inventario';
+import { validarIdOferta } from '../../helpers/validaciones-pedido';
+import { validarYCobrarTarjeta } from '../../helpers/validaciones-tarjeta';
 import { AgregarLineaPeticion, LineaPedidoResultado } from '../../dto/agregar-linea-pedido';
 import { CrearPedidoPeticion } from '../../dto/crear-pedido';
 import { PedidoCompleto } from '../../dto/pedido-completo';
-import { PedidoProducto } from '../../models/pedido-producto';
+import { PedidoResumen } from '../../dto/listar-pedidos';
+import {
+  AvisoPrecioPedido,
+  ComprarPedidoPeticion,
+  ComprarPedidoRespuesta,
+  StockResultanteOferta,
+} from '../../dto/comprar-pedido';
+import { CancelacionResultado } from '../../dto/cancelar-pedido';
+import { DetallePedido } from '../../models/pedido-producto';
+import { MetodoPago, METODO_PAGO_TARJETA } from '../../models/metodo-pago';
 import { ProductosService } from '../productos/productos.service';
 
 const REGEX_ID = /^\d+$/;
 
+/** Lo que devuelve comprar_pedido() de PostgreSQL, tal cual, antes de envolverlo en la respuesta. */
+interface CompraResultadoPostgres {
+  id_pedido: number;
+  total: string;
+  stock: StockResultanteOferta[];
+}
+
 /**
- * Servicio de POST /comprador/pedidos, POST /comprador/pedidos/:id/detalles
- * y DELETE /comprador/pedidos/:id/detalles/:idDetalle.
+ * Servicio de /comprador/pedidos: armar el pedido (crear, agregar/quitar
+ * lineas), consultarlo (uno o el listado propio), pagarlo y cancelarlo.
  *
  * Sin restriccion de rol: cualquiera con sesion puede comprar (comprador,
  * vendedor o admin), a diferencia de /vendedor/productos o /admin/*.
  *
- * Las cuatro funciones del flujo de pedido viven en PostgreSQL
- * (migrations/007_flujo_pedido.sql, ver cambios-etl-productos.md) y no se
- * tocan: este servicio solo las llama, resolviendo antes lo que Postgres
- * no puede saber por su cuenta (el nombre/precio/comision de Mongo, y de
- * quien es el pedido, que ninguna de las funciones comprueba).
+ * Las funciones del flujo de pedido viven en PostgreSQL
+ * (migrations/007_flujo_pedido.sql) y no se tocan: este servicio solo las
+ * llama, resolviendo antes lo que Postgres no puede saber por su cuenta
+ * (los nombres de Mongo, de quien es el pedido -- que ninguna funcion
+ * comprueba) y poniendo al dia despues los cuatro numeros calculados del
+ * catalogo en Mongo (ver ProductosService.recalcularCamposCalculados).
  */
 @Injectable()
 export class PedidosCompradorService {
@@ -36,9 +52,8 @@ export class PedidosCompradorService {
 
   /**
    * Abre un pedido vacio en estado "pendiente", llamando a
-   * crear_pedido(id_usuario, id_direccion_historial) de PostgreSQL
-   * (migrations/007_flujo_pedido.sql). No toca stock todavia: eso pasa
-   * despues, al agregar lineas y comprar.
+   * crear_pedido(id_usuario, id_direccion_historial) de PostgreSQL. No
+   * toca stock todavia: eso pasa despues, al agregar lineas y comprar.
    *
    * crear_pedido pide el id_direccion_historial (la version de la
    * direccion, congelada), no el id_direccion normal. Quien compra solo
@@ -92,22 +107,27 @@ export class PedidosCompradorService {
   }
 
   /**
-   * Agrega una variante al pedido (o le suma la cantidad, si ya estaba),
-   * llamando a agregar_linea(id_pedido, linea_jsonb). Una variante por
+   * Agrega una oferta al pedido (o le suma la cantidad, si ya estaba),
+   * llamando a agregar_linea(id_pedido, linea_jsonb). Una oferta por
    * llamada -- no admite lote.
    *
-   * agregar_linea exige nombre_producto, nombre_variante, precio_unitario
-   * y porcentaje_comision como parte de la linea, porque viven en Mongo y
-   * Postgres no los puede leer: se sacan de ahi antes de llamar, y quedan
-   * congelados en la linea desde ese momento (si el vendedor sube el
-   * precio despues, este pedido conserva el que se le mostro).
+   * El cliente solo manda id_oferta y cantidad. El backend resuelve el
+   * resto el mismo, sin confiar en nada que mande el cliente:
+   *
+   *   1. de la oferta en PostgreSQL sale el par de ids del catalogo en Mongo
+   *   2. de Mongo sale el nombre del producto y el de la variante
+   *
+   * agregar_linea() congela el precio ahi mismo (busca la fila vigente de
+   * precio_historial y guarda su id): si el vendedor lo sube despues, este
+   * pedido conserva el que se le mostro. El nombre del vendedor tampoco
+   * viene de aqui: lo pone la propia funcion, leyendolo de usuarios.
    *
    * Ninguna funcion de pedido comprueba de quien es el pedido -- eso lo
    * hace esta funcion antes de llamar a agregar_linea: un pedido ajeno da
-   * el mismo 404 que uno que no existe. El estado ("ya no se puede
-   * cambiar") y el stock ("no hay suficiente") si los comprueba la propia
-   * funcion de Postgres; esos errores se traducen a ErrorConflicto tal
-   * cual vienen, porque su mensaje ya es claro y seguro de mostrar.
+   * el mismo 404 que uno que no existe. El estado de la oferta ("ya no se
+   * puede comprar") y el stock ("no hay suficiente") si los comprueba la
+   * propia funcion de Postgres; esos errores se traducen a ErrorConflicto
+   * tal cual vienen, porque su mensaje ya es claro y seguro de mostrar.
    */
   async agregarLinea(
     idPedidoParametro: string,
@@ -119,37 +139,35 @@ export class PedidosCompradorService {
     }
     const idPedido = Number(idPedidoParametro);
 
-    const idProducto = validarIdProducto(datos.id_producto);
-    const idProductoVariante = validarIdProductoVariante(datos.id_producto_variante);
+    const idOferta = validarIdOferta(datos.id_oferta);
     const cantidad = validarCantidadMovimiento(datos.cantidad);
 
     await this.verificarPedidoPropio(idPedido, idUsuario);
+
+    const { idProductoMongo, idProductoVarianteMongo } =
+      await this.resolverOferta(idOferta);
 
     // Publico, no "propio": cualquiera puede comprar cualquier producto
     // publicado, no solo los del vendedor logueado. Da el mismo 404 que
     // GET /productos/:id si el producto no existe o esta oculto
     // (borrador/inactivo).
-    const producto = await this.productosService.obtenerPublico(String(idProducto));
+    const producto = await this.productosService.obtenerPublico(
+      String(idProductoMongo),
+    );
     const variante = producto.variantes.find(
-      (candidata) => candidata.id_producto_variante === idProductoVariante,
+      (candidata) => candidata.id_producto_variante === idProductoVarianteMongo,
     );
     if (variante == null) {
       throw new ErrorNoEncontrado('No existe una variante con ese id en este producto');
     }
 
-    // PARCHE MINIMO: agregar_linea (007_flujo_pedido.sql) ya cambio de
-    // firma con el giro multi-vendedor -- ahora recibe id_oferta (no
-    // precio_unitario ni porcentaje_comision, que ya ni siquiera existen:
-    // el precio lo busca ella misma en precio_historial y la comision salio
-    // del alcance). Este servicio entero necesita reescribirse contra
-    // ofertas antes de poder comprar de verdad; por ahora solo se ajusta
-    // para que compile, sin id_oferta todavia.
     const linea = {
-      id_producto: idProducto,
-      id_producto_variante: idProductoVariante,
+      id_oferta: idOferta,
+      cantidad,
+      id_producto: idProductoMongo,
+      id_producto_variante: idProductoVarianteMongo,
       nombre_producto: producto.nombre,
       nombre_variante: variante.nombre_variante,
-      cantidad,
     };
 
     try {
@@ -167,12 +185,12 @@ export class PedidosCompradorService {
   }
 
   /**
-   * Saca una linea del pedido, llamando a
-   * quitar_linea(id_pedido, id_producto, id_producto_variante). Se recibe
-   * el id propio de la linea (pedido_producto.id_pedido_producto), no el
-   * par producto+variante -- se resuelve aqui, en la misma consulta que
-   * comprueba que el pedido sea del usuario logueado (un detalle ajeno, o
-   * de un pedido ajeno, da el mismo 404 que uno que no existe).
+   * Saca una linea del pedido, llamando a quitar_linea(id_pedido,
+   * id_oferta). Se recibe el id propio de la linea
+   * (pedido_producto.id_pedido_producto), no la oferta directa -- se
+   * resuelve aqui, en la misma consulta que comprueba que el pedido sea
+   * del usuario logueado (un detalle ajeno, o de un pedido ajeno, da el
+   * mismo 404 que uno que no existe).
    */
   async quitarLinea(
     idPedidoParametro: string,
@@ -186,12 +204,10 @@ export class PedidosCompradorService {
     const idDetalle = Number(idDetalleParametro);
 
     try {
-      const resultadoDetalle = await pool.query<{
-        id_producto_mongo: string;
-        id_producto_variante_mongo: string;
-      }>(
-        `SELECT pp.id_producto_mongo, pp.id_producto_variante_mongo
+      const resultadoDetalle = await pool.query<{ id_oferta: string }>(
+        `SELECT ph.id_oferta
          FROM pedido_producto pp
+         JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
          JOIN pedido p ON p.id_pedido = pp.id_pedido
          WHERE pp.id_pedido_producto = $1 AND pp.id_pedido = $2 AND p.id_usuario = $3`,
         [idDetalle, idPedido, idUsuario],
@@ -203,8 +219,8 @@ export class PedidosCompradorService {
       }
 
       const resultado = await pool.query<{ quitar_linea: boolean }>(
-        'SELECT quitar_linea($1, $2, $3)',
-        [idPedido, detalle.id_producto_mongo, detalle.id_producto_variante_mongo],
+        'SELECT quitar_linea($1, $2)',
+        [idPedido, detalle.id_oferta],
       );
 
       if (!resultado.rows[0].quitar_linea) {
@@ -222,11 +238,40 @@ export class PedidosCompradorService {
   }
 
   /**
+   * Todos los pedidos propios, resumidos (no el detalle completo, para
+   * eso esta obtener(); y no un historial de eventos). El total sale de
+   * sumar precio_historial.precio * cantidad de cada linea -- el precio
+   * congelado de cada una, no el de hoy.
+   */
+  async listar(idUsuario: string): Promise<PedidoResumen[]> {
+    try {
+      const resultado = await pool.query<PedidoResumen>(
+        `SELECT p.id_pedido, p.fecha_creacion, p.id_estado_pedido, ep.estado_pedido_nombre,
+                COALESCE(SUM(ph.precio * pp.cantidad), 0)::text AS total,
+                COUNT(pp.id_pedido_producto)::int AS cantidad_lineas
+         FROM pedido p
+         JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
+         LEFT JOIN pedido_producto pp ON pp.id_pedido = p.id_pedido
+         LEFT JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+         WHERE p.id_usuario = $1
+         GROUP BY p.id_pedido, p.fecha_creacion, p.id_estado_pedido, ep.estado_pedido_nombre
+         ORDER BY p.fecha_creacion DESC`,
+        [idUsuario],
+      );
+      return resultado.rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
    * Trae un pedido propio completo: el pedido, la version de la direccion
    * que regia al crearlo y sus lineas (vacio si todavia no tiene
-   * ninguna). Consulta rapida, sin tocar Mongo -- lo que hace falta para
-   * mostrar el pedido ya esta copiado en pedido_producto (nombre, precio,
-   * comision), justo para no tener que ir a buscarlo.
+   * ninguna), cada una con su precio y su oferta ya resueltos con un JOIN
+   * contra precio_historial y oferta -- el precio ya no se copia directo
+   * en pedido_producto, se llega a el por id_precio_historial. Consulta
+   * rapida, sin tocar Mongo: nombre_producto, nombre_variante y
+   * nombre_vendedor ya estan copiados en la linea.
    *
    * Solo si es propio: el WHERE exige ese id_usuario, asi que un pedido
    * ajeno da el mismo ErrorNoEncontrado que uno que no existe.
@@ -270,12 +315,17 @@ export class PedidosCompradorService {
         throw new ErrorNoEncontrado('No existe un pedido con ese id');
       }
 
-      const resultadoDetalles = await pool.query<PedidoProducto>(
-        `SELECT id_pedido_producto, id_pedido, id_producto_mongo, id_producto_variante_mongo,
-                nombre_producto, nombre_variante, precio_unitario, porcentaje_comision, cantidad
-         FROM pedido_producto
-         WHERE id_pedido = $1
-         ORDER BY id_pedido_producto`,
+      const resultadoDetalles = await pool.query<DetallePedido>(
+        `SELECT pp.id_pedido_producto, pp.id_pedido, pp.id_precio_historial,
+                pp.id_producto_mongo, pp.id_producto_variante_mongo, pp.cantidad,
+                pp.nombre_producto, pp.nombre_variante, pp.nombre_vendedor,
+                ph.precio AS precio_unitario, ph.id_oferta,
+                o.id_usuario AS id_usuario_vendedor
+         FROM pedido_producto pp
+         JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+         JOIN oferta o ON o.id_oferta = ph.id_oferta
+         WHERE pp.id_pedido = $1
+         ORDER BY pp.id_pedido_producto`,
         [idPedidoParametro],
       );
 
@@ -307,6 +357,135 @@ export class PedidosCompradorService {
     }
   }
 
+  /** El catalogo (cerrado) de formas de pago, para armar el selector del checkout. */
+  async metodosPago(): Promise<MetodoPago[]> {
+    try {
+      const resultado = await pool.query<MetodoPago>(
+        'SELECT id_metodo_pago, metodo_nombre FROM metodo_pago ORDER BY id_metodo_pago',
+      );
+      return resultado.rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Confirma la compra. Antes de tocar nada:
+   *
+   *   1. Si el metodo es "tarjeta", corre el mock de validacion (formato,
+   *      Luhn, vencimiento, CVV, y las tarjetas de prueba que simulan un
+   *      rechazo) -- ver helpers/validaciones-tarjeta.ts. Rechaza con 400
+   *      (formato invalido) o 402 (tarjeta rechazada) sin llegar a tocar
+   *      el pedido.
+   *   2. Revisa que ninguna oferta cambio desde que se agrego al carrito
+   *      (revisarCambiosAntesDeComprar). Una oferta pausada/retirada o sin
+   *      stock rechaza con 409, siempre. Un precio que ya no es el
+   *      congelado no bloquea -- lo que se cobra es igual el precio
+   *      congelado -- pero se avisa: sin `confirmar_cambios: true` la
+   *      respuesta sale con `comprado: false` y la lista de avisos, sin
+   *      tocar nada todavia.
+   *
+   * Solo entonces llama a comprar_pedido(), que es la que de verdad
+   * descuenta el stock, registra el pago y pasa el pedido a "comprado".
+   * Con la compra ya confirmada en PostgreSQL, pone al dia en Mongo los
+   * cuatro numeros calculados de cada producto afectado (ver
+   * ProductosService.recalcularCamposCalculados) -- si eso fallara, no
+   * deshace la compra: solo queda una tarjeta del catalogo desactualizada
+   * un rato.
+   */
+  async comprarPedido(
+    idPedidoParametro: string,
+    idUsuario: string,
+    datos: ComprarPedidoPeticion,
+  ): Promise<ComprarPedidoRespuesta> {
+    if (!REGEX_ID.test(idPedidoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idPedido = Number(idPedidoParametro);
+
+    if (!esTextoNoVacio(datos.metodo_pago)) {
+      throw new ErrorValidacion('El metodo_pago es obligatorio');
+    }
+
+    await this.verificarPedidoPropio(idPedido, idUsuario);
+
+    if (datos.metodo_pago === METODO_PAGO_TARJETA) {
+      validarYCobrarTarjeta(datos.tarjeta);
+    }
+
+    const { bloqueantes, avisos } = await this.revisarCambiosAntesDeComprar(idPedido);
+
+    if (bloqueantes.length > 0) {
+      throw new ErrorConflicto(bloqueantes.join('; '));
+    }
+    if (avisos.length > 0 && datos.confirmar_cambios !== true) {
+      return { comprado: false, avisos };
+    }
+
+    try {
+      const resultado = await pool.query<{ comprar_pedido: CompraResultadoPostgres }>(
+        'SELECT comprar_pedido($1, $2)',
+        [idPedido, datos.metodo_pago],
+      );
+      const compra = resultado.rows[0].comprar_pedido;
+
+      const idsProducto = compra.stock.map((linea) => linea.id_producto);
+      await this.productosService.recalcularCamposCalculados(idsProducto);
+
+      return {
+        comprado: true,
+        id_pedido: compra.id_pedido,
+        total: compra.total,
+        stock: compra.stock,
+      };
+    } catch (error) {
+      if (this.esErrorDeNegocio(error)) {
+        throw new ErrorConflicto((error as Error).message);
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Cancela un pedido propio, llamando a cancelar_pedido(). Si estaba
+   * comprado, la propia funcion devuelve las unidades con un movimiento de
+   * devolucion; si estaba pendiente, no toca el stock porque nunca se
+   * descontó. En cualquier caso donde si hubo movimiento, pone al dia los
+   * cuatro numeros calculados de los productos afectados en Mongo (ver
+   * comprarPedido).
+   */
+  async cancelarPedido(
+    idPedidoParametro: string,
+    idUsuario: string,
+  ): Promise<CancelacionResultado> {
+    if (!REGEX_ID.test(idPedidoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idPedido = Number(idPedidoParametro);
+
+    await this.verificarPedidoPropio(idPedido, idUsuario);
+
+    try {
+      const resultado = await pool.query<{ cancelar_pedido: CancelacionResultado }>(
+        'SELECT cancelar_pedido($1)',
+        [idPedido],
+      );
+      const cancelacion = resultado.rows[0].cancelar_pedido;
+
+      if (cancelacion.stock.length > 0) {
+        const idsProducto = cancelacion.stock.map((linea) => linea.id_producto);
+        await this.productosService.recalcularCamposCalculados(idsProducto);
+      }
+
+      return cancelacion;
+    } catch (error) {
+      if (this.esErrorDeNegocio(error)) {
+        throw new ErrorConflicto((error as Error).message);
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
   /** El pedido tiene que existir y ser del usuario logueado. */
   private async verificarPedidoPropio(
     idPedido: number,
@@ -331,13 +510,120 @@ export class PedidosCompradorService {
   }
 
   /**
+   * El par de ids de Mongo (producto, variante) de una oferta. La oferta
+   * ya no lleva llave foranea contra el catalogo (ver
+   * migrations/005_ofertas.sql), asi que esto es una consulta directa a
+   * `oferta`, no un JOIN.
+   */
+  private async resolverOferta(
+    idOferta: number,
+  ): Promise<{ idProductoMongo: number; idProductoVarianteMongo: number }> {
+    try {
+      const resultado = await pool.query<{
+        id_producto_mongo: string;
+        id_producto_variante_mongo: string;
+      }>(
+        'SELECT id_producto_mongo, id_producto_variante_mongo FROM oferta WHERE id_oferta = $1',
+        [idOferta],
+      );
+      const fila = resultado.rows[0];
+
+      if (fila == null) {
+        throw new ErrorNoEncontrado('No existe una oferta con ese id');
+      }
+
+      return {
+        idProductoMongo: Number(fila.id_producto_mongo),
+        idProductoVarianteMongo: Number(fila.id_producto_variante_mongo),
+      };
+    } catch (error) {
+      if (error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Compara cada linea del pedido contra la oferta tal como esta HOY:
+   *
+   *   - oferta ya no activa (la pausaron o la retiraron), o sin stock
+   *     suficiente -> bloqueante: no se puede comprar, sin importar nada
+   *     mas.
+   *   - precio de hoy distinto del que quedo congelado en la linea ->
+   *     aviso: no bloquea (lo que se cobra sigue siendo el congelado),
+   *     pero se informa antes de seguir.
+   *
+   * Comparar precio_actual contra precio_congelado es texto contra texto
+   * (los dos numeric(12,2) de Postgres, formateados igual): exacto, sin
+   * el redondeo binario de comparar como numero de JavaScript.
+   */
+  private async revisarCambiosAntesDeComprar(
+    idPedido: number,
+  ): Promise<{ bloqueantes: string[]; avisos: AvisoPrecioPedido[] }> {
+    try {
+      const resultado = await pool.query<{
+        id_pedido_producto: number;
+        nombre_producto: string;
+        nombre_variante: string;
+        cantidad: number;
+        precio_congelado: string;
+        precio_actual: string;
+        stock: number;
+        estado_oferta_nombre: string;
+      }>(
+        `SELECT pp.id_pedido_producto, pp.nombre_producto, pp.nombre_variante, pp.cantidad,
+                ph.precio AS precio_congelado, o.precio AS precio_actual, o.stock,
+                eo.estado_oferta_nombre
+         FROM pedido_producto pp
+         JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+         JOIN oferta o ON o.id_oferta = ph.id_oferta
+         JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+         WHERE pp.id_pedido = $1`,
+        [idPedido],
+      );
+
+      const bloqueantes: string[] = [];
+      const avisos: AvisoPrecioPedido[] = [];
+
+      for (const fila of resultado.rows) {
+        if (fila.estado_oferta_nombre !== 'activa') {
+          bloqueantes.push(
+            `La oferta de "${fila.nombre_variante}" ya no esta disponible (${fila.estado_oferta_nombre})`,
+          );
+          continue;
+        }
+        if (fila.stock < fila.cantidad) {
+          bloqueantes.push(
+            `No hay suficiente stock de "${fila.nombre_variante}": quedan ${fila.stock} y el pedido pide ${fila.cantidad}`,
+          );
+          continue;
+        }
+        if (fila.precio_actual !== fila.precio_congelado) {
+          avisos.push({
+            id_pedido_producto: fila.id_pedido_producto,
+            nombre_producto: fila.nombre_producto,
+            nombre_variante: fila.nombre_variante,
+            precio_congelado: fila.precio_congelado,
+            precio_actual: fila.precio_actual,
+          });
+        }
+      }
+
+      return { bloqueantes, avisos };
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
    * 23503 (foreign_key_violation) y 23514 (check_violation) son los dos
    * codigos con los que las funciones de pedido levantan sus propios
    * errores de negocio (estado, stock) via RAISE EXCEPTION. A este punto
    * ya se resolvieron la existencia del pedido, el dueno y el formato de
    * los datos, asi que lo unico que puede seguir fallando con estos
    * codigos es lo que solo Postgres sabe en el momento: el estado del
-   * pedido o el stock disponible.
+   * pedido, de la oferta, o el stock disponible.
    */
   private esErrorDeNegocio(error: unknown): boolean {
     const codigo = (error as { code?: string } | undefined)?.code;

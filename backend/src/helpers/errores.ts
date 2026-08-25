@@ -21,3 +21,11 @@ export class ErrorSesion extends Error {}
 
 /** No existe lo que se pidio. El controlador la traduce a HTTP 404. */
 export class ErrorNoEncontrado extends Error {}
+
+/**
+ * El pago no se pudo procesar (tarjeta rechazada, vencida, fondos
+ * insuficientes, etc.). El controlador la traduce a HTTP 402 -- distinto de
+ * ErrorValidacion (400): los datos de la peticion estaban bien formados, lo
+ * que fallo fue el cobro en si.
+ */
+export class ErrorPago extends Error {}

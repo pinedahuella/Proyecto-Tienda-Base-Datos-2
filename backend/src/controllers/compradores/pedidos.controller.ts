@@ -13,6 +13,7 @@ import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { AgregarLineaPeticion } from '../../dto/agregar-linea-pedido';
 import type { CrearPedidoPeticion } from '../../dto/crear-pedido';
+import type { ComprarPedidoPeticion } from '../../dto/comprar-pedido';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import { PedidosCompradorService } from '../../services/compradores/pedidos.service';
 
@@ -45,6 +46,31 @@ export class PedidosCompradorController {
       return exito({ id_pedido: idPedido }, 'Pedido creado correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo crear el pedido');
+    }
+  }
+
+  // GET /comprador/pedidos
+  @Get()
+  async listar(@UsuarioActual() usuarioActual: TokenUsuario) {
+    try {
+      const pedidos = await this.pedidosCompradorService.listar(
+        usuarioActual.id_usuario,
+      );
+      return exito(pedidos, 'Pedidos obtenidos');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener los pedidos');
+    }
+  }
+
+  // GET /comprador/pedidos/metodos-pago
+  // Va antes de :id para que "metodos-pago" no se confunda con un id.
+  @Get('metodos-pago')
+  async metodosPago() {
+    try {
+      const metodos = await this.pedidosCompradorService.metodosPago();
+      return exito(metodos, 'Metodos de pago obtenidos');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener los metodos de pago');
     }
   }
 
@@ -100,6 +126,45 @@ export class PedidosCompradorController {
       return exito(null, 'Producto quitado del pedido');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo quitar el producto del pedido');
+    }
+  }
+
+  // POST /comprador/pedidos/:id/comprar
+  @Post(':id/comprar')
+  async comprar(
+    @Param('id') id: string,
+    @Body() cuerpo: ComprarPedidoPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const resultado = await this.pedidosCompradorService.comprarPedido(
+        id,
+        usuarioActual.id_usuario,
+        cuerpo,
+      );
+      const mensaje = resultado.comprado
+        ? 'Compra realizada correctamente'
+        : 'Hay cambios que revisar antes de comprar';
+      return exito(resultado, mensaje);
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo completar la compra');
+    }
+  }
+
+  // POST /comprador/pedidos/:id/cancelar
+  @Post(':id/cancelar')
+  async cancelar(
+    @Param('id') id: string,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const resultado = await this.pedidosCompradorService.cancelarPedido(
+        id,
+        usuarioActual.id_usuario,
+      );
+      return exito(resultado, 'Pedido cancelado correctamente');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo cancelar el pedido');
     }
   }
 }
