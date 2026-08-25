@@ -1441,7 +1441,9 @@ FROM (VALUES
 JOIN usuarios            u  ON u.correo_electronico = v.correo
 JOIN productos           p  ON p.nombre = v.producto
 JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_variante = v.variante
-JOIN oferta              o  ON o.id_producto_variante_mongo = pv.id_producto_variante AND o.id_usuario = u.id_usuario;
+JOIN oferta              o  ON o.id_producto_mongo = p.id_producto
+                            AND o.id_producto_variante_mongo = pv.id_producto_variante
+                            AND o.id_usuario = u.id_usuario;
 
 -- La oferta se pone en su precio de HOY, que es el ultimo de su historial.
 -- Se deriva del historial en vez de escribirse otra vez: si se escribiera
@@ -1497,7 +1499,8 @@ BEGIN
     FOR v_of IN
         SELECT o.id_oferta, p.id_producto, pv.id_producto_variante, p.nombre AS np, pv.nombre_variante AS nv
         FROM oferta o
-        JOIN productos_variantes pv ON pv.id_producto_variante = o.id_producto_variante_mongo
+        JOIN productos_variantes pv ON pv.id_producto = o.id_producto_mongo
+                                     AND pv.id_producto_variante = o.id_producto_variante_mongo
         JOIN productos p            ON p.id_producto = pv.id_producto
         JOIN estado_oferta eo       ON eo.id_estado_oferta = o.id_estado_oferta
         WHERE eo.estado_oferta_nombre = 'activa' AND o.stock >= 2
@@ -1525,7 +1528,8 @@ BEGIN
     SELECT o.id_oferta, p.id_producto, pv.id_producto_variante, p.nombre AS np, pv.nombre_variante AS nv
     INTO v_of
     FROM oferta o
-    JOIN productos_variantes pv ON pv.id_producto_variante = o.id_producto_variante_mongo
+    JOIN productos_variantes pv ON pv.id_producto = o.id_producto_mongo
+                                 AND pv.id_producto_variante = o.id_producto_variante_mongo
     JOIN productos p            ON p.id_producto = pv.id_producto
     JOIN estado_oferta eo       ON eo.id_estado_oferta = o.id_estado_oferta
     WHERE eo.estado_oferta_nombre = 'activa' AND o.stock >= 3
@@ -1591,7 +1595,8 @@ BEGIN
     WHERE NOT EXISTS (
         SELECT 1 FROM oferta o
         JOIN usuarios u ON u.id_usuario = o.id_usuario
-        WHERE o.id_producto_variante_mongo = pv.id_producto_variante
+        WHERE o.id_producto_mongo = pv.id_producto
+          AND o.id_producto_variante_mongo = pv.id_producto_variante
           AND u.correo_electronico = 'tienda@mesh.com'
     );
 

@@ -79,7 +79,10 @@ CREATE TABLE oferta (
     --
     -- Se guardan los DOS, producto y variante, no solo el de la variante: en
     -- Mongo las variantes van embebidas dentro del producto y no hay indice
-    -- unico sobre variantes.id_producto_variante. El par si es inequivoco.
+    -- unico sobre variantes.id_producto_variante, asi que dos productos
+    -- distintos pueden tener una variante con el mismo id. El PAR si es
+    -- inequivoco, y por eso el par entra en el UNIQUE y en el indice, no solo
+    -- la variante.
     --
     -- El precio de tener una sola forma de identificar la variante en todo el
     -- sistema es que la base ya no puede rechazar una oferta sobre una variante
@@ -104,7 +107,15 @@ CREATE TABLE oferta (
 
     -- LA restriccion del modelo. Un vendedor tiene UNA oferta por variante:
     -- dos filas serian dos precios para lo mismo y nadie sabria cual rige.
-    UNIQUE (id_usuario, id_producto_variante_mongo)
+    --
+    -- Van las TRES columnas y no solo vendedor + variante. El motivo es el
+    -- mismo por el que se guarda el id del producto: en Mongo las variantes van
+    -- embebidas y no hay indice unico sobre variantes.id_producto_variante, asi
+    -- que dos productos distintos PUEDEN tener una variante con el mismo id.
+    -- Con solo (usuario, variante) esos dos casos se pisarian: el vendedor no
+    -- podria ofertar la variante 5 de la laptop y la variante 5 de la camisa a
+    -- la vez, y la base rechazaria la segunda sin que nada este mal.
+    UNIQUE (id_usuario, id_producto_mongo, id_producto_variante_mongo)
 );
 
 COMMENT ON TABLE oferta IS 'Quien vende que variante, a que precio y con cuantas unidades';
@@ -123,11 +134,12 @@ COMMENT ON COLUMN oferta.fecha_actualizacion IS 'Ultimo cambio de precio, stock 
 -- dia en dos bases a la vez es justo el riesgo de inconsistencia que el
 -- proyecto quiere evitar. Lo unico que viaja a Mongo son cuatro numeros
 -- agregados que la LISTA del catalogo necesita en cada tarjeta.
-CREATE INDEX idx_oferta_variante_precio
-    ON oferta(id_producto_variante_mongo, precio);
-
--- "todas las ofertas de este producto": la ficha completa
-CREATE INDEX idx_oferta_producto ON oferta(id_producto_mongo);
+-- Lleva los dos ids del catalogo por lo mismo que el UNIQUE: el id de la
+-- variante no identifica nada por si solo, hace falta el par. Y sirve tambien
+-- para "todas las ofertas de este producto", porque el id del producto va
+-- primero y un indice compuesto se puede usar por su prefijo.
+CREATE INDEX idx_oferta_catalogo_precio
+    ON oferta(id_producto_mongo, id_producto_variante_mongo, precio);
 
 -- "las ofertas de este vendedor": su panel
 CREATE INDEX idx_oferta_usuario ON oferta(id_usuario);

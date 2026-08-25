@@ -51,7 +51,7 @@ estado_oferta     activa | pausada | retirada
 oferta            id_oferta, id_producto_mongo, id_producto_variante_mongo,
                   id_usuario, precio, stock, id_estado_oferta,
                   fecha_creacion, fecha_actualizacion
-                  UNIQUE (id_usuario, id_producto_variante_mongo)
+                  UNIQUE (id_usuario, id_producto_mongo, id_producto_variante_mongo)
 precio_historial  id_precio_historial, id_oferta, precio, id_usuario_modifico,
                   fecha_creacion
 ```
@@ -60,6 +60,17 @@ precio_historial  id_precio_historial, id_oferta, precio, id_usuario_modifico,
 que `pedido_producto`: una sola forma de identificar una variante en todo el
 sistema. La contra: la base ya no rechaza una oferta sobre una variante que no
 existe — eso lo tiene que comprobar la aplicación al publicar.
+
+**Y siempre por el PAR producto + variante, nunca por la variante sola.** En
+Mongo las variantes van embebidas y no hay índice único sobre
+`variantes.id_producto_variante`, así que dos productos distintos pueden tener
+una variante con el mismo id. Por eso el `UNIQUE` lleva las tres columnas y el
+índice lleva las dos del catálogo: con solo `(usuario, variante)` un vendedor no
+podría ofertar la variante 5 de la laptop y la variante 5 de la camisa a la vez,
+y la base rechazaría la segunda sin que nada esté mal.
+
+Aplicá la misma regla en tus consultas: `WHERE id_producto_mongo = $1 AND
+id_producto_variante_mongo = $2`.
 
 ### Las ofertas NO están en Mongo
 
@@ -180,13 +191,15 @@ SELECT o.id_oferta, o.precio, o.stock, eo.estado_oferta_nombre AS estado,
 FROM oferta o
 JOIN usuarios      u  ON u.id_usuario        = o.id_usuario
 JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
-WHERE o.id_producto_variante_mongo = $1
+WHERE o.id_producto_mongo          = $1
+  AND o.id_producto_variante_mongo = $2
   AND eo.estado_oferta_nombre = 'activa'
 ORDER BY o.precio;
 ```
 
-**Todas las ofertas de un producto**, para la ficha completa: lo mismo con
-`WHERE o.id_producto_mongo = $1`.
+**Todas las ofertas de un producto**, para la ficha completa: lo mismo con solo
+`WHERE o.id_producto_mongo = $1` — el índice sirve igual, porque el id del
+producto va primero y un índice compuesto se usa por su prefijo.
 
 **Las ofertas de un vendedor**, para su panel: `WHERE o.id_usuario = $1`.
 
@@ -361,8 +374,10 @@ seguidos: PostgreSQL te va a frenar. No lo rodees.
 una oferta cambie de precio, se quede sin stock o se pause. Si no, la tarjeta
 dice un precio y la ficha otro.
 
-**3. Un vendedor tiene UNA oferta por variante.** Lo garantiza el `UNIQUE`; si
-insertás dos, revienta con `unique_violation`.
+**3. Un vendedor tiene UNA oferta por producto+variante.** Lo garantiza el
+`UNIQUE` de las tres columnas; si insertás el mismo trío, revienta con
+`unique_violation`. Pero el **mismo id de variante en otro producto sí pasa**, y
+tiene que pasar.
 
 ---
 

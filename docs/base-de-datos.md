@@ -55,6 +55,15 @@ sola forma de identificar una variante en todo el sistema; lo que se paga es que
 la base ya no puede rechazar una oferta sobre una variante que no existe, y eso
 pasa a ser trabajo de la aplicacion.
 
+**Y se identifica por el PAR, nunca por la variante sola.** En Mongo las
+variantes van embebidas dentro del producto y no hay indice unico sobre
+`variantes.id_producto_variante`: dos productos distintos PUEDEN tener una
+variante con el mismo id. Por eso el `UNIQUE` de `Oferta` lleva las tres
+columnas -- vendedor, producto y variante -- y no dos. Con solo
+`(vendedor, variante)` la base rechazaria que un mismo vendedor ofertara la
+variante 5 de la laptop y la variante 5 de la camisa, que son cosas distintas.
+Es el mismo motivo por el que la linea del pedido guarda los dos id.
+
 Y aparece una pregunta que antes no existia: **de todos los precios, cual se
 ensena.** La respuesta la puso el profesor: **el primero siempre es el de la
 pagina**. La cuenta `tienda@mesh.com` tiene oferta de todas las variantes y su
