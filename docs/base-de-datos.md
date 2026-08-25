@@ -196,9 +196,16 @@ escribe el movimiento, se registra el pago y el pedido pasa a `comprado`. Las
 cinco cosas juntas o ninguna.
 
 Los estados son `pendiente`, `comprado`, `enviado`, `entregado` y `cancelado`.
-Se llama **comprado** y no pagado porque no son lo mismo: un pedido contra
-entrega esta comprado y todavia no pagado, y el estado del dinero vive en `Pago`,
-que tiene el suyo.
+Se llama **comprado** y no pagado porque conceptualmente no son lo mismo: el
+estado del pedido y el del dinero son columnas distintas, `Pedido.id_estado_pedido`
+y `Pago.id_estado_pago`, cada una con su propio catalogo (`pagado` es un estado
+de `Pago`, no de `Pedido`). Para la primera entrega, en la practica las dos
+avanzan juntas: `comprar_pedido()` registra el pago como `pagado` de una vez,
+sin importar el metodo -- no hay quien confirme una transferencia o un pago
+contra entrega todavia (ver mas abajo, el problema de que un pedido puede
+mezclar vendedores y el pago es uno solo). Es una simplificacion a proposito,
+no el diseño final: el dia que se agregue una confirmacion real, la mayoria
+de los metodos volveran a nacer `pendiente` como aqui se describia antes.
 
 **Mientras el pedido esta pendiente, el stock NO esta reservado.** Dos personas
 pueden meter la ultima unidad en su pedido; se la lleva la primera que compre y
@@ -231,12 +238,27 @@ con motivo `devolucion`. Un libro mayor no se corrige quitando renglones.
 **El chequeo de que la oferta siga `activa` no vive dentro de `comprar_pedido`.**
 La funcion SQL, al comprar, solo vuelve a mirar el stock (con el `FOR UPDATE` de
 arriba); que la oferta siga activa se comprueba antes, en el backend
-(`PedidosCompradorService.revisarCambiosAntesDeComprar`), con una consulta sin
-bloqueo. Queda una ventana angosta: si alguien pausa o retira la oferta justo
-entre ese chequeo y la llamada a `comprar_pedido`, la compra pasa igual -- el
-stock sigue correcto (el `FOR UPDATE` no se salta), pero el estado no se
-revalida dentro de la misma transaccion. Pendiente de decidir si vale la pena
-cerrar esa ventana metiendo el chequeo de estado dentro de la funcion.
+(`PedidosCompradorService.revisarCambiosAntesDeComprar`). Esto dejaba una
+ventana angosta cuando el chequeo y la llamada a `comprar_pedido` eran dos
+consultas sueltas: si alguien pausaba o retiraba la oferta justo entre las
+dos, la compra pasaba igual -- el `FOR UPDATE` de `comprar_pedido` no se
+saltaba, pero solo protegia el stock, nunca el estado.
+
+**Cerrado sin tocar la funcion SQL**: `comprarPedido()` ahora abre su propia
+transaccion (`pool.connect()` + `BEGIN`/`COMMIT`/`ROLLBACK`, no `pool.query`
+suelto) y el chequeo de `revisarCambiosAntesDeComprar` corre con
+`FOR UPDATE OF o` sobre esas mismas filas de `Oferta`, dentro de esa
+transaccion. El bloqueo queda tomado desde el chequeo: un `PATCH
+/vendedor/ofertas/:id` concurrente que intente cambiar el estado de esa
+oferta se queda esperando a que la transaccion de la compra termine, y
+`comprar_pedido()` -- que vuelve a pedir `FOR UPDATE` sobre la misma fila,
+ya bloqueada por la misma transaccion -- siempre lee el estado que ya se
+valido. Probado en vivo (25 ago 2026): dos conexiones directas confirmaron
+que la segunda se queda bloqueada mientras la primera sostiene el `FOR
+UPDATE`, y se desbloquea justo al hacer `ROLLBACK`; los tres caminos de
+`comprarPedido` (bloqueante por stock, bloqueante por estado, aviso de
+precio con y sin `confirmar_cambios`) se probaron end-to-end contra la base
+real sin regresiones.
 
 ---
 

@@ -131,7 +131,10 @@ GET /comprador/pedidos
       "id_estado_pedido": 1,
       "estado_pedido_nombre": "pendiente",
       "total": "8058.00",
-      "cantidad_lineas": 1
+      "cantidad_lineas": 1,
+      "metodo_pago": null,
+      "estado_pago": null,
+      "fecha_cancelacion": null
     },
     {
       "id_pedido": "1",
@@ -139,7 +142,10 @@ GET /comprador/pedidos
       "id_estado_pedido": 2,
       "estado_pedido_nombre": "comprado",
       "total": "7885.00",
-      "cantidad_lineas": 2
+      "cantidad_lineas": 2,
+      "metodo_pago": "tarjeta",
+      "estado_pago": "pagado",
+      "fecha_cancelacion": "2026-08-25T13:39:02.410Z"
     }
   ]
 }
@@ -148,6 +154,15 @@ GET /comprador/pedidos
 `total` es la suma de `precio_historial.precio * cantidad` de cada línea
 (el precio **congelado** de cada una, no el de hoy) — `"0.00"` si el
 pedido todavía no tiene ninguna línea.
+
+**`metodo_pago`, `estado_pago` y `fecha_cancelacion` salen del pago del
+pedido** (tabla `Pago`, una sola fila por pedido). Los tres salen `null`
+mientras el pedido sigue `pendiente`: todavía no existe el pago, ese nace
+recién al comprar (`comprar_pedido()`). Para la primera entrega,
+`comprar_pedido()` registra todo pago como `pagado` de una vez (con
+`fecha_cancelacion` = el momento de la compra), sin importar el método —
+es una simplificación a propósito, no el diseño final; ver
+`docs/base-de-datos.md`.
 
 ### 401
 

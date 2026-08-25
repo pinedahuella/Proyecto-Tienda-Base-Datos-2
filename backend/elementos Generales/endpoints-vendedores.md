@@ -21,15 +21,13 @@ Esa parte (`GET /vendedor/ofertas`, al final de este archivo) ya está
 construida contra el modelo nuevo, con las ofertas viviendo en PostgreSQL
 (tabla `oferta`) y el catálogo en Mongo.
 
-**Todo lo de `/vendedor/productos` de aquí abajo (menos `GET .../:id/historial`
-y el menú de categorías) sigue documentando el modelo VIEJO de un-vendedor-
-por-producto** — precio y stock por variante, `inventario` en vez de
-`oferta`, sin restricción de "solo tienda". Esas rutas tienen un parche
-mínimo en el código para que compilen, pero `POST/PATCH /vendedor/productos`
-y las cinco de `/inventario` (que hablan de una tabla `inventario` que ya
-no existe en PostgreSQL) todavía no están rediseñadas contra el modelo
-multi-vendedor — se documentan tal cual porque es lo que hay, no porque
-sea lo correcto hoy.
+**`POST`/`PATCH /vendedor/productos` ya están rediseñadas contra el modelo
+multi-vendedor**: ya no piden ni guardan `precio` ni `stock_inicial` por
+variante (eso es de la oferta, ver `/vendedor/ofertas` más abajo). Las
+cinco rutas viejas de `/inventario` (que hablaban de una tabla `inventario`
+que ya no existe en PostgreSQL) se borraron por completo — el stock ahora
+se maneja siempre a través de la oferta (`POST /vendedor/ofertas` y
+`PATCH /vendedor/ofertas/:id`, con `ajuste_stock`).
 
 ---
 
@@ -603,8 +601,8 @@ publicado, no solo los que ya están activos. Ordenados por
 todos de una vez.
 
 **Sin `variantes[].stock`, a propósito.** Esta es una ruta "rápida": no
-toca PostgreSQL. El stock real vive aparte, en
-[GET /vendedor/productos/inventario](#get-vendedorproductosinventario).
+toca PostgreSQL. El stock real es de cada oferta, no del producto — ver
+[GET /vendedor/ofertas](#get-vendedorofertas).
 
 ### 200
 
@@ -624,105 +622,6 @@ Mismos casos que las demás rutas de `/vendedor/productos` (ver arriba).
 
 ---
 
-## GET /vendedor/productos/inventario
-
-**El stock real** de todos los productos del vendedor logueado — la tabla
-`inventario` de PostgreSQL, no la copia de lectura que trae
-`variantes[].stock` en el catálogo público. Por eso es la ruta más pesada
-de las de vendedor: primero pregunta a MongoDB qué productos y qué
-variantes son suyas, y después le pregunta a PostgreSQL el stock de cada
-una de esas variantes.
-
-Devuelve una lista **plana**, un elemento por variante (no agrupada por
-producto):
-
-```json
-{
-  "ok": true,
-  "mensaje": "Inventario obtenido",
-  "payload": [
-    { "id_producto": 1, "id_producto_variante": 1, "stock": 9 },
-    { "id_producto": 1, "id_producto_variante": 2, "stock": 11 },
-    { "id_producto": 2, "id_producto_variante": 3, "stock": 12 }
-  ]
-}
-```
-
-Sin productos propios, `payload` sale `[]` (no es un error).
-
-**Si una variante propia todavía no tiene fila en `inventario`** — y desde
-que `POST`/`PATCH /vendedor/productos` dejaron de aceptar `stock_inicial`
-(ver arriba), **ninguna** nace con inventario ya creado — **la petición
-entera falla** con 409 —
-no se rellena con `0` en silencio, ni se omite esa variante y se muestran
-las demás. El mensaje nombra el producto y la variante exactos que faltan,
-para que el vendedor sepa qué arreglar: puede crearlo con
-[POST /vendedor/productos/:id/inventario](#post-vendedorproductosidinventario).
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "El producto \"Camisa de lino manga larga\" (id 1), variante \"L azul\" (id 2), todavia no tiene inventario creado", "payload": null }
-```
-
-### 401
-
-```json
-{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
-{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
-```
-
-### 403
-
-```json
-{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
-```
-
-### 503
-
-```json
-{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
-{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
-```
-
-### 500
-
-```json
-{ "ok": false, "mensaje": "No se pudo obtener el inventario", "payload": null }
-```
-
----
-
-## GET /vendedor/productos/inventario/motivos-ajuste
-
-Trae los dos motivos de `motivo_movimiento` que admite
-[PATCH /vendedor/productos/:id/inventario](#patch-vendedorproductosidinventario)
-— "ajuste positivo" y "ajuste negativo" — con sus ids reales de
-PostgreSQL, para que el frontend arme el select sin tenerlos escritos a
-mano. No trae los otros cuatro motivos del catálogo (`venta`,
-`devolucion`, `reposicion`, `merma`): esos nacen de otros flujos (una
-compra, publicar un producto), nunca de un ajuste manual.
-
-### 200
-
-```json
-{
-  "ok": true,
-  "mensaje": "Motivos obtenidos",
-  "payload": [
-    { "id_motivo_movimiento": 4, "motivo_nombre": "ajuste positivo" },
-    { "id_motivo_movimiento": 5, "motivo_nombre": "ajuste negativo" }
-  ]
-}
-```
-
-### 401 / 403 / 503 / 500
-
-Mismos casos que las demás rutas de `/vendedor/productos` (el 503 es de
-PostgreSQL).
-
----
-
 ## GET /vendedor/productos/:id
 
 Un producto propio tal como está **hoy**, con todos sus detalles (el mismo
@@ -735,9 +634,8 @@ en `borrador` o `inactivo` antes de publicarlo.
 Un producto de otro vendedor da el mismo 404 que un id que no existe.
 
 **Sin `variantes[].stock`, a propósito** — mismo motivo que
-`GET /vendedor/productos` (ver arriba): el stock real de este producto
-está en
-[GET /vendedor/productos/:id/inventario](#get-vendedorproductosidinventario).
+`GET /vendedor/productos` (ver arriba): el stock real es de cada oferta,
+ver [GET /vendedor/ofertas/producto/:idProducto](#get-vendedorofertasproductoidproducto).
 
 ### 200
 
@@ -764,234 +662,6 @@ está en
 ### 401 / 403 / 503 / 500
 
 Mismos casos que las demás rutas.
-
----
-
-## GET /vendedor/productos/:id/inventario
-
-Lo mismo que
-[GET /vendedor/productos/inventario](#get-vendedorproductosinventario),
-pero de un solo producto propio: la misma lista plana
-`{ id_producto, id_producto_variante, stock }`, filtrada a las variantes
-de ese producto. Mismo chequeo de dueño que `GET /vendedor/productos/:id`
-(404 si no es tuyo o no existe), y el mismo 409 si alguna de sus variantes
-no tiene fila en `inventario` todavía.
-
-```
-GET /vendedor/productos/1/inventario
-```
-
-### 200
-
-```json
-{
-  "ok": true,
-  "mensaje": "Inventario obtenido",
-  "payload": [
-    { "id_producto": 1, "id_producto_variante": 1, "stock": 9 },
-    { "id_producto": 1, "id_producto_variante": 2, "stock": 11 }
-  ]
-}
-```
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id no es valido", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
-```
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "El producto \"Camisa de lino manga larga\" (id 1), variante \"L azul\" (id 2), todavia no tiene inventario creado", "payload": null }
-```
-
-### 401 / 403 / 503 / 500
-
-Mismos casos que las demás rutas (el 503 puede ser de MongoDB o de
-PostgreSQL, ver
-[GET /vendedor/productos/inventario](#get-vendedorproductosinventario)).
-
----
-
-## POST /vendedor/productos/:id/inventario
-
-La reconstrucción de un inventario que falta: crea la fila de `inventario`
-de **una sola variante** propia, cuando el GET de arriba (o el de "todas
-las mías") rechazó con 409 porque esa variante todavía no la tenía. No
-admite lote — una variante a la vez, con su propio `id_producto_variante`
-y su stock inicial.
-
-`id_producto` sale de la URL (igual que en los GET de un producto
-específico); el cuerpo solo trae lo que falta:
-
-```json
-{ "id_producto_variante": 2, "stock_inicial": 20 }
-```
-
-| Campo | Obligatorio | Qué es |
-| --- | --- | --- |
-| `id_producto_variante` | Sí | Número entero mayor a 0, y tiene que ser una variante que de verdad tenga ese producto |
-| `stock_inicial` | Sí | Número entero mayor o igual a 0 |
-
-**También dejas un primer renglón en `stock_movimiento`** (motivo
-`reposicion`), para que el libro mayor nazca cuadrado con `inventario.stock`
-desde el primer día — salvo que `stock_inicial` sea `0`: ahí no hay nada
-que mover (`stock_movimiento.cantidad` no admite `0`), así que solo se crea
-la fila de `inventario`. Las dos escrituras van en una sola transacción.
-
-**Solo para crear, no para ajustar.** Si esa variante ya tenía fila en
-`inventario`, se rechaza con 409 — esta ruta es solo la reconstrucción del
-primer inventario. Para subir o bajar el stock de una variante que ya lo
-tiene está
-[PATCH /vendedor/productos/:id/inventario](#patch-vendedorproductosidinventario).
-
-**También deja `variantes[].stock` al día en el documento de Mongo**, con
-un `$set` sobre esa variante — es uno de los tres momentos documentados en
-`cambios-etl-productos.md` en que la copia de lectura se actualiza ("al
-publicar un producto o agregar una variante"), y este POST es justamente
-ese momento para una variante que no lo tenía. Pasa después de que la
-transacción de PostgreSQL ya confirmó: si esta segunda escritura fallara,
-el inventario real en PostgreSQL queda creado igual (es la fuente de la
-verdad), solo la copia de lectura en Mongo se queda desactualizada hasta
-que se reintente.
-
-Mismo chequeo de dueño que las demás rutas de `/vendedor/productos/:id`:
-un producto ajeno da el mismo 404 que un id que no existe.
-
-```
-POST /vendedor/productos/1/inventario
-{ "id_producto_variante": 2, "stock_inicial": 20 }
-```
-
-### 201
-
-```json
-{
-  "ok": true,
-  "mensaje": "Inventario creado correctamente",
-  "payload": { "id_producto": 1, "id_producto_variante": 2, "stock": 20 }
-}
-```
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id no es valido", "payload": null }
-{ "ok": false, "mensaje": "El id_producto_variante es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
-{ "ok": false, "mensaje": "El stock_inicial es obligatorio y debe ser un numero entero mayor o igual a 0", "payload": null }
-{ "ok": false, "mensaje": "La variante <id> no existe en el producto \"<nombre>\" (id <id_producto>)", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
-```
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "Ya existe inventario para el producto \"Camisa de lino manga larga\" (id 1), variante \"L azul\" (id 2)", "payload": null }
-```
-
-### 401 / 403 / 503 / 500
-
-Mismos casos que las demás rutas (el 503 puede ser de MongoDB o de
-PostgreSQL).
-
----
-
-## PATCH /vendedor/productos/:id/inventario
-
-Ajusta (sube o baja) el stock de **una variante propia que YA tiene
-inventario** — para correcciones manuales, por ejemplo un conteo físico
-que no cuadraba. Solo sobre productos propios: mismo chequeo de dueño que
-las demás rutas de `/vendedor/productos/:id` (404 si no es tuyo o no
-existe).
-
-`id_producto` sale de la URL (igual que en
-[POST /vendedor/productos/:id/inventario](#post-vendedorproductosidinventario));
-el cuerpo trae la variante, el motivo y la cantidad:
-
-```json
-{ "id_producto_variante": 2, "id_motivo_movimiento": 4, "cantidad": 10 }
-```
-
-| Campo | Obligatorio | Qué es |
-| --- | --- | --- |
-| `id_producto_variante` | Sí | Tiene que ser una variante de este producto, y ya tener inventario creado |
-| `id_motivo_movimiento` | Sí | Solo el de "ajuste positivo" o "ajuste negativo" — ver [GET /vendedor/productos/inventario/motivos-ajuste](#get-vendedorproductosinventariomotivos-ajuste) |
-| `cantidad` | Sí | Entero mayor a 0 — nunca 0, un movimiento siempre mueve algo |
-
-El nuevo stock sale de `stock_actual + cantidad * valor_del_motivo`
-(`valor` es `1` o `-1`, ver `motivo_movimiento.valor`). Bloquea la fila de
-`inventario` (`FOR UPDATE`) mientras decide, igual que `comprar_pedido`,
-para que dos ajustes al mismo tiempo no se pisen.
-
-**No crea inventario que no existía.** Si la variante no tiene fila en
-`inventario` todavía, se rechaza — para crearla por primera vez está
-[POST /vendedor/productos/:id/inventario](#post-vendedorproductosidinventario),
-no esta ruta.
-
-**Nunca deja el stock en negativo.** Si el ajuste negativo dejaría el
-stock por debajo de 0, se rechaza con un mensaje que dice cuánto queda y
-cuánto se quiso quitar — no se escribe nada, ni en `inventario` ni en
-`stock_movimiento`.
-
-**Deja `variantes[].stock` al día en Mongo**, con el mismo `$set` que ya
-usan las demás rutas de inventario, después de confirmar el ajuste real en
-PostgreSQL.
-
-```
-PATCH /vendedor/productos/1/inventario
-{ "id_producto_variante": 2, "id_motivo_movimiento": 4, "cantidad": 10 }
-```
-
-### 200
-
-```json
-{
-  "ok": true,
-  "mensaje": "Inventario ajustado correctamente",
-  "payload": { "id_producto": 1, "id_producto_variante": 2, "stock": 30 }
-}
-```
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id no es valido", "payload": null }
-{ "ok": false, "mensaje": "El id_producto_variante es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
-{ "ok": false, "mensaje": "La cantidad es obligatoria y debe ser un numero entero mayor a 0", "payload": null }
-{ "ok": false, "mensaje": "El id_motivo_movimiento es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
-{ "ok": false, "mensaje": "El id_motivo_movimiento debe ser el de \"ajuste positivo\" o \"ajuste negativo\"", "payload": null }
-{ "ok": false, "mensaje": "La variante <id> no existe en el producto \"<nombre>\" (id <id_producto>)", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
-```
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "El producto \"Camisa de lino manga larga\" (id 1), variante \"L azul\" (id 2), todavia no tiene inventario creado", "payload": null }
-{ "ok": false, "mensaje": "No hay suficiente stock: quedan <n> y se quiere quitar <n>", "payload": null }
-```
-
-### 401 / 403 / 503 / 500
-
-Mismos casos que las demás rutas (el 503 puede ser de MongoDB o de
-PostgreSQL).
 
 ---
 

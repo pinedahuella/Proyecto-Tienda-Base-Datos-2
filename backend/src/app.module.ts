@@ -23,7 +23,6 @@ import { CategoriasController } from './controllers/vendedores/categorias.contro
 import { CategoriasService } from './services/vendedores/categorias.service';
 import { ProductosVendedorController } from './controllers/vendedores/productos.controller';
 import { ProductosVendedorService } from './services/vendedores/productos.service';
-import { InventarioVendedorService } from './services/vendedores/inventario.service';
 import { OfertasVendedorController } from './controllers/vendedores/ofertas.controller';
 import { OfertasVendedorService } from './services/vendedores/ofertas.service';
 import { PedidosCompradorController } from './controllers/compradores/pedidos.controller';
@@ -66,7 +65,6 @@ import { PedidosCompradorService } from './services/compradores/pedidos.service'
     ProductosService,
     CategoriasService,
     ProductosVendedorService,
-    InventarioVendedorService,
     OfertasVendedorService,
     PedidosCompradorService,
   ],

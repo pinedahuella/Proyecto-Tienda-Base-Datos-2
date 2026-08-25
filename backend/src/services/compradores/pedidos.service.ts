@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { ErrorConflicto, ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
@@ -256,19 +257,31 @@ export class PedidosCompradorService {
    * eso esta obtener(); y no un historial de eventos). El total sale de
    * sumar precio_historial.precio * cantidad de cada linea -- el precio
    * congelado de cada una, no el de hoy.
+   *
+   * Trae tambien el pago (metodo, estado, cuando se salda), con LEFT JOIN:
+   * un pedido `pendiente` todavia no tiene fila en Pago (esa nace recien
+   * en comprar_pedido()), asi que esos tres campos salen null. Pago es una
+   * sola fila por pedido, asi que unirla no duplica renglones del GROUP BY.
    */
   async listar(idUsuario: string): Promise<PedidoResumen[]> {
     try {
       const resultado = await pool.query<PedidoResumen>(
         `SELECT p.id_pedido, p.fecha_creacion, p.id_estado_pedido, ep.estado_pedido_nombre,
                 COALESCE(SUM(ph.precio * pp.cantidad), 0)::text AS total,
-                COUNT(pp.id_pedido_producto)::int AS cantidad_lineas
+                COUNT(pp.id_pedido_producto)::int AS cantidad_lineas,
+                mp.metodo_nombre AS metodo_pago,
+                epa.estado_pago_nombre AS estado_pago,
+                pg.fecha_cancelacion
          FROM pedido p
          JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
          LEFT JOIN pedido_producto pp ON pp.id_pedido = p.id_pedido
          LEFT JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+         LEFT JOIN pago pg ON pg.id_pedido = p.id_pedido
+         LEFT JOIN metodo_pago mp ON mp.id_metodo_pago = pg.id_metodo_pago
+         LEFT JOIN estado_pago epa ON epa.id_estado_pago = pg.id_estado_pago
          WHERE p.id_usuario = $1
-         GROUP BY p.id_pedido, p.fecha_creacion, p.id_estado_pedido, ep.estado_pedido_nombre
+         GROUP BY p.id_pedido, p.fecha_creacion, p.id_estado_pedido, ep.estado_pedido_nombre,
+                  mp.metodo_nombre, epa.estado_pago_nombre, pg.fecha_cancelacion
          ORDER BY p.fecha_creacion DESC`,
         [idUsuario],
       );
@@ -401,6 +414,19 @@ export class PedidosCompradorService {
    *
    * Solo entonces llama a comprar_pedido(), que es la que de verdad
    * descuenta el stock, registra el pago y pasa el pedido a "comprado".
+   *
+   * Los pasos 2 y la llamada a comprar_pedido() van en una sola transaccion
+   * (BEGIN/COMMIT con un cliente dedicado, no con pool.query), y el SELECT
+   * de revisarCambiosAntesDeComprar bloquea las filas de oferta que revisa
+   * (FOR UPDATE OF o). Sin esto quedaba una ventana angosta: el chequeo y
+   * comprar_pedido() eran dos consultas sueltas, y entre una y otra alguien
+   * podia pausar/retirar la oferta (PATCH /vendedor/ofertas/:id) sin que
+   * comprar_pedido() -- que solo revisa stock, nunca estado -- se enterara.
+   * Con el bloqueo tomado desde el chequeo, ese PATCH se queda esperando a
+   * que esta transaccion termine, y comprar_pedido() (que vuelve a pedir
+   * FOR UPDATE sobre la misma fila, ya bloqueada por esta misma
+   * transaccion) lee siempre el mismo estado que ya se valido.
+   *
    * Con la compra ya confirmada en PostgreSQL, pone al dia en Mongo los
    * cuatro numeros calculados de cada producto afectado (ver
    * ProductosService.recalcularCamposCalculados) -- si eso fallara, no
@@ -427,22 +453,30 @@ export class PedidosCompradorService {
       validarYCobrarTarjeta(datos.tarjeta);
     }
 
-    const { bloqueantes, avisos } = await this.revisarCambiosAntesDeComprar(idPedido);
-
-    if (bloqueantes.length > 0) {
-      throw new ErrorConflicto(bloqueantes.join('; '));
-    }
-    if (avisos.length > 0 && datos.confirmar_cambios !== true) {
-      return { comprado: false, avisos };
-    }
-
+    const cliente = await pool.connect();
     try {
-      const resultado = await pool.query<{ comprar_pedido: CompraResultadoPostgres }>(
+      await cliente.query('BEGIN');
+
+      const { bloqueantes, avisos } = await this.revisarCambiosAntesDeComprar(
+        cliente,
+        idPedido,
+      );
+
+      if (bloqueantes.length > 0) {
+        throw new ErrorConflicto(bloqueantes.join('; '));
+      }
+      if (avisos.length > 0 && datos.confirmar_cambios !== true) {
+        await cliente.query('ROLLBACK');
+        return { comprado: false, avisos };
+      }
+
+      const resultado = await cliente.query<{ comprar_pedido: CompraResultadoPostgres }>(
         'SELECT comprar_pedido($1, $2)',
         [idPedido, datos.metodo_pago],
       );
-      const compra = resultado.rows[0].comprar_pedido;
+      await cliente.query('COMMIT');
 
+      const compra = resultado.rows[0].comprar_pedido;
       const idsProducto = compra.stock.map((linea) => linea.id_producto);
       await this.productosService.recalcularCamposCalculados(idsProducto);
 
@@ -453,10 +487,16 @@ export class PedidosCompradorService {
         stock: compra.stock,
       };
     } catch (error) {
+      await this.intentarRollback(cliente);
+      if (error instanceof ErrorConflicto) {
+        throw error;
+      }
       if (this.esErrorDeNegocio(error)) {
         throw new ErrorConflicto((error as Error).message);
       }
       manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
     }
   }
 
@@ -571,62 +611,77 @@ export class PedidosCompradorService {
    * Comparar precio_actual contra precio_congelado es texto contra texto
    * (los dos numeric(12,2) de Postgres, formateados igual): exacto, sin
    * el redondeo binario de comparar como numero de JavaScript.
+   *
+   * Corre dentro de la transaccion de comprarPedido(), con el `cliente` de
+   * esa transaccion (no con `pool` directo): el `FOR UPDATE OF o` deja
+   * bloqueadas las filas de oferta que revisa hasta que esa transaccion
+   * termine, para que nada las cambie entre este chequeo y la llamada a
+   * comprar_pedido() que viene despues. Los errores de conexion no se
+   * atrapan aqui: se dejan subir para que comprarPedido() decida el
+   * rollback.
    */
   private async revisarCambiosAntesDeComprar(
+    cliente: PoolClient,
     idPedido: number,
   ): Promise<{ bloqueantes: string[]; avisos: AvisoPrecioPedido[] }> {
-    try {
-      const resultado = await pool.query<{
-        id_pedido_producto: number;
-        nombre_producto: string;
-        nombre_variante: string;
-        cantidad: number;
-        precio_congelado: string;
-        precio_actual: string;
-        stock: number;
-        estado_oferta_nombre: string;
-      }>(
-        `SELECT pp.id_pedido_producto, pp.nombre_producto, pp.nombre_variante, pp.cantidad,
-                ph.precio AS precio_congelado, o.precio AS precio_actual, o.stock,
-                eo.estado_oferta_nombre
-         FROM pedido_producto pp
-         JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
-         JOIN oferta o ON o.id_oferta = ph.id_oferta
-         JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
-         WHERE pp.id_pedido = $1`,
-        [idPedido],
-      );
+    const resultado = await cliente.query<{
+      id_pedido_producto: number;
+      nombre_producto: string;
+      nombre_variante: string;
+      cantidad: number;
+      precio_congelado: string;
+      precio_actual: string;
+      stock: number;
+      estado_oferta_nombre: string;
+    }>(
+      `SELECT pp.id_pedido_producto, pp.nombre_producto, pp.nombre_variante, pp.cantidad,
+              ph.precio AS precio_congelado, o.precio AS precio_actual, o.stock,
+              eo.estado_oferta_nombre
+       FROM pedido_producto pp
+       JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+       JOIN oferta o ON o.id_oferta = ph.id_oferta
+       JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+       WHERE pp.id_pedido = $1
+       FOR UPDATE OF o`,
+      [idPedido],
+    );
 
-      const bloqueantes: string[] = [];
-      const avisos: AvisoPrecioPedido[] = [];
+    const bloqueantes: string[] = [];
+    const avisos: AvisoPrecioPedido[] = [];
 
-      for (const fila of resultado.rows) {
-        if (fila.estado_oferta_nombre !== 'activa') {
-          bloqueantes.push(
-            `La oferta de "${fila.nombre_variante}" ya no esta disponible (${fila.estado_oferta_nombre})`,
-          );
-          continue;
-        }
-        if (fila.stock < fila.cantidad) {
-          bloqueantes.push(
-            `No hay suficiente stock de "${fila.nombre_variante}": quedan ${fila.stock} y el pedido pide ${fila.cantidad}`,
-          );
-          continue;
-        }
-        if (fila.precio_actual !== fila.precio_congelado) {
-          avisos.push({
-            id_pedido_producto: fila.id_pedido_producto,
-            nombre_producto: fila.nombre_producto,
-            nombre_variante: fila.nombre_variante,
-            precio_congelado: fila.precio_congelado,
-            precio_actual: fila.precio_actual,
-          });
-        }
+    for (const fila of resultado.rows) {
+      if (fila.estado_oferta_nombre !== 'activa') {
+        bloqueantes.push(
+          `La oferta de "${fila.nombre_variante}" ya no esta disponible (${fila.estado_oferta_nombre})`,
+        );
+        continue;
       }
+      if (fila.stock < fila.cantidad) {
+        bloqueantes.push(
+          `No hay suficiente stock de "${fila.nombre_variante}": quedan ${fila.stock} y el pedido pide ${fila.cantidad}`,
+        );
+        continue;
+      }
+      if (fila.precio_actual !== fila.precio_congelado) {
+        avisos.push({
+          id_pedido_producto: fila.id_pedido_producto,
+          nombre_producto: fila.nombre_producto,
+          nombre_variante: fila.nombre_variante,
+          precio_congelado: fila.precio_congelado,
+          precio_actual: fila.precio_actual,
+        });
+      }
+    }
 
-      return { bloqueantes, avisos };
-    } catch (error) {
-      manejarErrorConexion(this.logger, error);
+    return { bloqueantes, avisos };
+  }
+
+  private async intentarRollback(cliente: PoolClient): Promise<void> {
+    try {
+      await cliente.query('ROLLBACK');
+    } catch {
+      // Si ni el rollback funciona, la conexion seguramente ya se cayo.
+      // No hay nada mas que hacer; sigue el error original de quien llamo.
     }
   }
 

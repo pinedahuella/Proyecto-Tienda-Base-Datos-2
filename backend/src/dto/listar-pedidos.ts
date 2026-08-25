@@ -12,4 +12,10 @@ export interface PedidoResumen {
   total: string;
   /** Cuantas lineas distintas tiene, para poder mostrar "3 productos" sin traerlas todas. */
   cantidad_lineas: number;
+  /** null mientras el pedido sigue pendiente: todavia no existe pago. */
+  metodo_pago: string | null;
+  /** null mientras el pedido sigue pendiente. */
+  estado_pago: string | null;
+  /** Cuando se salda el pago (ver Pago.fecha_cancelacion). null mientras el pedido sigue pendiente. */
+  fecha_cancelacion: Date | null;
 }

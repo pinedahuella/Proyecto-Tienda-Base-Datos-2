@@ -227,12 +227,9 @@ Documentado con el detalle completo en `endpoints-vendedores.md`, sección
 
 ---
 
-## 5. Borrar lo que ya no existe: las rutas viejas de `/inventario`
+## 5. ~~Borrar lo que ya no existe: las rutas viejas de `/inventario`~~ — hecho
 
-Confirmado que `inventario` ya no existe en Postgres (las rutas de
-`InventarioVendedorService` están rotas en tiempo de ejecución, aunque
-compilan). Al terminar los puntos 1–3 de arriba (que las reemplazan),
-borrar:
+Borradas las cinco rutas:
 
 - `GET /vendedor/productos/inventario`
 - `GET /vendedor/productos/inventario/motivos-ajuste`
@@ -241,13 +238,16 @@ borrar:
 - `PATCH /vendedor/productos/:id/inventario`
 
 Y sus archivos: `services/vendedores/inventario.service.ts`,
-`dto/inventario-vendedor.ts`, `dto/ajustar-inventario-vendedor.ts`, más
-las cuatro rutas correspondientes en
-`controllers/vendedores/productos.controller.ts` y su registro en
-`app.module.ts`. **`helpers/validaciones-inventario.ts` NO se borra
-completo** — `validarCantidadMovimiento` y `validarStockInicial` se
-siguen usando (pedidos, y el punto 1 y 3 de este plan); revisar cuál de
-las funciones del archivo queda huérfana antes de tocarlo.
+`dto/inventario-vendedor.ts`, `dto/ajustar-inventario-vendedor.ts`,
+`models/motivo-movimiento.ts` (quedó huérfano al borrar los dos
+anteriores), más las rutas correspondientes en
+`controllers/vendedores/productos.controller.ts` y el registro de
+`InventarioVendedorService` en `app.module.ts`.
+`helpers/validaciones-inventario.ts` **no se borró**: sus cuatro
+funciones (`validarIdProducto`, `validarIdProductoVariante`,
+`validarStockInicial`, `validarCantidadMovimiento`) se siguen usando
+desde `ofertas.service.ts` y `pedidos.service.ts`. `npx tsc --noEmit`
+queda limpio. Documentación actualizada en `endpoints-vendedores.md`.
 
 ---
 

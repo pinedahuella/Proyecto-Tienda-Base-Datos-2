@@ -2,14 +2,12 @@ import { ErrorValidacion } from './errores';
 
 /**
  * Reglas de id_producto, id_producto_variante, stock_inicial y cantidad:
- * las usan POST /vendedor/productos/:id/inventario (directo, del cuerpo),
- * POST /vendedor/productos y PATCH /vendedor/productos/:id (el
+ * las usan POST /vendedor/productos y PATCH /vendedor/productos/:id (el
  * stock_inicial opcional de cada variante, antes de crear/editar nada,
  * para que un dato invalido rechace toda la operacion en vez de fallar a
- * medias creando su inventario), PATCH /vendedor/productos/:id/inventario
- * (id de variante y la cantidad del ajuste) y POST /vendedor/ofertas (los
- * dos ids del catalogo que identifican la variante a ofertar, y su
- * stock_inicial).
+ * medias), POST /vendedor/ofertas (los dos ids del catalogo que
+ * identifican la variante a ofertar, y su stock_inicial) y
+ * POST /comprador/pedidos/:id/lineas (la cantidad de la linea a agregar).
  */
 
 export function validarIdProducto(valor: unknown): number {

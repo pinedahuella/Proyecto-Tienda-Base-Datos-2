@@ -382,12 +382,15 @@ BEGIN
         );
     END LOOP;
 
-    -- El pago nace pendiente: el pedido esta comprado, el dinero todavia no
-    -- entro. Quien confirme el cobro le pone la fecha y lo pasa a pagado.
+    -- Para la primera entrega, todo pago nace pagado de una vez, sin
+    -- importar el metodo -- no hay quien confirme transferencia/efectivo
+    -- todavia (ver el problema de fondo: un pedido puede mezclar
+    -- vendedores y el pago es uno solo, no uno por vendedor). Decision del
+    -- equipo: simplificar por ahora, retomarlo despues si hace falta.
     INSERT INTO pago (id_pedido, id_metodo_pago, monto, fecha_cancelacion, id_estado_pago)
     VALUES (
-        p_id_pedido, v_id_metodo, v_total, NULL,
-        (SELECT id_estado_pago FROM estado_pago WHERE estado_pago_nombre = 'pendiente')
+        p_id_pedido, v_id_metodo, v_total, now(),
+        (SELECT id_estado_pago FROM estado_pago WHERE estado_pago_nombre = 'pagado')
     );
 
     UPDATE pedido

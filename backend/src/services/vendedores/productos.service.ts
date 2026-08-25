@@ -223,7 +223,7 @@ export class ProductosVendedorService {
   ): Promise<ProductoVariante[]> {
     let siguienteId = await this.siguienteIdVariante(coleccion);
 
-    return peticiones.map((peticionVariante) => {
+    const variantes = peticiones.map((peticionVariante) => {
       const nombreVariante = validarNombreVariante(
         peticionVariante.nombre_variante,
       );
@@ -298,6 +298,27 @@ export class ProductosVendedorService {
 
       return variante;
     });
+
+    // Una variante nunca se borra por omision: si `peticiones` no trae una
+    // que el producto ya tenia, se conserva tal cual (nunca se elimina del
+    // documento).
+    if (variantesExistentes != null) {
+      const idsEnPeticion = new Set(
+        variantes.map((variante) => variante.id_producto_variante),
+      );
+      const faltantes = variantesExistentes.filter(
+        (existente) => !idsEnPeticion.has(existente.id_producto_variante),
+      );
+      for (const faltante of faltantes) {
+        validarCaracteristicasExistentesContraCategoria(
+          faltante.caracteristicas_adicionales,
+          categoria.caracteristicas_variante,
+        );
+      }
+      variantes.push(...faltantes);
+    }
+
+    return variantes;
   }
 
   /** El primer evento del producto: numero 1, operacion "creacion", la copia completa del producto. */
@@ -325,10 +346,13 @@ export class ProductosVendedorService {
    *
    * Cada campo es independiente: el que venga en null (o no venga) no se
    * toca. Para las dos listas de caracteristicas, un array (aunque sea
-   * vacio) reemplaza la lista completa; null es no tocarla. `variantes`
-   * funciona igual salvo que no admite quedar vacio: si se manda, se
-   * reemplaza completo (mismas reglas que al crear), pero siempre tiene que
-   * traer al menos una.
+   * vacio) reemplaza la lista completa; null es no tocarla. `variantes` es
+   * distinto: no admite quedar vacio (siempre tiene que traer al menos una)
+   * y NUNCA borra una variante que el producto ya tenia, aunque no venga en
+   * el array -- las que el producto ya tenia y no vienen en el array se
+   * conservan tal cual, sin tocarlas (una variante nunca desaparece por
+   * omision). Si el array manda una variante existente, esa se edita (o se
+   * deja igual, si no cambia nada de lo que esta ruta pregunta).
    *
    * Cada variante del array puede traer su id_producto_variante viejo: si
    * coincide con una que el producto ya tenia, esa CONSERVA su mismo id; si
