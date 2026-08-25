@@ -1,7 +1,13 @@
 # Backend: qué cambiar para el modelo multi-vendedor
 
-La base y el ETL ya están hechos y corriendo. Esto es lo que falta del lado del
-backend, en orden. No toqué nada de `backend/src/`.
+La base y el ETL ya están hechos y corriendo.
+
+> **La base está CONGELADA desde el 2026-08-25.** No se tocan más migraciones,
+> ni campos del ETL, ni índices. Cada cambio de aquí obliga a rehacer trabajo
+> del backend, y ya pasó tres veces en una mañana. Si aparece algo, se reporta
+> y lo decide el equipo — no se cambia.
+
+Esto es lo que falta del lado del backend, en orden.
 
 ```powershell
 .\arrancar.ps1 -Reiniciar
@@ -10,6 +16,28 @@ backend, en orden. No toqué nada de `backend/src/`.
 Queda en PostgreSQL: 36 tablas · 34 productos · 63 variantes · **168 ofertas** ·
 220 filas de precio · 153 movimientos de stock.
 Y en Mongo: `productos` 34 · `categorias` 23 · `productos_eventos` 44.
+
+---
+
+## 0. Lo que ya está hecho (no rehacer)
+
+| | |
+|---|---|
+| `GET /productos`, `/paginacion`, `/productos/:id` | listos, con los filtros nuevos |
+| Flujo de pedidos completo | listo y **probado end to end** |
+| Catálogo y ficha en el frontend | listos |
+| Panel del vendedor | **falta**, y es lo que sigue |
+
+**Probado el 2026-08-25**: compra con dos vendedores en un mismo pedido
+(Q7,885 = 3,856 + 4,029), stock descontado, kardex cuadrado, pago escrito,
+Mongo actualizado solo, y cancelación devolviendo stock con su movimiento de
+`devolucion` y el pago a `reembolsado`. Las validaciones aguantan pedido ajeno
+(404), pedido vacío (409), tarjeta inválida (400), vencida (402), método
+inventado (409) y cantidad 0 o negativa (400).
+
+**Lo único que falta de rutas:** `/vendedor/ofertas` — un vendedor ya no publica
+un producto con precio, publica una **oferta** sobre un producto que ya existe
+en el catálogo. Sin esas rutas el panel del vendedor no se puede arreglar.
 
 ---
 
