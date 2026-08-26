@@ -215,14 +215,28 @@ const VARIANTES_VOCAL: Record<string, string> = {
  * resuelve mayusculas/minusculas del resto de las letras; esta funcion
  * solo resuelve las vocales acentuadas, que `i` no cubre por si solo.
  *
- * Escapa los caracteres especiales de regex primero (mismo escaparRegex de
- * siempre) y recien despues expande cada vocal a su clase de caracteres --
- * las letras nunca quedan afectadas por el escape, asi que el orden es
- * seguro.
+ * Tres pasos, en este orden:
+ *
+ *   1. Escapa los caracteres especiales de regex (escaparRegex de
+ *      siempre) -- las letras nunca quedan afectadas por el escape.
+ *   2. Le quita las tildes al TEXTO BUSCADO (no al dato guardado, que
+ *      nunca se toca): `normalize('NFD')` descompone cada vocal
+ *      acentuada en la vocal simple mas su marca diacritica aparte, y el
+ *      regex de rango Unicode `\u0300-\u036f` (el bloque "Combining Diacritical Marks") borra esa marca. Sin este
+ *      paso, si quien busca escribe "Cámara" (con tilde, español
+ *      correcto), la á queda literal en el patron y nunca hace match
+ *      contra "Camara" sin tilde en los datos -- que es como esta
+ *      guardado el 100% del catalogo real hoy. El paso 3 (expandir
+ *      vocales) por si solo no alcanza: solo vale para vocales SIN
+ *      tilde, que es lo unico que puede quedar despues de este paso.
+ *   3. Expande cada vocal (ya sin tilde, garantizado por el paso 2) a su
+ *      clase de caracteres con todas las variantes acentuadas -- para
+ *      que SI el dato guardado tuviera una tilde, tambien la encuentre.
  */
 export function construirRegexNombreFlexible(texto: string): string {
   const escapado = escaparRegex(texto);
-  return escapado.replace(/[aeiouAEIOU]/g, (letra) => {
+  const sinTildes = escapado.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return sinTildes.replace(/[aeiouAEIOU]/g, (letra) => {
     const variantes = VARIANTES_VOCAL[letra.toLowerCase()];
     return `[${variantes}]`;
   });

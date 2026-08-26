@@ -75,6 +75,15 @@ export class ProductosVendedorService {
   ) {}
 
   async crear(idUsuario: string, datos: CrearProductoPeticion): Promise<Producto> {
+    // Primero que cualquier otra cosa, ni siquiera validar el cuerpo: si
+    // no sos la tienda ni admin, el 404 disfrazado tiene que ganarle a
+    // cualquier 400 de validacion -- si no, alguien sin permiso podria
+    // usar los mensajes de validacion (o hasta disparar una consulta a
+    // Mongo, ver obtenerCategoriaValida mas abajo) para confirmar que la
+    // ruta existe y como se comporta, justo lo que el 404 disfrazado
+    // busca evitar (ver exigirTiendaOAdmin).
+    await this.exigirTiendaOAdmin(idUsuario);
+
     const nombre = validarNombreProducto(datos.nombre);
     const descripcion = esTextoNoVacio(datos.descripcion)
       ? datos.descripcion
@@ -102,8 +111,6 @@ export class ProductosVendedorService {
       const caracteristicasPersonalizadas = validarCaracteristicasPersonalizadas(
         datos.caracteristicas_personalizadas,
       );
-
-      await this.exigirTiendaOAdmin(idUsuario);
 
       const idProducto = await this.siguienteIdProducto(coleccionProductos);
       const fechaCreacion = new Date();
@@ -392,6 +399,12 @@ export class ProductosVendedorService {
     idUsuarioToken: string,
     cambios: EditarProductoPeticion,
   ): Promise<Producto> {
+    // Primero que cualquier otra cosa, ni siquiera el formato del id --
+    // mismo motivo que en crear(): el 404 disfrazado tiene que ganarle a
+    // cualquier 400 de validacion, para no confirmarle a alguien sin
+    // permiso que la ruta existe.
+    await this.exigirTiendaOAdmin(idUsuarioToken);
+
     if (!REGEX_ID.test(idProductoParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }
@@ -442,8 +455,6 @@ export class ProductosVendedorService {
     const coleccion = mongoDb.collection<Producto>('productos');
 
     try {
-      await this.exigirTiendaOAdmin(idUsuarioToken);
-
       const productoActual = await coleccion.findOne({ _id: idProducto });
       if (productoActual == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
@@ -705,17 +716,21 @@ export class ProductosVendedorService {
     }
   }
 
-  /** Un producto del catalogo, tal como esta hoy. Solo la tienda o un admin puede pedirlo por esta ruta. */
+  /**
+   * Un producto del catalogo, tal como esta hoy. Solo la tienda o un
+   * admin puede pedirlo por esta ruta -- el chequeo va primero, antes
+   * incluso del formato del id, mismo motivo que en crear()/editar().
+   */
   async obtenerPropio(
     idProductoParametro: string,
     idUsuario: string,
   ): Promise<Producto> {
+    await this.exigirTiendaOAdmin(idUsuario);
+
     if (!REGEX_ID.test(idProductoParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }
     const idProducto = Number(idProductoParametro);
-
-    await this.exigirTiendaOAdmin(idUsuario);
 
     try {
       const producto = await mongoDb
