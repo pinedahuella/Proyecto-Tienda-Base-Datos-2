@@ -17,6 +17,7 @@ import {
 import { OfertaPropia, OfertaPropiaResumen } from '../../models/oferta';
 import { Producto } from '../../models/producto';
 import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
+import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { CrearOfertaPeticion } from '../../dto/crear-oferta';
 import { EditarOfertaPeticion } from '../../dto/editar-oferta';
 import {
@@ -24,6 +25,7 @@ import {
   ProductoVarianteConMiOferta,
 } from '../../dto/producto-con-mis-ofertas';
 import { ProductosService } from '../productos/productos.service';
+import { CORREO_TIENDA } from '../../helpers/constantes';
 
 const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
@@ -71,21 +73,65 @@ interface FilaOfertaNueva {
  * bases: primero Postgres para saber que es mio, despues Mongo para
  * ponerle nombre.
  *
- * Sin restriccion de "solo tienda (o admin)": a diferencia de crear un
- * producto del catalogo (que decidimos que es solo de tienda@mesh.com o de
- * una cuenta admin, ver cambios-multivendedor.md seccion 9), publicar una
- * OFERTA sobre un producto que ya existe es justo lo que cualquier
- * vendedor (o admin) puede hacer -- es el corazon del modelo
- * multi-vendedor. El guard de rol (@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
- * en OfertasVendedorController) deja pasar a los dos por igual; no hace
- * falta ningun chequeo de cuenta especifica aqui adentro, porque la oferta
- * siempre nace bajo el id_usuario de quien la crea.
+ * Sin restriccion de "solo tienda": a diferencia de crear un producto del
+ * catalogo (que decidimos que es solo de tienda@mesh.com o de una cuenta
+ * admin, ver cambios-multivendedor.md seccion 9), publicar una OFERTA
+ * sobre un producto que ya existe es justo lo que cualquier vendedor
+ * puede hacer -- es el corazon del modelo multi-vendedor. El guard de rol
+ * (@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN) en OfertasVendedorController)
+ * deja pasar tanto a un vendedor como a un admin.
+ *
+ * OJO: un admin NO opera bajo su propia cuenta aqui. Decision explicita
+ * del equipo (25 ago 2026): un admin que crea, edita o lista ofertas lo
+ * hace **como la cuenta de la tienda** (tienda@mesh.com) -- no como un
+ * vendedor mas con su propio id_usuario. resolverIdEfectivo(), llamada al
+ * principio de las cuatro acciones publicas de esta clase, es la que hace
+ * ese cambio: si quien esta logueado es admin, sustituye el idUsuario del
+ * token por el id_usuario real de tienda@mesh.com antes de tocar
+ * cualquier otra cosa. Para un vendedor que no es admin, no cambia nada
+ * -- sigue actuando bajo su propia cuenta, como siempre.
  */
 @Injectable()
 export class OfertasVendedorService {
   private readonly logger = new Logger(OfertasVendedorService.name);
 
   constructor(private readonly productosService: ProductosService) {}
+
+  /**
+   * El id_usuario que de verdad hay que usar para el resto de la
+   * operacion. Si quien esta logueado es admin, sustituye por el
+   * id_usuario real de la cuenta de la tienda (tienda@mesh.com) -- toda
+   * oferta que cree, edite o liste un admin es, a todos los efectos, una
+   * oferta de la tienda (misma cuenta que ve `es_tienda: true` y alimenta
+   * `precio_tienda`/`stock_tienda` en el catalogo publico). Para
+   * cualquier otro rol (vendedor normal) no hace nada: devuelve el mismo
+   * idUsuario que ya traia.
+   *
+   * Si la cuenta de la tienda no existiera (no deberia pasar nunca, es
+   * parte de los datos base) falla fuerte en vez de dejar a un admin
+   * operando por accidente bajo su propia cuenta.
+   */
+  private async resolverIdEfectivo(
+    idUsuario: string,
+    idRolUsuario: number,
+  ): Promise<string> {
+    if (idRolUsuario !== ID_ROL_ADMIN) {
+      return idUsuario;
+    }
+    try {
+      const resultado = await pool.query<{ id_usuario: string }>(
+        'SELECT id_usuario FROM usuarios WHERE correo_electronico = $1',
+        [CORREO_TIENDA],
+      );
+      const fila = resultado.rows[0];
+      if (fila == null) {
+        throw new Error('No existe la cuenta de la tienda (tienda@mesh.com)');
+      }
+      return fila.id_usuario;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
 
   /**
    * Publica una oferta sobre una variante que ya existe en el catalogo.
@@ -95,15 +141,20 @@ export class OfertasVendedorService {
    * `reponer_stock`, para que el kardex explique tambien esas unidades
    * (nunca se mete stock directo en el INSERT).
    *
+   * Si quien crea es admin, la oferta nace bajo la cuenta de la tienda,
+   * no bajo la del admin (ver resolverIdEfectivo() arriba).
+   *
    * Solo sobre productos activos: uno oculto (`inactivo`/`borrador`) da el
    * mismo 404 que uno que no existe, igual que en el catalogo publico y en
    * `agregar_linea` -- nadie mas lo ve, no deberia poder recibir una oferta
    * nueva tampoco.
    */
   async crear(
-    idUsuario: string,
+    idUsuarioToken: string,
+    idRolUsuario: number,
     datos: CrearOfertaPeticion,
   ): Promise<OfertaPropia> {
+    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
     const idProducto = validarIdProducto(datos.id_producto);
     const idProductoVariante = validarIdProductoVariante(
       datos.id_producto_variante,
@@ -221,13 +272,18 @@ export class OfertasVendedorService {
    *     de inventario, ahora sobre la oferta.
    *
    * Solo el dueno de la oferta -- una ajena da el mismo 404 generico que
-   * una que no existe, mismo criterio de siempre.
+   * una que no existe, mismo criterio de siempre. Si quien edita es
+   * admin, "dueno" se resuelve como la cuenta de la tienda (ver
+   * resolverIdEfectivo() arriba): un admin puede editar cualquier oferta
+   * de la tienda, pero sigue sin poder tocar la de otro vendedor.
    */
   async editar(
-    idUsuario: string,
+    idUsuarioToken: string,
+    idRolUsuario: number,
     idOfertaParametro: string,
     datos: EditarOfertaPeticion,
   ): Promise<OfertaPropia> {
+    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
     if (!REGEX_ID.test(idOfertaParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }
@@ -328,8 +384,17 @@ export class OfertasVendedorService {
    * Postgres por todas mis filas de `oferta`, y una sola a Mongo por todos
    * los productos distintos que aparecen ahi (con `$in`), nunca una por
    * oferta.
+   *
+   * Para un admin, "mis ofertas" son las de la cuenta de la tienda (ver
+   * resolverIdEfectivo() arriba), no las que hubiera creado el admin bajo
+   * su propio id -- no deberia haber ninguna, porque crear() ya las
+   * atribuye a la tienda.
    */
-  async listarPropias(idUsuario: string): Promise<OfertaPropia[]> {
+  async listarPropias(
+    idUsuarioToken: string,
+    idRolUsuario: number,
+  ): Promise<OfertaPropia[]> {
+    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
     const ofertas = await this.consultarOfertasPropias(idUsuario);
     if (ofertas.length === 0) {
       return [];
@@ -377,11 +442,16 @@ export class OfertasVendedorService {
    * Un producto que no existe da 404 igual para cualquiera: no hay nada
    * que ocultar aqui (a diferencia de "no es tuyo"), asi que no hace falta
    * el mismo cuidado de siempre con el mensaje.
+   *
+   * Para un admin, `mi_oferta` es la de la cuenta de la tienda (ver
+   * resolverIdEfectivo() arriba), igual que en listarPropias().
    */
   async obtenerConMisOfertas(
     idProductoParametro: string,
-    idUsuario: string,
+    idUsuarioToken: string,
+    idRolUsuario: number,
   ): Promise<ProductoConMisOfertas> {
+    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
     if (!REGEX_ID.test(idProductoParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }

@@ -17,12 +17,14 @@ import { OfertasVendedorService } from '../../services/vendedores/ofertas.servic
  * con rol admin: publicar una oferta sobre un producto que ya existe es lo
  * que cualquiera con rol vendedor o admin puede hacer -- la restriccion de
  * "solo tienda (o admin)" es unicamente para crear entradas nuevas del
- * catalogo (ver ProductosVendedorService). A diferencia de alli, aqui no
- * hace falta ningun chequeo de cuenta especifica: OfertasVendedorService ya
- * scoped todo (crear, editar, listar) al id_usuario de quien esta
- * logueado, asi que una oferta creada por un admin nace bajo su propia
- * cuenta, igual que la de cualquier otro vendedor -- no hay ninguna cuenta
- * "de la tienda" involucrada aqui.
+ * catalogo (ver ProductosVendedorService).
+ *
+ * OJO: un admin NO actua bajo su propia cuenta en estas cuatro rutas.
+ * OfertasVendedorService.resolverIdEfectivo() sustituye el id_usuario del
+ * token por el de la cuenta de la tienda (tienda@mesh.com) apenas entra
+ * un admin -- toda oferta que cree, edite o vea un admin es, a todos los
+ * efectos, una oferta de la tienda. Por eso las cuatro llamadas de abajo
+ * mandan tambien `usuarioActual.id_rol_usuario`, no solo el id_usuario.
  */
 @Controller('vendedor/ofertas')
 @UseGuards(SesionGuard)
@@ -38,6 +40,7 @@ export class OfertasVendedorController {
     try {
       const ofertas = await this.ofertasVendedorService.listarPropias(
         usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
       );
       return exito(ofertas, 'Ofertas obtenidas');
     } catch (error) {
@@ -57,6 +60,7 @@ export class OfertasVendedorController {
       const producto = await this.ofertasVendedorService.obtenerConMisOfertas(
         idProducto,
         usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
       );
       return exito(producto, 'Producto obtenido');
     } catch (error) {
@@ -73,6 +77,7 @@ export class OfertasVendedorController {
     try {
       const oferta = await this.ofertasVendedorService.crear(
         usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
         datos,
       );
       return exito(oferta, 'Oferta creada');
@@ -91,6 +96,7 @@ export class OfertasVendedorController {
     try {
       const oferta = await this.ofertasVendedorService.editar(
         usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
         id,
         datos,
       );

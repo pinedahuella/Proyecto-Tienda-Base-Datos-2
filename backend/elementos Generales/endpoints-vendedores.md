@@ -6,7 +6,7 @@ admin), [endpoints-productos.md](endpoints-productos.md) (el catálogo
 público) y [endpoints-compradores.md](endpoints-compradores.md) (comprar,
 sin exigir un rol en particular).
 
-Todas las rutas de aquí requieren la cookie `mesh_token`. Hay **dos niveles**
+Todas las rutas de aquí requieren la cookie `mesh_token`. Hay **tres niveles**
 de restricción, y no son lo mismo:
 
 1. **Por rol** (`id_rol_usuario`, lo revisa el guard `@Roles` antes de entrar
@@ -18,6 +18,12 @@ de restricción, y no son lo mismo:
    `exigirTiendaOAdmin()` a mano, por correo o por rol contra la base en cada
    petición, nunca por el token): no es un 403 — ver la nota mas abajo de por
    qué.
+3. **Por identidad efectiva** (solo dentro de `/vendedor/ofertas`, lo
+   resuelve `OfertasVendedorService.resolverIdEfectivo()`): no es una
+   restricción que bloquee nada, es una **sustitución** — cuando quien
+   llama es admin, toda la operación se hace usando el `id_usuario` de la
+   cuenta de la tienda en vez del propio. Ver la nota de más abajo,
+   "Ofertas creadas por un admin caen bajo la cuenta de la tienda".
 
 | Ruta | Rol exigido | Cuenta exigida |
 | --- | --- | --- |
@@ -31,7 +37,7 @@ de restricción, y no son lo mismo:
 | `GET /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
 | `GET /vendedor/ofertas/producto/:idProducto` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
 | `POST /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
-| `PATCH /vendedor/ofertas/:id` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin, pero solo sobre **su propia** oferta |
+| `PATCH /vendedor/ofertas/:id` | vendedor **o** admin (2 o 3) | cualquier vendedor, pero solo sobre **su propia** oferta; un admin, sobre cualquier oferta **de la tienda** |
 
 **`/vendedor/productos` es el panel de administración del catálogo
 completo, no "mis productos".** Con el giro a multi-vendedor, un producto
@@ -64,13 +70,35 @@ ya existe. Es la respuesta real a "¿cuáles son mis productos?" para un
 vendedor que no es la tienda — no hay tal cosa como "productos propios",
 pero `GET /vendedor/ofertas` da la lista de productos sobre los que sí
 tiene algo (una oferta), en cualquier estado. Vive en PostgreSQL (tabla
-`oferta`), el catálogo sigue en Mongo. A diferencia de `/vendedor/productos`,
-aquí **no hay ningún chequeo de cuenta específica** (no existe un
-`exigirTiendaOAdmin()` equivalente): `OfertasVendedorService` ya deja todo
-(crear, editar, listar) atado al `id_usuario` de quien está logueado, así
-que una oferta creada por un admin nace bajo **su propia cuenta**, igual
-que la de cualquier otro vendedor — no se puede publicar una oferta "a
-nombre de la tienda" desde aquí, ni siquiera siendo admin.
+`oferta`), el catálogo sigue en Mongo.
+
+**Ofertas creadas por un admin caen bajo la cuenta de la tienda, no bajo
+la del admin** (decisión explícita del equipo, 25 de agosto de 2026). A
+diferencia de `/vendedor/productos`, aquí no hay ningún 404 que bloquee a
+un admin — lo que hay es una **sustitución de identidad**, en
+`OfertasVendedorService.resolverIdEfectivo()`: apenas entra una petición
+de las cuatro rutas de esta sección (`GET /vendedor/ofertas`,
+`GET /vendedor/ofertas/producto/:idProducto`, `POST /vendedor/ofertas`,
+`PATCH /vendedor/ofertas/:id`) con `id_rol_usuario` 3 (admin), el
+`id_usuario` del token se cambia por el `id_usuario` real de
+`tienda@mesh.com` **antes** de tocar cualquier otra cosa — el resto del
+servicio ni se entera de que quien llamó fue un admin. En la práctica:
+
+- `POST /vendedor/ofertas` con sesión de admin crea la oferta con
+  `oferta.id_usuario` = el de la tienda, no el del admin. Esa oferta sale
+  marcada `es_tienda: true` en la ficha pública del producto y alimenta
+  `precio_tienda`/`stock_tienda`, exactamente como si la hubiera creado
+  la propia cuenta de la tienda.
+- `GET /vendedor/ofertas` con sesión de admin lista las ofertas **de la
+  tienda**, no las del admin (no debería existir ninguna oferta bajo el
+  id propio de un admin, porque `crear()` nunca la deja nacer ahí).
+- `PATCH /vendedor/ofertas/:id` con sesión de admin puede editar
+  **cualquier oferta de la tienda**, con el mismo chequeo de dueño de
+  siempre (`obtenerFilaPropia`) — pero sigue sin poder tocar la oferta de
+  un vendedor que no es la tienda, el 404 genérico de siempre.
+- Si la propia cuenta de la tienda (`tienda@mesh.com`, rol vendedor, no
+  admin) usa estas rutas, no cambia nada: `resolverIdEfectivo()` no hace
+  sustitución si `id_rol_usuario` no es 3.
 
 **`POST`/`PATCH /vendedor/productos` ya están rediseñadas contra el modelo
 multi-vendedor**: ya no piden ni guardan `precio` ni `stock_inicial` por
@@ -817,9 +845,12 @@ Postgres dice qué es mío, Mongo le pone nombre.
 un producto del catálogo (solo `tienda@mesh.com` o admin), publicar una
 oferta sobre un producto que ya existe es lo que cualquier cuenta con rol
 vendedor **o admin** puede hacer — es el corazón del modelo
-multi-vendedor. No hay ningún chequeo de cuenta específica aquí (a
-diferencia de `/vendedor/productos`): una oferta creada por un admin nace
-bajo su propia cuenta, como cualquier otro vendedor. `POST
+multi-vendedor. Eso sí: no hay ningún chequeo de cuenta específica aquí
+que **bloquee** (a diferencia de `/vendedor/productos`), pero para un
+admin sí hay una **sustitución de identidad** — la oferta nace bajo la
+cuenta de la tienda, no bajo la del admin (ver "Ofertas creadas por un
+admin caen bajo la cuenta de la tienda" más arriba). Un vendedor que no
+es admin sigue actuando bajo su propia cuenta, sin cambios. `POST
 /vendedor/ofertas` (crear) y `PATCH /vendedor/ofertas/:id` (editar precio,
 estado y/o stock) ya están hechos.
 
@@ -833,6 +864,11 @@ ficha pública de `GET /productos/:id`, que solo enseña las activas). Cada
 una trae el nombre del producto y de la variante, y su portada, para no
 tener que pedir cada producto aparte. Ordenadas por la más recién tocada
 primero (`fecha_actualizacion`).
+
+**Con sesión de admin, "mis ofertas" son las de la cuenta de la tienda**,
+no las del admin — ver la nota al principio del archivo. No debería haber
+nunca una oferta bajo el id propio de un admin, porque `POST
+/vendedor/ofertas` nunca la deja nacer ahí.
 
 Dos consultas nada más, sin importar cuántas ofertas haya: una a Postgres
 por todas mis filas de `oferta`, y una sola a Mongo por todos los
@@ -928,7 +964,10 @@ Un producto completo del catálogo — misma forma que `GET /productos/:id`
 para esto) — **pero sin excluir `inactivo`/`borrador`**: un vendedor tiene
 que poder ver un producto oculto para decidir si le conviene ofertarlo,
 aunque todavía no esté publicado. Cada variante trae `mi_oferta` embebida:
-mi oferta sobre esa variante si tengo una, o `null` si no.
+mi oferta sobre esa variante si tengo una, o `null` si no. Con sesión de
+admin, `mi_oferta` es la de la cuenta de la tienda (misma sustitución de
+identidad que en `GET /vendedor/ofertas`, ver la nota al principio del
+archivo).
 
 El segmento `producto` en la ruta es literal, a propósito: `:id` va a ser
 `id_oferta` en `PATCH /vendedor/ofertas/:id` (todavía no construida), y
@@ -1035,6 +1074,15 @@ compartido. Cualquier vendedor, o admin, no solo la tienda — crear la
 variante misma sigue siendo solo de `tienda@mesh.com` o admin (`POST
 /vendedor/productos`), pero ofertar sobre una que ya está publicada es lo
 que hace a alguien vendedor en este modelo.
+
+**Si quien crea es admin, `oferta.id_usuario` sale con el id de la cuenta
+de la tienda, no el del admin** — ver "Ofertas creadas por un admin caen
+bajo la cuenta de la tienda" al principio de este archivo. La respuesta
+de abajo (`payload`) no expone `id_usuario` directamente, pero
+`nombre_producto`/`nombre_variante` y el resto de los datos son iguales
+sea quien sea que la creó; la diferencia solo se nota en que esa oferta
+pasa a contar para `precio_tienda`/`stock_tienda`/`es_tienda` del
+producto.
 
 **Nace siempre `activa`** — sin aprobación previa de la tienda: eso quedó
 pendiente de diseñar más adelante (fecha límite del profesor obligó a
@@ -1180,7 +1228,12 @@ mano desde esta ruta:
   inventario, ahora sobre la oferta.
 
 **Solo el dueño de la oferta** — una ajena da el mismo 404 genérico que
-una que no existe, mismo criterio de siempre.
+una que no existe, mismo criterio de siempre. **Con sesión de admin,
+"dueño" se resuelve como la cuenta de la tienda**: un admin puede editar
+cualquier oferta de la tienda (incluidas las que la tienda creó ella
+misma, no solo las que nacieron por esta vía), pero sigue sin poder tocar
+la de un vendedor que no es la tienda — ver la nota al principio del
+archivo.
 
 ```
 PATCH /vendedor/ofertas/174
