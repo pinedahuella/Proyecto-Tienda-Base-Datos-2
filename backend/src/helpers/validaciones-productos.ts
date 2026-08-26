@@ -234,10 +234,29 @@ const VARIANTES_VOCAL: Record<string, string> = {
  *      que SI el dato guardado tuviera una tilde, tambien la encuentre.
  */
 export function construirRegexNombreFlexible(texto: string): string {
-  const escapado = escaparRegex(texto);
-  const sinTildes = escapado.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-  return sinTildes.replace(/[aeiouAEIOU]/g, (letra) => {
-    const variantes = VARIANTES_VOCAL[letra.toLowerCase()];
-    return `[${variantes}]`;
-  });
+  // El texto se parte por la ñ y cada trozo se procesa aparte, para que la ñ
+  // nunca pase por el paso 2. Ese paso la fundia con la n sin querer:
+  // normalize('NFD') descompone la ñ en n + tilde combinante, y el borrado de
+  // \u0300-\u036f se lleva esa tilde, asi que la ñ salia convertida en una n --
+  // justo lo que VARIANTES_VOCAL dice que no debe pasar ("año" != "ano").
+  //
+  // Medido contra el catalogo, fallaba en los dos sentidos: buscar "Ñandu" bien
+  // escrito devolvia 0 aunque hay un producto que se llama asi (el patron
+  // quedaba con una n literal, que no hace match contra la Ñ del dato), y una
+  // "Ñ" sola devolvia 81 de los 107 productos: todos los que tienen una n.
+  //
+  // Al rearmar basta con la ñ minuscula, porque el $regex va con $options: 'i'
+  // y esa i ya cubre la Ñ.
+  return escaparRegex(texto)
+    .split(/[ñÑ]/)
+    .map((trozo) =>
+      trozo
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[aeiouAEIOU]/g, (letra) => {
+          const variantes = VARIANTES_VOCAL[letra.toLowerCase()];
+          return `[${variantes}]`;
+        }),
+    )
+    .join('ñ');
 }
