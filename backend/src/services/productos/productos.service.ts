@@ -26,7 +26,7 @@ import {
   ProductosPaginados,
 } from '../../dto/paginar-productos';
 import { Producto, ProductoConOfertas } from '../../models/producto';
-import { OfertaVendedor } from '../../models/oferta';
+import { OfertaVendedor, OfertaHistorial } from '../../models/oferta';
 import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
 
 /** Fila cruda que devuelve la consulta de ofertas, antes de agrupar el vendedor. */
@@ -363,6 +363,88 @@ export class ProductosService {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);
+    }
+  }
+
+  /**
+   * Precio y stock de una oferta especifica, reconstruidos **como estaban
+   * en una fecha especifica** -- mismo espiritu que reconstruirEnFecha(),
+   * pero del lado economico (precio_historial + stock_movimiento), que
+   * vive en PostgreSQL, no en Mongo. De cualquier oferta, no solo la de la
+   * tienda: sirve para reconstruir un pedido viejo tal como se vio, sin
+   * importar de que vendedor era la oferta que se compro.
+   *
+   * Publica, sin restriccion de rol ni de dueño -- mismo criterio que
+   * reconstruirEnFecha(): cualquiera con sesion puede pedir el historial
+   * de cualquier oferta.
+   *
+   * Dos consultas, ambas hasta la misma fecha limite (medianoche del dia
+   * siguiente, zona Guatemala -06:00, igual que reconstruirEnFecha):
+   *
+   *   - precio: la ultima fila de precio_historial antes de esa fecha.
+   *     Como el trigger oferta_registrar_precio (005_ofertas.sql) siempre
+   *     escribe una fila al nacer la oferta, que no aparezca ninguna
+   *     significa que la oferta todavia no existia en esa fecha -- de ahi
+   *     sale el 404 "La oferta no existia en esa fecha".
+   *   - stock: la ultima fila de stock_movimiento antes de esa fecha. A
+   *     diferencia del precio, que no aparezca ninguna fila NO es un
+   *     error: una oferta creada sin stock inicial nunca escribe una fila
+   *     hasta la primera reposicion (ver OfertasVendedorService.crear), asi
+   *     que "ninguna fila todavia" significa stock 0, no que la oferta no
+   *     existiera.
+   */
+  async reconstruirOfertaEnFecha(
+    idOfertaParametro: string,
+    fecha: string | undefined,
+  ): Promise<OfertaHistorial> {
+    if (!REGEX_ID.test(idOfertaParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    validarFechaHistorial(fecha);
+
+    try {
+      const existe = await pool.query<{ id_oferta: string }>(
+        'SELECT id_oferta FROM oferta WHERE id_oferta = $1',
+        [idOfertaParametro],
+      );
+      if (existe.rows.length === 0) {
+        throw new ErrorNoEncontrado('No existe una oferta con ese id');
+      }
+
+      // "hasta ese dia completo": mismo limite y misma zona horaria que
+      // reconstruirEnFecha (ver el comentario ahi).
+      const fechaLimite = new Date(`${fecha}T00:00:00.000-06:00`);
+      fechaLimite.setUTCDate(fechaLimite.getUTCDate() + 1);
+
+      const [precioResultado, stockResultado] = await Promise.all([
+        pool.query<{ precio: string }>(
+          `SELECT precio FROM precio_historial
+           WHERE id_oferta = $1 AND fecha_creacion < $2
+           ORDER BY fecha_creacion DESC LIMIT 1`,
+          [idOfertaParametro, fechaLimite],
+        ),
+        pool.query<{ stock_resultante: number }>(
+          `SELECT stock_resultante FROM stock_movimiento
+           WHERE id_oferta = $1 AND fecha_movimiento < $2
+           ORDER BY fecha_movimiento DESC LIMIT 1`,
+          [idOfertaParametro, fechaLimite],
+        ),
+      ]);
+
+      if (precioResultado.rows.length === 0) {
+        throw new ErrorNoEncontrado('La oferta no existia en esa fecha');
+      }
+
+      return {
+        id_oferta: idOfertaParametro,
+        precio: precioResultado.rows[0].precio,
+        stock: stockResultado.rows[0]?.stock_resultante ?? 0,
+      };
+    } catch (error) {
+      if (error instanceof ErrorValidacion || error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
     }
   }
 

@@ -61,3 +61,17 @@ export interface OfertaPropia extends OfertaPropiaResumen {
   /** La primera imagen de la variante, o null si no tiene ninguna. */
   imagen: string | null;
 }
+
+/**
+ * Precio y stock de una oferta reconstruidos **como estaban en una fecha
+ * especifica** -- ver ProductosService.reconstruirOfertaEnFecha(). Mismo
+ * espiritu que reconstruir un producto a una fecha, pero del lado
+ * economico (precio_historial + stock_movimiento), que vive en PostgreSQL,
+ * no en Mongo.
+ */
+export interface OfertaHistorial {
+  id_oferta: string;
+  /** numeric(12,2) de Postgres: string. */
+  precio: string;
+  stock: number;
+}

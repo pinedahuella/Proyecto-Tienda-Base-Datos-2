@@ -484,6 +484,13 @@ GET /productos/2/historial?fecha=2026-01-10
 { "ok": false, "mensaje": "La fecha no es valida", "payload": null }
 ```
 
+### 401
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
 ### 404
 
 ```json
@@ -501,6 +508,81 @@ GET /productos/2/historial?fecha=2026-01-10
 
 ```json
 { "ok": false, "mensaje": "No se pudo reconstruir el producto", "payload": null }
+```
+
+---
+
+## GET /productos/ofertas/:id/historial
+
+**Protegida (`SesionGuard`), sin restricción de rol ni de dueño** — vive a
+la par de `GET /productos/:id/historial` y exige lo mismo: cualquier
+cuenta logueada puede pedir el historial de precio/stock de **cualquier**
+oferta, no solo la propia. Pensada para completar la reconstrucción de un
+pedido viejo: `:id/historial` reconstruye el producto tal como se veía, y
+esta reconstruye el precio y el stock de la oferta puntual que se compró,
+tal como estaban ese día — el lado económico vive en PostgreSQL
+(`precio_historial` + `stock_movimiento`), no en Mongo.
+
+```
+GET /productos/ofertas/3/historial?fecha=2026-01-10
+```
+
+Dos consultas de solo lectura, ambas hasta la medianoche del día
+**siguiente** al pedido (zona Guatemala, igual que `:id/historial`):
+
+- **`precio`**: la última fila de `precio_historial` antes de esa fecha —
+  siempre hay al menos una desde que nace la oferta (el trigger
+  `oferta_registrar_precio` la escribe sola). Que no aparezca ninguna
+  significa que la oferta todavía no existía en esa fecha.
+- **`stock`**: la última fila de `stock_movimiento` antes de esa fecha. A
+  diferencia del precio, que no aparezca ninguna **no** es un error: una
+  oferta creada sin stock inicial no tiene ninguna fila hasta la primera
+  reposición, así que "ninguna fila todavía" significa `0`, no que la
+  oferta no existiera.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Oferta reconstruida correctamente",
+  "payload": { "id_oferta": "3", "precio": "4100.00", "stock": 22 }
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "La fecha es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La fecha debe tener el formato AAAA-MM-DD", "payload": null }
+{ "ok": false, "mensaje": "La fecha no es valida", "payload": null }
+```
+
+### 401
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
+{ "ok": false, "mensaje": "La oferta no existia en esa fecha", "payload": null }
+```
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+### 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo reconstruir la oferta", "payload": null }
 ```
 
 ---
