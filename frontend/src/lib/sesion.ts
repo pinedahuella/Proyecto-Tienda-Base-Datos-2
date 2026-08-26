@@ -62,6 +62,23 @@ export interface PerfilUsuario extends UsuarioSesion {
 export const ID_ROL_ADMIN = 3;
 export const ID_ROL_VENDEDOR = 2;
 
+/**
+ * La cuenta de la tienda.
+ *
+ * El rol no alcanza para decidir que ve un vendedor: los cinco tienen el
+ * mismo `id_rol_usuario` (2), pero solo esta cuenta administra el catalogo
+ * compartido. Es el mismo valor que `CORREO_TIENDA` en
+ * `backend/src/helpers/constantes.ts`, y las cinco rutas de
+ * `/vendedor/productos` lo comprueban con `exigirTienda()`.
+ *
+ * Igual que las dos constantes de arriba: sirve para decidir QUE se pinta,
+ * no para dar permisos. Quien decide es el backend, que a cualquier otro
+ * vendedor le contesta 404 en esas rutas -- a proposito, para no revelar
+ * que la restriccion existe (ver
+ * `backend/elementos Generales/endpoints-vendedores.md`).
+ */
+export const CORREO_TIENDA = 'tienda@mesh.com';
+
 export function guardarSesion(correo: string) {
 	if (!browser) return;
 	localStorage.setItem(LLAVE, correo);

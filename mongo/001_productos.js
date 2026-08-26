@@ -11,7 +11,7 @@
 //   duplicar, y la traza entre las dos bases es directa.
 //
 //   NO trae vendedor, ni precio, ni stock por vendedor: al volverse
-//   multi-vendedor dejaron de ser del producto. Solo trae cuatro numeros
+//   multi-vendedor dejaron de ser del producto. Solo trae cinco numeros
 //   calculados, que son los que la LISTA del catalogo necesita en cada tarjeta:
 //   precio_tienda, precio_desde, stock_tienda, stock_total y total_ofertas.
 //   Los de stock van SUMADOS sobre todas sus variantes, y cuentan solo ofertas
@@ -32,14 +32,31 @@
 // completo, y dos vendedores vendiendo a la vez pelearian por el mismo
 // documento: lo contrario de lo que pide la Entrega 2.
 //
-// Lo que si viaja son cuatro numeros AGREGADOS dentro del producto
+// Lo que si viaja son cinco numeros AGREGADOS dentro del producto
 // (precio_tienda, stock_tienda, stock_total, total_ofertas), para que la LISTA
 // del catalogo se pinte sin salir de aqui. La ficha, que necesita las ofertas
 // de verdad, las pide a PostgreSQL.
 //
 // productos_eventos
-//   El historial. Un documento por evento, y los eventos solo se agregan:
-//   ninguno se edita ni se borra.
+//   El historial. Un documento por evento.
+//
+//   La APLICACION solo agrega: `POST /vendedor/productos` escribe el evento 1
+//   y cada `PATCH` escribe el siguiente, y ninguno de los dos toca ni borra
+//   los que ya estaban. Eso es lo que hace que reconstruir por fecha
+//   signifique algo.
+//
+//   El ETL es otra cosa, y conviene no confundirlos: los eventos que el ETL
+//   deriva de PostgreSQL son SUYOS y los rehace enteros en cada corrida
+//   (`replaceOne` del 1 al n, y `deleteMany` de lo que pase de n, en
+//   etl/cargar.js). No es que "edite el historial": es que ese tramo no es un
+//   registro, es una traduccion -- si la fila de PostgreSQL de la que sale se
+//   corrige, su evento tiene que corregirse con ella.
+//
+//   La consecuencia practica, que si hay que saber: si la tienda edita desde
+//   el panel un producto que vino del ETL, ese evento nuevo lleva un numero
+//   mas alto que los derivados, y una corrida de `arrancar.ps1 -Etl` se lo
+//   lleva por delante. Los productos creados desde el panel no corren ese
+//   riesgo: viven por encima del tope del ETL y no se tocan.
 //     el mas viejo    operacion "creacion",     lleva "datos" con todo
 //     los siguientes  operacion "modificacion", llevan "cambios" con solo lo
 //                     que cambio respecto del estado anterior
@@ -83,9 +100,14 @@ COLECCIONES.forEach(function (nombre) {
 // tres y solo dos se ganaron el puesto: un indice que nunca se usa no es
 // gratis, cuesta en cada escritura.
 //
-//   catalogo_categoria      examina 3 documentos para devolver 3
-//   catalogo_precio         examina 21 claves en vez de 34
-//   catalogo_disponibilidad examinaba 34 para devolver 33  <- se quito
+// Medido con explain("executionStats") sobre los 105 productos y los 118
+// eventos que hay hoy, comparando cada consulta contra ella misma con
+// hint({$natural:1}) -- o sea, contra no tener el indice:
+//
+//   catalogo_categoria          6 docs y 7 claves, contra 105 sin el
+//   catalogo_precio            51 docs y 53 claves, contra 105 sin el
+//   eventos_por_producto_fecha  4 docs y 4 claves, contra 118 sin el
+//   catalogo_disponibilidad     examinaba casi todo para devolver casi todo  <- se quito
 
 // "los productos de esta categoria, sin los ocultos, ordenados por id". Es la
 // navegacion normal del catalogo.

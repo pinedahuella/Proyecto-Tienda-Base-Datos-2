@@ -420,8 +420,41 @@
 			// que ni siquiera era suyo. Asi que primero se pregunta.
 			const rPedido = await traerPedido(idPedido);
 			if (pedidoCaduco(rPedido)) {
+				// El pedido guardado ya no sirve (se compro, se cancelo, o la
+				// base se rehizo). Antes esto se quedaba en un aviso -- "prueba
+				// otra vez y se abre uno nuevo" -- que obligaba a pulsar
+				// Agregar dos veces para hacer una sola cosa. Se abre el pedido
+				// nuevo y se reintenta aqui mismo, una sola vez: si el segundo
+				// intento tambien falla, el fallo es otro y ese si se cuenta.
 				olvidarPedidoAbierto();
-				errorPedido = 'Ese pedido ya no existe. Prueba otra vez y se abre uno nuevo.';
+				agregando = o.id_oferta;
+				const idNuevo = await pedidoAbierto();
+				if (idNuevo == null) {
+					agregando = '';
+					return;
+				}
+
+				const rReintento = await agregarLinea(idNuevo, {
+					id_oferta: Number(o.id_oferta),
+					cantidad
+				});
+				agregando = '';
+
+				if (rReintento.ok && rReintento.payload) {
+					avisoPedido =
+						`"${v.nombre_variante}" de ${o.vendedor.usuario} queda en ` +
+						`${rReintento.payload.cantidad} en tu carrito ` +
+						`(le quedan ${rReintento.payload.stock_disponible}).`;
+					ofertaDelAviso = o.id_oferta;
+					cantidades[Number(o.id_oferta)] = '';
+					await carrito.recontar();
+					carrito.abrir();
+				} else {
+					errorPedido =
+						rReintento.estado === 0
+							? 'No se pudo conectar con el servidor'
+							: rReintento.mensaje;
+				}
 			} else {
 				errorPedido = r.mensaje;
 			}

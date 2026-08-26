@@ -10,6 +10,7 @@
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
 	import {
 		cerrarSesion,
+		CORREO_TIENDA,
 		ID_ROL_ADMIN,
 		ID_ROL_VENDEDOR,
 		SesionIndeterminada,
@@ -45,6 +46,28 @@
 
 	let esAdmin = $derived(perfil?.id_rol_usuario === ID_ROL_ADMIN);
 	let esVendedor = $derived(perfil?.id_rol_usuario === ID_ROL_VENDEDOR);
+
+	/**
+	 * Quien administra el catalogo compartido: la cuenta de la tienda, o un
+	 * admin.
+	 *
+	 * El rol no basta: los cinco vendedores tienen `id_rol_usuario` 2 y solo
+	 * uno administra. Sin esta distincion, a los cuatro `ventas.*` se les
+	 * pintaba el panel del catalogo con su boton de publicar, y como el
+	 * backend les contesta 404 en `/vendedor/productos`, les salia el mensaje
+	 * de esa ruta -- "No existe un producto con ese id" -- en rojo nada mas
+	 * cargar; el boton ademas les dejaba llenar el formulario entero para
+	 * fallar al enviarlo.
+	 *
+	 * El admin va junto con la tienda y no aparte, porque el backend los trata
+	 * igual: `exigirTiendaOAdmin()` deja pasar a los dos en `/vendedor/productos`,
+	 * y en `/vendedor/ofertas` el `resolverIdEfectivo()` del commit `bd12cd4`
+	 * cambia el id del admin por el de la tienda, asi que las dos cuentas ven y
+	 * editan exactamente lo mismo. Un solo interruptor, un solo camino.
+	 */
+	let administraLaTienda = $derived(
+		perfil?.correo_electronico === CORREO_TIENDA || perfil?.id_rol_usuario === ID_ROL_ADMIN
+	);
 
 	/**
 	 * La linea de bienvenida, segun el rol.
@@ -463,14 +486,26 @@
 			<Direcciones alExpirarSesion={expiro} />
 
 			{#if esAdmin}
+				<!-- El admin gestiona cuentas Y administra el catalogo: desde el
+				     commit `bd12cd4` el backend le abre las mismas rutas que a la
+				     tienda, asi que se le pintan las mismas pantallas. Sin esto,
+				     tenia el permiso y ninguna forma de usarlo. -->
 				<PanelAdmin alExpirarSesion={expiro} />
+				<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
+				<PanelVendedor alExpirarSesion={expiro} />
 			{:else if esVendedor}
 				<!-- Las ofertas van PRIMERO y aparte de los productos: en el modelo
 				     multi-vendedor el producto es del catalogo compartido y no es de
 				     nadie, mientras que la oferta -- precio, existencias y estado --
 				     si es del vendedor. Es lo suyo, asi que va arriba. -->
-				<OfertasVendedor alExpirarSesion={expiro} />
-				<PanelVendedor alExpirarSesion={expiro} />
+				<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
+				{#if administraLaTienda}
+					<!-- Solo la tienda (o un admin). Las cinco rutas de
+					     /vendedor/productos exigen esa cuenta o ese rol, no el rol
+					     de vendedor a secas: a los demas vendedores el backend les
+					     contesta 404 y el panel salia con ese error. -->
+					<PanelVendedor alExpirarSesion={expiro} />
+				{/if}
 			{:else}
 				<!-- Lo que ve un comprador.
 

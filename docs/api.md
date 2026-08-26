@@ -1,5 +1,20 @@
 # API
 
+> **El contrato completo de las 49 rutas NO esta aqui.** Vive en
+> `backend/elementos Generales/`, que es donde lo mantiene quien escribe el
+> backend y por tanto la fuente de verdad:
+>
+> | Archivo | Que cubre |
+> |---|---|
+> | [endpoints.md](../backend/elementos%20Generales/endpoints.md) | usuario, perfil, direcciones, admin |
+> | [endpoints-productos.md](../backend/elementos%20Generales/endpoints-productos.md) | el catalogo publico, y los dos historiales por fecha |
+> | [endpoints-vendedores.md](../backend/elementos%20Generales/endpoints-vendedores.md) | `/vendedor/*`, con la tabla de que rol y que cuenta entra a cada ruta |
+> | [endpoints-compradores.md](../backend/elementos%20Generales/endpoints-compradores.md) | carrito, checkout, pedidos |
+>
+> Este archivo se queda con lo que NO cambia con cada ruta: el formato de
+> respuesta, como se manejan los errores y como esta organizado el codigo.
+> Duplicar alli la lista de rutas solo garantiza que una de las dos caduque.
+
 ## Estandar de respuestas
 
 Todos los endpoints responden con la misma estructura.

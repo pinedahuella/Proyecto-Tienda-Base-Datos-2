@@ -45,27 +45,40 @@
 		unidad?: string | null;
 	}
 
+	/** Un precio como llega: de Mongo viene envuelto en Decimal128. */
+	type Precio = { $numberDecimal: string } | string | number | null | undefined;
+
 	interface VarianteGuardada {
 		id_producto_variante?: number;
 		nombre_variante: string;
-		precio: { $numberDecimal: string } | string | number;
+		/**
+		 * Una variante NO tiene un precio: tiene tantos como vendedores, y
+		 * cada uno vive en su fila de `oferta`, en PostgreSQL.
+		 *
+		 * Lo que el documento guarda son dos numeros CALCULADOS: el de la
+		 * tienda (el que se ensena en el catalogo) y el mas barato de
+		 * cualquier vendedor. Los dos pueden ser null: una variante recien
+		 * creada todavia no tiene ninguna oferta encima.
+		 *
+		 * Antes aqui se declaraba `precio` a secas, que es como se llamaba
+		 * antes del modelo multi-vendedor. Ese campo ya no llega en NINGUN
+		 * producto -- medido: 0 de 102 -- asi que `Number(v.precio)` daba
+		 * NaN y la lista entera salia con "QNaN - QNaN" donde va el precio.
+		 */
+		precio_tienda?: Precio;
+		precio_desde?: Precio;
 		descripcion: string | null;
 		estado?: string;
 		imagenes?: string[];
 		/**
-		 * OJO: por aqui casi nunca llega.
+		 * Existencias, tambien calculadas: las de la tienda y las de todos
+		 * los vendedores activos sumadas. Como los precios, pueden faltar.
 		 *
-		 * GET /vendedor/productos y GET /vendedor/productos/:id lo BORRAN a
-		 * proposito con una proyeccion negativa
-		 * (`PROYECCION_SIN_STOCK = { 'variantes.stock': 0 }`, en
-		 * backend/src/services/vendedores/productos.service.ts:53). Solo el PATCH
-		 * lo devuelve, porque relee el documento sin proyeccion.
-		 *
-		 * Asi que NO se puede usar su ausencia para deducir "esta variante no
-		 * tiene inventario": aqui esta ausente siempre. Quien sabe eso de verdad
-		 * son las rutas de inventario.
+		 * (Antes aqui se declaraba `stock` a secas, con una nota sobre una
+		 * `PROYECCION_SIN_STOCK` del backend que ya no existe.)
 		 */
-		stock?: number;
+		stock_tienda?: number;
+		stock_total?: number;
 		caracteristicas_adicionales?: CaracteristicaGuardada[];
 		caracteristicas_personalizadas?: CaracteristicaGuardada[];
 	}
@@ -88,30 +101,15 @@
 		 * El id que YA tenia esta variante, cuando se esta editando.
 		 *
 		 * Mandarlo no es un detalle: es lo que le dice al backend "esta es la
-		 * misma variante, editada". Sin el, el backend le asigna un id nuevo, la
-		 * variante pierde su `stock`, y la fila de `inventario` de PostgreSQL
-		 * se queda apuntando a un id que ya no existe en el documento --
-		 * inventario huerfano, y todas las rutas de inventario contestando 409
-		 * para siempre. Undefined solo en las variantes de verdad nuevas.
+		 * misma variante, editada". Sin el, el backend le asigna un id nuevo,
+		 * y las ofertas de PostgreSQL -- que apuntan a la variante por
+		 * `id_producto_variante_mongo` -- se quedan apuntando a un id que ya
+		 * no existe en el documento. Undefined solo en las de verdad nuevas.
 		 */
 		id_producto_variante?: number;
 		nombre_variante: string;
-		precio: string;
 		descripcion: string;
 		imagenes: string;
-		/**
-		 * Solo tiene sentido en una variante NUEVA (sin id). En una que ya
-		 * existe, el backend lo ignora sin avisar si esa variante ya tiene
-		 * inventario -- y desde aqui no hay forma de saber si lo tiene, porque
-		 * la ruta que trae el producto borra `variantes[].stock`. Ofrecerlo ahi
-		 * seria prometer algo que puede no pasar, asi que solo se ensena cuando
-		 * la variante no tiene id.
-		 *
-		 * Va bindeado a un <input type="number">, asi que aqui NO siempre hay
-		 * texto: hay un numero, o undefined con el campo vacio. Se lee con
-		 * texto().
-		 */
-		stock_inicial: string | number | undefined;
 		valores: Record<string, unknown>;
 		propias: { nombre: string; valor: string }[];
 	}
@@ -121,6 +119,42 @@
 	// ---------------------------------------------------------------- estado
 	let vista = $state<Vista>('lista');
 	let mios = $state<ProductoGuardado[]>([]);
+
+	// ------------------------------------------------- la paginacion
+	/**
+	 * Se pagina en el SERVIDOR, con `GET /vendedor/productos/paginado`.
+	 *
+	 * Esa ruta la agrego el backend a proposito para este panel, y es la unica
+	 * que sirve: `GET /vendedor/productos` trae los tres estados pero entero
+	 * (191 KB, 789 ms medido), y la publica `GET /productos/paginacion` si
+	 * pagina pero fuerza `estado: 'activo'` como lista blanca, asi que dejaria
+	 * fuera justo los borradores que este panel existe para administrar.
+	 *
+	 * Medido con la ruta nueva: 32 KB y 234 ms la primera pagina de 20, contra
+	 * 191 KB y 789 ms de traerlo todo. Y el filtro por nombre tambien viaja,
+	 * asi que buscar mira los 105 y no solo lo que estuviera descargado.
+	 */
+	const POR_PAGINA = 20;
+
+	let pagina = $state(1);
+	let totalProductos = $state(0);
+	let totalPaginas = $state(0);
+	let busqueda = $state('');
+
+	/** Lo que hay escrito en la caja y todavia no se ha pedido. */
+	let temporizadorBusqueda: ReturnType<typeof setTimeout> | null = null;
+
+	function alBuscar() {
+		if (temporizadorBusqueda) clearTimeout(temporizadorBusqueda);
+		// 300 ms: lo mismo que el buscador de ofertas, y la ruta contesta en
+		// 40-70 ms con filtro, asi que no hace falta esperar mas.
+		temporizadorBusqueda = setTimeout(() => void irAPagina(1), 300);
+	}
+
+	async function irAPagina(n: number) {
+		pagina = n;
+		await cargar();
+	}
 	let categorias = $state<CategoriaBreve[]>([]);
 	let cargando = $state(true);
 	let error = $state('');
@@ -144,16 +178,34 @@
 	let productoHistorial = $state<ProductoGuardado | null>(null);
 	let fechaHistorial = $state('');
 	let reconstruido = $state<ProductoGuardado | null>(null);
+
+	/** Lo que devuelve GET /productos/ofertas/:id/historial?fecha= */
+	interface OfertaEnFecha {
+		id_oferta: string;
+		/** numeric(12,2) de PostgreSQL: llega como texto. */
+		precio: string;
+		stock: number;
+	}
+
+	/** Lo minimo de GET /vendedor/ofertas/producto/:id: de ahi sale el id_oferta. */
+	interface VarianteConOferta {
+		id_producto_variante: number;
+		mi_oferta: { id_oferta: string } | null;
+	}
+
+	/**
+	 * El precio y el stock de la oferta de la tienda ese dia, por variante.
+	 * Vacio mientras no se hayan podido resolver.
+	 */
+	let ofertaEnFecha = $state<Record<number, OfertaEnFecha>>({});
 	let errorHistorial = $state('');
 	let buscandoHistorial = $state(false);
 
 	function varianteVacia(): VarianteEnForma {
 		return {
 			nombre_variante: '',
-			precio: '',
 			descripcion: '',
 			imagenes: '',
-			stock_inicial: '',
 			valores: {},
 			propias: []
 		};
@@ -169,23 +221,47 @@
 		return false;
 	}
 
+	interface PaginaDeProductos {
+		productos: ProductoGuardado[];
+		pagina: number;
+		limite: number;
+		total_productos: number;
+		total_paginas: number;
+	}
+
 	async function cargar() {
 		cargando = true;
 		error = '';
 
+		const partes = [`pagina=${pagina}`, `limite=${POR_PAGINA}`];
+		const texto = busqueda.trim();
+		if (texto !== '') partes.push(`nombre=${encodeURIComponent(texto)}`);
+
+		// Las categorias solo la primera vez: son 17 y no cambian entre
+		// paginas. Pedirlas en cada salto seria gastar por gusto.
+		const pedirCategorias = categorias.length === 0;
+
 		const [rProductos, rCategorias] = await Promise.all([
-			pedir<ProductoGuardado[]>('/vendedor/productos'),
-			pedir<CategoriaBreve[]>('/vendedor/categorias')
+			pedir<PaginaDeProductos>(`/vendedor/productos/paginado?${partes.join('&')}`),
+			pedirCategorias
+				? pedir<CategoriaBreve[]>('/vendedor/categorias')
+				: Promise.resolve(null)
 		]);
 
-		if (expiro(rProductos) || expiro(rCategorias)) return;
+		if (expiro(rProductos) || (rCategorias != null && expiro(rCategorias))) {
+			cargando = false;
+			return;
+		}
 
 		if (rProductos.ok && rProductos.payload) {
-			mios = rProductos.payload;
+			mios = rProductos.payload.productos ?? [];
+			totalProductos = rProductos.payload.total_productos;
+			totalPaginas = rProductos.payload.total_paginas;
+			pagina = rProductos.payload.pagina;
 		} else {
 			error = rProductos.estado === 0 ? 'No se pudo conectar con el servidor' : rProductos.mensaje;
 		}
-		if (rCategorias.ok && rCategorias.payload) {
+		if (rCategorias?.ok && rCategorias.payload) {
 			categorias = rCategorias.payload;
 		}
 		cargando = false;
@@ -255,12 +331,6 @@
 		return mapa;
 	}
 
-	function precioTexto(precio: VarianteGuardada['precio']): string {
-		if (typeof precio === 'number') return precio.toFixed(2);
-		if (typeof precio === 'string') return precio;
-		return precio?.$numberDecimal ?? '';
-	}
-
 	async function editar(p: ProductoGuardado) {
 		editando = p._id;
 		idCategoria = String(p.categoria.id_categoria);
@@ -274,13 +344,12 @@
 		}));
 		variantes = p.variantes.map((v) => ({
 			// Se conserva el id, o el backend la trata como una variante nueva y
-			// le deja el inventario huerfano. Ver el comentario de VarianteEnForma.
+			// las ofertas quedan apuntando a un id que ya no existe. Ver el
+			// comentario de VarianteEnForma.
 			id_producto_variante: v.id_producto_variante,
 			nombre_variante: v.nombre_variante,
-			precio: precioTexto(v.precio),
 			descripcion: v.descripcion ?? '',
 			imagenes: (v.imagenes ?? []).join('\n'),
-			stock_inicial: '',
 			valores: aMapa(v.caracteristicas_adicionales),
 			propias: (v.caracteristicas_personalizadas ?? []).map((c) => ({
 				nombre: c.nombre,
@@ -364,9 +433,13 @@
 		if (!paleta) throw new Error('Elegi una categoria');
 
 		const variantesEnvio = variantes.map((v) => {
+			// Sin precio ni stock_inicial: `VarianteCreacionPeticion` no los
+			// tiene y el servicio del backend no los lee. Se mandaban igual y
+			// se descartaban en silencio, pero el formulario NO dejaba enviar
+			// sin escribir un precio -- pedia un dato que no se guardaba en
+			// ninguna parte.
 			const cuerpo: Record<string, unknown> = {
 				nombre_variante: v.nombre_variante.trim(),
-				precio: v.precio.trim(),
 				descripcion: v.descripcion.trim(),
 				imagenes: v.imagenes
 					.split('\n')
@@ -374,18 +447,12 @@
 					.filter((x) => x !== '')
 			};
 
-			// Si ya existia, se manda su id para que siga siendo LA MISMA variante:
-			// conserva el id y el stock, y su fila de inventario en PostgreSQL
-			// sigue apuntando a algo que existe.
+			// Si ya existia, se manda su id para que siga siendo LA MISMA
+			// variante y las ofertas que le apuntan sigan valiendo.
 			if (v.id_producto_variante != null) {
 				cuerpo.id_producto_variante = v.id_producto_variante;
 			}
 
-			// Solo en variantes nuevas: en una que ya existe el backend lo ignora
-			// si ya tiene inventario, y desde aqui no se puede saber si lo tiene.
-			if (v.id_producto_variante == null && texto(v.stock_inicial) !== '') {
-				cuerpo.stock_inicial = Number(texto(v.stock_inicial));
-			}
 			const suyas = caracteristicasDe(paleta!.caracteristicas_variante, v.valores);
 			if (suyas.length > 0) cuerpo.caracteristicas_adicionales = suyas;
 			const libres = propiasDe(v.propias);
@@ -420,20 +487,6 @@
 		for (const v of cuerpo.variantes) {
 			if (!v.nombre_variante) return (errorForma = 'Cada variante necesita un nombre');
 			if (!v.descripcion) return (errorForma = 'Cada variante necesita una descripcion');
-			if (!/^\d+(\.\d{1,2})?$/.test(String(v.precio)) || Number(v.precio) <= 0) {
-				return (errorForma = 'El precio debe ser un numero mayor a 0, con hasta 2 decimales');
-			}
-		}
-
-		// Un stock_inicial invalido hace que el backend rechace TODA la operacion,
-		// no solo esa variante: se comprueba aqui para no ir y volver.
-		for (const v of variantes) {
-			if (v.id_producto_variante == null && texto(v.stock_inicial) !== '') {
-				const n = Number(texto(v.stock_inicial));
-				if (!Number.isInteger(n) || n < 0) {
-					return (errorForma = 'El stock inicial debe ser un numero entero mayor o igual a 0');
-				}
-			}
 		}
 
 		guardando = true;
@@ -448,34 +501,20 @@
 
 		if (expiro(r)) return;
 		if (r.ok) {
-			// Al crear, las variantes que se enviaron SIN stock_inicial nacen sin
-			// inventario. Eso no da ningun error -- el producto se crea igual --
-			// pero deja la pantalla de inventario en modo pendientes hasta que se
-			// arregle, y el vendedor no tiene por que adivinar por que. Se le dice
-			// aqui, con el id, y con el boton que lleva directo a arreglarlo.
+			// Un producto nace SIN ninguna oferta: publicarlo lo pone en el
+			// catalogo, pero todavia no lo vende nadie ni tiene precio. Se
+			// dice, porque si no la fila nueva aparece con "sin ofertas" y
+			// parece que algo fallo.
 			//
-			// Ojo con la diferencia: stock_inicial 0 SI crea inventario (queda en
-			// cero, que es un dato); dejar el campo vacio es no crearlo.
-			const sinExistencias =
-				editando === null
-					? cuerpo.variantes.filter((v) => v.stock_inicial == null).length
-					: 0;
+			// Aqui habia un aviso sobre variantes "sin existencias" y un boton
+			// para llevarlas a la pantalla de inventario. Esa pantalla y sus
+			// cinco rutas ya no existen: el stock se maneja por la oferta.
 			const creado = r.payload;
-
-			if (editando === null && sinExistencias > 0 && creado) {
-				productoRecienCreado = creado;
-				aviso =
-					`Producto creado con el id ${creado._id}, pero ${sinExistencias} de sus ` +
-					`${cuerpo.variantes.length} ${cuerpo.variantes.length === 1 ? 'variante' : 'variantes'} ` +
-					`${sinExistencias === 1 ? 'quedo' : 'quedaron'} sin existencias. ` +
-					`Hasta que las tenga, su inventario no se puede consultar.`;
-			} else {
-				productoRecienCreado = null;
-				aviso =
-					editando === null
-						? `Producto creado con el id ${creado?._id ?? ''}`.trim()
-						: 'Producto actualizado';
-			}
+			aviso =
+				editando === null
+					? `Producto creado con el id ${creado?._id ?? ''}. Todavia no tiene ofertas: ` +
+						`ponle precio y existencias desde "Mis ofertas".`
+					: 'Producto actualizado';
 			vista = 'lista';
 			await cargar();
 		} else {
@@ -483,17 +522,9 @@
 		}
 	}
 
-	/**
-	 * El producto que se acaba de crear dejando alguna variante sin
-	 * existencias. Solo sirve para el boton de "Agregar existencias" que
-	 * aparece junto al aviso; se limpia en cuanto se usa o se hace otra cosa.
-	 */
-	let productoRecienCreado = $state<ProductoGuardado | null>(null);
-
 	/** Publicar o retirar sin abrir el formulario entero. */
 	async function cambiarEstado(p: ProductoGuardado, nuevoEstado: string) {
 		aviso = '';
-		productoRecienCreado = null;
 		error = '';
 		const r = await pedir<ProductoGuardado>(
 			`/vendedor/productos/${p._id}`,
@@ -523,24 +554,107 @@
 		buscandoHistorial = true;
 		errorHistorial = '';
 		reconstruido = null;
+		ofertaEnFecha = {};
+
 		const r = await pedir<ProductoGuardado>(
 			`/vendedor/productos/${productoHistorial._id}/historial?fecha=${fechaHistorial}`
 		);
 		buscandoHistorial = false;
 		if (expiro(r)) return;
-		if (r.ok && r.payload) reconstruido = r.payload;
-		else errorHistorial = r.mensaje;
+
+		if (r.ok && r.payload) {
+			reconstruido = r.payload;
+			// El producto reconstruido no trae precio ni existencias, y no puede:
+			// los eventos del catalogo no los guardan porque son de la oferta.
+			// Se piden aparte, del otro lado.
+			void reconstruirOfertas(productoHistorial._id);
+		} else {
+			errorHistorial = r.mensaje;
+		}
+	}
+
+	/**
+	 * El precio y las existencias que tenia CADA presentacion ese dia.
+	 *
+	 * Es lo que completa la consulta que pide la entrega: "el estado de un
+	 * producto en un punto anterior del tiempo (precio, descripcion y
+	 * disponibilidad)". La descripcion y la categoria salen de los eventos de
+	 * MongoDB; el precio y el stock no pueden salir de ahi, porque al volverse
+	 * multi-vendedor dejaron de ser del producto -- hay uno por vendedor, y su
+	 * historia vive en `precio_historial` y `stock_movimiento`, en PostgreSQL.
+	 *
+	 * Dos pasos, con las rutas que ya existen:
+	 *   1. GET /vendedor/ofertas/producto/:id   da el id_oferta de cada variante
+	 *   2. GET /productos/ofertas/:idOferta/historial?fecha=   precio y stock de ese dia
+	 *
+	 * Una peticion por variante. Son dos o tres por producto y pesan 1 KB, asi
+	 * que no vale la pena complicarlo; si un producto tuviera veinte, aqui es
+	 * donde habria que agruparlas.
+	 *
+	 * Si algo de esto falla no se pinta ningun error rojo: la reconstruccion
+	 * del producto -- que es lo que se vino a ver -- ya esta en pantalla, y
+	 * tumbarla por no poder adornarla con el precio seria peor. Cada renglon
+	 * que no se pudo resolver simplemente no ensena precio.
+	 */
+	async function reconstruirOfertas(idProducto: number) {
+		const rOfertas = await pedir<{ variantes: VarianteConOferta[] }>(
+			`/vendedor/ofertas/producto/${idProducto}`
+		);
+		if (!rOfertas.ok || !rOfertas.payload) return;
+
+		const conOferta = rOfertas.payload.variantes.filter((v) => v.mi_oferta != null);
+
+		const resueltas = await Promise.all(
+			conOferta.map(async (v) => {
+				const r = await pedir<OfertaEnFecha>(
+					`/productos/ofertas/${v.mi_oferta!.id_oferta}/historial?fecha=${fechaHistorial}`
+				);
+				return r.ok && r.payload
+					? ([v.id_producto_variante, r.payload] as const)
+					: null;
+			})
+		);
+
+		const mapa: Record<number, OfertaEnFecha> = {};
+		for (const par of resueltas) {
+			if (par) mapa[par[0]] = par[1];
+		}
+		ofertaEnFecha = mapa;
 	}
 
 	// ---------------------------------------------------------------- ayudas de pantalla
-	function quetzales(v: VarianteGuardada['precio']): string {
-		const n = Number(typeof v === 'object' ? v?.$numberDecimal : v);
+	/**
+	 * Un precio a numero, o null si no hay.
+	 *
+	 * Devolver null y no NaN es lo importante: NaN se cuela por las
+	 * operaciones sin quejarse y termina impreso como "QNaN", que es
+	 * exactamente lo que pasaba antes en las 102 filas de la lista.
+	 */
+	function numero(v: Precio): number | null {
+		if (v == null) return null;
+		const n = Number(typeof v === 'object' ? v.$numberDecimal : v);
+		return Number.isFinite(n) ? n : null;
+	}
+
+	function quetzales(v: Precio): string {
+		const n = numero(v);
+		if (n === null) return '—';
 		return 'Q' + n.toLocaleString('es-GT', { minimumFractionDigits: 2 });
 	}
 
+	/**
+	 * El rango de precios de un producto, tomando de cada variante el de la
+	 * tienda y, si esa variante no la vende la tienda, el mas barato que
+	 * haya.
+	 *
+	 * Un producto recien creado no tiene ninguna oferta todavia, asi que no
+	 * tiene precio: se dice, en vez de inventar un cero.
+	 */
 	function rango(p: ProductoGuardado): string {
-		const ns = p.variantes.map((v) => Number(typeof v.precio === 'object' ? v.precio?.$numberDecimal : v.precio));
-		if (ns.length === 0) return '—';
+		const ns = p.variantes
+			.map((v) => numero(v.precio_tienda) ?? numero(v.precio_desde))
+			.filter((n): n is number => n !== null);
+		if (ns.length === 0) return 'sin ofertas';
 		const min = Math.min(...ns);
 		const max = Math.max(...ns);
 		return min === max ? quetzales(min) : `${quetzales(min)} - ${quetzales(max)}`;
@@ -557,11 +671,26 @@
 <section class="panel">
 	<div class="titulo">
 		<div>
-			<h2>Mis productos</h2>
+			<!-- "El catalogo", no "Mis productos": el producto es compartido y no
+			     es de nadie. Esta pantalla es la administracion del catalogo
+			     entero, y por eso solo la abre la cuenta de la tienda. -->
+			<h2>El catalogo</h2>
 			<p class="sub">
-				{#if vista === 'lista'}
-					{mios.length}
-					{mios.length === 1 ? 'producto publicado o en borrador' : 'productos publicados o en borrador'}
+				{#if vista === 'lista' && (cargando || error)}
+					<!-- Ni "0 productos" ni ningun otro numero mientras no se sepa:
+					     con la lista sin cargar, "0 productos en el catalogo" es una
+					     afirmacion falsa puesta al lado del error que dice que no se
+					     pudo cargar. Las dos frases se contradecian en pantalla. -->
+					El catalogo compartido
+				{:else if vista === 'lista' && busqueda.trim() !== ''}
+					<!-- Con un filtro puesto, `totalProductos` es el de la BUSQUEDA.
+					     Decir "0 productos en el catalogo" teniendo 105 era mentir
+					     dos veces: ni son 0 ni es el catalogo lo que se conto. -->
+					{totalProductos}
+					{totalProductos === 1 ? 'producto encontrado' : 'productos encontrados'}
+				{:else if vista === 'lista'}
+					{totalProductos}
+					{totalProductos === 1 ? 'producto en el catalogo' : 'productos en el catalogo'}
 				{:else if vista === 'forma'}
 					{editando === null ? 'Publicar un producto nuevo' : 'Editando el producto ' + editando}
 				{:else}
@@ -584,15 +713,64 @@
 	{/if}
 	{#if error}
 		<p class="malo" role="alert">{error}</p>
+		<button type="button" class="enlace" onclick={cargar}>Reintentar</button>
 	{/if}
 
 	<!-- ══════════════════════════════ LISTA ══════════════════════════════ -->
 	{#if vista === 'lista'}
 		{#if cargando}
-			<p class="quieto">Cargando tus productos...</p>
-		{:else if mios.length === 0}
-			<p class="quieto">Todavia no has publicado nada. Empeza con el boton de arriba.</p>
+			<p class="quieto">Cargando el catalogo...</p>
+		{:else if error}
+			<!-- Nada mas. El error ya esta arriba, con su boton de reintentar.
+			     Antes aqui caia igualmente "Todavia no has publicado nada", asi
+			     que la pantalla decia a la vez que fallo la carga y que el
+			     catalogo esta vacio -- y lo segundo no se sabe. -->
 		{:else}
+			<!--
+				El buscador va FUERA de la comprobacion de lista vacia.
+
+				Antes estaba dentro del {:else}, asi que una busqueda sin
+				resultados se llevaba por delante la propia caja de busqueda:
+				la pantalla decia "El catalogo esta vacio, publica el primer
+				producto" -- tres mentiras seguidas, porque hay 105, no esta
+				vacio, y no habia ni como borrar lo escrito para volver.
+
+				Se esconde solo cuando de verdad no hay nada QUE buscar: catalogo
+				vacio y sin texto escrito.
+			-->
+			{#if mios.length > 0 || busqueda.trim() !== ''}
+				<label class="buscar">
+					<span class="visualmente-oculto">Buscar en el catalogo</span>
+					<input
+						type="search"
+						bind:value={busqueda}
+						oninput={alBuscar}
+						autocomplete="off"
+						placeholder="Buscar por nombre"
+					/>
+				</label>
+			{/if}
+
+			{#if mios.length === 0 && busqueda.trim() !== ''}
+				<p class="quieto">
+					Ningun producto del catalogo se llama <strong>"{busqueda.trim()}"</strong>.
+					<button
+						type="button"
+						class="enlace"
+						onclick={() => {
+							busqueda = '';
+							void irAPagina(1);
+						}}
+					>
+						Ver todos otra vez
+					</button>
+				</p>
+			{:else if mios.length === 0}
+				<p class="quieto">
+					El catalogo esta vacio. Publica el primer producto con el boton de arriba.
+				</p>
+			{/if}
+
 			<div class="tabla">
 				{#each mios as p (p._id)}
 					<article class="fila">
@@ -617,6 +795,49 @@
 					</article>
 				{/each}
 			</div>
+
+			{#if totalPaginas > 1}
+				<!--
+					Paginacion por NUMERO de pagina, no por cursor: es lo que
+					devuelve la ruta (`pagina`, `total_paginas`) y aqui tiene
+					sentido, porque en un panel de administracion uno quiere poder
+					volver a "la pagina 3" y no solo seguir bajando.
+				-->
+				<nav class="paginacion" aria-label="Paginas del catalogo">
+					<button
+						type="button"
+						onclick={() => irAPagina(pagina - 1)}
+						disabled={pagina <= 1 || cargando}
+					>
+						Anterior
+					</button>
+
+					<span class="cuantas">
+						Pagina {pagina} de {totalPaginas}
+						<span class="menor">
+							({totalProductos}
+							{totalProductos === 1 ? 'producto' : 'productos'}{busqueda.trim() !== ''
+								? ' con ese nombre'
+								: ''})
+						</span>
+					</span>
+
+					<button
+						type="button"
+						onclick={() => irAPagina(pagina + 1)}
+						disabled={pagina >= totalPaginas || cargando}
+					>
+						Siguiente
+					</button>
+				</nav>
+			{:else if totalProductos > 0}
+				<p class="quieto centrado">
+					{totalProductos}
+					{totalProductos === 1 ? 'producto' : 'productos'}{busqueda.trim() !== ''
+						? ' con ese nombre'
+						: ''}.
+				</p>
+			{/if}
 		{/if}
 
 		<!-- ══════════════════════════════ FORMULARIO ══════════════════════ -->
@@ -760,10 +981,6 @@
 									<label for={'vn-' + i}>Nombre</label>
 									<input id={'vn-' + i} type="text" bind:value={variantes[i].nombre_variante} />
 								</div>
-								<div class="campo">
-									<label for={'vp-' + i}>Precio (Q)</label>
-									<input id={'vp-' + i} type="text" placeholder="169.00" bind:value={variantes[i].precio} />
-								</div>
 								<div class="campo ancho">
 									<label for={'vd-' + i}>Descripcion</label>
 									<input id={'vd-' + i} type="text" bind:value={variantes[i].descripcion} />
@@ -773,44 +990,27 @@
 									<textarea id={'vi-' + i} rows="2" placeholder="Una URL por linea" bind:value={variantes[i].imagenes}
 									></textarea>
 								</div>
-
-								<!--
-									El stock inicial solo se puede poner cuando la variante todavia
-									no tiene inventario. Si ya lo tiene, el backend ignora este
-									campo a proposito: subir o bajar un stock que ya existe se hace
-									en la pantalla de Inventario, que ademas deja el movimiento
-									apuntado con su motivo.
-								-->
-								{#if variantes[i].id_producto_variante == null}
-									<div class="campo">
-										<label for={'vs-' + i}>Existencias iniciales</label>
-										<input
-											id={'vs-' + i}
-											type="number"
-											min="0"
-											step="1"
-											placeholder="Se puede dejar vacio"
-											bind:value={variantes[i].stock_inicial}
-										/>
-										<small>
-											<strong>Vacio y 0 no son lo mismo.</strong> Con un numero (0 incluido)
-											la variante nace con su inventario creado, y 0 quiere decir "agotada".
-											Vacio quiere decir que todavia no tiene inventario: hasta que se lo
-											crees en la pantalla de Inventario, el stock de este producto no se
-											puede consultar.
-										</small>
-									</div>
-								{:else}
-									<div class="campo">
-										<span class="rotulo">Stock</span>
-										<p class="fijo">Se lleva en Inventario</p>
-										<small>
-											Ahi se crea si le falta, y se sube o se baja con su motivo apuntado.
-											Aqui no se toca.
-										</small>
-									</div>
-								{/if}
 							</div>
+
+							<!--
+								Ni precio ni existencias.
+
+								Aqui habia un campo "Precio (Q)" obligatorio y uno de
+								"Existencias iniciales", los dos escritos contra la API de
+								antes del modelo multi-vendedor. El backend ya no los lee:
+								`VarianteCreacionPeticion` no los tiene, y el servicio nunca
+								los toca. El de precio ademas BLOQUEABA el formulario --
+								pedia un numero mayor a 0 para dejar publicar, y ese numero
+								se descartaba en el servidor.
+
+								Los dos son de la OFERTA, no del catalogo: una variante no
+								tiene un precio, tiene uno por cada vendedor que la ofrece.
+							-->
+							<p class="menor sep">
+								El precio y las existencias no se ponen aqui: son de la oferta, no del
+								catalogo. Cuando el producto exista, ponle los tuyos desde
+								<strong>Mis ofertas</strong>.
+							</p>
 
 							{#if defsVariante.length > 0}
 								<p class="menor sep">Lo que distingue a esta variante</p>
@@ -882,7 +1082,15 @@
 			<h3>{productoHistorial.nombre}</h3>
 			<p class="menor">
 				Se reconstruye juntando el evento de creacion y las modificaciones anteriores a la fecha que
-				elijas. Las caracteristicas no tienen historial: se ven las de hoy.
+				elijas. Reconstruye <strong>nombre, descripcion, categoria y variantes</strong>: son los
+				campos que guardan los eventos del catalogo.
+			</p>
+			<p class="menor">
+				El <strong>precio</strong> y las <strong>existencias</strong> no salen de esos eventos:
+				al volverse multi-vendedor un producto dejo de tener un precio -- tiene uno por
+				vendedor. Se piden aparte, a <code>precio_historial</code> y a
+				<code>stock_movimiento</code> de PostgreSQL, y son los de la oferta de la tienda. Las
+				caracteristicas no llevan historial: se ven las de hoy.
 			</p>
 
 			<div class="par">
@@ -900,10 +1108,43 @@
 				<div class="resultado">
 					<p><strong>{reconstruido.nombre}</strong></p>
 					<p class="menor">{reconstruido.descripcion ?? ''}</p>
-					<p class="menor">Estado ese dia: {reconstruido.estado ?? '—'}</p>
-					<ul>
+					{#if reconstruido.categoria?.nombre}
+						<p class="menor">
+							Categoria ese dia:
+							<strong>
+								{#if reconstruido.categoria.categoria_padre}{reconstruido.categoria
+										.categoria_padre} &rsaquo;
+								{/if}{reconstruido.categoria.nombre}
+							</strong>
+						</p>
+					{/if}
+					<ul class="presentaciones">
+						<!--
+							El nombre sale del evento del catalogo; el precio y las
+							existencias, de PostgreSQL (ver reconstruirOfertas).
+
+							Aqui iba `quetzales(v.precio)` sobre un campo que NUNCA
+							llega en ninguno de los 105 productos, asi que cada renglon
+							salia como "QNaN". Ahora o hay dato de verdad, o se dice que
+							no lo hay.
+						-->
 						{#each reconstruido.variantes ?? [] as v (v.id_producto_variante)}
-							<li>{v.nombre_variante} — {quetzales(v.precio)}</li>
+							<!-- `id_producto_variante` es opcional en el tipo (una variante
+							     nueva del formulario todavia no lo tiene), asi que se
+							     comprueba antes de usarlo como clave. -->
+							{@const enFecha =
+								v.id_producto_variante != null ? ofertaEnFecha[v.id_producto_variante] : undefined}
+							<li>
+								<span>{v.nombre_variante}</span>
+								{#if enFecha}
+									<span class="dato">
+										{quetzales(enFecha.precio)} · {enFecha.stock}
+										{enFecha.stock === 1 ? 'unidad' : 'unidades'}
+									</span>
+								{:else}
+									<span class="dato vacio">sin oferta de la tienda ese dia</span>
+								{/if}
+							</li>
 						{/each}
 					</ul>
 				</div>
@@ -1176,6 +1417,53 @@
 		border-radius: var(--r);
 	}
 
+	/* ---------- el buscador y el recorte de la lista ---------- */
+	.buscar {
+		display: block;
+		max-width: 24rem;
+		margin-bottom: 1rem;
+	}
+
+	.buscar input {
+		width: 100%;
+	}
+
+	/* Se oculta a la vista pero no al lector de pantalla: el campo necesita
+	   nombre y el marcador de posicion ya lo dice visualmente. */
+	.visualmente-oculto {
+		position: absolute;
+		width: 1px;
+		height: 1px;
+		padding: 0;
+		overflow: hidden;
+		clip-path: inset(50%);
+		white-space: nowrap;
+	}
+
+	.paginacion {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-wrap: wrap;
+		gap: 1rem;
+		margin-top: 1.25rem;
+	}
+
+	.cuantas {
+		color: var(--tinta);
+		text-align: center;
+	}
+
+	.cuantas .menor {
+		display: block;
+		color: var(--gris);
+	}
+
+	.centrado {
+		margin-top: 1.25rem;
+		text-align: center;
+	}
+
 	.resultado {
 		margin-top: 1rem;
 		padding: 1rem;
@@ -1187,6 +1475,44 @@
 	.resultado ul {
 		margin: 0.5rem 0 0 1.1rem;
 		font-size: 0.92rem;
+	}
+
+	/* Las presentaciones con su precio y sus existencias de ese dia. Sin
+	   vinetas y en dos columnas: el nombre a la izquierda y el dato a la
+	   derecha, que es como se lee una tabla de precios. */
+	.resultado ul.presentaciones {
+		list-style: none;
+		margin-left: 0;
+		border-top: 1px solid var(--linea);
+	}
+
+	.presentaciones li {
+		display: flex;
+		align-items: baseline;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 0.45rem 0;
+		border-bottom: 1px solid var(--linea);
+	}
+
+	.presentaciones .dato {
+		flex-shrink: 0;
+		color: var(--tinta);
+		white-space: nowrap;
+	}
+
+	/* "Sin oferta ese dia" es un dato, no un fallo: se dice apagado, no en
+	   rojo. Que la tienda no vendiera algo en marzo es informacion correcta. */
+	.presentaciones .dato.vacio {
+		color: var(--gris);
+		font-size: 0.85rem;
+	}
+
+	@media (max-width: 620px) {
+		.presentaciones li {
+			flex-direction: column;
+			gap: 0.15rem;
+		}
 	}
 
 	@media (max-width: 620px) {

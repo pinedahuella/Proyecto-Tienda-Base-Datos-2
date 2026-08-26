@@ -1,6 +1,16 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import type { RespuestaApi } from './api';
+	import Autocompletar from './Autocompletar.svelte';
+	import {
+		cargarPaises,
+		ciudadesDeDepartamento,
+		ciudadesDePais,
+		comparable,
+		etiquetaDivision,
+		paraLeer,
+		type Pais
+	} from './lugares';
 	import {
 		cambiarDireccionPedido,
 		comprarPedido,
@@ -102,6 +112,76 @@
 	let dirPostal = $state('');
 	let guardandoDireccion = $state(false);
 	let errorNueva = $state('');
+
+	// ---------------------------------------------- paises, departamentos, ciudades
+	/**
+	 * El formulario de aqui tenia cuatro <input type="text"> pelados: se
+	 * escribia "gua" en Pais y no pasaba nada, y se podia guardar una direccion
+	 * con un pais que no existe y una ciudad que no es de ese pais.
+	 *
+	 * El registro y el panel ya resolvian esto con `lugares.ts` y
+	 * `Autocompletar`: se elige el pais, eso trae sus departamentos, y el
+	 * departamento trae sus ciudades. Es la misma cascada, aqui.
+	 *
+	 * Los paises se bajan una sola vez (226 KB) y SOLO al abrir el formulario,
+	 * no al abrir el checkout: quien paga con una direccion que ya tiene --
+	 * que es lo normal -- no paga ese peso.
+	 */
+	let paises = $state<Pais[]>([]);
+	let cargandoPaises = $state(false);
+	let opcionesDepartamento = $state<{ texto: string; valor: string }[]>([]);
+	let opcionesCiudad = $state<{ texto: string; valor: string }[]>([]);
+	let paisElegido = $state(false);
+	let departamentoElegido = $state(false);
+	let ciudadElegida = $state(false);
+
+	let opcionesPais = $derived(paises.map((p) => ({ texto: p.nombre, valor: p.nombre })));
+	let hayDepartamentos = $derived(opcionesDepartamento.length > 0);
+	let rotuloDivision = $derived(etiquetaDivision(opcionesDepartamento.map((o) => o.valor)));
+
+	/**
+	 * Al elegir pais se rehacen las dos listas de abajo.
+	 *
+	 * Y si el pais no tiene departamentos -- 50 de los 246 no los tienen -- se
+	 * salta ese paso y las ciudades se piden del pais entero, o el campo se
+	 * queda libre si tampoco hay.
+	 */
+	async function alElegirPais(nombre: string) {
+		dirDepartamento = '';
+		dirCiudad = '';
+		departamentoElegido = false;
+		ciudadElegida = false;
+		opcionesCiudad = [];
+
+		const p = paises.find((x) => comparable(x.nombre) === comparable(nombre));
+		opcionesDepartamento = (p?.departamentos ?? []).map((d) => ({
+			texto: paraLeer(d),
+			valor: d
+		}));
+
+		if (opcionesDepartamento.length === 0 && nombre) {
+			const lista = await ciudadesDePais(p?.nombre ?? nombre);
+			opcionesCiudad = lista.map((c) => ({ texto: c, valor: c }));
+		}
+	}
+
+	async function alElegirDepartamento(estado: string) {
+		dirCiudad = '';
+		ciudadElegida = false;
+		if (!estado) {
+			opcionesCiudad = [];
+			return;
+		}
+
+		const p = paises.find((x) => comparable(x.nombre) === comparable(dirPais));
+		let lista = await ciudadesDeDepartamento(p?.nombre ?? dirPais, estado);
+
+		// Espana y Francia devuelven cero ciudades por departamento y miles por
+		// pais: si el departamento sale vacio se cae al listado del pais.
+		if (lista.length === 0) lista = await ciudadesDePais(p?.nombre ?? dirPais);
+
+		opcionesCiudad = lista.map((c) => ({ texto: c, valor: c }));
+	}
 
 	let numero = $state('');
 	let vencimiento = $state('');
@@ -398,6 +478,24 @@
 		idElegida = direccionPedido?.id_direccion ?? '';
 	}
 
+	/**
+	 * Abre el formulario y, la primera vez, baja la lista de paises.
+	 *
+	 * Se baja AQUI y no al montar el checkout: son 226 KB, y quien paga con
+	 * una direccion que ya tiene guardada no tiene por que descargarlos. Si la
+	 * API no contesta, `cargarPaises` devuelve una lista vacia y los tres
+	 * campos se comportan como texto libre -- que es lo que hacian antes de
+	 * este cambio, asi que en el peor caso no se pierde nada.
+	 */
+	async function abrirNueva() {
+		formNueva = true;
+		if (paises.length > 0 || cargandoPaises) return;
+
+		cargandoPaises = true;
+		paises = await cargarPaises();
+		cargandoPaises = false;
+	}
+
 	function cerrarNueva() {
 		formNueva = false;
 		dirPais = '';
@@ -405,6 +503,11 @@
 		dirCiudad = '';
 		dirPostal = '';
 		errorNueva = '';
+		paisElegido = false;
+		departamentoElegido = false;
+		ciudadElegida = false;
+		opcionesDepartamento = [];
+		opcionesCiudad = [];
 	}
 
 	/**
@@ -416,8 +519,24 @@
 		if (dirPais.trim() === '') return 'El pais es obligatorio';
 		if (dirPais.trim().length > 100) return 'El pais no puede tener mas de 100 caracteres';
 		if (dirDepartamento.trim() === '') return 'El departamento es obligatorio';
-		if (dirDepartamento.trim().length > 100) {
+		// Se mide lo que se va a MANDAR, no lo que se ve: el sufijo se quita
+		// antes de guardar, asi que contarlo aqui rechazaria nombres que caben.
+		if (paraLeer(dirDepartamento.trim()).length > 100) {
 			return 'El departamento no puede tener mas de 100 caracteres';
+		}
+
+		// Y que lo escrito sea de verdad una opcion de la lista, no algo
+		// tecleado encima. Sin esto se podia elegir Guatemala, escribir
+		// "Sacate" a mano sobre el departamento y guardar un lugar que no
+		// existe -- que es justo lo que Autocompletar sirve para evitar.
+		if (opcionesPais.length > 0 && !paisElegido) {
+			return 'Elegi un pais de la lista';
+		}
+		if (hayDepartamentos && !departamentoElegido) {
+			return 'Elegi un departamento de la lista';
+		}
+		if (opcionesCiudad.length > 0 && !ciudadElegida) {
+			return 'Elegi una ciudad de la lista';
 		}
 		if (dirCiudad.trim() === '') return 'La ciudad es obligatoria';
 		if (dirCiudad.trim().length > 100) return 'La ciudad no puede tener mas de 100 caracteres';
@@ -450,7 +569,12 @@
 
 		const r = await crearDireccion({
 			pais: dirPais.trim(),
-			departamento: dirDepartamento.trim(),
+			// `paraLeer` le quita el sufijo con el que viene de la API:
+			// "Sacatepequez Department" -> "Sacatepequez". Es lo mismo que hace
+			// Direcciones.svelte al guardar, y sin esto las direcciones creadas
+			// desde el checkout quedarian escritas distinto que las creadas
+			// desde el panel -- y encima con una palabra en ingles.
+			departamento: paraLeer(dirDepartamento.trim()),
 			ciudad: dirCiudad.trim(),
 			// El vacio va como null y no como '': la columna es opcional, y ''
 			// seria un codigo postal que existe y esta en blanco.
@@ -901,24 +1025,62 @@
 					{#if formNueva}
 						<form class="nueva" onsubmit={crearYUsar} novalidate>
 							<div class="campos">
-								<label class="ancho">
-									Pais
-									<input type="text" bind:value={dirPais} disabled={guardandoDireccion} />
-								</label>
+								{#if cargandoPaises}
+									<p class="quieto ancho" role="status">Cargando los paises...</p>
+								{/if}
 
-								<label>
-									Departamento
-									<input
-										type="text"
-										bind:value={dirDepartamento}
-										disabled={guardandoDireccion}
+								<!--
+									Los mismos tres campos encadenados que el registro y el
+									panel: el pais trae sus departamentos y el departamento
+									sus ciudades. Antes eran tres <input type="text"> sueltos,
+									y se podia guardar un pais que no existe.
+
+									Con la lista vacia (la API caida, o un pais sin
+									departamentos) Autocompletar se vuelve texto libre solo,
+									asi que el formulario nunca se queda bloqueado.
+								-->
+								<div class="ancho">
+									<Autocompletar
+										id="ck-pais"
+										etiqueta="Pais"
+										opciones={opcionesPais}
+										bind:valor={dirPais}
+										bind:elegido={paisElegido}
+										alElegir={alElegirPais}
+										deshabilitado={guardandoDireccion || cargandoPaises}
+										mostrarAlEnfocar
+										compacto
 									/>
-								</label>
+								</div>
 
-								<label>
-									Ciudad
-									<input type="text" bind:value={dirCiudad} disabled={guardandoDireccion} />
-								</label>
+								<div>
+									<Autocompletar
+										id="ck-departamento"
+										etiqueta={rotuloDivision}
+										opciones={opcionesDepartamento}
+										bind:valor={dirDepartamento}
+										bind:elegido={departamentoElegido}
+										alElegir={alElegirDepartamento}
+										deshabilitado={guardandoDireccion || !dirPais}
+										permitirLibre={!hayDepartamentos}
+										mostrarAlEnfocar
+										compacto
+									/>
+								</div>
+
+								<div>
+									<Autocompletar
+										id="ck-ciudad"
+										etiqueta="Ciudad"
+										opciones={opcionesCiudad}
+										bind:valor={dirCiudad}
+										bind:elegido={ciudadElegida}
+										deshabilitado={guardandoDireccion || !dirPais}
+										permitirLibre={opcionesCiudad.length === 0}
+										mostrarAlEnfocar
+										compacto
+									/>
+								</div>
 
 								<label class="ancho">
 									Codigo postal <span class="opcional">opcional</span>
@@ -943,7 +1105,7 @@
 						<button
 							type="button"
 							class="enlace"
-							onclick={() => (formNueva = true)}
+							onclick={abrirNueva}
 							disabled={cobrando || cambiandoDireccion}
 						>
 							{sinDirecciones ? 'Agregar una direccion' : 'Usar otra direccion'}

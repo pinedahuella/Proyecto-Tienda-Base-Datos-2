@@ -30,6 +30,13 @@ cuentas. Todos los productos tienen imagen, verificada una por una.
 No se edita a mano: lo escribe `node migrations/datos/generador.js`, con semilla
 fija, y el archivo se comprueba a si mismo al cargar.
 
+Esos son los numeros **recien cargado**. Una base sobre la que ya se compro o se
+publico algo tiene mas, y no pasa nada: los productos que se crean desde el
+panel viven solo en MongoDB (la migracion del catalogo esta terminada, ver
+[docs/base-de-datos.md](docs/base-de-datos.md)), asi que es normal que PostgreSQL
+y MongoDB no cuenten lo mismo. Para volver al conjunto exacto:
+`.\arrancar.ps1 -Reiniciar`.
+
 ## Que se puede hacer hoy
 
 Buscar en el catalogo (por nombre, categoria, precio, disponibilidad y
@@ -38,8 +45,18 @@ ofertas de cada vendedor, agregar al carrito, elegir a donde se entrega, pagar
 con la tarjeta simulada, y ver el historial de pedidos con el detalle de cada
 uno -- incluido **como se veia el producto el dia en que se compro**.
 
+Y despues de pagar se aterriza en una pantalla de agradecimiento con el detalle
+del pedido, cuyo boton de volver recarga el catalogo: asi el descuento de
+existencias se VE, que antes pasaba en la base y no en la pantalla.
+
 Del lado del vendedor: publicar ofertas, y cambiar su precio, su estado y sus
-existencias.
+existencias, con un buscador sobre las propias.
+
+Del lado de la tienda y del administrador -- que el backend trata igual -- se
+entra por el PRODUCTO en vez de por una lista de 202 ofertas: el catalogo
+paginado de 20 en 20, con filtro por nombre y por categoria, y las ofertas de un
+producto se piden al abrirlo. Ademas administran el catalogo compartido (alta,
+edicion e historial por fecha), tambien paginado y con su buscador.
 
 ## Documentacion
 

@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { conJson, pedir } from './api';
-	import type { UsuarioSesion } from './sesion';
+	import { CORREO_TIENDA, type UsuarioSesion } from './sesion';
 
 	/**
 	 * Panel de administracion: la lista de cuentas y sus dos catalogos.
@@ -179,15 +179,25 @@
 				</thead>
 				<tbody>
 					{#each usuarios as usuario (usuario.id_usuario)}
-						<tr>
+						{@const esTienda = usuario.correo_electronico === CORREO_TIENDA}
+						<tr class:protegida={esTienda}>
 							<td class="fuerte">{usuario.usuario}</td>
 							<td>{usuario.correo_electronico}</td>
 							<td>{nombreCompleto(usuario)}</td>
 							<td>
+								<!--
+									La cuenta de la tienda no se edita desde aqui: el backend
+									la rechaza con un 400 ("No se puede editar la cuenta de la
+									tienda desde aqui"). Se apaga el control en vez de dejar
+									intentarlo y recibir el error -- es la misma cuenta cuyo
+									precio se ensena en todo el catalogo y bajo la que caen
+									las ofertas que publica un admin, asi que cambiarle el rol
+									o desactivarla romperia media tienda.
+								-->
 								<select
 									aria-label="Rol de {usuario.usuario}"
 									value={usuario.id_rol_usuario}
-									disabled={guardando === usuario.id_usuario}
+									disabled={esTienda || guardando === usuario.id_usuario}
 									onchange={(e) =>
 										cambiar(usuario, 'id_rol_usuario', Number(e.currentTarget.value))}
 								>
@@ -200,7 +210,7 @@
 								<select
 									aria-label="Estado de {usuario.usuario}"
 									value={usuario.id_estado_usuario}
-									disabled={guardando === usuario.id_usuario}
+									disabled={esTienda || guardando === usuario.id_usuario}
 									onchange={(e) =>
 										cambiar(usuario, 'id_estado_usuario', Number(e.currentTarget.value))}
 								>
@@ -211,7 +221,12 @@
 									{/each}
 								</select>
 							</td>
-							<td class="gris">{fecha(usuario.fecha_creacion)}</td>
+							<td class="gris">
+								{fecha(usuario.fecha_creacion)}
+								{#if esTienda}
+									<span class="nota-tienda">la cuenta de la tienda no se edita</span>
+								{/if}
+							</td>
 						</tr>
 						{#if mensajes[usuario.id_usuario]?.texto}
 							<tr class="mensaje">
@@ -366,5 +381,15 @@
 		.admin {
 			padding: 22px 20px;
 		}
+	}
+
+	.protegida {
+		background: var(--panel);
+	}
+
+	.nota-tienda {
+		display: block;
+		font-size: 0.78rem;
+		color: var(--gris);
 	}
 </style>
