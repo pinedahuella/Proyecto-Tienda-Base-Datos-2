@@ -314,10 +314,15 @@
 					year: 'numeric'
 				})}.
 			</p>
+			<!-- Aqui decia que "el backend aun no expone esa ruta" para cerrar la
+			     compra. Dejo de ser cierto: POST /comprador/pedidos/:id/comprar
+			     existe, y de hecho este mismo comprador ya tiene pedidos pagados.
+			     Un aviso caducado es peor que ninguno: manda a la persona a
+			     esperar algo que ya puede hacer. -->
 			<p class="menor">
-				Agregar cosas <strong>no reserva existencias</strong>, y todavia no hay forma de
-				cerrar la compra: el backend aun no expone esa ruta, asi que el pedido se queda en
-				"{pedido.pedido.estado_pedido_nombre}".
+				Agregar cosas <strong>no reserva existencias</strong>: se comprueba que haya, pero
+				se descuentan al comprar. Si alguien mas se lleva la ultima unidad antes, la compra
+				lo avisa y no cobra nada.
 			</p>
 		</div>
 

@@ -8,7 +8,6 @@
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
-	import Pedido from '$lib/Pedido.svelte';
 	import {
 		cerrarSesion,
 		ID_ROL_ADMIN,
@@ -46,6 +45,21 @@
 
 	let esAdmin = $derived(perfil?.id_rol_usuario === ID_ROL_ADMIN);
 	let esVendedor = $derived(perfil?.id_rol_usuario === ID_ROL_VENDEDOR);
+
+	/**
+	 * La linea de bienvenida, segun el rol.
+	 *
+	 * Ninguna afirma cuantas cosas tiene la persona: el panel no lo sabe
+	 * todavia cuando pinta esto, y prometer "tu primer producto" a quien ya
+	 * vende dos docenas fue exactamente el fallo anterior.
+	 */
+	let saludo = $derived(
+		esAdmin
+			? 'Desde aqui gestionas las cuentas y los catalogos del sistema.'
+			: esVendedor
+				? 'Aqui llevas tus ofertas: a que precio vendes cada variante y cuantas unidades te quedan.'
+				: 'Aqui estan los datos de tu cuenta y tus direcciones de entrega. Tus pedidos tienen su propia pagina.'
+	);
 
 	type Modo = 'ver' | 'editar' | 'contrasena';
 	let modo = $state<Modo>('ver');
@@ -287,10 +301,6 @@
 	 * Las otras dos siguen siendo ceros fijos, y eso hay que quitarlo tambien
 	 * el dia que haya de donde sacarlos.
 	 */
-	const resumen = [
-		{ rotulo: 'Productos', cifra: '0', nota: 'Todavia no has publicado nada.' },
-		{ rotulo: 'Inventario', cifra: '0', nota: 'Sin movimientos registrados.' }
-	];
 </script>
 
 <svelte:head>
@@ -314,7 +324,13 @@
 		{:else if perfil}
 			<div class="saludo">
 				<h1>Hola, {perfil.nombre}</h1>
-				<p>Tu tienda esta lista. Publica tu primer producto para que aparezca en el catalogo.</p>
+				<!-- Uno por rol. Antes era un texto fijo -- "Tu tienda esta lista.
+				     Publica tu primer producto" -- que salia igual para los tres:
+				     le hablaba de su tienda a un comprador, y le pedia publicar
+				     su PRIMER producto a un vendedor con dos docenas de ofertas
+				     vivas. Y en este modelo un vendedor no publica productos: el
+				     catalogo es compartido y crearlo es solo de la tienda. -->
+				<p>{saludo}</p>
 			</div>
 
 			<section class="perfil">
@@ -446,10 +462,6 @@
 
 			<Direcciones alExpirarSesion={expiro} />
 
-			<!-- Va para todos, no solo para el rol comprador: /comprador/pedidos
-			     solo exige sesion, asi que un vendedor o un admin compran igual. -->
-			<Pedido alExpirarSesion={expiro} />
-
 			{#if esAdmin}
 				<PanelAdmin alExpirarSesion={expiro} />
 			{:else if esVendedor}
@@ -460,23 +472,38 @@
 				<OfertasVendedor alExpirarSesion={expiro} />
 				<PanelVendedor alExpirarSesion={expiro} />
 			{:else}
-				<div class="resumen">
-					{#each resumen as tarjeta}
-						<article>
-							<h3>{tarjeta.rotulo}</h3>
-							<p class="cifra">{tarjeta.cifra}</p>
-							<p class="nota">{tarjeta.nota}</p>
-						</article>
-					{/each}
-				</div>
+				<!-- Lo que ve un comprador.
 
-				<section class="invitacion">
-					<h2>Tu tienda esta vacia por ahora</h2>
-					<p>
-						Cuando publiques tu primer producto, los pedidos y los movimientos de inventario
-						empiezan a aparecer aqui.
-					</p>
-				</section>
+				     Aqui habia dos tarjetas -- "Productos 0" e "Inventario 0" --
+				     con las cifras escritas a mano, y debajo "Tu tienda esta vacia
+				     por ahora / cuando publiques tu primer producto...". Todo eso
+				     es de vendedor y se le enseñaba a un comprador: le hablaba de
+				     su tienda, le pedia publicar, y le enseñaba dos ceros que no
+				     salian de ninguna consulta. Ademas nombraba el inventario, que
+				     ya no existe ni como tabla. -->
+				<!-- Las dos, del mismo tamano y una al lado de la otra. Antes el
+				     enlace a los pedidos iba suelto, sin tarjeta, y el del catalogo
+				     dentro de una con borde: se leian como cosas de distinto peso
+				     cuando son las dos salidas de esta pagina. -->
+				<div class="salidas">
+					<section class="invitacion">
+						<h2>Tus pedidos</h2>
+						<p>
+							Lo que llevas en el carrito ahora y todo lo que compraste antes, con su
+							detalle.
+						</p>
+						<a class="ir" href="/pedidos">Ver mis pedidos</a>
+					</section>
+
+					<section class="invitacion">
+						<h2>Que quieres comprar hoy</h2>
+						<p>
+							Recorre el catalogo y agrega al carrito. Antes de pagar hace falta una
+							direccion de entrega: se agrega arriba, en "Tus direcciones".
+						</p>
+						<a class="ir" href="/">Ver el catalogo</a>
+					</section>
+				</div>
 			{/if}
 		{/if}
 	</div>
@@ -722,43 +749,10 @@
 		margin-top: 2px;
 	}
 
-	/* ── resumen ── */
-
-	.resumen {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-		gap: 20px;
-		margin-bottom: 28px;
-	}
-
-	.resumen article {
-		padding: 22px 24px;
-		background: var(--blanco);
-		border: 1px solid var(--linea);
-		border-radius: var(--r2);
-	}
-
-	.resumen h3 {
-		font-size: 0.95rem;
-		font-weight: 500;
-		color: var(--gris);
-		margin-bottom: 10px;
-	}
-
-	.cifra {
-		font-size: 2.4rem;
-		line-height: 1;
-		color: var(--tinta);
-		margin-bottom: 8px;
-	}
-
-	.nota {
-		font-size: 0.92rem;
-		color: var(--gris-2);
-	}
 
 	.invitacion {
 		padding: 30px 32px;
+		height: 100%;
 		background: var(--blanco);
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
@@ -771,7 +765,49 @@
 
 	.invitacion p {
 		max-width: 560px;
+		margin-bottom: 18px;
 		color: var(--texto);
+	}
+
+	/* El enlace al catalogo: es la unica salida de esta tarjeta, asi que se
+	   pinta como boton y no como texto subrayado. */
+	/* Dos columnas que se vuelven una en pantalla chica. `align-items:
+	   stretch` es lo que las deja de la misma altura aunque un texto sea mas
+	   largo que el otro; sin eso, la mas corta queda flotando. */
+	.salidas {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+		align-items: stretch;
+		/* Separadas de lo de arriba y entre si. Con el gap de 20px que tenian y
+		   sin margen propio quedaban pegadas a la seccion de direcciones y se
+		   leian como parte de ella. Las secciones de esta pagina van a 28px,
+		   asi que estas siguen esa medida y no una suya. */
+		margin-top: 28px;
+		gap: 28px;
+	}
+
+	/* La tarjeta es una columna para que el boton se pegue abajo con
+	   margin-top:auto: asi los dos botones quedan a la misma altura aunque el
+	   texto de arriba no mida lo mismo. */
+	.salidas .invitacion {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.salidas .invitacion .ir {
+		margin-top: auto;
+		align-self: flex-start;
+	}
+
+	.ir {
+		display: inline-block;
+		margin-top: 16px;
+		padding: 10px 20px;
+		font-size: 0.95rem;
+		color: var(--blanco);
+		background: var(--indigo);
+		border-radius: var(--r);
+		text-decoration: none;
 	}
 
 	@media (max-width: 620px) {

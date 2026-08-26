@@ -399,6 +399,87 @@ if ($LASTEXITCODE -eq 0) {
 # La carpeta esta montada dentro del contenedor en /migrations, y la de datos
 # cae sola en /migrations/datos.
 
+# ------------------------------------------------------------
+# El ETL, en PowerShell nativo
+# ------------------------------------------------------------
+# Hace lo mismo que etl/correr.sh -- extrae de PostgreSQL y carga en Mongo --
+# pero SIN depender de Git Bash.
+#
+# Antes esto llamaba a correr.sh a traves del bash de Git, y si no lo
+# encontraba se saltaba el ETL con un aviso amarillo: el script terminaba en
+# verde con el catalogo de Mongo vacio. Los productos estaban en PostgreSQL,
+# pero la tienda los lee de Mongo, asi que salia vacia sin que nada lo dijera.
+#
+# Los archivos van y vienen con `docker cp`, NUNCA por tuberia. PowerShell 5.1
+# codifica lo que manda por la tuberia en UTF-8 con BOM y le pega EF BB BF al
+# principio, que del otro lado rompe el SQL y el JavaScript. `docker cp` mueve
+# los bytes tal cual.
+#
+# El JSON intermedio da un rodeo por el disco (contenedor -> local -> otro
+# contenedor) porque los dos contenedores no comparten volumen. Son unos pocos
+# cientos de KB y se borra al terminar.
+function Correr-Etl {
+    $tmp = Join-Path $env:TEMP "mesh-etl"
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+
+    $usuario = $env_["DB_USER"]
+    $base    = $env_["DB_NAME"]
+
+    # Cada consulta y su archivo de salida
+    $pasos = @(
+        @{ sql = "extraer.sql";            salida = "mesh-productos.json";  que = "productos" },
+        @{ sql = "extraer_categorias.sql"; salida = "mesh-categorias.json"; que = "categorias" }
+    )
+
+    foreach ($p in $pasos) {
+        $local = Join-Path $tmp $p.salida
+
+        docker cp "$PSScriptRoot\etl\$($p.sql)" "mesh-postgres:/tmp/$($p.sql)" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar $($p.sql) al contenedor"; exit 1 }
+
+        # La redireccion ocurre DENTRO del contenedor: asi la salida nunca pasa
+        # por PowerShell y no se le cambia la codificacion por el camino.
+        $err = docker exec mesh-postgres sh -c "psql -U $usuario -d $base -qtAX -v ON_ERROR_STOP=1 -f /tmp/$($p.sql) > /tmp/$($p.salida)" 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Error1 "El ETL fallo extrayendo $($p.que):"
+            Write-Host $err -ForegroundColor Red
+            exit 1
+        }
+
+        docker cp "mesh-postgres:/tmp/$($p.salida)" "$local" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Error1 "No se pudo traer $($p.salida) de PostgreSQL"; exit 1 }
+
+        # Un archivo vacio aqui quiere decir que la consulta no devolvio nada.
+        # Cargarlo dejaria Mongo vacio sin un solo error, que es justo el fallo
+        # que esta comprobacion existe para evitar.
+        if (-not (Test-Path $local) -or (Get-Item $local).Length -eq 0) {
+            Error1 "La consulta de $($p.que) no devolvio ni una fila."
+            Error1 "Revisa que migrations/datos/ se haya cargado en PostgreSQL."
+            exit 1
+        }
+
+        docker cp "$local" "mesh-mongo:/tmp/$($p.salida)" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar $($p.salida) a Mongo"; exit 1 }
+    }
+
+    docker cp "$PSScriptRoot\etl\cargar.js" "mesh-mongo:/tmp/cargar.js" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar cargar.js a Mongo"; exit 1 }
+
+    $salida = docker exec mesh-mongo sh -c (Comando-Mongo "--file /tmp/cargar.js") 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "El ETL fallo cargando en MongoDB:"
+        Write-Host $salida -ForegroundColor Red
+        exit 1
+    }
+
+    foreach ($linea in ($salida -split "`n")) {
+        if ($linea.Trim()) { Ok $linea.Trim() }
+    }
+
+    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+}
+
+
 function Correr-Migraciones($carpeta, $rutaContenedor, $etiqueta) {
     $scripts = @(Get-ChildItem -LiteralPath $carpeta -Filter "*.sql" -ErrorAction SilentlyContinue | Sort-Object Name)
 
@@ -584,24 +665,86 @@ if (($topEnMongo -notmatch '^\d+$') -or ($topEnPostgres -notmatch '^\d+$') -or
 if (-not $Etl -and $alDia) {
     Ok "Ya cargado ($($resumen -join ', ')). Para volver a migrarlo: .\arrancar.ps1 -Etl"
 } else {
-    $bash = Buscar-Bash
-    if (-not $bash) {
-        Aviso "No encuentro el bash de Git, me salto el ETL."
-        Aviso "Instala Git para Windows y corre despues:  .\arrancar.ps1 -Etl"
-    } else {
-        # Git Bash no entiende las rutas con contrabarra de Windows
-        $rutaBash = $PSScriptRoot -replace '\\', '/'
-        $salidaEtl = & $bash -c "cd '$rutaBash' && ./etl/correr.sh" 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) {
-            foreach ($linea in ($salidaEtl -split "`n")) {
-                if ($linea.Trim()) { Ok $linea.Trim() }
-            }
-        } else {
-            Error1 "El ETL fallo:"
-            Write-Host $salidaEtl -ForegroundColor Red
-            exit 1
-        }
+    Correr-Etl
+}
+
+
+# ------------------------------------------------------------
+# 7b. El catalogo NO puede quedar vacio
+# ------------------------------------------------------------
+# Esta comprobacion existe porque el fallo real fue este: el ETL se saltaba y
+# el script terminaba en verde. Los productos si estaban en PostgreSQL, pero
+# el catalogo que ve la aplicacion sale de MongoDB, asi que la tienda salia
+# vacia y nada lo habia dicho.
+#
+# Se comprueba el RESULTADO, no que los pasos "parezcan" haber ido bien: un
+# paso puede contestar 0 sin fallar.
+
+Paso "Comprobando que el catalogo quedo cargado"
+
+# Las TRES colecciones que escribe el ETL, no las dos de $COLECCIONES_ETL.
+#
+# productos_eventos no esta en esa lista y es a proposito: alli cada coleccion
+# se compara contra una tabla de PostgreSQL para decidir si hace falta correr
+# el ETL, y los eventos no tienen tabla equivalente -- salen de fusionar dos
+# historiales por fecha, asi que su cuenta no cuadra con ninguna. Compararlos
+# haria que el ETL se creyera desfasado en cada arranque.
+#
+# Pero para "quedo vacio o no" si cuentan, y mucho: los eventos son de donde
+# sale la reconstruccion de un producto a una fecha pasada. Sin ellos esa
+# consulta devuelve vacio y la pantalla del historial se queda muda.
+# Cada coleccion, con la consulta que dice cuantas TENDRIA que haber.
+#
+# No basta con "no esta vacia": un ETL que cargue 3 productos de 102 pasaria en
+# verde y el catalogo saldria incompleto, que no se nota hasta que alguien busca
+# algo que deberia estar ahi. Se compara la cuenta contra PostgreSQL.
+#
+# productos_eventos es el caso aparte: no tiene tabla equivalente, porque sale
+# de fusionar dos historiales por fecha. De ese solo se puede exigir que no este
+# vacio -- sin el, reconstruir un producto a una fecha pasada devuelve vacio y
+# la pantalla del historial se queda muda.
+$COLECCIONES_CARGADAS = @(
+    @{ mongo = 'productos';         sql = 'SELECT count(*) FROM productos;'  },
+    @{ mongo = 'categorias';        sql = 'SELECT count(*) FROM categorias;' },
+    @{ mongo = 'productos_eventos'; sql = $null }
+)
+
+$faltantes = @()
+foreach ($col in $COLECCIONES_CARGADAS) {
+    $nombre = $col.mongo
+    $cuenta = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.$nombre.countDocuments()'") 2>&1 | Out-String).Trim()
+
+    if (($cuenta -notmatch '^\d+$') -or ([int]$cuenta -eq 0)) {
+        $faltantes += "$nombre (vacia)"
+        continue
     }
+
+    if ($null -eq $col.sql) {
+        Ok "$nombre  $cuenta"
+        continue
+    }
+
+    $esperados = ($col.sql |
+        docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
+    if ($esperados -notmatch '^\d+$') {
+        # No se pudo contar del otro lado. No se inventa un veredicto: se dice.
+        Aviso "$nombre  $cuenta  (no se pudo contar en PostgreSQL para comparar)"
+    } elseif ([int]$cuenta -ne [int]$esperados) {
+        $faltantes += "$nombre ($cuenta de $esperados)"
+    } else {
+        Ok "$nombre  $cuenta de $esperados"
+    }
+}
+
+if ($faltantes.Count -gt 0) {
+    Error1 "El catalogo de MongoDB NO quedo completo: $($faltantes -join ', ')"
+    Error1 ""
+    Error1 "Los productos si estan en PostgreSQL, pero la tienda los lee de MongoDB,"
+    Error1 "asi que el catalogo va a salir vacio. Lo que falla es el ETL."
+    Error1 ""
+    Error1 "Para ver el error completo:  .\arrancar.ps1 -Etl"
+    exit 1
 }
 
 

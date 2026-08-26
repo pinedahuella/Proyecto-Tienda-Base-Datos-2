@@ -11,8 +11,11 @@
 		leerPedidoAbierto,
 		olvidarPedidoAbierto,
 		pedidoCaduco,
-		traerPedido
+		traerPedido,
+		traerDirecciones,
+		direccionEnUnaLinea
 	} from '$lib/pedido';
+	import { carrito } from '$lib/estadoCarrito.svelte';
 
 	/**
 	 * La ficha de un producto: la foto arriba y debajo todo lo que la base
@@ -147,7 +150,7 @@
 			cantidades = {};
 			avisoPedido = '';
 			errorPedido = '';
-			varianteDelAviso = 0;
+			ofertaDelAviso = '';
 			traer(cual);
 		});
 	});
@@ -267,15 +270,39 @@
 	let haySesion = $state(false);
 	let cantidades = $state<Record<number, number | string | undefined>>({});
 	/** El id de la variante que se esta agregando ahora mismo; 0 = ninguna. */
-	let agregando = $state(0);
+	/** La OFERTA que se esta agregando ahora mismo; '' = ninguna. */
+	let agregando = $state('');
 	let avisoPedido = $state('');
 	let errorPedido = $state('');
+	/**
+	 * Adonde puede ir la persona para resolver el error, cuando hay adonde.
+	 *
+	 * Un error que dice que falta algo y no dice donde arreglarlo deja a
+	 * cualquiera atascado: en la ficha no hay ningun campo de direccion, asi
+	 * que "agregala en tu panel" sin enlace obliga a adivinar la ruta.
+	 */
+	let salidaDelError = $state<{ texto: string; href: string } | null>(null);
+	/**
+	 * A donde va el pedido que se acaba de abrir, y si habia mas de una para
+	 * elegir. Solo se llena cuando el pedido se abre AQUI: si ya venia abierto
+	 * de antes, la ficha no sabe (ni le hace falta) cual lleva puesta.
+	 */
+	let direccionDelPedido = $state('');
+	let hayVariasDirecciones = $state(false);
 	/**
 	 * De que presentacion habla el aviso. Sin esto el mensaje salia arriba de
 	 * todas, a varios cientos de pixeles del boton que se pulso: en un producto
 	 * con tres presentaciones no habia forma de saber a cual contestaba.
 	 */
-	let varianteDelAviso = $state(0);
+	/**
+	 * De que OFERTA habla el aviso, no de que variante.
+	 *
+	 * Era la variante, y con varios vendedores de la MISMA presentacion el
+	 * mensaje salia una sola vez al final de la lista, sin decir a cual de los
+	 * cuatro contestaba: agregabas de un vendedor y el aviso aparecia igual de
+	 * lejos de todos. Es texto, como todos los ids: '' cuando no hay ninguno.
+	 */
+	let ofertaDelAviso = $state('');
 
 	async function mirarSesion() {
 		const r = await pedir<unknown>('/usuario/yo');
@@ -289,7 +316,7 @@
 		const guardado = leerPedidoAbierto();
 		if (guardado) return guardado;
 
-		const rDirecciones = await pedir<{ id_direccion: string }[]>('/direccion-usuario');
+		const rDirecciones = await traerDirecciones();
 
 		// "No pude preguntar" y "no tienes ninguna" son cosas distintas, y
 		// mandar a agregar una direccion cuando lo que se cayo fue el servidor
@@ -297,6 +324,7 @@
 		if (rDirecciones.estado === 401) {
 			haySesion = false;
 			errorPedido = 'Se acabo tu sesion. Vuelve a entrar para seguir.';
+			salidaDelError = { texto: 'Iniciar sesion', href: '/entrar' };
 			return null;
 		}
 		if (!rDirecciones.ok || !rDirecciones.payload) {
@@ -307,18 +335,32 @@
 			return null;
 		}
 		if (rDirecciones.payload.length === 0) {
-			errorPedido =
-				'Para abrir un pedido hace falta una direccion de entrega. Agrega una en tu panel.';
+			// Antes decia "Agrega una en tu panel" y ahi se acababa: no habia
+			// enlace, y desde la ficha no hay ningun campo de direccion, asi que
+			// la persona quedaba sin saber adonde ir.
+			errorPedido = 'Para abrir un pedido hace falta una direccion de entrega.';
+			salidaDelError = { texto: 'Agregar una direccion', href: '/panel' };
 			return null;
 		}
 
-		const rPedido = await crearPedido(rDirecciones.payload[0].id_direccion);
+		// Se abre con la PRIMERA direccion, pero eso ya no queda invisible.
+		//
+		// Antes se tomaba `payload[0]` y ahi se acababa: quien tuviera tres
+		// direcciones veia su pedido salir hacia una que, desde su punto de
+		// vista, era al azar -- y no habia ni donde mirarla ni donde cambiarla.
+		// Elegir aqui obligaria a meter un selector en la ficha, que no es el
+		// sitio; asi que se usa la primera, SE DICE cual es, y se cambia al
+		// pagar, que es cuando de verdad importa.
+		const elegida = rDirecciones.payload[0];
+		const rPedido = await crearPedido(elegida.id_direccion);
 		if (!rPedido.ok || !rPedido.payload) {
 			errorPedido = rPedido.estado === 0 ? 'No se pudo conectar con el servidor' : rPedido.mensaje;
 			return null;
 		}
 
 		guardarPedidoAbierto(rPedido.payload.id_pedido);
+		direccionDelPedido = direccionEnUnaLinea(elegida);
+		hayVariasDirecciones = rDirecciones.payload.length > 1;
 		return rPedido.payload.id_pedido;
 	}
 
@@ -331,7 +373,8 @@
 	async function alPedido(v: Variante, o: Oferta) {
 		avisoPedido = '';
 		errorPedido = '';
-		varianteDelAviso = v.id_producto_variante;
+		salidaDelError = null;
+		ofertaDelAviso = o.id_oferta;
 
 		const escrito = cantidades[Number(o.id_oferta)];
 		// El campo esta vacio casi siempre: agregar de a uno es lo normal.
@@ -341,10 +384,10 @@
 			return;
 		}
 
-		agregando = v.id_producto_variante;
+		agregando = o.id_oferta;
 		const idPedido = await pedidoAbierto();
 		if (idPedido == null) {
-			agregando = 0;
+			agregando = '';
 			return;
 		}
 
@@ -352,16 +395,22 @@
 			id_oferta: Number(o.id_oferta),
 			cantidad
 		});
-		agregando = 0;
+		agregando = '';
 
 		if (r.ok && r.payload) {
 			avisoPedido =
 				`"${v.nombre_variante}" de ${o.vendedor.usuario} queda en ${r.payload.cantidad} ` +
-				`en tu pedido (le quedan ${r.payload.stock_disponible}). Se ve en tu panel.`;
+				`en tu carrito (le quedan ${r.payload.stock_disponible}).`;
 			cantidades[Number(o.id_oferta)] = '';
+			// Se abre el carrito y se vuelve a contar. Es lo que hace que se
+			// vea que "algo paso": antes el unico rastro era una linea de texto
+			// junto al boton, y habia que ir al panel para comprobarlo.
+			await carrito.recontar();
+			carrito.abrir();
 		} else if (r.estado === 401) {
 			haySesion = false;
 			errorPedido = 'Se acabo tu sesion. Vuelve a entrar para seguir.';
+			salidaDelError = { texto: 'Iniciar sesion', href: '/entrar' };
 		} else if (r.estado === 404) {
 			// OJO: este 404 tiene TRES motivos posibles y solo uno de ellos es
 			// del pedido (el otro es que el producto este oculto, y el otro que
@@ -383,7 +432,30 @@
 		}
 	}
 
-	let fotos = $derived(producto ? galeria(producto) : []);
+	/**
+	 * Las urls que el navegador no pudo cargar.
+	 *
+	 * En estado y no con una clase puesta desde el manejador: Svelte borra del
+	 * bundle los selectores que no aparecen escritos en el markup, asi que una
+	 * clase agregada por JS se queda sin CSS y sin avisar.
+	 */
+	let rotas = $state<string[]>([]);
+
+	function marcarRota(url: string) {
+		if (url && !rotas.includes(url)) rotas = [...rotas, url];
+	}
+
+	let todasLasFotos = $derived(producto ? galeria(producto) : []);
+	let fotos = $derived(todasLasFotos.filter((u) => !rotas.includes(u)));
+
+	/**
+	 * El indice de la foto que se ve, acotado a las que quedan.
+	 *
+	 * Si se cae una foto la galeria encoge, y `elegida` podia quedar apuntando
+	 * mas alla del final: `fotos[elegida]` daba undefined y el <img> se quedaba
+	 * sin src, que es otra imagen rota por el camino contrario.
+	 */
+	let indiceVisible = $derived(fotos.length === 0 ? 0 : Math.min(elegida, fotos.length - 1));
 	let deProducto = $derived(agrupadas(producto?.caracteristicas_adicionales));
 	let propias = $derived(agrupadas(producto?.caracteristicas_personalizadas));
 </script>
@@ -410,8 +482,16 @@
 			<div class="arriba">
 				<div class="galeria">
 					<div class="grande">
+						<!-- `fotos` ya viene sin las que fallaron: una url de fuera que
+						     se cae dejaria el icono de imagen rota, que se lee como un
+						     fallo de la pagina en vez de un enlace muerto. Al caerse la
+						     que se estaba viendo, se pasa a la siguiente sola. -->
 						{#if fotos.length > 0}
-							<img src={fotos[elegida]} alt={producto.nombre} />
+							<img
+								src={fotos[indiceVisible]}
+								alt={producto.nombre}
+								onerror={() => marcarRota(fotos[indiceVisible])}
+							/>
 						{:else}
 							<span class="sin-foto">Este producto no tiene fotos</span>
 						{/if}
@@ -423,11 +503,11 @@
 								<button
 									type="button"
 									class="tira"
-									class:activa={i === elegida}
+									class:activa={i === indiceVisible}
 									onclick={() => (elegida = i)}
 									aria-label={'Ver foto ' + (i + 1)}
 								>
-									<img src={url} alt="" />
+									<img src={url} alt="" onerror={() => marcarRota(url)} />
 								</button>
 							{/each}
 						</div>
@@ -476,8 +556,11 @@
 						{/if}
 					</div>
 
+					<!-- Los dos datos van uno al lado del otro. Aqui habia un <div>
+					     suelto de mas, sin cerrar, que el navegador cerraba con el
+					     </dl>: envolvia a los dos y el flex recibia UN hijo en vez de
+					     dos, asi que "Publicado" y "Variantes" salian apilados. -->
 					<dl class="datos">
-						<div>
 						<div><dt>Publicado</dt><dd>{fecha(producto.fecha_creacion)}</dd></div>
 						<div>
 							<dt>Variantes</dt>
@@ -593,29 +676,53 @@
 												<button
 													type="button"
 													onclick={() => alPedido(v, o)}
-													disabled={agregando !== 0 || o.stock === 0}
+													disabled={agregando !== '' || o.stock === 0}
 												>
-													{agregando === v.id_producto_variante ? 'Agregando...' : 'Agregar'}
+													{agregando === o.id_oferta ? 'Agregando...' : 'Agregar'}
 												</button>
 											</div>
+										{/if}
+
+										<!-- La respuesta va DENTRO de la oferta que la produjo.
+										     Estaba al final de la variante, y como los cuatro
+										     vendedores de esta presentacion comparten variante, el
+										     mensaje salia una sola vez abajo del todo sin decir a
+										     cual contestaba. -->
+										{#if ofertaDelAviso === o.id_oferta && avisoPedido}
+											<p class="aviso-pedido ok" role="status">
+												{avisoPedido}
+												<!-- A donde va, solo cuando el pedido se acaba de abrir
+												     aqui: antes se tomaba la primera direccion en
+												     silencio y quien tuviera tres no sabia cual se uso. -->
+												{#if direccionDelPedido}
+													<span class="destino">
+														Se entrega en <strong>{direccionDelPedido}</strong>{#if hayVariasDirecciones}
+															&mdash; puedes cambiarla al pagar{/if}.
+													</span>
+												{/if}
+											</p>
+										{/if}
+										{#if ofertaDelAviso === o.id_oferta && errorPedido}
+											<p class="aviso-pedido malo" role="alert">
+												{errorPedido}
+												{#if salidaDelError}
+													<a class="salida" href={salidaDelError.href}>{salidaDelError.texto}</a>
+												{/if}
+											</p>
 										{/if}
 									</li>
 								{/each}
 							</ul>
 
 							{#if !haySesion}
-								<p class="nota">
+								<!-- No es una nota al pie: es lo unico que separa a la persona
+								     de poder comprar. Con el estilo de nota gris quedaba mas
+								     apagado que los precios que tiene al lado. -->
+								<p class="entrar-aviso">
 									<a href="/entrar">Inicia sesion</a> para agregar al pedido.
 								</p>
 							{/if}
 
-							<!-- La respuesta va pegada a la presentacion que la produjo. -->
-							{#if varianteDelAviso === v.id_producto_variante && avisoPedido}
-								<p class="aviso-pedido ok" role="status">{avisoPedido}</p>
-							{/if}
-							{#if varianteDelAviso === v.id_producto_variante && errorPedido}
-								<p class="aviso-pedido malo" role="alert">{errorPedido}</p>
-							{/if}
 						{/if}
 					</article>
 				{/each}
@@ -1031,6 +1138,23 @@
 		color: var(--gris);
 	}
 
+	/* El aviso de iniciar sesion, con la caja del acento: es una invitacion a
+	   hacer algo, no una aclaracion. */
+	.entrar-aviso {
+		margin-top: 0.85rem;
+		padding: 0.7rem 0.9rem;
+		font-size: 0.92rem;
+		color: var(--indigo-os);
+		background: var(--indigo-cl);
+		border-radius: var(--r2);
+	}
+
+	.entrar-aviso a {
+		color: var(--indigo-os);
+		font-weight: 600;
+		text-decoration: underline;
+	}
+
 	/* La etiqueta existe para quien navega con lector de pantalla; en la
 	   pantalla el campo ya se entiende por el boton que tiene al lado. */
 	.oculto {
@@ -1061,6 +1185,25 @@
 		background: var(--panel);
 		color: var(--rojo);
 		border: 1px solid var(--rojo);
+	}
+
+	/* El enlace que saca del error. Va en linea con el texto, y subrayado:
+	   dentro de un recuadro rojo, algo que solo cambia de color no se lee
+	   como pulsable. */
+	/* A donde se entrega, debajo del aviso y en gris: es contexto, no la
+	   respuesta a lo que la persona acaba de pulsar. */
+	.destino {
+		display: block;
+		margin-top: 0.35rem;
+		color: var(--gris);
+	}
+
+	.salida {
+		display: inline-block;
+		margin-left: 0.35rem;
+		color: var(--indigo);
+		font-weight: 600;
+		text-decoration: underline;
 	}
 
 	.compacta {

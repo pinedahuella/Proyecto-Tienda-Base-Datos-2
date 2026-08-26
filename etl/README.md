@@ -15,14 +15,34 @@ y `mongosh`, que ya viene en el contenedor de Mongo, corre el JavaScript.
 
 ## Como se corre
 
-Desde Git Bash, no desde PowerShell: PowerShell se come las comillas al llamar a
-docker y la consulta llega partida.
+Lo normal es no correrlo a mano: `.rrancar.ps1` lo hace solo cuando detecta que
+Mongo esta desfasado, y `.rrancar.ps1 -Etl` lo fuerza. Esa es la via recomendada
+en Windows y **no necesita Git Bash**.
+
+```powershell
+.rrancar.ps1 -Etl
+```
+
+`arrancar.ps1` no llama a este `correr.sh`: hace los mismos pasos en PowerShell
+con `docker cp`. El motivo es que antes SI lo llamaba, a traves del bash de Git,
+y cuando no lo encontraba **se saltaba el ETL con un aviso y el script terminaba
+en verde**: los productos quedaban en PostgreSQL pero el catalogo de Mongo vacio,
+que es de donde los lee la tienda. Paso de verdad, en la maquina de un companero.
+
+El script de abajo sigue aqui para quien trabaje en Linux, en macOS, o prefiera
+bash:
 
 ```bash
 bash etl/correr.sh
 ```
 
-Imprime cuantos productos, categorias y eventos escribio.
+Va por tuberia (`psql ... | docker exec -i mongo ...`), y eso es justo lo que no
+se puede hacer desde PowerShell 5.1: le pega un BOM (`EF BB BF`) al principio de
+lo que manda, y del otro lado el SQL y el JavaScript llegan rotos. Por eso la
+version de PowerShell mueve archivos con `docker cp`, que copia los bytes tal
+cual.
+
+Las dos formas imprimen cuantos productos, categorias y eventos escribio.
 
 ## Que escribe
 
@@ -245,19 +265,35 @@ no de la carga, igual que un `CREATE INDEX` vive en la migracion y no en el
 `INSERT`.
 
 ```js
-db.productos.createIndex({ 'categoria.nombre': 1, estado: 1 })
-db.productos_eventos.createIndex({ id_producto: 1, fecha: 1 })
-db.categorias.createIndex({ nombre: 1 })
+db.productos.createIndex({ 'categoria.id_categoria': 1, estado: 1, _id: 1 }, { name: 'catalogo_categoria' })
+db.productos.createIndex({ estado: 1, precio_desde: 1 },                     { name: 'catalogo_precio' })
+db.productos_eventos.createIndex({ id_producto: 1, fecha: 1 },               { name: 'eventos_por_producto_fecha' })
+db.categorias.createIndex({ nombre: 1 },                                     { name: 'categorias_por_nombre' })
 ```
 
 Cada uno responde a una consulta concreta, no a la idea general de que conviene
-tener indices:
+tener indices. Los dos del catalogo salieron de MEDIR con `explain()`: se
+probaron tres y solo dos se ganaron el puesto, porque un indice que nadie usa no
+es gratis -- cuesta en cada escritura.
 
-- **catalogo** el estado se filtra siempre y la categoria a veces, asi que el
-  campo que nunca falta va primero
-- **eventos** sirve para las dos primeras etapas de la reconstruccion a la vez:
-  la base entra directo al producto y lee su tramo ya ordenado, sin recorrer la
-  coleccion y sin ordenar en memoria
+- **catalogo_categoria** "los productos de esta categoria, sin los ocultos".
+  Va sobre `categoria.id_categoria` y NO sobre `categoria.nombre`, porque el
+  backend filtra por id: un indice sobre el campo equivocado se ve igual de bien
+  en la lista de indices y no lo usa nadie. Medido: examina 3 documentos para
+  devolver 3, en vez de recorrer los 34.
+- **catalogo_precio** "los productos entre tal y tal precio". Va sobre
+  `precio_desde`, el mas barato que se puede PAGAR, y no sobre `precio_tienda`,
+  que es el que se ENSENA. Medido: 10 claves para 10 resultados.
+- **eventos_por_producto_fecha** sirve para las dos primeras etapas de la
+  reconstruccion a la vez: la base entra directo al producto y lee su tramo ya
+  ordenado, sin recorrer la coleccion y sin ordenar en memoria.
+
+Una nota medida, para no prometer de mas: en `catalogo_categoria` el `_id` va al
+final para que el listado salga ordenado del propio indice. Con el filtro tal
+como lo manda hoy el backend eso **no** se cumple: el estado se filtra con `$nin`,
+que es un rango, y detras de un rango el indice ya no sostiene el orden, asi que
+`explain()` ensena un `SORT` en memoria. Con el tamano actual del catalogo da
+igual; se arreglaria filtrando el estado por igualdad.
 
 ## El ETL solo manda sobre su tramo
 

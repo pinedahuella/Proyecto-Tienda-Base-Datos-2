@@ -370,7 +370,8 @@ Tres cosas que ensena esta prueba:
    del pedido 4, ni un pago, ni el pedido cambio de estado: sigue en
    `pendiente`. Revirtio entero, no a medias.
 3. **El saldo lo explica el libro.** 8 - 1 - 6 - 1 = 0, que es lo que dice
-   `oferta.stock`. Medido sobre las 168 ofertas: **cero descuadres**.
+   `oferta.stock`. Medido sobre las 552 ofertas del conjunto: **cero
+   descuadres**, y vuelto a medir despues de comprar y cancelar.
 
 Lo que lo consigue es una sola linea, el `SELECT ... FOR UPDATE` sobre la fila
 de `Oferta` dentro de `comprar_pedido`. La segunda conexion se queda esperando

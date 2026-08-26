@@ -115,6 +115,28 @@
 	}
 
 	/**
+	 * Lo que devuelve GET /productos/paginacion: el mismo documento de producto
+	 * y EXACTAMENTE los mismos filtros que GET /productos, solo que en vez de un
+	 * cursor trae en que pagina estas y cuantas hay.
+	 *
+	 * Es la ruta que resuelve el catalogo con el marco de agregacion de Mongo:
+	 * un $facet saca la tanda y el conteo de la misma foto del filtro, en vez de
+	 * dos consultas que podrian ver estados distintos.
+	 *
+	 * total_paginas es 0 cuando el filtro no encuentra nada, no 1. Comprobado
+	 * contra la ruta: ?nombre=zzzzzz devuelve total_productos 0 y total_paginas
+	 * 0. Por eso los extremos se comparan contra totalPaginas y no se supone que
+	 * siempre haya al menos una pagina.
+	 */
+	interface TandaPaginada {
+		productos: Producto[];
+		pagina: number;
+		limite: number;
+		total_productos: number;
+		total_paginas: number;
+	}
+
+	/**
 	 * Los nombres que GET /productos se reserva para sus filtros fijos: es la
 	 * misma lista CLAVES_RESERVADAS de productos.service.ts.
 	 *
@@ -250,10 +272,51 @@
 
 	let productos = $state<Producto[]>([]);
 	let cursor = $state<number | null>(null);
-	let cargando = $state(false);
+	/**
+	 * Nace en true, no en false.
+	 *
+	 * Los productos se piden en onMount, asi que entre el primer pintado y esa
+	 * llamada no hay ninguno todavia. Con `false`, ese hueco caia en la rama de
+	 * "no hay nada" y la pagina abria diciendo "Ningun producto coincide con lo
+	 * que buscaste" y un contador en 0, antes de haber preguntado siquiera. No
+	 * saber todavia no es lo mismo que no haber encontrado nada.
+	 */
+	let cargando = $state(true);
 	let trayendoMas = $state(false);
 	let error = $state('');
 	let primeraVez = $state(true);
+
+	/**
+	 * Si lo ultimo que fallo fue traer la SIGUIENTE tanda, no la busqueda.
+	 *
+	 * Los dos fallos se ven igual en pantalla (el mismo parrafo rojo) pero no se
+	 * reintentan igual: volver a empezar despues de un "Ver mas" que no llego
+	 * tiraria las tandas que ya estaban acumuladas y devolveria a la persona a
+	 * las primeras 12, que es perder trabajo por un fallo de red.
+	 */
+	let falloAlTraerMas = $state(false);
+
+	/**
+	 * Las dos formas de recorrer el catalogo. El backend expone las dos con los
+	 * mismos filtros: GET /productos pagina por cursor (una tanda encima de la
+	 * anterior) y GET /productos/paginacion por numero de pagina, que permite
+	 * saltar directo a cambio de contar el total.
+	 *
+	 * Nace en 'scroll' porque es lo que habia antes: cambiar el modo por defecto
+	 * cambiaria la pagina de inicio de todo el mundo sin que nadie lo pidiera.
+	 */
+	type Modo = 'scroll' | 'paginas';
+	let modo = $state<Modo>('scroll');
+
+	// Lo que trae GET /productos/paginacion. Solo significan algo en modo
+	// paginas; en scroll se quedan como estaban y no se pintan.
+	let pagina = $state(1);
+	let totalPaginas = $state(0);
+	let totalProductos = $state(0);
+
+	/** Lo escrito en "Ir a la pagina". Puede ser numero: el control es numerico. */
+	let saltoA = $state<Campo>('');
+	let avisoSalto = $state('');
 
 	let categorias = $state<CategoriaBreve[]>([]);
 	let paleta = $state<CategoriaCompleta | null>(null);
@@ -351,16 +414,21 @@
 	// ---------- las llamadas ----------
 
 	/**
-	 * La URL que se le pide al backend. Se arma sola con lo que este puesto.
+	 * Los filtros puestos, ya como query params. Se arma solo con lo que este
+	 * puesto y NO incluye como se pagina: eso lo pone cada modo encima.
+	 *
+	 * Esta separado justo por eso. Los dos modos filtran con los mismos
+	 * parametros (el backend usa el mismo construirFiltro para las dos rutas),
+	 * asi que si cada uno armara los suyos se irian separando en cuanto alguien
+	 * agregue un filtro y lo ponga solo en uno.
 	 *
 	 * URLSearchParams codifica los espacios como "+", que es una de las dos
 	 * formas que acepta la ruta ("Memoria+RAM" o "Memoria%20RAM"). Comprobado
 	 * contra el backend: las dos devuelven lo mismo.
 	 */
-	function consulta(despuesDe: number | null): string {
+	function paramsFiltros(): URLSearchParams {
 		const p = new URLSearchParams();
 		p.set('limite', String(POR_TANDA));
-		if (despuesDe !== null) p.set('despues_de', String(despuesDe));
 
 		if (texto(nombre)) p.set('nombre', texto(nombre));
 		if (idCategoria) p.set('id_categoria', idCategoria);
@@ -392,13 +460,40 @@
 			for (const [clave, valor] of paramsDe(f)) p.set(clave, valor);
 		}
 
+		return p;
+	}
+
+	/** La URL del modo scroll: los filtros mas el cursor. */
+	function consulta(despuesDe: number | null): string {
+		const p = paramsFiltros();
+		if (despuesDe !== null) p.set('despues_de', String(despuesDe));
 		return `/productos?${p.toString()}`;
 	}
 
+	/** La URL del modo paginas: los MISMOS filtros mas el numero de pagina. */
+	function consultaPagina(numero: number): string {
+		const p = paramsFiltros();
+		p.set('pagina', String(numero));
+		return `/productos/paginacion?${p.toString()}`;
+	}
+
+	/**
+	 * Lo que llama cualquier cambio de filtro, en los dos modos. Reparte aqui
+	 * para que ningun manejador de filtro tenga que saber cual esta puesto.
+	 *
+	 * En paginas se vuelve SIEMPRE a la 1: el filtro nuevo cambia cuantas
+	 * paginas hay, y quedarse en la 7 de algo que ahora tiene 2 deja la pantalla
+	 * vacia sin ninguna explicacion.
+	 */
+	function buscar(): Promise<void> {
+		return modo === 'paginas' ? buscarPagina(1) : buscarCursor();
+	}
+
 	/** Vuelve a empezar: cambio un filtro, la lista anterior ya no vale. */
-	async function buscar() {
+	async function buscarCursor() {
 		cargando = true;
 		error = '';
+		falloAlTraerMas = false;
 		const r = await pedir<Tanda>(consulta(null));
 		if (r.ok && r.payload) {
 			productos = r.payload.productos;
@@ -417,14 +512,113 @@
 	async function verMas() {
 		if (cursor === null || trayendoMas) return;
 		trayendoMas = true;
+		falloAlTraerMas = false;
 		const r = await pedir<Tanda>(consulta(cursor));
 		if (r.ok && r.payload) {
 			productos = [...productos, ...r.payload.productos];
 			cursor = r.payload.siguiente_cursor;
 		} else {
 			error = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			falloAlTraerMas = true;
 		}
 		trayendoMas = false;
+	}
+
+	/**
+	 * Una pagina concreta. REEMPLAZA la lista, no la acumula: en este modo lo
+	 * que se ve es la pagina, no todo lo que se ha recorrido.
+	 *
+	 * La lista anterior se deja en pantalla mientras carga y solo se vacia si
+	 * falla. Vaciarla antes pintaria "Ningun producto coincide" en el hueco
+	 * entre pedir y recibir, que es decir que no hay nada cuando todavia no se
+	 * sabe.
+	 */
+	async function buscarPagina(numero: number) {
+		cargando = true;
+		error = '';
+		avisoSalto = '';
+		falloAlTraerMas = false;
+		const r = await pedir<TandaPaginada>(consultaPagina(numero));
+		if (r.ok && r.payload) {
+			productos = r.payload.productos;
+			// La pagina se toma de la respuesta y no de `numero`: el backend es
+			// quien decide cual sirvio, y asi la cuenta de abajo dice lo que se
+			// esta viendo de verdad.
+			pagina = r.payload.pagina;
+			totalPaginas = r.payload.total_paginas;
+			totalProductos = r.payload.total_productos;
+			saltoA = r.payload.pagina;
+		} else {
+			productos = [];
+			totalPaginas = 0;
+			totalProductos = 0;
+			// Se guarda la pedida, no la anterior: es la que tiene que reintentar.
+			pagina = numero;
+			error = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+		}
+		// El cursor es del otro modo. Dejarlo con valor pintaria "Ver mas
+		// productos" debajo de una pagina, y esa tanda no seria la siguiente
+		// pagina sino la continuacion de otro recorrido.
+		cursor = null;
+		cargando = false;
+		primeraVez = false;
+	}
+
+	/**
+	 * Ir a una pagina, si existe. Los extremos ya vienen deshabilitados en el
+	 * markup; esto es el segundo cierre, por si se llama desde otro sitio.
+	 */
+	function irA(numero: number) {
+		if (cargando) return;
+		if (numero < 1 || numero > totalPaginas) return;
+		buscarPagina(numero);
+	}
+
+	/**
+	 * El salto a mano. Va en un <form> para que Enter dentro de la caja valga
+	 * igual que el boton; sin prevenir el envio el navegador recarga la pagina y
+	 * se pierden todos los filtros puestos.
+	 */
+	function saltar(evento: SubmitEvent) {
+		evento.preventDefault();
+		avisoSalto = '';
+		const numero = Number(texto(saltoA));
+		if (!Number.isInteger(numero) || numero < 1 || numero > totalPaginas) {
+			avisoSalto =
+				totalPaginas > 0
+					? `Escribe un numero de pagina entre 1 y ${totalPaginas}.`
+					: 'Todavia no hay paginas que recorrer.';
+			return;
+		}
+		buscarPagina(numero);
+	}
+
+	/**
+	 * Cambiar de forma de recorrer. Se vuelve a preguntar en vez de reaprovechar
+	 * lo que hay en pantalla: la lista del scroll puede llevar cuatro tandas
+	 * acumuladas, y eso no es "la pagina 1" de nada.
+	 */
+	function cambiarModo(nuevo: Modo) {
+		if (modo === nuevo) return;
+		modo = nuevo;
+		avisoSalto = '';
+		if (nuevo === 'paginas') buscarPagina(1);
+		else buscarCursor();
+	}
+
+	/**
+	 * Un fallo no borra los filtros: reintentar vuelve a pedir exactamente lo
+	 * mismo que fallo, y solo eso.
+	 *
+	 * El error se limpia aqui y no dentro de verMas() (que no lo toca) porque si
+	 * no, un "Ver mas" que si llega a la segunda deja el parrafo rojo puesto
+	 * debajo de una lista que ya se completo.
+	 */
+	function reintentar() {
+		error = '';
+		if (falloAlTraerMas) verMas();
+		else if (modo === 'paginas') buscarPagina(pagina);
+		else buscarCursor();
 	}
 
 	/** El selector de categoria sale de GET /categorias, que es publica. */
@@ -665,6 +859,19 @@
 		return p.total_ofertas === 0 ? 'sin-oferta' : 'agotado';
 	}
 
+	/**
+	 * Los id de los productos cuya portada no cargo.
+	 *
+	 * Va en estado y no poniendo una clase desde el manejador: Svelte borra del
+	 * bundle los selectores que no ve escritos en el markup, asi que una clase
+	 * agregada por JS se queda sin CSS y en silencio.
+	 */
+	let rotas = $state<number[]>([]);
+
+	function marcarRota(id: number) {
+		if (!rotas.includes(id)) rotas = [...rotas, id];
+	}
+
 	function portada(p: Producto): string | null {
 		for (const v of p.variantes) {
 			if (v.imagenes && v.imagenes.length > 0) return v.imagenes[0];
@@ -704,22 +911,59 @@
 <main>
 	<div class="env">
 		<div class="intro">
-			<h1>El catalogo</h1>
-			<p>
-				{#if cargando}
-					Buscando...
-				{:else if error}
-					&nbsp;
-				{:else}
-					{productos.length}
-					{productos.length === 1 ? 'producto' : 'productos'}
-					{hayFiltro
-						? productos.length === 1
-							? 'que coincide'
-							: 'que coinciden'
-						: 'en la tienda'}{cursor !== null ? ' y hay mas' : ''}
-				{/if}
-			</p>
+			<div>
+				<h1>El catalogo</h1>
+				<p>
+					{#if cargando}
+						Buscando...
+					{:else if error}
+						&nbsp;
+					{:else if modo === 'paginas'}
+						<!-- Aqui la cuenta es la del catalogo entero, no la de lo que se ve:
+						     el $facet de la ruta cuenta todo lo que pasa el filtro, y decir
+						     "12 productos" estando en la pagina 3 de 9 seria mentir. -->
+						{totalProductos}
+						{totalProductos === 1 ? 'producto' : 'productos'}
+						{hayFiltro
+							? totalProductos === 1
+								? 'que coincide'
+								: 'que coinciden'
+							: 'en la tienda'}{totalPaginas > 1 ? `, en ${totalPaginas} paginas` : ''}
+					{:else}
+						{productos.length}
+						{productos.length === 1 ? 'producto' : 'productos'}
+						{hayFiltro
+							? productos.length === 1
+								? 'que coincide'
+								: 'que coinciden'
+							: 'en la tienda'}{cursor !== null ? ' y hay mas' : ''}
+					{/if}
+				</p>
+			</div>
+
+			<!--
+				El interruptor entre las dos formas de recorrer el catalogo. Las dos
+				piden lo mismo al backend con los mismos filtros; lo unico que cambia
+				es la ruta y como se pide la siguiente tanda.
+			-->
+			<div class="modos" role="group" aria-label="Forma de recorrer el catalogo">
+				<button
+					type="button"
+					class:activo={modo === 'scroll'}
+					aria-pressed={modo === 'scroll'}
+					onclick={() => cambiarModo('scroll')}
+				>
+					Scroll
+				</button>
+				<button
+					type="button"
+					class:activo={modo === 'paginas'}
+					aria-pressed={modo === 'paginas'}
+					onclick={() => cambiarModo('paginas')}
+				>
+					Paginas
+				</button>
+			</div>
 		</div>
 
 		<!-- Los filtros. Cada cambio vuelve a preguntarle al backend -->
@@ -955,11 +1199,20 @@
 		</section>
 
 		{#if error}
-			<p class="error">{error}</p>
+			<p class="error">
+				{error}
+				<button type="button" class="enlace" onclick={reintentar}>Reintentar</button>
+			</p>
 		{/if}
 
-		{#if cargando && primeraVez}
-			<p class="vacio">Cargando el catalogo...</p>
+		<!--
+			"Todavia no se sabe" no se pinta igual que "no hay nada". Mientras se
+			espera una respuesta y no hay lista que ensenar, esto dice que se esta
+			buscando; el mensaje de "ningun producto coincide" solo aparece cuando ya
+			contesto el backend.
+		-->
+		{#if cargando && productos.length === 0}
+			<p class="vacio">{primeraVez ? 'Cargando el catalogo...' : 'Buscando productos...'}</p>
 		{:else if productos.length === 0 && !error}
 			<p class="vacio">
 				Ningun producto coincide con lo que buscaste.
@@ -990,8 +1243,18 @@
 				<article class="tarjeta">
 					<a class="cara" href="/producto/{p._id}">
 						<div class="foto">
-							{#if portada(p)}
-								<img src={portada(p)} alt={p.nombre} loading="lazy" />
+							<!-- Una portada que no carga se trata igual que no tenerla.
+							     Las urls son de fuera (Wikimedia), y cuando una se cae el
+							     navegador deja su icono de imagen rota con el texto alt al
+							     lado: se ve peor que el hueco limpio de "Sin imagen", y
+							     ademas parece un fallo de la pagina y no del enlace. -->
+							{#if portada(p) && !rotas.includes(p._id)}
+								<img
+									src={portada(p)}
+									alt={p.nombre}
+									loading="lazy"
+									onerror={() => marcarRota(p._id)}
+								/>
 							{:else}
 								<span class="sin-foto">Sin imagen</span>
 							{/if}
@@ -1055,12 +1318,59 @@
 			{/each}
 		</div>
 
-		{#if cursor !== null && productos.length > 0}
+		{#if modo === 'scroll' && cursor !== null && productos.length > 0}
 			<div class="mas">
 				<button type="button" onclick={verMas} disabled={trayendoMas}>
 					{trayendoMas ? 'Trayendo...' : 'Ver mas productos'}
 				</button>
 			</div>
+		{/if}
+
+		<!--
+			La barra de paginas. Solo con total_paginas > 0: cuando el filtro no
+			encuentra nada no hay ninguna pagina que recorrer, y ensenar "Pagina 1
+			de 0" con las dos flechas muertas no dice nada que el mensaje de vacio
+			no diga ya.
+		-->
+		{#if modo === 'paginas' && totalPaginas > 0}
+			<nav class="paginacion" aria-label="Paginas del catalogo">
+				<button
+					type="button"
+					onclick={() => irA(pagina - 1)}
+					disabled={cargando || pagina <= 1}
+				>
+					Anterior
+				</button>
+
+				<span class="cuenta" aria-live="polite">Pagina {pagina} de {totalPaginas}</span>
+
+				<button
+					type="button"
+					onclick={() => irA(pagina + 1)}
+					disabled={cargando || pagina >= totalPaginas}
+				>
+					Siguiente
+				</button>
+
+				<!-- El salto directo es lo unico que el modo cursor no puede hacer:
+				     la ruta de paginacion no necesita haber pedido las anteriores. -->
+				<form class="salto" onsubmit={saltar}>
+					<label for="p-salto">Ir a la pagina</label>
+					<input
+						id="p-salto"
+						type="number"
+						min="1"
+						max={totalPaginas}
+						step="1"
+						bind:value={saltoA}
+					/>
+					<button type="submit" disabled={cargando}>Ir</button>
+				</form>
+			</nav>
+
+			{#if avisoSalto}
+				<p class="aviso-salto">{avisoSalto}</p>
+			{/if}
 		{/if}
 	</div>
 </main>
@@ -1073,12 +1383,53 @@
 	}
 
 	.intro {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		justify-content: space-between;
+		gap: 1rem;
 		margin-bottom: 1.75rem;
 	}
 
 	.intro p {
 		color: var(--gris);
 		margin-top: 0.35rem;
+	}
+
+	/* Un interruptor de dos, no dos botones sueltos: el borde compartido dice
+	   que son la misma decision y que solo uno puede estar puesto. */
+	.modos {
+		display: flex;
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		overflow: hidden;
+	}
+
+	.modos button {
+		padding: 7px 16px;
+		font-family: inherit;
+		font-size: 0.88rem;
+		color: var(--gris);
+		background: var(--blanco);
+		border: none;
+		cursor: pointer;
+		transition:
+			color var(--t),
+			background var(--t);
+	}
+
+	.modos button + button {
+		border-left: 1px solid var(--linea);
+	}
+
+	.modos button:hover:not(.activo) {
+		color: var(--indigo);
+		background: var(--indigo-cl);
+	}
+
+	.modos button.activo {
+		color: var(--blanco);
+		background: var(--indigo);
 	}
 
 	/* ---------- filtros ---------- */
@@ -1480,6 +1831,116 @@
 		cursor: default;
 	}
 
+	/* ---------- la barra de paginas ---------- */
+
+	.paginacion {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: center;
+		justify-content: center;
+		gap: 0.7rem;
+		margin-top: 2.25rem;
+	}
+
+	/* Solo los hijos directos: los del formulario de salto tienen lo suyo. */
+	.paginacion > button {
+		padding: 9px 18px;
+		font-family: inherit;
+		font-size: 0.92rem;
+		color: var(--tinta);
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		cursor: pointer;
+		transition:
+			border-color var(--t),
+			color var(--t),
+			background var(--t);
+	}
+
+	.paginacion > button:hover:not(:disabled) {
+		color: var(--indigo);
+		background: var(--indigo-cl);
+		border-color: var(--indigo);
+	}
+
+	/* En los extremos el boton se queda, apagado: quitarlo moveria los demas de
+	   sitio en cada pagina y habria que volver a buscar donde quedo el otro. */
+	.paginacion > button:disabled {
+		color: var(--gris-2);
+		background: var(--panel);
+		cursor: default;
+	}
+
+	.cuenta {
+		min-width: 125px;
+		text-align: center;
+		font-size: 0.94rem;
+		color: var(--texto);
+	}
+
+	.salto {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		margin-left: 0.6rem;
+		padding-left: 1.1rem;
+		border-left: 1px solid var(--linea);
+	}
+
+	.salto label {
+		font-size: 0.86rem;
+		color: var(--gris);
+	}
+
+	.salto input {
+		width: 74px;
+		padding: 8px 10px;
+		font-family: inherit;
+		font-size: 0.92rem;
+		color: var(--tinta);
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		transition: border-color var(--t);
+	}
+
+	.salto input:focus {
+		outline: none;
+		border-color: var(--indigo);
+	}
+
+	.salto button {
+		padding: 8px 15px;
+		font-family: inherit;
+		font-size: 0.9rem;
+		color: var(--blanco);
+		background: var(--indigo);
+		border: 1px solid var(--indigo);
+		border-radius: var(--r);
+		cursor: pointer;
+		transition:
+			background var(--t),
+			border-color var(--t);
+	}
+
+	.salto button:hover:not(:disabled) {
+		background: var(--indigo-os);
+		border-color: var(--indigo-os);
+	}
+
+	.salto button:disabled {
+		opacity: 0.6;
+		cursor: default;
+	}
+
+	.aviso-salto {
+		margin-top: 0.6rem;
+		text-align: center;
+		font-size: 0.86rem;
+		color: var(--rojo);
+	}
+
 	@media (max-width: 620px) {
 		.campo.corto {
 			max-width: none;
@@ -1488,6 +1949,12 @@
 		.rejilla {
 			grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
 			gap: 0.9rem;
+		}
+		/* En una fila propia, la raya vertical y el sangrado separan de nada. */
+		.salto {
+			margin-left: 0;
+			padding-left: 0;
+			border-left: none;
 		}
 	}
 </style>
