@@ -730,7 +730,12 @@ foreach ($col in $COLECCIONES_CARGADAS) {
     if ($esperados -notmatch '^\d+$') {
         # No se pudo contar del otro lado. No se inventa un veredicto: se dice.
         Aviso "$nombre  $cuenta  (no se pudo contar en PostgreSQL para comparar)"
-    } elseif ([int]$cuenta -ne [int]$esperados) {
+    } elseif ([int]$cuenta -lt [int]$esperados) {
+        # -lt y no -ne: que Mongo tenga MAS que PostgreSQL es lo normal, no un
+        # fallo. Un producto publicado desde el panel nace solo en Mongo y no
+        # tiene fila del otro lado (ver docs/base-de-datos.md, "El catalogo se
+        # mudo a MongoDB"). Con -ne, cada producto creado desde la app dejaba
+        # el arranque en rojo con todo bien cargado.
         $faltantes += "$nombre ($cuenta de $esperados)"
     } else {
         Ok "$nombre  $cuenta de $esperados"
