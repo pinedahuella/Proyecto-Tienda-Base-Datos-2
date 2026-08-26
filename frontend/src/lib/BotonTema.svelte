@@ -42,6 +42,11 @@
 	button {
 		width: 38px;
 		height: 38px;
+		/* Sin esto se come el icono: el boton mide 38 de ancho y el
+		   relleno global de los botones (8px 16px) le deja 6 al svg,
+		   que es de 19. Un boton de icono con medida fija no lleva
+		   relleno, lo centra `place-items`. */
+		padding: 0;
 		display: grid;
 		place-items: center;
 		background: none;

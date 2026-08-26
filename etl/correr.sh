@@ -26,7 +26,7 @@ BASE="${1:-$DB_NAME}"
 #
 # Las OFERTAS no se migran: se quedan en PostgreSQL. Precio, stock y estado
 # cambian en cada venta, y copiarlos aqui obligaria a sostenerlos al dia en dos
-# bases a la vez. Lo que si viaja son cuatro numeros agregados por producto
+# bases a la vez. Lo que si viaja son cinco numeros agregados por producto
 # (precio_tienda, stock_tienda, stock_total, total_ofertas), que los calcula
 # extraer.sql y son los que la LISTA del catalogo necesita en cada tarjeta.
 #

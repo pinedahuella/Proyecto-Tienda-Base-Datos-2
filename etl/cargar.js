@@ -37,7 +37,7 @@
 // exactamente el riesgo de inconsistencia que el proyecto quiere evitar. Se
 // quedan en PostgreSQL, que es donde ademas se decide si alcanza para vender.
 //
-// Lo unico que viaja de ellas son cuatro numeros AGREGADOS por producto
+// Lo unico que viaja de ellas son cinco numeros AGREGADOS por producto
 // (precio_tienda, stock_tienda, stock_total, total_ofertas), que los calcula
 // extraer.sql. Esos si son copias, pero de un dato agregado y para pintar una
 // tarjeta: si quedan viejos la lista miente un rato, no se vende de mas.

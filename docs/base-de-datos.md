@@ -3,6 +3,13 @@
 Modelo relacional en PostgreSQL. **36 tablas construidas** de las 39 del
 diagrama; faltan las tres de la parte social (comentario, resena y likes).
 
+> **Los numeros de este documento describen el conjunto de datos que genera
+> `migrations/datos/generador.js` con su semilla fija** -- 102 productos, 202
+> variantes, 552 ofertas y 8 cuentas -- no el estado de una base que ya se uso.
+> Una base sobre la que alguien compro, publico una oferta o creo un producto
+> tiene mas, y eso es normal, no un desajuste. Para volver a los numeros de
+> aqui: `.\arrancar.ps1 -Reiniciar`.
+
 El catalogo de productos ya no vive solo aqui: se migro a MongoDB, y eso cambio
 un par de decisiones de este modelo. Esta explicado abajo, en "El catalogo se
 mudo a MongoDB".
@@ -370,8 +377,23 @@ Tres cosas que ensena esta prueba:
    del pedido 4, ni un pago, ni el pedido cambio de estado: sigue en
    `pendiente`. Revirtio entero, no a medias.
 3. **El saldo lo explica el libro.** 8 - 1 - 6 - 1 = 0, que es lo que dice
-   `oferta.stock`. Medido sobre las 552 ofertas del conjunto: **cero
-   descuadres**, y vuelto a medir despues de comprar y cancelar.
+   `oferta.stock`. Medido sobre **todas** las ofertas, dos veces: primero sobre
+   las 552 del conjunto recien cargado, y despues sobre una base ya usada -- 555
+   ofertas tras comprar, cancelar y publicar a mano. **Cero descuadres las dos
+   veces**, con las dos comprobaciones que tienen sentido: que `oferta.stock`
+   sea el ultimo `stock_resultante` del kardex, y que la suma con signo de todos
+   los movimientos de una oferta de exactamente su saldo.
+
+   ```sql
+   -- que el saldo sea el ultimo renglon del libro
+   WITH ultimo AS (
+     SELECT DISTINCT ON (sm.id_oferta) sm.id_oferta, sm.stock_resultante
+     FROM stock_movimiento sm
+     ORDER BY sm.id_oferta, sm.fecha_movimiento DESC, sm.id_stock_movimiento DESC
+   )
+   SELECT count(*) FILTER (WHERE o.stock <> COALESCE(u.stock_resultante, 0)) AS descuadres
+   FROM oferta o LEFT JOIN ultimo u ON u.id_oferta = o.id_oferta;
+   ```
 
 Lo que lo consigue es una sola linea, el `SELECT ... FOR UPDATE` sobre la fila
 de `Oferta` dentro de `comprar_pedido`. La segunda conexion se queda esperando
@@ -383,11 +405,79 @@ descontara stock por su cuenta se lo saltaria.
 
 ---
 
+## Registro de decisiones arquitectonicas
+
+Las tres decisiones de tecnologia de esta entrega, en el formato que pide el
+enunciado (seccion 5.3): contexto, alternativas consideradas, decision,
+justificacion con criterios tecnicos, y consecuencias. Abajo, en las secciones
+siguientes, esta el detalle largo de cada una.
+
+Vale la pena leer antes el criterio 5.5 del propio enunciado: *"la
+justificacion de mantener un componente en su forma relacional se evalua con el
+mismo nivel de exigencia que la justificacion de una migracion"*. Por eso la
+segunda de las tres es una decision de **no** migrar, y esta argumentada con el
+mismo cuidado que la primera.
+
+### ADR-1 · Migrar el catalogo de productos a MongoDB
+
+| | |
+|---|---|
+| **Contexto** | Cada categoria necesita atributos distintos: los de una laptop no se parecen a los de una camisa. En el modelo relacional eso caia en `descripcion` como texto libre, y por lo tanto **no se podia filtrar por atributo**. Medido sobre el conjunto: ningun producto llena el 100% de lo que su categoria ofrece y el promedio esta en **59%**, asi que una tabla de columnas fijas quedaria mayormente nula. |
+| **Alternativas consideradas** | (a) Dejarlo como estaba, con todo en `descripcion`: barato, pero renuncia a filtrar por atributo, que es una funcionalidad que el enunciado pide. (b) Entidad-atributo-valor en PostgreSQL: permite filtrar, pero cada consulta con dos atributos necesita un `JOIN` por atributo y el plan se degrada rapido. (c) `jsonb` en PostgreSQL: intermedio real, y honestamente viable. (d) Migrar a MongoDB. |
+| **Decision** | (d). El catalogo -- productos, variantes, caracteristicas, imagenes e historial -- vive en MongoDB. Se descarto (c) porque el enunciado de esta entrega pide explicitamente una base documental y ejercitar su marco de agregacion y sus indices; con `jsonb` se resolveria el problema pero no el ejercicio. |
+| **Justificacion** | **Patron de consulta:** el catalogo se lee entero y por producto, casi nunca por partes, que es exactamente la forma de un documento. **Escalabilidad:** los atributos se agregan sin migracion de esquema. **Costo operativo:** un motor mas que levantar y mantener, y dos backups en vez de uno. **Consistencia:** es lo que se paga, y va abajo. |
+| **Consecuencias** | Se gana filtrar por atributo, una ficha sin `JOIN` y agregar caracteristicas sin tocar el esquema. Se pierde la integridad referencial entre las lineas de pedido y los productos: `pedido_producto.id_producto_mongo` **no es** una llave foranea y no puede serlo, asi que ese enlace lo sostiene la aplicacion. Y aparece un ETL que hay que mantener. |
+
+### ADR-2 · NO migrar las ofertas: se quedan en PostgreSQL
+
+| | |
+|---|---|
+| **Contexto** | Al volverse multi-vendedor, quien vende, a que precio y con cuantas unidades dejo de ser del producto y paso a ser una fila de `oferta`. La pregunta es si esa fila se va con el catalogo a MongoDB o se queda. |
+| **Alternativas consideradas** | (a) Embeberlas dentro del documento del producto. (b) Coleccion propia en MongoDB. (c) Dejarlas en PostgreSQL. |
+| **Decision** | (c). Ni siquiera tienen coleccion en la base documental. Lo unico que viaja son cinco numeros ya calculados (`precio_tienda`, `precio_desde`, `stock_tienda`, `stock_total`, `total_ofertas`), para que la lista del catalogo se pinte sin salir de Mongo. |
+| **Justificacion** | **Consistencia, y es el criterio que decide:** el descuento de inventario tiene que ser atomico y no vender dos veces la ultima unidad. Eso lo sostiene un `SELECT ... FOR UPDATE` dentro de `comprar_pedido()`; medido, cero sobreventas y cero descuadres sobre 555 ofertas. **Tasa de cambio:** precio, stock y estado cambian en cada venta, y una copia en la base documental habria que sostenerla al dia en dos sitios. **Patron de consulta:** embeberlas ademas seria peor, porque Mongo reescribe el documento entero en cada actualizacion -- comprar una camisa reescribiria su catalogo completo, y dos vendedores vendiendo a la vez pelearian por el mismo documento. **Volumen:** NO es el motivo; un documento aguanta 16 MB y ningun producto va a tener tantos vendedores. |
+| **Consecuencias** | La ficha de un producto necesita dos consultas, una a cada base -- pero es una sola consulta indexada y ya se pagaba. Los cinco numeros calculados son una copia y hay que recalcularlos cada vez que una oferta cambia de precio, se quede sin unidades o se pause; si no, la tarjeta dice un precio y la ficha otro. Ese recalculo esta en `recalcularCamposCalculados()` y es deuda asumida a conciencia. |
+
+### ADR-3 · Las imagenes, embebidas dentro de su variante
+
+| | |
+|---|---|
+| **Contexto** | Cada variante tiene sus fotos. En el relacional eran dos tablas, `imagen_producto` y su pivote con la variante. |
+| **Alternativas consideradas** | (a) Coleccion aparte en MongoDB, referenciada. (b) Embebidas en el producto. (c) Embebidas en la variante. |
+| **Decision** | (c). Un arreglo de URLs dentro de cada variante. |
+| **Justificacion** | **Frecuencia de acceso conjunto:** no existe ninguna pantalla que pida una imagen sin su variante. **Volumen:** son URLs, no archivos, y son pocas y acotadas. **Tasa de cambio:** cambian al ritmo del catalogo, que es lento. Se eligio (c) sobre (b) porque la foto es de la variante -- la camisa azul y la blanca no comparten imagen. |
+| **Consecuencias** | Desaparece la columna `numero_orden`: en un arreglo la posicion **es** el orden, y guardarlo aparte seria un dato duplicado que se puede desincronizar. A cambio, reordenar las fotos obliga a reescribir el arreglo, que es exactamente la operacion que uno quiere ahi. |
+
+---
+
 ## El catalogo se mudo a MongoDB
 
-Los productos, sus variantes, sus caracteristicas y su historial se leen desde
-MongoDB. PostgreSQL sigue siendo el dueno: el ETL de `etl/` extrae de aqui y
-escribe alla, y cada documento se reemplaza entero.
+Los productos, sus variantes, sus caracteristicas y su historial viven en
+MongoDB.
+
+**Y viven ahi de verdad: la migracion esta terminada, no es una copia que se
+sostiene en dos sitios.** Conviene decirlo con precision porque es la decision
+de la entrega, y aqui antes decia lo contrario ("PostgreSQL sigue siendo el
+dueño"), que dejo de ser cierto y no se corrigio a tiempo:
+
+- Las tablas `productos`, `productos_variantes` y `productos_historial` de
+  PostgreSQL son el **origen** de la migracion. De ahi salio el conjunto de
+  datos de prueba, y de ahi lo sigue leyendo el ETL de `etl/` para poder
+  reconstruir MongoDB desde cero cuando haga falta.
+- Pero la aplicacion **ya no escribe ahi**. `POST /vendedor/productos` y
+  `PATCH /vendedor/productos/:id` tocan MongoDB y nada mas -- el propio
+  servicio lo dice: *"los productos ya no se registran en PostgreSQL (las
+  migraciones de productos fueron solo para el ETL que cargo los datos de
+  prueba)"*.
+- Se nota contandolos. Hoy: **102 filas en `productos` de PostgreSQL y 105
+  documentos en MongoDB**. Los tres de diferencia se crearon desde el panel y
+  no tienen fila del otro lado. La diferencia no es un desajuste que haya que
+  arreglar: es la prueba de que la migracion se completo.
+
+De ahi salen las dos reglas que gobiernan el ETL, y que estan explicadas en
+`etl/README.md`: solo manda sobre **su tramo** (del id 1 al mas alto que trajo
+de PostgreSQL) y ahi si reemplaza el documento entero; lo que nacio en Mongo
+por encima de ese tope ni lo toca ni lo cuenta.
 
 Los id que viven en Mongo llevan el sufijo **`_mongo`** en la linea del pedido.
 **No son llaves foraneas y no pueden serlo**: PostgreSQL no puede garantizar
@@ -440,14 +530,76 @@ PostgreSQL con una sola consulta indexada. Es un cruce entre las dos bases que
 resuelve la aplicacion, no una llave foranea -- y eso es exactamente lo que la
 entrega pide documentar.
 
+**Las resenas: REFERENCIADAS.** Todavia no estan construidas -- la parte social
+entra en una entrega posterior -- pero la decision se toma ahora, porque es una
+de las tres que el enunciado pide argumentar y porque condiciona donde se
+guardan cuando toque escribirlas.
+
+Van **fuera del documento del producto**, en `Resena` de PostgreSQL, colgando de
+`Oferta`. Los tres criterios, uno por uno:
+
+**Frecuencia de acceso conjunto: baja, y esa es la trampa.** Parece que si --
+uno piensa en la ficha del producto, que las ensena. Pero la ficha es una
+pantalla de las dos que leen el catalogo, y la otra, la LISTA, es la que se pide
+todo el tiempo y no las necesita para nada: una tarjeta ensena foto, nombre y
+precio. Embeberlas haria que cada tanda de 20 productos arrastrara las resenas
+de los 20, para pintar cero. Y ni siquiera la ficha las quiere enteras: las
+quiere paginadas, diez a la vez, que es justo lo que un arreglo embebido no
+sabe hacer sin traerse el arreglo completo.
+
+**Volumen: no tienen techo, y este es el criterio que decide.** Es la diferencia
+de fondo con las variantes y las caracteristicas, que si van embebidas: un
+producto tiene dos o tres variantes y ocho caracteristicas, y ese numero **esta
+acotado por el modelo**. Las resenas crecen mientras el producto se venda, sin
+limite. Mongo tiene un tope duro de 16 MB por documento, pero el problema
+aparece mucho antes: el documento se hace grande para TODOS los que lo leen,
+incluido quien solo queria el precio.
+
+**Tasa de cambio: baja por resena, alta por producto.** Una resena se escribe
+una vez y casi nunca se edita, y eso, aislado, favoreceria embeber. Pero lo que
+importa no es cuanto cambia una resena: es cuantas veces cambia el DOCUMENTO que
+las contendria. Mongo reescribe el documento entero en cada actualizacion, asi
+que cada resena nueva reescribiria el producto completo -- sus variantes, sus
+imagenes y sus caracteristicas -- y dos personas resenando a la vez pelearian
+por el mismo documento. Es exactamente el argumento que ya descarto embeber las
+ofertas.
+
+**Y hay un cuarto motivo, propio de este modelo:** la resena cuelga de la
+**oferta**, no del producto (ver mas abajo, "La resena es de la oferta"). Las
+ofertas se quedaron en PostgreSQL, asi que embeber la resena en el documento del
+producto la separaria de su padre y dejaria la calificacion de un vendedor
+guardada en la ficha de una cosa que no es suya.
+
+**Lo que se paga:** la ficha necesita una consulta mas para traerlas. Es un
+costo que ya estaba pagado: la ficha **ya** hace una segunda consulta a
+PostgreSQL para las ofertas, asi que las resenas viajan en esa misma ida y no
+agregan un viaje.
+
+**Y lo que se gana de cara a lo que viene:** la Entrega 2 pide detectar
+*"conjuntos de cuentas que se califican entre si de forma reiterada sobre los
+mismos productos"*. Eso es recorrer relaciones entre cuentas, no leer un
+documento; con las resenas sueltas y apuntando a usuario y oferta, ese camino
+queda abierto -- embebidas dentro del producto, habria que deshacerlo primero.
+
 **El caso simetrico, para que se vea que la pregunta se contesta por caso y no
 por costumbre:** si algun dia hiciera falta llevar las ofertas a Mongo, el
 vendedor iria **embebido dentro de cada una**. Son cuatro campos, se leen
 siempre con ella ("Vendido por Carlos Ramirez") y casi nunca cambian. La misma
 pregunta, respuesta contraria.
 
+---
+
+**Las tres respuestas juntas**, que es como las pide el enunciado:
+
+| Caso | Decision | El criterio que la decide |
+|---|---|---|
+| Imagenes | **embebidas** en su variante | se leen siempre con ella, son pocas y no cambian |
+| Producto y vendedor | **referenciado** (la oferta se queda en PostgreSQL) | precio, stock y estado cambian en cada venta |
+| Resenas | **referenciadas** | volumen sin techo, y cada una reescribiria el producto entero |
+
 Y como la **lista** del catalogo si necesita un precio y saber si hay
-existencias en cada tarjeta, el producto lleva cuatro numeros calculados:
+existencias en cada tarjeta, el producto lleva cinco numeros calculados
+(aqui decia "cuatro" y la tabla de abajo siempre listo cinco):
 
 | Campo | Que es |
 |---|---|
@@ -459,10 +611,24 @@ existencias en cada tarjeta, el producto lleva cuatro numeros calculados:
 
 **Por que hay dos precios y no uno.** La tarjeta ensena el de la tienda, que es
 la regla del profesor. Pero el FILTRO del buscador usa `precio_desde`: quien
-busca "hasta Q4000" quiere lo que puede pagar con eso, y en 21 de los 34
-productos del conjunto hay alguien vendiendolo mas barato que la tienda. Con el
-filtro sobre `precio_tienda` esos quedaban fuera de la busqueda aunque si le
-sirvieran. Es un fallo que solo se ve buscando, no leyendo el modelo.
+busca "hasta Q4000" quiere lo que puede pagar con eso, y en **59 de los 102**
+productos del conjunto hay alguien vendiendolo mas barato que la tienda -- mas
+de la mitad. Con el filtro sobre `precio_tienda` esos quedaban fuera de la
+busqueda aunque si le sirvieran. Es un fallo que solo se ve buscando, no
+leyendo el modelo.
+
+```sql
+-- los productos donde alguien vende mas barato que la tienda
+WITH t AS (SELECT id_usuario FROM usuarios WHERE correo_electronico = 'tienda@mesh.com')
+SELECT count(*) FROM (
+  SELECT o.id_producto_mongo,
+         min(o.precio) FILTER (WHERE o.id_usuario = (SELECT id_usuario FROM t)) AS precio_tienda,
+         min(o.precio) AS precio_desde
+  FROM oferta o JOIN estado_oferta eo USING (id_estado_oferta)
+  WHERE eo.estado_oferta_nombre = 'activa'
+  GROUP BY 1
+) x WHERE precio_desde < precio_tienda;
+```
 
 Y `precio_desde` **no mira el stock**, a proposito: si lo mirara, un rango de
 precio estaria filtrando ademas por disponibilidad sin que nadie lo pida, y para
@@ -618,7 +784,7 @@ conocida del modelo relacional para este caso, y esta anotada dentro del diagram
 
 No basta con decir que los atributos varian: hay que ensenarlo. En el conjunto
 de datos, **ningun producto llena el 100%** de lo que su categoria ofrece, y el
-promedio esta en **57%**.
+promedio esta en **59%**.
 
 Eso fue deliberado. La primera version tenia las paletas hechas a la medida de
 los productos, y casi todos las llenaban enteras: asi el modelo parece una tabla

@@ -36,7 +36,9 @@
 		checkoutAbierto = true;
 	}
 
-	function alComprado(_resultado: ResultadoCompra) {
+	function alComprado(resultado: ResultadoCompra) {
+		const comprado = idPedidoAComprar;
+
 		checkoutAbierto = false;
 		// El pedido dejo de estar pendiente, asi que ya no es "el carrito". Sin
 		// olvidarlo, el panel volveria a abrir un pedido comprado como si fuera
@@ -45,6 +47,21 @@
 		carrito.fijarCuenta(0);
 		idPedidoAComprar = null;
 		lineasAComprar = [];
+
+		// Y se sale de la pantalla en la que estaba.
+		//
+		// Antes la compra terminaba aqui: se cerraba el checkout y la persona
+		// se quedaba en la misma ficha, enseñando las existencias de ANTES de
+		// comprar. El descuento habia pasado en la base, pero en pantalla no
+		// se movia nada.
+		//
+		// El id sale de `resultado` si el backend lo devolvio, y si no del que
+		// se mando a comprar: son el mismo pedido, pero el segundo es texto y
+		// el primero puede venir como numero (los bigint del proyecto viajan
+		// como texto a proposito, asi que no se pasa por Number, se pasa a
+		// String).
+		const id = resultado.id_pedido != null ? String(resultado.id_pedido) : comprado;
+		goto(id ? `/gracias?pedido=${encodeURIComponent(id)}` : '/gracias');
 	}
 
 	function sesionExpirada() {
@@ -107,6 +124,15 @@
 		--indigo-cl: #e8ebf7;
 
 		--rojo: #b3352c;
+		--rojo-cl: #fbeceb;
+
+		/* El texto que va ENCIMA del indigo. En claro el indigo es oscuro y
+		   lleva letra blanca; en oscuro el indigo se aclara para verse sobre
+		   el fondo, asi que la letra tiene que oscurecerse o el boton
+		   principal queda ilegible. Por eso es una variable y no un blanco
+		   fijo: es el unico color que se invierte entre los dos temas. */
+		--sobre-indigo: #ffffff;
+		--sobre-rojo: #ffffff;
 
 		/* La trama va apenas por encima del fondo. Si se sube mas, los hilos
 		   cruzan por detras de las letras y el texto se vuelve dificil de leer. */
@@ -136,6 +162,11 @@
 		--indigo-cl: #1c2447;
 
 		--rojo: #e08b81;
+		--rojo-cl: #2e1b1a;
+
+		/* Se invierten: aqui el indigo y el rojo son claros. */
+		--sobre-indigo: #10142a;
+		--sobre-rojo: #2a1210;
 
 		--hilo: #191f3a;
 	}
@@ -199,6 +230,211 @@
 
 	:global(a) {
 		color: inherit;
+	}
+
+	/* ══════════════════════════════════════════════════════════
+	   CONTROLES
+
+	   Un <button> del navegador NO hereda la tipografia: sale en
+	   Arial 13.3px con su caja gris. Medido en el panel: 185 de 192
+	   botones salian asi. No era que nadie estilara nada -- 15 de los
+	   21 componentes lo hacian -- sino que cada uno cubria lo suyo y
+	   nadie cubria el resto; OfertasVendedor, con 13 botones, no
+	   tenia ni una regla. Esto lo arregla de raiz.
+
+	   La base es la que ya usaba `.salir` de Cabecera.svelte, que es
+	   el boton que se veia bien: esa era la forma de la casa, solo
+	   que estaba escrita en un archivo y no en todos.
+
+	   La regla BASE cede ante el componente a proposito: Svelte
+	   compila un `button` con ambito a `button.svelte-xxxx` (0,1,1)
+	   y `:global(button)` es (0,0,1). Asi solo rellena lo que nadie
+	   definio -- y el unico que no definia NADA era OfertasVendedor.
+
+	   Las VARIANTES son al reves: tienen que ganar siempre, o la
+	   misma clase se ve distinta segun donde caiga. `.principal`
+	   suelto seria (0,1,1) y perderia contra las 14 reglas del tipo
+	   `.acciones button` (0,2,0) que hay repartidas por el proyecto,
+	   asi que la clase va DOBLADA -- `.principal.principal` es
+	   (0,2,1) y les gana. Es el truco de siempre para subir
+	   especificidad sin recurrir a !important, que no deja salida.
+	   ══════════════════════════════════════════════════════════ */
+
+	:global(button),
+	:global(.boton) {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 0.45rem;
+		padding: 8px 16px;
+		font-family: inherit;
+		font-size: 0.95rem;
+		line-height: 1.2;
+		color: var(--tinta);
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		cursor: pointer;
+		text-decoration: none;
+		white-space: nowrap;
+		transition:
+			border-color var(--t),
+			background var(--t),
+			color var(--t);
+	}
+
+	:global(button:hover:not(:disabled)),
+	:global(.boton:hover) {
+		border-color: var(--indigo);
+		color: var(--indigo);
+	}
+
+	:global(button:active:not(:disabled)),
+	:global(.boton:active) {
+		transform: translateY(1px);
+	}
+
+	/* La accion principal de cada pantalla: relleno solido. */
+	:global(button.principal.principal),
+	:global(.boton.principal.principal) {
+		color: var(--sobre-indigo);
+		background: var(--indigo);
+		border-color: var(--indigo);
+	}
+	:global(button.principal.principal:hover:not(:disabled)),
+	:global(.boton.principal.principal:hover) {
+		color: var(--sobre-indigo);
+		background: var(--indigo-os);
+		border-color: var(--indigo-os);
+	}
+
+	/* La alternativa de al lado: misma caja, sin relleno. */
+	:global(button.secundario.secundario),
+	:global(.boton.secundario.secundario) {
+		color: var(--tinta);
+		background: none;
+	}
+
+	/* Cancelar, cerrar, retirar. Se rellena solo al pasar por encima:
+	   un boton rojo permanente grita mas de lo que hace falta. */
+	:global(button.peligro.peligro),
+	:global(.boton.peligro.peligro) {
+		color: var(--rojo);
+		background: none;
+		border-color: var(--rojo);
+	}
+	:global(button.peligro.peligro:hover:not(:disabled)),
+	:global(.boton.peligro.peligro:hover) {
+		color: var(--sobre-rojo);
+		background: var(--rojo);
+		border-color: var(--rojo);
+	}
+
+	/* Sin caja: para acciones de tercera fila y para iconos. */
+	:global(button.fantasma.fantasma),
+	:global(.boton.fantasma.fantasma) {
+		padding: 6px 8px;
+		color: var(--gris);
+		background: none;
+		border-color: transparent;
+	}
+	:global(button.fantasma.fantasma:hover:not(:disabled)),
+	:global(.boton.fantasma.fantasma:hover) {
+		color: var(--indigo);
+		background: var(--indigo-cl);
+		border-color: transparent;
+	}
+
+	/* Un boton que se lee como enlace: "Reintentar", "Ver mas".
+	   Ya se usaba en 5 componentes y solo estaba DEFINIDO en 3 --
+	   como el CSS de Svelte tiene ambito, en OfertasVendedor y en
+	   Pedido la clase no existia y esos dos salian con caja. */
+	:global(button.enlace.enlace),
+	:global(.boton.enlace.enlace) {
+		padding: 0;
+		color: var(--indigo);
+		background: none;
+		border: none;
+		text-decoration: underline;
+		text-underline-offset: 3px;
+	}
+	:global(button.enlace.enlace:hover:not(:disabled)),
+	:global(.boton.enlace.enlace:hover) {
+		color: var(--indigo-os);
+	}
+
+	:global(button:disabled) {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	/* Los campos, con la misma caja que los botones: si no, un
+	   formulario mezcla dos alturas y dos radios distintos. */
+	:global(input),
+	:global(select),
+	:global(textarea) {
+		font-family: inherit;
+		font-size: 0.95rem;
+		line-height: 1.4;
+		color: var(--tinta);
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		padding: 8px 11px;
+		transition:
+			border-color var(--t),
+			box-shadow var(--t);
+	}
+
+	:global(textarea) {
+		resize: vertical;
+	}
+
+	:global(input:hover:not(:disabled)),
+	:global(select:hover:not(:disabled)),
+	:global(textarea:hover:not(:disabled)) {
+		border-color: var(--gris-2);
+	}
+
+	:global(input:focus),
+	:global(select:focus),
+	:global(textarea:focus) {
+		border-color: var(--indigo);
+		box-shadow: 0 0 0 3px var(--indigo-cl);
+	}
+
+	/* El foco de un campo ya se ve con el borde y el halo de arriba;
+	   el anillo de :focus-visible encima se veria doble. */
+	:global(input:focus-visible),
+	:global(select:focus-visible),
+	:global(textarea:focus-visible) {
+		outline: none;
+	}
+
+	:global(input:disabled),
+	:global(select:disabled),
+	:global(textarea:disabled) {
+		opacity: 0.55;
+		cursor: not-allowed;
+	}
+
+	/* Las casillas y los radios NO llevan la caja de arriba: son
+	   cuadrados chicos y el padding los deforma. Solo el color. */
+	:global(input[type='checkbox']),
+	:global(input[type='radio']) {
+		width: auto;
+		padding: 0;
+		border: none;
+		background: none;
+		accent-color: var(--indigo);
+		cursor: pointer;
+	}
+
+	:global(input[type='date']),
+	:global(input[type='search']) {
+		/* Los dos traen icono propio de Chrome, que en tema oscuro sale
+		   negro sobre fondo oscuro y no se ve. */
+		color-scheme: light dark;
 	}
 
 	:global(img),

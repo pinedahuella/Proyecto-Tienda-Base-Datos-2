@@ -15,12 +15,12 @@ y `mongosh`, que ya viene en el contenedor de Mongo, corre el JavaScript.
 
 ## Como se corre
 
-Lo normal es no correrlo a mano: `.rrancar.ps1` lo hace solo cuando detecta que
-Mongo esta desfasado, y `.rrancar.ps1 -Etl` lo fuerza. Esa es la via recomendada
+Lo normal es no correrlo a mano: `.\arrancar.ps1` lo hace solo cuando detecta que
+Mongo esta desfasado, y `.\arrancar.ps1 -Etl` lo fuerza. Esa es la via recomendada
 en Windows y **no necesita Git Bash**.
 
 ```powershell
-.rrancar.ps1 -Etl
+.\arrancar.ps1 -Etl
 ```
 
 `arrancar.ps1` no llama a este `correr.sh`: hace los mismos pasos en PowerShell
@@ -111,7 +111,7 @@ aguanta 16 MB y ningun producto va a tener tantos vendedores. Son dos:
   y dos vendedores vendiendo a la vez pelearian por el mismo documento, que es
   lo contrario de lo que pide la Entrega 2.
 
-Lo que si viaja son los cuatro numeros AGREGADOS de arriba. Esos tambien son
+Lo que si viaja son los cinco numeros AGREGADOS de arriba. Esos tambien son
 copias, pero de un dato agregado y para pintar una tarjeta: si quedan viejos la
 lista miente un rato, no se vende de mas.
 
@@ -276,17 +276,30 @@ tener indices. Los dos del catalogo salieron de MEDIR con `explain()`: se
 probaron tres y solo dos se ganaron el puesto, porque un indice que nadie usa no
 es gratis -- cuesta en cada escritura.
 
+Lo medido, con `explain("executionStats")` sobre los **105 productos** y los
+**118 eventos** que hay hoy. Cada consulta se compara contra ella misma con
+`hint({$natural:1})`, que es la forma de preguntarle a Mongo "¿y sin el
+indice?":
+
+| Indice | Consulta | Con el indice | Sin el |
+|---|---|---|---|
+| `catalogo_categoria` | categoria 19, ordenado por `_id` | 6 docs, 7 claves | 105 docs |
+| `catalogo_precio` | hasta Q500 | 51 docs, 53 claves | 105 docs |
+| `eventos_por_producto_fecha` | eventos del producto 51 hasta el 1 de julio | 4 docs, 4 claves | 118 docs |
+
 - **catalogo_categoria** "los productos de esta categoria, sin los ocultos".
   Va sobre `categoria.id_categoria` y NO sobre `categoria.nombre`, porque el
   backend filtra por id: un indice sobre el campo equivocado se ve igual de bien
-  en la lista de indices y no lo usa nadie. Medido: examina 3 documentos para
-  devolver 3, en vez de recorrer los 34.
+  en la lista de indices y no lo usa nadie.
 - **catalogo_precio** "los productos entre tal y tal precio". Va sobre
   `precio_desde`, el mas barato que se puede PAGAR, y no sobre `precio_tienda`,
-  que es el que se ENSENA. Medido: 10 claves para 10 resultados.
+  que es el que se ENSENA. Aqui la ganancia es menor que en el otro, y es
+  esperable: un rango de precio ancho deja fuera poco, asi que el indice ahorra
+  la mitad de los documentos y no el 95%. Con un rango estrecho ahorra mas.
 - **eventos_por_producto_fecha** sirve para las dos primeras etapas de la
   reconstruccion a la vez: la base entra directo al producto y lee su tramo ya
-  ordenado, sin recorrer la coleccion y sin ordenar en memoria.
+  ordenado, sin recorrer la coleccion y sin ordenar en memoria. Es el que mas
+  se nota: 4 documentos contra 118, y crece con cada edicion del catalogo.
 
 Una nota medida, para no prometer de mas: en `catalogo_categoria` el `_id` va al
 final para que el listado salga ordenado del propio indice. Con el filtro tal

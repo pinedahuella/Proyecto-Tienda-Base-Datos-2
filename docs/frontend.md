@@ -11,6 +11,9 @@
 > | `/pedidos` | el pedido abierto y el historial, con su detalle |
 > | `/panel` perfil, direcciones, admin | al dia |
 > | `/panel` vendedor | al dia: ofertas propias, publicar, precio, estado y stock |
+> | `/panel` tienda y admin | al dia: el catalogo paginado, y las ofertas de cada producto al abrirlo |
+> | `/gracias` | al dia: el comprobante despues de comprar |
+> | filtros | catalogo y ofertas filtran en el servidor; la lista del vendedor, en memoria |
 > | `Carrito.svelte` | panel lateral, con seleccion por linea |
 > | `Checkout.svelte` | forma de pago, direccion de entrega y el mock de tarjeta |
 
@@ -35,9 +38,17 @@ sesion se movio a `/entrar` y la cabecera lleva el enlace.
 si se hiciera, un filtro solo alcanzaria a los productos ya descargados y
 mentiria en cuanto haya mas de una tanda.
 
-El panel muestra una cosa u otra segun el rol: un admin ve la gestion de
-usuarios, un vendedor ve sus ofertas y sus productos, y un comprador el resumen. Esconder un
-panel no da permisos -- quien decide es el backend, que responde 403.
+El panel muestra una cosa u otra segun **quien** es la cuenta, no solo segun su
+rol. Un comprador ve el resumen. Un vendedor normal ve sus ofertas. Y quien
+administra el catalogo -- la cuenta `tienda@mesh.com` **o** cualquier admin --
+ve ademas el catalogo compartido, porque el backend les abre las mismas rutas
+(`exigirTiendaOAdmin()` en `/vendedor/productos`, y `resolverIdEfectivo()` en
+`/vendedor/ofertas`, que cambia el id de un admin por el de la tienda). El admin
+ve tambien la gestion de cuentas, que es solo suya.
+
+El rol no basta para decidirlo: los cinco vendedores tienen `id_rol_usuario` 2 y
+solo uno administra el catalogo. Esconder un panel no da permisos -- quien decide
+es el backend, que responde 403 o 404.
 
 ## Archivos
 
@@ -56,8 +67,8 @@ panel no da permisos -- quien decide es el backend, que responde 403.
 | `src/lib/Checkout.svelte` | pagar: forma de pago, direccion de entrega y tarjeta simulada |
 | `src/lib/MisPedidos.svelte` | los pedidos anteriores, con detalle, cancelar e historial del producto |
 | `src/lib/estadoCarrito.svelte.ts` | si el carrito esta abierto y cuantas lineas lleva, compartido |
-| `src/lib/OfertasVendedor.svelte` | las ofertas del vendedor: verlas, editar precio/estado/stock y publicar |
-| `src/lib/PanelVendedor.svelte` | los productos del vendedor, dentro del panel |
+| `src/lib/OfertasVendedor.svelte` | las ofertas: verlas, editar precio/estado/stock y publicar. Con `administraLaTienda` entra por el catalogo paginado en vez de traerlas todas |
+| `src/lib/PanelVendedor.svelte` | el catalogo compartido (alta, edicion e historial por fecha), solo para la tienda o un admin |
 | `src/lib/Direcciones.svelte` | direcciones, dentro del panel |
 | `src/lib/Pedido.svelte` | el pedido abierto y sus lineas, dentro del panel |
 | `src/lib/pedido.ts` | las cuatro rutas de `/comprador/pedidos` y el id del pedido abierto |
@@ -113,14 +124,18 @@ en `backend/elementos Generales/endpoints-productos.md`; aqui solo se dice como
 se traducen a controles.
 
 **Los fijos** son los que existen siempre: `nombre` (busqueda parcial),
-`id_categoria`, `precio_min`, `precio_max`, `estado_variante` y `id_vendedor`.
+`id_categoria`, `precio_min`, `precio_max` y `estado_variante`.
 La casilla "Solo variantes activas" manda `estado_variante=activa`, y el backend
 la mete en el mismo `$elemMatch` que el rango de precio: marcarla con un rango
 puesto pide **una variante que cumpla las dos cosas**, no dos variantes
 distintas que cumplan una cada una.
 
-`id_vendedor` no tiene campo propio porque no hay ruta que liste vendedores. Se
-pone desde la tarjeta, con "Ver todo de ...".
+**`id_vendedor` ya no existe** y aqui se listaba como fijo: es la contradiccion
+que tenia este documento, porque mas abajo -- en "El filtro por vendedor se fue"
+-- ya se decia lo contrario. Manda esa. `ListarProductosQuery` (en
+`backend/src/dto/listar-productos.ts`) no lo tiene, y como cualquier parametro
+que el backend no reconoce se trata como filtro de caracteristica, mandarlo
+devuelve cero sin decir por que.
 
 **El stock: `stock_min` y `stock_max`.** Son la excepcion a lo de "la misma
 variante": no van sobre una variante, van sobre `stock_total`, que es la suma de
@@ -231,9 +246,69 @@ arreglo es que la pantalla lo diga en vez de dejar a la persona adivinando.
 
 ## Las ofertas del vendedor
 
-`OfertasVendedor.svelte`, dentro del panel y **encima** de sus productos: en el
+`OfertasVendedor.svelte`, dentro del panel y **encima** del catalogo: en el
 modelo multi-vendedor el producto es del catalogo compartido y no es de nadie,
 mientras que la oferta -- precio, existencias y estado -- si es del vendedor.
+
+**Dos formas de entrar, segun la cuenta.** Un vendedor normal tiene ~90 ofertas y
+se le traen todas de una (`GET /vendedor/ofertas`): esa lista es su pantalla
+entera. Pero la tienda oferta TODO el catalogo, y esa misma ruta le devuelve 202
+filas antes de pintar nada; a un admin le devolveria esas mismas 202, porque el
+backend le sustituye la identidad por la de la tienda
+(`resolverIdEfectivo()`). Asi que a los dos se les entra por el PRODUCTO:
+`GET /productos?limite=20&despues_de=` de 20 en 20, y las ofertas de un producto
+solo al abrirlo. La lista completa sigue a un clic, en "Ver la lista completa".
+
+Medido, mediana de tres corridas en caliente:
+
+| Ruta | Peso | Tiempo | Trae |
+|---|---|---|---|
+| `GET /vendedor/ofertas` | 84 KB | 254 ms | 202 filas |
+| `GET /productos?limite=20` | 40 KB | 188 ms | 20 filas |
+| `GET /vendedor/ofertas/producto/:id` | 2 KB | 59 ms | un producto |
+
+**El argumento no es el tiempo.** 254 ms no es una tragedia, y decir lo
+contrario seria inventar -- aqui llego a estar escrito "1.7 s", que era una
+medida en frio presentada como si fuera la normal. Son dos cosas: los bytes de
+la primera pantalla (40 contra 84 KB, y 20 filas con imagen contra 202), y que
+el coste de la lista completa crece con el catalogo mientras el de una tanda no.
+
+## El catalogo compartido, tambien paginado
+
+`PanelVendedor.svelte`, debajo de las ofertas y solo para la tienda o un admin.
+
+Aqui habia el mismo problema y no tenia arreglo desde el frontend:
+`GET /vendedor/productos` es la unica ruta que devuelve los tres estados
+--`borrador`, `activo` e `inactivo`--, que es justo lo que este panel
+administra, y traia el catalogo entero de un golpe. La publica
+`GET /productos/paginacion` si pagina, pero fuerza `estado: 'activo'` como
+lista blanca (`models/estado-producto.ts`), asi que se dejaba fuera lo unico
+que aqui no se puede dejar fuera.
+
+**Lo resolvio el backend con una ruta nueva**, `GET /vendedor/productos/paginado`
+(commit `704ba11`): todos los estados, paginada por numero de pagina
+(`pagina`, `limite`, tope 100) y con un filtro, `nombre`. Devuelve
+`{ productos, pagina, limite, total_productos, total_paginas }` y por dentro es
+un `$facet`, igual que la paginacion del catalogo publico.
+
+El efecto en el panel completo del admin, medido sumando TODO lo que pide al
+abrir:
+
+| | Antes | Ahora |
+|---|---|---|
+| Ofertas | 84 KB, las 202 | 40 KB, tanda de 20 |
+| Catalogo | 191 KB, los 105 | 32 KB, pagina de 20 |
+| **El panel entero** | 275 KB solo esas dos | **75 KB todo** |
+
+Se pagina por **numero de pagina** y no por cursor, al reves que la vista de
+ofertas: en un panel de administracion uno quiere poder volver a "la pagina 3",
+no solo seguir bajando.
+
+**Ojo con el filtro de nombre**: la ruta nueva dice ser insensible a tildes,
+pero solo lo es en un sentido. Buscar `lampara` encuentra `Lampara`; buscar
+`lámpara` no encuentra nada, porque `construirRegexNombreFlexible` solo expande
+las vocales SIN tilde del texto buscado. Como el catalogo no tiene ni un nombre
+con tilde, quien escriba bien en español no encuentra nada. Reportado.
 
 Reemplaza a la vieja pantalla de Inventario, que leia la tabla `inventario`.
 Esa tabla ya no existe: el stock se fue a `oferta.stock`. Con ella se fue toda
@@ -474,3 +549,27 @@ peticiones se veia que cada cambio de categoria pedia `/categorias/:id` y
 `/productos` **dos veces**, y el evento del DOM salia una sola vez: eran dos
 instancias del componente vivas a la vez, de las recargas de Vite. Con `F5` de
 verdad sale una sola. Antes de perseguir un doble disparo, recarga entera.
+
+## El historial dentro de un pedido
+
+En `/pedidos`, cada linea trae un "Ver como se veia": reconstruye el producto
+tal como estaba **el dia de la compra**, con
+`GET /productos/:id/historial?fecha=`. Es la evidencia de funcionamiento que
+pide la entrega, vista desde el lado del comprador.
+
+Ensena nombre, descripcion, **categoria de ese dia** y **caracteristicas de ese
+dia**. Lo de la categoria no es adorno: es el caso que justifica
+`productos_historial.id_categoria` -- el balon nacio en Fitness y se movio a
+Futbol, asi que reconstruirlo al 1 de mayo tiene que decir Fitness.
+
+**El precio que se ensena NO es el de ese dia: es el que se pago.** Sale
+congelado por `pedido_producto.id_precio_historial`, y para un comprobante es
+lo correcto. Si alguna vez se quisiera "a como estaba la oferta ese dia" -- que
+es otra pregunta -- la ruta es `GET /productos/ofertas/:id/historial?fecha=`,
+la misma que usa el panel del catalogo.
+
+**El dia se calcula en hora de Guatemala**, no recortando el texto ISO. Con el
+recorte, un pedido de las 8:52 p. m. caia en el dia UTC siguiente y la pantalla
+se contradecia sola: la cabecera decia "25 ago" y dos renglones mas abajo "Asi
+se veia el 2026-08-26". El resultado no era incorrecto (el backend cuenta hasta
+el final del dia), pero se leia como un error.

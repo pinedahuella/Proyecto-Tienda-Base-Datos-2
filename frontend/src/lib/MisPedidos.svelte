@@ -260,9 +260,32 @@
 	 * puede no venir en la fusion: por eso los dos admiten null aunque el tipo
 	 * de la ruta diga que el nombre siempre esta.
 	 */
+	interface CaracteristicaEnFecha {
+		nombre: string;
+		valor: string | number | boolean | string[];
+		unidad?: string | null;
+	}
+
+	/**
+	 * Lo que devuelve GET /productos/:id/historial?fecha=
+	 *
+	 * Antes aqui solo se declaraban `nombre` y `descripcion`, y por eso la
+	 * pantalla ensenaba solo esos dos: la ruta manda ademas la categoria, las
+	 * variantes y las caracteristicas de ese dia, y se estaban tirando.
+	 */
 	interface ProductoEnFecha {
 		nombre: string | null;
 		descripcion: string | null;
+		categoria?: { nombre: string; categoria_padre: string | null } | null;
+		caracteristicas_adicionales?: CaracteristicaEnFecha[];
+		variantes?: { id_producto_variante: number; nombre_variante: string }[];
+	}
+
+	/** Un valor de caracteristica, como texto. Una lista se une con comas. */
+	function valorTexto(v: CaracteristicaEnFecha['valor']): string {
+		if (Array.isArray(v)) return v.join(', ');
+		if (typeof v === 'boolean') return v ? 'si' : 'no';
+		return String(v);
 	}
 
 	/**
@@ -302,17 +325,26 @@
 	 *
 	 * Sale del mismo `fecha_creacion` que ya pinta la fila, no de una segunda
 	 * fuente: si alguna vez difirieran, la pantalla estaria ensenando una fecha
-	 * y preguntando por otra. El corte es sobre el texto ISO (UTC) mientras que
-	 * la fila lo ensena en hora de Guatemala, asi que un pedido de la tarde cae
-	 * en el dia UTC siguiente -- y no estorba para lo que importa: el backend
-	 * cuenta "hasta el final de ese dia" (medianoche de Guatemala), asi que un
-	 * dia de mas sigue incluyendo la compra, nunca la deja fuera. Lo que si
-	 * puede colarse son los cambios del catalogo de esas horas de mas: la
-	 * reconstruccion es por DIA, no por instante, y por eso lo que se pinta
-	 * dice "el <dia>" y no "al momento de comprar".
+	 * y preguntando por otra.
+	 *
+	 * El dia se saca en hora de GUATEMALA, no recortando el texto ISO. Antes
+	 * era `iso.slice(0, 10)`, que es UTC: un pedido de las 8:52 p. m. son las
+	 * 02:52 UTC del dia siguiente, asi que la cabecera decia "25 ago" y dos
+	 * renglones mas abajo "Asi se veia el 2026-08-26". No daba un resultado
+	 * incorrecto -- el backend cuenta hasta el final de ese dia, asi que el dia
+	 * de mas seguia incluyendo la compra -- pero en pantalla se leia como una
+	 * contradiccion, y la fila de arriba ya usa la hora de Guatemala.
+	 *
+	 * Lo que sigue en pie: la reconstruccion es por DIA y no por instante, y
+	 * por eso lo que se pinta dice "el <dia>" y no "al momento de comprar".
 	 */
 	function diaDe(iso: string | null): string {
-		return (iso ?? '').slice(0, 10);
+		if (!iso) return '';
+		const d = new Date(iso);
+		if (Number.isNaN(d.getTime())) return iso.slice(0, 10);
+		// 'en-CA' da AAAA-MM-DD, que es justo lo que espera la ruta, y
+		// timeZone lo calcula en hora de Guatemala.
+		return d.toLocaleDateString('en-CA', { timeZone: 'America/Guatemala' });
 	}
 
 	async function cargarHistorial(idProducto: string, dia: string) {
@@ -718,6 +750,35 @@
 																	{antes.descripcion || 'Ese dia no tenia descripcion.'}
 																</p>
 
+																{#if antes.categoria?.nombre}
+																	<!-- La categoria de ESE dia, que puede no ser la de hoy: es
+																	     justo el caso que justifica `productos_historial.id_categoria`
+																	     (el balon nacio en Fitness y se movio a Futbol). -->
+																	<p class="menor">
+																		Estaba en
+																		<strong>
+																			{#if antes.categoria.categoria_padre}{antes.categoria
+																					.categoria_padre} &rsaquo;
+																			{/if}{antes.categoria.nombre}
+																		</strong>
+																	</p>
+																{/if}
+
+																{#if antes.caracteristicas_adicionales?.length}
+																	<dl class="fichas">
+																		{#each antes.caracteristicas_adicionales as c (c.nombre)}
+																			<div class="ficha">
+																				<dt>{c.nombre}</dt>
+																				<dd>
+																					{valorTexto(c.valor)}{#if c.unidad}
+																						<span class="menor">{c.unidad}</span>
+																					{/if}
+																				</dd>
+																			</div>
+																		{/each}
+																	</dl>
+																{/if}
+
 																<p class="menor">
 																	Reconstruido con el historial del catalogo, que ensena el
 																	producto aunque hoy ya no se venda.
@@ -1115,5 +1176,25 @@
 
 	.ir {
 		color: var(--indigo);
+	}
+
+	/* Las caracteristicas de ese dia, en dos columnas. */
+	.fichas {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+		gap: 0.5rem 1.25rem;
+		margin-top: 0.75rem;
+		padding-top: 0.75rem;
+		border-top: 1px solid var(--linea);
+	}
+
+	.ficha dt {
+		font-size: 0.78rem;
+		color: var(--gris);
+	}
+
+	.ficha dd {
+		color: var(--tinta);
+		font-size: 0.9rem;
 	}
 </style>
