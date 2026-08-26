@@ -36,6 +36,7 @@ import {
 import { UsuarioService } from '../../services/usuario.service';
 import { ProductosService } from '../../services/productos/productos.service';
 import { CORREO_TIENDA } from '../../helpers/constantes';
+import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 
 const ESTADO_PRODUCTO_NUEVO = 'borrador';
 const ESTADO_VARIANTE_NUEVA = 'activa';
@@ -93,7 +94,7 @@ export class ProductosVendedorService {
         datos.caracteristicas_personalizadas,
       );
 
-      await this.exigirTienda(idUsuario);
+      await this.exigirTiendaOAdmin(idUsuario);
 
       const idProducto = await this.siguienteIdProducto(coleccionProductos);
       const fechaCreacion = new Date();
@@ -146,14 +147,23 @@ export class ProductosVendedorService {
   }
 
   /**
-   * Solo la cuenta de la tienda crea/edita/consulta el catalogo por estas
-   * rutas (ver la nota de CORREO_TIENDA arriba). Mismo 404 generico que el
-   * resto del proyecto usa para "no es tuyo": no hay que confirmarle a un
-   * vendedor cualquiera que la ruta existe.
+   * Solo la cuenta de la tienda, o cualquier cuenta con rol admin, crea/edita/
+   * consulta el catalogo por estas rutas (ver la nota de CORREO_TIENDA
+   * arriba). El guard de rol (@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN) en
+   * ProductosVendedorController) ya deja pasar admin junto con vendedor;
+   * esta funcion es el segundo filtro, mas fino, que distingue "vendedor
+   * cualquiera" (rechazado) de "la tienda o un admin" (aceptado) dentro de
+   * ese primer grupo. Un producto creado o editado por un admin no queda
+   * marcado de ninguna forma especial: el documento en Mongo no tiene (ni
+   * tuvo nunca, desde el giro multi-vendedor) un campo de dueño, asi que
+   * sale identico sin importar si lo toco la tienda o un admin.
+   *
+   * Mismo 404 generico que el resto del proyecto usa para "no es tuyo": no
+   * hay que confirmarle a un vendedor cualquiera que la ruta existe.
    */
-  private async exigirTienda(idUsuario: string): Promise<void> {
+  private async exigirTiendaOAdmin(idUsuario: string): Promise<void> {
     const usuario = await this.usuarioService.obtenerPorId(idUsuario);
-    if (usuario.correo_electronico !== CORREO_TIENDA) {
+    if (usuario.correo_electronico !== CORREO_TIENDA && usuario.id_rol_usuario !== ID_ROL_ADMIN) {
       throw new ErrorNoEncontrado('No existe un producto con ese id');
     }
   }
@@ -341,7 +351,7 @@ export class ProductosVendedorService {
   }
 
   /**
-   * Edita un producto del catalogo (solo la tienda): cualquier campo que tenga sentido cambiar
+   * Edita un producto del catalogo (solo la tienda o un admin): cualquier campo que tenga sentido cambiar
    * (nombre, descripcion, estado, categoria, sus caracteristicas, las
    * personalizadas, y las variantes).
    *
@@ -423,7 +433,7 @@ export class ProductosVendedorService {
     const coleccion = mongoDb.collection<Producto>('productos');
 
     try {
-      await this.exigirTienda(idUsuarioToken);
+      await this.exigirTiendaOAdmin(idUsuarioToken);
 
       const productoActual = await coleccion.findOne({ _id: idProducto });
       if (productoActual == null) {
@@ -597,11 +607,11 @@ export class ProductosVendedorService {
   /**
    * Todo el catalogo, en cualquier estado (incluyendo borrador e inactivo).
    * Antes era "los productos del vendedor logueado"; con el catalogo
-   * compartido y solo la tienda creando/editando, "propio" paso a ser "todo
-   * el catalogo, si sos la tienda".
+   * compartido y solo la tienda (o un admin) creando/editando, "propio"
+   * paso a ser "todo el catalogo, si sos la tienda o admin".
    */
   async listarPropios(idUsuario: string): Promise<Producto[]> {
-    await this.exigirTienda(idUsuario);
+    await this.exigirTiendaOAdmin(idUsuario);
 
     try {
       return await mongoDb
@@ -614,7 +624,7 @@ export class ProductosVendedorService {
     }
   }
 
-  /** Un producto del catalogo, tal como esta hoy. Solo la tienda puede pedirlo por esta ruta. */
+  /** Un producto del catalogo, tal como esta hoy. Solo la tienda o un admin puede pedirlo por esta ruta. */
   async obtenerPropio(
     idProductoParametro: string,
     idUsuario: string,
@@ -624,7 +634,7 @@ export class ProductosVendedorService {
     }
     const idProducto = Number(idProductoParametro);
 
-    await this.exigirTienda(idUsuario);
+    await this.exigirTiendaOAdmin(idUsuario);
 
     try {
       const producto = await mongoDb
@@ -645,19 +655,19 @@ export class ProductosVendedorService {
   }
 
   /**
-   * Reconstruye un producto del catalogo (solo la tienda) como estaba en
-   * una fecha especifica. La reconstruccion en si (el pipeline de
-   * agregacion de Mongo sobre productos_eventos) vive en
+   * Reconstruye un producto del catalogo (solo la tienda o un admin) como
+   * estaba en una fecha especifica. La reconstruccion en si (el pipeline
+   * de agregacion de Mongo sobre productos_eventos) vive en
    * ProductosService.reconstruirEnFecha() -- ya no es exclusiva de la
    * tienda (ver GET /productos/:id/historial, general), asi que esta
-   * funcion solo agrega el chequeo de "solo tienda" antes de delegar.
+   * funcion solo agrega el chequeo de "tienda o admin" antes de delegar.
    */
   async obtenerHistorialPropio(
     idProductoParametro: string,
     idUsuario: string,
     fecha: string | undefined,
   ): Promise<Producto> {
-    await this.exigirTienda(idUsuario);
+    await this.exigirTiendaOAdmin(idUsuario);
     return this.productosService.reconstruirEnFecha(idProductoParametro, fecha);
   }
 }

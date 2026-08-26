@@ -11,46 +11,66 @@ de restricción, y no son lo mismo:
 
 1. **Por rol** (`id_rol_usuario`, lo revisa el guard `@Roles` antes de entrar
    al controlador): un rol sin permiso recibe 403, igual que en `/admin/*`.
+   Desde el 25 de agosto de 2026, tanto `/vendedor/productos` como
+   `/vendedor/ofertas` aceptan **vendedor (2) o admin (3)** — antes solo
+   dejaban pasar vendedor.
 2. **Por cuenta especifica** (solo dentro de `/vendedor/productos`, lo revisa
-   `exigirTienda()` a mano, por correo contra la base en cada petición, nunca
-   por el token): no es un 403 — ver la nota mas abajo de por qué.
+   `exigirTiendaOAdmin()` a mano, por correo o por rol contra la base en cada
+   petición, nunca por el token): no es un 403 — ver la nota mas abajo de por
+   qué.
 
 | Ruta | Rol exigido | Cuenta exigida |
 | --- | --- | --- |
 | `GET /vendedor/categorias` | vendedor **o** admin (2 o 3) | cualquiera |
 | `GET /vendedor/categorias/:id` | vendedor **o** admin (2 o 3) | cualquiera |
-| `GET /vendedor/productos` | vendedor (2) | **solo `tienda@mesh.com`** |
-| `GET /vendedor/productos/:id` | vendedor (2) | **solo `tienda@mesh.com`** |
-| `GET /vendedor/productos/:id/historial` | vendedor (2) | **solo `tienda@mesh.com`** |
-| `POST /vendedor/productos` | vendedor (2) | **solo `tienda@mesh.com`** |
-| `PATCH /vendedor/productos/:id` | vendedor (2) | **solo `tienda@mesh.com`** |
-| `GET /vendedor/ofertas` | vendedor (2) | cualquier vendedor |
-| `GET /vendedor/ofertas/producto/:idProducto` | vendedor (2) | cualquier vendedor |
-| `POST /vendedor/ofertas` | vendedor (2) | cualquier vendedor |
-| `PATCH /vendedor/ofertas/:id` | vendedor (2) | cualquier vendedor, pero solo sobre **su propia** oferta |
+| `GET /vendedor/productos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `GET /vendedor/productos/:id` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `GET /vendedor/productos/:id/historial` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `POST /vendedor/productos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `PATCH /vendedor/productos/:id` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `GET /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
+| `GET /vendedor/ofertas/producto/:idProducto` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
+| `POST /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
+| `PATCH /vendedor/ofertas/:id` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin, pero solo sobre **su propia** oferta |
 
 **`/vendedor/productos` es el panel de administración del catálogo
 completo, no "mis productos".** Con el giro a multi-vendedor, un producto
 dejó de pertenecer a quien lo crea — el catálogo (`productos`/`variantes`
 en Mongo) es compartido, y por decisión explícita con el profesor **solo
-la cuenta de la tienda lo administra** (`cambios-multivendedor.md`, sección
-9). Las cinco rutas de arriba llaman a `ProductosVendedorService.exigirTienda()`,
-que compara el correo del usuario logueado contra `tienda@mesh.com` —
-cualquier otro vendedor recibe el **mismo 404** que si el recurso no
-existiera (`"No existe un producto con ese id"` en las rutas con `:id`;
-en `GET /vendedor/productos`, que no lleva ningún id, ese mismo mensaje
-sale igual, reutilizado tal cual). Es a propósito, para no revelar que la
-restricción existe — el mismo patrón que ya usa el resto de la API para
-"un recurso ajeno da el mismo 404 que uno inexistente" — solo que aquí no
-hay ningún dueño de por medio, es una cuenta fija.
+la cuenta de la tienda, o cualquier cuenta con rol admin, lo administra**
+(`cambios-multivendedor.md`, sección 9; la apertura a admin se agregó el
+25 de agosto de 2026, a pedido del equipo). Las cinco rutas de arriba
+llaman a `ProductosVendedorService.exigirTiendaOAdmin()`, que deja pasar
+si el correo del usuario logueado es `tienda@mesh.com` **o** si su
+`id_rol_usuario` es 3 (admin) — cualquier otro vendedor recibe el **mismo
+404** que si el recurso no existiera (`"No existe un producto con ese
+id"` en las rutas con `:id`; en `GET /vendedor/productos`, que no lleva
+ningún id, ese mismo mensaje sale igual, reutilizado tal cual). Es a
+propósito, para no revelar que la restricción existe — el mismo patrón
+que ya usa el resto de la API para "un recurso ajeno da el mismo 404 que
+uno inexistente" — solo que aquí no hay ningún dueño de por medio, es una
+cuenta fija (o un rol fijo).
 
-**Lo que sí es de cualquier vendedor es la oferta**: publicar (y editar)
-un precio y un stock propios sobre una variante del catálogo que ya
-existe. Es la respuesta real a "¿cuáles son mis productos?" para un
+Un producto o una variante creados o editados por un admin **no quedan
+marcados de ninguna forma especial**: el documento de Mongo no tiene (ni
+tuvo nunca, desde el giro multi-vendedor) un campo de dueño, así que sale
+idéntico sin importar si lo tocó la tienda o un admin — no hay nada que
+"caiga bajo la cuenta de la tienda", porque el catálogo ya no le
+pertenece a nadie.
+
+**Lo que sí es de cualquier vendedor (o admin) es la oferta**: publicar (y
+editar) un precio y un stock propios sobre una variante del catálogo que
+ya existe. Es la respuesta real a "¿cuáles son mis productos?" para un
 vendedor que no es la tienda — no hay tal cosa como "productos propios",
 pero `GET /vendedor/ofertas` da la lista de productos sobre los que sí
 tiene algo (una oferta), en cualquier estado. Vive en PostgreSQL (tabla
-`oferta`), el catálogo sigue en Mongo.
+`oferta`), el catálogo sigue en Mongo. A diferencia de `/vendedor/productos`,
+aquí **no hay ningún chequeo de cuenta específica** (no existe un
+`exigirTiendaOAdmin()` equivalente): `OfertasVendedorService` ya deja todo
+(crear, editar, listar) atado al `id_usuario` de quien está logueado, así
+que una oferta creada por un admin nace bajo **su propia cuenta**, igual
+que la de cualquier otro vendedor — no se puede publicar una oferta "a
+nombre de la tienda" desde aquí, ni siquiera siendo admin.
 
 **`POST`/`PATCH /vendedor/productos` ya están rediseñadas contra el modelo
 multi-vendedor**: ya no piden ni guardan `precio` ni `stock_inicial` por
@@ -192,8 +212,9 @@ GET /vendedor/categorias/3
 
 ## POST /vendedor/productos
 
-**Solo `tienda@mesh.com`** (ver `helpers/constantes.ts`, `CORREO_TIENDA`) —
-no cualquier vendedor, ni siquiera con `id_rol_usuario` 2: en el modelo
+**Solo `tienda@mesh.com` o una cuenta con rol admin** (ver
+`helpers/constantes.ts`, `CORREO_TIENDA`, y `ProductosVendedorService.exigirTiendaOAdmin`)
+— no cualquier vendedor, ni siquiera con `id_rol_usuario` 2: en el modelo
 multi-vendedor el catálogo es compartido, y si cualquiera pudiera crear
 productos dos vendedores acabarían duplicando el mismo artículo. Cualquier
 otro vendedor recibe el mismo 404 genérico que "no existe" — nunca 403, ni
@@ -205,7 +226,7 @@ producto (por esta ruta) no crea ninguna oferta — nace sin nadie que lo
 venda todavía. Para que alguien pueda comprarlo hace falta un segundo paso,
 aparte: `POST /vendedor/ofertas` (ver la sección "Las ofertas: modelo
 multi-vendedor" más abajo), que es donde de verdad se ponen el precio y el
-stock inicial — y ahí sí, cualquier vendedor, incluida la tienda.
+stock inicial — y ahí sí, cualquier vendedor o admin, incluida la tienda.
 
 Nace siempre en estado `borrador` (por eso `GET /productos` y
 `GET /productos/paginacion` nunca lo muestran hasta que alguien lo publique
@@ -406,7 +427,7 @@ que el evento de `productos_eventos` tampoco los tiene.
 { "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
 ```
 
-Cuando el token ni siquiera tiene rol vendedor (por ejemplo, un comprador).
+Cuando el token no tiene rol vendedor ni admin (por ejemplo, un comprador).
 
 ### 404
 
@@ -434,8 +455,9 @@ vendedor cualquiera que la ruta funciona.
 
 ## PATCH /vendedor/productos/:id
 
-**Solo `tienda@mesh.com`**, igual que `POST /vendedor/productos` — mismo
-404 genérico para cualquier otro vendedor. Edita cualquier campo que tenga
+**Solo `tienda@mesh.com` o una cuenta con rol admin**, igual que
+`POST /vendedor/productos` — mismo 404 genérico para cualquier otro
+vendedor. Edita cualquier campo que tenga
 sentido cambiar: `nombre`, `descripcion`, `estado`, `id_categoria`,
 `caracteristicas_adicionales`, `caracteristicas_personalizadas` y
 **`variantes`** — sí, las variantes se editan aquí mismo, como un campo
@@ -518,9 +540,9 @@ Casos probados contra la base real:
 - Un id de variante que no pertenece al producto se sigue rechazando con
   400, igual que siempre.
 
-Un id que no existe, o cualquier vendedor que no sea la tienda: mismo
+Un id que no existe, o cualquier cuenta que no sea la tienda ni admin: mismo
 404 — no hay forma de usar esta ruta para confirmar qué productos existen
-si no eres la tienda.
+si no eres la tienda o admin.
 
 Un mismo evento de modificación puede traer varias llaves en `cambios` a
 la vez, una por cada cosa que cambió en esa edición (por ejemplo, `nombre`
@@ -623,8 +645,9 @@ personalizada inválido — ver arriba). Si el cuerpo trae `precio` o
 
 ## GET /vendedor/productos
 
-**Solo `tienda@mesh.com`**, igual que `POST /vendedor/productos` — no es
-"mis productos", es el catálogo completo para administrarlo. Cualquier
+**Solo `tienda@mesh.com` o una cuenta con rol admin**, igual que
+`POST /vendedor/productos` — no es "mis productos", es el catálogo
+completo para administrarlo. Cualquier
 otro vendedor recibe el mismo 404 genérico que las demás rutas de
 `/vendedor/productos` (ver la tabla al principio de este archivo), aunque
 aquí no haya ningún `id` de por medio: el mensaje es el mismo
@@ -659,9 +682,9 @@ toca PostgreSQL. El stock real es de cada oferta, no del producto — ver
 { "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
 ```
 
-Este es el que sale para **cualquier vendedor que no sea la tienda** — el
-mismo mensaje que usan las rutas con `:id`, aunque aquí no se haya
-mandado ningún id.
+Este es el que sale para **cualquier cuenta que no sea la tienda ni
+admin** — el mismo mensaje que usan las rutas con `:id`, aunque aquí no
+se haya mandado ningún id.
 
 ### 401 / 403 / 503 / 500
 
@@ -671,8 +694,8 @@ Mismos casos que las demás rutas de `/vendedor/productos` (ver arriba).
 
 ## GET /vendedor/productos/:id
 
-**Solo `tienda@mesh.com`**, igual que las demás rutas de
-`/vendedor/productos` (ver la tabla al principio del archivo). Un
+**Solo `tienda@mesh.com` o una cuenta con rol admin**, igual que las demás
+rutas de `/vendedor/productos` (ver la tabla al principio del archivo). Un
 producto tal como está **hoy**, con todos sus detalles (el mismo
 documento completo que devuelven las rutas de creación y edición). A
 diferencia del catálogo público (que no tiene una ruta de detalle por id
@@ -680,7 +703,7 @@ todavía, y de cualquier forma solo mostraría productos `activo`), esta
 funciona sin importar el estado — sirve justo para ver un producto en
 `borrador` o `inactivo` antes de publicarlo.
 
-Un id que no existe, o cualquier vendedor que no sea la tienda: mismo 404.
+Un id que no existe, o cualquier cuenta que no sea la tienda ni admin: mismo 404.
 
 **Sin `variantes[].stock`, a propósito** — mismo motivo que
 `GET /vendedor/productos` (ver arriba): el stock real es de cada oferta,
@@ -716,11 +739,11 @@ Mismos casos que las demás rutas.
 
 ## GET /vendedor/productos/:id/historial
 
-**Solo `tienda@mesh.com`**, igual que las demás rutas de
-`/vendedor/productos`. Misma reconstrucción, mismo resultado, que
+**Solo `tienda@mesh.com` o una cuenta con rol admin**, igual que las demás
+rutas de `/vendedor/productos`. Misma reconstrucción, mismo resultado, que
 `GET /productos/:id/historial` (endpoints-productos.md), pública y sin
-restricción de dueño — esta ruta solo le suma el chequeo de "solo
-tienda" antes de delegar. Reconstruye un producto **como estaba en una
+restricción de dueño — esta ruta solo le suma el chequeo de "tienda o
+admin" antes de delegar. Reconstruye un producto **como estaba en una
 fecha específica**: toma el evento de creación y todos los de
 modificación anteriores a esa fecha (o de ese mismo día), en orden, y los
 fusiona uno encima del otro.
@@ -742,7 +765,7 @@ stock no es parte de ningún evento (ver `cambios-etl-productos.md`), así
 que reconstruir un producto a una fecha pasada no dice qué stock tenía en
 ese momento — eso solo lo sabe el libro `stock_movimiento` en PostgreSQL.
 
-Un id que no existe, o cualquier vendedor que no sea la tienda: mismo 404.
+Un id que no existe, o cualquier cuenta que no sea la tienda ni admin: mismo 404.
 Una fecha anterior a la creación del producto también da 404, con un
 mensaje distinto (el producto sencillamente no existía todavía).
 
@@ -790,10 +813,13 @@ modelo nuevo — nada de parche. Las ofertas viven solo en PostgreSQL (tabla
 imágenes) vive solo en Mongo. Las dos rutas de aquí cruzan las dos bases:
 Postgres dice qué es mío, Mongo le pone nombre.
 
-**Cualquier vendedor, no solo la tienda.** A diferencia de crear un
-producto del catálogo (solo `tienda@mesh.com`), publicar una oferta sobre
-un producto que ya existe es lo que cualquier cuenta con rol vendedor
-puede hacer — es el corazón del modelo multi-vendedor. `POST
+**Cualquier vendedor, o admin, no solo la tienda.** A diferencia de crear
+un producto del catálogo (solo `tienda@mesh.com` o admin), publicar una
+oferta sobre un producto que ya existe es lo que cualquier cuenta con rol
+vendedor **o admin** puede hacer — es el corazón del modelo
+multi-vendedor. No hay ningún chequeo de cuenta específica aquí (a
+diferencia de `/vendedor/productos`): una oferta creada por un admin nace
+bajo su propia cuenta, como cualquier otro vendedor. `POST
 /vendedor/ofertas` (crear) y `PATCH /vendedor/ofertas/:id` (editar precio,
 estado y/o stock) ya están hechos.
 
@@ -1005,10 +1031,10 @@ ocultar.
 ## POST /vendedor/ofertas
 
 Publica una oferta sobre una variante que **ya existe** en el catálogo
-compartido. Cualquier vendedor, no solo la tienda — crear la variante
-misma sigue siendo solo de `tienda@mesh.com` (`POST /vendedor/productos`),
-pero ofertar sobre una que ya está publicada es lo que hace a alguien
-vendedor en este modelo.
+compartido. Cualquier vendedor, o admin, no solo la tienda — crear la
+variante misma sigue siendo solo de `tienda@mesh.com` o admin (`POST
+/vendedor/productos`), pero ofertar sobre una que ya está publicada es lo
+que hace a alguien vendedor en este modelo.
 
 **Nace siempre `activa`** — sin aprobación previa de la tienda: eso quedó
 pendiente de diseñar más adelante (fecha límite del profesor obligó a

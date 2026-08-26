@@ -71,11 +71,15 @@ interface FilaOfertaNueva {
  * bases: primero Postgres para saber que es mio, despues Mongo para
  * ponerle nombre.
  *
- * Sin restriccion de "solo tienda": a diferencia de crear un producto del
- * catalogo (que decidimos que es solo de tienda@mesh.com, ver
- * cambios-multivendedor.md seccion 9), publicar una OFERTA sobre un
- * producto que ya existe es justo lo que cualquier vendedor puede hacer --
- * es el corazon del modelo multi-vendedor.
+ * Sin restriccion de "solo tienda (o admin)": a diferencia de crear un
+ * producto del catalogo (que decidimos que es solo de tienda@mesh.com o de
+ * una cuenta admin, ver cambios-multivendedor.md seccion 9), publicar una
+ * OFERTA sobre un producto que ya existe es justo lo que cualquier
+ * vendedor (o admin) puede hacer -- es el corazon del modelo
+ * multi-vendedor. El guard de rol (@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+ * en OfertasVendedorController) deja pasar a los dos por igual; no hace
+ * falta ningun chequeo de cuenta especifica aqui adentro, porque la oferta
+ * siempre nace bajo el id_usuario de quien la crea.
  */
 @Injectable()
 export class OfertasVendedorService {
@@ -85,9 +89,9 @@ export class OfertasVendedorService {
 
   /**
    * Publica una oferta sobre una variante que ya existe en el catalogo.
-   * Cualquier vendedor, no solo tienda -- esto es justo lo que hace a
-   * alguien vendedor en el modelo multi-vendedor. Nace siempre `activa` y
-   * con `stock = 0`; si viene `stock_inicial > 0` se repone aparte, con
+   * Cualquier vendedor o admin, no solo tienda -- esto es justo lo que
+   * hace a alguien vendedor en el modelo multi-vendedor. Nace siempre
+   * `activa` y con `stock = 0`; si viene `stock_inicial > 0` se repone aparte, con
    * `reponer_stock`, para que el kardex explique tambien esas unidades
    * (nunca se mete stock directo en el INSERT).
    *

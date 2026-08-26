@@ -1,9 +1,10 @@
 /**
  * Cuerpo esperado en POST /vendedor/ofertas.
  *
- * Cualquier vendedor puede publicar una oferta sobre una variante que ya
- * existe en el catalogo compartido (Mongo) -- crear la variante misma sigue
- * siendo solo de tienda@mesh.com (ver ProductosVendedorService.exigirTienda).
+ * Cualquier vendedor (o admin) puede publicar una oferta sobre una variante
+ * que ya existe en el catalogo compartido (Mongo) -- crear la variante
+ * misma sigue siendo solo de tienda@mesh.com o admin (ver
+ * ProductosVendedorService.exigirTiendaOAdmin).
  * id_producto e id_producto_variante son los mismos ids de MongoDB, no un
  * id de PostgreSQL.
  */

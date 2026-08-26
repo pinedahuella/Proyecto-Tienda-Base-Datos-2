@@ -16,7 +16,7 @@ import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { CrearProductoPeticion } from '../../dto/crear-producto';
 import type { EditarProductoPeticion } from '../../dto/editar-producto';
 import type { TokenUsuario } from '../../dto/token-usuario';
-import { ID_ROL_VENDEDOR } from '../../models/rol-usuario';
+import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { ProductosVendedorService } from '../../services/vendedores/productos.service';
 
 /**
@@ -25,14 +25,15 @@ import { ProductosVendedorService } from '../../services/vendedores/productos.se
  * Un producto ya no pertenece a ningun vendedor: el catalogo es compartido
  * (modelo multi-vendedor). Estas rutas son el panel de administracion del
  * catalogo completo, y por eso estan restringidas a la cuenta de la tienda
- * (`tienda@mesh.com`, ver exigirTienda en ProductosVendedorService) -- no
- * a "vendedor" como rol en general. Un vendedor que no es la tienda no
- * tiene "sus productos" aqui; lo que tiene es su oferta sobre una
- * variante del catalogo (ver /vendedor/ofertas).
+ * (`tienda@mesh.com`) o a cualquier cuenta con rol admin (ver
+ * exigirTiendaOAdmin en ProductosVendedorService) -- no a "vendedor" como
+ * rol en general. Un vendedor que no es la tienda ni admin no tiene "sus
+ * productos" aqui; lo que tiene es su oferta sobre una variante del
+ * catalogo (ver /vendedor/ofertas).
  */
 @Controller('vendedor/productos')
 @UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR)
+@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
 export class ProductosVendedorController {
   constructor(
     private readonly productosVendedorService: ProductosVendedorService,

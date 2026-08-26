@@ -7,20 +7,26 @@ import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import type { CrearOfertaPeticion } from '../../dto/crear-oferta';
 import type { EditarOfertaPeticion } from '../../dto/editar-oferta';
-import { ID_ROL_VENDEDOR } from '../../models/rol-usuario';
+import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { OfertasVendedorService } from '../../services/vendedores/ofertas.service';
 
 /**
  * Controlador de las rutas /vendedor/ofertas.
  *
- * Cualquier vendedor (no solo tienda@mesh.com): publicar una oferta sobre
- * un producto que ya existe es lo que cualquiera con rol vendedor puede
- * hacer -- la restriccion de "solo tienda" es unicamente para crear
- * entradas nuevas del catalogo (ver ProductosVendedorService).
+ * Cualquier vendedor (no solo tienda@mesh.com), y tambien cualquier cuenta
+ * con rol admin: publicar una oferta sobre un producto que ya existe es lo
+ * que cualquiera con rol vendedor o admin puede hacer -- la restriccion de
+ * "solo tienda (o admin)" es unicamente para crear entradas nuevas del
+ * catalogo (ver ProductosVendedorService). A diferencia de alli, aqui no
+ * hace falta ningun chequeo de cuenta especifica: OfertasVendedorService ya
+ * scoped todo (crear, editar, listar) al id_usuario de quien esta
+ * logueado, asi que una oferta creada por un admin nace bajo su propia
+ * cuenta, igual que la de cualquier otro vendedor -- no hay ninguna cuenta
+ * "de la tienda" involucrada aqui.
  */
 @Controller('vendedor/ofertas')
 @UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR)
+@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
 export class OfertasVendedorController {
   constructor(
     private readonly ofertasVendedorService: OfertasVendedorService,
