@@ -9,6 +9,7 @@ import {
 } from '../../helpers/validaciones-perfil';
 import { EditarUsuarioAdminPeticion } from '../../dto/editar-usuario-admin';
 import { UsuarioRegistrado } from '../../dto/registro-usuario';
+import { CORREO_TIENDA } from '../../helpers/constantes';
 
 const REGEX_ID = /^\d+$/;
 
@@ -61,9 +62,10 @@ export class AdminUsuariosService {
    * no existe ahi no sirve.
    *
    * Lanza ErrorValidacion si no viene ningun campo, si algun campo no pasa
-   * su regla, si el id no tiene forma de id, o si el admin se esta
-   * apuntando a si mismo. Lanza ErrorNoEncontrado si no existe un usuario
-   * con ese id.
+   * su regla, si el id no tiene forma de id, si el admin se esta
+   * apuntando a si mismo, o si el objetivo es la cuenta de la tienda
+   * (bloqueo total, ver esCuentaTienda() abajo). Lanza ErrorNoEncontrado
+   * si no existe un usuario con ese id.
    */
   async actualizar(
     idUsuario: string,
@@ -76,6 +78,12 @@ export class AdminUsuariosService {
 
     if (idUsuario === idQuienEdita) {
       throw new ErrorValidacion('No puedes editar tu propia cuenta desde aqui');
+    }
+
+    if (await this.esCuentaTienda(idUsuario)) {
+      throw new ErrorValidacion(
+        'No se puede editar la cuenta de la tienda desde aqui',
+      );
     }
 
     const nombre = cambios.nombre ?? null;
@@ -144,6 +152,34 @@ export class AdminUsuariosService {
     }
 
     return fila;
+  }
+
+  /**
+   * true si idUsuario es la cuenta de la tienda (tienda@mesh.com).
+   * Bloqueo total, a proposito: no solo id_rol_usuario e
+   * id_estado_usuario (que romperian el login o el acceso directo de la
+   * tienda a /vendedor/productos y /vendedor/ofertas), sino cualquier
+   * campo -- nombre, apellido, fecha_nacimiento incluidos. La cuenta de
+   * la tienda es la unica pieza fija de la que depende medio catalogo
+   * (CORREO_TIENDA, exigirTiendaOAdmin, resolverIdEfectivo, es_tienda,
+   * precio_tienda/stock_tienda): mas seguro no dejar tocarla en absoluto
+   * desde el panel de admin que confiar en que nadie le cambie el rol o
+   * la desactive por accidente.
+   *
+   * correo_electronico y usuario ya estaban protegidos de por si --
+   * EditarUsuarioAdminPeticion ni siquiera los acepta -- pero esto cierra
+   * el resto de la cuenta tambien.
+   */
+  private async esCuentaTienda(idUsuario: string): Promise<boolean> {
+    try {
+      const resultado = await pool.query<{ id_usuario: string }>(
+        'SELECT id_usuario FROM usuarios WHERE correo_electronico = $1',
+        [CORREO_TIENDA],
+      );
+      return resultado.rows[0]?.id_usuario === idUsuario;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
   }
 
   private async idRolValido(id: number): Promise<boolean> {

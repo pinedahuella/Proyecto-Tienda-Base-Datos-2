@@ -378,9 +378,26 @@ activa:
 
 Requiere la cookie `mesh_token` y rol admin. Edita `nombre`, `apellido`,
 `fecha_nacimiento`, `id_rol_usuario` y/o `id_estado_usuario` de cualquier
-**otro** usuario (un admin no puede editarse a si mismo con esta ruta).
-Cada campo es independiente: el que venga en `null` (o no venga) no se
-toca. Debe venir al menos uno.
+**otro** usuario (un admin no puede editarse a si mismo con esta ruta),
+**excepto la cuenta de la tienda** (`tienda@mesh.com`), que esta
+bloqueada por completo — ver la nota de abajo. Cada campo es
+independiente: el que venga en `null` (o no venga) no se toca. Debe venir
+al menos uno.
+
+**Bloqueo total sobre la cuenta de la tienda** (agregado el 26 de agosto
+de 2026): ningun admin puede editar `tienda@mesh.com` desde aqui, ni
+siquiera `nombre` o `apellido` — no solo `id_rol_usuario`/
+`id_estado_usuario`. Medio catálogo depende de que esa cuenta exista,
+siga con su correo exacto, su rol vendedor y su estado activo
+(`CORREO_TIENDA`, `ProductosVendedorService.exigirTiendaOAdmin()`,
+`OfertasVendedorService.resolverIdEfectivo()`, la bandera `es_tienda` y
+los campos calculados `precio_tienda`/`stock_tienda` del catálogo
+público) — cambiarle el rol la dejaría con 403 en sus propias rutas de
+`/vendedor/*`, y desactivarla le impediría volver a loguearse (el login
+revisa `id_estado_usuario`). `correo_electronico` y `usuario` ya estaban
+protegidos de por sí (`EditarUsuarioAdminPeticion` ni siquiera los
+acepta); este bloqueo cierra el resto de la cuenta también, con el mismo
+tipo de error (400) que ya usa el bloqueo de auto-edición.
 
 `nombre`, `apellido` y `fecha_nacimiento` usan exactamente las mismas
 reglas que `POST /usuario/registro` (mismos mensajes de error incluidos),
@@ -424,6 +441,7 @@ ahi no sirve.
 ```json
 { "ok": false, "mensaje": "El id no es valido", "payload": null }
 { "ok": false, "mensaje": "No puedes editar tu propia cuenta desde aqui", "payload": null }
+{ "ok": false, "mensaje": "No se puede editar la cuenta de la tienda desde aqui", "payload": null }
 { "ok": false, "mensaje": "Debes enviar al menos un campo para actualizar", "payload": null }
 { "ok": false, "mensaje": "El nombre es obligatorio", "payload": null }
 { "ok": false, "mensaje": "El nombre no puede tener mas de 100 caracteres", "payload": null }
