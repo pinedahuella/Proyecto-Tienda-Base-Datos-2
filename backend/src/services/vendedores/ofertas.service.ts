@@ -16,7 +16,7 @@ import {
 } from '../../helpers/validaciones-oferta';
 import { OfertaPropia, OfertaPropiaResumen } from '../../models/oferta';
 import { Producto } from '../../models/producto';
-import { ESTADOS_PRODUCTO_OCULTOS } from '../../models/estado-producto';
+import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
 import { CrearOfertaPeticion } from '../../dto/crear-oferta';
 import { EditarOfertaPeticion } from '../../dto/editar-oferta';
 import {
@@ -113,7 +113,7 @@ export class OfertasVendedorService {
       const encontrado = await mongoDb
         .collection<Producto>('productos')
         .findOne<ProductoLigero>(
-          { _id: idProducto, estado: { $nin: ESTADOS_PRODUCTO_OCULTOS } },
+          { _id: idProducto, estado: ESTADO_PRODUCTO_VISIBLE },
           {
             projection: {
               _id: 1,

@@ -416,7 +416,9 @@ resto por su cuenta, sin confiar en nada más que mande el cliente:
 2. con esos ids, pide el producto público a Mongo (mismo mecanismo que
    `GET /productos/:id`, incluyendo que un producto `borrador`/`inactivo`
    da el mismo 404 que uno inexistente) para sacar `nombre_producto` y
-   `nombre_variante`;
+   `nombre_variante`. **Una variante `inactiva` da el mismo 404** que una
+   que no existe — no se puede agregar al carrito en ninguno de los dos
+   casos, aunque el producto en sí esté `activo`;
 3. llama a `agregar_linea(id_pedido, linea_jsonb)`, que congela el precio
    ahí mismo (guarda el id de la fila vigente de `precio_historial`) y
    pone el nombre del vendedor leyéndolo de `usuarios` — nunca del
@@ -661,9 +663,10 @@ DELETE /comprador/pedidos/3/detalles/4
 ## POST /comprador/pedidos/:id/comprar
 
 Confirma la compra: llama a `comprar_pedido(id_pedido, metodo_pago)`, que
-descuenta el stock de cada oferta, registra el pago (nace `pendiente`) y
-pasa el pedido a `comprado`. Todo o nada — si algo falla, no se descuenta
-ni se cobra nada.
+descuenta el stock de cada oferta, registra el pago (nace `pagado` de una
+vez, sin importar el método — simplificación de la primera entrega, ver
+`docs/base-de-datos.md`) y pasa el pedido a `comprado`. Todo o nada — si
+algo falla, no se descuenta ni se cobra nada.
 
 ```json
 { "metodo_pago": "tarjeta", "tarjeta": { "numero": "4242424242424242", "vencimiento": "12/28", "cvv": "123", "titular": "Ana Lopez" } }
@@ -725,9 +728,12 @@ mismo código que usan las pasarelas de verdad para "el cobro no pasó".
 Justo antes de llamar a `comprar_pedido()`, cada línea del pedido se
 compara contra su oferta **tal como está hoy**:
 
-- **La oferta ya no está activa** (la pausaron o la retiraron), o **ya no
-  hay stock suficiente** → rechaza con **409**, siempre, pase lo que pase.
-  Ninguna bandera lo salta.
+- **La oferta ya no está activa** (la pausaron o la retiraron), **la
+  variante del catálogo se desactivó** desde que se agregó al carrito
+  (se trata igual que si el producto entero estuviera oculto — mismo
+  criterio que al agregar la línea), o **ya no hay stock suficiente** →
+  rechaza con **409**, siempre, pase lo que pase. Ninguna bandera lo
+  salta.
 - **El precio de hoy ya no es el que quedó congelado** en la línea → esto
   **no bloquea** (lo que se va a cobrar sigue siendo el precio congelado,
   nunca el de hoy), pero la persona merece saberlo antes de pagar: la
@@ -828,6 +834,7 @@ seguir de todas formas, repetir la petición con `confirmar_cambios: true`.
 { "ok": false, "mensaje": "El pedido <id> no tiene ninguna linea", "payload": null }
 { "ok": false, "mensaje": "El metodo de pago \"<metodo_pago>\" no existe", "payload": null }
 { "ok": false, "mensaje": "La oferta de \"<nombre_variante>\" ya no esta disponible (<estado>)", "payload": null }
+{ "ok": false, "mensaje": "La variante \"<nombre_variante>\" ya no esta disponible", "payload": null }
 { "ok": false, "mensaje": "No hay suficiente stock de \"<nombre_variante>\": quedan <n> y el pedido pide <n>", "payload": null }
 ```
 
@@ -835,6 +842,7 @@ seguir de todas formas, repetir la petición con `confirmar_cambios: true`.
 
 ```json
 { "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
 ```
 
 ### 500

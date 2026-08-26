@@ -261,6 +261,30 @@ UPDATE`, y se desbloquea justo al hacer `ROLLBACK`; los tres caminos de
 precio con y sin `confirmar_cambios`) se probaron end-to-end contra la base
 real sin regresiones.
 
+**El estado de la VARIANTE tambien bloquea la compra, ademas del de la
+oferta** (25 ago 2026, sesion posterior). El estado de un producto ya
+protegia la busqueda, la ficha publica y crear una oferta (lista blanca,
+`ESTADO_PRODUCTO_VISIBLE = 'activo'`), pero el de cada variante no vivia
+en PostgreSQL -- nada revisaba `variantes[].estado` al comprar, solo al
+agregar la linea (`agregarLinea`, via `obtenerPublico`). Decision del
+usuario: agregar y comprar tratan una variante `inactiva` igual que un
+producto oculto (no se puede agregar, no se puede comprar); quitar una
+linea o restarle cantidad (el "-1") siguen funcionando siempre, sin
+importar el estado de la variante -- nunca aumentan lo que hay en el
+carrito, asi que no hay nada que proteger ahi, y sirven como la salida
+para limpiar el carrito de algo que ya no se puede comprar.
+
+`revisarCambiosAntesDeComprar` ahora tambien resuelve el estado de cada
+variante de las lineas del pedido con una sola consulta a Mongo
+(`ProductosService.obtenerEstadosVariante`, con `$in` sobre todos los
+`id_producto` de una vez, nunca una consulta por linea), dentro de la
+misma transaccion que ya tenia el `FOR UPDATE OF o`. Probado en vivo con
+una variante forzada a `inactiva` directo en Mongo (no existe todavia
+ningun endpoint que la desactive): agregarla al carrito rechaza con 404,
+comprarla despues de agregarla y luego desactivarla rechaza con 409 (y
+el `ROLLBACK` deja el pedido intacto), y restar/quitar la misma linea
+siguen funcionando sin problema.
+
 ---
 
 ## El stock, con kardex

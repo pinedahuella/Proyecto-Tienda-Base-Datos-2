@@ -43,11 +43,13 @@ Esto es posible sin cambiar nada en el ETL ni en la base: `_id` ya es el
 mismo `id_producto` `bigserial` de PostgreSQL, así que ya es único y siempre
 creciente por sí solo.
 
-**Los productos `inactivo` o `borrador` nunca aparecen aquí.** No es un
-filtro opcional que se pueda desactivar: la consulta los excluye siempre,
-incluso si se pide explícitamente `?estado=inactivo` (en ese caso, la
-respuesta es una lista vacía, no un error). No cuentan como parte del
-catálogo público.
+**Solo los productos `activo` aparecen aquí — lista blanca, no lista
+negra.** No es "se excluyen `inactivo`/`borrador`", es "solo entra
+`activo`": cualquier otro valor, incluido uno que se agregue más
+adelante y nadie recuerde excluir, queda oculto por defecto. No es un
+filtro opcional que se pueda ampliar: pedir explícitamente
+`?estado=inactivo` (o cualquier valor que no sea `activo`) da una lista
+vacía, no un error. No cuentan como parte del catálogo público.
 
 ### Query params
 
@@ -58,7 +60,8 @@ catálogo público.
 | `nombre` | texto | No | Búsqueda parcial (sin distinguir mayúsculas) sobre `nombre` |
 | `estado` | texto | No | Igualdad exacta sobre `estado` del producto |
 | `id_categoria` | entero | No | Igualdad exacta sobre `categoria.id_categoria` |
-| `precio_min` / `precio_max` | decimal | No | Rango sobre `precio_tienda` |
+| `precio_min` / `precio_max` | decimal | No | Rango sobre `precio_desde` |
+| `precio_tienda_min` / `precio_tienda_max` | decimal | No | Rango sobre `precio_tienda` |
 | `estado_variante` | texto | No | Igualdad exacta sobre `variantes[].estado` |
 | `stock_min` / `stock_max` | entero | No | Rango sobre `stock_total` (existencias activas entre TODOS los vendedores, ya sumadas sobre las variantes) |
 | `stock_tienda_min` / `stock_tienda_max` | entero | No | Rango sobre `stock_tienda` (existencias activas solo de la tienda, ya sumadas sobre las variantes) |
@@ -90,16 +93,21 @@ GET /productos?stock_min=10
 **Modelo multi-vendedor** (ver `docs/base-de-datos.md` en la raíz del
 repo, "El catálogo se mudó a MongoDB"): el producto ya no tiene un precio
 ni un stock propios — cada vendedor pone los suyos en su oferta, que vive
-solo en PostgreSQL. Lo que trae el documento son cuatro números ya
+solo en PostgreSQL. Lo que trae el documento son cinco números ya
 calculados (nunca agregados al vuelo en la consulta): `precio_tienda`,
-`stock_tienda`, `stock_total` y `total_ofertas`, tanto en la raíz del
-producto como dentro de cada variante — son los que necesita la tarjeta
-del catálogo sin ir a pedir las ofertas reales.
+`precio_desde`, `stock_tienda`, `stock_total` y `total_ofertas`, tanto en
+la raíz del producto como dentro de cada variante — son los que necesita
+la tarjeta del catálogo sin ir a pedir las ofertas reales.
 
-- **`precio_min`/`precio_max`** van sobre `precio_tienda`: el precio de la
-  oferta de la tienda (a nivel de producto, el menor entre sus variantes).
-  Ya no se puede filtrar por el precio de un vendedor cualquiera desde
-  aquí — para eso está la lista de `ofertas` de `GET /productos/:id`.
+- **`precio_min`/`precio_max`** van sobre `precio_desde`: el precio más
+  barato al que se ofrece el producto entre TODOS los vendedores activos
+  (no solo la tienda). Filtrar por `precio_tienda` en cambio dejaba fuera
+  21 de los 34 productos del conjunto de datos en los que algún vendedor
+  la tiene más barata que la tienda — para ese filtro estricto está
+  `precio_tienda_min`/`precio_tienda_max` (mismo rango, pero sobre
+  `precio_tienda`). Ya no se puede filtrar por el precio de un vendedor
+  cualquiera desde aquí — para eso está la lista de `ofertas` de
+  `GET /productos/:id`.
 - **`estado_variante`** sigue siendo `variantes[].estado` (si la
   presentación está activa o inactiva), pero ya **no se combina** con el
   rango de precio en la misma variante: como el precio ahora es un campo
@@ -519,7 +527,7 @@ mínimo, no el total del catálogo entero.
 | --- | --- | --- | --- |
 | `pagina` | entero | No (por defecto 1) | Qué página pedir, 1 es la primera |
 | `limite` | entero | No (por defecto 20, tope 100) | Cuántos productos trae cada página |
-| `nombre`, `estado`, `id_categoria`, `precio_min`, `precio_max`, `estado_variante`, `stock_min`, `stock_max`, `stock_tienda_min`, `stock_tienda_max` | — | No | Los mismos filtros fijos de `GET /productos` |
+| `nombre`, `estado`, `id_categoria`, `precio_min`, `precio_max`, `precio_tienda_min`, `precio_tienda_max`, `estado_variante`, `stock_min`, `stock_max`, `stock_tienda_min`, `stock_tienda_max` | — | No | Los mismos filtros fijos de `GET /productos` |
 | _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada), igualdad por defecto o `min_`/`max_`/`contiene_` como prefijo, igual que en `GET /productos` |
 
 ### Ejemplo
@@ -697,8 +705,10 @@ más arriba).
 | `nombre` | `GET /productos?nombre=laptop` | Productos cuyo nombre contenga "laptop" |
 | `estado` | `GET /productos?estado=activo` | Productos con estado exactamente "activo" |
 | `id_categoria` | `GET /productos?id_categoria=7` | Productos de la categoría 7 |
-| `precio_min` | `GET /productos?precio_min=100` | Productos con `precio_tienda` >= 100 |
-| `precio_max` | `GET /productos?precio_max=500` | Productos con `precio_tienda` <= 500 |
+| `precio_min` | `GET /productos?precio_min=100` | Productos con `precio_desde` >= 100 |
+| `precio_max` | `GET /productos?precio_max=500` | Productos con `precio_desde` <= 500 |
+| `precio_tienda_min` | `GET /productos?precio_tienda_min=100` | Productos con `precio_tienda` >= 100 |
+| `precio_tienda_max` | `GET /productos?precio_tienda_max=500` | Productos con `precio_tienda` <= 500 |
 | `estado_variante` | `GET /productos?estado_variante=activa` | Productos con alguna variante activa |
 | `stock_min` | `GET /productos?stock_min=10` | Productos con `stock_total` (entre todos los vendedores) >= 10 |
 | `stock_max` | `GET /productos?stock_max=0` | Productos con `stock_total` = 0 (agotados en todos lados) |

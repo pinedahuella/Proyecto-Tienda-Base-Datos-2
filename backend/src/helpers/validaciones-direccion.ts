@@ -1,7 +1,7 @@
 import { ErrorValidacion } from './errores';
 import { esTextoNoVacio } from './validaciones-perfil';
 
-const REGEX_FECHA = /^\d{4}-\d{2}-\d{2}$/;
+const REGEX_FECHA = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**
  * Reglas de pais, departamento, ciudad y codigo_postal: van aqui, sueltas
@@ -58,10 +58,25 @@ export function validarFechaHistorial(fecha: string | undefined): void {
   if (!esTextoNoVacio(fecha)) {
     throw new ErrorValidacion('La fecha es obligatoria');
   }
-  if (!REGEX_FECHA.test(fecha)) {
+  const coincidencia = REGEX_FECHA.exec(fecha);
+  if (!coincidencia) {
     throw new ErrorValidacion('La fecha debe tener el formato AAAA-MM-DD');
   }
-  if (Number.isNaN(Date.parse(fecha))) {
+  // Date.parse() no sirve para esto: normaliza los desbordes en vez de
+  // rechazarlos ("2024-02-30" se convierte en 1 de marzo sin dar NaN), asi
+  // que un 400 "La fecha no es valida" nunca salia para una fecha de
+  // calendario inexistente. Se arma la fecha a mano y se compara contra los
+  // numeros que mando el cliente: si no coinciden, el dia no existe.
+  const [, anioTexto, mesTexto, diaTexto] = coincidencia;
+  const anio = Number(anioTexto);
+  const mes = Number(mesTexto);
+  const dia = Number(diaTexto);
+  const fechaUtc = new Date(Date.UTC(anio, mes - 1, dia));
+  const esFechaReal =
+    fechaUtc.getUTCFullYear() === anio &&
+    fechaUtc.getUTCMonth() === mes - 1 &&
+    fechaUtc.getUTCDate() === dia;
+  if (!esFechaReal) {
     throw new ErrorValidacion('La fecha no es valida');
   }
 }

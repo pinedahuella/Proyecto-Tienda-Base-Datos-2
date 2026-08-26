@@ -238,7 +238,10 @@ export class PedidosCompradorService {
     const variante = producto.variantes.find(
       (candidata) => candidata.id_producto_variante === idProductoVarianteMongo,
     );
-    if (variante == null) {
+    // Una variante inactiva se trata igual que un producto oculto: mismo
+    // 404 generico, tanto si no existe como si existe pero esta apagada --
+    // no se puede agregar al carrito en ninguno de los dos casos.
+    if (variante == null || variante.estado !== 'activa') {
       throw new ErrorNoEncontrado('No existe una variante con ese id en este producto');
     }
 
@@ -503,12 +506,23 @@ export class PedidosCompradorService {
   /**
    * Confirma la compra. Antes de tocar nada:
    *
-   *   1. Si el metodo es "tarjeta", corre el mock de validacion (formato,
+   *   1. Revisa que el pedido siga "pendiente". Un pedido que ya esta
+   *      comprado, cancelado, etc. rechaza con 409 aqui mismo -- ANTES de
+   *      correr el mock de tarjeta, no despues. Si se corriera despues, una
+   *      tarjeta de prueba que rechaza (ver validaciones-tarjeta.ts) le
+   *      ganaria al 409 y un pedido ya comprado devolveria 402 en vez de
+   *      "el pedido ya esta comprado", que es lo que de verdad paso.
+   *      comprar_pedido() en SQL vuelve a hacer este mismo chequeo dentro
+   *      de la transaccion (por si el estado cambio entre este SELECT y el
+   *      COMMIT), pero para el caso comun -- pedido ya comprado antes de
+   *      siquiera empezar -- el rechazo tiene que salir de aqui, con el
+   *      mismo mensaje que ya documenta `endpoints-compradores.md`.
+   *   2. Si el metodo es "tarjeta", corre el mock de validacion (formato,
    *      Luhn, vencimiento, CVV, y las tarjetas de prueba que simulan un
    *      rechazo) -- ver helpers/validaciones-tarjeta.ts. Rechaza con 400
    *      (formato invalido) o 402 (tarjeta rechazada) sin llegar a tocar
    *      el pedido.
-   *   2. Revisa que ninguna oferta cambio desde que se agrego al carrito
+   *   3. Revisa que ninguna oferta cambio desde que se agrego al carrito
    *      (revisarCambiosAntesDeComprar). Una oferta pausada/retirada o sin
    *      stock rechaza con 409, siempre. Un precio que ya no es el
    *      congelado no bloquea -- lo que se cobra es igual el precio
@@ -551,7 +565,11 @@ export class PedidosCompradorService {
       throw new ErrorValidacion('El metodo_pago es obligatorio');
     }
 
-    await this.verificarPedidoPropio(idPedido, idUsuario);
+    const { estadoPedido } = await this.verificarPedidoPropio(idPedido, idUsuario);
+
+    if (estadoPedido !== 'pendiente') {
+      throw new ErrorConflicto(`El pedido ${idPedido} ya esta ${estadoPedido}`);
+    }
 
     if (datos.metodo_pago === METODO_PAGO_TARJETA) {
       validarYCobrarTarjeta(datos.tarjeta);
@@ -645,13 +663,25 @@ export class PedidosCompradorService {
   }
 
   /** El pedido tiene que existir y ser del usuario logueado. */
+  /**
+   * Devuelve el nombre del estado del pedido de paso, para que
+   * comprarPedido() pueda rechazar un pedido que ya no esta pendiente
+   * ANTES de correr el mock de tarjeta -- ver el comentario en
+   * comprarPedido() sobre por que el orden importa.
+   */
   private async verificarPedidoPropio(
     idPedido: number,
     idUsuario: string,
-  ): Promise<void> {
+  ): Promise<{ estadoPedido: string }> {
     try {
-      const resultado = await pool.query<{ id_usuario: string }>(
-        'SELECT id_usuario FROM pedido WHERE id_pedido = $1',
+      const resultado = await pool.query<{
+        id_usuario: string;
+        estado_pedido_nombre: string;
+      }>(
+        `SELECT p.id_usuario, ep.estado_pedido_nombre
+         FROM pedido p
+         JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
+         WHERE p.id_pedido = $1`,
         [idPedido],
       );
       const pedido = resultado.rows[0];
@@ -659,6 +689,7 @@ export class PedidosCompradorService {
       if (pedido == null || Number(pedido.id_usuario) !== Number(idUsuario)) {
         throw new ErrorNoEncontrado('No existe un pedido con ese id');
       }
+      return { estadoPedido: pedido.estado_pedido_nombre };
     } catch (error) {
       if (error instanceof ErrorNoEncontrado) {
         throw error;
@@ -705,9 +736,9 @@ export class PedidosCompradorService {
   /**
    * Compara cada linea del pedido contra la oferta tal como esta HOY:
    *
-   *   - oferta ya no activa (la pausaron o la retiraron), o sin stock
-   *     suficiente -> bloqueante: no se puede comprar, sin importar nada
-   *     mas.
+   *   - oferta ya no activa (la pausaron o la retiraron), variante
+   *     desactivada, o sin stock suficiente -> bloqueante: no se puede
+   *     comprar, sin importar nada mas.
    *   - precio de hoy distinto del que quedo congelado en la linea ->
    *     aviso: no bloquea (lo que se cobra sigue siendo el congelado),
    *     pero se informa antes de seguir.
@@ -715,6 +746,14 @@ export class PedidosCompradorService {
    * Comparar precio_actual contra precio_congelado es texto contra texto
    * (los dos numeric(12,2) de Postgres, formateados igual): exacto, sin
    * el redondeo binario de comparar como numero de JavaScript.
+   *
+   * El estado de la variante no vive en PostgreSQL (el catalogo esta en
+   * Mongo): se resuelve aparte, con una sola consulta a
+   * ProductosService.obtenerEstadosVariante() para todas las lineas del
+   * pedido -- una variante que se desactivo despues de agregarla al
+   * carrito se trata igual que si el producto entero estuviera oculto: no
+   * se puede comprar (mismo criterio que agregarLinea, que ya la rechaza
+   * al agregarla).
    *
    * Corre dentro de la transaccion de comprarPedido(), con el `cliente` de
    * esa transaccion (no con `pool` directo): el `FOR UPDATE OF o` deja
@@ -737,8 +776,11 @@ export class PedidosCompradorService {
       precio_actual: string;
       stock: number;
       estado_oferta_nombre: string;
+      id_producto_mongo: string;
+      id_producto_variante_mongo: string;
     }>(
       `SELECT pp.id_pedido_producto, pp.nombre_producto, pp.nombre_variante, pp.cantidad,
+              pp.id_producto_mongo, pp.id_producto_variante_mongo,
               ph.precio AS precio_congelado, o.precio AS precio_actual, o.stock,
               eo.estado_oferta_nombre
        FROM pedido_producto pp
@@ -750,6 +792,10 @@ export class PedidosCompradorService {
       [idPedido],
     );
 
+    const estadosVariante = await this.productosService.obtenerEstadosVariante(
+      resultado.rows.map((fila) => Number(fila.id_producto_mongo)),
+    );
+
     const bloqueantes: string[] = [];
     const avisos: AvisoPrecioPedido[] = [];
 
@@ -757,6 +803,15 @@ export class PedidosCompradorService {
       if (fila.estado_oferta_nombre !== 'activa') {
         bloqueantes.push(
           `La oferta de "${fila.nombre_variante}" ya no esta disponible (${fila.estado_oferta_nombre})`,
+        );
+        continue;
+      }
+      const estadoVariante = estadosVariante.get(
+        `${fila.id_producto_mongo}:${fila.id_producto_variante_mongo}`,
+      );
+      if (estadoVariante !== 'activa') {
+        bloqueantes.push(
+          `La variante "${fila.nombre_variante}" ya no esta disponible`,
         );
         continue;
       }

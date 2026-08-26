@@ -27,7 +27,7 @@ import {
 } from '../../dto/paginar-productos';
 import { Producto, ProductoConOfertas } from '../../models/producto';
 import { OfertaVendedor } from '../../models/oferta';
-import { ESTADOS_PRODUCTO_OCULTOS } from '../../models/estado-producto';
+import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
 
 /** Fila cruda que devuelve la consulta de ofertas, antes de agrupar el vendedor. */
 interface FilaOferta {
@@ -206,7 +206,7 @@ export class ProductosService {
     try {
       const encontrado = await mongoDb.collection<Producto>('productos').findOne({
         _id: idProducto,
-        estado: { $nin: ESTADOS_PRODUCTO_OCULTOS },
+        estado: ESTADO_PRODUCTO_VISIBLE,
       });
 
       if (encontrado == null) {
@@ -223,6 +223,52 @@ export class ProductosService {
     const ofertas = await this.obtenerOfertasReales(idProducto);
 
     return { ...producto, ofertas };
+  }
+
+  /**
+   * El estado de cada variante de estos productos, indexado por
+   * "id_producto:id_producto_variante". Usado por
+   * PedidosCompradorService.revisarCambiosAntesDeComprar para rechazar la
+   * compra si alguna variante se desactivo despues de que la linea se
+   * agrego al carrito -- el estado de PRODUCTO ya lo protege
+   * obtenerPublico() (y por transitividad, agregarLinea), pero el de cada
+   * VARIANTE no se copia a PostgreSQL, asi que hay que volver a consultar
+   * Mongo antes de comprar.
+   *
+   * Una sola consulta con `$in`, sin importar cuantas lineas tenga el
+   * pedido -- mismo criterio que el resto del backend (nunca una consulta
+   * a Mongo por linea).
+   */
+  async obtenerEstadosVariante(idsProducto: number[]): Promise<Map<string, string>> {
+    const idsUnicos = [...new Set(idsProducto)];
+    try {
+      const productos = await mongoDb
+        .collection<Producto>('productos')
+        .find(
+          { _id: { $in: idsUnicos } },
+          {
+            projection: {
+              _id: 1,
+              'variantes.id_producto_variante': 1,
+              'variantes.estado': 1,
+            },
+          },
+        )
+        .toArray();
+
+      const estados = new Map<string, string>();
+      for (const producto of productos) {
+        for (const variante of producto.variantes) {
+          estados.set(
+            `${producto._id}:${variante.id_producto_variante}`,
+            variante.estado,
+          );
+        }
+      }
+      return estados;
+    } catch (error) {
+      manejarErrorConexionMongo(this.logger, error);
+    }
   }
 
   /**
@@ -543,14 +589,16 @@ export class ProductosService {
     if (query.nombre) {
       filtro.nombre = { $regex: escaparRegex(query.nombre), $options: 'i' };
     }
-    // Inactivo y borrador nunca son parte de la busqueda publica, sin
-    // importar que se pida: no es un filtro opcional, es una exclusion fija.
-    const condicionEstado: Record<string, unknown> = {
-      $nin: ESTADOS_PRODUCTO_OCULTOS,
-    };
-    if (query.estado) {
-      condicionEstado.$eq = query.estado;
-    }
+    // Lista blanca, no lista negra: solo ESTADO_PRODUCTO_VISIBLE es parte de
+    // la busqueda publica, sin importar que se pida -- no es un filtro
+    // opcional que se pueda ampliar. Si ?estado= pide cualquier otro valor,
+    // no hay (ni puede haber) ningun producto que lo cumpla a la vez que sea
+    // visible: $in: [] es el idiom estandar de Mongo para "nunca hace match",
+    // asi que la respuesta sigue siendo una lista vacia, nunca un error.
+    const condicionEstado: Record<string, unknown> =
+      query.estado != null && query.estado !== ESTADO_PRODUCTO_VISIBLE
+        ? { $in: [] }
+        : { $eq: ESTADO_PRODUCTO_VISIBLE };
     filtro.estado = condicionEstado;
     if (idCategoria != null) {
       filtro['categoria.id_categoria'] = idCategoria;
