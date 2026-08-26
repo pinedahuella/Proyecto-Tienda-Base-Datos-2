@@ -1,4 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
+import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { mongoDb } from '../../database/mongo';
 import { ErrorConflicto, ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
@@ -276,6 +277,14 @@ export class OfertasVendedorService {
    * admin, "dueno" se resuelve como la cuenta de la tienda (ver
    * resolverIdEfectivo() arriba): un admin puede editar cualquier oferta
    * de la tienda, pero sigue sin poder tocar la de otro vendedor.
+   *
+   * El UPDATE de precio/estado y el SELECT reponer_stock() van en una
+   * sola transaccion (BEGIN/COMMIT con un cliente dedicado, no con
+   * pool.query), igual que ya se hace en direccion-usuario.service.ts y
+   * en comprarPedido(): si el ajuste de stock revienta (por ejemplo,
+   * dejaria el stock en negativo), el ROLLBACK deshace tambien el cambio
+   * de precio/estado, para que nunca quede un precio nuevo guardado
+   * mientras el ajuste que vino junto con el fallo.
    */
   async editar(
     idUsuarioToken: string,
@@ -304,47 +313,51 @@ export class OfertasVendedorService {
     // tocar nada, para no dejar un cambio a medias si la oferta es ajena.
     await this.obtenerFilaPropia(idOferta, idUsuario);
 
-    if (precio != null || estado != null) {
-      const asignaciones: string[] = [];
-      const valores: unknown[] = [];
-      if (precio != null) {
-        asignaciones.push(`precio = $${valores.length + 1}`);
-        valores.push(precio);
-      }
-      if (estado != null) {
-        asignaciones.push(
-          `id_estado_oferta = (SELECT id_estado_oferta FROM estado_oferta WHERE estado_oferta_nombre = $${valores.length + 1})`,
-        );
-        valores.push(estado);
-      }
-      valores.push(idOferta);
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
 
-      try {
-        await pool.query(
+      if (precio != null || estado != null) {
+        const asignaciones: string[] = [];
+        const valores: unknown[] = [];
+        if (precio != null) {
+          asignaciones.push(`precio = $${valores.length + 1}`);
+          valores.push(precio);
+        }
+        if (estado != null) {
+          asignaciones.push(
+            `id_estado_oferta = (SELECT id_estado_oferta FROM estado_oferta WHERE estado_oferta_nombre = $${valores.length + 1})`,
+          );
+          valores.push(estado);
+        }
+        valores.push(idOferta);
+
+        await cliente.query(
           `UPDATE oferta SET ${asignaciones.join(', ')} WHERE id_oferta = $${valores.length}`,
           valores,
         );
-      } catch (error) {
-        manejarErrorConexion(this.logger, error);
       }
-    }
 
-    if (ajusteStock != null) {
-      const motivo = ajusteStock > 0 ? 'reposicion' : 'ajuste';
-      const cantidad = Math.abs(ajusteStock);
-      try {
-        await pool.query('SELECT reponer_stock($1, $2, $3, $4)', [
+      if (ajusteStock != null) {
+        const motivo = ajusteStock > 0 ? 'reposicion' : 'ajuste';
+        const cantidad = Math.abs(ajusteStock);
+        await cliente.query('SELECT reponer_stock($1, $2, $3, $4)', [
           idOferta,
           cantidad,
           motivo,
           idUsuario,
         ]);
-      } catch (error) {
-        if (this.esErrorDeNegocio(error)) {
-          throw new ErrorConflicto((error as Error).message);
-        }
-        manejarErrorConexion(this.logger, error);
       }
+
+      await cliente.query('COMMIT');
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      if (this.esErrorDeNegocio(error)) {
+        throw new ErrorConflicto((error as Error).message);
+      }
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
     }
 
     const filaFinal = await this.obtenerFilaPropia(idOferta, idUsuario);
@@ -621,5 +634,14 @@ export class OfertasVendedorService {
   private esErrorDeNegocio(error: unknown): boolean {
     const codigo = (error as { code?: string } | undefined)?.code;
     return codigo === CODIGO_CHECK_VIOLATION;
+  }
+
+  private async intentarRollback(cliente: PoolClient): Promise<void> {
+    try {
+      await cliente.query('ROLLBACK');
+    } catch {
+      // Si ni el rollback funciona, la conexion seguramente ya se cayo.
+      // No hay nada mas que hacer; sigue el error original de quien llamo.
+    }
   }
 }
