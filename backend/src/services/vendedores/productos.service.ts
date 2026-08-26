@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Collection } from 'mongodb';
+import { Collection, Document } from 'mongodb';
 import { mongoDb } from '../../database/mongo';
 import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
@@ -15,12 +15,21 @@ import {
   validarNombreVariante,
 } from '../../helpers/validaciones-crear-producto';
 import {
+  construirRegexNombreFlexible,
+  validarLimite,
+  validarPagina,
+} from '../../helpers/validaciones-productos';
+import {
   CaracteristicaCatalogoPeticion,
   CaracteristicaPersonalizadaPeticion,
   CrearProductoPeticion,
   VarianteCreacionPeticion,
 } from '../../dto/crear-producto';
 import { EditarProductoPeticion } from '../../dto/editar-producto';
+import {
+  PaginarProductosVendedorQuery,
+  ProductosVendedorPaginados,
+} from '../../dto/paginar-productos-vendedor';
 import { CategoriaDocumento } from '../../models/categoria';
 import {
   EntradaCaracteristica,
@@ -619,6 +628,78 @@ export class ProductosVendedorService {
         .find({})
         .sort({ fecha_creacion: -1 })
         .toArray();
+    } catch (error) {
+      manejarErrorConexionMongo(this.logger, error);
+    }
+  }
+
+  /**
+   * Lo mismo que listarPropios() (todo el catalogo, en cualquier estado,
+   * sin ninguna exclusion), pero paginado por numero de pagina -- igual
+   * que GET /productos/paginacion, no por cursor -- y con un solo filtro
+   * posible: `nombre`, "contiene" insensible a mayusculas y a tildes
+   * (construirRegexNombreFlexible). Sin categoria, precio, stock ni
+   * caracteristicas: ese filtrado es del catalogo publico, no de este
+   * panel.
+   *
+   * Mismo patron de agregacion que ProductosService.listarPaginado()
+   * ($facet: productos + total en una sola consulta), pero ordenado por
+   * fecha_creacion descendente -- igual que listarPropios() sin paginar,
+   * no por _id como el catalogo publico -- para que un admin vea primero
+   * lo mas reciente.
+   */
+  async listarPropiosPaginado(
+    idUsuario: string,
+    query: PaginarProductosVendedorQuery,
+  ): Promise<ProductosVendedorPaginados> {
+    await this.exigirTiendaOAdmin(idUsuario);
+
+    const limite = validarLimite(query.limite);
+    const pagina = validarPagina(query.pagina);
+
+    const filtro: Record<string, unknown> = {};
+    if (query.nombre) {
+      filtro.nombre = {
+        $regex: construirRegexNombreFlexible(query.nombre),
+        $options: 'i',
+      };
+    }
+
+    const saltar = (pagina - 1) * limite;
+
+    try {
+      const pipeline: Document[] = [
+        { $match: filtro },
+        {
+          $facet: {
+            productos: [
+              { $sort: { fecha_creacion: -1 } },
+              { $skip: saltar },
+              { $limit: limite },
+            ],
+            total: [{ $count: 'total' }],
+          },
+        },
+      ];
+
+      const [resultado] = await mongoDb
+        .collection<Producto>('productos')
+        .aggregate<{ productos: Producto[]; total: { total: number }[] }>(
+          pipeline,
+        )
+        .toArray();
+
+      const totalProductos = resultado.total[0]?.total ?? 0;
+      const totalPaginas =
+        totalProductos === 0 ? 0 : Math.ceil(totalProductos / limite);
+
+      return {
+        productos: resultado.productos,
+        pagina,
+        limite,
+        total_productos: totalProductos,
+        total_paginas: totalPaginas,
+      };
     } catch (error) {
       manejarErrorConexionMongo(this.logger, error);
     }

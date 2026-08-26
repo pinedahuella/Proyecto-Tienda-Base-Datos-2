@@ -30,6 +30,7 @@ de restricción, y no son lo mismo:
 | `GET /vendedor/categorias` | vendedor **o** admin (2 o 3) | cualquiera |
 | `GET /vendedor/categorias/:id` | vendedor **o** admin (2 o 3) | cualquiera |
 | `GET /vendedor/productos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `GET /vendedor/productos/paginado` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `GET /vendedor/productos/:id` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `GET /vendedor/productos/:id/historial` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `POST /vendedor/productos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
@@ -713,6 +714,91 @@ toca PostgreSQL. El stock real es de cada oferta, no del producto — ver
 Este es el que sale para **cualquier cuenta que no sea la tienda ni
 admin** — el mismo mensaje que usan las rutas con `:id`, aunque aquí no
 se haya mandado ningún id.
+
+### 401 / 403 / 503 / 500
+
+Mismos casos que las demás rutas de `/vendedor/productos` (ver arriba).
+
+---
+
+## GET /vendedor/productos/paginado
+
+**Solo `tienda@mesh.com` o una cuenta con rol admin**, igual que
+`GET /vendedor/productos` — mismo 404 genérico para cualquier otro
+vendedor. Lo mismo que `GET /vendedor/productos` (el catálogo completo,
+**en cualquier estado**, sin excluir `borrador`/`inactivo`), pero
+paginado por número de página — igual que `GET /productos/paginacion`
+del catálogo público, no por cursor — y con un solo filtro posible.
+
+**Un solo filtro, a propósito: `nombre`, "contiene".** A diferencia del
+catálogo público (`GET /productos`/`/paginacion`, con filtros fijos y
+dinámicos por categoría, precio, stock y características), este panel
+solo necesita encontrar un producto por nombre en toda la lista — no
+tiene sentido filtrar por precio o stock de la tienda cuando ya se está
+viendo todo, incluido lo que ni siquiera tiene ofertas todavía. Sin
+`id_categoria`, `precio_min`/`max`, `stock_min`/`max` ni características:
+ninguno de esos existe aquí.
+
+**El filtro `nombre` es insensible a mayúsculas y a tildes.** Buscar
+`camara` encuentra "Cámara" y buscar `Cámara` encuentra "camara" — sin
+importar de qué lado quedó la tilde. La `í` insensible a mayúsculas de
+`GET /productos?nombre=` (`$options: 'i'` en el regex de Mongo) no cubre
+tildes por sí sola; `construirRegexNombreFlexible()`
+(`helpers/validaciones-productos.ts`) expande cada vocal del término de
+búsqueda a una clase de caracteres que cubre sus variantes acentuadas,
+antes de armar el regex. La `ñ` **no** se funde con la `n` a propósito:
+es una letra distinta en español, no un acento (fundirla cambiaría el
+significado — "año" ≠ "ano").
+
+Ordenado igual que `GET /vendedor/productos`: por `fecha_creacion`, más
+reciente primero.
+
+### Query params
+
+| Param | Tipo | Obligatorio | Qué hace |
+| --- | --- | --- | --- |
+| `pagina` | entero | No (por defecto 1) | Qué página pedir, 1 es la primera |
+| `limite` | entero | No (por defecto 20, tope 100) | Cuántos productos trae cada página |
+| `nombre` | texto | No | "Contiene", insensible a mayúsculas y a tildes |
+
+### Ejemplo
+
+```
+GET /vendedor/productos/paginado?nombre=camara&limite=10&pagina=1
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Productos obtenidos",
+  "payload": {
+    "productos": [ "... mismos documentos que GET /vendedor/productos ..." ],
+    "pagina": 1,
+    "limite": 10,
+    "total_productos": 2,
+    "total_paginas": 1
+  }
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "La pagina debe ser un numero entero mayor a 0", "payload": null }
+{ "ok": false, "mensaje": "El limite debe ser un numero entero mayor a 0", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+```
+
+Este es el que sale para **cualquier cuenta que no sea la tienda ni
+admin** — mismo mensaje genérico que el resto de `/vendedor/productos`,
+aunque aquí tampoco haya ningún `id` de por medio.
 
 ### 401 / 403 / 503 / 500
 

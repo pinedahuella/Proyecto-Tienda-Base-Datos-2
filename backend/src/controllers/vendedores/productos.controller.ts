@@ -15,6 +15,7 @@ import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { CrearProductoPeticion } from '../../dto/crear-producto';
 import type { EditarProductoPeticion } from '../../dto/editar-producto';
+import type { PaginarProductosVendedorQuery } from '../../dto/paginar-productos-vendedor';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { ProductosVendedorService } from '../../services/vendedores/productos.service';
@@ -47,6 +48,28 @@ export class ProductosVendedorController {
         usuarioActual.id_usuario,
       );
       return exito(productos, 'Productos obtenidos');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener los productos');
+    }
+  }
+
+  // GET /vendedor/productos/paginado
+  // Va antes de :id para que "paginado" no se confunda con un id (aunque
+  // Fastify de por si prioriza las rutas estaticas sobre las parametricas).
+  // Todo el catalogo, sin excluir ningun estado -- igual que listarMios()
+  // -- pero paginado por numero de pagina y con un solo filtro: nombre
+  // "contiene", insensible a mayusculas y a tildes.
+  @Get('paginado')
+  async listarMiosPaginado(
+    @Query() query: PaginarProductosVendedorQuery,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const pagina = await this.productosVendedorService.listarPropiosPaginado(
+        usuarioActual.id_usuario,
+        query,
+      );
+      return exito(pagina, 'Productos obtenidos');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudieron obtener los productos');
     }

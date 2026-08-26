@@ -4,7 +4,10 @@ import { ErrorValidacion } from './errores';
  * Reglas de validacion y saneamiento de GET /productos: la paginacion por
  * cursor, los filtros fijos (nombre, estado, categoria, vendedor, precio,
  * estado de variante, stock_total) y los filtros dinamicos de
- * caracteristicas_adicionales.
+ * caracteristicas_adicionales. `validarPagina`/`validarLimite` y
+ * `construirRegexNombreFlexible` tambien las reutiliza
+ * `GET /vendedor/productos/paginado` (mismas reglas, mismos mensajes, un
+ * solo lugar -- ver ProductosVendedorService).
  */
 
 export const LIMITE_PRODUCTOS_DEFECTO = 20;
@@ -187,4 +190,40 @@ export function interpretarFiltroCaracteristica(
 /** Escapa caracteres especiales de regex antes de usar un texto en un $regex. */
 export function escaparRegex(texto: string): string {
   return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Cada vocal, con todas sus variantes acentuadas (y sin acentuar) en los
+ * dos casos -- para armar un $regex que no le importe de que lado de la
+ * busqueda quedo la tilde. La eñe/Ñ se deja tal cual: es una letra
+ * distinta en español, no un acento, y fundirla con la n cambiaria el
+ * significado de la palabra ("año" != "ano").
+ */
+const VARIANTES_VOCAL: Record<string, string> = {
+  a: 'aàáâäAÀÁÂÄ',
+  e: 'eèéêëEÈÉÊË',
+  i: 'iìíîïIÌÍÎÏ',
+  o: 'oòóôöOÒÓÔÖ',
+  u: 'uùúûüUÙÚÛÜ',
+};
+
+/**
+ * Arma un patron de $regex "contiene" insensible a mayusculas/minusculas Y
+ * a tildes: buscar "camara" encuentra "Cámara" y buscar "Cámara" encuentra
+ * "camara", sin importar de que lado del texto (busqueda o dato guardado)
+ * esta la tilde. Se usa junto con `$options: 'i'` en el $regex -- eso
+ * resuelve mayusculas/minusculas del resto de las letras; esta funcion
+ * solo resuelve las vocales acentuadas, que `i` no cubre por si solo.
+ *
+ * Escapa los caracteres especiales de regex primero (mismo escaparRegex de
+ * siempre) y recien despues expande cada vocal a su clase de caracteres --
+ * las letras nunca quedan afectadas por el escape, asi que el orden es
+ * seguro.
+ */
+export function construirRegexNombreFlexible(texto: string): string {
+  const escapado = escaparRegex(texto);
+  return escapado.replace(/[aeiouAEIOU]/g, (letra) => {
+    const variantes = VARIANTES_VOCAL[letra.toLowerCase()];
+    return `[${variantes}]`;
+  });
 }
