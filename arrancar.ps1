@@ -354,12 +354,46 @@ foreach ($linea in Get-Content "$PSScriptRoot\.env") {
     if ($partes.Count -eq 2) { $env_[$partes[0].Trim()] = $partes[1].Trim() }
 }
 
+# Esta lista tiene que llevar TODAS las variables que docker-compose.yml marca
+# con ":?" -- si no, el arranque muere doce pasos mas adelante con un
+# "Fallo docker compose up" que no dice cual falta.
+#
+# Ya paso: al agregar Redis y Neo4j se agregaron REDIS_PASSWORD y
+# NEO4J_PASSWORD al compose y NO a esta lista. El .env no se sube al
+# repositorio, asi que a quien hizo pull le faltaban las dos, y el script le
+# dijo "Credenciales leidas" -- en verde -- antes de morir con un mensaje que
+# no mencionaba ni Redis ni Neo4j ni el .env. Perdio la tarde buscando en Docker
+# un problema que estaba en un archivo de texto.
+#
+# La regla: agregar un servicio al compose con una variable obligatoria incluye
+# agregarla AQUI y a .env.example, en la misma pasada.
+$faltantes = @()
+# Son las DIEZ que docker-compose.yml marca con ":?". Se comprueba con:
+#   las de   grep -o '\${[A-Z0-9_]*:?' docker-compose.yml
+#   tienen que estar todas en esta lista.
+# PGADMIN_EMAIL y PGADMIN_PASSWORD llevaban aqui desde siempre y faltaban: el
+# mismo fallo, sin descubrir, esperando al primero que armara su .env a mano.
 foreach ($obligatoria in @("DB_USER", "DB_PASSWORD", "DB_NAME",
-                          "MONGO_USER", "MONGO_PASSWORD", "MONGO_DB")) {
+                          "MONGO_USER", "MONGO_PASSWORD", "MONGO_DB",
+                          "PGADMIN_EMAIL", "PGADMIN_PASSWORD",
+                          "REDIS_PASSWORD", "NEO4J_PASSWORD")) {
     if (-not $env_[$obligatoria] -or $env_[$obligatoria] -eq "cambiame") {
-        Error1 "Falta llenar $obligatoria en el .env"
-        exit 1
+        $faltantes += $obligatoria
     }
+}
+
+# Se juntan y se reportan TODAS de una vez. Reportar la primera y salir obliga a
+# correr el script una vez por variable que falte, y con dos nuevas eso son tres
+# arranques para enterarse de algo que se sabia desde el primero.
+if ($faltantes.Count -gt 0) {
+    Error1 "Falta llenar en el .env: $($faltantes -join ', ')"
+    Error1 ""
+    Error1 "Si actualizaste el repositorio, son variables NUEVAS: tu .env es tuyo"
+    Error1 "y no viene en el pull. Copia las lineas que te falten de .env.example"
+    Error1 "y ponles el mismo valor que ya usas en las otras."
+    Error1 ""
+    Error1 "NEO4J_PASSWORD tiene que tener 8 caracteres o mas, o Neo4j no arranca."
+    exit 1
 }
 Ok "Credenciales leidas"
 
