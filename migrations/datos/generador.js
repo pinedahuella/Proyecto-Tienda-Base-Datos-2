@@ -1226,20 +1226,33 @@ w(``);
 // Direcciones de los compradores: hacen falta para poder crear un pedido
 w(`-- Las direcciones de los compradores. Sin una direccion no se puede crear`);
 w(`-- un pedido: crear_pedido pide su id_direccion_historial.`);
-w(`INSERT INTO direcciones (id_usuario, pais, departamento, ciudad, codigo_postal, id_estado_direccion)`);
-w(`SELECT u.id_usuario, v.pais, v.departamento, v.ciudad, v.codigo, ed.id_estado_direccion`);
+// La calle (direccion_exacta, migracion 008) va AQUI y no en un UPDATE aparte:
+// el esquema corre antes que los datos, asi que cuando la 008 anade la columna
+// esta tabla todavia esta vacia y no hay nada que rellenar. Si la calle no
+// naciera en este INSERT, una base recien cargada quedaria con las dos
+// direcciones sin calle -- y el backend la exige al crear una nueva, o sea que
+// los datos de prueba serian los unicos que no cumplen su propia regla.
+//
+// Y va emparejada por CORREO, no por id. Es la regla de migrations/README.md y
+// aqui se ve para que sirve: la calle de Antigua tiene que caerle al comprador
+// del sur y la de la zona 10 a la compradora del norte. Emparejarlas por
+// id_direccion las cruza sin que nada falle.
+w(`INSERT INTO direcciones (id_usuario, pais, departamento, ciudad, direccion_exacta, codigo_postal, id_estado_direccion)`);
+w(`SELECT u.id_usuario, v.pais, v.departamento, v.ciudad, v.calle, v.codigo, ed.id_estado_direccion`);
 w(`FROM (VALUES`);
-w(`    ('compradora.norte@mesh.com', 'Guatemala', 'Guatemala',     'Guatemala', '01010'),`);
-w(`    ('comprador.sur@mesh.com',    'Guatemala', 'Sacatepequez',  'Antigua Guatemala', '03001')`);
-w(`) AS v(correo, pais, departamento, ciudad, codigo)`);
+w(`    ('compradora.norte@mesh.com', 'Guatemala', 'Guatemala',     'Guatemala',         '6a. Avenida 9-18, Zona 10, Edificio Vista Real, Nivel 3', '01010'),`);
+w(`    ('comprador.sur@mesh.com',    'Guatemala', 'Sacatepequez',  'Antigua Guatemala', '5a. Avenida Norte 22, frente al Arco de Santa Catalina',   '03001')`);
+w(`) AS v(correo, pais, departamento, ciudad, calle, codigo)`);
 w(`JOIN usuarios u ON u.correo_electronico = v.correo`);
 w(`JOIN estado_direccion ed ON ed.estado_direccion_nombre = 'activa'`);
 w(`WHERE NOT EXISTS (SELECT 1 FROM direcciones d WHERE d.id_usuario = u.id_usuario);`);
 w(``);
 w(`-- Su primera version en el historial. El pedido apunta AQUI y no a`);
 w(`-- direcciones: guarda a donde se mando de verdad, aunque despues la editen.`);
-w(`INSERT INTO direccion_historial (id_direccion, pais, departamento, ciudad, codigo_postal)`);
-w(`SELECT d.id_direccion, d.pais, d.departamento, d.ciudad, d.codigo_postal`);
+w(`-- La calle se copia igual que el resto: si faltara aqui, la etiqueta de un`);
+w(`-- pedido viejo se quedaria sin ella.`);
+w(`INSERT INTO direccion_historial (id_direccion, pais, departamento, ciudad, direccion_exacta, codigo_postal)`);
+w(`SELECT d.id_direccion, d.pais, d.departamento, d.ciudad, d.direccion_exacta, d.codigo_postal`);
 w(`FROM direcciones d`);
 w(`WHERE NOT EXISTS (SELECT 1 FROM direccion_historial h WHERE h.id_direccion = d.id_direccion);`);
 w(``);
@@ -1643,8 +1656,30 @@ w(`-- cinco. Alguna sale pausada o en cero a proposito: si todas estuvieran`);
 w(`-- activas y con stock, la pantalla nunca ensenaria los casos que si van a`);
 w(`-- pasar de verdad.`);
 w(``);
-w(`INSERT INTO oferta (id_producto_mongo, id_producto_variante_mongo, id_usuario, precio, stock, id_estado_oferta, fecha_creacion, fecha_actualizacion)`);
-w(`SELECT p.id_producto, pv.id_producto_variante, u.id_usuario, v.precio, v.stock, eo.id_estado_oferta, v.fecha::timestamptz, v.fecha::timestamptz`);
+// fecha_aprobacion (migracion 010) sale de la misma fecha de creacion, y no de
+// una columna nueva en los VALUES de arriba, porque TODAS estas ofertas nacen
+// aprobadas: son `activa` o `pausada`, y a esos dos estados no se llega sin que
+// la tienda haya dado el visto bueno. Una oferta activa con la aprobacion en
+// NULL es un estado que no puede existir, y sin esta linea las 552 quedarian
+// justo asi -- la 010 no las arregla, porque el esquema corre antes que los
+// datos y cuando ella pasa esta tabla todavia esta vacia.
+//
+// Ninguna nace `pendiente` a proposito. La semilla retrata un catalogo que ya
+// funciona, y una oferta esperando revision para siempre no es eso. Para probar
+// la cola de aprobacion basta publicar una desde el panel con cualquier cuenta
+// ventas.*@mesh.com: el backend ya la crea pendiente sola.
+// Y `id_usuario_aprobo` distingue los dos caminos de nacimiento que tiene una
+// oferta, que es justo lo que esta columna existe para poder contar:
+//
+//   la tienda      nace aprobada sin que nadie la revise -> NULL, no consta quien
+//   los demas      pasan por la cola y las aprueba la tienda -> su id
+//
+// NULL aqui NO significa "sin aprobar" -- la fecha ya dice que si -- significa
+// que no hubo revisor. Por eso esta columna no puede llevar un CHECK que la
+// empareje con la fecha: prohibiria el caso de la tienda, que son 202 de las 552.
+w(`INSERT INTO oferta (id_producto_mongo, id_producto_variante_mongo, id_usuario, precio, stock, id_estado_oferta, fecha_creacion, fecha_actualizacion, fecha_aprobacion, id_usuario_aprobo)`);
+w(`SELECT p.id_producto, pv.id_producto_variante, u.id_usuario, v.precio, v.stock, eo.id_estado_oferta, v.fecha::timestamptz, v.fecha::timestamptz, v.fecha::timestamptz,`);
+w(`       CASE WHEN v.correo = ${txt(TIENDA.correo)} THEN NULL ELSE ut.id_usuario END`);
 w(`FROM (VALUES`);
 w(OFERTAS.map((o, i) =>
   `    (${txt(o.correo)}, ${txt(o.producto)}, ${txt(o.variante)}, ${num(o.precio)}.00, ${num(o.stock)}, ${txt(o.estado)}, ${txt(o.fecha)})` +
@@ -1653,7 +1688,8 @@ w(`) AS v(correo, producto, variante, precio, stock, estado, fecha)`);
 w(`JOIN usuarios            u  ON u.correo_electronico = v.correo`);
 w(`JOIN productos           p  ON p.nombre = v.producto`);
 w(`JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_variante = v.variante`);
-w(`JOIN estado_oferta       eo ON eo.estado_oferta_nombre = v.estado;`);
+w(`JOIN estado_oferta       eo ON eo.estado_oferta_nombre = v.estado`);
+w(`JOIN usuarios            ut ON ut.correo_electronico = ${txt(TIENDA.correo)};`);
 w(``);
 
 
@@ -1828,7 +1864,7 @@ w(`-- ============================================================`);
 w(`-- El trigger vuelve, y el conjunto se comprueba a si mismo`);
 w(`-- ============================================================`);
 w(`-- Un conjunto de datos que no se verifica es un conjunto de datos que`);
-w(`-- miente en silencio. Estas tres comprobaciones fallan la migracion entera`);
+w(`-- miente en silencio. Estas siete comprobaciones fallan la migracion entera`);
 w(`-- si algo no cuadra, en vez de dejar la base torcida y que alguien lo`);
 w(`-- descubra tres semanas despues.`);
 w(``);
@@ -1883,7 +1919,73 @@ w(`    IF v_mal > 0 THEN`);
 w(`        RAISE EXCEPTION '% variantes no tienen oferta de la tienda', v_mal;`);
 w(`    END IF;`);
 w(``);
-w(`    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios y ofertas de la tienda cuadran';`);
+w(`    -- 4. Ninguna oferta que circula esta sin aprobar. A 'activa' y a`);
+w(`    --    'pausada' no se llega sin el visto bueno de la tienda, asi que una`);
+w(`    --    de esas con fecha_aprobacion en NULL es un estado imposible.`);
+w(`    --    Esta comprobacion existe porque la base NO lo puede impedir sola:`);
+w(`    --    un CHECK no admite subconsultas y meter el id del estado a mano`);
+w(`    --    dentro de la restriccion esta prohibido (migrations/README.md).`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM oferta o`);
+w(`    JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta`);
+w(`    WHERE eo.estado_oferta_nombre IN ('activa', 'pausada')`);
+w(`      AND o.fecha_aprobacion IS NULL;`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% ofertas circulan sin fecha de aprobacion', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    -- 5. Y la reciproca: una oferta 'pendiente' o 'rechazada' NO puede tener`);
+w(`    --    fecha de aprobacion. A 'rechazada' solo se llega desde 'pendiente'`);
+w(`    --    (el backend rechaza revisar cualquier otro estado), y el rechazo no`);
+w(`    --    toca la fecha, asi que las dos comparten la misma invariante.`);
+w(`    --`);
+w(`    --    Esta mitad importa mas de lo que parece: la fecha de aprobacion es`);
+w(`    --    el candado que impide que un vendedor active su propia oferta, asi`);
+w(`    --    que una fila sin aprobar pero CON fecha es una que se puede publicar`);
+w(`    --    sola, saltandose la revision.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM oferta o`);
+w(`    JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta`);
+w(`    WHERE eo.estado_oferta_nombre IN ('pendiente', 'rechazada')`);
+w(`      AND o.fecha_aprobacion IS NOT NULL;`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% ofertas sin aprobar ya traen fecha de aprobacion', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    -- 6. Nadie aprobo una oferta que no esta aprobada. Al reves SI se puede`);
+w(`    --    (la tienda nace aprobada y sin revisor), asi que solo se comprueba`);
+w(`    --    esta mitad: si hay aprobador, tiene que haber fecha.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM oferta`);
+w(`    WHERE id_usuario_aprobo IS NOT NULL`);
+w(`      AND fecha_aprobacion IS NULL;`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% ofertas tienen aprobador pero no fecha de aprobacion', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    -- 7. Toda direccion tiene calle, en la fila viva y en su historial. Sin`);
+w(`    --    ella no se entrega un pedido, y el backend la exige al crear una`);
+w(`    --    nueva: los datos de prueba no pueden ser los unicos que se saltan`);
+w(`    --    la regla.`);
+w(`    --    Se cuentan DIRECCIONES distintas, no filas: una direccion sin calle`);
+w(`    --    arrastra tambien su fila de historial, y sumar las dos tablas`);
+w(`    --    reportaria el doble. Quien lea "2" saldria a buscar dos direcciones`);
+w(`    --    rotas cuando solo hay una.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM direcciones d`);
+w(`    WHERE d.direccion_exacta IS NULL`);
+w(`       OR EXISTS (SELECT 1 FROM direccion_historial h`);
+w(`                   WHERE h.id_direccion = d.id_direccion`);
+w(`                     AND h.direccion_exacta IS NULL);`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% direcciones se quedaron sin calle', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones y direcciones cuadran';`);
 w(`END`);
 w(`$verificar$;`);
 w(``);

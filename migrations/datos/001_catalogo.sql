@@ -64,20 +64,22 @@ WHERE NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.correo_electronico = v.correo
 
 -- Las direcciones de los compradores. Sin una direccion no se puede crear
 -- un pedido: crear_pedido pide su id_direccion_historial.
-INSERT INTO direcciones (id_usuario, pais, departamento, ciudad, codigo_postal, id_estado_direccion)
-SELECT u.id_usuario, v.pais, v.departamento, v.ciudad, v.codigo, ed.id_estado_direccion
+INSERT INTO direcciones (id_usuario, pais, departamento, ciudad, direccion_exacta, codigo_postal, id_estado_direccion)
+SELECT u.id_usuario, v.pais, v.departamento, v.ciudad, v.calle, v.codigo, ed.id_estado_direccion
 FROM (VALUES
-    ('compradora.norte@mesh.com', 'Guatemala', 'Guatemala',     'Guatemala', '01010'),
-    ('comprador.sur@mesh.com',    'Guatemala', 'Sacatepequez',  'Antigua Guatemala', '03001')
-) AS v(correo, pais, departamento, ciudad, codigo)
+    ('compradora.norte@mesh.com', 'Guatemala', 'Guatemala',     'Guatemala',         '6a. Avenida 9-18, Zona 10, Edificio Vista Real, Nivel 3', '01010'),
+    ('comprador.sur@mesh.com',    'Guatemala', 'Sacatepequez',  'Antigua Guatemala', '5a. Avenida Norte 22, frente al Arco de Santa Catalina',   '03001')
+) AS v(correo, pais, departamento, ciudad, calle, codigo)
 JOIN usuarios u ON u.correo_electronico = v.correo
 JOIN estado_direccion ed ON ed.estado_direccion_nombre = 'activa'
 WHERE NOT EXISTS (SELECT 1 FROM direcciones d WHERE d.id_usuario = u.id_usuario);
 
 -- Su primera version en el historial. El pedido apunta AQUI y no a
 -- direcciones: guarda a donde se mando de verdad, aunque despues la editen.
-INSERT INTO direccion_historial (id_direccion, pais, departamento, ciudad, codigo_postal)
-SELECT d.id_direccion, d.pais, d.departamento, d.ciudad, d.codigo_postal
+-- La calle se copia igual que el resto: si faltara aqui, la etiqueta de un
+-- pedido viejo se quedaria sin ella.
+INSERT INTO direccion_historial (id_direccion, pais, departamento, ciudad, direccion_exacta, codigo_postal)
+SELECT d.id_direccion, d.pais, d.departamento, d.ciudad, d.direccion_exacta, d.codigo_postal
 FROM direcciones d
 WHERE NOT EXISTS (SELECT 1 FROM direccion_historial h WHERE h.id_direccion = d.id_direccion);
 
@@ -2415,8 +2417,9 @@ JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_vari
 -- activas y con stock, la pantalla nunca ensenaria los casos que si van a
 -- pasar de verdad.
 
-INSERT INTO oferta (id_producto_mongo, id_producto_variante_mongo, id_usuario, precio, stock, id_estado_oferta, fecha_creacion, fecha_actualizacion)
-SELECT p.id_producto, pv.id_producto_variante, u.id_usuario, v.precio, v.stock, eo.id_estado_oferta, v.fecha::timestamptz, v.fecha::timestamptz
+INSERT INTO oferta (id_producto_mongo, id_producto_variante_mongo, id_usuario, precio, stock, id_estado_oferta, fecha_creacion, fecha_actualizacion, fecha_aprobacion, id_usuario_aprobo)
+SELECT p.id_producto, pv.id_producto_variante, u.id_usuario, v.precio, v.stock, eo.id_estado_oferta, v.fecha::timestamptz, v.fecha::timestamptz, v.fecha::timestamptz,
+       CASE WHEN v.correo = 'tienda@mesh.com' THEN NULL ELSE ut.id_usuario END
 FROM (VALUES
     ('tienda@mesh.com', 'Laptop Aurora 14', '16 GB / 512 GB', 6200.00, 35, 'activa', '2026-01-04 10:52:00-06'),
     ('ventas.norte@mesh.com', 'Laptop Aurora 14', '16 GB / 512 GB', 6228.00, 15, 'activa', '2026-01-04 10:52:00-06'),
@@ -2974,7 +2977,8 @@ FROM (VALUES
 JOIN usuarios            u  ON u.correo_electronico = v.correo
 JOIN productos           p  ON p.nombre = v.producto
 JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_variante = v.variante
-JOIN estado_oferta       eo ON eo.estado_oferta_nombre = v.estado;
+JOIN estado_oferta       eo ON eo.estado_oferta_nombre = v.estado
+JOIN usuarios            ut ON ut.correo_electronico = 'tienda@mesh.com';
 
 -- ============================================================
 -- El historial de precio: 762 filas
@@ -3863,7 +3867,7 @@ $bloque$;
 -- El trigger vuelve, y el conjunto se comprueba a si mismo
 -- ============================================================
 -- Un conjunto de datos que no se verifica es un conjunto de datos que
--- miente en silencio. Estas tres comprobaciones fallan la migracion entera
+-- miente en silencio. Estas siete comprobaciones fallan la migracion entera
 -- si algo no cuadra, en vez de dejar la base torcida y que alguien lo
 -- descubra tres semanas despues.
 
@@ -3918,7 +3922,73 @@ BEGIN
         RAISE EXCEPTION '% variantes no tienen oferta de la tienda', v_mal;
     END IF;
 
-    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios y ofertas de la tienda cuadran';
+    -- 4. Ninguna oferta que circula esta sin aprobar. A 'activa' y a
+    --    'pausada' no se llega sin el visto bueno de la tienda, asi que una
+    --    de esas con fecha_aprobacion en NULL es un estado imposible.
+    --    Esta comprobacion existe porque la base NO lo puede impedir sola:
+    --    un CHECK no admite subconsultas y meter el id del estado a mano
+    --    dentro de la restriccion esta prohibido (migrations/README.md).
+    SELECT count(*) INTO v_mal
+    FROM oferta o
+    JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+    WHERE eo.estado_oferta_nombre IN ('activa', 'pausada')
+      AND o.fecha_aprobacion IS NULL;
+
+    IF v_mal > 0 THEN
+        RAISE EXCEPTION '% ofertas circulan sin fecha de aprobacion', v_mal;
+    END IF;
+
+    -- 5. Y la reciproca: una oferta 'pendiente' o 'rechazada' NO puede tener
+    --    fecha de aprobacion. A 'rechazada' solo se llega desde 'pendiente'
+    --    (el backend rechaza revisar cualquier otro estado), y el rechazo no
+    --    toca la fecha, asi que las dos comparten la misma invariante.
+    --
+    --    Esta mitad importa mas de lo que parece: la fecha de aprobacion es
+    --    el candado que impide que un vendedor active su propia oferta, asi
+    --    que una fila sin aprobar pero CON fecha es una que se puede publicar
+    --    sola, saltandose la revision.
+    SELECT count(*) INTO v_mal
+    FROM oferta o
+    JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+    WHERE eo.estado_oferta_nombre IN ('pendiente', 'rechazada')
+      AND o.fecha_aprobacion IS NOT NULL;
+
+    IF v_mal > 0 THEN
+        RAISE EXCEPTION '% ofertas sin aprobar ya traen fecha de aprobacion', v_mal;
+    END IF;
+
+    -- 6. Nadie aprobo una oferta que no esta aprobada. Al reves SI se puede
+    --    (la tienda nace aprobada y sin revisor), asi que solo se comprueba
+    --    esta mitad: si hay aprobador, tiene que haber fecha.
+    SELECT count(*) INTO v_mal
+    FROM oferta
+    WHERE id_usuario_aprobo IS NOT NULL
+      AND fecha_aprobacion IS NULL;
+
+    IF v_mal > 0 THEN
+        RAISE EXCEPTION '% ofertas tienen aprobador pero no fecha de aprobacion', v_mal;
+    END IF;
+
+    -- 7. Toda direccion tiene calle, en la fila viva y en su historial. Sin
+    --    ella no se entrega un pedido, y el backend la exige al crear una
+    --    nueva: los datos de prueba no pueden ser los unicos que se saltan
+    --    la regla.
+    --    Se cuentan DIRECCIONES distintas, no filas: una direccion sin calle
+    --    arrastra tambien su fila de historial, y sumar las dos tablas
+    --    reportaria el doble. Quien lea "2" saldria a buscar dos direcciones
+    --    rotas cuando solo hay una.
+    SELECT count(*) INTO v_mal
+    FROM direcciones d
+    WHERE d.direccion_exacta IS NULL
+       OR EXISTS (SELECT 1 FROM direccion_historial h
+                   WHERE h.id_direccion = d.id_direccion
+                     AND h.direccion_exacta IS NULL);
+
+    IF v_mal > 0 THEN
+        RAISE EXCEPTION '% direcciones se quedaron sin calle', v_mal;
+    END IF;
+
+    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones y direcciones cuadran';
 END
 $verificar$;
 
