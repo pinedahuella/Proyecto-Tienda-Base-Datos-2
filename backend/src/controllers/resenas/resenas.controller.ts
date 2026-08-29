@@ -1,9 +1,11 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Post,
+  Put,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -14,23 +16,29 @@ import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import { NOMBRE_COOKIE_TOKEN, verificarToken } from '../../helpers/token';
 import type { CrearResenaPeticion } from '../../dto/crear-resena';
+import type { ResponderResenaPeticion } from '../../dto/responder-resena';
+import type { VotarComentarioPeticion } from '../../dto/votar-comentario';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import { ResenasService } from '../../services/resenas/resenas.service';
 
 /**
  * Las rutas de la parte social (migracion 011): la lista de resenas de un
- * producto y escribir una.
+ * producto, escribir una, responderla y votar (like/dislike) un comentario.
  *
  * Sin prefijo de clase a proposito: la lista cuelga de `/productos/:id` (es
- * parte de la ficha) y escribir cuelga de `/resenas`. Cada metodo lleva su
- * ruta completa.
+ * parte de la ficha), las resenas de `/resenas` y los votos de
+ * `/comentarios/:id/voto`. Cada metodo lleva su ruta completa.
  *
- * `POST /resenas` pide sesion (SesionGuard, sin @Roles: calificar no es de
- * un rol, cualquiera con sesion puede -- igual que comprar).
  * `GET /productos/:id/resenas` es publica: se puede ver sin sesion. Si hay
  * cookie de sesion valida, el controlador la resuelve a mano (sin guard) y
  * se la pasa al servicio para que cada voto traiga `mio` y salga
  * `puede_calificar`.
+ *
+ * Las cuatro rutas de escritura piden sesion (SesionGuard por metodo, sin
+ * @Roles: ni calificar, ni responder, ni votar son de un rol -- cualquiera
+ * con sesion puede, igual que comprar). En particular RESPONDER una resena
+ * lo puede hacer cualquiera, no solo el vendedor calificado (decision del
+ * equipo; ver endpoints-resenas.md).
  */
 @Controller()
 export class ResenasController {
@@ -66,6 +74,64 @@ export class ResenasController {
       return exito(resena, 'Tu resena se publico');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo publicar la resena');
+    }
+  }
+
+  // POST /resenas/:id/respuestas   (:id es id_resena)
+  @Post('resenas/:id/respuestas')
+  @UseGuards(SesionGuard)
+  async responder(
+    @Param('id') id: string,
+    @Body() cuerpo: ResponderResenaPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const respuesta = await this.resenasService.responder(
+        usuarioActual.id_usuario,
+        id,
+        cuerpo,
+      );
+      return exito(respuesta, 'Tu respuesta se publico');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo publicar la respuesta');
+    }
+  }
+
+  // PUT /comentarios/:id/voto   (:id es id_comentario)
+  @Put('comentarios/:id/voto')
+  @UseGuards(SesionGuard)
+  async votar(
+    @Param('id') id: string,
+    @Body() cuerpo: VotarComentarioPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const voto = await this.resenasService.votar(
+        usuarioActual.id_usuario,
+        id,
+        cuerpo,
+      );
+      return exito(voto, 'Voto registrado');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo registrar el voto');
+    }
+  }
+
+  // DELETE /comentarios/:id/voto
+  @Delete('comentarios/:id/voto')
+  @UseGuards(SesionGuard)
+  async quitarVoto(
+    @Param('id') id: string,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const voto = await this.resenasService.quitarVoto(
+        usuarioActual.id_usuario,
+        id,
+      );
+      return exito(voto, 'Voto quitado');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo quitar el voto');
     }
   }
 

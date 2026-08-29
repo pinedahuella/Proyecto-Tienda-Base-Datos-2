@@ -50,14 +50,15 @@ Si te falta `REDIS_PASSWORD` o `NEO4J_PASSWORD` en tu `.env`, copialas de
 Las tres tablas existen desde la migracion `011_resenas.sql`. Hay **86 resenas,
 115 comentarios y 46 votos** sembrados.
 
-> **Avance (2026-08-29):** `GET /productos/:id/resenas` y `POST /resenas` ya
-> estan hechas y probadas (29 comprobaciones). Ver `endpoints-resenas.md`
-> para la forma exacta y para una diferencia con este documento: el equipo
-> decidio exigir que el autor **haya comprado y pagado** el producto a ese
-> vendedor (regla propia, reversible). Falta lo de abajo:
-> `POST /resenas/:id/respuestas`, `PUT /comentarios/:id/voto`,
-> `DELETE /comentarios/:id/voto`. El `GET` ya devuelve `respuestas` y `voto`;
-> lo que falta son las rutas para **escribirlos**.
+> **HECHO (2026-08-29): las cinco rutas del bloque 1** están construidas y
+> probadas (29 + 40 comprobaciones). Ver `endpoints-resenas.md` para la
+> forma exacta y **dos diferencias con este documento**, ambas decididas
+> por el equipo:
+> 1. `POST /resenas` exige que el autor **haya comprado y pagado** el
+>    producto a ese vendedor (regla propia, reversible — dos consultas).
+> 2. `POST /resenas/:id/respuestas` la puede usar **cualquiera con sesión**,
+>    no solo el vendedor calificado. Y el árbol de comentarios se queda en
+>    **un nivel** por ahora (no hay ruta para responder a una respuesta).
 
 ## Lo que hay que saber del modelo antes de escribir la ruta
 

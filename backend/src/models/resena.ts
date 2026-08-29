@@ -72,3 +72,19 @@ export interface ResenasDeProducto {
   resumen: ResumenResenas;
   puede_calificar: VendedorCalificable[];
 }
+
+/** Lo que devuelve POST /resenas/:id/respuestas. */
+export interface RespuestaCreada {
+  id_comentario: number;
+}
+
+/**
+ * El estado del voto de un comentario despues de `PUT` o `DELETE
+ * /comentarios/:id/voto`: los contadores ya recontados por el trigger y lo
+ * que quedo votando la cuenta (`mio`: `1`, `-1`, o `null` tras un DELETE).
+ */
+export interface VotoActualizado {
+  a_favor: number;
+  en_contra: number;
+  mio: number | null;
+}

@@ -11,20 +11,26 @@ import {
   validarCalificacion,
   validarComentarioResena,
   validarCorreoVendedor,
+  validarValorVoto,
 } from '../../helpers/validaciones-resena';
 import { CrearResenaPeticion } from '../../dto/crear-resena';
+import { ResponderResenaPeticion } from '../../dto/responder-resena';
+import { VotarComentarioPeticion } from '../../dto/votar-comentario';
 import {
+  RespuestaCreada,
   RespuestaResena,
   ResenaProducto,
   ResenasDeProducto,
   ResumenResenas,
   VendedorCalificable,
+  VotoActualizado,
   VotoResena,
 } from '../../models/resena';
 
 const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
 const CODIGO_CHECK_VIOLATION = '23514';
+const CODIGO_FK_VIOLATION = '23503';
 
 /** Fila cruda de una resena + su comentario raiz + autor + vendedor. */
 interface FilaResena {
@@ -238,6 +244,188 @@ export class ResenasService {
         // ya se validaron. Queda como red de seguridad si una ruta futura
         // se salta una validacion.
         throw new ErrorValidacion('La resena no cumple una regla de la base');
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Responde a una resena: inserta un `comentario` que cuelga del comentario
+   * RAIZ de esa resena. `:id` es el `id_resena`.
+   *
+   * **Cualquier cuenta con sesion puede responder** (decision del equipo; el
+   * enunciado / BACKEND-PENDIENTE decia "solo el vendedor calificado"). No
+   * hay comprobacion de dueno ni de rol.
+   *
+   * **Un solo nivel, por ahora:** la respuesta siempre cuelga de la raiz de
+   * la resena, nunca de otra respuesta, porque no existe una ruta para
+   * responder a un `id_comentario` cualquiera. Asi el arbol se queda plano
+   * sin necesidad de un CHECK.
+   *
+   * Un `id_resena` que no existe -> 404: el `INSERT ... SELECT ... FROM
+   * resena WHERE id_resena = $` no encuentra nada y no inserta.
+   */
+  async responder(
+    idUsuario: string,
+    idResenaParametro: string,
+    datos: ResponderResenaPeticion,
+  ): Promise<RespuestaCreada> {
+    if (!REGEX_ID.test(idResenaParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idResena = Number(idResenaParametro);
+    const comentario = validarComentarioResena(datos.comentario);
+
+    try {
+      const resultado = await pool.query<{ id_comentario: string }>(
+        `INSERT INTO comentario (id_usuario, id_comentario_padre, comentario)
+         SELECT $1, r.id_comentario, $2
+           FROM resena r
+          WHERE r.id_resena = $3
+         RETURNING id_comentario`,
+        [idUsuario, comentario, idResena],
+      );
+      const fila = resultado.rows[0];
+      if (fila == null) {
+        throw new ErrorNoEncontrado('No existe una resena con ese id');
+      }
+      return { id_comentario: Number(fila.id_comentario) };
+    } catch (error) {
+      if (error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Pone o cambia el voto de la cuenta sobre un comentario (`:id` es
+   * `id_comentario` -- sirve para la raiz de una resena o para una
+   * respuesta). UPSERT sobre la llave `(id_usuario, id_comentario)` de
+   * `likes`: votar distinto es un UPDATE, no otra fila. Los contadores
+   * `cantidad_likes`/`cantidad_dislikes` los recuenta el trigger
+   * `trg_likes_recontar`; aca solo se leen despues.
+   *
+   * Un `id_comentario` que no existe -> 404 (lo levanta la FK, codigo
+   * 23503).
+   */
+  async votar(
+    idUsuario: string,
+    idComentarioParametro: string,
+    datos: VotarComentarioPeticion,
+  ): Promise<VotoActualizado> {
+    if (!REGEX_ID.test(idComentarioParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idComentario = Number(idComentarioParametro);
+    const valor = validarValorVoto(datos.valor);
+
+    try {
+      await pool.query(
+        `INSERT INTO likes (id_usuario, id_comentario, valor)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id_usuario, id_comentario)
+         DO UPDATE SET valor = EXCLUDED.valor`,
+        [idUsuario, idComentario, valor],
+      );
+    } catch (error) {
+      const codigo = (error as { code?: string } | undefined)?.code;
+      if (codigo === CODIGO_FK_VIOLATION) {
+        throw new ErrorNoEncontrado('No existe un comentario con ese id');
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+
+    return this.leerVoto(idUsuario, idComentario);
+  }
+
+  /**
+   * Quita el voto de la cuenta sobre un comentario. Idempotente: si no
+   * habia voto, no pasa nada y responde igual. Un `id_comentario` que no
+   * existe -> 404.
+   */
+  async quitarVoto(
+    idUsuario: string,
+    idComentarioParametro: string,
+  ): Promise<VotoActualizado> {
+    if (!REGEX_ID.test(idComentarioParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idComentario = Number(idComentarioParametro);
+
+    let borradas: number;
+    try {
+      const resultado = await pool.query(
+        'DELETE FROM likes WHERE id_usuario = $1 AND id_comentario = $2',
+        [idUsuario, idComentario],
+      );
+      borradas = resultado.rowCount ?? 0;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+
+    // No se borro nada: puede ser que la cuenta no habia votado, o que el
+    // comentario no existe. Solo en ese caso se paga la consulta extra para
+    // distinguir "no habia voto" (200, idempotente) de "no existe" (404).
+    if (borradas === 0) {
+      await this.exigirComentarioExiste(idComentario);
+    }
+
+    return this.leerVoto(idUsuario, idComentario);
+  }
+
+  /** 404 si el comentario no existe. Solo se usa en el caso borde del DELETE. */
+  private async exigirComentarioExiste(idComentario: number): Promise<void> {
+    try {
+      const resultado = await pool.query(
+        'SELECT 1 FROM comentario WHERE id_comentario = $1',
+        [idComentario],
+      );
+      if ((resultado.rowCount ?? 0) === 0) {
+        throw new ErrorNoEncontrado('No existe un comentario con ese id');
+      }
+    } catch (error) {
+      if (error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * El estado del voto de un comentario para una cuenta: los contadores
+   * (recontados por el trigger) y lo que quedo votando la cuenta.
+   */
+  private async leerVoto(
+    idUsuario: string,
+    idComentario: number,
+  ): Promise<VotoActualizado> {
+    try {
+      const resultado = await pool.query<{
+        cantidad_likes: number;
+        cantidad_dislikes: number;
+        mio: number | null;
+      }>(
+        `SELECT c.cantidad_likes, c.cantidad_dislikes,
+                l.valor AS mio
+           FROM comentario c
+           LEFT JOIN likes l
+             ON l.id_comentario = c.id_comentario AND l.id_usuario = $2
+          WHERE c.id_comentario = $1`,
+        [idComentario, idUsuario],
+      );
+      const fila = resultado.rows[0];
+      if (fila == null) {
+        throw new ErrorNoEncontrado('No existe un comentario con ese id');
+      }
+      return {
+        a_favor: fila.cantidad_likes,
+        en_contra: fila.cantidad_dislikes,
+        mio: fila.mio,
+      };
+    } catch (error) {
+      if (error instanceof ErrorNoEncontrado) {
+        throw error;
       }
       manejarErrorConexion(this.logger, error);
     }

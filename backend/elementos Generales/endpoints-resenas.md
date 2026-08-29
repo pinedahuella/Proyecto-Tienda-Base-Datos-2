@@ -5,13 +5,16 @@ con su conversación (respuestas) y sus votos. Las tres tablas viven en
 PostgreSQL desde `migrations/011_resenas.sql` (`resena`, `comentario`,
 `likes`).
 
-> **Estado (2026-08-29):** hechas y probadas `GET /productos/:id/resenas` y
-> `POST /resenas` (29 comprobaciones, 0 fallos — ver "Pruebas" abajo).
-> **Pendientes** del bloque 1 de `BACKEND-PENDIENTE.md`, para más adelante:
-> `POST /resenas/:id/respuestas`, `PUT /comentarios/:id/voto`,
-> `DELETE /comentarios/:id/voto`. El `GET` ya devuelve `respuestas` y `voto`
-> para que la pantalla los muestre; lo que falta son las rutas para
-> **escribir** una respuesta o un voto.
+> **Estado (2026-08-29): las cinco rutas del bloque 1 están hechas y
+> probadas** (29 + 40 comprobaciones, 0 fallos — ver "Pruebas"):
+> `GET /productos/:id/resenas`, `POST /resenas`,
+> `POST /resenas/:id/respuestas`, `PUT /comentarios/:id/voto` y
+> `DELETE /comentarios/:id/voto`. Dos diferencias deliberadas con
+> `BACKEND-PENDIENTE.md`, ambas decididas por el equipo:
+> 1. `POST /resenas` **exige haber comprado** el producto a ese vendedor
+>    (ver "La regla del equipo").
+> 2. **A una reseña puede responder cualquiera** con sesión, no solo el
+>    vendedor calificado (ver `POST /resenas/:id/respuestas`).
 
 Código: `src/controllers/resenas/resenas.controller.ts` +
 `src/services/resenas/resenas.service.ts`. Pantalla que las consume:
@@ -34,6 +37,15 @@ Código: `src/controllers/resenas/resenas.controller.ts` +
   mantiene el trigger `trg_likes_recontar`; el backend solo los lee.
 - **Una reseña por (comprador, vendedor, producto)** — lo garantiza el
   `UNIQUE` de la tabla.
+- **El árbol de comentarios está en UN solo nivel, por ahora.** El esquema
+  (`comentario.id_comentario_padre` apuntando a `comentario`) permite
+  recursión, pero la única ruta para responder es
+  `POST /resenas/:id/respuestas`, que cuelga la respuesta **siempre** de la
+  raíz de esa reseña. No hay ruta para responder a un `id_comentario`
+  cualquiera, así que una respuesta nunca puede tener hijos: el "padre no
+  tiene padre" queda garantizado por diseño, sin un `CHECK`. Si algún día
+  se quiere anidar más, se agrega `POST /comentarios/:id/respuestas` y ahí
+  sí hará falta limitar la profundidad.
 
 ---
 
@@ -245,12 +257,182 @@ arriba): no hay un pedido pagado de ese producto a ese vendedor.
 
 ---
 
+## POST /resenas/:id/respuestas
+
+**Pide sesión** (sin `@Roles`). `:id` es el **`id_resena`**. Escribe un
+`comentario` que cuelga del **comentario raíz** de esa reseña
+(`id_comentario_padre = resena.id_comentario`).
+
+> **A una reseña puede responder cualquiera con sesión.**
+> `BACKEND-PENDIENTE.md` decía "solo el vendedor calificado puede contestar
+> (403 a los demás)"; el equipo decidió abrirlo. No hay comprobación de
+> dueño ni de rol. El frontend igual solo muestra el botón "Responder" al
+> vendedor calificado, pero eso es cosa de la pantalla, no del permiso.
+
+Como `:id` es la reseña y la respuesta cuelga siempre de su raíz, **el
+árbol se queda en un nivel**: no hay forma de responder a una respuesta
+(ver "El modelo").
+
+```
+POST /resenas/61/respuestas
+```
+
+```json
+{ "comentario": "Gracias por la reseña, saludos." }
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `comentario` | Sí | Texto no vacío, hasta 2000 caracteres. Se guarda recortado. Mismas reglas que el texto de una reseña |
+
+### 201
+
+```json
+{
+  "ok": true,
+  "mensaje": "Tu respuesta se publico",
+  "payload": { "id_comentario": 123 }
+}
+```
+
+### 400 / 401
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "El comentario es obligatorio y no puede estar vacio", "payload": null }
+{ "ok": false, "mensaje": "El comentario no puede tener mas de 2000 caracteres", "payload": null }
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una resena con ese id", "payload": null }
+```
+
+El `INSERT ... SELECT ... FROM resena WHERE id_resena = $` no encuentra la
+reseña y no inserta nada.
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo publicar la respuesta", "payload": null }
+```
+
+---
+
+## PUT /comentarios/:id/voto
+
+**Pide sesión** (sin `@Roles`). `:id` es el **`id_comentario`** — sirve
+igual para el comentario raíz de una reseña que para una respuesta. Pone o
+cambia el voto de la cuenta. Cambiar de opinión es el **mismo PUT** (un
+`UPSERT` sobre la llave `(id_usuario, id_comentario)` de `likes`), no una
+fila nueva. Los contadores `cantidad_likes` / `cantidad_dislikes` los
+recuenta el trigger `trg_likes_recontar`; la respuesta los devuelve ya al
+día.
+
+```
+PUT /comentarios/123/voto
+```
+
+```json
+{ "valor": 1 }
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `valor` | Sí | Exactamente `1` (a favor) o `-1` (en contra). La columna `likes.valor` no tiene `CHECK` (decisión del equipo en la 011); lo amarra esta validación, y el trigger solo cuenta `= 1` y `= -1` |
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Voto registrado",
+  "payload": { "a_favor": 3, "en_contra": 1, "mio": 1 }
+}
+```
+
+`a_favor` / `en_contra` son los contadores del comentario tras el voto;
+`mio` es lo que quedó votando esta cuenta.
+
+### 400 / 401
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "El valor del voto debe ser 1 (a favor) o -1 (en contra)", "payload": null }
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un comentario con ese id", "payload": null }
+```
+
+Lo levanta la llave foránea `likes.id_comentario` (código `23503`).
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo registrar el voto", "payload": null }
+```
+
+---
+
+## DELETE /comentarios/:id/voto
+
+**Pide sesión** (sin `@Roles`). Quita el voto de la cuenta sobre ese
+comentario. Sin cuerpo. **Idempotente**: si la cuenta no había votado,
+responde 200 igual (con `mio: null`).
+
+```
+DELETE /comentarios/123/voto
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Voto quitado",
+  "payload": { "a_favor": 2, "en_contra": 1, "mio": null }
+}
+```
+
+### 400 / 401
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un comentario con ese id", "payload": null }
+```
+
+Solo se comprueba (con una consulta extra) cuando el `DELETE` no borró
+nada: así se distingue "no había voto" (200) de "el comentario no existe"
+(404).
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo quitar el voto", "payload": null }
+```
+
+---
+
 ## Lo que NO se hizo (y por qué)
 
-- **`POST /resenas/:id/respuestas`, `PUT`/`DELETE /comentarios/:id/voto`** —
-  bloque 1 de `BACKEND-PENDIENTE.md`, para más adelante. El `GET` ya sirve
-  `respuestas` y `voto` (leídos de las tablas y los contadores del
-  trigger); falta solo escribirlos.
+- **Responder a una respuesta** (comentarios anidados más de un nivel) — no
+  hay ruta `POST /comentarios/:id/respuestas`. Por ahora todo cuelga de la
+  raíz de la reseña. Ver "El modelo".
 - **El chequeo "el vendedor tiene una oferta activa del producto"** que
   pedía `BACKEND-PENDIENTE.md` — **no hace falta**: la regla del equipo
   ("le compraste y pagaste") ya implica que ese vendedor te vendió ese
@@ -259,13 +441,18 @@ arriba): no hay un pedido pagado de ese producto a ese vendedor.
 - **Verificar cuenta activa en el `GET`** — la ruta es pública y de solo
   lectura; una sesión suspendida como mucho vería resaltados sus votos
   viejos. No vale la consulta extra.
+- **Limitar respuestas o votos por cuenta / por tiempo** (anti-spam) — no
+  se pidió. Cualquiera puede responder muchas veces a la misma reseña.
 
 ---
 
-## Pruebas — 29/29 contra la base real (2026-08-29)
+## Pruebas — contra la base real (2026-08-29)
 
-Script fuera del repo, con teardown que deja `resena` y `comentario` en 86 /
-115 (los conteos de la semilla).
+Scripts fuera del repo, con teardown que deja `resena` / `comentario` /
+`likes` en 86 / 115 / 46 (los conteos de la semilla) y los contadores del
+trigger en su valor original.
+
+### `GET /productos/:id/resenas` y `POST /resenas` — 29/29
 
 **`GET /productos/:id/resenas`:**
 
@@ -288,3 +475,33 @@ Script fuera del repo, con teardown que deja `resena` y `comentario` en 86 /
 | `correo_vendedor` inexistente | 404 |
 | Calificarse a sí mismo | 400 "No puedes calificarte a ti mismo" |
 | Tras publicar: `GET` como `compradora_norte` | `ventas_oriente` sale de `puede_calificar`, `ventas_sur` sigue, `resumen.total` = 1 |
+
+### `POST /resenas/:id/respuestas`, `PUT`/`DELETE /comentarios/:id/voto` — 40/40
+
+**Respuestas:**
+
+| Caso | Resultado |
+|---|---|
+| `comprador_sur` responde a una reseña | 201; el comentario cuelga de la raíz de la reseña, y esa raíz **no** tiene padre (un nivel) |
+| `compradora_norte` (no es el vendedor) responde a la misma reseña | 201 — cualquiera puede |
+| El vendedor calificado responde | 201 (sigue siendo cualquiera) |
+| `id_resena` inexistente / id no numérico / comentario en blanco / sin sesión | 404 / 400 / 400 / 401 |
+| Tras responder: `GET /productos/:id/resenas` | la respuesta nueva aparece anidada |
+
+**Votos:**
+
+| Caso | Resultado |
+|---|---|
+| `comprador_sur` vota `+1` en un comentario | 200; `mio: 1`, `a_favor: 1`, 1 fila en `likes`, `cantidad_likes` subió (trigger) |
+| El mismo vota `-1` (cambia de opinión) | 200; `mio: -1`, `a_favor: 0`, `en_contra: 1`, **sigue 1 fila** en `likes` (UPSERT) |
+| Otro usuario vota `+1` en el mismo comentario | `a_favor: 1`, `en_contra: 1` |
+| Votar sobre una **respuesta** (comentario con padre) | 200 — los votos van contra cualquier `id_comentario` |
+| Votar sobre la **raíz** de una reseña que ya tenía un voto de la semilla | 200; `a_favor` = base + 1 (el voto sembrado se conserva) |
+| `valor` 0 / 2 / no numérico / comentario inexistente / sin sesión | 400 / 400 / 400 / 404 / 401 |
+| `DELETE` el voto propio | 200; `mio: null`, contador baja, la fila de `likes` se borra |
+| `DELETE` otra vez (ya no había) | 200 — idempotente |
+| `DELETE` sobre comentario inexistente / sin sesión | 404 / 401 |
+
+Teardown verificado: `comentario` y `likes` vuelven a 115 / 46 y la suma de
+`cantidad_likes + cantidad_dislikes` de toda la tabla vuelve a 46 (el
+trigger recuenta al borrar los votos de prueba).

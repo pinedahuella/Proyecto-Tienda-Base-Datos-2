@@ -2,10 +2,11 @@ import { ErrorValidacion } from './errores';
 import { esTextoNoVacio } from './validaciones-perfil';
 
 /**
- * Reglas de POST /resenas. El `id_producto` se valida con
- * `validarIdProducto` de validaciones-inventario.ts (mismo mensaje que en
- * las rutas de ofertas y productos, por la regla de validaciones
- * consistentes).
+ * Reglas de las rutas de resenas: `POST /resenas`,
+ * `POST /resenas/:id/respuestas` y `PUT /comentarios/:id/voto`. El
+ * `id_producto` se valida con `validarIdProducto` de
+ * validaciones-inventario.ts (mismo mensaje que en las rutas de ofertas y
+ * productos, por la regla de validaciones consistentes).
  */
 
 const LONGITUD_MAXIMA_COMENTARIO = 2000;
@@ -51,4 +52,20 @@ export function validarComentarioResena(valor: unknown): string {
     );
   }
   return recortado;
+}
+
+/**
+ * El valor de un voto: exactamente `1` (a favor) o `-1` (en contra). La
+ * columna `likes.valor` NO tiene CHECK (decision del equipo en la migracion
+ * 011); esta funcion es la que amarra el rango, y ademas el trigger
+ * `trg_likes_recontar` solo cuenta `= 1` y `= -1`, asi que un valor fuera
+ * de rango no sumaria en ningun lado.
+ */
+export function validarValorVoto(valor: unknown): number {
+  if (valor !== 1 && valor !== -1) {
+    throw new ErrorValidacion(
+      'El valor del voto debe ser 1 (a favor) o -1 (en contra)',
+    );
+  }
+  return valor;
 }
