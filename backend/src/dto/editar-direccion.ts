@@ -9,5 +9,6 @@ export interface EditarDireccionPeticion {
   pais?: string | null;
   departamento?: string | null;
   ciudad?: string | null;
+  direccion_exacta?: string | null;
   codigo_postal?: string | null;
 }

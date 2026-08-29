@@ -430,12 +430,14 @@ export class PedidosCompradorService {
         pais: string;
         departamento: string;
         ciudad: string;
+        direccion_exacta: string | null;
         codigo_postal: string | null;
         direccion_fecha_creacion: Date;
       }>(
         `SELECT p.id_pedido, p.fecha_creacion AS pedido_fecha_creacion, p.id_usuario,
                 p.id_direccion_historial, p.id_estado_pedido, ep.estado_pedido_nombre,
-                dh.id_direccion, dh.pais, dh.departamento, dh.ciudad, dh.codigo_postal,
+                dh.id_direccion, dh.pais, dh.departamento, dh.ciudad,
+                dh.direccion_exacta, dh.codigo_postal,
                 dh.fecha_creacion AS direccion_fecha_creacion
          FROM pedido p
          JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
@@ -478,6 +480,7 @@ export class PedidosCompradorService {
           pais: fila.pais,
           departamento: fila.departamento,
           ciudad: fila.ciudad,
+          direccion_exacta: fila.direccion_exacta,
           codigo_postal: fila.codigo_postal,
           fecha_creacion: fila.direccion_fecha_creacion,
         },

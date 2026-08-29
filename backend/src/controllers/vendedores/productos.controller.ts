@@ -15,6 +15,7 @@ import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { CrearProductoPeticion } from '../../dto/crear-producto';
 import type { EditarProductoPeticion } from '../../dto/editar-producto';
+import type { RevisarPropuestaPeticion } from '../../dto/revisar-propuesta';
 import type { PaginarProductosVendedorQuery } from '../../dto/paginar-productos-vendedor';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
@@ -75,6 +76,77 @@ export class ProductosVendedorController {
     }
   }
 
+  // GET /vendedor/productos/propuestas
+  // Las propuestas del vendedor logueado (solo las suyas). Cualquier
+  // vendedor o admin. Va antes de :id (segmento estatico).
+  @Get('propuestas')
+  async listarPropuestasMias(@UsuarioActual() usuarioActual: TokenUsuario) {
+    try {
+      const propuestas =
+        await this.productosVendedorService.listarPropuestasPropias(
+          usuarioActual.id_usuario,
+        );
+      return exito(propuestas, 'Propuestas obtenidas');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener las propuestas');
+    }
+  }
+
+  // GET /vendedor/productos/propuestas/sin-aprobar
+  // Todas las propuestas sin aprobar (en_revision o rechazado). Solo tienda
+  // o admin -- un vendedor cualquiera recibe el mismo 404 generico.
+  @Get('propuestas/sin-aprobar')
+  async listarPropuestasSinAprobar(
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const propuestas =
+        await this.productosVendedorService.listarPropuestasSinAprobar(
+          usuarioActual.id_usuario,
+        );
+      return exito(propuestas, 'Propuestas sin aprobar obtenidas');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener las propuestas');
+    }
+  }
+
+  // GET /vendedor/productos/propuestas/todas
+  // Todas las propuestas, en cualquier estado. Solo tienda o admin.
+  @Get('propuestas/todas')
+  async listarTodasLasPropuestas(
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const propuestas =
+        await this.productosVendedorService.listarTodasLasPropuestas(
+          usuarioActual.id_usuario,
+        );
+      return exito(propuestas, 'Propuestas obtenidas');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener las propuestas');
+    }
+  }
+
+  // GET /vendedor/productos/propuestas/:id/rechazos
+  // El historial de rechazos de una propuesta. La ve la tienda/un admin (de
+  // cualquiera) o el vendedor que la propuso (solo la suya).
+  @Get('propuestas/:id/rechazos')
+  async listarRechazosPropuesta(
+    @Param('id') id: string,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const rechazos =
+        await this.productosVendedorService.listarRechazosPropuesta(
+          usuarioActual.id_usuario,
+          id,
+        );
+      return exito(rechazos, 'Rechazos de la propuesta obtenidos');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener los rechazos de la propuesta');
+    }
+  }
+
   // GET /vendedor/productos/:id/historial
   // Va antes de :id para que "historial" no se confunda con un id (aunque
   // Fastify de por si prioriza las rutas estaticas sobre las parametricas).
@@ -127,6 +199,70 @@ export class ProductosVendedorController {
       return exito(producto, 'Producto creado correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo crear el producto');
+    }
+  }
+
+  // POST /vendedor/productos/propuestas
+  // Un vendedor convencional PROPONE un producto: nace en Mongo con estado
+  // `en_revision` (no circula) y se registra la propuesta en PostgreSQL.
+  // A diferencia de POST /vendedor/productos, no exige ser la tienda ni
+  // admin -- el guard de la clase ya deja fuera a los compradores.
+  @Post('propuestas')
+  async proponer(
+    @Body() cuerpo: CrearProductoPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const producto = await this.productosVendedorService.proponer(
+        usuarioActual.id_usuario,
+        cuerpo,
+      );
+      return exito(producto, 'Propuesta de producto enviada a revision');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo enviar la propuesta');
+    }
+  }
+
+  // PATCH /vendedor/productos/:id/revision
+  // La tienda o un admin aprueba o rechaza una propuesta en revision.
+  // Segmento "revision" literal, va antes de :id.
+  @Patch(':id/revision')
+  async revisarPropuesta(
+    @Param('id') id: string,
+    @Body() cuerpo: RevisarPropuestaPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const producto = await this.productosVendedorService.revisarPropuesta(
+        usuarioActual.id_usuario,
+        id,
+        cuerpo,
+      );
+      const mensaje =
+        producto.estado === 'activo'
+          ? 'Propuesta aprobada'
+          : 'Propuesta rechazada';
+      return exito(producto, mensaje);
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo revisar la propuesta');
+    }
+  }
+
+  // PATCH /vendedor/productos/:id/reenviar
+  // El vendedor re-envia su propia propuesta rechazada a revision.
+  @Patch(':id/reenviar')
+  async reenviarPropuesta(
+    @Param('id') id: string,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const producto = await this.productosVendedorService.reenviarPropuesta(
+        usuarioActual.id_usuario,
+        id,
+      );
+      return exito(producto, 'Propuesta reenviada a revision');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo reenviar la propuesta');
     }
   }
 

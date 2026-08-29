@@ -13,6 +13,12 @@ export interface Direccion {
   pais: string;
   departamento: string;
   ciudad: string;
+  /**
+   * Calle, numero, zona y referencias en una sola linea. La API la exige
+   * al crear una direccion; la columna es varchar(255) y todavia nullable
+   * en la base (la migracion real la dejara NOT NULL), de ahi el `| null`.
+   */
+  direccion_exacta: string | null;
   codigo_postal: string | null;
   fecha_creacion: Date;
   id_estado_direccion: number;

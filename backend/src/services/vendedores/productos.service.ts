@@ -1,7 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Collection, Document } from 'mongodb';
+import type { PoolClient } from 'pg';
 import { mongoDb } from '../../database/mongo';
-import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
+import { pool } from '../../database/postgres';
+import {
+  ErrorConflicto,
+  ErrorNoEncontrado,
+  ErrorValidacion,
+} from '../../helpers/errores';
+import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
 import {
@@ -30,7 +37,15 @@ import {
   PaginarProductosVendedorQuery,
   ProductosVendedorPaginados,
 } from '../../dto/paginar-productos-vendedor';
+import { PropuestaProducto } from '../../dto/propuesta-producto';
+import { RevisarPropuestaPeticion } from '../../dto/revisar-propuesta';
+import {
+  validarDecisionRevision,
+  validarRazonRechazo,
+} from '../../helpers/validaciones-oferta';
+import { validarComentarioAprobacion } from '../../helpers/validaciones-propuesta';
 import { CategoriaDocumento } from '../../models/categoria';
+import { RechazoProducto } from '../../models/rechazo-producto';
 import {
   EntradaCaracteristica,
   Producto,
@@ -48,8 +63,31 @@ import { CORREO_TIENDA } from '../../helpers/constantes';
 import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 
 const ESTADO_PRODUCTO_NUEVO = 'borrador';
+/**
+ * Estado con el que nace un producto que PROPONE un vendedor convencional
+ * (POST /vendedor/productos/propuestas): no circula -- la busqueda, la
+ * ficha y crear una oferta filtran por `activo` (lista blanca) -- hasta que
+ * un admin o la tienda lo apruebe. Ver
+ * `elementos Generales/plan pendiente/propuesta-de-productos.md`.
+ */
+const ESTADO_PRODUCTO_EN_REVISION = 'en_revision';
 const ESTADO_VARIANTE_NUEVA = 'activa';
 const REGEX_ID = /^\d+$/;
+/** unique_violation: el UNIQUE (id_producto_mongo) de propuesta_producto. */
+const CODIGO_UNIQUE_VIOLATION = '23505';
+
+/** Fila cruda de `propuesta_producto`; los campos de `usuarios` van solo en las consultas de tienda/admin. */
+interface FilaPropuesta {
+  id_propuesta_producto: string;
+  id_producto_mongo: string;
+  fecha_propuesta: Date;
+  fecha_aprobacion: Date | null;
+  comentario_aprobacion: string | null;
+  id_usuario?: string;
+  usuario?: string;
+  nombre?: string;
+  apellido?: string | null;
+}
 
 /**
  * Servicio de POST /vendedor/productos.
@@ -163,6 +201,571 @@ export class ProductosVendedorService {
   }
 
   /**
+   * Un vendedor convencional PROPONE un producto nuevo
+   * (POST /vendedor/productos/propuestas). A diferencia de `crear()` (solo
+   * la tienda o un admin, nace `borrador`):
+   *
+   *   - No hay `exigirTiendaOAdmin`: cualquiera con rol vendedor o admin
+   *     puede proponer (el guard de la clase ya filtra a los compradores).
+   *   - El producto nace en Mongo con estado **`en_revision`**, que no
+   *     circula: la busqueda, la ficha y crear una oferta filtran por
+   *     `activo` (lista blanca), asi que queda oculto hasta que un admin o
+   *     la tienda lo apruebe.
+   *   - Ademas del documento de Mongo (y su evento de creacion, igual que
+   *     `crear()`), escribe una fila en **`propuesta_producto`** de
+   *     PostgreSQL con `id_usuario` = quien propone e `id_producto_mongo` =
+   *     el `_id` recien generado. Esa fila es la que sabe quien propuso y
+   *     lleva la aprobacion; las dos escrituras son en bases distintas y
+   *     no hay transaccion entre ellas, asi que si la de Postgres falla se
+   *     deshace la de Mongo (`deshacerProductoMongo`) para no dejar un
+   *     producto `en_revision` sin proponente.
+   *
+   * El orden es Mongo primero: el `_id` unico de Mongo ya serializa dos
+   * propuestas que compitan por el mismo id (la segunda falla al insertar
+   * el documento y ni llega a Postgres), igual que el riesgo aceptado de
+   * `crear()`.
+   */
+  async proponer(
+    idUsuario: string,
+    datos: CrearProductoPeticion,
+  ): Promise<Producto> {
+    const nombre = validarNombreProducto(datos.nombre);
+    const descripcion = esTextoNoVacio(datos.descripcion)
+      ? datos.descripcion
+      : null;
+
+    if (!Array.isArray(datos.variantes) || datos.variantes.length === 0) {
+      throw new ErrorValidacion('Debes enviar al menos una variante');
+    }
+    if (
+      typeof datos.id_categoria !== 'number' ||
+      !Number.isInteger(datos.id_categoria)
+    ) {
+      throw new ErrorValidacion('El id de la categoria no es valido');
+    }
+
+    const coleccionProductos = mongoDb.collection<Producto>('productos');
+    let producto: Producto;
+
+    try {
+      const categoria = await this.obtenerCategoriaValida(datos.id_categoria);
+
+      const caracteristicasAdicionales = validarCaracteristicasCatalogo(
+        datos.caracteristicas_adicionales,
+        categoria.caracteristicas,
+      );
+      const caracteristicasPersonalizadas = validarCaracteristicasPersonalizadas(
+        datos.caracteristicas_personalizadas,
+      );
+
+      const idProducto = await this.siguienteIdProducto(coleccionProductos);
+      const fechaCreacion = new Date();
+      const variantes = await this.construirVariantes(
+        datos.variantes,
+        categoria,
+        fechaCreacion,
+        coleccionProductos,
+        null,
+      );
+
+      producto = {
+        _id: idProducto,
+        nombre,
+        descripcion,
+        fecha_creacion: fechaCreacion,
+        estado: ESTADO_PRODUCTO_EN_REVISION,
+        categoria: {
+          id_categoria: categoria._id,
+          nombre: categoria.nombre,
+          categoria_padre: categoria.categoria_padre as string,
+        },
+        precio_tienda: null,
+        precio_desde: null,
+        stock_tienda: 0,
+        stock_total: 0,
+        total_ofertas: 0,
+        variantes,
+        ...(caracteristicasAdicionales.length > 0 && {
+          caracteristicas_adicionales: caracteristicasAdicionales,
+        }),
+        ...(caracteristicasPersonalizadas.length > 0 && {
+          caracteristicas_personalizadas: caracteristicasPersonalizadas,
+        }),
+      };
+
+      await coleccionProductos.insertOne(producto);
+      await this.crearEventoCreacion(producto);
+    } catch (error) {
+      if (error instanceof ErrorValidacion) {
+        throw error;
+      }
+      manejarErrorConexionMongo(this.logger, error);
+    }
+
+    // El producto ya esta en Mongo (invisible por la lista blanca). Ahora la
+    // propuesta en Postgres; si falla, se deshace la escritura de Mongo.
+    try {
+      await pool.query(
+        'INSERT INTO propuesta_producto (id_usuario, id_producto_mongo) VALUES ($1, $2)',
+        [idUsuario, producto._id],
+      );
+    } catch (error) {
+      await this.deshacerProductoMongo(producto._id);
+      if (
+        (error as { code?: string } | undefined)?.code ===
+        CODIGO_UNIQUE_VIOLATION
+      ) {
+        throw new ErrorConflicto(
+          'No se pudo registrar la propuesta. Volve a intentarlo.',
+        );
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+
+    return producto;
+  }
+
+  /**
+   * Borra un producto de Mongo y sus eventos -- la compensacion cuando la
+   * propuesta en Postgres falla despues de escribir el producto. Si ni esto
+   * funciona, queda un producto `en_revision` sin proponente: invisible por
+   * la lista blanca, se registra y sigue el error original.
+   */
+  private async deshacerProductoMongo(idProducto: number): Promise<void> {
+    try {
+      await mongoDb
+        .collection<Producto>('productos')
+        .deleteOne({ _id: idProducto });
+      await mongoDb
+        .collection<ProductoEventoCreacion>('productos_eventos')
+        .deleteMany({ id_producto: idProducto });
+    } catch {
+      this.logger.error(
+        `No se pudo deshacer el producto ${idProducto} de Mongo tras fallar su propuesta`,
+      );
+    }
+  }
+
+  /**
+   * Las propuestas del vendedor logueado -- las que EL propuso, mas
+   * recientes primero. El WHERE exige `propuesta_producto.id_usuario`, asi
+   * que no hay forma de ver las de otro vendedor. Sin `exigirTiendaOAdmin`:
+   * cualquier vendedor ve las suyas.
+   *
+   * Cada propuesta trae el documento del producto (desde Mongo) y su
+   * historial de rechazos. Sin `vendedor` embebido: ya se que soy yo.
+   */
+  async listarPropuestasPropias(idUsuario: string): Promise<PropuestaProducto[]> {
+    let filas: FilaPropuesta[];
+    try {
+      const resultado = await pool.query<FilaPropuesta>(
+        `SELECT id_propuesta_producto, id_producto_mongo, fecha_propuesta,
+                fecha_aprobacion, comentario_aprobacion
+         FROM propuesta_producto
+         WHERE id_usuario = $1
+         ORDER BY fecha_propuesta DESC`,
+        [idUsuario],
+      );
+      filas = resultado.rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+    return this.armarPropuestas(filas, false);
+  }
+
+  /**
+   * Todas las propuestas que NO han sido aprobadas todavia
+   * (`fecha_aprobacion IS NULL`) -- las `en_revision` esperando y las
+   * `rechazado` que el vendedor no ha vuelto a enviar. De cualquier
+   * vendedor, la mas antigua primero (cola de trabajo). Solo la tienda o un
+   * admin (`exigirTiendaOAdmin`, 404 disfrazado).
+   */
+  async listarPropuestasSinAprobar(
+    idUsuario: string,
+  ): Promise<PropuestaProducto[]> {
+    await this.exigirTiendaOAdmin(idUsuario);
+
+    let filas: FilaPropuesta[];
+    try {
+      const resultado = await pool.query<FilaPropuesta>(
+        `SELECT pp.id_propuesta_producto, pp.id_producto_mongo, pp.fecha_propuesta,
+                pp.fecha_aprobacion, pp.comentario_aprobacion,
+                u.id_usuario, u.usuario, u.nombre, u.apellido
+         FROM propuesta_producto pp
+         JOIN usuarios u ON u.id_usuario = pp.id_usuario
+         WHERE pp.fecha_aprobacion IS NULL
+         ORDER BY pp.fecha_propuesta ASC`,
+      );
+      filas = resultado.rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+    return this.armarPropuestas(filas, true);
+  }
+
+  /**
+   * Todas las propuestas, en cualquier estado, mas recientes primero. De
+   * cualquier vendedor. Solo la tienda o un admin.
+   */
+  async listarTodasLasPropuestas(
+    idUsuario: string,
+  ): Promise<PropuestaProducto[]> {
+    await this.exigirTiendaOAdmin(idUsuario);
+
+    let filas: FilaPropuesta[];
+    try {
+      const resultado = await pool.query<FilaPropuesta>(
+        `SELECT pp.id_propuesta_producto, pp.id_producto_mongo, pp.fecha_propuesta,
+                pp.fecha_aprobacion, pp.comentario_aprobacion,
+                u.id_usuario, u.usuario, u.nombre, u.apellido
+         FROM propuesta_producto pp
+         JOIN usuarios u ON u.id_usuario = pp.id_usuario
+         ORDER BY pp.fecha_propuesta DESC`,
+      );
+      filas = resultado.rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+    return this.armarPropuestas(filas, true);
+  }
+
+  /**
+   * Junta las filas de `propuesta_producto` con el documento del producto
+   * (Mongo, un solo `$in`) y con los rechazos (`rechazo_producto`, un solo
+   * `= ANY`), sin importar cuantas propuestas haya. `incluirVendedor` es
+   * true en las vistas de tienda/admin.
+   */
+  private async armarPropuestas(
+    filas: FilaPropuesta[],
+    incluirVendedor: boolean,
+  ): Promise<PropuestaProducto[]> {
+    if (filas.length === 0) {
+      return [];
+    }
+
+    const idsProducto = [
+      ...new Set(filas.map((fila) => Number(fila.id_producto_mongo))),
+    ];
+    let productoPorId: Map<number, Producto>;
+    try {
+      const productos = await mongoDb
+        .collection<Producto>('productos')
+        .find({ _id: { $in: idsProducto } })
+        .toArray();
+      productoPorId = new Map(productos.map((p) => [p._id, p]));
+    } catch (error) {
+      manejarErrorConexionMongo(this.logger, error);
+    }
+
+    const idsPropuesta = filas.map((fila) => fila.id_propuesta_producto);
+    const rechazosPorPropuesta = new Map<string, RechazoProducto[]>();
+    try {
+      const resultado = await pool.query<
+        RechazoProducto & { id_propuesta_producto: string }
+      >(
+        `SELECT id_rechazo_producto, id_propuesta_producto, razon_rechazo, fecha_rechazo
+         FROM rechazo_producto
+         WHERE id_propuesta_producto = ANY($1::bigint[])
+         ORDER BY fecha_rechazo DESC, id_rechazo_producto DESC`,
+        [idsPropuesta],
+      );
+      for (const fila of resultado.rows) {
+        const lista = rechazosPorPropuesta.get(fila.id_propuesta_producto) ?? [];
+        lista.push({
+          id_rechazo_producto: fila.id_rechazo_producto,
+          razon_rechazo: fila.razon_rechazo,
+          fecha_rechazo: fila.fecha_rechazo,
+        });
+        rechazosPorPropuesta.set(fila.id_propuesta_producto, lista);
+      }
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+
+    return filas.map((fila) => {
+      const idProducto = Number(fila.id_producto_mongo);
+      const propuesta: PropuestaProducto = {
+        id_propuesta_producto: fila.id_propuesta_producto,
+        id_producto: idProducto,
+        fecha_propuesta: fila.fecha_propuesta,
+        fecha_aprobacion: fila.fecha_aprobacion,
+        comentario_aprobacion: fila.comentario_aprobacion,
+        producto: productoPorId.get(idProducto) ?? null,
+        rechazos: rechazosPorPropuesta.get(fila.id_propuesta_producto) ?? [],
+      };
+      if (incluirVendedor && fila.id_usuario != null) {
+        propuesta.vendedor = {
+          id_usuario: fila.id_usuario,
+          usuario: fila.usuario as string,
+          nombre: fila.nombre as string,
+          apellido: fila.apellido ?? null,
+        };
+      }
+      return propuesta;
+    });
+  }
+
+  /**
+   * La tienda o un admin APRUEBA una propuesta (pasa a `activo`, y ya
+   * circula) o la RECHAZA con un motivo (pasa a `rechazado`; se guarda una
+   * fila en `rechazo_producto`). `:id` es el `_id` del producto en Mongo.
+   *
+   * Solo la tienda o un admin (`exigirTiendaOAdmin`, 404 disfrazado, lo
+   * primero). La propuesta tiene que estar en estado `en_revision`;
+   * cualquier otro estado -> 409.
+   *
+   * El estado del producto vive en Mongo, no en Postgres, asi que la
+   * sincronizacion es un `SELECT ... FOR UPDATE` sobre la fila de
+   * `propuesta_producto`: dos revisiones a la vez sobre la misma propuesta
+   * se serializan ahi, y `reenviarPropuesta()` toma el mismo lock. Se
+   * escribe primero Mongo (estado + evento de modificacion) y despues
+   * Postgres, dentro de la transaccion; si Postgres falla, se hace ROLLBACK
+   * y se compensa Mongo (`compensarRevisionMongo`).
+   */
+  async revisarPropuesta(
+    idUsuario: string,
+    idProductoParametro: string,
+    datos: RevisarPropuestaPeticion,
+  ): Promise<Producto> {
+    await this.exigirTiendaOAdmin(idUsuario);
+
+    if (!REGEX_ID.test(idProductoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idProducto = Number(idProductoParametro);
+
+    const decision = validarDecisionRevision(datos.decision);
+    const razon =
+      decision === 'rechazar' ? validarRazonRechazo(datos.razon) : null;
+    const comentario =
+      decision === 'aprobar'
+        ? validarComentarioAprobacion(datos.comentario)
+        : null;
+
+    const nuevoEstado = decision === 'aprobar' ? 'activo' : 'rechazado';
+    const coleccionProductos = mongoDb.collection<Producto>('productos');
+
+    let estadoARevertir: string | null = null;
+    let eventoABorrar: string | null = null;
+
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
+
+      const bloqueo = await cliente.query<{ id_propuesta_producto: string }>(
+        `SELECT id_propuesta_producto
+           FROM propuesta_producto
+          WHERE id_producto_mongo = $1
+          FOR UPDATE`,
+        [idProducto],
+      );
+      const propuesta = bloqueo.rows[0];
+      if (propuesta == null) {
+        throw new ErrorNoEncontrado('No existe un producto con ese id');
+      }
+
+      const doc = await coleccionProductos.findOne(
+        { _id: idProducto },
+        { projection: { estado: 1 } },
+      );
+      if (doc?.estado !== 'en_revision') {
+        throw new ErrorConflicto(
+          `Esta propuesta no esta en revision (esta ${doc?.estado ?? 'sin producto'})`,
+        );
+      }
+
+      await coleccionProductos.updateOne(
+        { _id: idProducto },
+        { $set: { estado: nuevoEstado } },
+      );
+      estadoARevertir = 'en_revision';
+      eventoABorrar = await this.crearEventoModificacion(idProducto, {
+        estado: nuevoEstado,
+      });
+
+      if (decision === 'aprobar') {
+        await cliente.query(
+          `UPDATE propuesta_producto
+              SET fecha_aprobacion = now(),
+                  id_usuario_aprobo = $1,
+                  comentario_aprobacion = $2
+            WHERE id_propuesta_producto = $3`,
+          [idUsuario, comentario, propuesta.id_propuesta_producto],
+        );
+      } else {
+        await cliente.query(
+          'INSERT INTO rechazo_producto (id_propuesta_producto, razon_rechazo) VALUES ($1, $2)',
+          [propuesta.id_propuesta_producto, razon],
+        );
+      }
+
+      await cliente.query('COMMIT');
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      await this.compensarRevisionMongo(
+        idProducto,
+        estadoARevertir,
+        eventoABorrar,
+      );
+      if (
+        error instanceof ErrorConflicto ||
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorValidacion
+      ) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
+    }
+
+    return this.leerProducto(idProducto);
+  }
+
+  /**
+   * El vendedor RE-ENVIA su propia propuesta rechazada: `rechazado` ->
+   * `en_revision`, sin editar nada (por diseño una propuesta no se edita).
+   * Solo el dueño de la propuesta (`propuesta_producto.id_usuario`); una
+   * ajena o inexistente da el mismo 404 generico. La propuesta tiene que
+   * estar `rechazado`; cualquier otro estado -> 409.
+   *
+   * Mismo lock que `revisarPropuesta()` (`SELECT ... FOR UPDATE` sobre
+   * `propuesta_producto`), aunque aqui no haya escritura en Postgres: la
+   * transaccion existe para serializar el cambio de estado contra una
+   * revision simultanea.
+   */
+  async reenviarPropuesta(
+    idUsuario: string,
+    idProductoParametro: string,
+  ): Promise<Producto> {
+    if (!REGEX_ID.test(idProductoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idProducto = Number(idProductoParametro);
+    const coleccionProductos = mongoDb.collection<Producto>('productos');
+
+    let estadoARevertir: string | null = null;
+    let eventoABorrar: string | null = null;
+
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
+
+      const bloqueo = await cliente.query<{ id_propuesta_producto: string }>(
+        `SELECT id_propuesta_producto
+           FROM propuesta_producto
+          WHERE id_producto_mongo = $1 AND id_usuario = $2
+          FOR UPDATE`,
+        [idProducto, idUsuario],
+      );
+      if (bloqueo.rows[0] == null) {
+        throw new ErrorNoEncontrado('No existe una propuesta tuya para ese producto');
+      }
+
+      const doc = await coleccionProductos.findOne(
+        { _id: idProducto },
+        { projection: { estado: 1 } },
+      );
+      if (doc?.estado !== 'rechazado') {
+        throw new ErrorConflicto(
+          `Solo se puede reenviar una propuesta rechazada (esta ${doc?.estado ?? 'sin producto'})`,
+        );
+      }
+
+      await coleccionProductos.updateOne(
+        { _id: idProducto },
+        { $set: { estado: 'en_revision' } },
+      );
+      estadoARevertir = 'rechazado';
+      eventoABorrar = await this.crearEventoModificacion(idProducto, {
+        estado: 'en_revision',
+      });
+
+      await cliente.query('COMMIT');
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      await this.compensarRevisionMongo(
+        idProducto,
+        estadoARevertir,
+        eventoABorrar,
+      );
+      if (
+        error instanceof ErrorConflicto ||
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorValidacion
+      ) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
+    }
+
+    return this.leerProducto(idProducto);
+  }
+
+  /** Lee un producto de Mongo por su _id. Lo usan revisar/reenviar al final. */
+  private async leerProducto(idProducto: number): Promise<Producto> {
+    try {
+      const producto = await mongoDb
+        .collection<Producto>('productos')
+        .findOne({ _id: idProducto });
+      if (producto == null) {
+        throw new ErrorNoEncontrado('No existe un producto con ese id');
+      }
+      return producto;
+    } catch (error) {
+      if (error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexionMongo(this.logger, error);
+    }
+  }
+
+  private async intentarRollback(cliente: PoolClient): Promise<void> {
+    try {
+      await cliente.query('ROLLBACK');
+    } catch {
+      // Si ni el rollback funciona, la conexion seguramente ya se cayo.
+    }
+  }
+
+  /**
+   * Deshace el cambio de estado y el evento que escribio revisar/reenviar
+   * en Mongo, cuando la parte de Postgres fallo. Si esto tampoco funciona,
+   * queda el producto con el estado nuevo pero sin el registro en Postgres
+   * -- se registra y sigue el error original.
+   */
+  private async compensarRevisionMongo(
+    idProducto: number,
+    estadoARevertir: string | null,
+    eventoABorrar: string | null,
+  ): Promise<void> {
+    if (estadoARevertir == null && eventoABorrar == null) {
+      return;
+    }
+    try {
+      if (eventoABorrar != null) {
+        await mongoDb
+          .collection<ProductoEventoModificacion>('productos_eventos')
+          .deleteOne({ _id: eventoABorrar });
+      }
+      if (estadoARevertir != null) {
+        await mongoDb
+          .collection<Producto>('productos')
+          .updateOne(
+            { _id: idProducto },
+            { $set: { estado: estadoARevertir } },
+          );
+      }
+    } catch {
+      this.logger.error(
+        `No se pudo compensar la revision del producto ${idProducto} en Mongo`,
+      );
+    }
+  }
+
+  /**
    * Solo la cuenta de la tienda, o cualquier cuenta con rol admin, crea/edita/
    * consulta el catalogo por estas rutas (ver la nota de CORREO_TIENDA
    * arriba). El guard de rol (@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN) en
@@ -178,9 +781,78 @@ export class ProductosVendedorService {
    * hay que confirmarle a un vendedor cualquiera que la ruta existe.
    */
   private async exigirTiendaOAdmin(idUsuario: string): Promise<void> {
-    const usuario = await this.usuarioService.obtenerPorId(idUsuario);
-    if (usuario.correo_electronico !== CORREO_TIENDA && usuario.id_rol_usuario !== ID_ROL_ADMIN) {
+    if (!(await this.esTiendaOAdmin(idUsuario))) {
       throw new ErrorNoEncontrado('No existe un producto con ese id');
+    }
+  }
+
+  /**
+   * Version que NO lanza, para las rutas donde la autorizacion tiene mas de
+   * una via -- por ejemplo el historial de rechazos de una propuesta, que
+   * puede ver la tienda/un admin (cualquiera) o el vendedor (solo la suya).
+   */
+  private async esTiendaOAdmin(idUsuario: string): Promise<boolean> {
+    const usuario = await this.usuarioService.obtenerPorId(idUsuario);
+    return (
+      usuario.correo_electronico === CORREO_TIENDA ||
+      usuario.id_rol_usuario === ID_ROL_ADMIN
+    );
+  }
+
+  /**
+   * El historial de rechazos de una propuesta. `:id` es el `_id` del
+   * producto en Mongo.
+   *
+   * La ve **la tienda o un admin** (de cualquier propuesta) **o el
+   * vendedor** que la propuso (solo la suya). Cualquier otro caso -- o una
+   * propuesta que no existe -- da el mismo 404 generico. Una propuesta
+   * propia que nunca fue rechazada devuelve `[]`, no 404.
+   */
+  async listarRechazosPropuesta(
+    idUsuario: string,
+    idProductoParametro: string,
+  ): Promise<RechazoProducto[]> {
+    if (!REGEX_ID.test(idProductoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idProducto = Number(idProductoParametro);
+
+    let propuesta: { id_propuesta_producto: string; id_usuario: string };
+    try {
+      const resultado = await pool.query<{
+        id_propuesta_producto: string;
+        id_usuario: string;
+      }>(
+        `SELECT id_propuesta_producto, id_usuario
+           FROM propuesta_producto
+          WHERE id_producto_mongo = $1`,
+        [idProducto],
+      );
+      propuesta = resultado.rows[0];
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+
+    if (propuesta == null) {
+      throw new ErrorNoEncontrado('No existe una propuesta para ese producto');
+    }
+
+    const esMia = propuesta.id_usuario === idUsuario;
+    if (!esMia && !(await this.esTiendaOAdmin(idUsuario))) {
+      throw new ErrorNoEncontrado('No existe una propuesta para ese producto');
+    }
+
+    try {
+      const resultado = await pool.query<RechazoProducto>(
+        `SELECT id_rechazo_producto, razon_rechazo, fecha_rechazo
+           FROM rechazo_producto
+          WHERE id_propuesta_producto = $1
+          ORDER BY fecha_rechazo DESC, id_rechazo_producto DESC`,
+        [propuesta.id_propuesta_producto],
+      );
+      return resultado.rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
     }
   }
 
@@ -596,11 +1268,15 @@ export class ProductosVendedorService {
     return categoria;
   }
 
-  /** El siguiente evento del producto: el ultimo numero que tenga, mas 1. */
+  /**
+   * El siguiente evento del producto: el ultimo numero que tenga, mas 1.
+   * Devuelve el `_id` del evento creado -- lo usa revisarPropuesta() para
+   * poder borrarlo si tiene que compensar.
+   */
   private async crearEventoModificacion(
     idProducto: number,
     cambios: ProductoEventoCambios,
-  ): Promise<void> {
+  ): Promise<string> {
     const ultimo = await mongoDb
       .collection('productos_eventos')
       .find({ id_producto: idProducto })
@@ -622,6 +1298,8 @@ export class ProductosVendedorService {
     await mongoDb
       .collection<ProductoEventoModificacion>('productos_eventos')
       .insertOne(evento);
+
+    return evento._id;
   }
 
   /**

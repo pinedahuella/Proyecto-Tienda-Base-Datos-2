@@ -34,11 +34,21 @@ de restricción, y no son lo mismo:
 | `GET /vendedor/productos/:id` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `GET /vendedor/productos/:id/historial` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `POST /vendedor/productos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `POST /vendedor/productos/propuestas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin — el producto nace `en_revision` |
+| `GET /vendedor/productos/propuestas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin — solo las **suyas** |
+| `GET /vendedor/productos/propuestas/sin-aprobar` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `GET /vendedor/productos/propuestas/todas` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `GET /vendedor/productos/propuestas/:id/rechazos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** (cualquiera), o el vendedor que la propuso (solo la suya) |
+| `PATCH /vendedor/productos/:id/revision` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `PATCH /vendedor/productos/:id/reenviar` | vendedor **o** admin (2 o 3) | solo el vendedor que **propuso** esa propuesta |
 | `PATCH /vendedor/productos/:id` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `GET /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
+| `GET /vendedor/ofertas/pendientes` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `GET /vendedor/ofertas/:id/rechazos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** (cualquier oferta), o el vendedor dueño (solo la suya) |
 | `GET /vendedor/ofertas/producto/:idProducto` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
 | `POST /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
 | `PATCH /vendedor/ofertas/:id` | vendedor **o** admin (2 o 3) | cualquier vendedor, pero solo sobre **su propia** oferta; un admin, sobre cualquier oferta **de la tienda** |
+| `PATCH /vendedor/ofertas/:id/revision` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 
 **`/vendedor/productos` es el panel de administración del catálogo
 completo, no "mis productos".** Con el giro a multi-vendedor, un producto
@@ -478,6 +488,389 @@ vendedor cualquiera que la ruta funciona.
 
 ```json
 { "ok": false, "mensaje": "No se pudo crear el producto", "payload": null }
+```
+
+---
+
+## POST /vendedor/productos/propuestas
+
+**Cualquier vendedor** (o admin) **propone** un producto nuevo para el
+catálogo. A diferencia de `POST /vendedor/productos` (solo la tienda o un
+admin, nace `borrador`):
+
+- **No exige ser la tienda ni admin.** El guard de la clase ya deja fuera a
+  los compradores (403); dentro, cualquier rol vendedor o admin puede
+  proponer.
+- El producto nace en Mongo con estado **`en_revision`**, que **no
+  circula**: `GET /productos`, la ficha pública y `POST /vendedor/ofertas`
+  filtran por `activo` (lista blanca), así que queda oculto hasta que un
+  admin o la tienda lo apruebe. Sí aparece en `GET /vendedor/productos/paginado`
+  (el panel de la tienda muestra todos los estados).
+- Además del documento de Mongo y su evento de creación (igual que
+  `POST /vendedor/productos`), escribe una fila en **`propuesta_producto`**
+  de PostgreSQL: `id_usuario` = quien propone, `id_producto_mongo` = el
+  `_id` recién generado, `fecha_aprobacion` y `comentario_aprobacion` en
+  NULL. Esa fila es la que sabe quién propuso y llevará la aprobación.
+
+**El cuerpo es idéntico al de `POST /vendedor/productos`** (`id_categoria`,
+`nombre`, `descripcion?`, `caracteristicas_adicionales?`,
+`caracteristicas_personalizadas?`, `variantes` con al menos una) y se
+valida igual, con los mismos mensajes. Sin precio ni stock: eso es de la
+oferta. El vendedor crea su oferta a mano con `POST /vendedor/ofertas`
+**después** de que se apruebe.
+
+Las dos escrituras (Mongo y Postgres) son en bases distintas y no hay
+transacción entre ellas. El orden es Mongo primero; si el `INSERT` en
+`propuesta_producto` falla, se deshace la escritura de Mongo
+(`deshacerProductoMongo`) para no dejar un producto `en_revision` sin
+proponente.
+
+### 201
+
+```json
+{
+  "ok": true,
+  "mensaje": "Propuesta de producto enviada a revision",
+  "payload": {
+    "_id": 103,
+    "nombre": "Audifonos Ronda Pro",
+    "descripcion": "...",
+    "fecha_creacion": "2026-08-29T04:11:02.331Z",
+    "estado": "en_revision",
+    "categoria": { "id_categoria": 9, "nombre": "Audifonos", "categoria_padre": "Electronica" },
+    "precio_tienda": null,
+    "precio_desde": null,
+    "stock_tienda": 0,
+    "stock_total": 0,
+    "total_ofertas": 0,
+    "variantes": [ ... ]
+  }
+}
+```
+
+Misma forma que `POST /vendedor/productos`, con `estado: "en_revision"`.
+
+### 400
+
+Mismos mensajes que `POST /vendedor/productos`
+(`Debes enviar al menos una variante`, `El id de la categoria no es
+valido`, `La categoria no existe o no es valida para publicar`, nombre y
+características, etc.). Una validación fallida **no escribe nada** ni en
+Mongo ni en `propuesta_producto`.
+
+### 401 / 403
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+403 solo para un comprador (rol 1). Un vendedor o un admin siempre pasan.
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "No se pudo registrar la propuesta. Volve a intentarlo.", "payload": null }
+```
+
+Choque de `id_producto_mongo` en `propuesta_producto` (dos propuestas
+simultáneas por el mismo id). El producto de Mongo ya se deshizo; reintentar
+resuelve.
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo enviar la propuesta", "payload": null }
+```
+
+Probado en vivo el 29 de agosto de 2026 (41 comprobaciones): el producto
+nace `en_revision` en Mongo con su evento de creación; la fila de
+`propuesta_producto` sale con el `id_usuario` correcto y el resto NULL; el
+producto no aparece en el buscador ni en la ficha ni se le puede crear una
+oferta (404), pero sí en `/vendedor/productos/paginado`; un comprador → 403,
+sin sesión → 401, un admin también puede proponer; las validaciones dan los
+mismos 400 que `POST /vendedor/productos` sin escribir nada; y forzando un
+choque de id se confirmó que el producto de Mongo se deshace y la respuesta
+es 409.
+
+---
+
+## GET /vendedor/productos/propuestas
+
+Las propuestas del **vendedor logueado** — las que él propuso, más recientes
+primero. El `WHERE` exige `propuesta_producto.id_usuario`, así que **no hay
+forma de ver las de otro vendedor**. Cualquier vendedor o admin ve las
+suyas (sin `exigirTiendaOAdmin`).
+
+Cada propuesta trae:
+
+- `id_propuesta_producto`, `id_producto` (el `_id` en Mongo),
+  `fecha_propuesta`, `fecha_aprobacion` (NULL si no está aprobada),
+  `comentario_aprobacion` (la nota de quien aprobó, NULL si no).
+- `producto`: el documento completo del producto desde Mongo (con su
+  `estado` actual — `en_revision` / `rechazado` / `activo`). `null` solo si
+  el documento no se encontró (no debería pasar).
+- `rechazos`: el historial, del más reciente al más viejo. `[]` si nunca se
+  rechazó.
+- **Sin** `vendedor` (ya sé que soy yo).
+
+Dos consultas a Postgres (`propuesta_producto`, `rechazo_producto` con un
+`= ANY`) y una a Mongo (`$in`), sin importar cuántas propuestas haya.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Propuestas obtenidas",
+  "payload": [
+    {
+      "id_propuesta_producto": "7",
+      "id_producto": 104,
+      "fecha_propuesta": "2026-08-29T05:10:11.004Z",
+      "fecha_aprobacion": null,
+      "comentario_aprobacion": null,
+      "producto": { "_id": 104, "nombre": "...", "estado": "rechazado", "categoria": { ... }, "variantes": [ ... ], ... },
+      "rechazos": [
+        { "id_rechazo_producto": "3", "razon_rechazo": "La categoria no corresponde", "fecha_rechazo": "2026-08-20T15:00:00.000Z" }
+      ]
+    }
+  ]
+}
+```
+
+`[]` si el vendedor no ha propuesto nada.
+
+### 401 / 403
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+403 solo para un comprador.
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudieron obtener las propuestas", "payload": null }
+```
+
+---
+
+## GET /vendedor/productos/propuestas/sin-aprobar
+
+Todas las propuestas que **no han sido aprobadas** todavía
+(`fecha_aprobacion IS NULL`) — las `en_revision` esperando y las
+`rechazado` que el vendedor no ha vuelto a enviar. De **cualquier
+vendedor**, la más antigua primero (cola de trabajo). **Solo
+`tienda@mesh.com` o un admin** — un vendedor cualquiera recibe el **mismo
+404 genérico** que oculta que la ruta existe.
+
+Misma forma que `GET /vendedor/productos/propuestas`, **más el
+`vendedor`** que propuso cada una:
+
+```json
+"vendedor": { "id_usuario": "4", "usuario": "ventas_norte", "nombre": "Carlos", "apellido": "Ramirez" }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+```
+
+Un vendedor que no es la tienda ni admin — mismo mensaje reutilizado.
+
+### 401 / 403 / 503 / 500
+
+Como las demás.
+
+---
+
+## GET /vendedor/productos/propuestas/todas
+
+Todas las propuestas, **en cualquier estado**, más recientes primero. De
+cualquier vendedor. **Solo `tienda@mesh.com` o un admin** (404 disfrazado
+para el resto). Misma forma que `/sin-aprobar` (con `vendedor`); aquí sí
+salen las aprobadas, con su `fecha_aprobacion` y `comentario_aprobacion`.
+
+Probado en vivo el 29 de agosto de 2026 (39 comprobaciones, los tres GET):
+"las mías" está acotado por `id_usuario` (ventas_norte no ve las de
+ventas_sur ni al revés) y no trae `vendedor`; `/sin-aprobar` trae P1 y P2
+(no la aprobada P3) con el `vendedor` correcto y orden ascendente;
+`/todas` trae las tres con orden descendente; un vendedor normal recibe
+404 en las dos de tienda/admin y el comprador 403; el `producto` embebido
+es el documento completo de Mongo; y con dos rechazos sobre una propuesta
+salen del más reciente al más viejo.
+
+---
+
+## GET /vendedor/productos/propuestas/:id/rechazos
+
+El historial de rechazos de **una** propuesta. `:id` es el `_id` del
+producto en Mongo.
+
+- **La tienda o un admin** la ven de **cualquier** propuesta.
+- **El vendedor** que la propuso, solo de **la suya**.
+- Cualquier otro caso, o una propuesta que no existe → **404 genérico**
+  (`"No existe una propuesta para ese producto"`).
+- Una propuesta que nunca fue rechazada → `[]`, no 404.
+
+```json
+{
+  "ok": true,
+  "mensaje": "Rechazos de la propuesta obtenidos",
+  "payload": [
+    { "id_rechazo_producto": "5", "razon_rechazo": "Segundo intento, foto mala", "fecha_rechazo": "2026-08-25T21:00:00.000Z" },
+    { "id_rechazo_producto": "3", "razon_rechazo": "La categoria esta mal", "fecha_rechazo": "2026-08-20T15:00:00.000Z" }
+  ]
+}
+```
+
+### 400 / 401 / 403 / 404 / 503 / 500
+
+Como el resto. 400 solo por `:id` con formato inválido.
+
+Probado en vivo el 29 de agosto de 2026 (36 comprobaciones, con el GET de
+rechazos de oferta): el vendedor ve los de su propia propuesta (ordenados,
+`[]` si no hay), y 404 en una ajena; la tienda y un admin ven los de
+cualquiera; producto inexistente o normal (sin propuesta) → 404; `id`
+inválido → 400; comprador → 403; sin sesión → 401.
+
+---
+
+## PATCH /vendedor/productos/:id/revision
+
+**La tienda o un admin** aprueba una propuesta `en_revision` (pasa a
+`activo` y ya circula) o la **rechaza** con un motivo (pasa a `rechazado`;
+se guarda una fila en `rechazo_producto`). `:id` es el `_id` del producto
+en Mongo.
+
+**Solo `tienda@mesh.com` o un admin** — un vendedor cualquiera, **incluido
+el que propuso**, recibe el **mismo 404 genérico**. La comprobación de
+permiso va antes de validar el id o el cuerpo.
+
+La propuesta tiene que estar en estado **`en_revision`**; cualquier otro
+estado → 409 (una `rechazado` hay que reenviarla primero;
+`PATCH .../:id/reenviar`). Un producto normal del catálogo (sin fila en
+`propuesta_producto`) → 404.
+
+Como el estado del producto vive en Mongo, la sincronización es un
+`SELECT ... FOR UPDATE` sobre la fila de `propuesta_producto`: dos
+revisiones a la vez sobre la misma propuesta se serializan ahí (y
+`reenviar` toma el mismo lock). Se escribe primero Mongo (estado + un
+evento de modificación en `productos_eventos`) y luego Postgres; si
+Postgres falla, se hace ROLLBACK y se revierte Mongo.
+
+```json
+{ "decision": "aprobar" }
+{ "decision": "aprobar", "comentario": "Buen aporte al catalogo" }
+{ "decision": "rechazar", "razon": "La categoria no corresponde" }
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `decision` | Sí | `"aprobar"` o `"rechazar"` |
+| `razon` | Solo si `decision` es `"rechazar"` | Texto no vacío. Se guarda recortado en `rechazo_producto.razon_rechazo` |
+| `comentario` | No | Solo se guarda si `decision` es `"aprobar"`. Texto; se guarda recortado (o NULL si vacío) en `propuesta_producto.comentario_aprobacion` |
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Propuesta aprobada",
+  "payload": { "_id": 103, "estado": "activo", "nombre": "...", "variantes": [ ... ], ... }
+}
+```
+
+`mensaje` es `"Propuesta aprobada"` o `"Propuesta rechazada"`; `payload` es
+el documento del producto con su nuevo `estado`. Al aprobar se ponen
+`propuesta_producto.fecha_aprobacion = now()`, `id_usuario_aprobo` (quien
+aprobó) y el `comentario` si vino.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "La decision debe ser una de: aprobar, rechazar", "payload": null }
+{ "ok": false, "mensaje": "La razon del rechazo es obligatoria y no puede estar vacia", "payload": null }
+{ "ok": false, "mensaje": "El comentario debe ser texto", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
+```
+
+Producto inexistente, producto normal (sin propuesta), o quien llama no es
+la tienda ni un admin.
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "Esta propuesta no esta en revision (esta activo)", "payload": null }
+```
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo revisar la propuesta", "payload": null }
+```
+
+Probado en vivo el 29 de agosto de 2026 (81 comprobaciones, con
+`/reenviar`): aprobar → `activo` (visible, con oferta posible),
+`fecha_aprobacion` / `id_usuario_aprobo` / `comentario` puestos, evento de
+modificación, sale de `/sin-aprobar`; rechazar → `rechazado`, fila en
+`rechazo_producto`, `fecha_aprobacion` sigue NULL, sigue en `/sin-aprobar`;
+admin también puede; `decision` inválida / `razon` vacía / `comentario` no
+texto → 400 sin mover nada; revisar una `activo`/`rechazado` → 409; producto
+normal → 404; vendedor normal (incluido el que propuso) → 404, comprador →
+403; el historial reconstruye el estado por fecha; **12 carreras
+aprobar-vs-rechazar** siempre 1×200 + 1×409 con estado coherente; y
+forzando un fallo de Postgres se confirmó que Mongo se revierte (estado y
+evento).
+
+---
+
+## PATCH /vendedor/productos/:id/reenviar
+
+El **vendedor que propuso** re-envía su propia propuesta **rechazada** a
+revisión: `rechazado` → `en_revision`, **sin editar nada** (por diseño una
+propuesta no se edita; si quiere cambiarla, propone otra). `:id` es el
+`_id` del producto en Mongo. Sin cuerpo.
+
+**Solo el dueño de la propuesta** (`propuesta_producto.id_usuario`). Una
+propuesta ajena, inexistente, o de la tienda/un admin (que no son dueños de
+propuestas) → **404 genérico**. La propuesta tiene que estar `rechazado`;
+cualquier otro estado → 409.
+
+El rechazo previo **se conserva** en `rechazo_producto` — reenviar no borra
+el historial.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Propuesta reenviada a revision",
+  "payload": { "_id": 103, "estado": "en_revision", ... }
+}
+```
+
+### 400 / 401 / 403 / 404 / 409 / 503 / 500
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "No existe una propuesta tuya para ese producto", "payload": null }
+{ "ok": false, "mensaje": "Solo se puede reenviar una propuesta rechazada (esta en_revision)", "payload": null }
+{ "ok": false, "mensaje": "No se pudo reenviar la propuesta", "payload": null }
 ```
 
 ---
@@ -1043,6 +1436,172 @@ Un vendedor sin ninguna oferta recibe `[]`, no un error.
 
 ---
 
+## GET /vendedor/ofertas/pendientes
+
+La **cola de revisión**: todas las ofertas en estado `pendiente`, de
+cualquier vendedor, de la más antigua a la más nueva (`fecha_creacion`
+ascendente — la que lleva más tiempo esperando va primero). Es lo que la
+tienda usa para aprobar o rechazar (`PATCH /vendedor/ofertas/:id/revision`,
+todavía no implementado).
+
+**Solo `tienda@mesh.com` o un admin.** Un vendedor cualquiera recibe el
+**mismo 404 genérico** que el resto de `/vendedor/*` restringido a la
+tienda — no se le confirma que la ruta existe. Un admin la ve tal cual (no
+hay sustitución de identidad aquí: la cola es global, no "mis pendientes").
+
+Segmento literal: se resuelve antes que `:id/rechazos`.
+
+```
+GET /vendedor/ofertas/pendientes
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Ofertas pendientes obtenidas",
+  "payload": [
+    {
+      "id_oferta": "591",
+      "id_producto": 12,
+      "id_producto_variante": 24,
+      "nombre_producto": "Silla Ergonomica Onda",
+      "nombre_variante": "Malla / Negro",
+      "imagen": null,
+      "precio": "80.00",
+      "stock": 0,
+      "fecha_creacion": "2026-08-28T21:40:11.002Z",
+      "vendedor": {
+        "id_usuario": "6",
+        "usuario": "ventas_sur",
+        "nombre": "Lucia",
+        "apellido": "Morales"
+      }
+    }
+  ]
+}
+```
+
+Dos consultas en total sin importar cuántas ofertas haya: una a Postgres
+(`oferta` en `pendiente` + `JOIN usuarios` por el vendedor) y una sola a
+Mongo con `$in` por los productos distintos. Lista vacía (`[]`) si no hay
+ninguna pendiente. `stock` puede ser `> 0`: una oferta pendiente pudo
+nacer con `stock_inicial`, pero no cuenta para nada del catálogo hasta que
+se apruebe.
+
+### 401 / 403
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
+```
+
+Un vendedor que no es la tienda ni admin: el mismo mensaje reutilizado
+(igual que `GET /vendedor/productos`, que tampoco lleva id).
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudieron obtener las ofertas pendientes", "payload": null }
+```
+
+Probado en vivo el 28 de agosto de 2026 (28 comprobaciones, con las dos
+rutas GET): la cuenta coincide con `SELECT count(*) ... WHERE estado =
+'pendiente'`, el admin ve la misma lista, un vendedor normal recibe 404,
+el comprador 403, sin sesión 401; el contenido trae el vendedor y los
+nombres correctos; las ofertas `activa`/`rechazada` no aparecen; el orden
+es `fecha_creacion` ascendente.
+
+---
+
+## GET /vendedor/ofertas/:id/rechazos
+
+El **historial de rechazos** de una oferta **propia**: cada vez que la
+tienda la rechazó, con su motivo y su fecha, de la más reciente a la más
+vieja. `:id` es `id_oferta`.
+
+Como una oferta se puede rechazar, corregir (vuelve a `pendiente`) y
+rechazar otra vez, puede haber varias filas. El historial **se conserva**
+aunque la oferta ya no esté `rechazada` (la haya reenviado el vendedor, o
+la tienda la haya aprobado después).
+
+**La tienda o un admin** ven los rechazos de **cualquier** oferta (son
+quienes escriben esos motivos, en `PATCH /vendedor/ofertas/:id/revision`).
+**Un vendedor cualquiera**, solo los de **sus** ofertas. En los dos casos,
+una oferta que no existe (o que no es suya, para un vendedor) da el mismo
+**404 genérico**. Una oferta sin rechazos devuelve `[]` (no 404).
+
+```
+GET /vendedor/ofertas/174/rechazos
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Rechazos de la oferta obtenidos",
+  "payload": [
+    {
+      "id_rechazo_oferta": "2",
+      "razon_rechazo": "Sigue sin cumplir, foto de baja calidad",
+      "fecha_rechazo": "2026-08-25T20:30:00.000Z"
+    },
+    {
+      "id_rechazo_oferta": "1",
+      "razon_rechazo": "Precio muy por debajo del mercado",
+      "fecha_rechazo": "2026-08-20T16:00:00.000Z"
+    }
+  ]
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+```
+
+### 401 / 403
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
+```
+
+Mismo mensaje para una que no existe y para una de otro vendedor.
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudieron obtener los rechazos de la oferta", "payload": null }
+```
+
+Probado en vivo el 28 de agosto de 2026 (dueño) y el 29 de agosto de 2026
+(tienda/admin): una oferta con 2 rechazos los devuelve del más reciente al
+más viejo; una sin rechazos devuelve `[]`; el dueño ve las suyas y una
+ajena da 404; **la tienda y un admin ven los rechazos de cualquier oferta**
+(incluida una de otro vendedor); un vendedor que no es dueño ni tienda/admin
+→ 404; `id` con formato inválido 400; sin sesión 401; comprador 403; y tras
+reenviar la oferta (vuelve a `pendiente`) el historial sigue completo.
+
+---
+
 ## GET /vendedor/ofertas/producto/:idProducto
 
 Un producto completo del catálogo — misma forma que `GET /productos/:id`
@@ -1170,13 +1729,30 @@ sea quien sea que la creó; la diferencia solo se nota en que esa oferta
 pasa a contar para `precio_tienda`/`stock_tienda`/`es_tienda` del
 producto.
 
-**Nace siempre `activa`** — sin aprobación previa de la tienda: eso quedó
-pendiente de diseñar más adelante (fecha límite del profesor obligó a
-priorizar el flujo directo primero, se retoma después). Y **nace siempre
-con `stock = 0`**, nunca con `stock_inicial` puesto directo: el kardex
-(`stock_movimiento`) tiene que explicar cada unidad, así que si viene
-`stock_inicial > 0` se repone aparte, con `reponer_stock`, justo después
-de que la oferta nazca.
+**El estado con el que nace depende de quién la crea** (flujo de aprobación
+de ofertas, ver `plan pendiente/aceptacion-de-ofertas.md`):
+
+| Quién crea | Estado inicial | `fecha_aprobacion` |
+| --- | --- | --- |
+| `tienda@mesh.com` (o un admin, que actúa como la tienda) | `activa` | `now()` |
+| Cualquier otro vendedor | `pendiente` | `NULL` |
+
+Una oferta `pendiente` **no circula**: no aparece en la ficha pública
+(`GET /productos/:id`), no cuenta para `precio_tienda`/`precio_desde`/
+`stock_tienda`/`stock_total`/`total_ofertas`, y no se puede agregar a un
+pedido ni comprar (`agregar_linea` la rechaza con 409). La tienda la
+aprueba después con `PATCH /vendedor/ofertas/:id/revision` (todavía no
+implementado a esta fecha — solo la creación). El vendedor **sí** ve su
+propia oferta `pendiente` en `GET /vendedor/ofertas`, con ese estado.
+
+**Nace siempre con `stock = 0`**, nunca con `stock_inicial` puesto directo:
+el kardex (`stock_movimiento`) tiene que explicar cada unidad, así que si
+viene `stock_inicial > 0` se repone aparte, con `reponer_stock`, justo
+después de que la oferta nazca — esto ocurre igual aunque la oferta esté
+`pendiente` (el kardex es independiente del estado). El `reponer_stock`
+toca `fecha_actualizacion` vía trigger, pero **no** `fecha_aprobacion`:
+por eso el flujo de aprobación usa una columna dedicada y no
+`fecha_actualizacion`.
 
 **Solo sobre productos activos.** Un producto `inactivo`/`borrador` da el
 mismo 404 que uno que no existe — mismo criterio que `GET /productos/:id`
@@ -1218,24 +1794,32 @@ POST /vendedor/ofertas
     "imagen": null,
     "precio": "3950.00",
     "stock": 7,
-    "estado": "activa",
+    "estado": "pendiente",
     "fecha_creacion": "2026-08-25T17:10:24.348Z",
     "fecha_actualizacion": "2026-08-25T17:10:24.348Z"
   }
 }
 ```
 
+(`estado` es `"activa"` si quien la crea es la tienda o un admin.)
+
 Misma forma que cada elemento de `GET /vendedor/ofertas`. Deja al día en
 Mongo los cinco campos calculados del producto y la variante afectados
 (`precio_tienda`/`precio_desde`/`stock_tienda`/`stock_total`/`total_ofertas`,
-ver `ProductosService.recalcularCamposCalculados`).
+ver `ProductosService.recalcularCamposCalculados`) — una oferta `pendiente`
+no cambia ninguno de esos números, pero el recálculo se llama igual.
 
-Probado en vivo el 25 de agosto de 2026 contra la base real, con un
-vendedor de prueba (`ventas.norte@mesh.com`): la oferta nace `activa` con
-`id_estado_oferta = 1`, el kardex registra la reposición del
-`stock_inicial` con `id_pedido NULL` y `id_usuario_modifico` del vendedor,
-`precio_historial` registra el precio de nacimiento, y `total_ofertas`/
-`stock_total` del producto en Mongo suben lo esperado.
+Probado en vivo el 28 de agosto de 2026 contra la base real (48
+comprobaciones), con las cinco cuentas:
+`tienda@mesh.com` y un admin crean `activa` con `fecha_aprobacion` puesta
+(la del admin bajo `oferta.id_usuario` de la tienda, no del admin); los
+demás vendedores crean `pendiente` con `fecha_aprobacion NULL`; el
+`stock_inicial` de una oferta `pendiente` sí llega al kardex como
+`reposicion` sin aprobarla; la oferta `pendiente` no sale en la ficha
+pública, no cuenta en los campos calculados de Mongo (probado con una
+`pendiente` de stock 7 que dejó `stock_total` en 0), y `agregar_linea` la
+rechaza con 409; el vendedor la ve en su panel como `pendiente`. Sin
+regresión: la tienda ofertando una variante que ya tiene sigue dando 409.
 
 ### 400
 
@@ -1303,9 +1887,21 @@ mano desde esta ruta:
 - **`precio`** — un `UPDATE` sobre `oferta.precio`. El trigger
   `trg_oferta_registrar_precio` (`005_ofertas.sql`) escribe solo la fila
   nueva en `precio_historial`.
-- **`estado`** — un `UPDATE` sobre `oferta.id_estado_oferta`. Sin
-  restricción sobre a cuál: el dueño maneja su oferta como quiera,
-  incluido volver de `retirada` a `activa`.
+- **`estado`** — un `UPDATE` sobre `oferta.id_estado_oferta`. Depende de
+  si la oferta **ya fue aprobada** alguna vez (`fecha_aprobacion` no NULL):
+  - **Aprobada** (`activa`/`pausada`/`retirada` que pasó por revisión): sin
+    restricción, el dueño la maneja como quiera, incluido volver de
+    `retirada` a `activa`.
+  - **Nunca aprobada** (`pendiente`, `rechazada`, o `retirada` sin haber
+    pasado por revisión — `fecha_aprobacion` NULL): el vendedor **no** puede
+    ponerla `activa` ni `pausada` por su cuenta (**409**); solo `retirada`.
+    Y **cualquier otra edición** (un `precio` nuevo y/o un `ajuste_stock`)
+    la deja —o la devuelve, si estaba `rechazada`— a **`pendiente`**, para
+    que la tienda la revise otra vez. Es el mecanismo de re-envío tras un
+    rechazo, sin recrear la oferta.
+  El cliente **nunca** manda `pendiente` ni `rechazada` en el cuerpo (los
+  pone el servidor): `estado` solo acepta `activa`/`pausada`/`retirada`, el
+  resto es 400.
 - **`ajuste_stock`** — un entero con signo, nunca `0`. Positivo llama a
   `reponer_stock(..., 'reposicion', ...)` (sube el stock); negativo llama
   con `'ajuste'` y la magnitud (resta). Son los mismos dos motivos que
@@ -1359,15 +1955,26 @@ Al menos uno de los tres tiene que venir.
 }
 ```
 
-Misma forma que `POST /vendedor/ofertas`. Deja al día en Mongo los cinco
-campos calculados del producto y la variante afectados.
+Misma forma que `POST /vendedor/ofertas`. `payload.estado` trae el estado
+real tras el cambio (puede ser `pendiente` si la oferta no estaba
+aprobada). Deja al día en Mongo los cinco campos calculados del producto y
+la variante afectados.
 
-Probado en vivo el 25 de agosto de 2026 contra la base real: precio
-(verificado que `precio_historial` registró la fila nueva), pausar y
-reactivar, ajuste positivo (`reponer_stock` con `'reposicion'`) y negativo
-(`'ajuste'`) — verificado el kardex fila por fila
-(`reposicion +3 → 3`, `reposicion +5 → 8`, `ajuste -2 → 6`) — y que una
-oferta ajena (probado contra la de `mesh_tienda`) da 404 sin tocar nada.
+Probado en vivo el 25 de agosto de 2026 (aprobadas) y el 28 de agosto de
+2026 (flujo de aprobación) contra la base real:
+
+- **Ofertas aprobadas** — precio (verificado que `precio_historial`
+  registró la fila nueva), pausar y reactivar, `retirada → activa`, ajuste
+  positivo y negativo verificado en el kardex fila por fila, cuerpo vacío
+  → 400, oferta ajena → 404, `estado` inválido → 400.
+- **Ofertas nunca aprobadas** (48 comprobaciones) — una `pendiente`
+  editando `precio` o `ajuste_stock` sigue `pendiente` con
+  `fecha_aprobacion` NULL; una `rechazada` editando `precio` **vuelve a
+  `pendiente`**; una `retirada` sin haber sido aprobada, al editarse,
+  también vuelve a `pendiente`; `estado: "activa"` o `"pausada"` sobre
+  cualquiera de esas → **409**; `estado: "retirada"` sí se respeta;
+  `estado: "pendiente"`/`"rechazada"` en el cuerpo → 400. Sin regresión en
+  las aprobadas (mismo script).
 
 ### 400
 
@@ -1405,10 +2012,12 @@ no hay nada que confirmar por esta vía.
 
 ```json
 { "ok": false, "mensaje": "El ajuste dejaria la oferta 174 en -993 unidades", "payload": null }
+{ "ok": false, "mensaje": "Esta oferta todavia no fue aprobada por la tienda: no puedes activarla ni pausarla. Editala (precio o stock) y queda pendiente de revision otra vez.", "payload": null }
 ```
 
-Mensaje de `reponer_stock()` tal cual, cuando el ajuste negativo deja el
-stock por debajo de 0.
+El primero es de `reponer_stock()` tal cual, cuando el ajuste negativo deja
+el stock por debajo de 0. El segundo, cuando se intenta poner `activa` o
+`pausada` una oferta que nunca fue aprobada.
 
 ### 503
 
@@ -1422,3 +2031,123 @@ stock por debajo de 0.
 ```json
 { "ok": false, "mensaje": "No se pudo actualizar la oferta", "payload": null }
 ```
+
+---
+
+## PATCH /vendedor/ofertas/:id/revision
+
+La tienda (o un admin) **aprueba** una oferta `pendiente` — pasa a `activa`
+y ya circula (aparece en la ficha, cuenta para los campos calculados, se
+puede comprar) — o la **rechaza** con un motivo — pasa a `rechazada` y se
+guarda una fila en `rechazo_oferta`. `:id` es `id_oferta`.
+
+Es la **única** vía para aprobar o rechazar; ni el vendedor ni un admin
+pueden forzar ese estado por `PATCH /vendedor/ofertas/:id`.
+
+**Solo `tienda@mesh.com` o un admin.** Un vendedor cualquiera —**incluido
+el dueño de la oferta**— recibe el **mismo 404 genérico** que si la ruta no
+existiera: uno no aprueba su propia oferta. La comprobación de permiso va
+antes de validar el id o el cuerpo.
+
+La oferta tiene que estar **`pendiente`**. Cualquier otro estado → 409. La
+comprobación va dentro de una transacción con `SELECT ... FOR UPDATE` sobre
+la fila de `oferta`: si dos revisiones caen a la vez sobre la misma oferta,
+la segunda espera y al desbloquearse ve el estado ya cambiado y responde
+409 — nunca queda aprobada y rechazada a la vez. En el rechazo, el cambio
+de estado y el `INSERT` en `rechazo_oferta` van en esa misma transacción.
+
+```
+PATCH /vendedor/ofertas/174/revision
+```
+
+```json
+{ "decision": "aprobar" }
+```
+```json
+{ "decision": "rechazar", "razon": "La foto no corresponde al producto" }
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `decision` | Sí | `"aprobar"` o `"rechazar"` |
+| `razon` | Solo si `decision` es `"rechazar"` | Texto no vacío. Se guarda recortado (`trim`) en `rechazo_oferta.razon_rechazo` |
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Oferta aprobada",
+  "payload": {
+    "id_oferta": "174",
+    "id_producto": 6,
+    "id_producto_variante": 11,
+    "nombre_producto": "Audifonos Estudio 900",
+    "nombre_variante": "Cable 3 m",
+    "imagen": null,
+    "precio": "550.00",
+    "stock": 6,
+    "estado": "activa",
+    "fecha_creacion": "2026-08-25T17:10:44.377Z",
+    "fecha_actualizacion": "2026-08-28T22:11:03.512Z"
+  }
+}
+```
+
+`mensaje` es `"Oferta aprobada"` o `"Oferta rechazada"` según la decisión;
+`payload.estado` es `activa` o `rechazada`. Misma forma que
+`PATCH /vendedor/ofertas/:id`. Al aprobar se ponen `fecha_aprobacion =
+now()` y se recalculan los cinco campos del producto en Mongo.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "La decision debe ser una de: aprobar, rechazar", "payload": null }
+{ "ok": false, "mensaje": "La razon del rechazo es obligatoria y no puede estar vacia", "payload": null }
+```
+
+### 401 / 403
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
+```
+
+Oferta inexistente, o quien llama no es la tienda ni un admin — el mismo
+mensaje, para no revelar que la ruta existe.
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "Esta oferta no esta pendiente de revision (esta activa)", "payload": null }
+```
+
+La oferta ya no está `pendiente` (otra revisión se adelantó, o nunca lo
+estuvo).
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo revisar la oferta", "payload": null }
+```
+
+Probado en vivo el 28 de agosto de 2026 (55 comprobaciones): aprobar y
+rechazar (con `razon` recortada y una fila en `rechazo_oferta`); `activa`
+tras aprobar aparece en la ficha y se puede comprar, y `precio_desde` baja
+si la oferta es más barata que la de la tienda; una `rechazada` no aparece
+y el vendedor la ve en `GET /vendedor/ofertas/:id/rechazos`; el dueño de la
+oferta y un vendedor ajeno reciben 404, el comprador 403, sin sesión 401;
+`decision` ausente/inválida y `razon` vacía → 400; revisar una oferta en
+cualquier estado ≠ `pendiente` → 409, y el 409 no deja fila de rechazo
+(rollback); el ciclo completo `pendiente → rechazada → (el vendedor
+corrige) → pendiente → aprobada` funciona y conserva el historial de
+rechazo; y **12 carreras concurrentes aprobar-vs-rechazar sobre la misma
+oferta**: siempre exactamente un 200 y un 409, con estado final coherente.

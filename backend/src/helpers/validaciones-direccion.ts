@@ -4,10 +4,10 @@ import { esTextoNoVacio } from './validaciones-perfil';
 const REGEX_FECHA = /^(\d{4})-(\d{2})-(\d{2})$/;
 
 /**
- * Reglas de pais, departamento, ciudad y codigo_postal: van aqui, sueltas
- * de DireccionUsuarioService, porque las usa mas de un lugar (POST
- * /direccion-usuario y PATCH /direccion-usuario/:id) y tienen que dar
- * exactamente los mismos mensajes en los dos.
+ * Reglas de pais, departamento, ciudad, direccion_exacta y codigo_postal:
+ * van aqui, sueltas de DireccionUsuarioService, porque las usa mas de un
+ * lugar (POST /direccion-usuario y PATCH /direccion-usuario/:id) y tienen
+ * que dar exactamente los mismos mensajes en los dos.
  */
 
 export function validarPais(pais: string): void {
@@ -36,6 +36,24 @@ export function validarCiudad(ciudad: string): void {
   }
   if (ciudad.length > 100) {
     throw new ErrorValidacion('La ciudad no puede tener mas de 100 caracteres');
+  }
+}
+
+/**
+ * direccion_exacta: la calle, numero, zona y referencias en una sola linea.
+ * Obligatoria al crear una direccion -- sin ella no se puede entregar un
+ * pedido -- y del largo de la columna, varchar(255). Al editar es opcional
+ * como el resto (si no viene, no se toca), pero si viene tiene que cumplir
+ * lo mismo.
+ */
+export function validarDireccionExacta(direccionExacta: string): void {
+  if (!esTextoNoVacio(direccionExacta)) {
+    throw new ErrorValidacion('La direccion exacta es obligatoria');
+  }
+  if (direccionExacta.length > 255) {
+    throw new ErrorValidacion(
+      'La direccion exacta no puede tener mas de 255 caracteres',
+    );
   }
 }
 

@@ -63,6 +63,36 @@ export interface OfertaPropia extends OfertaPropiaResumen {
 }
 
 /**
+ * Una oferta en estado `pendiente`, tal como la ve la tienda (o un admin)
+ * en su cola de revisión -- `GET /vendedor/ofertas/pendientes`. Como quien
+ * la lee NO es el dueño, lleva el vendedor embebido (igual que
+ * `OfertaVendedor` de la ficha pública), más el nombre del producto y de
+ * la variante ya resueltos desde Mongo. No lleva `estado` (todas son
+ * `pendiente`) ni `fecha_actualizacion` (lo que importa es desde cuándo
+ * espera, `fecha_creacion`).
+ */
+export interface OfertaPendiente {
+  id_oferta: string;
+  id_producto: number;
+  id_producto_variante: number;
+  nombre_producto: string;
+  nombre_variante: string;
+  /** La primera imagen de la variante, o null si no tiene ninguna. */
+  imagen: string | null;
+  /** numeric(12,2) de Postgres: string. */
+  precio: string;
+  stock: number;
+  /** Desde cuándo espera revisión. La cola se ordena por esto, ascendente. */
+  fecha_creacion: Date;
+  vendedor: {
+    id_usuario: string;
+    usuario: string;
+    nombre: string;
+    apellido: string | null;
+  };
+}
+
+/**
  * Precio y stock de una oferta reconstruidos **como estaban en una fecha
  * especifica** -- ver ProductosService.reconstruirOfertaEnFecha(). Mismo
  * espiritu que reconstruir un producto a una fecha, pero del lado

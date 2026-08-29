@@ -14,6 +14,8 @@ export interface DireccionHistorial {
   pais: string;
   departamento: string;
   ciudad: string;
+  /** La direccion_exacta que regia en esa version (ver models/direccion.ts). */
+  direccion_exacta: string | null;
   codigo_postal: string | null;
   fecha_creacion: Date;
 }

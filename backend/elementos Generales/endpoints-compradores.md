@@ -263,6 +263,7 @@ GET /comprador/pedidos/3
       "pais": "Guatemala",
       "departamento": "Guatemala",
       "ciudad": "Guatemala",
+      "direccion_exacta": "6a. Avenida 9-18, Zona 1, Edificio El Centro, Nivel 3",
       "codigo_postal": "01010",
       "fecha_creacion": "2026-08-25T13:38:51.071Z"
     },

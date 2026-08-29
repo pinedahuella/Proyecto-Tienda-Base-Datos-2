@@ -12,15 +12,15 @@ rutas separadas (`PATCH /vendedor/ofertas/:id` para precio/estado, `POST
 está escrito, ya no aplica — lo que hacía (`reponer_stock` con
 `'reposicion'`/`'ajuste'`) quedó cubierto por `ajuste_stock` del PATCH.
 
-**Decisión pendiente de retomar, no descartada:** se había discutido que
-crear/editar una oferta pasara por una aprobación de la tienda (nace
-`pausada`, la tienda la activa). El profesor dio una fecha límite nueva a
-mitad de sesión y no alcanzó el tiempo para resolver el diseño completo
-(qué marca "pendiente de aprobar" sin romperse con `reponer_stock`, quién
-puede activar qué, etc. — quedó discutido pero sin cerrar). Se decidió
-seguir con creación directa (nace `activa`, tal como estaba en este plan
-desde el principio) para no perder tiempo, y retomar la aprobación después
-como su propio cambio.
+**Decisión pendiente de retomar, no descartada:** ~~se había discutido que
+crear/editar una oferta pasara por una aprobación de la tienda~~ —
+**resuelto — el backend está completo desde el 2026-08-28**, ver
+`plan pendiente/aceptacion-de-ofertas.md`. Creación (`POST`), edición
+(`PATCH`), la cola (`GET /vendedor/ofertas/pendientes`), el historial de
+rechazos (`GET /vendedor/ofertas/:id/rechazos`) y la revisión
+(`PATCH /vendedor/ofertas/:id/revision`) están construidos y probados (179
+comprobaciones). Falta solo la migración real en `migrations/` (la lleva
+el compañero — hay un `.sql` de referencia aplicado en local).
 
 Contexto que ya existe y hay que reusar, no repensar:
 

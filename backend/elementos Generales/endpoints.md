@@ -750,11 +750,14 @@ snapshot inicial) — las dos cosas pasan juntas, en una sola transaccion.
   "pais": "Guatemala",
   "departamento": "Guatemala",
   "ciudad": "Guatemala",
+  "direccion_exacta": "4a. Avenida 12-34, Zona 10, Edificio Plaza, Oficina 502",
   "codigo_postal": "01001"
 }
 ```
 
-`codigo_postal` es opcional.
+`direccion_exacta` es **obligatoria** — la calle, el numero, la zona y las
+referencias en una sola linea; sin ella no se puede entregar un pedido.
+Maximo 255 caracteres. `codigo_postal` sigue siendo opcional.
 
 **201**
 
@@ -768,6 +771,7 @@ snapshot inicial) — las dos cosas pasan juntas, en una sola transaccion.
     "pais": "Guatemala",
     "departamento": "Guatemala",
     "ciudad": "Guatemala",
+    "direccion_exacta": "4a. Avenida 12-34, Zona 10, Edificio Plaza, Oficina 502",
     "codigo_postal": "01001",
     "fecha_creacion": "2026-08-22T03:03:20.679Z",
     "id_estado_direccion": 1
@@ -784,6 +788,8 @@ snapshot inicial) — las dos cosas pasan juntas, en una sola transaccion.
 { "ok": false, "mensaje": "El departamento no puede tener mas de 100 caracteres", "payload": null }
 { "ok": false, "mensaje": "La ciudad es obligatoria", "payload": null }
 { "ok": false, "mensaje": "La ciudad no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La direccion exacta es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La direccion exacta no puede tener mas de 255 caracteres", "payload": null }
 { "ok": false, "mensaje": "El codigo postal no puede tener mas de 20 caracteres", "payload": null }
 ```
 
@@ -811,10 +817,12 @@ activa:
 
 ## PATCH /direccion-usuario/:id
 
-Requiere la cookie `mesh_token`. Edita `pais`, `departamento`, `ciudad`
-y/o `codigo_postal` de una direccion **propia**. Cada campo es
-independiente: el que venga en `null` (o no venga) no se toca. Debe venir
-al menos uno.
+Requiere la cookie `mesh_token`. Edita `pais`, `departamento`, `ciudad`,
+`direccion_exacta` y/o `codigo_postal` de una direccion **propia**. Cada
+campo es independiente: el que venga en `null` (o no venga) no se toca.
+Debe venir al menos uno. `direccion_exacta`, si viene, no puede quedar
+vacia ni pasar de 255 caracteres (aqui es opcional, a diferencia de
+`POST`, donde es obligatoria).
 
 Solo puede editar sus propias direcciones: una direccion de otro usuario
 da el mismo 404 que un id que no existe (no hay forma de usar esta ruta
@@ -830,6 +838,7 @@ una sola transaccion.
   "pais": null,
   "departamento": null,
   "ciudad": "Mixco",
+  "direccion_exacta": "7a. Calle 1-50, Zona 4, Casa 12",
   "codigo_postal": null
 }
 ```
@@ -846,6 +855,7 @@ una sola transaccion.
     "pais": "Guatemala",
     "departamento": "Guatemala",
     "ciudad": "Mixco",
+    "direccion_exacta": "7a. Calle 1-50, Zona 4, Casa 12",
     "codigo_postal": "01001",
     "fecha_creacion": "2026-08-22T03:17:18.338Z",
     "id_estado_direccion": 1
@@ -864,6 +874,8 @@ una sola transaccion.
 { "ok": false, "mensaje": "El departamento no puede tener mas de 100 caracteres", "payload": null }
 { "ok": false, "mensaje": "La ciudad es obligatoria", "payload": null }
 { "ok": false, "mensaje": "La ciudad no puede tener mas de 100 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La direccion exacta es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "La direccion exacta no puede tener mas de 255 caracteres", "payload": null }
 { "ok": false, "mensaje": "El codigo postal no puede tener mas de 20 caracteres", "payload": null }
 ```
 
@@ -914,6 +926,7 @@ de otra persona.
       "pais": "Guatemala",
       "departamento": "Guatemala",
       "ciudad": "Mixco",
+      "direccion_exacta": "4a. Avenida 12-34, Zona 10, Edificio Plaza, Oficina 502",
       "codigo_postal": "01001",
       "fecha_creacion": "2026-08-22T18:15:02.423Z",
       "id_estado_direccion": 1
@@ -969,6 +982,7 @@ GET /direccion-usuario/4
       "pais": "Guatemala",
       "departamento": "Guatemala",
       "ciudad": "Mixco",
+      "direccion_exacta": "7a. Calle 1-50, Zona 4, Casa 12",
       "codigo_postal": "01001",
       "fecha_creacion": "2026-08-22T18:15:02.423Z",
       "id_estado_direccion": 1
@@ -980,6 +994,7 @@ GET /direccion-usuario/4
         "pais": "Guatemala",
         "departamento": "Guatemala",
         "ciudad": "Mixco",
+        "direccion_exacta": "7a. Calle 1-50, Zona 4, Casa 12",
         "codigo_postal": "01001",
         "fecha_creacion": "2026-08-22T18:15:09.808Z"
       },
@@ -989,6 +1004,7 @@ GET /direccion-usuario/4
         "pais": "Guatemala",
         "departamento": "Guatemala",
         "ciudad": "Guatemala",
+        "direccion_exacta": "4a. Avenida 12-34, Zona 10, Edificio Plaza, Oficina 502",
         "codigo_postal": "01001",
         "fecha_creacion": "2026-08-22T18:15:02.423Z"
       }
@@ -1057,6 +1073,7 @@ GET /direccion-usuario/historial?fecha=2026-08-22
       "pais": "Guatemala",
       "departamento": "Guatemala",
       "ciudad": "Mixco",
+      "direccion_exacta": "7a. Calle 1-50, Zona 4, Casa 12",
       "codigo_postal": "01001",
       "fecha_creacion": "2026-08-22T18:15:09.808Z"
     }

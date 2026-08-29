@@ -29,3 +29,33 @@ export function validarAjusteStock(valor: unknown): number {
   }
   return valor;
 }
+
+/**
+ * Reglas de PATCH /vendedor/ofertas/:id/revision: la decision de la tienda
+ * sobre una oferta pendiente.
+ */
+
+const DECISIONES_REVISION = ['aprobar', 'rechazar'];
+
+export function validarDecisionRevision(valor: unknown): string {
+  if (typeof valor !== 'string' || !DECISIONES_REVISION.includes(valor)) {
+    throw new ErrorValidacion(
+      `La decision debe ser una de: ${DECISIONES_REVISION.join(', ')}`,
+    );
+  }
+  return valor;
+}
+
+/**
+ * El motivo de un rechazo: obligatorio, texto no vacio. Se guarda ya
+ * recortado en `rechazo_oferta.razon_rechazo`, que ademas tiene un CHECK
+ * de no-vacio en la base -- esto da el 400 amable antes de llegar ahi.
+ */
+export function validarRazonRechazo(valor: unknown): string {
+  if (typeof valor !== 'string' || valor.trim().length === 0) {
+    throw new ErrorValidacion(
+      'La razon del rechazo es obligatoria y no puede estar vacia',
+    );
+  }
+  return valor.trim();
+}

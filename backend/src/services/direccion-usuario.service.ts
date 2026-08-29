@@ -7,6 +7,7 @@ import {
   validarCiudad,
   validarCodigoPostal,
   validarDepartamento,
+  validarDireccionExacta,
   validarFechaHistorial,
   validarPais,
 } from '../helpers/validaciones-direccion';
@@ -46,6 +47,7 @@ export class DireccionUsuarioService {
     validarPais(datos.pais);
     validarDepartamento(datos.departamento);
     validarCiudad(datos.ciudad);
+    validarDireccionExacta(datos.direccion_exacta);
     validarCodigoPostal(datos.codigo_postal);
 
     const codigoPostal = esTextoNoVacio(datos.codigo_postal)
@@ -58,15 +60,16 @@ export class DireccionUsuarioService {
 
       const resultado = await cliente.query<Direccion>(
         `INSERT INTO direcciones
-           (id_usuario, pais, departamento, ciudad, codigo_postal, id_estado_direccion)
-         VALUES ($1, $2, $3, $4, $5, $6)
+           (id_usuario, pais, departamento, ciudad, direccion_exacta, codigo_postal, id_estado_direccion)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING id_direccion, id_usuario, pais, departamento, ciudad,
-                   codigo_postal, fecha_creacion, id_estado_direccion`,
+                   direccion_exacta, codigo_postal, fecha_creacion, id_estado_direccion`,
         [
           idUsuario,
           datos.pais,
           datos.departamento,
           datos.ciudad,
+          datos.direccion_exacta,
           codigoPostal,
           ID_ESTADO_DIRECCION_ACTIVA,
         ],
@@ -85,9 +88,10 @@ export class DireccionUsuarioService {
   }
 
   /**
-   * Edita pais, departamento, ciudad y/o codigo_postal de una direccion
-   * del usuario logueado. Cada campo es independiente: el que venga en
-   * null (o no venga) se queda igual que estaba. Debe venir al menos uno.
+   * Edita pais, departamento, ciudad, direccion_exacta y/o codigo_postal de
+   * una direccion del usuario logueado. Cada campo es independiente: el que
+   * venga en null (o no venga) se queda igual que estaba. Debe venir al
+   * menos uno.
    *
    * Solo puede editar sus propias direcciones: el UPDATE exige que
    * id_direccion sea de ese id_usuario a la vez, asi que la direccion de
@@ -111,12 +115,14 @@ export class DireccionUsuarioService {
     const pais = cambios.pais ?? null;
     const departamento = cambios.departamento ?? null;
     const ciudad = cambios.ciudad ?? null;
+    const direccionExacta = cambios.direccion_exacta ?? null;
     const codigoPostal = cambios.codigo_postal ?? null;
 
     if (
       pais == null &&
       departamento == null &&
       ciudad == null &&
+      direccionExacta == null &&
       codigoPostal == null
     ) {
       throw new ErrorValidacion(
@@ -133,6 +139,9 @@ export class DireccionUsuarioService {
     if (ciudad != null) {
       validarCiudad(ciudad);
     }
+    if (direccionExacta != null) {
+      validarDireccionExacta(direccionExacta);
+    }
     validarCodigoPostal(codigoPostal);
 
     const cliente = await pool.connect();
@@ -144,11 +153,20 @@ export class DireccionUsuarioService {
          SET pais = COALESCE($1, pais),
              departamento = COALESCE($2, departamento),
              ciudad = COALESCE($3, ciudad),
-             codigo_postal = COALESCE($4, codigo_postal)
-         WHERE id_direccion = $5 AND id_usuario = $6
+             direccion_exacta = COALESCE($4, direccion_exacta),
+             codigo_postal = COALESCE($5, codigo_postal)
+         WHERE id_direccion = $6 AND id_usuario = $7
          RETURNING id_direccion, id_usuario, pais, departamento, ciudad,
-                   codigo_postal, fecha_creacion, id_estado_direccion`,
-        [pais, departamento, ciudad, codigoPostal, idDireccion, idUsuario],
+                   direccion_exacta, codigo_postal, fecha_creacion, id_estado_direccion`,
+        [
+          pais,
+          departamento,
+          ciudad,
+          direccionExacta,
+          codigoPostal,
+          idDireccion,
+          idUsuario,
+        ],
       );
       const direccion = resultado.rows[0];
 
@@ -179,7 +197,7 @@ export class DireccionUsuarioService {
     try {
       const resultado = await pool.query<Direccion>(
         `SELECT id_direccion, id_usuario, pais, departamento, ciudad,
-                codigo_postal, fecha_creacion, id_estado_direccion
+                direccion_exacta, codigo_postal, fecha_creacion, id_estado_direccion
          FROM direcciones
          WHERE id_usuario = $1
          ORDER BY fecha_creacion DESC`,
@@ -208,7 +226,7 @@ export class DireccionUsuarioService {
     try {
       const resultadoDireccion = await pool.query<Direccion>(
         `SELECT id_direccion, id_usuario, pais, departamento, ciudad,
-                codigo_postal, fecha_creacion, id_estado_direccion
+                direccion_exacta, codigo_postal, fecha_creacion, id_estado_direccion
          FROM direcciones
          WHERE id_direccion = $1 AND id_usuario = $2`,
         [idDireccion, idUsuario],
@@ -221,7 +239,7 @@ export class DireccionUsuarioService {
 
       const resultadoHistorial = await pool.query<DireccionHistorial>(
         `SELECT id_direccion_historial, id_direccion, pais, departamento,
-                ciudad, codigo_postal, fecha_creacion
+                ciudad, direccion_exacta, codigo_postal, fecha_creacion
          FROM direccion_historial
          WHERE id_direccion = $1
          ORDER BY fecha_creacion DESC`,
@@ -257,7 +275,8 @@ export class DireccionUsuarioService {
       const resultado = await pool.query<DireccionHistorial>(
         `SELECT DISTINCT ON (dh.id_direccion)
                 dh.id_direccion_historial, dh.id_direccion, dh.pais,
-                dh.departamento, dh.ciudad, dh.codigo_postal, dh.fecha_creacion
+                dh.departamento, dh.ciudad, dh.direccion_exacta,
+                dh.codigo_postal, dh.fecha_creacion
          FROM direccion_historial dh
          JOIN direcciones d ON d.id_direccion = dh.id_direccion
          WHERE d.id_usuario = $1
@@ -278,13 +297,14 @@ export class DireccionUsuarioService {
   ): Promise<void> {
     await cliente.query(
       `INSERT INTO direccion_historial
-         (id_direccion, pais, departamento, ciudad, codigo_postal)
-       VALUES ($1, $2, $3, $4, $5)`,
+         (id_direccion, pais, departamento, ciudad, direccion_exacta, codigo_postal)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         direccion.id_direccion,
         direccion.pais,
         direccion.departamento,
         direccion.ciudad,
+        direccion.direccion_exacta,
         direccion.codigo_postal,
       ],
     );
