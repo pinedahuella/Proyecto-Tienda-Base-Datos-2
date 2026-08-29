@@ -113,9 +113,23 @@ COLECCIONES.forEach(function (nombre) {
 // navegacion normal del catalogo.
 //
 // El orden importa: id_categoria va PRIMERO porque es igualdad; estado
-// despues, que se filtra siempre pero con $nin y no descarta casi nada; y _id
-// al final, que es por donde se ordena y asi sale ordenado del indice, sin
-// ordenar en memoria.
+// despues, que tambien es igualdad y se filtra siempre; y _id al final, que es
+// por donde se ordena y asi sale ordenado del indice, sin ordenar en memoria.
+//
+// Sobre el estado, dos cosas que conviene tener escritas:
+//
+// 1. El filtro es una LISTA BLANCA, no una negra. El backend pide
+//    `estado: 'activo'` y nada mas (ESTADO_PRODUCTO_VISIBLE). Antes se
+//    descartaba con $nin, y este comentario decia eso; cambio, y la diferencia
+//    importa: con lista blanca, un estado nuevo queda oculto por defecto en vez
+//    de aparecer en el catalogo porque nadie se acordo de excluirlo.
+//
+// 2. El conjunto de estados crecio a CINCO -- borrador, activo, inactivo,
+//    en_revision y rechazado -- desde que un vendedor puede proponer productos
+//    (migracion 009). Aqui no hay validador de esquema sobre `estado`, asi que
+//    la coleccion no fuerza nada: la lista completa vive en el catalogo
+//    `estado_producto` de PostgreSQL, y esto queda anotado para quien lea los
+//    indices y se pregunte cuantos valores distintos puede tomar el campo.
 //
 // Va sobre categoria.id_categoria y NO sobre categoria.nombre: el backend
 // filtra por id. Un indice sobre el campo equivocado se ve igual de bien en la

@@ -147,7 +147,8 @@ con el ETL de `etl/`. En Mongo quedan **tres colecciones**:
 **Las ofertas NO se migran**: se quedan en `oferta`, en PostgreSQL. Precio,
 stock y estado cambian en cada venta, y copiarlos obligaria a sostenerlos al
 dia en dos bases a la vez. Lo que si viaja son cinco numeros agregados dentro
-del producto (`precio_tienda`, `stock_tienda`, `stock_total`, `total_ofertas`),
+del producto (`precio_tienda`, `precio_desde`, `stock_tienda`, `stock_total` y
+`total_ofertas`),
 para que la lista del catalogo se pinte sin salir de Mongo. La ficha de un
 producto pide sus ofertas a PostgreSQL.
 

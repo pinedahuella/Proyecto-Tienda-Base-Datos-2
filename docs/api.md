@@ -1,6 +1,6 @@
 # API
 
-> **El contrato completo de las 49 rutas NO esta aqui.** Vive en
+> **El contrato completo de las 59 rutas NO esta aqui.** Vive en
 > `backend/elementos Generales/`, que es donde lo mantiene quien escribe el
 > backend y por tanto la fuente de verdad:
 >
@@ -65,6 +65,8 @@ El codigo y `ok` siempre concuerdan.
 | 200 | Todo bien | true |
 | 201 | Se creo algo | true |
 | 400 | El cliente mando datos invalidos | false |
+| 401 | No hay sesion, o el token vencio | false |
+| 402 | La tarjeta fue rechazada | false |
 | 404 | No existe lo que se pidio | false |
 | 409 | Conflicto, por ejemplo stock insuficiente | false |
 | 503 | Una base de datos no responde | false |
@@ -164,33 +166,27 @@ src/
 Las carpetas usan los nombres estandar del framework. Todo lo que escribimos
 nosotros (archivos, clases y funciones) esta en espanol.
 
-### Cada archivo y que hace
+### Cuantas piezas hay, y donde esta la lista
 
-| Archivo | Que contiene |
-|---|---|
-| `main.ts` | arranca el servidor en el puerto 3000 |
-| `app.module.ts` | la lista de controladores y servicios que existen |
-| `controllers/inicio.controller.ts` | `InicioController`, la ruta `GET /` |
-| `controllers/base-datos.controller.ts` | `BaseDatosController`, la ruta `GET /db` |
-| `services/inicio.service.ts` | `InicioService`, devuelve el estado de la API |
-| `services/base-datos.service.ts` | `BaseDatosService`, consulta a PostgreSQL |
-| `helpers/respuesta.ts` | `exito()` y `fallo()`, arman el formato de respuesta |
-| `database/postgres.ts` | `pool`, la conexion a PostgreSQL |
+Al dia de hoy el backend son **14 controladores, 14 servicios, 20 modelos,
+34 DTO y 18 helpers**, y monta **59 rutas**.
 
-### Los modelos
+**La lista archivo por archivo no se copia aqui a proposito.** `backend/` lo
+escribe y lo mantiene otra persona, asi que un inventario en este documento
+caduca el dia siguiente y nadie se entera: es exactamente el problema que ya
+tuvo este archivo, que llego a enumerar cuatro controladores cuando ya habia
+catorce. La lista viva esta en los cuatro `endpoints-*.md` de
+`backend/elementos Generales/`, que son la fuente de verdad.
 
-Uno por cada tabla de la base, con el mismo nombre.
-
-| Archivo | Interfaz | Tabla |
-|---|---|---|
-| `models/usuario.ts` | `Usuario` | `usuarios` |
-| `models/rol-usuario.ts` | `RolUsuario` | `rol_usuario` |
-| `models/estado-usuario.ts` | `EstadoUsuario` | `estado_usuario` |
-| `models/tipo-login.ts` | `TipoLogin` | `tipo_login` |
-| `models/log-login.ts` | `LogLogin` | `log_login` |
-| `models/log-registro.ts` | `LogRegistro` | `log_registro` |
-| `models/estado-api.ts` | `EstadoApi` | ninguna, es la respuesta de `GET /` |
-| `models/info-conexion.ts` | `InfoConexion` | ninguna, es la respuesta de `GET /db` |
+Lo que si vale la pena fijar aqui, porque es la convencion y no cambia, es
+**como se llaman las cosas**: un modelo por cada tabla que el backend LEE, con
+el mismo nombre en singular y en kebab-case (`models/estado-oferta.ts` para
+`estado_oferta`). No hay uno por cada tabla de la base -- son 20 modelos contra
+39 tablas -- porque los catalogos y las tablas que solo toca el SQL no necesitan
+tipo en TypeScript. Ademas, un
+DTO por cuerpo de peticion o de respuesta, y las carpetas con los nombres
+estandar del framework. Todo lo que escribimos nosotros -- archivos, clases y
+funciones -- esta en espanol.
 
 Los `id` de las tablas grandes van tipados como `string` y no como `number`.
 Son `bigserial`, y el driver `pg` entrega los `bigint` como texto para no perder

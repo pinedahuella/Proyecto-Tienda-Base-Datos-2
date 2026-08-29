@@ -50,13 +50,27 @@ del pedido, cuyo boton de volver recarga el catalogo: asi el descuento de
 existencias se VE, que antes pasaba en la base y no en la pantalla.
 
 Del lado del vendedor: publicar ofertas, y cambiar su precio, su estado y sus
-existencias, con un buscador sobre las propias.
+existencias, con un buscador sobre las propias. **Una oferta suya ya no sale a la
+venta sola**: nace `pendiente` y espera a que la tienda la apruebe o la rechace
+con un motivo. Si se la rechazan, corregirle el precio la manda de vuelta a la
+cola. Y ademas puede **proponer productos** nuevos para el catalogo compartido,
+que nacen `en_revision` y siguen el mismo camino.
 
 Del lado de la tienda y del administrador -- que el backend trata igual -- se
 entra por el PRODUCTO en vez de por una lista de 202 ofertas: el catalogo
 paginado de 20 en 20, con filtro por nombre y por categoria, y las ofertas de un
 producto se piden al abrirlo. Ademas administran el catalogo compartido (alta,
-edicion e historial por fecha), tambien paginado y con su buscador.
+edicion e historial por fecha), tambien paginado y con su buscador, y tienen las
+dos colas de revision: la de ofertas pendientes y la de productos propuestos.
+
+Las direcciones llegan hasta la puerta: ademas de pais, departamento, ciudad y
+codigo postal llevan la **calle**, que es obligatoria al crear una direccion
+nueva -- sin ella no se puede entregar un pedido.
+
+> **Ojo con el frontend.** El backend de todo lo anterior esta hecho y probado, y
+> el esquema tambien; las pantallas todavia no. En concreto, el formulario de
+> direcciones tiene que mandar `direccion_exacta` o el alta responde 400, y las
+> dos colas de revision no tienen pantalla todavia.
 
 ## Documentacion
 

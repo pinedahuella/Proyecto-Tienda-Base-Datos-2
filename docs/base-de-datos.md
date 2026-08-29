@@ -1,6 +1,6 @@
 # Base de datos
 
-Modelo relacional en PostgreSQL. **36 tablas construidas** de las 39 del
+Modelo relacional en PostgreSQL. **39 tablas construidas** de las 42 del
 diagrama; faltan las tres de la parte social (comentario, resena y likes).
 
 > **Los numeros de este documento describen el conjunto de datos que genera
@@ -405,9 +405,115 @@ descontara stock por su cuenta se lo saltaria.
 
 ---
 
+## Una oferta nace esperando, y un producto se propone
+
+Tres cosas entraron juntas y conviene leerlas juntas, porque las tres responden
+a la misma pregunta: **quien puede meter algo al sitio sin que nadie lo mire.**
+
+### La oferta ya no nace vendiendo
+
+Antes, cualquiera que publicara una oferta la tenia a la venta en el acto. Ahora
+la oferta de un vendedor normal nace `pendiente` y no circula hasta que la tienda
+la aprueba. La de la tienda —y la de un admin, que el backend trata igual— sigue
+naciendo `activa`: la tienda es la autoridad y no tiene a quien pedirle permiso.
+
+Se guardan **tres cosas**, y ninguna sobra:
+
+| | Que responde | Que le pasa despues |
+|---|---|---|
+| `id_estado_oferta` | en que situacion esta AHORA | se pierde en cuanto cambia |
+| `fecha_aprobacion` | si alguna vez se aprobo, y cuando | no cambia nunca mas |
+| `id_usuario_aprobo` | **quien** la dejo pasar | no cambia nunca mas |
+
+La tercera sigue la convencion que el proyecto ya usa en `Precio Historial` y en
+`Stock Movimiento`: quien provoco el cambio se guarda aparte del dueno de la
+cosa. Y su NULL dice algo distinto del NULL de la fecha: **la fecha en NULL
+significa "sin aprobar"; el usuario en NULL significa "no consta quien"**, que es
+el caso normal de las ofertas de la tienda -- nacen aprobadas sin que nadie las
+revise. En el conjunto de datos son 350 aprobadas por la tienda y 202 nacidas
+aprobadas sin revisor.
+
+Por eso esta columna **no** lleva un CHECK que la empareje con la fecha, aunque
+`Propuesta Producto` si lo lleva: alli las dos van siempre juntas, y aqui
+prohibirian el caso mas comun.
+
+Una oferta aprobada que despues se pausa ya no dice por ningun lado que alguna
+vez paso por revision, y sin ese dato el vendedor no podria volver a activarla
+sin pedir permiso otra vez. Es la misma regla de siempre: la fila viva lleva
+estado, el hecho historico va aparte.
+
+**Y hay una invariante que ninguna restriccion declarativa puede sostener:** una
+oferta `activa` o `pausada` tiene que tener `fecha_aprobacion`, porque a esos dos
+estados no se llega sin el visto bueno. Como `CHECK` no se puede escribir -- una
+restriccion no admite subconsultas, y meter el `id_estado_oferta` a mano ahi
+dentro es justamente el id escrito a mano que el proyecto prohibe.
+
+Con un trigger SI se podria, y conviene decir por que no se hizo en vez de dar a
+entender que era imposible: `oferta` ya lleva dos triggers de este proyecto, asi
+que el camino existe. Se dejo fuera porque el que decide sobre esta regla es el
+backend -- es el que sabe si quien publica es la tienda o un vendedor -- y meter
+un segundo guardian en la base que pueda contradecirlo aparta la regla de donde
+se decide. Queda anotado como la alternativa si algun dia hace falta cerrarla
+desde abajo.
+
+Lo que si la vigila es el conjunto de datos, que la comprueba al cargar: si
+alguna vez se siembra una oferta activa sin aprobar, la migracion falla en vez de
+dejar la base torcida.
+
+El rechazo va en su propia tabla, `Rechazo Oferta`, y no en dos columnas de
+`Oferta`. El motivo es que **un rechazo se repite**: el vendedor corrige el
+precio, la oferta vuelve a `pendiente`, y se le puede volver a rechazar. Con
+columnas, el segundo rechazo pisaria al primero y se perderia la historia justo
+cuando empieza a ser interesante. Es la misma regla que ya siguen
+`Precio Historial` y `Stock Movimiento`: lo que pasa varias veces va en filas.
+
+### Un vendedor puede proponer una entrada del catalogo
+
+Crear productos era solo de la tienda, para que dos vendedores no subieran la
+misma laptop dos veces. Lo que se abre es la **propuesta**, no la edicion: el
+vendedor crea el producto, nace `en_revision` y no circula; la tienda lo aprueba
+(pasa a `activo`) o lo rechaza con un motivo. Editar el catalogo compartido sigue
+siendo de la tienda.
+
+`Propuesta Producto` guarda quien propuso, quien aprobo y cuando. Su tabla gemela
+`Rechazo Producto` guarda los motivos, por la misma razon que `Rechazo Oferta`.
+
+**Y los dos estados nuevos no se cuelan al catalogo publico** — ni estos ni
+ninguno que se agregue despues. La busqueda y la ficha filtran por **lista
+blanca**: solo `activo` pasa. Un estado nuevo queda oculto por defecto en vez de
+visible por defecto, que es la unica forma de que nadie tenga que acordarse de
+excluirlo.
+
+### La direccion llega hasta la puerta
+
+`Direcciones` llegaba hasta la ciudad. Con "Guatemala, Guatemala, Guatemala" se
+sabe el punto del mapa pero no la casa, asi que un pedido no se podia entregar.
+
+Se agrego `direccion_exacta`, **una sola linea de texto** y no cuatro columnas.
+Una direccion guatemalteca no se deja partir sin pelear: *"5a. Avenida Norte 22,
+frente al Arco de Santa Catalina"* y *"6a. Avenida 9-18, Zona 10, Edificio Vista
+Real, Nivel 3"* no tienen la misma forma. Cuatro columnas fijas obligarian a
+inventar una regla que la mitad de las direcciones no cumple, y acabarian siendo
+el antipatron de columnas mayormente nulas que critica el enunciado. Ademas el
+unico que lee este dato es quien tiene que llegar a la puerta: no se filtra ni se
+agrupa por el, se imprime en la etiqueta y se lee.
+
+Va en `Direcciones` **y** en `Direccion Historial`, igual que las otras cuatro. No
+es duplicar: el pedido apunta al historial, no a la fila viva, y si la calle solo
+viviera en la fila viva, editarla cambiaria a donde dice que se mando un pedido de
+hace tres meses.
+
+Nace nullable a proposito. Las filas anteriores a la columna no tienen forma
+honesta de rellenarse, y una direccion inventada se entrega mal sin que nadie se
+entere. El backend si la exige al crear una nueva, y el conjunto de datos la trae
+de nacimiento; cuando no quede ninguna en NULL se puede cerrar con un
+`SET NOT NULL`.
+
+---
+
 ## Registro de decisiones arquitectonicas
 
-Las tres decisiones de tecnologia de esta entrega, en el formato que pide el
+Las cuatro decisiones de modelado y tecnologia de esta entrega, en el formato que pide el
 enunciado (seccion 5.3): contexto, alternativas consideradas, decision,
 justificacion con criterios tecnicos, y consecuencias. Abajo, en las secciones
 siguientes, esta el detalle largo de cada una.
@@ -415,8 +521,9 @@ siguientes, esta el detalle largo de cada una.
 Vale la pena leer antes el criterio 5.5 del propio enunciado: *"la
 justificacion de mantener un componente en su forma relacional se evalua con el
 mismo nivel de exigencia que la justificacion de una migracion"*. Por eso la
-segunda de las tres es una decision de **no** migrar, y esta argumentada con el
-mismo cuidado que la primera.
+segunda es una decision de **no** migrar, y la cuarta es una decision de dejar en
+PostgreSQL algo que nacia del catalogo documental; las dos estan argumentadas con
+el mismo cuidado que la primera.
 
 ### ADR-1 · Migrar el catalogo de productos a MongoDB
 
@@ -447,6 +554,16 @@ mismo cuidado que la primera.
 | **Decision** | (c). Un arreglo de URLs dentro de cada variante. |
 | **Justificacion** | **Frecuencia de acceso conjunto:** no existe ninguna pantalla que pida una imagen sin su variante. **Volumen:** son URLs, no archivos, y son pocas y acotadas. **Tasa de cambio:** cambian al ritmo del catalogo, que es lento. Se eligio (c) sobre (b) porque la foto es de la variante -- la camisa azul y la blanca no comparten imagen. |
 | **Consecuencias** | Desaparece la columna `numero_orden`: en un arreglo la posicion **es** el orden, y guardarlo aparte seria un dato duplicado que se puede desincronizar. A cambio, reordenar las fotos obliga a reescribir el arreglo, que es exactamente la operacion que uno quiere ahi. |
+
+### ADR-4 · Quien propuso un producto se guarda en PostgreSQL, no en el documento
+
+| | |
+|---|---|
+| **Contexto** | El giro multi-vendedor quito `productos.id_usuario` a proposito: un producto describe una cosa del mundo y no es de nadie. Al abrir la creacion del catalogo a los vendedores hace falta saber **quien propuso** cada entrada -- para avisarle del rechazo y para dejarle re-enviar la suya -- y eso parece devolver el vinculo usuario-producto que se habia eliminado. |
+| **Alternativas consideradas** | (a) Un campo de proponente dentro del documento del producto en MongoDB. (b) Devolver `id_usuario` a la entidad del producto. (c) Una tabla pivote en PostgreSQL, fuera del documento. (d) No guardar al proponente y que la tienda avise por fuera. |
+| **Decision** | (c). `Propuesta Producto` en PostgreSQL, apuntando al catalogo por `id_producto_mongo` y sin llave foranea, igual que `Oferta` y `Pedido / producto`. |
+| **Justificacion** | **Integridad referencial, y es el criterio que decide:** el proponente y el aprobador son dos llaves foraneas contra `usuarios`, y PostgreSQL las garantiza. En el documento serian dos numeros sueltos que nada impide que apunten a una cuenta que no existe. **Patron de consulta:** la cola de revision es "lo que falta por aprobar, lo mas viejo primero" -- un filtro por nulidad mas un orden por fecha sobre TODAS las propuestas, que es un indice parcial en el relacional y un recorrido de la coleccion entera en el documental, donde ademas cada producto solo sabe de si mismo. **Volumen:** los rechazos crecen sin techo por propuesta, y embebidos harian que el documento del producto engordara para todos los que solo querian el precio. Se descarto (a) y (b) porque reintroducen la propiedad del producto por la puerta de atras. **Lo que este ADR NO alega es tasa de cambio:** el estado del producto vive en el documento y el tramite lo reescribe igual en cada paso, asi que sacar la propuesta de Mongo no ahorra ni una reescritura. |
+| **Consecuencias** | Se paga que un solo tramite queda repartido entre dos bases: el estado vive en el documento y la atribucion en el relacional, sin transaccion que las abarque, asi que sostener el flujo es trabajo de la aplicacion. **La propuesta no tiene estado propio a proposito** -- el suyo es el del producto -- porque darselo crearia dos verdades sobre lo mismo y habria que mantenerlas sincronizadas (ver "Los historiales no llevan estado", donde se explica por que esta tabla es la excepcion de esa regla). Y hay que decirlo claro para que no se lea como una contradiccion: **esto es atribucion, no propiedad.** La fila no da ningun derecho -- en cuanto el producto es `activo` cualquier vendedor puede ofertarlo, incluido o no el que lo propuso, y el proponente no puede editarlo ni bloquearlo. Es la misma figura que `Pedido / producto`, que guarda a quien se le compro ese dia sin convertir al comprador en dueno de nada. |
 
 ---
 
@@ -712,6 +829,20 @@ que si cambia.
 La regla: si la fila se actualiza, lleva estado. Si solo se inserta, no. Por eso
 `Oferta` lleva estado y `Precio Historial` no.
 
+**Y hay una excepcion que conviene mirar de frente, porque parece romperla:**
+`Propuesta Producto` es una fila viva —se actualiza cuando alguien la aprueba— y
+**no tiene columna de estado**. No es un olvido. El estado de una propuesta es el
+estado del PRODUCTO que propone (`en_revision`, `rechazado`, `activo`), y ese
+vive en el documento de MongoDB. Darle un estado propio a la propuesta crearia
+dos verdades sobre lo mismo, que es justo lo que la regla quiere evitar: la
+propuesta podria decir "aprobada" mientras el producto sigue `en_revision`, y
+nadie sabria cual manda.
+
+Lo que si guarda es el HECHO de la aprobacion —`fecha_aprobacion` e
+`id_usuario_aprobo`— que es lo que el estado pierde en cuanto cambia. La regla,
+enunciada con mas precision: **el estado vive una sola vez, en la fila que
+describe la cosa; los hechos historicos viven donde ocurrieron.**
+
 Por lo mismo la fecha se llama `fecha_creacion` y no `fecha_actualizacion`: marca
 desde cuando rige esa version. Con una sola fecha alcanza para reconstruir:
 
@@ -727,11 +858,18 @@ Con un indice en `(id_oferta, fecha_creacion DESC)` la base no recorre nada:
 entra al indice y lee una fila. No hace falta un booleano `es_vigente`, que
 ademas seria derivable, el mismo problema por el que quitamos `pedidos.total`.
 
-**`Oferta` es la excepcion y lleva las dos fechas**, porque es una fila viva:
-`fecha_creacion` dice cuando nacio y `fecha_actualizacion` cuando se toco por
-ultima vez. Esa segunda la mantiene un trigger y no la aplicacion: si dependiera
-de que cada UPDATE se acuerde de ponerla, el dia que una ruta nueva no lo haga
-la fecha miente sin dar ningun error.
+**`Oferta` es la excepcion y lleva TRES fechas**, porque es una fila viva:
+`fecha_creacion` dice cuando nacio, `fecha_actualizacion` cuando se toco por
+ultima vez, y `fecha_aprobacion` cuando la tienda le dio el visto bueno. La
+segunda la mantiene un trigger y no la aplicacion: si dependiera de que cada
+UPDATE se acuerde de ponerla, el dia que una ruta nueva no lo haga la fecha
+miente sin dar ningun error.
+
+La tercera merece su propia linea porque no es una fecha de auditoria como las
+otras dos: es la unica que puede estar en NULL, y ese NULL significa algo —
+**esta oferta nunca fue aprobada**. Es lo que separa una oferta que espera
+revision de una que ya circula, y sobrevive a que despues se pause o se retire,
+que es exactamente lo que el estado no sabe hacer.
 
 ---
 

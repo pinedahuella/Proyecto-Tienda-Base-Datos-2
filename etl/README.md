@@ -301,12 +301,17 @@ indice?":
   ordenado, sin recorrer la coleccion y sin ordenar en memoria. Es el que mas
   se nota: 4 documentos contra 118, y crece con cada edicion del catalogo.
 
-Una nota medida, para no prometer de mas: en `catalogo_categoria` el `_id` va al
-final para que el listado salga ordenado del propio indice. Con el filtro tal
-como lo manda hoy el backend eso **no** se cumple: el estado se filtra con `$nin`,
-que es un rango, y detras de un rango el indice ya no sostiene el orden, asi que
-`explain()` ensena un `SORT` en memoria. Con el tamano actual del catalogo da
-igual; se arreglaria filtrando el estado por igualdad.
+Una nota que hubo que corregir: en `catalogo_categoria` el `_id` va al final para
+que el listado salga ordenado del propio indice. Durante un tiempo eso **no** se
+cumplia, porque el backend filtraba el estado con `$nin` -- un rango, y detras de
+un rango el indice deja de sostener el orden, asi que `explain()` ensenaba un
+`SORT` en memoria.
+
+**Ya no.** El backend pasa el estado por igualdad (`$eq: 'activo'`, la lista
+blanca de `ESTADO_PRODUCTO_VISIBLE`), que era justo el arreglo que esta nota
+proponia, asi que el indice sostiene el orden y no hay ordenamiento en memoria.
+Se deja escrito porque la version vieja de este parrafo circulo un tiempo y
+conviene que quien la recuerde sepa que ya no aplica.
 
 ## El ETL solo manda sobre su tramo
 

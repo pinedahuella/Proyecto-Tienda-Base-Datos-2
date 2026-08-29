@@ -4,14 +4,21 @@
 > agregar al carrito, elegir a donde se entrega y pagar -- esta construido y
 > probado contra el backend real.
 >
+> 🔴 **Pero el frontend se quedo atras del backend.** Entraron tres cosas nuevas
+> -- la calle en las direcciones, la aprobacion de ofertas y la propuesta de
+> productos -- con su backend y su esquema terminados y probados, y **ninguna
+> tiene pantalla todavia**. Lo urgente es la calle: `Direcciones.svelte` y
+> `Checkout.svelte` no mandan `direccion_exacta`, que el backend exige al crear,
+> asi que **hoy no se puede dar de alta una direccion desde la interfaz**.
+>
 > | Pantalla | Estado |
 > |---|---|
 > | `/` catalogo | al dia. Dos formas de paginar: cursor y por numero de pagina |
 > | `/producto/[id]` ficha | al dia, lista las ofertas de cada vendedor |
 > | `/pedidos` | el pedido abierto y el historial, con su detalle |
-> | `/panel` perfil, direcciones, admin | al dia |
-> | `/panel` vendedor | al dia: ofertas propias, publicar, precio, estado y stock |
-> | `/panel` tienda y admin | al dia: el catalogo paginado, y las ofertas de cada producto al abrirlo |
+> | `/panel` perfil, direcciones, admin | perfil y admin al dia. **Direcciones no**: le falta el campo de la calle, y sin el, crear una direccion devuelve 400 |
+> | `/panel` vendedor | ofertas propias, publicar, precio, estado y stock. **Le falta** ensenar el estado `pendiente` y sus rechazos, y proponer productos |
+> | `/panel` tienda y admin | el catalogo paginado y las ofertas de cada producto al abrirlo. **Le faltan** las dos colas de revision: ofertas pendientes y productos propuestos |
 > | `/gracias` | al dia: el comprobante despues de comprar |
 > | filtros | catalogo y ofertas filtran en el servidor; la lista del vendedor, en memoria |
 > | `Carrito.svelte` | panel lateral, con seleccion por linea |
@@ -278,9 +285,9 @@ el coste de la lista completa crece con el catalogo mientras el de una tanda no.
 `PanelVendedor.svelte`, debajo de las ofertas y solo para la tienda o un admin.
 
 Aqui habia el mismo problema y no tenia arreglo desde el frontend:
-`GET /vendedor/productos` es la unica ruta que devuelve los tres estados
---`borrador`, `activo` e `inactivo`--, que es justo lo que este panel
-administra, y traia el catalogo entero de un golpe. La publica
+`GET /vendedor/productos` es la unica ruta que devuelve TODOS los estados del
+catalogo --`borrador`, `activo`, `inactivo` y, desde la migracion 009,
+`en_revision` y `rechazado`--, que es justo lo que este panel administra, y traia el catalogo entero de un golpe. La publica
 `GET /productos/paginacion` si pagina, pero fuerza `estado: 'activo'` como
 lista blanca (`models/estado-producto.ts`), asi que se dejaba fuera lo unico
 que aqui no se puede dejar fuera.
@@ -317,8 +324,10 @@ su maquinaria de dos modos, que existia porque
 409 que variante faltaba. `GET /vendedor/ofertas` devuelve un arreglo plano y
 no hace falta deducir nada.
 
-Trae las ofertas en **los tres estados** (`activa`, `pausada`, `retirada`),
-porque es el panel del duenno; la ficha publica solo ensena las activas. El
+Trae las ofertas en **todos sus estados** (`activa`, `pausada`, `retirada` y,
+desde la migracion 010, `pendiente` y `rechazada`), porque es el panel del
+duenno; la ficha publica solo ensena las activas. Ojo: la pantalla todavia no
+sabe pintar los dos estados nuevos. El
 filtro por estado es local, sobre lo que ya se trajo.
 
 **El ajuste de existencias es un DELTA, no el total.** Es la trampa de esta
@@ -356,17 +365,17 @@ las dos: con solo la primera, los campos calculados del catalogo se pintaban
 consumen las cuatro rutas de `/comprador/pedidos`. Ninguna pide rol, solo
 sesion: comprar no es privilegio de un rol, asi que el panel lo ensena a todos.
 
-Dos huecos del backend que la pantalla **dice** en vez de esconder:
+Un hueco del backend que la pantalla **dice** en vez de esconder:
 
-- **No hay ruta para cerrar la compra.** `comprar_pedido()` existe en PostgreSQL
-  pero nadie la expone, asi que el pedido se queda en `pendiente`.
 - **Agregar una linea no reserva stock.** Solo lo lee para avisar. Dos personas
   pueden meter la misma ultima unidad.
 
-**No hay ruta para listar los pedidos de uno**, solo `GET /comprador/pedidos/:id`.
-Por eso el id del pedido abierto se guarda en `localStorage` (`mesh.pedido`): si
-se pierde, el pedido sigue en la base pero desde el navegador ya no se llega a
-el.
+El id del pedido abierto se guarda en `localStorage` (`mesh.pedido`). Nacio como
+apano -- entonces no habia forma de listar los pedidos de uno y perder el id
+dejaba el pedido inalcanzable desde el navegador -- pero **`GET /comprador/pedidos`
+ya existe**, asi que perderlo dejo de ser fatal: el pendiente se vuelve a
+encontrar en esa lista. Se sigue guardando porque ahorra esa consulta en cada
+carga, no porque haga falta.
 
 Y de ahi salen dos reglas que parecen quisquillosas y no lo son:
 
