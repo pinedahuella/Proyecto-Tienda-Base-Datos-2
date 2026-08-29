@@ -19,7 +19,25 @@
 	 * si/no, lista) y la validacion que hara el backend.
 	 */
 
-	let { alExpirarSesion }: { alExpirarSesion?: () => void } = $props();
+	/**
+	 * `modo` decide para quien es este panel, y son los dos unicos usos:
+	 *
+	 *   'catalogo'  la tienda o un admin administrando el catalogo compartido:
+	 *               la lista paginada, el alta, la edicion y el historial.
+	 *   'propuesta' un vendedor normal proponiendo un producto: SOLO el
+	 *               formulario, que se manda a otra ruta y nace `en_revision`.
+	 *
+	 * Va como modo y no como componente aparte porque el formulario es el MISMO:
+	 * los cuatro campos fijos, las variantes y las dos tandas de caracteristicas
+	 * que pinta la categoria. Duplicarlo eran setecientas lineas que se irian
+	 * separando con el primer cambio que alguien hiciera en una sola de las dos.
+	 */
+	let {
+		alExpirarSesion,
+		modo = 'catalogo'
+	}: { alExpirarSesion?: () => void; modo?: 'catalogo' | 'propuesta' } = $props();
+
+	let proponiendo = $derived(modo === 'propuesta');
 
 	// ---------------------------------------------------------------- tipos
 	interface CategoriaBreve {
@@ -117,6 +135,9 @@
 	type Vista = 'lista' | 'forma' | 'historial';
 
 	// ---------------------------------------------------------------- estado
+	// Arranca en 'lista' y el modo la corrige en onMount. Es `$state` y no
+	// `$derived` porque la vista cambia navegando dentro del panel: si siguiera a
+	// la prop, no se podria salir de ella.
 	let vista = $state<Vista>('lista');
 	let mios = $state<ProductoGuardado[]>([]);
 
@@ -229,6 +250,25 @@
 		total_paginas: number;
 	}
 
+	/**
+	 * Solo las categorias, para el modo propuesta.
+	 *
+	 * `cargar()` las pide junto con la lista paginada, y esa lista devuelve 404 a
+	 * un vendedor normal. Aqui se pide lo unico que el formulario necesita.
+	 */
+	async function cargarCategorias() {
+		if (categorias.length > 0) return;
+
+		const r = await pedir<CategoriaBreve[]>('/vendedor/categorias');
+		if (expiro(r)) return;
+
+		if (r.ok && r.payload) {
+			categorias = r.payload;
+		} else {
+			errorForma = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+		}
+	}
+
 	async function cargar() {
 		cargando = true;
 		error = '';
@@ -268,7 +308,22 @@
 	}
 
 	// Al montar y nada mas: con $effect se repetia sola.
-	onMount(cargar);
+	// Solo la tienda carga la lista. Un vendedor normal recibiria el 404
+	// deliberado de `/vendedor/productos` y el panel abriria con ese error.
+	onMount(() => {
+		// Proponiendo no hay lista que ver: `GET /vendedor/productos` responde 404
+		// a un vendedor normal a proposito, asi que se entra directo al formulario
+		// y no se pide nada que vaya a fallar.
+		if (proponiendo) {
+			// El formulario no puede pintarse sin las categorias: son el primer
+			// campo y de ellas cuelgan las caracteristicas. `cargar()` las traia
+			// de paso, asi que aqui hay que pedirlas aparte.
+			nuevo();
+			cargarCategorias();
+		} else {
+			cargar();
+		}
+	});
 
 	/** Al elegir categoria se pide su menu de caracteristicas: son los campos. */
 	async function traerPaleta(id: string, conservarValores = false) {
@@ -490,8 +545,11 @@
 		}
 
 		guardando = true;
-		const r =
-			editando === null
+		// El cuerpo es el mismo; lo unico que cambia es a donde va. Proponiendo
+		// nunca se edita: una propuesta se corrige reenviandola, no editandola.
+		const r = proponiendo
+			? await pedir<ProductoGuardado>('/vendedor/productos/propuestas', conJson('POST', cuerpo))
+			: editando === null
 				? await pedir<ProductoGuardado>('/vendedor/productos', conJson('POST', cuerpo))
 				: await pedir<ProductoGuardado>(
 						`/vendedor/productos/${editando}`,
@@ -510,6 +568,25 @@
 			// para llevarlas a la pantalla de inventario. Esa pantalla y sus
 			// cinco rutas ya no existen: el stock se maneja por la oferta.
 			const creado = r.payload;
+
+			if (proponiendo) {
+				// Proponiendo NO se vuelve a la lista ni se recarga: la lista es
+				// `/vendedor/productos`, que a un vendedor normal le contesta 404 a
+				// proposito, y ese 404 salia pintado como error justo debajo del
+				// aviso de exito. Se queda en el formulario, limpio para la
+				// siguiente.
+				const texto =
+					`"${creado?.nombre ?? 'El producto'}" quedo enviado a revision. ` +
+					`Cuando la tienda lo apruebe vas a poder ofertarlo, y mientras tanto ` +
+					`lo seguis en "Mis propuestas al catalogo".`;
+				// `nuevo()` limpia el formulario Y el aviso, asi que el mensaje se
+				// pone DESPUES: al reves se borraba solo y parecia que no habia
+				// pasado nada.
+				nuevo();
+				aviso = texto;
+				return;
+			}
+
 			aviso =
 				editando === null
 					? `Producto creado con el id ${creado?._id ?? ''}. Todavia no tiene ofertas: ` +
@@ -674,9 +751,12 @@
 			<!-- "El catalogo", no "Mis productos": el producto es compartido y no
 			     es de nadie. Esta pantalla es la administracion del catalogo
 			     entero, y por eso solo la abre la cuenta de la tienda. -->
-			<h2>El catalogo</h2>
+			<h2>{proponiendo ? 'Proponer un producto' : 'El catalogo'}</h2>
 			<p class="sub">
-				{#if vista === 'lista' && (cargando || error)}
+				{#if proponiendo}
+					El catalogo es compartido: si lo que vendes no esta, propone la entrada y la tienda
+					la revisa. Una vez aprobada, cualquiera puede ofertarla, tambien vos.
+				{:else if vista === 'lista' && (cargando || error)}
 					<!-- Ni "0 productos" ni ningun otro numero mientras no se sepa:
 					     con la lista sin cargar, "0 productos en el catalogo" es una
 					     afirmacion falsa puesta al lado del error que dice que no se
@@ -699,7 +779,14 @@
 			</p>
 		</div>
 
-		{#if vista === 'lista'}
+		{#if proponiendo}
+			<!-- Proponiendo no hay lista a la que volver: el formulario ES la
+			     pantalla. Se ofrece empezar de nuevo, que es lo unico que hace
+			     falta despues de mandar una. -->
+			<button type="button" class="secundario" onclick={() => (nuevo(), (aviso = ''))}>
+				Empezar otra
+			</button>
+		{:else if vista === 'lista'}
 			<button type="button" class="principal" onclick={nuevo}>Publicar producto</button>
 		{:else}
 			<button type="button" class="secundario" onclick={() => ((vista = 'lista'), (aviso = '')) }>
@@ -873,7 +960,13 @@
 					<textarea id="v-desc" rows="2" bind:value={descripcion}></textarea>
 				</div>
 
-				{#if editando !== null}
+				{#if proponiendo}
+					<!-- El vendedor no elige el estado: una propuesta nace `en_revision`
+					     y quien la mueve de ahi es la tienda. -->
+					<p class="menor">
+						Se envia a revision de la tienda. Hasta que la aprueben no se ve en el catalogo.
+					</p>
+				{:else if editando !== null}
 					<div class="campo">
 						<label for="v-estado">Estado</label>
 						<select id="v-estado" bind:value={estado}>
@@ -1067,7 +1160,13 @@
 
 				<div class="final">
 					<button type="button" class="principal" onclick={guardar} disabled={guardando}>
-						{guardando ? 'Guardando...' : editando === null ? 'Crear producto' : 'Guardar cambios'}
+						{guardando
+							? 'Guardando...'
+							: proponiendo
+								? 'Enviar a revision'
+								: editando === null
+									? 'Crear producto'
+									: 'Guardar cambios'}
 					</button>
 					<button type="button" class="secundario" onclick={() => (vista = 'lista')}>Cancelar</button>
 				</div>

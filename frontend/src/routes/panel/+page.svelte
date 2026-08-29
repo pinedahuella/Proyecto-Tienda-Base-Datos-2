@@ -8,6 +8,7 @@
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
+	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
 	import {
 		cerrarSesion,
 		CORREO_TIENDA,
@@ -493,6 +494,10 @@
 				<PanelAdmin alExpirarSesion={expiro} />
 				<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
 				<PanelVendedor alExpirarSesion={expiro} />
+				<!-- La cola de productos propuestos por otros vendedores. Va al final
+				     porque es lo que menos se toca: se revisa cuando hay algo, no en
+				     cada visita. -->
+				<PropuestasProducto alExpirarSesion={expiro} {administraLaTienda} />
 			{:else if esVendedor}
 				<!-- Las ofertas van PRIMERO y aparte de los productos: en el modelo
 				     multi-vendedor el producto es del catalogo compartido y no es de
@@ -505,7 +510,16 @@
 					     de vendedor a secas: a los demas vendedores el backend les
 					     contesta 404 y el panel salia con ese error. -->
 					<PanelVendedor alExpirarSesion={expiro} />
+				{:else}
+					<!-- El mismo panel, en modo propuesta: solo el formulario, mandado a
+					     /vendedor/productos/propuestas. Un vendedor normal no puede
+					     administrar el catalogo, pero si proponerle entradas. -->
+					<PanelVendedor alExpirarSesion={expiro} modo="propuesta" />
 				{/if}
+				<!-- Las propuestas SI son de todos los vendedores, y el componente
+				     cambia de cara solo: la tienda ve la cola de lo que le mandaron y
+				     un vendedor normal ve las suyas con el motivo del rechazo. -->
+				<PropuestasProducto alExpirarSesion={expiro} {administraLaTienda} />
 			{:else}
 				<!-- Lo que ve un comprador.
 
