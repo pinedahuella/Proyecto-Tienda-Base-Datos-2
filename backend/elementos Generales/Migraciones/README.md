@@ -89,12 +89,20 @@ numeracion entre archivos, porque ya no hay numeracion que coordinar.
 
 ## El conjunto se comprueba a si mismo
 
-`001_catalogo.sql` termina con tres verificaciones dentro de un `DO`, y cada una
+`001_catalogo.sql` termina con seis verificaciones dentro de un `DO`, y cada una
 **falla la migracion entera** si no cuadra:
 
 1. el saldo de cada oferta es la suma de su kardex
 2. el precio de cada oferta es el ultimo de su historial
 3. toda variante tiene la oferta de la tienda
+4. ninguna oferta `activa` o `pausada` esta sin fecha de aprobacion
+5. ninguna oferta `pendiente` o `rechazada` la trae puesta
+6. toda direccion tiene calle, en la fila viva y en su historial
+
+Las tres ultimas nacieron con las migraciones 008 y 010. Las dos de la fecha de
+aprobacion son las mas importantes de las seis: esa columna es lo que decide si
+un vendedor puede publicar su oferta sin que la tienda la vea, asi que una fila
+mal puesta no es un dato torcido, es un permiso regalado.
 
 Un conjunto de datos que no se verifica es un conjunto de datos que miente en
 silencio. Vale mas fallar al cargar que descubrirlo tres semanas despues.
