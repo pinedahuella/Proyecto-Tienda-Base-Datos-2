@@ -32,6 +32,10 @@ corren en orden y una tabla no puede referenciar otra que todavia no existe.
 Primero `migrations/*.sql` en orden de nombre, y despues `migrations/datos/*.sql`
 en orden de nombre. `arrancar.ps1` hace los dos pasos.
 
+Pero los dos pasos NO se tratan igual, y conviene saberlo antes de tocar nada:
+el esquema se reejecuta en cada arranque y los datos **solo entran en una base
+vacia**. El por que esta abajo, en "El conjunto de datos solo entra una vez".
+
 ## Reglas del esquema
 
 Una migracion ya corrida **no se edita**. Si algo hay que cambiar, se hace un
@@ -44,6 +48,42 @@ Cuidado con una migracion que falla a la mitad. La siguiente corrida la ve como
 ese archivo y volviendo a correrlo.
 
 Cada archivo hace una sola cosa y se puede leer solo.
+
+## Los doce archivos de esquema
+
+Una linea cada uno, para no tener que abrirlos para saber donde buscar:
+
+| Archivo | Que trae |
+|---|---|
+| `001_usuarios.sql` | usuarios, sus catalogos y los logs de acceso |
+| `002_direcciones.sql` | direcciones, su catalogo de estados y su historial |
+| `003_productos.sql` | categorias, productos, variantes, imagenes y sus dos historiales |
+| `004_caracteristicas.sql` | las caracteristicas: su definicion, que ofrece cada categoria, que valor pone cada producto |
+| `005_ofertas.sql` | `oferta`, `precio_historial` y el trigger que escribe el precio |
+| `006_pedidos.sql` | pedido, pago y el kardex de `stock_movimiento` |
+| `007_flujo_pedido.sql` | las funciones de armar y comprar: `crear_pedido`, `agregar_linea`, `comprar_pedido`, `cancelar_pedido`... |
+| `008_direccion_exacta.sql` | la calle, en la fila viva y en el historial |
+| `009_propuesta_productos.sql` | un vendedor propone una entrada del catalogo; `propuesta_producto` y `rechazo_producto` |
+| `010_aprobacion_ofertas.sql` | una oferta nace `pendiente`: `fecha_aprobacion`, `id_usuario_aprobo` y `rechazo_oferta` |
+| `011_resenas.sql` | la parte social: `comentario`, `resena` y `likes`, mas el trigger que recuenta los votos |
+| `012_comprar_carrito.sql` | `comprar_carrito()`: crear el pedido, meterle todas sus lineas y comprarlo en una sola llamada |
+
+Las dos ultimas son de la Entrega 2 y merecen una linea mas de la que caben en
+la tabla.
+
+**La 011 cierra el diagrama.** Con `comentario`, `resena` y `likes` las 42 cajas
+del ER estan construidas; antes eran 39. Y trae un cambio de modelo que hay que
+leer en `docs/base-de-datos.md`: la resena cuelga del **producto y del
+vendedor**, no de la oferta como se habia escrito en la Entrega 1.
+
+**La 012 no reemplaza a la 007: la COMPONE.** `comprar_carrito()` llama por
+dentro a las mismas `crear_pedido`, `agregar_linea` y `comprar_pedido`, en vez
+de copiar su contenido, justamente para que no existan dos versiones de las
+reglas de negocio que se puedan desincronizar. Existe porque el carrito de la
+Entrega 2 vive en Redis: ya no hay una fila de `pedido` mientras la persona
+compra, asi que el pedido tiene que nacer entero al pagar. Lo que se paga esta
+escrito de frente en su cabecera: con ella el precio se congela en el momento de
+PAGAR y no en el de agregar al carrito.
 
 ## Los datos los escribe un generador
 
@@ -63,6 +103,66 @@ mecanico no se escribe a mano: se calcula.
 Es **determinista**. El azar sale de una semilla fija, asi que correrlo dos
 veces escribe el mismo archivo. Sin eso, cada corrida cambiaria el conjunto de
 datos y nadie podria comparar dos bases.
+
+## El conjunto de datos solo entra una vez
+
+Aqui hay una diferencia de fondo con el esquema, y es un hecho medido, no una
+sospecha: **`datos/001_catalogo.sql` NO es idempotente.** Correrlo por segunda
+vez sobre una base que ya lo tiene FALLA.
+
+De sus **20 `INSERT` de primer nivel, 17 no llevan ninguna guardia** -- ni
+`ON CONFLICT` ni `WHERE NOT EXISTS`. Los tres guardados son los primeros
+(`usuarios`, `direcciones` y `direccion_historial`), y lo estan por otro motivo:
+son las tablas que tambien escribe la aplicacion. El bloque social del final
+(`DO $social$`) tambien esta guardado, con `NOT EXISTS` y un `ON CONFLICT DO
+NOTHING`. Todo lo demas -- categorias, caracteristicas, productos, variantes,
+imagenes, ofertas, precios y el kardex -- entra a pelo.
+
+Medido sobre una base desechable, esquema completo y el archivo corrido dos
+veces seguidas:
+
+```
+primera pasada   EXIT=0    102 productos, 202 variantes, 552 ofertas,
+                           8 usuarios, 86 resenas, 115 comentarios, 46 likes
+                           NOTICE: Conjunto de datos verificado
+
+segunda pasada   EXIT=3
+  psql:/migrations/datos/001_catalogo.sql:99: ERROR: duplicate key value
+  violates unique constraint "idx_categorias_nombre_raiz"
+  DETAIL: Key (nombre)=(Electronica) already exists.
+```
+
+**Lo que salva la situacion es que el archivo abre con `BEGIN;` (linea 33) y
+cierra con `COMMIT;`**, asi que la pasada que falla se deshace ENTERA: tras la
+segunda corrida los conteos seguian exactamente en 102/202/552/8/86/115/46. Una
+base ya cargada no se ensucia; simplemente no se carga nada. Sin ese
+`BEGIN`/`COMMIT` quedaria a medias hasta la linea 99 de mas de cuatro mil, que
+es mucho peor que fallar.
+
+Ojo con el codigo de salida, porque cambia segun como se llame:
+
+```bash
+psql -f /migrations/datos/001_catalogo.sql                    # sale 0, aunque falle
+psql -v ON_ERROR_STOP=1 -f /migrations/datos/001_catalogo.sql # sale 3
+```
+
+Sin `ON_ERROR_STOP=1` el error se imprime y psql contesta que todo fue bien. Un
+script que no lo ponga no se va a enterar.
+
+**Por eso `arrancar.ps1` se los salta si la base ya tiene productos**, con una
+guardia que pregunta a la base misma (`SELECT count(*) FROM productos`) y no a
+una tabla de control. Si hay productos, avisa en amarillo y sigue. Para
+recargarlos hay que vaciar primero:
+
+```powershell
+.\arrancar.ps1 -Reiniciar
+```
+
+Y la contrapartida honesta: la guardia es **todo o nada por carpeta**. El dia
+que se agregue un `datos/002_*.sql`, ese tampoco se va a correr solo sobre una
+base cargada. No es un descuido del script -- estos archivos no se pueden correr
+sobre una base con datos, punto. El arreglo de verdad seria ponerles guardias a
+los 17 `INSERT`, y eso todavia no esta hecho.
 
 ## Ningun id se escribe a mano
 
@@ -89,20 +189,47 @@ numeracion entre archivos, porque ya no hay numeracion que coordinar.
 
 ## El conjunto se comprueba a si mismo
 
-`001_catalogo.sql` termina con seis verificaciones dentro de un `DO`, y cada una
-**falla la migracion entera** si no cuadra:
+`001_catalogo.sql` termina con **nueve** verificaciones dentro de un `DO`, y cada
+una **falla la migracion entera** si no cuadra:
 
 1. el saldo de cada oferta es la suma de su kardex
 2. el precio de cada oferta es el ultimo de su historial
 3. toda variante tiene la oferta de la tienda
 4. ninguna oferta `activa` o `pausada` esta sin fecha de aprobacion
 5. ninguna oferta `pendiente` o `rechazada` la trae puesta
-6. toda direccion tiene calle, en la fila viva y en su historial
+6. ninguna oferta tiene aprobador sin fecha de aprobacion
+7. toda direccion tiene calle, en la fila viva y en su historial
+8. toda resena cuelga de un comentario RAIZ (`id_comentario_padre` en NULL)
+9. `cantidad_likes` y `cantidad_dislikes` de cada comentario cuadran con `likes`
 
-Las tres ultimas nacieron con las migraciones 008 y 010. Las dos de la fecha de
-aprobacion son las mas importantes de las seis: esa columna es lo que decide si
-un vendedor puede publicar su oferta sin que la tienda la vea, asi que una fila
-mal puesta no es un dato torcido, es un permiso regalado.
+Las 4, 5 y 6 nacieron con la 010, la 7 con la 008, y **las dos ultimas con la
+011**. Aqui decia "seis" y listaba seis, pero le faltaban tres: las dos de la
+011 y, desde antes, la 6. Una lista escrita a mano caduca sin avisar; el archivo
+no. Antes de creerle a esta, contalos:
+
+```bash
+grep -c "RAISE EXCEPTION" migrations/datos/001_catalogo.sql
+```
+
+Las dos de la fecha de aprobacion (4 y 5) siguen siendo las mas importantes: esa
+columna es lo que decide si un vendedor puede publicar su oferta sin que la
+tienda la vea, asi que una fila mal puesta no es un dato torcido, es un permiso
+regalado.
+
+**Las dos nuevas comprueban justo lo que la 011 NO puede exigir sola**, y por eso
+existen:
+
+La 8 es una invariante que ningun `CHECK` puede sostener, porque un `CHECK` no ve
+otra fila: `resena.id_comentario` tiene que apuntar a una raiz. Si apunta a una
+respuesta, el hilo se dibuja dentro de si mismo y la base no se queja jamas.
+
+La 9 vigila una **copia**. `cantidad_likes` y `cantidad_dislikes` son un dato
+derivado de `likes`, y la 011 los sostiene con un trigger que RECUENTA (no suma:
+un contador incremental acumula error para siempre). Esta comprobacion no valida
+el dato, valida que el trigger de verdad corrio -- que no es lo mismo que
+suponer que existe. Cuenta `valor = 1` y `valor = -1` explicitamente, igual que
+el trigger: si el candado contara de otra forma, aprobaria o fallaria midiendo
+algo distinto de lo que vigila.
 
 Un conjunto de datos que no se verifica es un conjunto de datos que miente en
 silencio. Vale mas fallar al cargar que descubrirlo tres semanas despues.

@@ -1,4 +1,35 @@
-# ETL de productos
+# Los ETL de Mesh
+
+Son **dos**, uno por cada base derivada. Los dos salen de PostgreSQL, que es la
+unica fuente de verdad, y los dos son proyecciones: se pueden tirar enteras y
+reconstruir sin perder un dato.
+
+```
+A MongoDB -- el catalogo            A Neo4j -- el grafo de resenas
+-------------------------------     ---------------------------------------
+extraer.sql                         extraer_grafo.sql
+extraer_categorias.sql              cargar_grafo.sh
+cargar.js                           (el esquema vive en neo4j/001_esquema.cypher)
+reconstruir.js
+correr.sh
+```
+
+**No hay nada que instalar, en ninguno de los dos.** Es la regla de esta
+carpeta y se cumple igual en los dos casos: PostgreSQL arma el texto y lo carga
+el cliente que ya viene DENTRO del contenedor. Para Mongo el texto es JSON
+(`jsonb_build_object`) y lo carga `mongosh`; para Neo4j el texto es Cypher y lo
+carga `cypher-shell`, que la imagen `neo4j:5-community` trae puesto.
+
+Lo normal es no correr ninguno a mano: `.\arrancar.ps1` los corre solos cuando
+detecta que la base derivada esta desfasada, y `.\arrancar.ps1 -Etl` fuerza
+**los dos**.
+
+- [ETL de productos: PostgreSQL a MongoDB](#etl-de-productos-postgresql-a-mongodb)
+- [ETL del grafo: PostgreSQL a Neo4j](#etl-del-grafo-postgresql-a-neo4j)
+
+---
+
+# ETL de productos: PostgreSQL a MongoDB
 
 Pasa el catalogo de PostgreSQL a MongoDB.
 
@@ -9,9 +40,6 @@ cargar.js               arma los documentos y los escribe en Mongo
 reconstruir.js          que decia un producto tal dia
 correr.sh               todo lo anterior, uno detras del otro
 ```
-
-No hay nada que instalar. PostgreSQL arma el JSON solo con `jsonb_build_object`,
-y `mongosh`, que ya viene en el contenedor de Mongo, corre el JavaScript.
 
 ## Como se corre
 
@@ -278,8 +306,8 @@ es gratis -- cuesta en cada escritura.
 
 Lo medido, con `explain("executionStats")` sobre los **105 productos** y los
 **118 eventos** que hay hoy. Cada consulta se compara contra ella misma con
-`hint({$natural:1})`, que es la forma de preguntarle a Mongo "¿y sin el
-indice?":
+`hint({$natural:1})`, que es la forma de preguntarle a Mongo "y sin el
+indice, cuanto?":
 
 | Indice | Consulta | Con el indice | Sin el |
 |---|---|---|---|
@@ -349,3 +377,243 @@ Si el historial encoge, porque se corrigio una fila mal fechada, los eventos
 sobrantes de la corrida anterior se borran por numero. Lo que no se borra es un
 producto que desaparezca de PostgreSQL, y no hace falta: en el modelo los
 productos no se borran, se les pone estado inactivo.
+
+---
+
+# ETL del grafo: PostgreSQL a Neo4j
+
+Pasa las cuentas, las resenas y los productos calificados de PostgreSQL a Neo4j.
+Es lo que sostiene la parte de la Entrega 2 que pide senalar, con una consulta de
+varios saltos, un conjunto de cuentas con patron anomalo.
+
+```
+neo4j/001_esquema.cypher  restricciones e indices del grafo
+extraer_grafo.sql         saca de PostgreSQL el Cypher que carga el grafo
+cargar_grafo.sh           esquema + extraccion + carga, uno detras del otro
+```
+
+Las consultas de deteccion **no** viven aqui: estan en `neo4j/consultas/` y se
+corren con `bash neo4j/correr_fraude.sh`; se explican en `neo4j/README.md`. Esta carpeta solo se encarga de que el grafo
+exista y este al dia.
+
+## Como se corre
+
+Lo normal es no correrlo a mano.
+
+```powershell
+.\arrancar.ps1                  # lo corre solo si el grafo esta desfasado
+.\arrancar.ps1 -Etl             # lo fuerza (y tambien fuerza el de Mongo)
+.\arrancar.ps1 -ReiniciarGrafo  # borra el grafo entero y lo reconstruye
+```
+
+`arrancar.ps1` **no llama a `cargar_grafo.sh`**: hace los mismos pasos en
+PowerShell con `docker cp`, exactamente por el motivo que ya esta contado mas
+arriba para Mongo. Antes el ETL de Mongo si se llamaba a traves del bash de Git,
+y cuando no lo encontraba **se saltaba con un aviso amarillo y el script
+terminaba en verde**, con la base derivada vacia. Paso de verdad, en la maquina
+de un companero.
+
+Con el grafo eso seria peor de detectar, y conviene decir por que: el catalogo
+vacio se nota el mismo dia, porque la tienda sale sin productos. Un grafo vacio
+no se nota nunca -- se mira el dia de la entrega, y ese dia la consulta de
+anillos contesta "no hay cuentas anomalas", que es una respuesta creible y
+falsa. Por eso en `arrancar.ps1` el ETL del grafo **no tiene ni una rama que
+avise y siga**: cualquier fallo suyo tumba el arranque, y al terminar se cuentan
+los nodos **y las relaciones** contra PostgreSQL para comprobar el RESULTADO y no
+que los pasos "parezcan" haber ido bien.
+
+Las relaciones no estaban en esa cuenta y hacian falta: contar solo nodos **no
+es** comprobar el resultado. Medido -- borrando las 272 relaciones y dejando los
+163 nodos intactos, `arrancar.ps1` imprimia "Ya cargado", **saltaba el ETL**, las
+tres cuentas de nodos en verde y `exit 0`, sobre un grafo donde la consulta de
+varios saltos contesta "0 anillos". Y como los conteos de nodos cuadraban, el ETL
+no volvia a correr en ningun arranque posterior: el hueco era permanente. Ahora
+se comparan las ocho cosas (cuatro clases de nodo y cuatro relaciones), y con ese
+mismo sabotaje el arranque detecta la falta, dispara el ETL y lo repara solo.
+
+Para quien trabaje en Linux, en macOS o prefiera bash:
+
+```bash
+./etl/cargar_grafo.sh                 # carga sobre lo que haya
+./etl/cargar_grafo.sh --limpiar       # borra el grafo entero y lo reconstruye
+./etl/cargar_grafo.sh prueba_tuyo     # extrae de otra base de PostgreSQL
+```
+
+### La trampa de Git Bash, esquivada dos veces distintas
+
+Git Bash sobre Windows convierte las rutas que empiezan con `/` cuando se las
+pasa a `docker`. Un `cypher-shell --file /neo4j/001_esquema.cypher` no busca el
+archivo dentro del contenedor: busca `C:/Program Files/Git/neo4j/...` y falla con
+un "No such file or directory" que ni menciona a Docker. El parche conocido es
+`export MSYS_NO_PATHCONV=1`.
+
+Los dos caminos la esquivan, y cada uno a su manera:
+
+- **`cargar_grafo.sh`** manda TODO por la entrada estandar y no escribe ni una
+  ruta absoluta de contenedor, asi que no necesita el parche. De paso deja de
+  depender de que `./neo4j` este montado dentro de `mesh-neo4j`.
+- **`arrancar.ps1`** no pasa por Git Bash, asi que la trampa no existe; usa
+  `docker cp` por el motivo contrario, que es el de PowerShell 5.1: lo que manda
+  por tuberia sale con un BOM (`EF BB BF`) pegado al principio y del otro lado el
+  SQL y el Cypher llegan rotos. `docker cp` mueve los bytes tal cual.
+
+Tampoco lee del volumen `./neo4j` que el compose monta en el contenedor: copia
+los dos archivos con `docker cp`. Es la misma decision que tomo `cargar_grafo.sh`
+-- si alguien toca ese montaje en `docker-compose.yml`, el ETL sigue cargando en
+vez de fallar por un archivo que "estaba ahi".
+
+## Que escribe
+
+Cuatro clases de nodo y cuatro relaciones. Los numeros son los medidos hoy:
+
+```
+Usuario   10     (a)-[:ESCRIBIO]->(r)      86
+Producto  54     (r)-[:CALIFICA_A]->(v)    86
+Resena    86     (r)-[:SOBRE]->(p)         86
+Direccion 12     (u)-[:VIVE_EN]->(d)       14
+```
+
+El `id` de `:Usuario`, `:Resena` y `:Producto` es **el mismo de PostgreSQL**
+(`usuarios.id_usuario`, `resena.id_resena`, `productos.id_producto`). No se
+inventa uno nuevo: si el grafo tuviera identidad propia, volver del grafo a la
+fila que lo origino -- que es lo primero que hace alguien cuando la consulta
+senala una cuenta -- pediria una tabla de equivalencias que nadie va a mantener.
+
+Tres cosas de esos numeros no cuadran con un `count(*)`, y las tres son a
+proposito:
+
+- **54 productos y no 102.** Solo viajan los que tienen al menos una resena. Un
+  producto que nadie califico no es alcanzable por ningun camino del modelo:
+  seria un nodo suelto que engorda el grafo y no aparece en ninguna consulta.
+
+  **La lista sale de `resena`, no de `productos`,** y la diferencia importa:
+  `resena.id_producto_mongo` no tiene llave foranea, porque el catalogo vive en
+  MongoDB. Un producto que publica un vendedor existe en Mongo y **no** tiene
+  fila en `productos` -- hoy hay tres asi con ofertas vivas. Con la version
+  anterior, que partia de `productos`, una resena sobre uno de ellos se perdia
+  **en silencio**: el nodo no se emitia, el `MATCH` de la sentencia 5 no lo
+  encontraba y la fila entera se descartaba sin error. Medido dentro de un
+  `BEGIN`/`ROLLBACK`: el Cypher salia con 87 resenas y 54 productos, y el grafo
+  quedaba con 86 `:Resena`, con `cypher-shell` terminando en exito y sin una
+  advertencia. Y era justo donde un anillo opera -- publica su propio producto y
+  se resena encima. Cuando el producto solo vive en Mongo, el nodo lleva un
+  nombre de relleno que lo dice.
+- **10 usuarios, incluso los que no escribieron nada.** Al reves que con los
+  productos, aqui si van todos: una cuenta sin resenas puede compartir direccion
+  con otra, y eso ya es una senal.
+- **12 direcciones de 16 filas, con 14 relaciones.** El ETL deduplica por el
+  TEXTO normalizado (minusculas, sin tildes, espacios colapsados) y no por
+  `id_direccion`. Esa resta ES la senal: si la identidad fuera el id, dos cuentas
+  que viven en la misma casa serian dos nodos distintos y "comparten direccion"
+  no existiria como camino. En los datos de hoy la misma casa de Antigua esta
+  cargada tres veces, escrita distinto cada vez.
+
+La normalizacion quita las tildes con `translate()` y `chr(225)||chr(233)||...`,
+no con `unaccent()`. `unaccent` es una extension, o sea una dependencia nueva; y
+las letras acentuadas escritas a la vista romperian la regla de ASCII puro del
+proyecto -- un `.sql` con acentos que pase por la consola de Windows se reguarda
+en otra codificacion y el `translate` deja de coincidir **en silencio**: no da
+error, solo deja de normalizar, y la senal desaparece sin que nadie se entere.
+
+### La direccion es un NODO y no una propiedad
+
+Es la unica decision de modelado que el encargo dejaba abierta. Se eligio nodo
+por dos razones: una cuenta tiene VARIAS direcciones (una tiene seis), y sobre
+todo porque la senal es el **vecino compartido**. Con la direccion como nodo,
+"estas dos cuentas viven en la misma casa" es literalmente un camino de dos
+saltos:
+
+```cypher
+(a:Usuario)-[:VIVE_EN]->(:Direccion)<-[:VIVE_EN]-(b:Usuario)
+```
+
+Con la direccion como propiedad habria que comparar el texto de todas contra
+todas, que es exactamente el trabajo que el grafo existe para no hacer.
+
+### La fecha de la resena no esta en `resena`
+
+`resena` no guarda fecha. La del grafo sale de `comentario.fecha_publicacion`,
+por el `id_comentario` de la raiz de esa resena. Sin ese JOIN no hay consulta de
+rafagas ("tres o mas calificaciones a la misma cuenta en 72 horas"), que es una
+de las cuatro senales de `neo4j/consultas/A3_rafaga.cypher`. Esta anotado como trampa dentro de
+`extraer_grafo.sql` porque es facil escribir el ETL sin fecha y no notarlo: el
+grafo carga igual y solo esa consulta se queda muda.
+
+### Lo que NO va al grafo, dicho para que nadie lo suponga
+
+Ni los votos de `likes` ni las respuestas a las resenas.
+
+Las respuestas las escribe el vendedor dentro de su propia resena, asi que no
+agregan ningun camino entre cuentas que `ESCRIBIO` no de ya. Los votos si
+agregarian uno -- quien apoya a quien -- y son lo primero que este grafo deberia
+crecer si hiciera falta mas senal; hoy son 46 votos de dos cuentas, que no
+alcanza para un patron y entraria como ruido con nombre.
+
+## Por que Cypher y no JSON
+
+Con Mongo el ETL es `cargar.js`, un programa que corre dentro de `mongosh` y que
+tiene trabajo de verdad: convierte dos historiales de fotos a eventos. Aqui no
+hay nada que reconstruir -- las tres columnas de `resena` YA son las tres
+relaciones del grafo -- asi que un programa intermedio solo agregaria un archivo
+mas donde equivocarse.
+
+La alternativa era emitir JSON y cargarlo con `apoc.load.json`. Se descarto:
+obliga a dejar el archivo dentro del contenedor y a habilitar
+`apoc.import.file.enabled` en `neo4j.conf`, o sea a tocar `docker-compose.yml`
+por una comodidad. Cypher por la entrada estandar no necesita permiso de nada.
+
+Todos los textos salen por `to_json(x)::text` y **nunca** concatenados a mano
+entre comillas. El escape de una cadena JSON es un subconjunto del de Cypher
+(comilla doble, barra invertida, saltos de linea y los escapes numericos
+significan lo mismo en los dos), asi que lo que `to_json` devuelve ya es un
+literal de Cypher valido. Concatenar a mano se rompe con la primera resena que
+lleve una comilla -- y en este proyecto los textos los escribe el usuario. Peor:
+no se rompe con un error de sintaxis claro, sino con un script partido a la
+mitad.
+
+## El esquema va en CADA corrida
+
+`neo4j/001_esquema.cypher` se aplica antes de cargar, siempre, y no una sola vez.
+No es por gusto: el ETL carga con `MERGE`, y **`MERGE` sin restriccion de
+unicidad no garantiza unicidad** -- hace un `MATCH` y, si no encuentra, un
+`CREATE`. Sin indice ese `MATCH` es un barrido de etiqueta, y dos corridas al
+mismo tiempo pueden no encontrar nada las dos y crear dos nodos con el mismo id.
+
+Si alguien levanta el contenedor con el volumen de datos vacio, las restricciones
+se fueron con el; un ETL que no las reaplique empieza a duplicar sin dar un solo
+error. Todo el `001` lleva `IF NOT EXISTS`, asi que repetirlo cuesta milisegundos.
+
+`ON_ERROR_STOP=1` en la extraccion es obligatorio por lo mismo. Sin el, `psql` se
+salta la sentencia que fallo, sigue con las demas y termina en cero: el Cypher
+sale INCOMPLETO, `cypher-shell` lo carga contento y el grafo queda con la mitad
+de las relaciones. Es el peor final posible, porque parece que funciono.
+
+## Por que correrlo dos veces no duplica
+
+No hay ni un `CREATE` en `extraer_grafo.sql`: todo es `MERGE`. `MERGE` encuentra
+el nodo por su id -- el mismo de PostgreSQL -- y solo lo crea si no estaba; el
+`SET` que va despues lo pone al dia igual la primera vez que la decima.
+
+Medido, no supuesto: cuatro corridas seguidas dejan los mismos conteos, y una
+corrida con `--limpiar` (o `-ReiniciarGrafo`) deja exactamente esos mismos
+numeros. El grafo incremental y el reconstruido desde cero son el mismo grafo.
+
+**Lo que la idempotencia NO cubre:** el ETL solo agrega y actualiza, nunca resta.
+Una resena borrada en PostgreSQL se queda en el grafo para siempre, y ahi el
+grafo empieza a contestar cosas que ya no son ciertas. Para eso esta `--limpiar`
+/ `-ReiniciarGrafo`, que se puede correr sin miedo porque el grafo es una
+proyeccion: no hay ni un dato aqui que no exista en PostgreSQL.
+
+Va detras de una bandera y no por defecto a proposito: si alguien sembro un
+anillo de prueba a mano para una demostracion, un borrado automatico se lo lleva
+en medio de la demostracion.
+
+## Neo4j community no tiene restricciones de existencia ni de tipo
+
+`NOT NULL` sobre una propiedad y el tipo de dato son de la edicion Enterprise.
+Aqui no se pueden declarar, asi que "toda `:Resena` tiene calificacion entre 1 y
+5" **no lo garantiza el grafo**: lo garantiza el `CHECK` de PostgreSQL, que es de
+donde salen los datos.
+
+Es el precio de que el grafo sea una proyeccion y no una fuente de verdad, y
+conviene decirlo antes de que alguien lo descubra por su cuenta.

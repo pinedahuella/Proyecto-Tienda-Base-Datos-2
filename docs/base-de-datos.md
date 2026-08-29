@@ -1,11 +1,21 @@
 # Base de datos
 
-Modelo relacional en PostgreSQL. **39 tablas construidas** de las 42 del
-diagrama; faltan las tres de la parte social (comentario, resena y likes).
+Modelo relacional en PostgreSQL. **Las 42 tablas del diagrama estan
+construidas.** Las tres ultimas -- `comentario`, `resena` y `likes` -- entraron
+con `migrations/011_resenas.sql`; aqui decia "39 de 42" y ya no es cierto. Se
+comprueba contando:
+
+```bash
+docker exec -i mesh-postgres psql -U meme -d mesh -tAc \
+  "SELECT count(*) FROM information_schema.tables
+    WHERE table_schema='public' AND table_type='BASE TABLE';"
+-- 42
+```
 
 > **Los numeros de este documento describen el conjunto de datos que genera
 > `migrations/datos/generador.js` con su semilla fija** -- 102 productos, 202
-> variantes, 552 ofertas y 8 cuentas -- no el estado de una base que ya se uso.
+> variantes, 552 ofertas, 8 cuentas, y desde la 011 tambien 86 resenas, 115
+> comentarios y 46 votos -- no el estado de una base que ya se uso.
 > Una base sobre la que alguien compro, publico una oferta o creo un producto
 > tiene mas, y eso es normal, no un desajuste. Para volver a los numeros de
 > aqui: `.\arrancar.ps1 -Reiniciar`.
@@ -211,7 +221,7 @@ avanzan juntas: `comprar_pedido()` registra el pago como `pagado` de una vez,
 sin importar el metodo -- no hay quien confirme una transferencia o un pago
 contra entrega todavia (ver mas abajo, el problema de que un pedido puede
 mezclar vendedores y el pago es uno solo). Es una simplificacion a proposito,
-no el diseño final: el dia que se agregue una confirmacion real, la mayoria
+no el diseno final: el dia que se agregue una confirmacion real, la mayoria
 de los metodos volveran a nacer `pendiente` como aqui se describia antes.
 
 **Mientras el pedido esta pendiente, el stock NO esta reservado.** Dos personas
@@ -414,7 +424,7 @@ a la misma pregunta: **quien puede meter algo al sitio sin que nadie lo mire.**
 
 Antes, cualquiera que publicara una oferta la tenia a la venta en el acto. Ahora
 la oferta de un vendedor normal nace `pendiente` y no circula hasta que la tienda
-la aprueba. La de la tienda —y la de un admin, que el backend trata igual— sigue
+la aprueba. La de la tienda -- y la de un admin, que el backend trata igual -- sigue
 naciendo `activa`: la tienda es la autoridad y no tiene a quien pedirle permiso.
 
 Se guardan **tres cosas**, y ninguna sobra:
@@ -478,7 +488,7 @@ siendo de la tienda.
 `Propuesta Producto` guarda quien propuso, quien aprobo y cuando. Su tabla gemela
 `Rechazo Producto` guarda los motivos, por la misma razon que `Rechazo Oferta`.
 
-**Y los dos estados nuevos no se cuelan al catalogo publico** — ni estos ni
+**Y los dos estados nuevos no se cuelan al catalogo publico** -- ni estos ni
 ninguno que se agregue despues. La busqueda y la ficha filtran por **lista
 blanca**: solo `activo` pasa. Un estado nuevo queda oculto por defecto en vez de
 visible por defecto, que es la unica forma de que nadie tenga que acordarse de
@@ -513,10 +523,15 @@ de nacimiento; cuando no quede ninguna en NULL se puede cerrar con un
 
 ## Registro de decisiones arquitectonicas
 
-Las cuatro decisiones de modelado y tecnologia de esta entrega, en el formato que pide el
+Las cuatro decisiones de modelado y tecnologia de la Entrega 1, en el formato que pide el
 enunciado (seccion 5.3): contexto, alternativas consideradas, decision,
 justificacion con criterios tecnicos, y consecuencias. Abajo, en las secciones
 siguientes, esta el detalle largo de cada una.
+
+Hay una quinta, **ADR-5 - Todo lo social se queda en PostgreSQL**, que es de la
+Entrega 2 y por eso no vive aqui sino junto a lo que decide, en "La resena es del
+VENDEDOR sobre un PRODUCTO". Es la tercera decision de **no** migrar del
+documento.
 
 Vale la pena leer antes el criterio 5.5 del propio enunciado: *"la
 justificacion de mantener un componente en su forma relacional se evalua con el
@@ -525,7 +540,7 @@ segunda es una decision de **no** migrar, y la cuarta es una decision de dejar e
 PostgreSQL algo que nacia del catalogo documental; las dos estan argumentadas con
 el mismo cuidado que la primera.
 
-### ADR-1 · Migrar el catalogo de productos a MongoDB
+### ADR-1 - Migrar el catalogo de productos a MongoDB
 
 | | |
 |---|---|
@@ -535,7 +550,7 @@ el mismo cuidado que la primera.
 | **Justificacion** | **Patron de consulta:** el catalogo se lee entero y por producto, casi nunca por partes, que es exactamente la forma de un documento. **Escalabilidad:** los atributos se agregan sin migracion de esquema. **Costo operativo:** un motor mas que levantar y mantener, y dos backups en vez de uno. **Consistencia:** es lo que se paga, y va abajo. |
 | **Consecuencias** | Se gana filtrar por atributo, una ficha sin `JOIN` y agregar caracteristicas sin tocar el esquema. Se pierde la integridad referencial entre las lineas de pedido y los productos: `pedido_producto.id_producto_mongo` **no es** una llave foranea y no puede serlo, asi que ese enlace lo sostiene la aplicacion. Y aparece un ETL que hay que mantener. |
 
-### ADR-2 · NO migrar las ofertas: se quedan en PostgreSQL
+### ADR-2 - NO migrar las ofertas: se quedan en PostgreSQL
 
 | | |
 |---|---|
@@ -545,7 +560,7 @@ el mismo cuidado que la primera.
 | **Justificacion** | **Consistencia, y es el criterio que decide:** el descuento de inventario tiene que ser atomico y no vender dos veces la ultima unidad. Eso lo sostiene un `SELECT ... FOR UPDATE` dentro de `comprar_pedido()`; medido, cero sobreventas y cero descuadres sobre 555 ofertas. **Tasa de cambio:** precio, stock y estado cambian en cada venta, y una copia en la base documental habria que sostenerla al dia en dos sitios. **Patron de consulta:** embeberlas ademas seria peor, porque Mongo reescribe el documento entero en cada actualizacion -- comprar una camisa reescribiria su catalogo completo, y dos vendedores vendiendo a la vez pelearian por el mismo documento. **Volumen:** NO es el motivo; un documento aguanta 16 MB y ningun producto va a tener tantos vendedores. |
 | **Consecuencias** | La ficha de un producto necesita dos consultas, una a cada base -- pero es una sola consulta indexada y ya se pagaba. Los cinco numeros calculados son una copia y hay que recalcularlos cada vez que una oferta cambia de precio, se quede sin unidades o se pause; si no, la tarjeta dice un precio y la ficha otro. Ese recalculo esta en `recalcularCamposCalculados()` y es deuda asumida a conciencia. |
 
-### ADR-3 · Las imagenes, embebidas dentro de su variante
+### ADR-3 - Las imagenes, embebidas dentro de su variante
 
 | | |
 |---|---|
@@ -555,7 +570,7 @@ el mismo cuidado que la primera.
 | **Justificacion** | **Frecuencia de acceso conjunto:** no existe ninguna pantalla que pida una imagen sin su variante. **Volumen:** son URLs, no archivos, y son pocas y acotadas. **Tasa de cambio:** cambian al ritmo del catalogo, que es lento. Se eligio (c) sobre (b) porque la foto es de la variante -- la camisa azul y la blanca no comparten imagen. |
 | **Consecuencias** | Desaparece la columna `numero_orden`: en un arreglo la posicion **es** el orden, y guardarlo aparte seria un dato duplicado que se puede desincronizar. A cambio, reordenar las fotos obliga a reescribir el arreglo, que es exactamente la operacion que uno quiere ahi. |
 
-### ADR-4 · Quien propuso un producto se guarda en PostgreSQL, no en el documento
+### ADR-4 - Quien propuso un producto se guarda en PostgreSQL, no en el documento
 
 | | |
 |---|---|
@@ -575,7 +590,7 @@ MongoDB.
 **Y viven ahi de verdad: la migracion esta terminada, no es una copia que se
 sostiene en dos sitios.** Conviene decirlo con precision porque es la decision
 de la entrega, y aqui antes decia lo contrario ("PostgreSQL sigue siendo el
-dueño"), que dejo de ser cierto y no se corrigio a tiempo:
+dueno"), que dejo de ser cierto y no se corrigio a tiempo:
 
 - Las tablas `productos`, `productos_variantes` y `productos_historial` de
   PostgreSQL son el **origen** de la migracion. De ahi salio el conjunto de
@@ -647,13 +662,12 @@ PostgreSQL con una sola consulta indexada. Es un cruce entre las dos bases que
 resuelve la aplicacion, no una llave foranea -- y eso es exactamente lo que la
 entrega pide documentar.
 
-**Las resenas: REFERENCIADAS.** Todavia no estan construidas -- la parte social
-entra en una entrega posterior -- pero la decision se toma ahora, porque es una
-de las tres que el enunciado pide argumentar y porque condiciona donde se
-guardan cuando toque escribirlas.
+**Las resenas: REFERENCIADAS.** Ya estan construidas (`migrations/011_resenas.sql`,
+tablas `resena`, `comentario` y `likes`); aqui decia "todavia no" y la decision
+que se argumenta abajo es la que efectivamente se implemento.
 
-Van **fuera del documento del producto**, en `Resena` de PostgreSQL, colgando de
-`Oferta`. Los tres criterios, uno por uno:
+Van **fuera del documento del producto**, en `resena` de PostgreSQL. Los tres
+criterios, uno por uno:
 
 **Frecuencia de acceso conjunto: baja, y esa es la trampa.** Parece que si --
 uno piensa en la ficha del producto, que las ensena. Pero la ficha es una
@@ -681,11 +695,12 @@ imagenes y sus caracteristicas -- y dos personas resenando a la vez pelearian
 por el mismo documento. Es exactamente el argumento que ya descarto embeber las
 ofertas.
 
-**Y hay un cuarto motivo, propio de este modelo:** la resena cuelga de la
-**oferta**, no del producto (ver mas abajo, "La resena es de la oferta"). Las
-ofertas se quedaron en PostgreSQL, asi que embeber la resena en el documento del
-producto la separaria de su padre y dejaria la calificacion de un vendedor
-guardada en la ficha de una cosa que no es suya.
+**Y hay un cuarto motivo, propio de este modelo:** la resena califica a un
+**vendedor** -- `resena.id_usuario_vendedor`, una llave foranea a `usuarios` --
+y los usuarios viven en PostgreSQL. Embeberla en el documento del producto
+dejaria la calificacion de una cuenta guardada dentro de la ficha de una cosa
+que no es suya, y con las dos puntas del "A califica a B" repartidas entre dos
+bases.
 
 **Lo que se paga:** la ficha necesita una consulta mas para traerlas. Es un
 costo que ya estaba pagado: la ficha **ya** hace una segunda consulta a
@@ -695,8 +710,10 @@ agregan un viaje.
 **Y lo que se gana de cara a lo que viene:** la Entrega 2 pide detectar
 *"conjuntos de cuentas que se califican entre si de forma reiterada sobre los
 mismos productos"*. Eso es recorrer relaciones entre cuentas, no leer un
-documento; con las resenas sueltas y apuntando a usuario y oferta, ese camino
-queda abierto -- embebidas dentro del producto, habria que deshacerlo primero.
+documento; con las resenas sueltas y apuntando a las dos cuentas y al producto,
+ese camino queda abierto -- embebidas dentro del producto, habria que deshacerlo
+primero. Es lo que despues permitio proyectar todo esto a Neo4j sin cambiar el
+modelo relacional (`neo4j/README.md`).
 
 **El caso simetrico, para que se vea que la pregunta se contesta por caso y no
 por costumbre:** si algun dia hiciera falta llevar las ofertas a Mongo, el
@@ -792,32 +809,164 @@ llevan estado.
 
 ---
 
-## La resena es de la oferta, no del producto
+## La resena es del VENDEDOR sobre un PRODUCTO, no de la oferta
 
-Todavia no esta construida, pero la decision ya se tomo y conviene dejarla
-escrita porque no es obvia.
+**Esto cambio, y hay que leerlo con cuidado porque va al informe: aqui se
+defendio lo contrario durante toda la Entrega 1.** La version anterior de esta
+seccion decia "la resena cuelga de `Oferta`". Ya no. Vive en
+`migrations/011_resenas.sql` y cuelga de dos cosas a la vez:
 
-`Resena` cuelga de `Oferta` y no de `Productos`. Con varios vendedores, una
-queja de "llego tarde, mal empacado" es del **vendedor**, no del producto.
+```
+resena
+  id_usuario           quien califica       -> usuarios   (FK)
+  id_usuario_vendedor  a quien califica     -> usuarios   (FK)
+  id_producto_mongo    sobre que producto   -> MongoDB, SIN FK
+  calificacion         1..5
+  id_comentario        la raiz del hilo     -> comentario (FK, UNIQUE)
+```
 
-Lo que se gana es que la Entrega 2 se vuelve posible: el enunciado pide detectar
-*"conjuntos de cuentas que se califican entre si de forma reiterada sobre los
-mismos productos"*. Con la resena colgando del producto, las cuentas nunca se
-tocan entre ellas y esa frase no tiene como expresarse. Con
-`resena -> oferta -> usuario`, "A califica a B" es un camino real de dos saltos.
+**El motivo original se conserva entero, y ademas se acorta.** La razon por la
+que la resena colgaba de `Oferta` era que "A califica a B" fuera un camino real
+entre cuentas, y no un promedio sobre un producto que no es de nadie. Ese motivo
+sigue siendo bueno y no se abandona: `id_usuario_vendedor` lo cumple mejor.
+Antes eran dos saltos (`resena -> oferta -> usuario`); ahora es **uno**, y ni
+siquiera es un salto: es una columna.
 
-Y no se pierde la vista del producto: las resenas de la laptop salen subiendo
-por `Oferta -> Productos Variantes -> Productos`. **La consecuencia que hay que
-anotar** es que la calificacion del producto pasa a ser el promedio de las de
-sus ofertas, asi que una queja de envio cuenta para la nota del producto.
+**Lo que se descarto fue el vehiculo, no el argumento.** `oferta` es unica por
+(usuario, producto, **variante**). Colgar la resena de ahi no la deja sobre
+"Carlos me vendio bien esta laptop" sino sobre "Carlos me vendio bien la laptop,
+version negra de 14 pulgadas". Un vendedor con tres variantes del mismo producto
+termina con sus resenas repartidas en tres filas que el modelo trata como cosas
+distintas, y su nota pasa a ser un promedio de promedios. **Nadie resena una
+variante.** Con `id_producto_mongo` la resena queda donde la persona la escribio:
+sobre el producto.
+
+Cambiarlo costo cero porque las tablas todavia no existian. En tres semanas
+costaba migracion, ETL y reescribir el informe.
+
+**Lo que se paga, dicho de frente.** Con `id_oferta` la base garantizaba que la
+resena apuntaba a una oferta real. Con `id_producto_mongo` no puede: el catalogo
+vive en MongoDB. Que ese vendedor venda ese producto pasa a ser comprobacion de
+la aplicacion. Es el **mismo precio que `oferta` ya paga** desde la 005 y ya
+estaba escrito arriba -- no es una excepcion nueva, es la regla de la casa
+aplicada otra vez. Y lo que si queda garantizado es la mitad que importa para la
+Entrega 2: las dos cuentas son cuentas de verdad, con llave foranea, porque
+viven aqui.
+
+Tambien se pierde el ascenso `Oferta -> Productos Variantes -> Productos` para
+armar la nota de un producto, y a cambio se gana: la nota del producto es ahora
+un `avg(calificacion)` directo sobre `resena`, sin promediar promedios. Lo que
+NO cambia es la consecuencia que ya estaba anotada: una queja de envio ("llego
+tarde, mal empacado") es del vendedor y cuenta igual para la nota del producto.
 Amazon las separa; aqui van juntas.
 
+### Por que NO hay llave foranea a `pedido`
+
+No se exige haber comprado para resenar, y es deliberado.
+
+La Entrega 2 pide senalar cuentas que se califican entre si de forma anomala. La
+resena **sin compra detras** es la senal mas fuerte que existe de eso. Exigir la
+compra la borraria del modelo: el fraude mas obvio dejaria de poder
+representarse, y la consulta de varios saltos perderia su hallazgo mas util.
+
+Es la diferencia entre un modelo que **impide** el fraude y uno que lo puede
+**observar**. Aqui hace falta el segundo. En el conjunto de datos son 83 de las
+86 resenas las que no tienen un pedido detras:
+
+```sql
+SELECT count(*) FROM resena r
+WHERE NOT EXISTS (
+  SELECT 1 FROM pedido p
+  JOIN pedido_producto pp ON pp.id_pedido = p.id_pedido
+  WHERE p.id_usuario = r.id_usuario
+    AND pp.id_producto_mongo = r.id_producto_mongo);
+-- 83
+```
+
+### Por que `comentario` lleva `id_usuario` aunque el diagrama no lo tenga
+
+Es un **hueco del diagrama**, no una licencia que nos tomamos.
+
+Sin esa columna una **respuesta** no tiene autor. La raiz de una resena si
+podria sacarlo de `resena.id_usuario`, pero una respuesta no cuelga de ninguna
+resena -- cuelga de otro comentario -- y se quedaria sin forma de saber quien la
+escribio. No se podria ni pintar "Carlos respondio: ..." ni contar cuentas que se
+comentan entre si, que es una de las senales de la Entrega 2. En el conjunto de
+datos hay 29 respuestas sobre 86 raices.
+
+Para la raiz queda repetido con `resena.id_usuario`. Es redundancia real y se
+acepta a sabiendas: la alternativa era dejar las respuestas sin autor. La
+coherencia entre las dos la comprueba el conjunto de datos al cargar.
+
+Y el arbol vive en **una sola tabla** y no en dos porque una respuesta y el texto
+de una resena son la misma cosa: alguien escribio algo. Partirlos obligaria a
+tener dos tablas de `likes` o una referencia polimorfica -- y el like sobre la
+RESENA es justo el que importa para detectar manipulacion.
+
 La resena no lleva fecha propia: es el comentario raiz
-(`id_comentario_padre` en NULL) y `Comentario.fecha_publicacion` ya guarda
-cuando. `Likes` si lleva `fecha_creacion` porque no es un comentario y no tiene
-de donde heredarla -- y ademas es el campo que hace posible detectar
-manipulacion: 40 likes en tres minutos, o cuentas creadas el mismo dia dandose
-like entre si.
+(`id_comentario_padre` en NULL) y `comentario.fecha_publicacion` ya guarda
+cuando. Seria una segunda verdad sobre lo mismo. `likes` si lleva
+`fecha_creacion` porque no es un comentario y no tiene de donde heredarla -- y
+ademas es el campo que hace posible detectar manipulacion: 40 likes en tres
+minutos, o cuentas creadas el mismo dia dandose like entre si.
+
+### ADR-5 - Todo lo social se queda en PostgreSQL
+
+| | |
+|---|---|
+| **Contexto** | El catalogo ya se migro a MongoDB. Las resenas y sus comentarios son la parte que mas se lee de la ficha de un producto, y la pregunta obligada -- por el criterio 5.5 del enunciado, que exige justificar quedarse igual que justificar migrar -- es si tambien se van al documental. |
+| **Alternativas consideradas** | (a) Embeberlas en el documento del producto en MongoDB. (b) Coleccion propia de resenas y comentarios en MongoDB. (c) Dejarlas en PostgreSQL. |
+| **Decision** | (c). `resena`, `comentario` y `likes` en PostgreSQL. Ni embebidas ni con coleccion propia. |
+| **Justificacion** | **Heterogeneidad de atributos, que es el criterio que trajo MongoDB a este sistema y aqui no aplica:** MongoDB entro por UNA razon -- los atributos cambian entre categorias de producto, y medido sobre el conjunto ningun producto llena el 100% de lo que su categoria ofrece (promedio 59%). Un comentario tiene siempre los mismos cuatro campos: autor, texto, fecha y padre. Heterogeneidad cero. Llevarlo al documental seria usarlo porque esta, no porque el dato lo pida. **Integridad referencial:** las dos puntas de "A califica a B" son llaves foraneas contra `usuarios`; en un documento serian dos numeros sueltos que nada impide que apunten a una cuenta que no existe -- el mismo argumento del ADR-4. **Patron de consulta:** la ficha las quiere paginadas, diez a la vez, que es justo lo que un arreglo embebido no sabe hacer sin traerse el arreglo completo. **Volumen:** no tienen techo, y cada resena nueva reescribiria el documento entero del producto (ver arriba). |
+| **Consecuencias** | La ficha cruza dos bases, que es un costo ya pagado. Y la velocidad de lectura, que es la preocupacion real, se resuelve **sin cambiar la fuente de verdad**: con el contador denormalizado (`cantidad_likes` / `cantidad_dislikes`, sostenido por trigger) y con cache. Es lo que hacen los sistemas que tienen este problema de verdad -- TAO de Facebook es un cache de grafo delante de MySQL, no un reemplazo de MySQL. El cache le toca a Redis en la Entrega 2. |
+
+**Y la velocidad no es una suposicion: se midio.** La consulta de la ficha -- las
+diez resenas de un producto con su texto, su fecha, su autor y sus dos
+contadores -- corre en **decimas de milisegundo**:
+
+```sql
+EXPLAIN (ANALYZE)
+SELECT r.calificacion, c.comentario, c.fecha_publicacion,
+       c.cantidad_likes, c.cantidad_dislikes, u.usuario
+FROM resena r
+JOIN comentario c ON c.id_comentario = r.id_comentario
+JOIN usuarios   u ON u.id_usuario    = r.id_usuario
+WHERE r.id_producto_mongo = 48
+ORDER BY c.fecha_publicacion DESC
+LIMIT 10;
+```
+
+Tres corridas de "un calentamiento mas tres medidas" dieron medianas de 0.219,
+0.146 y 0.070 ms, y **las doce lecturas cayeron entre 0.068 y 0.485 ms**. La
+primera consulta de cada sesion sube a unos pocos milisegundos y por eso no
+cuenta: es el plan que se arma, no la consulta.
+
+El milisegundo es ruidoso; el numero estable es el otro que imprime el plan:
+`Buffers: shared hit=8`, ni una lectura de disco. Ocho paginas que ya estan en
+memoria.
+
+Y conviene mirar el plan de frente, porque dice algo que no se esperaba:
+**PostgreSQL NO usa `idx_resena_producto` aqui, hace un `Seq Scan` sobre
+`resena`.** No es un fallo del indice: con 86 filas la tabla entera cabe en una
+sola pagina (`Buffers: shared hit=1` en ese nodo), asi que recorrerla sale mas
+barato que entrar por el indice. El indice esta puesto para el tamano al que este
+argumento importa, no para este. Y el argumento no depende de el: si a esta
+escala la consulta ya es ruido comparada con la pantalla de al lado, cambiar de
+motor por velocidad es optimizar lo que no cuesta.
+
+Contra que se compara: `docs/frontend.md` mide, con el mismo metodo (mediana de
+tres corridas en caliente), **188 ms para `GET /productos?limite=20`**, que es la
+ruta que pinta la primera pantalla del catalogo. **Son tres ordenes de magnitud.**
+Y no son cifras equivalentes, y por eso la comparacion vale: los 188 ms son una
+ruta HTTP entera -- red, Nest, Mongo y serializacion de 40 KB -- y las decimas de
+milisegundo son solo el motor relacional contestando. Aun asi, mover las resenas
+a MongoDB para "que la ficha vaya mas rapido" estaria optimizando la parte que ni
+en su peor lectura llega al 0.3% de lo que la pantalla de al lado ya paga sin
+quejarse.
+
+Los dos numeros se pueden volver a medir, y conviene hacerlo antes de citarlos:
+el de arriba con el `EXPLAIN (ANALYZE)` de aqui, y el de los 188 ms con lo que
+describe `docs/frontend.md`.
 
 ---
 
@@ -830,7 +979,7 @@ La regla: si la fila se actualiza, lleva estado. Si solo se inserta, no. Por eso
 `Oferta` lleva estado y `Precio Historial` no.
 
 **Y hay una excepcion que conviene mirar de frente, porque parece romperla:**
-`Propuesta Producto` es una fila viva —se actualiza cuando alguien la aprueba— y
+`Propuesta Producto` es una fila viva -- se actualiza cuando alguien la aprueba -- y
 **no tiene columna de estado**. No es un olvido. El estado de una propuesta es el
 estado del PRODUCTO que propone (`en_revision`, `rechazado`, `activo`), y ese
 vive en el documento de MongoDB. Darle un estado propio a la propuesta crearia
@@ -838,8 +987,8 @@ dos verdades sobre lo mismo, que es justo lo que la regla quiere evitar: la
 propuesta podria decir "aprobada" mientras el producto sigue `en_revision`, y
 nadie sabria cual manda.
 
-Lo que si guarda es el HECHO de la aprobacion —`fecha_aprobacion` e
-`id_usuario_aprobo`— que es lo que el estado pierde en cuanto cambia. La regla,
+Lo que si guarda es el HECHO de la aprobacion -- `fecha_aprobacion` e
+`id_usuario_aprobo` -- que es lo que el estado pierde en cuanto cambia. La regla,
 enunciada con mas precision: **el estado vive una sola vez, en la fila que
 describe la cosa; los hechos historicos viven donde ocurrieron.**
 
@@ -866,7 +1015,7 @@ UPDATE se acuerde de ponerla, el dia que una ruta nueva no lo haga la fecha
 miente sin dar ningun error.
 
 La tercera merece su propia linea porque no es una fecha de auditoria como las
-otras dos: es la unica que puede estar en NULL, y ese NULL significa algo —
+otras dos: es la unica que puede estar en NULL, y ese NULL significa algo --
 **esta oferta nunca fue aprobada**. Es lo que separa una oferta que espera
 revision de una que ya circula, y sobrevive a que despues se pause o se retire,
 que es exactamente lo que el estado no sabe hacer.

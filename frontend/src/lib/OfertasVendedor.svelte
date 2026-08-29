@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { pedir, conJson, type RespuestaApi } from './api';
+	import { pedir, conJson, mensajeUtil, type RespuestaApi } from './api';
 	import Autocompletar from './Autocompletar.svelte';
 
 	/**
@@ -132,6 +132,26 @@
 			precio: string;
 			stock: number;
 			estado: EstadoOferta;
+			/**
+			 * Cuando la tienda la aprobo. NULL = nunca.
+			 *
+			 * Esto FALTABA aqui, y no porque el backend no lo mandara: la ruta
+			 * devuelve ocho campos en `mi_oferta` y este tipo declaraba cuatro.
+			 * El dato llegaba y el tipo lo escondia.
+			 *
+			 * Lo que costo: el formulario de editar de ESTA vista no tenia como
+			 * saber si la oferta estaba aprobada, asi que ofrecia los cinco
+			 * estados a todo el mundo -- incluidos `pendiente` y `rechazada`,
+			 * que el backend nunca acepta, y `activa`/`pausada` sobre una oferta
+			 * sin aprobar, que da 409. Tres errores distintos, todos provocados
+			 * por la pantalla.
+			 *
+			 * La leccion, que vale para el resto del archivo: un tipo que declara
+			 * de menos no es "conservador", es una capacidad que se pierde en
+			 * silencio. No hay error en ningun lado; simplemente el dato no
+			 * existe para quien lo necesita.
+			 */
+			fecha_aprobacion: string | null;
 		} | null;
 	}
 
@@ -199,7 +219,44 @@
 		};
 	}
 
+	/**
+	 * Los cinco estados que una oferta PUEDE TENER. Sirven para las pestanas
+	 * del filtro, que tienen que poder listar las cinco.
+	 */
 	const ESTADOS: EstadoOferta[] = ['pendiente', 'activa', 'pausada', 'retirada', 'rechazada'];
+
+	/**
+	 * Los tres estados que un vendedor PUEDE PEDIR al editar. No son los
+	 * mismos, y confundirlos era un bug.
+	 *
+	 * `pendiente` y `rechazada` los pone el flujo de aprobacion, nunca el
+	 * cliente: `pendiente` lo pone la creacion (o una edicion de una oferta sin
+	 * aprobar) y `rechazada` lo pone la tienda. El backend los rechaza de plano
+	 * -- es su `ESTADOS_OFERTA_VALIDOS`, en models/estado-oferta.ts.
+	 *
+	 * Lo que pasaba: el select de editar se llenaba con los CINCO. Elegir
+	 * "pendiente" o "rechazada" mandaba un PATCH que volvia con
+	 * "El estado debe ser uno de: activa, pausada, retirada" -- un error que
+	 * la pantalla provoco sola, ofreciendo una opcion que sabia invalida.
+	 * La regla: un control no ofrece lo que el servidor no acepta.
+	 */
+	const ESTADOS_EDITABLES: EstadoOferta[] = ['activa', 'pausada', 'retirada'];
+
+	/**
+	 * Que estados se le pueden ofrecer a ESTA oferta en el select de editar.
+	 *
+	 * Siempre entra el suyo actual, que significa "dejalo como esta": guardar
+	 * sin tocarlo no manda el campo (ver guardarFila), asi que una oferta
+	 * `pendiente` puede editarse el precio sin que su estado viaje.
+	 *
+	 * Y si nunca fue aprobada, la unica salida real es retirarla: `activa` y
+	 * `pausada` devuelven 409 con "todavia no fue aprobada por la tienda".
+	 * Ofrecerlas seria repetir el mismo error de antes con otro codigo.
+	 */
+	function estadosPosibles(o: { estado: EstadoOferta; fecha_aprobacion: string | null }) {
+		const destinos = sinAprobar(o) ? (['retirada'] as EstadoOferta[]) : ESTADOS_EDITABLES;
+		return [o.estado, ...destinos.filter((e) => e !== o.estado)];
+	}
 
 	/**
 	 * Si la oferta todavia no paso por la tienda.
@@ -456,7 +513,7 @@
 			ofertas = r.payload;
 			traidasTodas = true;
 		} else {
-			error = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			error = mensajeUtil(r);
 		}
 		cargando = false;
 	}
@@ -508,7 +565,7 @@
 			// trae nada. Una tanda corta ya dice que se acabo.
 			cursor = tanda.length < POR_TANDA ? null : r.payload.siguiente_cursor;
 		} else {
-			errorCatalogo = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorCatalogo = mensajeUtil(r);
 		}
 	}
 
@@ -654,7 +711,7 @@
 			editando = null;
 			aviso = `"${r.payload.nombre_producto} - ${r.payload.nombre_variante}" actualizada`;
 		} else {
-			errorFila = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorFila = mensajeUtil(r);
 		}
 	}
 
@@ -672,7 +729,14 @@
 								id_oferta: o.id_oferta,
 								precio: o.precio,
 								stock: o.stock,
-								estado: o.estado
+								estado: o.estado,
+								// Va tambien la fecha de aprobacion, y no es un extra:
+								// es lo que decide que estados puede pedir el vendedor.
+								// Sin copiarla, la oferta recien guardada volvia a la
+								// tarjeta SIN ella, o sea indistinguible de una que
+								// nunca se aprobo, y el select de al lado cambiaba de
+								// opciones despues de guardar sin que nadie tocara nada.
+								fecha_aprobacion: o.fecha_aprobacion
 							}
 						}
 					: v
@@ -709,7 +773,7 @@
 		if (r.ok && r.payload) {
 			rechazos = r.payload;
 		} else {
-			errorRechazos = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorRechazos = mensajeUtil(r);
 		}
 	}
 
@@ -727,7 +791,7 @@
 			refrescarEnProductoAbierto(r.payload);
 			aviso = `"${r.payload.nombre_producto} - ${r.payload.nombre_variante}" quedo ${estado}`;
 		} else {
-			const texto = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			const texto = mensajeUtil(r);
 			// `error` solo se pinta en la vista 'lista', asi que un fallo desde
 			// el catalogo no se veia en ninguna parte: el boton se quedaba
 			// quieto y no pasaba nada. Y al reves, en 'lista' ese mismo `error`
@@ -838,7 +902,7 @@
 			resultados = r.payload.productos ?? [];
 		} else {
 			resultados = [];
-			errorPublicar = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorPublicar = mensajeUtil(r);
 		}
 	}
 
@@ -868,7 +932,7 @@
 			productoElegido = r.payload;
 		} else {
 			productoElegido = null;
-			errorPublicar = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorPublicar = mensajeUtil(r);
 		}
 	}
 
@@ -938,7 +1002,7 @@
 				filtro = 'todas';
 			}
 		} else {
-			errorPublicar = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorPublicar = mensajeUtil(r);
 		}
 	}
 
@@ -1049,7 +1113,7 @@
 		if (r.ok && r.payload) {
 			pendientes = r.payload;
 		} else {
-			errorPendientes = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorPendientes = mensajeUtil(r);
 		}
 	}
 
@@ -1095,7 +1159,7 @@
 					? `Aprobaste "${o.nombre_producto} - ${o.nombre_variante}" de ${o.vendedor.nombre}`
 					: `Rechazaste "${o.nombre_producto} - ${o.nombre_variante}" y ${o.vendedor.nombre} ya puede corregirla`;
 		} else {
-			errorPendientes = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorPendientes = mensajeUtil(r);
 		}
 	}
 
@@ -1484,12 +1548,23 @@
 
 														<label>
 															Estado
+															<!-- Solo lo que el backend acepta, mas el actual como
+															     "dejalo asi". Antes salian los cinco y elegir
+															     "pendiente" o "rechazada" era un error seguro. -->
 															<select bind:value={estadoNuevo}>
-																{#each ESTADOS as e}
-																	<option value={e}>{e}</option>
+																{#each estadosPosibles(mia) as e}
+																	<option value={e}>
+																		{e === mia.estado ? e + ' (no cambiar)' : e}
+																	</option>
 																{/each}
 															</select>
 														</label>
+														{#if sinAprobar(mia)}
+															<p class="nota-estado">
+																Todavia sin aprobar: solo puedes retirarla. Si cambias
+																el precio o las unidades vuelve a la cola de revision.
+															</p>
+														{/if}
 
 														<label>
 															Ajuste de existencias
@@ -1753,11 +1828,14 @@
 
 										<label>
 											Estado
-											<!-- Sin aprobar, las unicas salidas son dejarla como esta o
-											     retirarla: `activa` y `pausada` dan 409. -->
+											<!-- Solo lo que el backend acepta (activa, pausada, retirada),
+											     mas el actual como "dejalo asi". Sin aprobar, la unica
+											     salida es retirarla: activa y pausada dan 409. -->
 											<select bind:value={estadoNuevo}>
-												{#each sinAprobar(o) ? ESTADOS.filter((e) => e === o.estado || e === 'retirada') : ESTADOS as e}
-													<option value={e}>{e}</option>
+												{#each estadosPosibles(o) as e}
+													<option value={e}>
+														{e === o.estado ? e + ' (no cambiar)' : e}
+													</option>
 												{/each}
 											</select>
 										</label>
@@ -2151,6 +2229,16 @@
 
 	.nota {
 		margin: 0 0 12px;
+	}
+
+	/* La explicacion de por que el select de estado trae una sola salida
+	   cuando la oferta no esta aprobada. Va debajo del control y no como
+	   aviso arriba: contesta una pregunta que se hace mirando ESE campo. */
+	.nota-estado {
+		grid-column: 1 / -1;
+		margin: -4px 0 0;
+		font-size: 0.85rem;
+		color: var(--gris);
 	}
 
 	.chip.activo {

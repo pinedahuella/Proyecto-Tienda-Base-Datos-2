@@ -9,6 +9,7 @@
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
+	import PanelFraude from '$lib/PanelFraude.svelte';
 	import {
 		cerrarSesion,
 		CORREO_TIENDA,
@@ -498,6 +499,15 @@
 				     porque es lo que menos se toca: se revisa cuando hay algo, no en
 				     cada visita. -->
 				<PropuestasProducto alExpirarSesion={expiro} {administraLaTienda} />
+				<!-- El panel de manipulacion de resenas. Es SOLO del admin y no de
+				     la tienda: el enunciado lo pide "visible para el equipo
+				     administrativo", y la tienda es un vendedor mas -- el mas
+				     grande, pero vendedor. Ensenarle a un vendedor quien lo esta
+				     calificando de forma sospechosa le entrega justo la lista de
+				     cuentas que no deberia poder mirar.
+				     Va al final porque no es una tarea diaria: se abre cuando hay
+				     una sospecha, no en cada visita al panel. -->
+				<PanelFraude alExpirarSesion={expiro} />
 			{:else if esVendedor}
 				<!-- Las ofertas van PRIMERO y aparte de los productos: en el modelo
 				     multi-vendedor el producto es del catalogo compartido y no es de

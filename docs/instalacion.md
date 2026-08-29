@@ -10,8 +10,9 @@ Como dejar Mesh corriendo en una PC nueva.
 | Docker Desktop | ultima | https://www.docker.com/products/docker-desktop |
 | Git | ultima | https://git-scm.com/downloads |
 
-Nada mas. PostgreSQL y pgAdmin no se instalan: estan en el `docker-compose.yml`
-y Docker los baja solo.
+Nada mas. Ninguna de las cuatro bases se instala -- ni PostgreSQL, ni MongoDB, ni
+Redis, ni Neo4j -- y tampoco sus tres ventanas: los siete contenedores estan en
+el `docker-compose.yml` y Docker los baja solos.
 
 Si la PC ya tiene PostgreSQL instalado, hay que detener su servicio antes de
 empezar. Usa el puerto 5432 y se pelea con el contenedor. En PowerShell como
@@ -62,13 +63,27 @@ En Windows, un solo comando deja las bases listas:
 .\arrancar.ps1
 ```
 
-El script arranca Docker si esta apagado, levanta los contenedores, espera a que
-PostgreSQL responda y corre las migraciones pendientes. Se puede correr las veces
-que quieras: si una migracion ya estaba aplicada lo avisa y sigue.
+El script arranca Docker si esta apagado, levanta los siete contenedores, espera
+a que **los cuatro motores** respondan -- PostgreSQL, MongoDB, Redis y Neo4j --,
+corre las migraciones pendientes y carga lo que les falte a las dos bases
+derivadas: el catalogo de MongoDB y el grafo de Neo4j. Se puede correr las veces
+que quieras.
 
-```powershell
-.\arrancar.ps1 -Reiniciar     # borra los datos y empieza de cero
-```
+Las banderas:
+
+| Bandera | Que hace |
+|---|---|
+| *(ninguna)* | levanta, migra, y corre los ETL solo si detecta que falta algo |
+| `-Reiniciar` | borra los datos y empieza de cero |
+| `-Etl` | fuerza los DOS ETL: el catalogo de Mongo y el grafo de Neo4j |
+| `-ReiniciarMongo` | rehace solo MongoDB, sin tocar PostgreSQL |
+| `-ReiniciarGrafo` | rehace solo el grafo de Neo4j, desde cero |
+| `-Mongo` | abre la consola de MongoDB y ya |
+
+`-Etl` fuerza los dos a proposito, en vez de tener una bandera por destino: quien
+la teclea sabe que cambio algo en PostgreSQL, pero no si ese dato viaja a Mongo,
+a Neo4j o a los dos. Los dos ETL son idempotentes, asi que correr de mas es
+gratis y correr de menos es el fallo de verdad.
 
 Despues, en dos terminales mas:
 
@@ -107,17 +122,45 @@ y a que precio) lo calcula el, con una semilla fija para que dos corridas den el
 mismo archivo. Las reglas estan en
 [migrations/README.md](../migrations/README.md).
 
-Si tu base ya estaba creada de antes, la primera vez veras correr
-crea en una base nueva. No borra nada.
+**Los dos pasos no se tratan igual, y hay que saberlo.** El esquema se reejecuta
+en cada arranque sin problema: si una migracion ya estaba aplicada, el script lo
+avisa y sigue. Los conjuntos de datos no: `datos/001_catalogo.sql` **no es
+idempotente** -- 17 de sus 20 `INSERT` no llevan ninguna guardia -- y una segunda
+pasada muere en la linea 99 con `duplicate key value violates unique constraint
+"idx_categorias_nombre_raiz"`.
+
+Por eso `arrancar.ps1` se los salta si la base ya tiene productos, y lo avisa en
+amarillo:
+
+```
+>> Corriendo conjuntos de datos
+   La base ya tiene 102 productos: me salto migrations/datos/
+   Esos archivos no son idempotentes y solo entran en una base vacia.
+   Para recargarlos desde cero:  .\arrancar.ps1 -Reiniciar
+```
+
+No se pierde nada por eso: el archivo abre con `BEGIN;` y cierra con `COMMIT;`,
+asi que una pasada que falla se deshace entera y una base ya cargada no se
+ensucia. El motivo largo esta en
+[migrations/README.md](../migrations/README.md), en "El conjunto de datos solo
+entra una vez".
 
 ## Contenedores
 
-| Servicio | Contenedor | Imagen | Puerto |
-|---|---|---|---|
-| PostgreSQL | mesh-postgres | pgvector/pgvector:pg18 | 5432 |
-| pgAdmin | mesh-pgadmin | dpage/pgadmin4 | 5050 |
-| MongoDB | mesh-mongo | mongo:8 | 27018 |
-| DbGate | mesh-dbgate | dbgate/dbgate:latest | 3001 |
+Son **siete**: cuatro motores y tres ventanas para mirarlos.
+
+| Servicio | Contenedor | Imagen | Puerto | Para que |
+|---|---|---|---|---|
+| PostgreSQL | mesh-postgres | pgvector/pgvector:pg18 | 5432 | la base relacional: cuentas, ofertas, pedidos y la parte social |
+| pgAdmin | mesh-pgadmin | dpage/pgadmin4 | 5050 | la ventana de PostgreSQL |
+| MongoDB | mesh-mongo | mongo:8 | 27018 | el catalogo de productos |
+| DbGate | mesh-dbgate | dbgate/dbgate:latest | 3001 | la ventana de MongoDB |
+| Redis | mesh-redis | redis:8-alpine | 6379 | Entrega 2: el carrito con expiracion y la oferta de inventario limitado |
+| RedisInsight | mesh-redisinsight | redis/redisinsight:latest | 5540 | la ventana de Redis, con el TTL contando hacia atras |
+| Neo4j | mesh-neo4j | neo4j:5-community | 7474 y 7687 | Entrega 2: el grafo de cuentas, resenas y productos |
+
+Las tres ultimas filas son de la Entrega 2 y estan explicadas mas abajo, cada una
+en su seccion.
 
 Apagar todo:
 
@@ -127,11 +170,19 @@ docker compose down
 
 Con `-v` ademas borra los datos de la base.
 
-La carpeta `migrations/` esta montada dentro del contenedor de PostgreSQL en
-`/migrations`, para poder correr los scripts sin copiarlos a mano.
+**Tres carpetas del repositorio van montadas dentro de su contenedor**, para
+poder correr los scripts sin copiarlos a mano:
 
-Lo mismo con `mongo/`, montada en el contenedor de MongoDB en `/mongo`. Ahi van
-los scripts que crean las colecciones.
+| Carpeta | Contenedor | Ruta adentro | Que hay ahi |
+|---|---|---|---|
+| `migrations/` | mesh-postgres | `/migrations` | el esquema y los conjuntos de datos |
+| `mongo/` | mesh-mongo | `/mongo` | los scripts que crean las colecciones |
+| `neo4j/` | mesh-neo4j | `/neo4j` | el esquema del grafo y las consultas de fraude |
+
+Redis no tiene carpeta montada, y no es un olvido: sus dos scripts Lua se cargan
+por la entrada estandar (`redis-cli -x SCRIPT LOAD < redis/carrito.lua`), asi que
+no hace falta que el contenedor los vea. El ETL del grafo hace lo mismo con
+`docker cp` y con stdin, para no depender de que ese montaje siga en pie.
 
 ## El catalogo en MongoDB
 
@@ -170,14 +221,166 @@ existe, no lo detecta. Para eso se pide a mano:
 
 El detalle esta en [etl/README.md](../etl/README.md).
 
+## Redis: el carrito y la oferta de inventario limitado
+
+Es el almacen clave-valor de la Entrega 2. Guarda dos cosas, y las dos son
+efimeras a proposito:
+
+- **el carrito**, en `mesh:carrito:<id_usuario>`, un HASH con expiracion por
+  inactividad. Al pagar se llama a `comprar_carrito()` de PostgreSQL y solo si
+  salio bien se vacia.
+- **la oferta de inventario limitado**, en `mesh:oferta:<id>` mas su ZSET de
+  reservas, con un script Lua atomico que compara contra la cantidad pedida
+  antes de descontar.
+
+**Lleva contrasena aunque sea local**, y no es ceremonia: Redis sin
+`requirepass` acepta a cualquiera que alcance el puerto, y el 6379 es de los mas
+barridos que hay. La contrasena sale de `REDIS_PASSWORD` del `.env`, como las
+otras tres.
+
+```bash
+docker exec mesh-redis redis-cli -a $REDIS_PASSWORD --no-auth-warning PING
+# PONG
+```
+
+El `--no-auth-warning` solo calla el aviso de que la contrasena va en la linea de
+comando; sin el funciona igual.
+
+**Nace vacio y se queda vacio hasta que alguien lo use.** `arrancar.ps1` espera a
+que Redis este sano y nada mas: no hay migraciones ni ETL que correr, porque el
+carrito y los contadores son datos de la sesion, no un conjunto que se siembre.
+
+Los dos scripts Lua los tiene que cargar el backend al arrancar, y en CADA
+arranque suyo: un `SCRIPT LOAD` se pierde con cada reinicio de Redis. Hoy
+**todavia no lo hace** -- `grep -ril redis backend/src` no devuelve nada -- y esta
+en la lista de lo que falta enchufar, en la seccion 5 de `redis/README.md`. Se
+cargan por la entrada estandar, sin montar nada:
+
+```bash
+docker exec -i mesh-redis redis-cli -a $REDIS_PASSWORD --no-auth-warning \
+  -x SCRIPT LOAD < redis/inventario_limitado.lua
+```
+
+Ojo con lo que eso implica: **un arranque en verde NO prueba que la capa de Redis
+funcione.** Eso lo prueban sus dos arneses, que hay que correr a mano:
+
+```bash
+bash redis/prueba_concurrencia.sh    # sobreventa bajo carga
+bash redis/prueba_carrito.sh         # la expiracion y el checkout
+```
+
+El detalle esta en [redis/README.md](../redis/README.md).
+
+## RedisInsight: la ventana de Redis
+
+Redis no trae ninguna de fabrica -- `redis-cli` es todo lo que hay. RedisInsight
+es lo que pgAdmin es para PostgreSQL: http://localhost:5540, sin usuario ni
+contrasena.
+
+**Se eligio esta y no una conexion de Redis en dbgate (que tambien sabe) por una
+razon concreta de la entrega:** RedisInsight ensena el TTL de cada clave y lo
+cuenta hacia atras. La Entrega 2 pide "un tiempo de expiracion configurado
+explicitamente", y esa pantalla **es** la evidencia -- se ve el carrito perdiendo
+segundos y desapareciendo solo. En un listado de filas eso no se ve.
+
+La conexion ya viene cargada, sin tener que agregarla a mano: las variables
+`RI_*` del `docker-compose.yml` hacen aqui lo que `servers.json` en pgAdmin.
+Apuntan a `redis:6379`, el nombre del servicio y el puerto de ADENTRO, porque
+RedisInsight esta en la misma red de Docker y para el `localhost` es el mismo
+RedisInsight.
+
+## Neo4j: el grafo de cuentas, resenas y productos
+
+Es la base de grafos de la Entrega 2. El corazon del modelo son tres tipos de
+nodo:
+
+```
+(:Usuario)-[:ESCRIBIO]->(:Resena)
+(:Resena)-[:CALIFICA_A]->(:Usuario)
+(:Resena)-[:SOBRE]->(:Producto)
+```
+
+**No hay un nodo `:Vendedor`**, y es obligatorio que no lo haya: en Mesh comprar
+no pide rol, asi que un vendedor tambien compra. Si se partiera en `:Usuario` y
+`:Vendedor`, la misma cuenta serian dos nodos distintos y el anillo de fraude
+nunca cerraria. Hay un cuarto tipo, `:Direccion`, con
+`(:Usuario)-[:VIVE_EN]->(:Direccion)`, para que "dos cuentas en la misma casa" sea
+literalmente un vecino compartido. El por que de cada decision esta en
+`neo4j/README.md`.
+
+Y es una **proyeccion** de PostgreSQL, no una fuente de verdad: se puede borrar
+entero y reconstruir. Nada se escribe ahi que no exista en PostgreSQL.
+
+**Dos puertos, y hacen falta los dos:**
+
+| Puerto | Que es |
+|---|---|
+| 7474 | la ventana del navegador, que Neo4j trae adentro. No hay que montar un visor aparte |
+| 7687 | bolt, el protocolo por el que hablan `cypher-shell` y el ETL, y por el que hablaria el backend |
+
+Abrir solo uno deja la mitad sin servir. Y la ventana del 7474 importa mas de lo
+normal aqui: **dibuja** el grafo, nodos y flechas. Un anillo de cuentas que se
+califican entre si no se ve en una tabla de filas.
+
+**El usuario es siempre `neo4j`**: en la edicion community no se puede cambiar.
+Por eso el `.env` solo pide la contrasena, `NEO4J_PASSWORD`, y tiene que tener al
+menos 8 caracteres o Neo4j no arranca.
+
+```bash
+docker exec mesh-neo4j cypher-shell -u neo4j -p $NEO4J_PASSWORD "RETURN 1;"
+```
+
+**Tarda en arrancar, y es normal.** Neo4j se toma unos 40 segundos en aceptar
+Cypher; su healthcheck tiene `start_period: 40s` con 10 reintentos cada 15 s, o
+sea que el propio Compose se da hasta ~190 segundos antes de declararlo enfermo.
+`arrancar.ps1` lo espera hasta 240 s por eso mismo: un plazo mas corto declararia
+muerto un contenedor que esta arrancando bien.
+
+El healthcheck usa `cypher-shell` y no un HTTP contra el 7474 a proposito: el
+7474 contesta antes de que la base acepte consultas, asi que daria "sano" con
+Neo4j todavia arrancando y el ETL fallaria contra un contenedor en verde.
+
+APOC viene instalado (`NEO4J_PLUGINS: '["apoc"]'`).
+
+**A diferencia de Redis, aqui si hay un ETL**, y `arrancar.ps1` lo corre solo
+cuando detecta que el grafo tiene menos de lo que dice PostgreSQL, igual que con
+el catalogo de Mongo:
+
+```powershell
+.\arrancar.ps1                    # carga el grafo si falta algo
+.\arrancar.ps1 -Etl               # fuerza los DOS ETL, el de Mongo y el del grafo
+.\arrancar.ps1 -ReiniciarGrafo    # borra el grafo entero y lo reconstruye
+```
+
+Las consultas de fraude se corren aparte:
+
+```bash
+bash neo4j/correr_fraude.sh
+```
+
+El detalle esta en [neo4j/README.md](../neo4j/README.md) y en
+[etl/README.md](../etl/README.md).
+
 ## Accesos de desarrollo
 
-| Servicio | Usuario | Contrasena |
-|---|---|---|
-| PostgreSQL | `DB_USER` del .env | `DB_PASSWORD` del .env |
-| pgAdmin | `PGADMIN_EMAIL` del .env | `PGADMIN_PASSWORD` del .env |
-| MongoDB | `MONGO_USER` del .env | `MONGO_PASSWORD` del .env |
-| DbGate | entra directo, sin usuario | |
+| Servicio | Donde entra | Usuario | Contrasena |
+|---|---|---|---|
+| PostgreSQL | `localhost:5432`, base `mesh` | `DB_USER` del .env | `DB_PASSWORD` del .env |
+| pgAdmin | http://localhost:5050 | `PGADMIN_EMAIL` del .env | `PGADMIN_PASSWORD` del .env |
+| MongoDB | `localhost:27018`, base `mesh` | `MONGO_USER` del .env | `MONGO_PASSWORD` del .env |
+| DbGate | http://localhost:3001 | sin usuario ni contrasena | |
+| Redis | `localhost:6379` | no lleva usuario (`requirepass`) | `REDIS_PASSWORD` del .env |
+| RedisInsight | http://localhost:5540 | sin usuario ni contrasena | |
+| Neo4j | http://localhost:7474 y bolt `localhost:7687` | `neo4j`, fijo | `NEO4J_PASSWORD` del .env |
+
+Las dos variables que agrego la Entrega 2 al `.env` son **`REDIS_PASSWORD`** y
+**`NEO4J_PASSWORD`**. Ya estan en `.env.example`: quien tenga un `.env` de antes
+tiene que agregarlas a mano, o Compose se detiene con "falta REDIS_PASSWORD en
+.env" en vez de arrancar con valores en blanco.
+
+Redis **no tiene usuario**: `requirepass` es una contrasena sola, sin nombre
+delante. Neo4j si lo tiene y no se puede cambiar: en la edicion community es
+siempre `neo4j`, y por eso el `.env` solo pide la contrasena.
 
 **Ninguna contrasena de servicio esta escrita en el repositorio.** Todas viven
 en el archivo `.env`, que git ignora. Por eso el primer paso de la instalacion es
@@ -325,6 +528,40 @@ Counter to that, there appears to be PostgreSQL data in:
 PostgreSQL 18 cambio la ruta de los datos. El volumen va montado en
 `/var/lib/postgresql`, no en `/var/lib/postgresql/data`. Ya esta corregido en el
 `docker-compose.yml`; no revertirlo.
+
+**El contenedor de Neo4j se reinicia en bucle y el error no menciona Docker**
+
+```
+Failed to read config: Unrecognized setting. No declared setting with name:
+PASSWORD. Cleanup the config or disable
+'server.config.strict_validation.enabled' to continue.
+```
+
+Esta ya nos costo tiempo, y no se deduce leyendo el mensaje. **La imagen de Neo4j
+trata CUALQUIER variable de entorno que empiece con `NEO4J_` como un ajuste de
+`neo4j.conf`.** Asi que una variable llamada `NEO4J_PASSWORD` no le llega a Neo4j
+como una contrasena: se traduce al ajuste `PASSWORD`, que no existe, la validacion
+estricta lo rechaza y el contenedor muere antes de arrancar. Con
+`restart: unless-stopped`, muere para siempre.
+
+Se reproduce en diez segundos, y vale la pena verlo una vez:
+
+```bash
+docker run --rm -e NEO4J_AUTH=neo4j/TU_CONTRASENA -e NEO4J_PASSWORD=TU_CONTRASENA neo4j:5-community
+```
+
+Fijate en el detalle que hace dificil encontrarlo: `NEO4J_AUTH` **si** es una
+variable legitima de la imagen, asi que "una variable NEO4J_ mas no puede hacer
+dano" es exactamente el razonamiento equivocado.
+
+**Por eso la variable que usa el healthcheck se llama `MESH_NEO4J_PASSWORD` y no
+`NEO4J_PASSWORD`.** El healthcheck corre `cypher-shell -u neo4j -p ...` y necesita
+la contrasena SOLA, mientras que `NEO4J_AUTH` la trae pegada al usuario
+(`neo4j/loquesea`); hacia falta una segunda variable con el mismo valor, y el
+unico nombre que sirve es uno que no empiece con `NEO4J_`. En el `.env` la
+variable si se llama `NEO4J_PASSWORD` -- eso es seguro, porque el `.env` lo lee
+Compose y no la imagen; lo que no puede pasar es que ese nombre entre al
+contenedor.
 
 **El backend dice que la contrasena esta mal**
 

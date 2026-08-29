@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
+	import Resenas from '$lib/Resenas.svelte';
 	import { pedir } from '$lib/api';
 	import {
 		agregarLinea,
@@ -304,9 +305,20 @@
 	 */
 	let ofertaDelAviso = $state('');
 
+	/**
+	 * El correo de quien esta mirando, o null.
+	 *
+	 * Hace falta para las resenas: solo el vendedor calificado puede contestar
+	 * la suya, y sin saber quien mira habria que pintarle el boton de
+	 * responder a todo el mundo para que el backend le conteste 403.
+	 * Sale de la misma peticion que ya se hacia, no de una nueva.
+	 */
+	let correoSesion = $state<string | null>(null);
+
 	async function mirarSesion() {
-		const r = await pedir<unknown>('/usuario/yo');
+		const r = await pedir<{ correo_electronico?: string }>('/usuario/yo');
 		haySesion = r.ok;
+		correoSesion = r.ok ? (r.payload?.correo_electronico ?? null) : null;
 	}
 
 	onMount(mirarSesion);
@@ -760,6 +772,14 @@
 					</article>
 				{/each}
 			</section>
+		{/if}
+		<!-- Las resenas van al final de la ficha y no arriba: quien entra a un
+		     producto viene a ver que es y a que precio, y eso es lo de arriba. La
+		     opinion se busca despues, cuando ya se decidio que interesa.
+		     Se pintan solo con el producto cargado -- sin id no hay a que pedirle
+		     resenas, y montarlo antes dispararia una peticion a /productos/NaN. -->
+		{#if producto}
+			<Resenas idProducto={id} {haySesion} {correoSesion} />
 		{/if}
 	</div>
 </main>

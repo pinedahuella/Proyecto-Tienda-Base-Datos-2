@@ -58,3 +58,6 @@ temp/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Los respaldos que deja draw.io al guardar
+.$*.drawio.bkp

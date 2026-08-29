@@ -105,8 +105,124 @@ services:
     depends_on:
       - mongo
 
+  # El almacen clave-valor de la Entrega 2: el carrito con expiracion por
+  # inactividad y la oferta de inventario limitado.
+  #
+  # Lleva contrasena aunque sea local. Redis sin `requirepass` acepta a
+  # cualquiera que alcance el puerto, y el 6379 es de los mas barridos que hay:
+  # dejarlo abierto en una maquina con la red de la universidad no es un riesgo
+  # teorico. La contrasena sale del .env, como las otras tres.
+  #
+  # `appendonly yes` para que el carrito sobreviva a un reinicio del
+  # contenedor. Un carrito que se pierde porque se reinicio Docker se ve
+  # exactamente igual que un TTL mal puesto, y esa confusion cuesta una tarde.
+  redis:
+    image: redis:8-alpine
+    container_name: mesh-redis
+    restart: unless-stopped
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD:?falta REDIS_PASSWORD en .env}
+      --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a $$REDIS_PASSWORD ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?falta REDIS_PASSWORD en .env}
+
+  # La ventana de Redis, lo que pgAdmin es para PostgreSQL. Redis no trae
+  # ninguna: `redis-cli` es todo lo que hay de fabrica.
+  #
+  # Se eligio RedisInsight y no una conexion de Redis en dbgate (que tambien
+  # sabe) por una razon concreta de la entrega: RedisInsight ensena el TTL de
+  # cada clave y lo cuenta hacia atras. La Entrega 2 pide "un tiempo de
+  # expiracion configurado explicitamente", y esa pantalla ES la evidencia --
+  # se ve el carrito perdiendo segundos y desapareciendo solo. En un listado de
+  # filas eso no se ve.
+  #
+  # Las variables RI_* dejan la conexion ya cargada, sin tener que agregarla a
+  # mano, igual que servers.json en pgAdmin.
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: mesh-redisinsight
+    restart: unless-stopped
+    environment:
+      # Por el nombre del servicio y el puerto de ADENTRO: RedisInsight esta en
+      # la misma red de Docker, asi que "localhost" apuntaria a si mismo.
+      RI_REDIS_HOST: redis
+      RI_REDIS_PORT: 6379
+      RI_REDIS_ALIAS: Mesh Redis
+      RI_REDIS_PASSWORD: ${REDIS_PASSWORD:?falta REDIS_PASSWORD en .env}
+    ports:
+      - "5540:5540"
+    volumes:
+      - redisinsight-data:/data
+    depends_on:
+      - redis
+
+  # La base de grafos de la Entrega 2: cuentas, resenas y productos, para
+  # detectar conjuntos de cuentas que se califican entre si.
+  #
+  # No lleva visor aparte: Neo4j trae el suyo dentro, en el puerto 7474 (ver
+  # abajo). Y ademas DIBUJA el grafo -- nodos y flechas -- que es la forma de
+  # mirar esto. Un visor de filas y columnas no ensenaria el anillo.
+  #
+  # Dos puertos, y hacen falta los dos: el 7474 es la ventana del navegador
+  # (equivale a pgAdmin o a dbgate, no hay que montar nada aparte) y el 7687 es
+  # bolt, por donde habla el backend. Abrir solo uno deja la mitad sin servir.
+  #
+  # El usuario tiene que llamarse `neo4j` en la edicion community: no se puede
+  # cambiar. Por eso el .env solo pide la contrasena, y Neo4j la rechaza si
+  # tiene menos de 8 caracteres.
+  neo4j:
+    image: neo4j:5-community
+    container_name: mesh-neo4j
+    restart: unless-stopped
+    environment:
+      NEO4J_AUTH: neo4j/${NEO4J_PASSWORD:?falta NEO4J_PASSWORD en .env}
+      # APOC trae las utilidades de carga e iteracion por lotes que el ETL
+      # necesita para no mandar una transaccion por fila.
+      NEO4J_PLUGINS: '["apoc"]'
+      # La contrasena sola, para el healthcheck: NEO4J_AUTH la trae pegada al
+      # usuario y cypher-shell la necesita aparte.
+      #
+      # El nombre NO lleva el prefijo NEO4J_, y eso es obligatorio: la imagen
+      # trata CUALQUIER variable NEO4J_* como un ajuste de neo4j.conf. Una
+      # NEO4J_PASSWORD se traduce al ajuste "PASSWORD", que no existe, y la
+      # validacion estricta tumba el arranque en bucle con el mensaje
+      # "Unrecognized setting. No declared setting with name: PASSWORD".
+      # El contenedor se reinicia para siempre y el error no menciona Docker.
+      MESH_NEO4J_PASSWORD: ${NEO4J_PASSWORD:?falta NEO4J_PASSWORD en .env}
+    ports:
+      - "7474:7474"
+      - "7687:7687"
+    volumes:
+      - neo4j-data:/data
+      - neo4j-logs:/logs
+      # El ETL deja aqui lo que carga, igual que migrations/ en PostgreSQL
+      - ./neo4j:/neo4j:ro
+    healthcheck:
+      # cypher-shell y no un HTTP contra el 7474: el 7474 contesta antes de que
+      # la base acepte consultas, asi que daria "sano" con Neo4j todavia
+      # arrancando y el ETL fallaria contra un contenedor en verde.
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p $$MESH_NEO4J_PASSWORD 'RETURN 1' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 40s
+
 volumes:
   postgres-data:
   pgadmin-data:
   mongo-data:
   dbgate-data:
+  redis-data:
+  redisinsight-data:
+  neo4j-data:
+  neo4j-logs:

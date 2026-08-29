@@ -69,6 +69,57 @@ export async function pedir<T>(ruta: string, opciones: RequestInit = {}): Promis
 	}
 }
 
+/**
+ * El texto que se le puede ensenar a una persona cuando algo falla.
+ *
+ * El backend de Mesh contesta con mensajes escritos para leerse ("No existe
+ * una oferta con ese id"), asi que lo normal es que devuelva el suyo tal cual.
+ * Esto es una RED, para los casos en que lo que llega no es eso:
+ *
+ *   - la peticion no salio (backend apagado, sin red): `estado` es 0
+ *   - el cuerpo no traia `mensaje` -- por ejemplo un 404 de Nest, que usa
+ *     `message` y no `mensaje`, o un proxy que se metio en el medio. Sin esto,
+ *     el mensaje quedaba en `undefined` y la caja de error salia VACIA
+ *   - el texto es de maquina y no de persona: "Cannot PATCH /vendedor/ofertas",
+ *     un volcado de pila, un HTML entero
+ *
+ * Lo ultimo es lo que hay que atajar de verdad. Que alguien que esta
+ * publicando una oferta lea la palabra PATCH no le dice nada y le hace pensar
+ * que rompio algo: no es su vocabulario, es el nuestro. Se cambia por un texto
+ * que si le sirve, y el original queda en la consola para quien lo tenga que
+ * depurar -- porque esconderselo a la persona no es motivo para perderlo.
+ */
+export function mensajeUtil(respuesta: { mensaje?: string; estado: number }): string {
+	const generico = 'No se pudo completar la operacion. Intenta de nuevo.';
+
+	if (respuesta.estado === 0) {
+		return 'No se pudo conectar con el servidor. Revisa que el backend este corriendo.';
+	}
+
+	const texto = String(respuesta.mensaje ?? '').trim();
+	if (texto === '') return generico;
+
+	// Lo que delata a un mensaje de maquina. Se mira el verbo HTTP solo cuando
+	// va pegado a una ruta ("PATCH /algo"), para no censurar una frase legitima
+	// que por casualidad lleve una de esas palabras.
+	const deMaquina =
+		/\b(?:GET|POST|PATCH|PUT|DELETE)\s+\//.test(texto) ||
+		/^Cannot\s/i.test(texto) ||
+		/\b(?:ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ERR_[A-Z_]+)\b/.test(texto) ||
+		/\bat\s+\S+\s+\(.*:\d+:\d+\)/.test(texto) ||
+		/^\s*<(?:!doctype|html)\b/i.test(texto);
+
+	if (deMaquina) {
+		console.warn('[Mesh] el servidor devolvio un mensaje tecnico:', texto);
+		if (respuesta.estado === 404) {
+			return 'Esa opcion todavia no esta disponible en el servidor.';
+		}
+		return generico;
+	}
+
+	return texto;
+}
+
 /** Atajo para las peticiones que mandan un cuerpo JSON. */
 export function conJson(metodo: string, cuerpo: unknown): RequestInit {
 	return {
