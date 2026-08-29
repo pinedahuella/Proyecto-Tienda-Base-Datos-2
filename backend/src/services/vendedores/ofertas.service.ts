@@ -18,6 +18,7 @@ import {
   validarRazonRechazo,
 } from '../../helpers/validaciones-oferta';
 import {
+  AprobadorOferta,
   OfertaPendiente,
   OfertaPropia,
   OfertaPropiaResumen,
@@ -50,6 +51,11 @@ interface FilaOfertaPropia {
   estado_oferta_nombre: string;
   /** NULL mientras la tienda no la haya aprobado (ver flujo de aprobacion de ofertas). */
   fecha_aprobacion: Date | null;
+  /** NULL si no consta aprobador: oferta de la tienda/admin, o anterior al flujo. */
+  id_usuario_aprobo: string | null;
+  aprobo_usuario: string | null;
+  aprobo_nombre: string | null;
+  aprobo_apellido: string | null;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -84,6 +90,8 @@ interface FilaOfertaNueva {
   id_oferta: string;
   precio: string;
   stock: number;
+  /** now() si nace `activa` (tienda/admin); NULL si nace `pendiente`. */
+  fecha_aprobacion: Date | null;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -297,7 +305,7 @@ export class OfertasVendedorService {
          VALUES ($1, $2, $3, $4,
                  (SELECT id_estado_oferta FROM estado_oferta WHERE estado_oferta_nombre = $5),
                  CASE WHEN $5 = 'activa' THEN now() ELSE NULL END)
-         RETURNING id_oferta, precio, stock, fecha_creacion, fecha_actualizacion`,
+         RETURNING id_oferta, precio, stock, fecha_aprobacion, fecha_creacion, fecha_actualizacion`,
         [idProducto, idProductoVariante, idUsuario, precio, estadoInicial],
       );
       filaOferta = resultado.rows[0];
@@ -339,6 +347,11 @@ export class OfertasVendedorService {
       precio: filaOferta.precio,
       stock: stockFinal,
       estado: estadoInicial,
+      // Recien creada nunca hay aprobador: la tienda/admin nace `activa` sin
+      // revisor (fecha puesta, aprobado_por null), y cualquier otro vendedor
+      // nace `pendiente` (las dos cosas null).
+      fecha_aprobacion: filaOferta.fecha_aprobacion,
+      aprobado_por: null,
       fecha_creacion: filaOferta.fecha_creacion,
       fecha_actualizacion: filaOferta.fecha_actualizacion,
     };
@@ -484,9 +497,10 @@ export class OfertasVendedorService {
   }
 
   /**
-   * Revisa una oferta pendiente: la aprueba (pasa a `activa` y le pone
-   * `fecha_aprobacion`) o la rechaza (pasa a `rechazada` y guarda el motivo
-   * en `rechazo_oferta`). `:id` es `id_oferta`.
+   * Revisa una oferta pendiente: la aprueba (pasa a `activa`, le pone
+   * `fecha_aprobacion` y guarda en `id_usuario_aprobo` quien la reviso) o
+   * la rechaza (pasa a `rechazada` y guarda el motivo en `rechazo_oferta`).
+   * `:id` es `id_oferta`.
    *
    * Solo la cuenta de la tienda o un admin -- un vendedor cualquiera, aun
    * siendo el dueno de la oferta, recibe el **404 disfrazado**: no aprueba
@@ -562,12 +576,18 @@ export class OfertasVendedorService {
       idProductoMongo = Number(fila.id_producto_mongo);
 
       if (decision === 'aprobar') {
+        // `id_usuario_aprobo` es quien REVISA, no la cuenta efectiva: se
+        // guarda el id del token tal cual (un admin queda como el admin
+        // real, no sustituido por la tienda), igual que
+        // ProductosVendedorService.revisarPropuesta. El dueno de la oferta
+        // sigue saliendo de `oferta.id_usuario`, que no se toca aqui.
         await cliente.query(
           `UPDATE oferta
               SET id_estado_oferta = (SELECT id_estado_oferta FROM estado_oferta WHERE estado_oferta_nombre = 'activa'),
-                  fecha_aprobacion = now()
+                  fecha_aprobacion = now(),
+                  id_usuario_aprobo = $2
             WHERE id_oferta = $1`,
-          [idOferta],
+          [idOferta, idUsuarioToken],
         );
       } else {
         await cliente.query(
@@ -629,8 +649,30 @@ export class OfertasVendedorService {
       precio: fila.precio,
       stock: fila.stock,
       estado: fila.estado_oferta_nombre,
+      fecha_aprobacion: fila.fecha_aprobacion,
+      aprobado_por: this.armarAprobador(fila),
       fecha_creacion: fila.fecha_creacion,
       fecha_actualizacion: fila.fecha_actualizacion,
+    };
+  }
+
+  /**
+   * El vendedor/tienda que aprobo la oferta, resuelto desde el LEFT JOIN a
+   * `usuarios` por `oferta.id_usuario_aprobo`. `null` cuando no consta
+   * aprobador -- la oferta nunca fue aprobada (`pendiente`/`rechazada`/
+   * `retirada` sin revision), es de la propia tienda o de un admin (nacen
+   * aprobadas sin revisor), o es anterior al flujo de aprobacion de
+   * ofertas (migrations/010_aprobacion_ofertas.sql).
+   */
+  private armarAprobador(fila: FilaOfertaPropia): AprobadorOferta | null {
+    if (fila.id_usuario_aprobo == null) {
+      return null;
+    }
+    return {
+      id_usuario: fila.id_usuario_aprobo,
+      usuario: fila.aprobo_usuario as string,
+      nombre: fila.aprobo_nombre as string,
+      apellido: fila.aprobo_apellido ?? null,
     };
   }
 
@@ -687,6 +729,8 @@ export class OfertasVendedorService {
         precio: fila.precio,
         stock: fila.stock,
         estado: fila.estado_oferta_nombre,
+        fecha_aprobacion: fila.fecha_aprobacion,
+        aprobado_por: this.armarAprobador(fila),
         fecha_creacion: fila.fecha_creacion,
         fecha_actualizacion: fila.fecha_actualizacion,
       };
@@ -752,6 +796,8 @@ export class OfertasVendedorService {
               precio: fila.precio,
               stock: fila.stock,
               estado: fila.estado_oferta_nombre,
+              fecha_aprobacion: fila.fecha_aprobacion,
+              aprobado_por: this.armarAprobador(fila),
               fecha_creacion: fila.fecha_creacion,
               fecha_actualizacion: fila.fecha_actualizacion,
             }
@@ -887,9 +933,13 @@ export class OfertasVendedorService {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.id_usuario_aprobo,
+                ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
+                ua.apellido AS aprobo_apellido,
                 o.fecha_creacion, o.fecha_actualizacion
          FROM oferta o
          JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+         LEFT JOIN usuarios ua ON ua.id_usuario = o.id_usuario_aprobo
          WHERE o.id_usuario = $1
          ORDER BY o.fecha_actualizacion DESC`,
         [idUsuario],
@@ -908,9 +958,13 @@ export class OfertasVendedorService {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.id_usuario_aprobo,
+                ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
+                ua.apellido AS aprobo_apellido,
                 o.fecha_creacion, o.fecha_actualizacion
          FROM oferta o
          JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+         LEFT JOIN usuarios ua ON ua.id_usuario = o.id_usuario_aprobo
          WHERE o.id_usuario = $1 AND o.id_producto_mongo = $2`,
         [idUsuario, idProducto],
       );
@@ -968,9 +1022,13 @@ export class OfertasVendedorService {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.id_usuario_aprobo,
+                ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
+                ua.apellido AS aprobo_apellido,
                 o.fecha_creacion, o.fecha_actualizacion
          FROM oferta o
          JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+         LEFT JOIN usuarios ua ON ua.id_usuario = o.id_usuario_aprobo
          WHERE o.id_oferta = $1 AND o.id_usuario = $2`,
         [idOferta, idUsuario],
       );
@@ -999,9 +1057,13 @@ export class OfertasVendedorService {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.id_usuario_aprobo,
+                ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
+                ua.apellido AS aprobo_apellido,
                 o.fecha_creacion, o.fecha_actualizacion
          FROM oferta o
          JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+         LEFT JOIN usuarios ua ON ua.id_usuario = o.id_usuario_aprobo
          WHERE o.id_oferta = $1`,
         [idOferta],
       );

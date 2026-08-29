@@ -30,6 +30,20 @@ export interface OfertaVendedor {
 }
 
 /**
+ * El vendedor/tienda que aprobo una oferta, resuelto via JOIN a `usuarios`
+ * desde `oferta.id_usuario_aprobo` (migrations/010_aprobacion_ofertas.sql).
+ * Es quien pulso "aprobar" en `PATCH /vendedor/ofertas/:id/revision`: la
+ * cuenta de la tienda, o el admin real que la reviso -- nunca el dueno de
+ * la oferta, que sale de `oferta.id_usuario`.
+ */
+export interface AprobadorOferta {
+  id_usuario: string;
+  usuario: string;
+  nombre: string;
+  apellido: string | null;
+}
+
+/**
  * Una oferta propia, tal como la ve el vendedor logueado en su panel (
  * GET /vendedor/ofertas y GET /vendedor/ofertas/producto/:id). A diferencia
  * de OfertaVendedor (la ficha publica, con el vendedor embebido porque
@@ -44,6 +58,19 @@ export interface OfertaPropiaResumen {
   precio: string;
   stock: number;
   estado: string;
+  /**
+   * Cuando la tienda aprobo esta oferta. `null` = nunca aprobada: esta
+   * `pendiente`, `rechazada`, o `retirada` sin haber pasado por revision.
+   * Sobrevive a que despues la oferta se pause o se retire.
+   */
+  fecha_aprobacion: Date | null;
+  /**
+   * Quien la aprobo (`PATCH /vendedor/ofertas/:id/revision`). `null` cuando
+   * `fecha_aprobacion` es `null`, y tambien en las ofertas de la propia
+   * tienda o de un admin -- nacen aprobadas sin revisor -- y en las
+   * anteriores al flujo de aprobacion.
+   */
+  aprobado_por: AprobadorOferta | null;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }

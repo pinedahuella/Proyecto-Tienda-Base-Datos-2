@@ -45,6 +45,7 @@ import {
 } from '../../helpers/validaciones-oferta';
 import { validarComentarioAprobacion } from '../../helpers/validaciones-propuesta';
 import { CategoriaDocumento } from '../../models/categoria';
+import { ESTADOS_PRODUCTO_SOLO_REVISION } from '../../models/estado-producto';
 import { RechazoProducto } from '../../models/rechazo-producto';
 import {
   EntradaCaracteristica,
@@ -1043,6 +1044,11 @@ export class ProductosVendedorService {
    * (nombre, descripcion, estado, categoria, sus caracteristicas, las
    * personalizadas, y las variantes).
    *
+   * NO edita un producto que este en el flujo de propuesta (`en_revision`
+   * o `rechazado`): esos dos estados solo se mueven por
+   * `PATCH .../:id/revision` o `.../:id/reenviar` -- 409 por esta ruta. Ver
+   * `ESTADOS_PRODUCTO_SOLO_REVISION`.
+   *
    * Cada campo es independiente: el que venga en null (o no venga) no se
    * toca. Para las dos listas de caracteristicas, un array (aunque sea
    * vacio) reemplaza la lista completa; null es no tocarla. `variantes` es
@@ -1130,6 +1136,21 @@ export class ProductosVendedorService {
       const productoActual = await coleccion.findOne({ _id: idProducto });
       if (productoActual == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
+      }
+
+      // Candado del flujo de propuesta: un producto `en_revision` o
+      // `rechazado` NO se toca por esta ruta -- ni siquiera para cambiarle
+      // el estado. La unica salida de esos dos estados es
+      // `PATCH .../:id/revision` (aprobar/rechazar) o `.../:id/reenviar`,
+      // que son las que dejan constancia en `propuesta_producto` de quien y
+      // cuando. Sin esto, un `PATCH .../:id {estado:'activo'}` publicaba el
+      // producto dejando la propuesta con `fecha_aprobacion = NULL` para
+      // siempre (atascada en `/propuestas/sin-aprobar`, sin poder
+      // reenviarse porque reenviar exige estado `rechazado`).
+      if (ESTADOS_PRODUCTO_SOLO_REVISION.includes(productoActual.estado)) {
+        throw new ErrorConflicto(
+          `Este producto esta en el flujo de propuesta (${productoActual.estado}) y no se edita por aca: usa PATCH /vendedor/productos/:id/revision para aprobarlo o rechazarlo, o /reenviar si es una propuesta rechazada`,
+        );
       }
 
       const categoriaCambia =
@@ -1246,7 +1267,11 @@ export class ProductosVendedorService {
 
       return (await coleccion.findOne({ _id: idProducto })) as Producto;
     } catch (error) {
-      if (error instanceof ErrorValidacion || error instanceof ErrorNoEncontrado) {
+      if (
+        error instanceof ErrorValidacion ||
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorConflicto
+      ) {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);

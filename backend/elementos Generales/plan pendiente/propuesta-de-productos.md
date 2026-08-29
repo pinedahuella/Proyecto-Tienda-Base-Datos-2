@@ -1,8 +1,8 @@
 # Plan pendiente 03 — Propuesta de productos por vendedores convencionales
 
-> **Estado (2026-08-29):**
-> - La base local ya tiene los dos estados y las dos tablas nuevas (ver
->   `propuesta-de-productos.sql`).
+> **Estado (2026-08-29): completo.**
+> - La migración real ya está en `migrations/009_propuesta_productos.sql`
+>   (verificada contra la base local).
 > - **Hecho y probado — todo el backend del flujo:**
 >   - `POST /vendedor/productos/propuestas` — crea el producto `en_revision`
 >     + la fila en `propuesta_producto` (41 comprobaciones).
@@ -14,8 +14,10 @@
 >   - `GET /vendedor/productos/propuestas/:id/rechazos` (rechazos de una
 >     propuesta) y `GET /vendedor/ofertas/:id/rechazos` extendido para que
 >     la tienda/un admin vean cualquier oferta.
-> - **Falta solo**: la migración real en `migrations/` (la lleva el
->   compañero, con el `.sql` de referencia).
+>   - **Candado de `editar()`**: `PATCH /vendedor/productos/:id` sobre un
+>     producto `en_revision` o `rechazado` → 409 (2026-08-29, 36
+>     comprobaciones — ver la nota "RESUELTO" más abajo). Incluye
+>     `models/estado-producto.ts`, que ahora conoce los cinco estados.
 
 ## El problema
 
@@ -207,16 +209,34 @@ En `backend/src/`:
 | `services/vendedores/ofertas.service.ts` → `listarRechazos()` | **extendido**: la tienda o un admin ahora ven los rechazos de **cualquier** oferta (antes solo los de la tienda). `esTiendaOAdmin()` nuevo (no lanza), `obtenerFilaPorId` (ya existía) |
 | `controllers/vendedores/productos.controller.ts` | `@Patch(':id/revision')`, `@Patch(':id/reenviar')`, `@Get('propuestas/:id/rechazos')` |
 
-**No se tocó**: `models/estado-producto.ts` (los estados los pone el
-servidor en este flujo, no se validan contra el cliente), `crear()`,
-`editar()`, ni el catálogo/ficha/compra (lista blanca `activo`).
+**No se tocó** (en la ronda del flujo): `crear()`, ni el
+catálogo/ficha/compra (lista blanca `activo`). `models/estado-producto.ts`
+y `editar()` **sí se tocaron después**, ver la nota de abajo.
 
-> **Pendiente menor, no bloqueante**: `editar()` (`PATCH /vendedor/productos/:id`,
-> solo tienda/admin) **hoy sí deja editar** un producto `en_revision` o
-> `rechazado`, contradiciendo la decisión #2 ("una propuesta no se edita").
-> Un vendedor normal ya no puede (404); solo la tienda/un admin podrían, y
-> por diseño no deberían. Es un `if` de guardia en `editar()` que se puede
-> agregar cuando se decida.
+> **RESUELTO el 2026-08-29** (era "pendiente menor, no bloqueante"):
+> `editar()` (`PATCH /vendedor/productos/:id`, solo tienda/admin) **dejaba
+> editar** un producto `en_revision` o `rechazado`, contradiciendo la
+> decisión #2 ("una propuesta no se edita"). Peor: un
+> `PATCH .../:id {estado:'activo'}` lo publicaba sin tocar
+> `propuesta_producto`, así que la propuesta quedaba con
+> `fecha_aprobacion = NULL` para siempre (atascada en `/sin-aprobar`, sin
+> poder reenviarse). El arreglo, en dos partes:
+>
+> 1. **`models/estado-producto.ts`** — antes tenía solo tres estados
+>    (`borrador`/`activo`/`inactivo`) y el backend no conocía los dos del
+>    flujo de propuesta. Ahora exporta `ESTADOS_PRODUCTO` (los cinco),
+>    `ESTADOS_PRODUCTO_VALIDOS` (los tres que el cliente puede enviar en un
+>    PATCH, sin cambios) y `ESTADOS_PRODUCTO_SOLO_REVISION`
+>    (`['en_revision', 'rechazado']`).
+> 2. **`editar()`** — después de leer el producto de Mongo, si
+>    `productoActual.estado ∈ ESTADOS_PRODUCTO_SOLO_REVISION` → `ErrorConflicto`
+>    (409), sin tocar nada. Se añadió `ErrorConflicto` a la lista de errores
+>    que el `catch` de `editar()` re-lanza (antes solo re-lanzaba
+>    `ErrorValidacion`/`ErrorNoEncontrado` y un `ErrorConflicto` lanzado
+>    dentro del `try` se habría convertido en 500).
+>
+> Probado en vivo: 36 comprobaciones, 0 fallos (detalle en
+> `endpoints-vendedores.md`, sección `PATCH /vendedor/productos/:id`).
 
 **Pruebas**: proponer 41/41, GET propuestas 39/39, revisión/re-envío
 81/81, GET rechazos (ver abajo). Regresión completa del proyecto sin
@@ -224,8 +244,10 @@ cambios.
 
 ## Lo que falta
 
-- La migración real en `migrations/` (compañero, `.sql` de referencia listo).
-- (Opcional) el guard de `editar()` de la nota de arriba.
+- Nada del backend. La migración real ya está aplicada
+  (`migrations/009_propuesta_productos.sql`, verificado el 2026-08-29). El
+  guard de `editar()` que faltaba se hizo el 2026-08-29 (ver la nota de
+  arriba).
 
 ## Fuera de `backend/` (lo lleva el compañero)
 

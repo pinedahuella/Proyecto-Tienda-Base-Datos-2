@@ -887,6 +887,18 @@ más del producto, no en una ruta aparte. Sin precio ni stock, igual que al
 crear: eso se edita en la oferta (`PATCH /vendedor/ofertas/:id`), nunca
 aquí.
 
+**No edita un producto que esté en el flujo de propuesta** (`en_revision`
+o `rechazado`): cualquier `PATCH` sobre uno de esos —incluido
+`{estado:'activo'}`— responde **409**, sin tocar nada. La única forma de
+sacar un producto de esos dos estados es
+`PATCH /vendedor/productos/:id/revision` (aprobar/rechazar) o
+`PATCH /vendedor/productos/:id/reenviar` — las rutas que dejan constancia
+en `propuesta_producto` de quién y cuándo. Sin este candado, un
+`PATCH .../:id {estado:'activo'}` publicaba el producto dejando su
+propuesta con `fecha_aprobacion = NULL` para siempre: atascada en
+`GET /vendedor/productos/propuestas/sin-aprobar` y sin poder reenviarse
+(reenviar exige estado `rechazado`).
+
 Cada campo es independiente: el que venga en `null` (o no venga) no se
 toca. Debe venir al menos uno. Para las dos listas de características, un
 array (aunque sea `[]`) reemplaza la lista completa; `null` es no tocarla.
@@ -1051,6 +1063,21 @@ personalizada inválido — ver arriba). Si el cuerpo trae `precio` o
 { "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
 ```
 
+Un id que no existe, o cualquier cuenta que no sea la tienda ni admin (el
+mismo 404 disfrazado) — este 404 **le gana al 409** de abajo: a un vendedor
+ajeno no se le confirma que el producto existe, aunque esté `en_revision`.
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "Este producto esta en el flujo de propuesta (en_revision) y no se edita por aca: usa PATCH /vendedor/productos/:id/revision para aprobarlo o rechazarlo, o /reenviar si es una propuesta rechazada", "payload": null }
+```
+
+El producto está `en_revision` o `rechazado`. Esos dos estados solo se
+mueven por `PATCH .../:id/revision` o `.../:id/reenviar`. Las validaciones
+de formato (400 — id inválido, cuerpo vacío, estado inválido en el body)
+**le ganan** a este 409: se revisan antes de leer el producto.
+
 ### 503
 
 ```json
@@ -1062,6 +1089,27 @@ personalizada inválido — ver arriba). Si el cuerpo trae `precio` o
 ```json
 { "ok": false, "mensaje": "No se pudo actualizar el producto", "payload": null }
 ```
+
+### Candado del flujo de propuesta — probado en vivo el 29 de agosto de 2026
+
+36 comprobaciones, 0 fallos. Un vendedor propone un producto (nace
+`en_revision`) y:
+
+- `PATCH .../:id {estado:'activo'}` como tienda **y** como admin → **409**;
+  el producto sigue `en_revision`, no aparece en `GET /productos/:id` y
+  sigue en `/propuestas/sin-aprobar`.
+- Cualquier otro campo (`{nombre}`, `{descripcion}`) → 409 también.
+- El flujo bueno sigue intacto: `PATCH .../:id/revision {decision:'aprobar'}`
+  → 200, `activo`, `propuesta_producto.fecha_aprobacion` e
+  `id_usuario_aprobo` quedan puestos, sale de `/sin-aprobar`, se vuelve
+  visible; y ya `activo`, `PATCH .../:id {descripcion}` vuelve a dar 200.
+- `rechazado` bloqueado igual; `PATCH .../:id/reenviar` (del proponente) no
+  se ve afectado — devuelve el producto a `en_revision`, donde el candado
+  sigue aplicando.
+- Regresión: un `borrador` (creado por `POST /vendedor/productos`) se edita
+  y transiciona `borrador → activo → inactivo` por esta ruta sin problema.
+- Precedencias: un vendedor ajeno recibe 404 (no 409), un comprador 403; el
+  cuerpo vacío / `estado` inválido / id no numérico dan 400 antes del 409.
 
 ---
 
@@ -1378,6 +1426,13 @@ GET /vendedor/ofertas
       "precio": "13803.00",
       "stock": 15,
       "estado": "pausada",
+      "fecha_aprobacion": "2026-08-25T15:54:00.258Z",
+      "aprobado_por": {
+        "id_usuario": "2",
+        "usuario": "mesh_tienda",
+        "nombre": "Mesh",
+        "apellido": "Tienda"
+      },
       "fecha_creacion": "2026-01-09T16:22:00.000Z",
       "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
     },
@@ -1391,6 +1446,8 @@ GET /vendedor/ofertas
       "precio": "6343.00",
       "stock": 4,
       "estado": "activa",
+      "fecha_aprobacion": null,
+      "aprobado_por": null,
       "fecha_creacion": "2026-01-04T16:52:00.000Z",
       "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
     }
@@ -1405,6 +1462,20 @@ Mongo. `imagen` es la primera de `variantes[].imagenes` de esa variante, o
 Mongo (no debería pasar nunca: el catálogo no borra, solo desactiva), la
 oferta sale igual con `"(producto no encontrado)"`/`"(variante no
 encontrada)"` en vez de romper la lista entera por una fila huérfana.
+
+`fecha_aprobacion` y `aprobado_por` cuentan cómo entró en circulación la
+oferta (flujo de aprobación, migración `010_aprobacion_ofertas.sql`):
+
+- `fecha_aprobacion` — cuándo la aprobó la tienda. `null` = **nunca
+  aprobada**: está `pendiente`, `rechazada`, o `retirada` sin haber pasado
+  por revisión. Sobrevive a que después la oferta se pause o se retire.
+- `aprobado_por` — **quién** la aprobó (`id_usuario`, `usuario`, `nombre`,
+  `apellido` — la cuenta de la tienda, o el admin real que la revisó). Es
+  `null` en tres casos: la oferta nunca fue aprobada (`fecha_aprobacion`
+  también `null`); es una oferta de la **propia tienda o de un admin**
+  (nacen aprobadas sin revisor — `fecha_aprobacion` puesta, `aprobado_por`
+  `null`); o es anterior al flujo de aprobación. El **dueño** de la oferta
+  no sale de aquí, sale de que es tu panel.
 
 Un vendedor sin ninguna oferta recibe `[]`, no un error.
 
@@ -1649,6 +1720,13 @@ GET /vendedor/ofertas/producto/2
           "precio": "13803.00",
           "stock": 15,
           "estado": "pausada",
+          "fecha_aprobacion": "2026-08-25T15:54:00.258Z",
+          "aprobado_por": {
+            "id_usuario": "2",
+            "usuario": "mesh_tienda",
+            "nombre": "Mesh",
+            "apellido": "Tienda"
+          },
           "fecha_creacion": "2026-01-09T16:22:00.000Z",
           "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
         }
@@ -1667,6 +1745,11 @@ GET /vendedor/ofertas/producto/2
 Un producto donde no tengo ninguna oferta todavía sale igual, con
 `mi_oferta: null` en todas sus variantes — no es un error, es la señal de
 "todavía no publicaste nada aquí".
+
+`mi_oferta` trae `fecha_aprobacion` y `aprobado_por` con el mismo
+significado que en `GET /vendedor/ofertas` (quién y cuándo aprobó la
+tienda esa oferta; los dos `null` mientras no circule, `aprobado_por`
+también `null` en las ofertas de la propia tienda/admin).
 
 ### 400
 
@@ -1795,13 +1878,19 @@ POST /vendedor/ofertas
     "precio": "3950.00",
     "stock": 7,
     "estado": "pendiente",
+    "fecha_aprobacion": null,
+    "aprobado_por": null,
     "fecha_creacion": "2026-08-25T17:10:24.348Z",
     "fecha_actualizacion": "2026-08-25T17:10:24.348Z"
   }
 }
 ```
 
-(`estado` es `"activa"` si quien la crea es la tienda o un admin.)
+(`estado` es `"activa"` si quien la crea es la tienda o un admin, y en ese
+caso `fecha_aprobacion` viene puesta — pero `aprobado_por` sigue `null`:
+la tienda/admin nace aprobada sin revisor. Un vendedor normal nace
+`pendiente` con las dos en `null`. Recién creada, `aprobado_por` siempre
+es `null`.)
 
 Misma forma que cada elemento de `GET /vendedor/ofertas`. Deja al día en
 Mongo los cinco campos calculados del producto y la variante afectados
@@ -1949,6 +2038,13 @@ Al menos uno de los tres tiene que venir.
     "precio": "550.00",
     "stock": 6,
     "estado": "activa",
+    "fecha_aprobacion": "2026-08-28T22:11:03.512Z",
+    "aprobado_por": {
+      "id_usuario": "2",
+      "usuario": "mesh_tienda",
+      "nombre": "Mesh",
+      "apellido": "Tienda"
+    },
     "fecha_creacion": "2026-08-25T17:10:44.377Z",
     "fecha_actualizacion": "2026-08-25T17:18:46.987Z"
   }
@@ -1957,8 +2053,11 @@ Al menos uno de los tres tiene que venir.
 
 Misma forma que `POST /vendedor/ofertas`. `payload.estado` trae el estado
 real tras el cambio (puede ser `pendiente` si la oferta no estaba
-aprobada). Deja al día en Mongo los cinco campos calculados del producto y
-la variante afectados.
+aprobada). `fecha_aprobacion` / `aprobado_por` traen quién y cuándo la
+aprobó la tienda, con el mismo significado que en `GET /vendedor/ofertas`;
+editar la oferta no los toca (una oferta ya aprobada que se edita sigue
+mostrando a su aprobador). Deja al día en Mongo los cinco campos
+calculados del producto y la variante afectados.
 
 Probado en vivo el 25 de agosto de 2026 (aprobadas) y el 28 de agosto de
 2026 (flujo de aprobación) contra la base real:
@@ -2088,6 +2187,13 @@ PATCH /vendedor/ofertas/174/revision
     "precio": "550.00",
     "stock": 6,
     "estado": "activa",
+    "fecha_aprobacion": "2026-08-28T22:11:03.512Z",
+    "aprobado_por": {
+      "id_usuario": "2",
+      "usuario": "mesh_tienda",
+      "nombre": "Mesh",
+      "apellido": "Tienda"
+    },
     "fecha_creacion": "2026-08-25T17:10:44.377Z",
     "fecha_actualizacion": "2026-08-28T22:11:03.512Z"
   }
@@ -2096,8 +2202,13 @@ PATCH /vendedor/ofertas/174/revision
 
 `mensaje` es `"Oferta aprobada"` o `"Oferta rechazada"` según la decisión;
 `payload.estado` es `activa` o `rechazada`. Misma forma que
-`PATCH /vendedor/ofertas/:id`. Al aprobar se ponen `fecha_aprobacion =
-now()` y se recalculan los cinco campos del producto en Mongo.
+`PATCH /vendedor/ofertas/:id`. **Al aprobar** se ponen `fecha_aprobacion =
+now()` y `id_usuario_aprobo` = **quien revisa** (la cuenta de la tienda, o
+el `id_usuario` real del admin — no se sustituye por la tienda, igual que
+en `PATCH /vendedor/productos/:id/revision`), y `payload.aprobado_por` lo
+devuelve resuelto; después se recalculan los cinco campos del producto en
+Mongo. **Al rechazar**, `fecha_aprobacion` y `aprobado_por` quedan `null`
+y solo se inserta la fila en `rechazo_oferta`.
 
 ### 400
 
@@ -2151,3 +2262,15 @@ cualquier estado ≠ `pendiente` → 409, y el 409 no deja fila de rechazo
 corrige) → pendiente → aprobada` funciona y conserva el historial de
 rechazo; y **12 carreras concurrentes aprobar-vs-rechazar sobre la misma
 oferta**: siempre exactamente un 200 y un 409, con estado final coherente.
+
+Probado otra vez el 29 de agosto de 2026 (20 comprobaciones) al añadir
+`aprobado_por` / `id_usuario_aprobo`: la tienda aprueba → `aprobado_por` =
+`mesh_tienda` (id 2), `oferta.id_usuario_aprobo = 2`; un **admin** aprueba
+→ `aprobado_por` = `admin_mesh` (id 5), no la tienda; rechazar deja
+`aprobado_por` y `fecha_aprobacion` en `null` y `id_usuario_aprobo` NULL en
+la base; la oferta aprobada aparece con su `aprobado_por` en
+`GET /vendedor/ofertas`, en `GET /vendedor/ofertas/producto/:id`
+(`mi_oferta`) y al editarla; las ofertas de la propia tienda salen con
+`fecha_aprobacion` puesta y `aprobado_por` `null`; y las 350 ofertas de
+vendedor de la semilla salen con `aprobado_por` = `mesh_tienda`. Teardown
+sin drift en los campos calculados de Mongo.

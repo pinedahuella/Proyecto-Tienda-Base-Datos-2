@@ -232,6 +232,90 @@ COMMENT ON FUNCTION agregar_linea(bigint, jsonb) IS
 
 
 -- ============================================================
+-- restar_linea
+-- ============================================================
+-- El "-1" de agregar_linea: resta cantidad de una oferta que ya esta en
+-- el pedido, en vez de sumarla. Si la resta deja la cantidad en 0 o
+-- menos, la linea se borra entera -- mismo resultado final que
+-- quitar_linea, disparado por llegar a 0 en vez de un DELETE aparte.
+--
+-- Sin chequeo de stock: restar unidades nunca puede dejar sin stock a
+-- nadie, a diferencia de agregar_linea.
+CREATE OR REPLACE FUNCTION restar_linea(
+    p_id_pedido  bigint,
+    p_id_oferta  bigint,
+    p_cantidad   integer
+) RETURNS jsonb
+LANGUAGE plpgsql
+AS $fn$
+DECLARE
+    v_estado_pedido  varchar;
+    v_id_linea       bigint;
+    v_actual         integer;
+    v_nueva          integer;
+BEGIN
+    SELECT ep.estado_pedido_nombre INTO v_estado_pedido
+    FROM pedido p JOIN estado_pedido ep USING (id_estado_pedido)
+    WHERE p.id_pedido = p_id_pedido;
+
+    IF v_estado_pedido IS NULL THEN
+        RAISE EXCEPTION 'No existe el pedido %', p_id_pedido
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    IF v_estado_pedido <> 'pendiente' THEN
+        RAISE EXCEPTION 'El pedido % esta % y ya no se puede cambiar',
+                        p_id_pedido, v_estado_pedido
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    IF p_cantidad IS NULL OR p_cantidad <= 0 THEN
+        RAISE EXCEPTION 'La cantidad tiene que ser mayor a 0'
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    SELECT pp.id_pedido_producto, pp.cantidad INTO v_id_linea, v_actual
+    FROM pedido_producto pp
+    JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+    WHERE pp.id_pedido = p_id_pedido
+      AND ph.id_oferta = p_id_oferta;
+
+    IF v_id_linea IS NULL THEN
+        RAISE EXCEPTION 'La oferta % no esta en el pedido %', p_id_oferta, p_id_pedido
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    v_nueva := v_actual - p_cantidad;
+
+    IF v_nueva <= 0 THEN
+        DELETE FROM pedido_producto WHERE id_pedido_producto = v_id_linea;
+
+        RETURN jsonb_build_object(
+            'id_pedido', p_id_pedido,
+            'id_oferta', p_id_oferta,
+            'cantidad', 0,
+            'eliminada', true
+        );
+    END IF;
+
+    UPDATE pedido_producto SET cantidad = v_nueva
+    WHERE id_pedido_producto = v_id_linea;
+
+    RETURN jsonb_build_object(
+        'id_pedido', p_id_pedido,
+        'id_pedido_producto', v_id_linea,
+        'id_oferta', p_id_oferta,
+        'cantidad', v_nueva,
+        'eliminada', false
+    );
+END;
+$fn$;
+
+COMMENT ON FUNCTION restar_linea(bigint, bigint, integer) IS
+    'Resta cantidad de una linea del pedido pendiente; si llega a 0 la borra';
+
+
+-- ============================================================
 -- quitar_linea
 -- ============================================================
 CREATE OR REPLACE FUNCTION quitar_linea(
@@ -271,6 +355,50 @@ $fn$;
 
 COMMENT ON FUNCTION quitar_linea(bigint, bigint) IS
     'Saca una oferta de un pedido pendiente';
+
+
+-- ============================================================
+-- cambiar_direccion_pedido
+-- ============================================================
+-- Cambia a donde apunta un pedido pendiente. Solo mientras esta pendiente,
+-- igual que agregar_linea/quitar_linea: una vez comprado, id_direccion_historial
+-- ya es la version que regia cuando se compro, y cambiarla despues reescribiria
+-- a donde se dijo que se mando de verdad.
+--
+-- La ownership de la direccion (que sea del mismo usuario) ya se resolvio en
+-- el backend antes de llamar aqui -- p_id_direccion_historial ya es la fila
+-- correcta, no un id_direccion suelto.
+CREATE OR REPLACE FUNCTION cambiar_direccion_pedido(
+    p_id_pedido               bigint,
+    p_id_direccion_historial  bigint
+) RETURNS void
+LANGUAGE plpgsql
+AS $fn$
+DECLARE
+    v_estado  varchar;
+BEGIN
+    SELECT ep.estado_pedido_nombre INTO v_estado
+    FROM pedido p JOIN estado_pedido ep USING (id_estado_pedido)
+    WHERE p.id_pedido = p_id_pedido;
+
+    IF v_estado IS NULL THEN
+        RAISE EXCEPTION 'No existe el pedido %', p_id_pedido
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+
+    IF v_estado <> 'pendiente' THEN
+        RAISE EXCEPTION 'El pedido % esta % y ya no se puede cambiar',
+                        p_id_pedido, v_estado
+            USING ERRCODE = 'check_violation';
+    END IF;
+
+    UPDATE pedido SET id_direccion_historial = p_id_direccion_historial
+    WHERE id_pedido = p_id_pedido;
+END;
+$fn$;
+
+COMMENT ON FUNCTION cambiar_direccion_pedido(bigint, bigint) IS
+    'Cambia la direccion de un pedido pendiente';
 
 
 -- ============================================================
@@ -382,12 +510,15 @@ BEGIN
         );
     END LOOP;
 
-    -- El pago nace pendiente: el pedido esta comprado, el dinero todavia no
-    -- entro. Quien confirme el cobro le pone la fecha y lo pasa a pagado.
+    -- Para la primera entrega, todo pago nace pagado de una vez, sin
+    -- importar el metodo -- no hay quien confirme transferencia/efectivo
+    -- todavia (ver el problema de fondo: un pedido puede mezclar
+    -- vendedores y el pago es uno solo, no uno por vendedor). Decision del
+    -- equipo: simplificar por ahora, retomarlo despues si hace falta.
     INSERT INTO pago (id_pedido, id_metodo_pago, monto, fecha_cancelacion, id_estado_pago)
     VALUES (
-        p_id_pedido, v_id_metodo, v_total, NULL,
-        (SELECT id_estado_pago FROM estado_pago WHERE estado_pago_nombre = 'pendiente')
+        p_id_pedido, v_id_metodo, v_total, now(),
+        (SELECT id_estado_pago FROM estado_pago WHERE estado_pago_nombre = 'pagado')
     );
 
     UPDATE pedido

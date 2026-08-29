@@ -1,12 +1,13 @@
 # Plan pendiente 01 — Aceptación de ofertas
 
-> **Estado (2026-08-28): el backend está completo y probado** (creación,
-> edición, los dos GET y `PATCH .../:id/revision` — 179 comprobaciones, 0
-> fallos, ver "Estado de implementación" más abajo). Falta **solo la
-> migración real** en `migrations/`, que lleva el compañero (hay un `.sql`
-> de referencia aplicado en la base local). Este documento fija las
-> decisiones de diseño acordadas con el usuario y el detalle de lo
-> construido.
+> **Estado (2026-08-29): completo.** El backend estaba construido y probado
+> desde el 2026-08-28 (creación, edición, los dos GET y
+> `PATCH .../:id/revision` — 179 comprobaciones). La **migración real** ya
+> está en `migrations/010_aprobacion_ofertas.sql`, y trajo una columna
+> extra, `oferta.id_usuario_aprobo`, que se integró al backend el
+> 2026-08-29 (+20 comprobaciones — ver "Añadido el 29 de agosto de 2026"
+> más abajo). Este documento fija las decisiones de diseño acordadas con el
+> usuario y el detalle de lo construido.
 
 ## El problema
 
@@ -459,10 +460,49 @@ Detalle de `PATCH /vendedor/ofertas/:id/revision`:
 | ciclo `pendiente → rechazada → (corrige) → pendiente → aprobada` | funciona, conserva el historial de rechazo |
 | 12 carreras concurrentes aprobar-vs-rechazar sobre la misma oferta | siempre 1×200 + 1×409, estado final coherente |
 
+### Añadido el 29 de agosto de 2026 — `oferta.id_usuario_aprobo`
+
+La migración real del compañero (`migrations/010_aprobacion_ofertas.sql`)
+salió con una columna que este plan no había previsto: **`oferta.id_usuario_aprobo`**
+(`bigint`, FK a `usuarios` con `ON DELETE RESTRICT`, nullable). Espeja lo
+que `propuesta_producto` ya hacía para los productos: la `fecha_aprobacion`
+dice *cuándo* y esta columna *quién*. `NULL` no significa "sin aprobar"
+(para eso está la fecha): significa que no consta revisor — la oferta de la
+tienda o de un admin nace aprobada sin que nadie la mire, y las ofertas
+anteriores al flujo tampoco tienen aprobador. Por eso **no** lleva CHECK
+que la empareje con `fecha_aprobacion`. El generador de datos ya la llena:
+de las 552 ofertas de la semilla, 350 (las de vendedor) quedan aprobadas
+por `mesh_tienda` y 202 (las de la tienda) con `NULL`.
+
+Cambios de backend que trajo (todos en `services/vendedores/ofertas.service.ts`
+y `models/oferta.ts`):
+
+- **`revisar()` (rama `aprobar`)** — el `UPDATE oferta` ahora también pone
+  `id_usuario_aprobo = <id del token>`: **quien revisa**, tal cual, sin
+  pasar por `resolverIdEfectivo` (un admin queda como el admin real, no
+  sustituido por la tienda — mismo criterio que `revisarPropuesta`). El
+  rechazo no la toca.
+- **`OfertaPropiaResumen`** (y por herencia `OfertaPropia`) ganó dos campos
+  que antes no se exponían: `fecha_aprobacion: Date | null` y
+  `aprobado_por: AprobadorOferta | null` (`{ id_usuario, usuario, nombre,
+  apellido }`). Se resuelven con un `LEFT JOIN usuarios ua ON ua.id_usuario
+  = o.id_usuario_aprobo` en las cuatro consultas de oferta propia
+  (`consultarOfertasPropias`, `consultarOfertasPropiasDeProducto`,
+  `obtenerFilaPropia`, `obtenerFilaPorId`) y un helper privado
+  `armarAprobador(fila)`.
+- Aparecen en `GET /vendedor/ofertas`, `GET /vendedor/ofertas/producto/:id`
+  (`mi_oferta`), y en las respuestas de `POST` / `PATCH /vendedor/ofertas/:id`
+  / `PATCH .../:id/revision`. La cola de `GET /vendedor/ofertas/pendientes`
+  no los lleva (todas son `pendiente`, nunca aprobadas).
+
+Probado en vivo el 29 de agosto de 2026 — 20 comprobaciones, 0 fallos (ver
+`endpoints-vendedores.md`, sección `PATCH /vendedor/ofertas/:id/revision`).
+
 ### Pendiente (no hecho todavía)
 
-- La migración real (la lleva el compañero). Todo el backend del flujo de
-  aprobación de ofertas está construido y probado.
+- Nada del backend. La migración real ya está aplicada
+  (`migrations/008..010`, verificado contra la base local el 29 de agosto
+  de 2026).
 
 ## Cómo se prueba (el resto, cuando se implemente)
 
