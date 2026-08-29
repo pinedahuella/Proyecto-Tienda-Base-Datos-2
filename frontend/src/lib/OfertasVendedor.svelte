@@ -98,6 +98,12 @@
 		precio: string;
 		stock: number;
 		estado: EstadoOferta;
+		/**
+		 * Cuando la tienda la aprobo. NULL = nunca. Es lo que decide si el
+		 * vendedor puede activarla o pausarla el solo: sin ella el backend
+		 * responde 409.
+		 */
+		fecha_aprobacion: string | null;
 		fecha_creacion: string;
 		fecha_actualizacion: string;
 	}
@@ -196,23 +202,16 @@
 	const ESTADOS: EstadoOferta[] = ['pendiente', 'activa', 'pausada', 'retirada', 'rechazada'];
 
 	/**
-	 * Si el vendedor puede poner una oferta `activa` o `pausada` el solo.
+	 * Si la oferta todavia no paso por la tienda.
 	 *
-	 * La verdad la tiene `oferta.fecha_aprobacion`, pero el backend no la manda en
-	 * el resumen, asi que se deduce del estado. Y se deduce SOLO donde es seguro:
-	 *
-	 *   pendiente / rechazada  ->  nunca aprobada, seguro. El backend da 409.
-	 *   activa / pausada       ->  aprobada, seguro. A esos estados no se llega sin.
-	 *   retirada               ->  NO SE SABE. Pudo retirarla estando aprobada, o
-	 *                              estando pendiente sin que nadie la mirara.
-	 *
-	 * Con la ambigua se deja el boton y se confia en el backend: si no estaba
-	 * aprobada contesta 409 con un mensaje que ya explica que hacer. Esconder el
-	 * boton en ese caso seria peor, porque dejaria sin salida a una oferta
-	 * retirada que SI estaba aprobada.
+	 * Se mira `fecha_aprobacion` y no el estado, porque es exactamente lo que
+	 * mira el backend (`nuncaAprobada`) para decidir si el vendedor puede
+	 * activarla o pausarla el solo. Deducirlo del estado casi alcanzaba, pero
+	 * `retirada` es ambigua -- se puede retirar una aprobada y tambien una que
+	 * nunca se miro -- y ahi la deduccion se equivocaba en un sentido o en otro.
 	 */
-	function sinAprobar(estado: EstadoOferta): boolean {
-		return estado === 'pendiente' || estado === 'rechazada';
+	function sinAprobar(o: { fecha_aprobacion: string | null }): boolean {
+		return o.fecha_aprobacion == null;
 	}
 
 	/** Cuantos productos por tanda en la vista de catalogo. */
@@ -1691,7 +1690,7 @@
 									<button type="button" onclick={() => cambiarEstado(o, 'pausada')} disabled={guardando}>
 										Pausar
 									</button>
-								{:else if !sinAprobar(o.estado)}
+								{:else if !sinAprobar(o)}
 									<button type="button" onclick={() => cambiarEstado(o, 'activa')} disabled={guardando}>
 										Activar
 									</button>
@@ -1737,7 +1736,7 @@
 
 							{#if editando === o.id_oferta}
 								<div class="edicion">
-									{#if sinAprobar(o.estado)}
+									{#if sinAprobar(o)}
 										<!-- Se dice ANTES de que lo intente: el select de abajo no ofrece
 										     activa ni pausada porque el backend las rechaza con un 409
 										     mientras la tienda no la apruebe. -->
@@ -1757,7 +1756,7 @@
 											<!-- Sin aprobar, las unicas salidas son dejarla como esta o
 											     retirarla: `activa` y `pausada` dan 409. -->
 											<select bind:value={estadoNuevo}>
-												{#each sinAprobar(o.estado) ? ESTADOS.filter((e) => e === o.estado || e === 'retirada') : ESTADOS as e}
+												{#each sinAprobar(o) ? ESTADOS.filter((e) => e === o.estado || e === 'retirada') : ESTADOS as e}
 													<option value={e}>{e}</option>
 												{/each}
 											</select>
