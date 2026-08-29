@@ -10,6 +10,11 @@ backend (usuario, perfil, direcciones, admin) están en
 sesión, pero sin exigir un rol en particular) en
 [endpoints-compradores.md](endpoints-compradores.md).
 
+`GET /productos/:id/resenas` (las reseñas de un producto, en su ficha) es
+pública pero vive en PostgreSQL, no en el catálogo de Mongo: está
+documentada aparte en [endpoints-resenas.md](endpoints-resenas.md) junto
+con `POST /resenas`.
+
 La forma de los documentos que devuelven estas rutas está explicada en
 [Elementos Documentales/productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)
 y [Elementos Documentales/ejemplos_bson_productos.md](Elementos%20Documentales/ejemplos_bson_productos.md).

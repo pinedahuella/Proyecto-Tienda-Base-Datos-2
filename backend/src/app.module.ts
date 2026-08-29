@@ -27,6 +27,8 @@ import { OfertasVendedorController } from './controllers/vendedores/ofertas.cont
 import { OfertasVendedorService } from './services/vendedores/ofertas.service';
 import { PedidosCompradorController } from './controllers/compradores/pedidos.controller';
 import { PedidosCompradorService } from './services/compradores/pedidos.service';
+import { ResenasController } from './controllers/resenas/resenas.controller';
+import { ResenasService } from './services/resenas/resenas.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -51,6 +53,7 @@ import { PedidosCompradorService } from './services/compradores/pedidos.service'
     ProductosVendedorController,
     OfertasVendedorController,
     PedidosCompradorController,
+    ResenasController,
   ],
   providers: [
     InicioService,
@@ -67,6 +70,7 @@ import { PedidosCompradorService } from './services/compradores/pedidos.service'
     ProductosVendedorService,
     OfertasVendedorService,
     PedidosCompradorService,
+    ResenasService,
   ],
 })
 export class AppModule {}

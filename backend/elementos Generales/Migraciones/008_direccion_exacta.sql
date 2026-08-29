@@ -92,27 +92,26 @@ COMMENT ON COLUMN direccion_historial.direccion_exacta IS
 -- estaban andando cuando llego la columna: les copia al historial la calle que
 -- tenga la fila viva, para que las dos tablas no se contradigan.
 --
--- Van dos pasos, y el segundo tiene una trampa que costo ver.
+-- No se rellena NADA en `direcciones`, y esa es la decision, no un olvido.
 --
+-- La tentacion era ponerle su calle a las dos direcciones del conjunto de datos,
+-- que son las unicas cuya calle conocemos. Se probo y estaba mal: en una base ya
+-- usada, esas dos cuentas tienen MAS direcciones -- las que fue creando la gente
+-- desde la aplicacion -- y no hay forma de distinguir cual es la sembrada. Ni por
+-- usuario (empareja con todas las suyas) ni por su pais/ciudad/codigo postal, que
+-- tampoco es unico: en esta misma base hay dos filas con la tupla identica, una
+-- sembrada y otra tecleada.
 --
--- Paso 1: las dos direcciones del conjunto de datos
--- ------------------------------------------------------------
--- Son las unicas direcciones que pudieron existir antes de esta columna en
--- cualquier base de Mesh, porque las escribe la semilla y sabemos exactamente
--- cual es la calle de cada una. Se emparejan por CORREO, nunca por id.
+-- Lo que pasaba al intentarlo era peor que dejarlo vacio: una calle de la zona 10
+-- de la capital acababa escrita en una direccion de Merida y en otra de Flores.
+-- Dato inventado que se entrega mal y nadie descubre hasta que el paquete se
+-- pierde.
 --
--- Las direcciones que haya creado gente desde la aplicacion NO se tocan: de
--- esas no sabemos la calle, y una direccion inventada se entrega mal sin que
--- nadie se entere. Se quedan en NULL, que es la respuesta honesta.
-UPDATE direcciones d
-   SET direccion_exacta = v.calle
-  FROM (VALUES
-      ('compradora.norte@mesh.com', '6a. Avenida 9-18, Zona 10, Edificio Vista Real, Nivel 3'),
-      ('comprador.sur@mesh.com',    '5a. Avenida Norte 22, frente al Arco de Santa Catalina')
-  ) AS v(correo, calle)
-  JOIN usuarios u ON u.correo_electronico = v.correo
- WHERE d.id_usuario = u.id_usuario
-   AND d.direccion_exacta IS NULL;
+-- Asi que en una base ya usada las direcciones anteriores se quedan en NULL, que
+-- es la respuesta honesta: no consta la calle. El backend la exige al crear una
+-- nueva, la pantalla marca las que estan sin ella ("sin calle, editala para poder
+-- entregarla"), y se van completando a mano. En una base NUEVA no hay nada de
+-- esto: la calle nace puesta desde `migrations/datos/generador.js`.
 
 
 -- Paso 2: la version VIGENTE de cada direccion, y solo esa

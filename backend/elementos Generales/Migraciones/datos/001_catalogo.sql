@@ -3864,10 +3864,270 @@ END
 $bloque$;
 
 -- ============================================================
+-- La parte social: 86 resenas, 29 respuestas, 46 votos
+-- ============================================================
+-- Tablas de la migracion 011.
+--
+-- Van en un bloque plpgsql y no en tres INSERT sueltos por una razon: la
+-- resena necesita el id del comentario que acaba de nacer, y ese id no se
+-- puede escribir a mano ni adivinar. El bloque lo recibe del RETURNING y lo
+-- usa en la linea siguiente.
+--
+-- Todo se busca por correo y por nombre de producto, nunca por id: la regla
+-- de migrations/README.md.
+--
+-- Y todo esta guardado con NOT EXISTS, porque arrancar.ps1 vuelve a correr
+-- este archivo en cada arranque: sin eso, la segunda corrida chocaria con
+-- el UNIQUE de resena y tumbaria la carga entera.
+
+DO $social$
+DECLARE
+    v_fila        record;
+    v_autor       bigint;
+    v_vendedor    bigint;
+    v_producto    bigint;
+    v_comentario  bigint;
+    v_raiz        bigint;
+BEGIN
+    -- ---------- Las resenas, con su comentario raiz
+    FOR v_fila IN
+        SELECT * FROM (VALUES
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Espinilleras Muralla', 5, 'Muy buena atencion, respondio las dudas antes de que yo pagara.', '2026-04-24 17:50:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Silla de comedor Vara', 4, 'Contento con la compra. El empaque podria ser mejor.', '2026-04-25 12:10:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Camisa polo pique Cardumen', 2, 'Se tardo mas de una semana y nadie contestaba los mensajes.', '2026-02-27 08:56:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Espinilleras Muralla', 2, 'Mal empacado, llego con la caja abierta.', '2026-03-17 18:13:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Audifonos Duna Trabajo', 2, 'Mal empacado, llego con la caja abierta.', '2026-02-26 16:23:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Lampara colgante Candela 40', 2, 'El producto no venia igual a la foto. Sirve, pero no es lo que esperaba.', '2026-04-25 15:23:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Camisa de vestir Meridiano', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-02-27 12:29:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Set de bandas elasticas', 2, 'Mal empacado, llego con la caja abierta.', '2026-03-25 15:17:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Telefono Ceibo Lite', 5, 'Segunda vez que le compro y las dos veces sin un problema.', '2026-03-25 20:27:00-06'),
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Balon de futbol numero 5', 4, 'Bien en general, aunque tardo en contestar un mensaje.', '2026-05-25 18:57:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Manual de instalaciones electricas residenciales', 4, 'Buen producto y buen precio. Tardo un dia mas de lo que decia, nada grave.', '2026-06-01 09:42:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Monitor Vitral 24', 3, 'El producto esta bien, el envio fue lento.', '2026-01-28 15:43:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Audifonos Colibri Micro TWS', 5, 'Muy buena atencion, respondio las dudas antes de que yo pagara.', '2026-03-11 10:48:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Audifonos Brisa Sport', 2, 'Se tardo mas de una semana y nadie contestaba los mensajes.', '2026-01-24 11:21:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Lampara de pie Vigia 165', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-04-05 18:46:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Camisa guayabera Xelaju', 4, 'Buen producto y buen precio. Tardo un dia mas de lo que decia, nada grave.', '2026-03-02 16:01:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Agua de colonia Amanecer Citrico', 4, 'Todo bien. La caja venia un poco golpeada pero el contenido intacto.', '2026-06-22 11:49:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Monitor Horizonte 27', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-02-11 08:15:00-06'),
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Lampara de pie Vigia 165', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-02-21 15:30:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Redes industriales y buses de campo', 4, 'Bien en general, aunque tardo en contestar un mensaje.', '2026-06-17 16:28:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Cafetera Alba Espresso', 5, 'Excelente. Lo recomiendo sin pensarlo.', '2026-02-24 12:12:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Telefono Nautilo Pro', 5, 'Excelente. Lo recomiendo sin pensarlo.', '2026-02-18 20:30:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Lampara de escritorio Faro', 1, 'Nunca me llego a la direccion que puse y tuve que ir a traerlo.', '2026-04-05 09:34:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Limpiador en gel Verdo', 5, 'Entrega puntual y el producto viene con todo lo que dice.', '2026-04-16 20:48:00-06'),
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Pantalon chino resistente', 4, 'Contento con la compra. El empaque podria ser mejor.', '2026-03-23 16:15:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Olla arrocera Grano 8 tazas', 4, 'Buen producto y buen precio. Tardo un dia mas de lo que decia, nada grave.', '2026-03-10 10:47:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Crema hidratante nocturna Alba', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-05-06 13:05:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Tabla de picar Cedro grande', 4, 'Bien en general, aunque tardo en contestar un mensaje.', '2026-02-08 08:39:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Laptop Bastion 16', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-03-25 14:27:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Escritorio Roble 120', 2, 'El producto no venia igual a la foto. Sirve, pero no es lo que esperaba.', '2026-04-18 11:51:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Camisa de vestir Meridiano', 5, 'Segunda vez que le compro y las dos veces sin un problema.', '2026-03-25 21:49:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Mesa de centro Guijarro', 5, 'Entrega puntual y el producto viene con todo lo que dice.', '2026-04-09 17:32:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Contorno de ojos Lumine', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-04-20 09:37:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Antologia del ruido', 2, 'Se tardo mas de una semana y nadie contestaba los mensajes.', '2026-04-20 18:28:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Laptop Vireo Air 12', 3, 'Regular. Tuve que escribir dos veces para que me dieran la guia.', '2026-03-02 12:10:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Monitor Nube 22', 5, 'Muy buena atencion, respondio las dudas antes de que yo pagara.', '2026-04-07 15:51:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Silla de comedor Vara', 4, 'Buen producto y buen precio. Tardo un dia mas de lo que decia, nada grave.', '2026-04-24 09:29:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Monitor Horizonte 27', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-03-13 13:51:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Manual de instalaciones electricas residenciales', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-06-28 18:52:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Cacerola honda Comal 18', 5, 'Segunda vez que le compro y las dos veces sin un problema.', '2026-02-10 19:52:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Redes industriales y buses de campo', 3, 'Ni bueno ni malo. Llego lo que pedi pero se tardo bastante.', '2026-04-10 15:21:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Monitor Vertice 27 Gamer', 4, 'Cumple con lo que ofrece. Habria estado bueno que avisaran del envio.', '2026-03-27 12:19:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Camisa de vestir Meridiano', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-02-24 09:03:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Agua de colonia Amanecer Citrico', 2, 'Mal empacado, llego con la caja abierta.', '2026-04-24 21:24:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Licuadora Torbellino 1200', 4, 'Cumple con lo que ofrece. Habria estado bueno que avisaran del envio.', '2026-04-24 19:48:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Monitor Vertice 27 Gamer', 3, 'El producto esta bien, el envio fue lento.', '2026-01-28 17:20:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Laptop Nimbo 13', 5, 'Segunda vez que le compro y las dos veces sin un problema.', '2026-02-12 11:09:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Lampara colgante Candela 40', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-03-04 17:55:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Monitor Cenit 32 4K', 5, 'Segunda vez que le compro y las dos veces sin un problema.', '2026-02-05 13:22:00-06'),
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Camisa polo pique Cardumen', 4, 'Contento con la compra. El empaque podria ser mejor.', '2026-04-02 13:47:00-06'),
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Candado plegable Cerrojo F8', 5, 'Segunda vez que le compro y las dos veces sin un problema.', '2026-03-23 16:31:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Olla arrocera Grano 8 tazas', 4, 'Buen producto y buen precio. Tardo un dia mas de lo que decia, nada grave.', '2026-03-18 18:12:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Set descubrimiento Nocturno', 4, 'Todo bien. La caja venia un poco golpeada pero el contenido intacto.', '2026-04-22 09:52:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Telefono Pedernal Rugged', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-03-23 11:46:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'El camino de las nubes', 2, 'El producto no venia igual a la foto. Sirve, pero no es lo que esperaba.', '2026-05-27 17:27:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Laptop Aurora 14', 4, 'Bien en general, aunque tardo en contestar un mensaje.', '2026-01-18 16:10:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Audifonos Sereno ANC', 5, 'Entrega puntual y el producto viene con todo lo que dice.', '2026-02-24 10:32:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Juego de ollas Fuego 5 piezas', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-02-13 21:48:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Comoda Sendero 4 gavetas', 4, 'Bien en general, aunque tardo en contestar un mensaje.', '2026-02-14 14:33:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Lampara de pie Vigia 165', 5, 'Entrega puntual y el producto viene con todo lo que dice.', '2026-03-15 08:24:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Silla de comedor Vara', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-02-16 11:26:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Pantalon cargo Vereda', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-05-06 08:40:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Limpiador en gel Verdo', 4, 'Contento con la compra. El empaque podria ser mejor.', '2026-04-14 09:10:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Bota de trabajo Yunque S3', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-03-23 17:54:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Librero Hoja 5 niveles', 5, 'Segunda vez que le compro y las dos veces sin un problema.', '2026-02-23 09:11:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Bota de trabajo Yunque S3', 4, 'Cumple con lo que ofrece. Habria estado bueno que avisaran del envio.', '2026-04-27 10:04:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Audifonos Marea Diadema Abierta', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-02-09 09:09:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Protector solar mineral FPS 50', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-05-26 11:35:00-06'),
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Laptop Cumbre 17 Gamer', 4, 'Todo bien. La caja venia un poco golpeada pero el contenido intacto.', '2026-01-11 13:56:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Escritorio Roble 120', 5, 'Excelente. Lo recomiendo sin pensarlo.', '2026-04-26 14:33:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Telefono Vela 7', 4, 'Buen producto y buen precio. Tardo un dia mas de lo que decia, nada grave.', '2026-02-07 16:42:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Telefono Cuarzo Duo', 4, 'Contento con la compra. El empaque podria ser mejor.', '2026-03-23 09:35:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Espinilleras Muralla', 4, 'Cumple con lo que ofrece. Habria estado bueno que avisaran del envio.', '2026-03-17 16:48:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Silla de comedor Vara', 5, 'Segunda vez que le compro y las dos veces sin un problema.', '2026-02-18 17:27:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Camisa polo pique Cardumen', 5, 'Excelente. Lo recomiendo sin pensarlo.', '2026-02-28 14:33:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Espinilleras Muralla', 3, 'Regular. Tuve que escribir dos veces para que me dieran la guia.', '2026-04-14 20:13:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Audifonos Duna Trabajo', 5, 'Excelente. Lo recomiendo sin pensarlo.', '2026-01-28 11:36:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Lampara colgante Candela 40', 3, 'Regular. Tuve que escribir dos veces para que me dieran la guia.', '2026-02-21 18:51:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Camisa de vestir Meridiano', 5, 'Entrega puntual y el producto viene con todo lo que dice.', '2026-02-25 16:57:00-06'),
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Set de bandas elasticas', 5, 'Muy buena atencion, respondio las dudas antes de que yo pagara.', '2026-03-27 21:03:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Telefono Ceibo Lite', 4, 'Bien en general, aunque tardo en contestar un mensaje.', '2026-03-06 14:56:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Balon de futbol numero 5', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-05-19 10:05:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Manual de instalaciones electricas residenciales', 4, 'Buen producto y buen precio. Tardo un dia mas de lo que decia, nada grave.', '2026-04-21 17:12:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Monitor Vitral 24', 5, 'Todo perfecto. Tal cual la descripcion y sin un rayon.', '2026-02-16 19:37:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Audifonos Colibri Micro TWS', 5, 'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.', '2026-03-07 21:58:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Audifonos Brisa Sport', 5, 'Excelente. Lo recomiendo sin pensarlo.', '2026-03-18 19:47:00-06')
+        ) AS t(autor, vendedor, producto, nota, texto, fecha)
+    LOOP
+        SELECT id_usuario  INTO v_autor     FROM usuarios  WHERE correo_electronico = v_fila.autor;
+        SELECT id_usuario  INTO v_vendedor  FROM usuarios  WHERE correo_electronico = v_fila.vendedor;
+        SELECT id_producto INTO v_producto  FROM productos WHERE nombre = v_fila.producto;
+
+        CONTINUE WHEN v_autor IS NULL OR v_vendedor IS NULL OR v_producto IS NULL;
+        CONTINUE WHEN EXISTS (
+            SELECT 1 FROM resena
+            WHERE id_usuario = v_autor
+              AND id_usuario_vendedor = v_vendedor
+              AND id_producto_mongo = v_producto);
+
+        INSERT INTO comentario (id_usuario, comentario, fecha_publicacion)
+        VALUES (v_autor, v_fila.texto, v_fila.fecha::timestamptz)
+        RETURNING id_comentario INTO v_comentario;
+
+        INSERT INTO resena (id_usuario, id_usuario_vendedor, id_producto_mongo, calificacion, id_comentario)
+        VALUES (v_autor, v_vendedor, v_producto, v_fila.nota, v_comentario);
+    END LOOP;
+
+    -- ---------- Las respuestas del vendedor, colgando de la raiz
+    FOR v_fila IN
+        SELECT * FROM (VALUES
+            ('compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Silla de comedor Vara', 'Le agradecemos el comentario. Seguimos mejorando el empaque.', '2026-04-25 14:10:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Camisa polo pique Cardumen', 'Gracias por avisarnos. Escribanos y lo resolvemos.', '2026-02-27 09:56:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Audifonos Duna Trabajo', 'Gracias por avisarnos. Escribanos y lo resolvemos.', '2026-02-26 17:23:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Lampara colgante Candela 40', 'Le agradecemos el comentario. Seguimos mejorando el empaque.', '2026-04-25 16:23:00-06'),
+            ('compradora.norte@mesh.com', 'tienda@mesh.com', 'Set de bandas elasticas', 'Tiene razon, ya cambiamos de empresa de envio por eso mismo.', '2026-03-25 17:17:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Telefono Ceibo Lite', 'Que bueno que le sirvio. Estamos para servirle.', '2026-03-25 22:27:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Manual de instalaciones electricas residenciales', 'Gracias por la compra, cualquier cosa nos escribe.', '2026-06-01 10:42:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Audifonos Brisa Sport', 'Tiene razon, ya cambiamos de empresa de envio por eso mismo.', '2026-01-24 12:21:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Camisa guayabera Xelaju', 'Gracias por la compra, cualquier cosa nos escribe.', '2026-03-02 17:01:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Agua de colonia Amanecer Citrico', 'Gracias por la compra, cualquier cosa nos escribe.', '2026-06-22 12:49:00-06'),
+            ('comprador.sur@mesh.com', 'tienda@mesh.com', 'Lampara de pie Vigia 165', 'Le agradecemos el comentario. Seguimos mejorando el empaque.', '2026-02-21 17:30:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Lampara de escritorio Faro', 'Gracias por avisarnos. Escribanos y lo resolvemos.', '2026-04-05 10:34:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Olla arrocera Grano 8 tazas', 'Tiene razon, ya cambiamos de empresa de envio por eso mismo.', '2026-03-10 12:47:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Escritorio Roble 120', 'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.', '2026-04-18 13:51:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Camisa de vestir Meridiano', 'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.', '2026-03-25 22:49:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Contorno de ojos Lumine', 'Le agradecemos el comentario. Seguimos mejorando el empaque.', '2026-04-20 11:37:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Antologia del ruido', 'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.', '2026-04-20 20:28:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.sur@mesh.com', 'Silla de comedor Vara', 'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.', '2026-04-24 11:29:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Agua de colonia Amanecer Citrico', 'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.', '2026-04-24 23:24:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Lampara colgante Candela 40', 'Tiene razon, ya cambiamos de empresa de envio por eso mismo.', '2026-03-04 18:55:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Lampara de pie Vigia 165', 'Gracias por la compra, cualquier cosa nos escribe.', '2026-03-15 10:24:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Pantalon cargo Vereda', 'Gracias por avisarnos. Escribanos y lo resolvemos.', '2026-05-06 10:40:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Audifonos Marea Diadema Abierta', 'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.', '2026-02-09 11:09:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Telefono Cuarzo Duo', 'Gracias por avisarnos. Escribanos y lo resolvemos.', '2026-03-23 11:35:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Silla de comedor Vara', 'Tiene razon, ya cambiamos de empresa de envio por eso mismo.', '2026-02-18 19:27:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Audifonos Duna Trabajo', 'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.', '2026-01-28 13:36:00-06'),
+            ('comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Lampara colgante Candela 40', 'Le agradecemos el comentario. Seguimos mejorando el empaque.', '2026-02-21 20:51:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Camisa de vestir Meridiano', 'Tiene razon, ya cambiamos de empresa de envio por eso mismo.', '2026-02-25 17:57:00-06'),
+            ('compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Audifonos Brisa Sport', 'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.', '2026-03-18 20:47:00-06')
+        ) AS t(autor, vendedor, producto, texto, fecha)
+    LOOP
+        SELECT id_usuario  INTO v_autor     FROM usuarios  WHERE correo_electronico = v_fila.autor;
+        SELECT id_usuario  INTO v_vendedor  FROM usuarios  WHERE correo_electronico = v_fila.vendedor;
+        SELECT id_producto INTO v_producto  FROM productos WHERE nombre = v_fila.producto;
+
+        SELECT id_comentario INTO v_raiz FROM resena
+        WHERE id_usuario = v_autor
+          AND id_usuario_vendedor = v_vendedor
+          AND id_producto_mongo = v_producto;
+
+        CONTINUE WHEN v_raiz IS NULL;
+        -- Ya contestada: se reconoce por el padre y el autor, no hay que
+        -- guardar nada aparte.
+        CONTINUE WHEN EXISTS (
+            SELECT 1 FROM comentario
+            WHERE id_comentario_padre = v_raiz AND id_usuario = v_vendedor);
+
+        INSERT INTO comentario (id_usuario, id_comentario_padre, comentario, fecha_publicacion)
+        VALUES (v_vendedor, v_raiz, v_fila.texto, v_fila.fecha::timestamptz);
+    END LOOP;
+
+    -- ---------- Los votos. El trigger de la 011 recalcula los contadores
+    FOR v_fila IN
+        SELECT * FROM (VALUES
+            ('ventas.sur@mesh.com', 'comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Camisa polo pique Cardumen', -1),
+            ('ventas.poniente@mesh.com', 'comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Espinilleras Muralla', 1),
+            ('ventas.poniente@mesh.com', 'comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Camisa de vestir Meridiano', 1),
+            ('ventas.poniente@mesh.com', 'compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Camisa guayabera Xelaju', 1),
+            ('comprador.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Camisa guayabera Xelaju', 1),
+            ('compradora.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Agua de colonia Amanecer Citrico', -1),
+            ('compradora.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Monitor Horizonte 27', 1),
+            ('ventas.poniente@mesh.com', 'comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Monitor Horizonte 27', 1),
+            ('ventas.oriente@mesh.com', 'comprador.sur@mesh.com', 'tienda@mesh.com', 'Lampara de pie Vigia 165', 1),
+            ('compradora.norte@mesh.com', 'comprador.sur@mesh.com', 'tienda@mesh.com', 'Lampara de pie Vigia 165', 1),
+            ('ventas.poniente@mesh.com', 'compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Lampara de escritorio Faro', 1),
+            ('ventas.norte@mesh.com', 'compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Lampara de escritorio Faro', 1),
+            ('compradora.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Limpiador en gel Verdo', 1),
+            ('ventas.poniente@mesh.com', 'comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Crema hidratante nocturna Alba', 1),
+            ('ventas.oriente@mesh.com', 'compradora.norte@mesh.com', 'tienda@mesh.com', 'Tabla de picar Cedro grande', 1),
+            ('ventas.poniente@mesh.com', 'compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Mesa de centro Guijarro', 1),
+            ('comprador.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Mesa de centro Guijarro', 1),
+            ('ventas.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.poniente@mesh.com', 'Contorno de ojos Lumine', 1),
+            ('ventas.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Laptop Vireo Air 12', 1),
+            ('ventas.poniente@mesh.com', 'compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Laptop Vireo Air 12', 1),
+            ('ventas.poniente@mesh.com', 'compradora.norte@mesh.com', 'tienda@mesh.com', 'Monitor Nube 22', 1),
+            ('compradora.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Cacerola honda Comal 18', 1),
+            ('ventas.oriente@mesh.com', 'comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Cacerola honda Comal 18', 1),
+            ('ventas.poniente@mesh.com', 'comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Lampara colgante Candela 40', -1),
+            ('ventas.oriente@mesh.com', 'comprador.sur@mesh.com', 'tienda@mesh.com', 'Camisa polo pique Cardumen', 1),
+            ('ventas.oriente@mesh.com', 'comprador.sur@mesh.com', 'tienda@mesh.com', 'Candado plegable Cerrojo F8', -1),
+            ('compradora.norte@mesh.com', 'comprador.sur@mesh.com', 'tienda@mesh.com', 'Candado plegable Cerrojo F8', 1),
+            ('comprador.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Telefono Pedernal Rugged', 1),
+            ('ventas.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Telefono Pedernal Rugged', 1),
+            ('ventas.norte@mesh.com', 'compradora.norte@mesh.com', 'ventas.oriente@mesh.com', 'Telefono Pedernal Rugged', 1),
+            ('ventas.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'El camino de las nubes', 1),
+            ('ventas.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Laptop Aurora 14', 1),
+            ('comprador.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Laptop Aurora 14', 1),
+            ('comprador.sur@mesh.com', 'compradora.norte@mesh.com', 'tienda@mesh.com', 'Audifonos Sereno ANC', 1),
+            ('ventas.norte@mesh.com', 'compradora.norte@mesh.com', 'tienda@mesh.com', 'Audifonos Sereno ANC', 1),
+            ('ventas.oriente@mesh.com', 'comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Comoda Sendero 4 gavetas', 1),
+            ('ventas.sur@mesh.com', 'comprador.sur@mesh.com', 'ventas.oriente@mesh.com', 'Comoda Sendero 4 gavetas', 1),
+            ('ventas.oriente@mesh.com', 'compradora.norte@mesh.com', 'ventas.poniente@mesh.com', 'Silla de comedor Vara', 1),
+            ('compradora.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Pantalon cargo Vereda', -1),
+            ('compradora.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Librero Hoja 5 niveles', 1),
+            ('ventas.sur@mesh.com', 'comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Librero Hoja 5 niveles', -1),
+            ('ventas.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.norte@mesh.com', 'Escritorio Roble 120', -1),
+            ('ventas.sur@mesh.com', 'compradora.norte@mesh.com', 'ventas.norte@mesh.com', 'Telefono Cuarzo Duo', 1),
+            ('ventas.norte@mesh.com', 'comprador.sur@mesh.com', 'ventas.sur@mesh.com', 'Audifonos Duna Trabajo', 1),
+            ('ventas.oriente@mesh.com', 'comprador.sur@mesh.com', 'tienda@mesh.com', 'Set de bandas elasticas', 1),
+            ('ventas.sur@mesh.com', 'compradora.norte@mesh.com', 'tienda@mesh.com', 'Balon de futbol numero 5', 1)
+        ) AS t(votante, autor, vendedor, producto, valor)
+    LOOP
+        SELECT id_usuario  INTO v_autor     FROM usuarios  WHERE correo_electronico = v_fila.autor;
+        SELECT id_usuario  INTO v_vendedor  FROM usuarios  WHERE correo_electronico = v_fila.vendedor;
+        SELECT id_producto INTO v_producto  FROM productos WHERE nombre = v_fila.producto;
+
+        SELECT id_comentario INTO v_raiz FROM resena
+        WHERE id_usuario = v_autor
+          AND id_usuario_vendedor = v_vendedor
+          AND id_producto_mongo = v_producto;
+
+        CONTINUE WHEN v_raiz IS NULL;
+
+        INSERT INTO likes (id_usuario, id_comentario, valor)
+        SELECT u.id_usuario, v_raiz, v_fila.valor
+        FROM usuarios u WHERE u.correo_electronico = v_fila.votante
+        ON CONFLICT (id_usuario, id_comentario) DO NOTHING;
+    END LOOP;
+END
+$social$;
+
+-- ============================================================
 -- El trigger vuelve, y el conjunto se comprueba a si mismo
 -- ============================================================
 -- Un conjunto de datos que no se verifica es un conjunto de datos que
--- miente en silencio. Estas siete comprobaciones fallan la migracion entera
+-- miente en silencio. Estas nueve comprobaciones fallan la migracion entera
 -- si algo no cuadra, en vez de dejar la base torcida y que alguien lo
 -- descubra tres semanas despues.
 
@@ -3988,7 +4248,40 @@ BEGIN
         RAISE EXCEPTION '% direcciones se quedaron sin calle', v_mal;
     END IF;
 
-    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones y direcciones cuadran';
+    -- 8. Toda resena cuelga de un comentario RAIZ, nunca de una respuesta.
+    --    Es la invariante que la 011 NO puede exigir con un CHECK, porque un
+    --    CHECK no ve otra fila. Y es la que mas barato se rompe: si una
+    --    resena apunta a una respuesta, el hilo se dibuja dentro de si mismo
+    --    y la base no se queja jamas.
+    SELECT count(*) INTO v_mal
+    FROM resena r
+    JOIN comentario c ON c.id_comentario = r.id_comentario
+    WHERE c.id_comentario_padre IS NOT NULL;
+
+    IF v_mal > 0 THEN
+        RAISE EXCEPTION '% resenas cuelgan de una respuesta en vez de una raiz', v_mal;
+    END IF;
+
+    -- 9. Los contadores de cada comentario dicen lo mismo que la tabla likes.
+    --    cantidad_likes y cantidad_dislikes son una COPIA derivada, y una
+    --    copia sin quien la vigile se desvia en silencio. El trigger de la
+    --    011 la mantiene; esto comprueba que el trigger de verdad corrio, que
+    --    no es lo mismo que suponer que existe.
+    --    Se cuentan valor = 1 y valor = -1 explicitamente, igual que el
+    --    trigger: si el candado contara de otra forma, aprobaria o fallaria
+    --    midiendo algo distinto de lo que vigila.
+    SELECT count(*) INTO v_mal
+    FROM comentario c
+    WHERE c.cantidad_likes <> (SELECT count(*) FROM likes l
+                                WHERE l.id_comentario = c.id_comentario AND l.valor = 1)
+       OR c.cantidad_dislikes <> (SELECT count(*) FROM likes l
+                                   WHERE l.id_comentario = c.id_comentario AND l.valor = -1);
+
+    IF v_mal > 0 THEN
+        RAISE EXCEPTION '% comentarios tienen los contadores desincronizados de likes', v_mal;
+    END IF;
+
+    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones, direcciones y la parte social cuadran';
 END
 $verificar$;
 

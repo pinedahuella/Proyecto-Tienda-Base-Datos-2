@@ -1858,13 +1858,345 @@ w(``);
 
 
 // ============================================================
+// La parte social: resenas, respuestas y votos
+// ============================================================
+// Las tablas son de la migracion 011. Aqui va el CONTENIDO.
+//
+//
+// Su propio azar, y no el de arriba
+// ============================================================
+// Esta seccion NO usa `azar()`. Usa `azarSocial`, con su propia semilla.
+//
+// El motivo es concreto y ya mordio antes: `azar()` es UNA secuencia global, y
+// quien saca un numero corre a todos los que vienen despues. Colgar las resenas
+// de esa misma secuencia significaria que el dia que alguien toque el reparto
+// de ofertas -- doce lineas mas arriba -- cambien tambien las resenas, y al
+// reves. Dos cosas que no tienen nada que ver quedarian amarradas.
+//
+// Con una secuencia propia, esta seccion se puede escribir, mover o ampliar sin
+// tocar una sola oferta, y el reparto de ofertas puede cambiar sin mover una
+// sola resena. Sigue siendo determinista: misma semilla, mismo resultado.
+//
+// Es ademas lo que va a hacer falta cuando se siembre el anillo de la Entrega 2
+// en su propio bloque.
+const azarSocial = crearAzar(20260829);
+const entreSocial = (min, max) => min + Math.floor(azarSocial() * (max - min + 1));
+const unoDe = (lista) => lista[Math.floor(azarSocial() * lista.length)];
+
+// El CONTENIDO se escribe a mano porque es criterio, igual que los nombres de
+// los productos. Van agrupados por calificacion: un texto no puede caer en
+// cualquier nota. "Llego roto" con cinco estrellas es un dato que se contradice
+// a si mismo, y el conjunto de datos dejaria de servir para ensenar la pantalla.
+const TEXTOS_RESENA = {
+  5: [
+    'Llego en dos dias y bien empacado. El vendedor aviso cuando lo despacho.',
+    'Todo perfecto. Tal cual la descripcion y sin un rayon.',
+    'Segunda vez que le compro y las dos veces sin un problema.',
+    'Muy buena atencion, respondio las dudas antes de que yo pagara.',
+    'Entrega puntual y el producto viene con todo lo que dice.',
+    'Excelente. Lo recomiendo sin pensarlo.',
+  ],
+  4: [
+    'Buen producto y buen precio. Tardo un dia mas de lo que decia, nada grave.',
+    'Todo bien. La caja venia un poco golpeada pero el contenido intacto.',
+    'Cumple con lo que ofrece. Habria estado bueno que avisaran del envio.',
+    'Contento con la compra. El empaque podria ser mejor.',
+    'Bien en general, aunque tardo en contestar un mensaje.',
+  ],
+  3: [
+    'Ni bueno ni malo. Llego lo que pedi pero se tardo bastante.',
+    'El producto esta bien, el envio fue lento.',
+    'Cumple, pero por ese precio esperaba un poco mas.',
+    'Regular. Tuve que escribir dos veces para que me dieran la guia.',
+  ],
+  2: [
+    'Se tardo mas de una semana y nadie contestaba los mensajes.',
+    'El producto no venia igual a la foto. Sirve, pero no es lo que esperaba.',
+    'Mal empacado, llego con la caja abierta.',
+  ],
+  1: [
+    'Nunca me llego a la direccion que puse y tuve que ir a traerlo.',
+    'Pesimo. El producto venia golpeado y no me quisieron responder.',
+    'No lo recomiendo. Se tardaron y encima llego incompleto.',
+  ],
+};
+
+// Las respuestas del vendedor. Son pocas a proposito: no todo vendedor
+// contesta, y si contestaran todos el arbol de comentarios se veria falso.
+const TEXTOS_RESPUESTA = [
+  'Gracias por la compra, cualquier cosa nos escribe.',
+  'Le agradecemos el comentario. Seguimos mejorando el empaque.',
+  'Lamentamos la demora, tuvimos problemas con la mensajeria esa semana.',
+  'Gracias por avisarnos. Escribanos y lo resolvemos.',
+  'Que bueno que le sirvio. Estamos para servirle.',
+  'Tiene razon, ya cambiamos de empresa de envio por eso mismo.',
+];
+
+// Los pares (vendedor, producto) que de verdad existen. Una resena sobre un
+// vendedor que no vende ese producto seria un dato imposible: el backend lo
+// rechaza, y el conjunto de datos no puede ser el unico que no cumple la regla
+// que el sistema exige.
+//
+// Solo ofertas `activa`: una pausada no se pudo comprar.
+const PARES_RESENABLES = [];
+{
+  const visto = new Set();
+  OFERTAS.forEach((o) => {
+    if (o.estado !== 'activa') return;
+    const clave = `${o.correo}|${o.producto}`;
+    if (visto.has(clave)) return;   // un vendedor puede tener varias variantes
+    visto.add(clave);               // del mismo producto; la resena es del producto
+    PARES_RESENABLES.push({ correo: o.correo, producto: o.producto });
+  });
+}
+
+// Barajado de Fisher-Yates con la semilla social. Sin barajar, las resenas
+// caerian todas sobre los primeros productos del catalogo -- que es el orden en
+// que se generaron las ofertas -- y la mitad de las pantallas quedaria sin una
+// sola resena que ensenar.
+for (let i = PARES_RESENABLES.length - 1; i > 0; i--) {
+  const j = Math.floor(azarSocial() * (i + 1));
+  [PARES_RESENABLES[i], PARES_RESENABLES[j]] = [PARES_RESENABLES[j], PARES_RESENABLES[i]];
+}
+
+// La nota, con la forma que tiene de verdad: la mayoria buenas y una cola de
+// malas. Si todas fueran 5 no habria nada que filtrar ni que ensenar en la
+// ficha, y el promedio del vendedor seria el mismo para todos.
+function notaCreible() {
+  const s = azarSocial();
+  if (s < 0.52) return 5;
+  if (s < 0.78) return 4;
+  if (s < 0.90) return 3;
+  if (s < 0.96) return 2;
+  return 1;
+}
+
+// La fecha de la resena va DESPUES de que el producto exista. Se cuelga del mes
+// del producto, no de un rango fijo: una resena fechada antes de que el producto
+// naciera pasa la carga sin una queja y despues aparece en el historial como un
+// evento imposible.
+//
+// Dia hasta 28 y mes hasta 6, que es lo que exige el validador del final.
+function fechaResena(fechaProducto) {
+  const mesProd = Number(fechaProducto.slice(5, 7));
+  const diaProd = Number(fechaProducto.slice(8, 10));
+  const mes = Math.min(6, mesProd + entreSocial(0, 2));
+  const dia = mes === mesProd ? entreSocial(Math.min(diaProd, 28), 28) : entreSocial(1, 28);
+  const hh = String(entreSocial(8, 21)).padStart(2, '0');
+  const mm = String(entreSocial(0, 59)).padStart(2, '0');
+  return `2026-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')} ${hh}:${mm}:00-06`;
+}
+
+const fechaDeProducto = new Map(PRODUCTOS.map((p) => [p.nombre, p.fecha]));
+
+// Cuantas. No son todas las que se pueden: un catalogo donde CADA producto de
+// CADA vendedor tiene resena no se parece a ninguna tienda real, y de paso
+// dejaria sin caso la pantalla de "todavia no hay resenas".
+const CUANTAS_RESENAS = Math.min(72, PARES_RESENABLES.length);
+
+const RESENAS = [];
+for (let i = 0; i < CUANTAS_RESENAS; i++) {
+  const par = PARES_RESENABLES[i];
+  // Los dos compradores se turnan, con un empujon del azar para que no quede
+  // una alternancia perfecta, que tampoco se ve real.
+  const autor = COMPRADORES[azarSocial() < 0.5 ? 0 : 1];
+  const nota = notaCreible();
+  RESENAS.push({
+    autor: autor.correo,
+    vendedor: par.correo,
+    producto: par.producto,
+    nota,
+    texto: unoDe(TEXTOS_RESENA[nota]),
+    fecha: fechaResena(fechaDeProducto.get(par.producto) || '2026-01-10 10:00:00-06'),
+  });
+}
+
+// Algunos productos con DOS resenas, de los dos compradores. Sin esto, ninguna
+// ficha ensena mas de una y no se puede ver como se apilan ni como sale el
+// promedio.
+{
+  const yaCon2 = new Set();
+  for (let i = 0; i < RESENAS.length && yaCon2.size < 14; i++) {
+    const r = RESENAS[i];
+    const clave = `${r.vendedor}|${r.producto}`;
+    if (yaCon2.has(clave)) continue;
+    const otro = COMPRADORES.find((c) => c.correo !== r.autor);
+    if (!otro) continue;
+    yaCon2.add(clave);
+    const nota = notaCreible();
+    RESENAS.push({
+      autor: otro.correo,
+      vendedor: r.vendedor,
+      producto: r.producto,
+      nota,
+      texto: unoDe(TEXTOS_RESENA[nota]),
+      fecha: fechaResena(fechaDeProducto.get(r.producto) || '2026-01-10 10:00:00-06'),
+    });
+  }
+}
+
+// Las respuestas del vendedor. Una de cada tres y media, mas seguido en las
+// malas: un vendedor contesta cuando le reclaman.
+const RESPUESTAS = [];
+RESENAS.forEach((r) => {
+  const probabilidad = r.nota <= 2 ? 0.75 : 0.22;
+  if (azarSocial() > probabilidad) return;
+  // La respuesta va despues de la resena. Se le suman horas y no dias para no
+  // salirse del mes: el validador del final no perdona un dia 29.
+  const hora = Math.min(23, Number(r.fecha.slice(11, 13)) + entreSocial(1, 2));
+  RESPUESTAS.push({
+    resena: r,
+    texto: unoDe(TEXTOS_RESPUESTA),
+    fecha: `${r.fecha.slice(0, 11)}${String(hora).padStart(2, '0')}${r.fecha.slice(13)}`,
+  });
+});
+
+// Los votos. Votan los dos compradores y los cuatro vendedores -- votar no pide
+// rol, igual que comprar -- pero NADIE vota su propio comentario: eso no lo
+// impide la base (no tendria como, es otra fila) y aqui no se hace porque un
+// conjunto de datos donde la gente se aplaude sola es justo lo que la Entrega 2
+// va a estar buscando como senal de fraude. Sembrarlo ahora seria plantar un
+// falso positivo.
+const VOTANTES = [...COMPRADORES, ...VENDEDORES];
+const VOTOS = [];
+{
+  const visto = new Set();
+  RESENAS.forEach((r) => {
+    const cuantos = azarSocial() < 0.45 ? entreSocial(1, 3) : 0;
+    for (let i = 0; i < cuantos; i++) {
+      const votante = unoDe(VOTANTES);
+      if (votante.correo === r.autor) continue;      // no se vota a si mismo
+      const clave = `${votante.correo}|${r.autor}|${r.vendedor}|${r.producto}`;
+      if (visto.has(clave)) continue;                // un voto por cuenta
+      visto.add(clave);
+      VOTOS.push({
+        votante: votante.correo,
+        resena: r,
+        // Mayoria a favor: los comentarios utiles son los que la gente vota.
+        valor: azarSocial() < 0.78 ? 1 : -1,
+      });
+    }
+  });
+}
+
+w(`-- ============================================================`);
+w(`-- La parte social: ${RESENAS.length} resenas, ${RESPUESTAS.length} respuestas, ${VOTOS.length} votos`);
+w(`-- ============================================================`);
+w(`-- Tablas de la migracion 011.`);
+w(`--`);
+w(`-- Van en un bloque plpgsql y no en tres INSERT sueltos por una razon: la`);
+w(`-- resena necesita el id del comentario que acaba de nacer, y ese id no se`);
+w(`-- puede escribir a mano ni adivinar. El bloque lo recibe del RETURNING y lo`);
+w(`-- usa en la linea siguiente.`);
+w(`--`);
+w(`-- Todo se busca por correo y por nombre de producto, nunca por id: la regla`);
+w(`-- de migrations/README.md.`);
+w(`--`);
+w(`-- Y todo esta guardado con NOT EXISTS, porque arrancar.ps1 vuelve a correr`);
+w(`-- este archivo en cada arranque: sin eso, la segunda corrida chocaria con`);
+w(`-- el UNIQUE de resena y tumbaria la carga entera.`);
+w(``);
+w(`DO $social$`);
+w(`DECLARE`);
+w(`    v_fila        record;`);
+w(`    v_autor       bigint;`);
+w(`    v_vendedor    bigint;`);
+w(`    v_producto    bigint;`);
+w(`    v_comentario  bigint;`);
+w(`    v_raiz        bigint;`);
+w(`BEGIN`);
+w(`    -- ---------- Las resenas, con su comentario raiz`);
+w(`    FOR v_fila IN`);
+w(`        SELECT * FROM (VALUES`);
+w(RESENAS.map((r, i) =>
+  `            (${txt(r.autor)}, ${txt(r.vendedor)}, ${txt(r.producto)}, ${num(r.nota)}, ${txt(r.texto)}, ${txt(r.fecha)})` +
+  (i < RESENAS.length - 1 ? ',' : '')).join('\n'));
+w(`        ) AS t(autor, vendedor, producto, nota, texto, fecha)`);
+w(`    LOOP`);
+w(`        SELECT id_usuario  INTO v_autor     FROM usuarios  WHERE correo_electronico = v_fila.autor;`);
+w(`        SELECT id_usuario  INTO v_vendedor  FROM usuarios  WHERE correo_electronico = v_fila.vendedor;`);
+w(`        SELECT id_producto INTO v_producto  FROM productos WHERE nombre = v_fila.producto;`);
+w(``);
+w(`        CONTINUE WHEN v_autor IS NULL OR v_vendedor IS NULL OR v_producto IS NULL;`);
+w(`        CONTINUE WHEN EXISTS (`);
+w(`            SELECT 1 FROM resena`);
+w(`            WHERE id_usuario = v_autor`);
+w(`              AND id_usuario_vendedor = v_vendedor`);
+w(`              AND id_producto_mongo = v_producto);`);
+w(``);
+w(`        INSERT INTO comentario (id_usuario, comentario, fecha_publicacion)`);
+w(`        VALUES (v_autor, v_fila.texto, v_fila.fecha::timestamptz)`);
+w(`        RETURNING id_comentario INTO v_comentario;`);
+w(``);
+w(`        INSERT INTO resena (id_usuario, id_usuario_vendedor, id_producto_mongo, calificacion, id_comentario)`);
+w(`        VALUES (v_autor, v_vendedor, v_producto, v_fila.nota, v_comentario);`);
+w(`    END LOOP;`);
+w(``);
+w(`    -- ---------- Las respuestas del vendedor, colgando de la raiz`);
+w(`    FOR v_fila IN`);
+w(`        SELECT * FROM (VALUES`);
+w(RESPUESTAS.map((p, i) =>
+  `            (${txt(p.resena.autor)}, ${txt(p.resena.vendedor)}, ${txt(p.resena.producto)}, ${txt(p.texto)}, ${txt(p.fecha)})` +
+  (i < RESPUESTAS.length - 1 ? ',' : '')).join('\n'));
+w(`        ) AS t(autor, vendedor, producto, texto, fecha)`);
+w(`    LOOP`);
+w(`        SELECT id_usuario  INTO v_autor     FROM usuarios  WHERE correo_electronico = v_fila.autor;`);
+w(`        SELECT id_usuario  INTO v_vendedor  FROM usuarios  WHERE correo_electronico = v_fila.vendedor;`);
+w(`        SELECT id_producto INTO v_producto  FROM productos WHERE nombre = v_fila.producto;`);
+w(``);
+w(`        SELECT id_comentario INTO v_raiz FROM resena`);
+w(`        WHERE id_usuario = v_autor`);
+w(`          AND id_usuario_vendedor = v_vendedor`);
+w(`          AND id_producto_mongo = v_producto;`);
+w(``);
+w(`        CONTINUE WHEN v_raiz IS NULL;`);
+w(`        -- Ya contestada: se reconoce por el padre y el autor, no hay que`);
+w(`        -- guardar nada aparte.`);
+w(`        CONTINUE WHEN EXISTS (`);
+w(`            SELECT 1 FROM comentario`);
+w(`            WHERE id_comentario_padre = v_raiz AND id_usuario = v_vendedor);`);
+w(``);
+w(`        INSERT INTO comentario (id_usuario, id_comentario_padre, comentario, fecha_publicacion)`);
+w(`        VALUES (v_vendedor, v_raiz, v_fila.texto, v_fila.fecha::timestamptz);`);
+w(`    END LOOP;`);
+w(``);
+w(`    -- ---------- Los votos. El trigger de la 011 recalcula los contadores`);
+w(`    FOR v_fila IN`);
+w(`        SELECT * FROM (VALUES`);
+w(VOTOS.map((v, i) =>
+  `            (${txt(v.votante)}, ${txt(v.resena.autor)}, ${txt(v.resena.vendedor)}, ${txt(v.resena.producto)}, ${num(v.valor)})` +
+  (i < VOTOS.length - 1 ? ',' : '')).join('\n'));
+w(`        ) AS t(votante, autor, vendedor, producto, valor)`);
+w(`    LOOP`);
+w(`        SELECT id_usuario  INTO v_autor     FROM usuarios  WHERE correo_electronico = v_fila.autor;`);
+w(`        SELECT id_usuario  INTO v_vendedor  FROM usuarios  WHERE correo_electronico = v_fila.vendedor;`);
+w(`        SELECT id_producto INTO v_producto  FROM productos WHERE nombre = v_fila.producto;`);
+w(``);
+w(`        SELECT id_comentario INTO v_raiz FROM resena`);
+w(`        WHERE id_usuario = v_autor`);
+w(`          AND id_usuario_vendedor = v_vendedor`);
+w(`          AND id_producto_mongo = v_producto;`);
+w(``);
+w(`        CONTINUE WHEN v_raiz IS NULL;`);
+w(``);
+w(`        INSERT INTO likes (id_usuario, id_comentario, valor)`);
+w(`        SELECT u.id_usuario, v_raiz, v_fila.valor`);
+w(`        FROM usuarios u WHERE u.correo_electronico = v_fila.votante`);
+w(`        ON CONFLICT (id_usuario, id_comentario) DO NOTHING;`);
+w(`    END LOOP;`);
+w(`END`);
+w(`$social$;`);
+w(``);
+
+
+// ============================================================
 // Cierre: encender el trigger y comprobarse a si mismo
 // ============================================================
 w(`-- ============================================================`);
 w(`-- El trigger vuelve, y el conjunto se comprueba a si mismo`);
 w(`-- ============================================================`);
 w(`-- Un conjunto de datos que no se verifica es un conjunto de datos que`);
-w(`-- miente en silencio. Estas siete comprobaciones fallan la migracion entera`);
+w(`-- miente en silencio. Estas nueve comprobaciones fallan la migracion entera`);
 w(`-- si algo no cuadra, en vez de dejar la base torcida y que alguien lo`);
 w(`-- descubra tres semanas despues.`);
 w(``);
@@ -1985,7 +2317,40 @@ w(`    IF v_mal > 0 THEN`);
 w(`        RAISE EXCEPTION '% direcciones se quedaron sin calle', v_mal;`);
 w(`    END IF;`);
 w(``);
-w(`    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones y direcciones cuadran';`);
+w(`    -- 8. Toda resena cuelga de un comentario RAIZ, nunca de una respuesta.`);
+w(`    --    Es la invariante que la 011 NO puede exigir con un CHECK, porque un`);
+w(`    --    CHECK no ve otra fila. Y es la que mas barato se rompe: si una`);
+w(`    --    resena apunta a una respuesta, el hilo se dibuja dentro de si mismo`);
+w(`    --    y la base no se queja jamas.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM resena r`);
+w(`    JOIN comentario c ON c.id_comentario = r.id_comentario`);
+w(`    WHERE c.id_comentario_padre IS NOT NULL;`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% resenas cuelgan de una respuesta en vez de una raiz', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    -- 9. Los contadores de cada comentario dicen lo mismo que la tabla likes.`);
+w(`    --    cantidad_likes y cantidad_dislikes son una COPIA derivada, y una`);
+w(`    --    copia sin quien la vigile se desvia en silencio. El trigger de la`);
+w(`    --    011 la mantiene; esto comprueba que el trigger de verdad corrio, que`);
+w(`    --    no es lo mismo que suponer que existe.`);
+w(`    --    Se cuentan valor = 1 y valor = -1 explicitamente, igual que el`);
+w(`    --    trigger: si el candado contara de otra forma, aprobaria o fallaria`);
+w(`    --    midiendo algo distinto de lo que vigila.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM comentario c`);
+w(`    WHERE c.cantidad_likes <> (SELECT count(*) FROM likes l`);
+w(`                                WHERE l.id_comentario = c.id_comentario AND l.valor = 1)`);
+w(`       OR c.cantidad_dislikes <> (SELECT count(*) FROM likes l`);
+w(`                                   WHERE l.id_comentario = c.id_comentario AND l.valor = -1);`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% comentarios tienen los contadores desincronizados de likes', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones, direcciones y la parte social cuadran';`);
 w(`END`);
 w(`$verificar$;`);
 w(``);
@@ -2034,3 +2399,4 @@ console.log(`  historial    ${FILAS_HIST.length} filas de producto, ${FILAS_HIST
 console.log(`  ofertas      ${OFERTAS.length}`);
 console.log(`  precios      ${CAMBIOS.length} filas de historial`);
 console.log(`  usuarios     ${USUARIOS.length}`);
+console.log(`  social       ${RESENAS.length} resenas, ${RESPUESTAS.length} respuestas, ${VOTOS.length} votos`);

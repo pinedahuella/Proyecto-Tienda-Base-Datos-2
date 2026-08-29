@@ -1,15 +1,41 @@
 # arrancar.ps1
 # Levanta todo el ambiente de Mesh de una sola vez.
 #
-#   .\arrancar.ps1                   levanta PostgreSQL, pgAdmin y MongoDB
+#   .\arrancar.ps1                   levanta PostgreSQL, pgAdmin, MongoDB, Redis y Neo4j
 #   .\arrancar.ps1 -Reiniciar        borra TODOS los datos y empieza de cero
 #   .\arrancar.ps1 -ReiniciarMongo   rehace solo MongoDB, sin tocar PostgreSQL
+#   .\arrancar.ps1 -ReiniciarGrafo   rehace solo el grafo de Neo4j, desde cero
 #   .\arrancar.ps1 -Mongo            abre la consola de MongoDB y ya
-#   .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a MongoDB
+#   .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a Mongo Y el grafo a Neo4j
+
+# Por que -Etl fuerza LOS DOS ETL y no hay un -EtlGrafo aparte
+# ------------------------------------------------------------
+# La bandera existe para el caso "cambie algo en PostgreSQL que no mueve
+# ninguna cuenta" -- corregir el precio de una oferta que ya existe, arreglar
+# la fecha de una resena mal fechada. Ese caso no distingue de que ETL se
+# trata: quien lo teclea no sabe si el dato que toco viaja a Mongo, a Neo4j o
+# a los dos. Una bandera por destino obligaria a saberlo, y el dia que alguien
+# elija mal se va con la mitad al dia y la otra mitad vieja, sin un solo error.
+# Los dos ETL son idempotentes, asi que correr de mas es gratis; correr de
+# menos es el fallo que este script ya cometio dos veces con Mongo (ver la
+# seccion 7).
+#
+# -ReiniciarGrafo si es aparte, porque no es "correr de mas": BORRA el grafo
+# entero antes de reconstruirlo. Es el equivalente de --limpiar en
+# etl/cargar_grafo.sh y hace falta porque el ETL solo suma -- una resena
+# borrada en PostgreSQL se queda en el grafo hasta que alguien lo vacie. Va
+# detras de su propia bandera y no pegado a -Etl por lo mismo que dice ese
+# script: si alguien sembro un anillo de prueba a mano para una demostracion,
+# un borrado automatico se lo lleva en medio de la demostracion.
+#
+# Se llama -ReiniciarGrafo y no -LimpiarGrafo para que se parezca a
+# -ReiniciarMongo, que es lo mismo un piso mas abajo: tirar una base derivada
+# y volverla a llenar sin tocar PostgreSQL, que es la fuente de verdad.
 
 param(
     [switch]$Reiniciar,
     [switch]$ReiniciarMongo,
+    [switch]$ReiniciarGrafo,
     [switch]$Mongo,
     [switch]$Etl
 )
@@ -20,6 +46,58 @@ function Paso($t)  { Write-Host "`n>> $t" -ForegroundColor Cyan }
 function Ok($t)    { Write-Host "   $t"   -ForegroundColor Green }
 function Aviso($t) { Write-Host "   $t"   -ForegroundColor Yellow }
 function Error1($t){ Write-Host "   $t"   -ForegroundColor Red }
+
+
+# ------------------------------------------------------------
+# Esperar a que un contenedor este SANO
+# ------------------------------------------------------------
+# Los cuatro contenedores con datos se esperan igual, asi que el bucle vive
+# aqui una sola vez en vez de estar copiado cuatro. Estaba copiado dos, y al
+# agregar Redis y Neo4j iban a ser cuatro copias de la misma espera con cuatro
+# timeouts que se pueden desincronizar.
+#
+# Se mira el HEALTHCHECK del compose y no "docker ps": un contenedor puede
+# estar corriendo y todavia no aceptar consultas. Con Neo4j eso no es teorico
+# -- su puerto 7474 contesta antes de que la base acepte Cypher, y por eso su
+# healthcheck usa cypher-shell y no un HTTP (esta explicado en
+# docker-compose.yml). Si aqui se mirara "running", el ETL del grafo saldria
+# contra un contenedor en verde que todavia no sabe contestar.
+#
+# El plazo va en SEGUNDOS y lo pone cada llamada, porque no todos tardan lo
+# mismo: PostgreSQL levanta en dos, Neo4j se toma unos 40 y su healthcheck
+# tiene start_period de 40s con 10 reintentos cada 15s. Un timeout corto aqui
+# haria fallar el arranque en una maquina lenta con todo bien configurado.
+#
+# La plantilla lleva el {{if .State.Health}} y NO es adorno. Sobre un
+# contenedor sin healthcheck declarado, "-f {{.State.Health.Status}}" no
+# devuelve vacio ni "<no value>": revienta con
+#
+#   template parsing error: template: :1:8: executing "" at
+#   <.State.Health.Status>: map has no entry for key "Health"
+#
+# que nunca va a ser igual a "healthy". Sin el if, esperar a un contenedor sin
+# healthcheck consume el plazo ENTERO y despues declara muerto algo que estaba
+# perfecto -- y el mensaje de error habla de PostgreSQL o de Neo4j, no de una
+# plantilla de Go, asi que manda a buscar el problema al lugar equivocado.
+# Medido contra mesh-pgadmin, que es justamente el contenedor de este proyecto
+# que no tiene healthcheck.
+function Esperar-Contenedor($nombre, $segundos) {
+    $plantilla = '{{if .State.Health}}{{.State.Health.Status}}{{else}}sin-healthcheck{{end}}'
+    $vueltas   = [int][math]::Ceiling($segundos / 2)
+
+    for ($i = 0; $i -lt $vueltas; $i++) {
+        $estado = "$(docker inspect -f $plantilla $nombre 2>&1)".Trim()
+        if ($estado -eq "healthy") { return $true }
+
+        # Sin healthcheck no hay nada que esperar: nadie va a poner ese
+        # contenedor en "healthy" nunca. Se contesta que si en vez de gastar el
+        # plazo entero para terminar mintiendo.
+        if ($estado -eq "sin-healthcheck") { return $true }
+
+        Start-Sleep -Seconds 2
+    }
+    return $false
+}
 
 
 # ------------------------------------------------------------
@@ -78,6 +156,83 @@ function Comando-Mongo($resto) {
            ' -p $MONGO_INITDB_ROOT_PASSWORD' +
            ' --authenticationDatabase admin' +
            ' $MONGO_INITDB_DATABASE ' + $resto
+}
+
+
+# ------------------------------------------------------------
+# Como se le habla a cypher-shell desde aqui
+# ------------------------------------------------------------
+# La regla 2 de mongosh vale IGUAL aqui, y se pago por comprobarlo: la consulta
+# de Cypher va entre COMILLAS SIMPLES dentro de la cadena, nunca entre dobles.
+# Con dobles, PowerShell 5.1 las escapa al armar la linea del programa externo
+# y cypher-shell las recibe como parte del texto de la consulta. No falla con
+# "faltan comillas" ni con nada que mencione a PowerShell: falla con
+#
+#   Invalid input '': expected a graph pattern (line 1, column 6)
+#   "MATCH"
+#         ^
+#
+# que parece un error de Cypher y manda a revisar la consulta, que esta bien.
+# Se comprueba asi:  docker exec mesh-neo4j sh -c '... "MATCH (n) RETURN n"'
+#
+# La contrasena no se escribe aqui. Sale de MESH_NEO4J_PASSWORD, que ya vive
+# dentro del contenedor puesta por el compose desde el .env -- la misma que usa
+# el healthcheck. La expande la shell de adentro, asi que no aparece en la
+# lista de procesos de Windows, igual que con Mongo.
+#
+# El nombre de esa variable NO lleva el prefijo NEO4J_ y eso es obligatorio: la
+# imagen trata cualquier NEO4J_* como un ajuste de neo4j.conf y tumba el
+# arranque en bucle. Esta contado entero en docker-compose.yml.
+#
+# --format plain porque la salida la lee este script o una persona, no una
+# tabla dibujada con guiones que despues habria que desarmar.
+function Comando-Cypher($resto) {
+    return 'cypher-shell -u neo4j -p $MESH_NEO4J_PASSWORD --format plain ' + $resto
+}
+
+
+# Cuenta los nodos de una etiqueta del grafo. Devuelve $null si no se pudo
+# contar, y quien llame decide que hacer: aqui no se inventa un cero, porque un
+# cero inventado hace creer que el grafo esta vacio y dispara un ETL de mas (o
+# peor, deja el arranque en rojo con todo bien).
+#
+# Se queda con la ULTIMA linea que sea solo digitos porque --format plain
+# imprime primero el nombre de la columna y despues el valor.
+function Contar-Nodos($etiqueta) {
+    $salida = docker exec mesh-neo4j sh -c (Comando-Cypher "'MATCH (n:$etiqueta) RETURN count(n) AS n;'") 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { return $null }
+
+    $numeros = @($salida -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' })
+    if ($numeros.Count -eq 0) { return $null }
+    return [int]$numeros[-1]
+}
+
+
+# Lo mismo, pero para las ARISTAS. Existe porque no existia, y esa ausencia era
+# el agujero mas grande de todo el arranque:
+#
+# Con el grafo cargado se borraron TODAS las relaciones dejando los 163 nodos
+# intactos (MATCH ()-[r]->() DELETE r, 272 relaciones a 0) y se corrio
+# .\arrancar.ps1 sin banderas. Imprimio "Ya cargado (Usuario 10/10, Producto
+# 54/54, Resena 86/86)" -- o sea SALTO el ETL -- despues las mismas tres cuentas
+# en verde, "Listo", y termino con EXIT 0. Sobre ese grafo la consulta de varios
+# saltos contesta "0 anillos" y la de direcciones "0 pares": la entrega de 3
+# puntos no senala ni una cuenta y el arranque dice que todo esta bien.
+#
+# Y no se autorepara: como los tres conteos de NODOS cuadran, el ETL no vuelve a
+# correr en ningun arranque posterior. El hueco era permanente.
+#
+# El comentario de la seccion 9c ya nombraba ese peligro exacto -- "la consulta
+# de anillos contestaria no hay nada raro, que es una respuesta creible y falsa"
+# -- y despues el codigo solo contaba nodos. La consulta que faltaba estaba
+# escrita hace rato en etl/cargar_grafo.sh, que si cuenta las cuatro relaciones.
+function Contar-Aristas($tipo) {
+    $salida = docker exec mesh-neo4j sh -c (Comando-Cypher "'MATCH ()-[r:$tipo]->() RETURN count(r) AS n;'") 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { return $null }
+
+    $numeros = @($salida -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' })
+    if ($numeros.Count -eq 0) { return $null }
+    return [int]$numeros[-1]
 }
 
 
@@ -171,11 +326,7 @@ function Reparar-Mongo {
     Ok $resultado.Trim()
 
     # Esperar a que el contenedor normal vuelva a estar sano
-    for ($i = 0; $i -lt 60; $i++) {
-        $estado = docker inspect -f "{{.State.Health.Status}}" mesh-mongo 2>&1
-        if ("$estado".Trim() -eq "healthy") { return $true }
-        Start-Sleep -Seconds 2
-    }
+    if (Esperar-Contenedor "mesh-mongo" 120) { return $true }
 
     Error1 "MongoDB no volvio a levantar despues de la reparacion"
     return $false
@@ -325,12 +476,7 @@ Ok "Contenedores arriba"
 # ------------------------------------------------------------
 Paso "Esperando a PostgreSQL"
 
-$listo = $false
-for ($i = 0; $i -lt 60; $i++) {
-    $estado = docker inspect -f "{{.State.Health.Status}}" mesh-postgres 2>&1
-    if ("$estado".Trim() -eq "healthy") { $listo = $true; break }
-    Start-Sleep -Seconds 2
-}
+$listo = Esperar-Contenedor "mesh-postgres" 120
 
 if (-not $listo) {
     Error1 "PostgreSQL no respondio. Mira el log:"
@@ -480,7 +626,146 @@ function Correr-Etl {
 }
 
 
-function Correr-Migraciones($carpeta, $rutaContenedor, $etiqueta) {
+# ------------------------------------------------------------
+# El ETL del grafo, tambien en PowerShell nativo
+# ------------------------------------------------------------
+# Hace lo mismo que etl/cargar_grafo.sh -- aplica el esquema, extrae de
+# PostgreSQL y carga en Neo4j -- pero SIN depender de Git Bash, exactamente por
+# la razon que dice el ETL de Mongo aqui arriba y que etl/README.md cuenta con
+# nombre y apellido: cuando esto llamaba a un .sh a traves del bash de Git y no
+# lo encontraba, se saltaba el ETL con un aviso amarillo y el script terminaba
+# EN VERDE con la base derivada vacia. Paso de verdad con Mongo, en la maquina
+# de un companero, y no se va a repetir con el grafo: aqui no hay ni una rama
+# que avise y siga. Todo fallo de este ETL corta el arranque.
+#
+# Los archivos van con `docker cp`, igual que los de Mongo y NUNCA por tuberia.
+# PowerShell 5.1 codifica lo que manda por la tuberia en UTF-8 con BOM y le
+# pega EF BB BF al principio; del otro lado el SQL y el Cypher llegan rotos.
+#
+# El .cypher intermedio da el mismo rodeo por el disco que el JSON de Mongo
+# (contenedor -> local -> otro contenedor) porque mesh-postgres y mesh-neo4j no
+# comparten volumen. Son unos 20 KB y se borra al terminar.
+#
+# Ni el esquema ni la consulta se leen del volumen ./neo4j que el compose monta
+# en el contenedor: van por docker cp los dos. Es a proposito y es la misma
+# decision que tomo cargar_grafo.sh -- si alguien toca ese montaje en
+# docker-compose.yml, esto sigue cargando en vez de fallar por un archivo que
+# "estaba ahi".
+function Correr-EtlGrafo($limpiar) {
+    $tmp = Join-Path $env:TEMP "mesh-etl-grafo"
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+
+    $usuario = $env_["DB_USER"]
+    $base    = $env_["DB_NAME"]
+
+    # --- 1. El esquema, SIEMPRE y antes de cargar ---
+    # Va en cada corrida y no una sola vez porque el MERGE del ETL se apoya en
+    # las restricciones de unicidad para no duplicar. Si alguien levanta Neo4j
+    # con el volumen vacio, las restricciones se fueron con el, y un ETL que no
+    # las reaplique empieza a crear nodos repetidos sin dar un solo error.
+    # Todo el 001 lleva IF NOT EXISTS, asi que repetirlo cuesta milisegundos.
+    docker cp "$PSScriptRoot\neo4j\001_esquema.cypher" "mesh-neo4j:/tmp/001_esquema.cypher" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar 001_esquema.cypher a Neo4j"; exit 1 }
+
+    $salidaEsquema = docker exec mesh-neo4j sh -c (Comando-Cypher "--file /tmp/001_esquema.cypher") 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "El ETL del grafo fallo aplicando el esquema:"
+        Write-Host $salidaEsquema -ForegroundColor Red
+        exit 1
+    }
+    Ok "esquema del grafo aplicado (restricciones e indices)"
+
+    # --- 2. El borrado, solo si lo piden ---
+    # DETACH DELETE y no DELETE: DELETE sobre un nodo con relaciones falla, y
+    # con 86 resenas todo nodo tiene relaciones. Se puede borrar sin miedo
+    # porque el grafo es una PROYECCION: no hay ni un dato aqui que no exista
+    # en PostgreSQL.
+    if ($limpiar) {
+        $salidaBorrado = docker exec mesh-neo4j sh -c (Comando-Cypher "'MATCH (n) DETACH DELETE n;'") 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Error1 "No se pudo vaciar el grafo:"
+            Write-Host $salidaBorrado -ForegroundColor Red
+            exit 1
+        }
+        Ok "grafo vaciado: se reconstruye desde cero"
+    }
+
+    # --- 3. Extraer de PostgreSQL ---
+    # ON_ERROR_STOP=1 es obligatorio y no una precaucion: sin el, psql se salta
+    # la sentencia que fallo, sigue con las demas y termina en cero. El archivo
+    # de salida quedaria con un script de Cypher INCOMPLETO, cypher-shell lo
+    # cargaria contento, y el grafo se quedaria con la mitad de las relaciones
+    # sin que nadie se entere. Es el peor final posible: parece que funciono.
+    docker cp "$PSScriptRoot\etl\extraer_grafo.sql" "mesh-postgres:/tmp/extraer_grafo.sql" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar extraer_grafo.sql al contenedor"; exit 1 }
+
+    # La redireccion ocurre DENTRO del contenedor, igual que en el ETL de
+    # Mongo: asi la salida nunca pasa por PowerShell y no se le cambia la
+    # codificacion por el camino.
+    $errExtraer = docker exec mesh-postgres sh -c "psql -U $usuario -d $base -qtAX -v ON_ERROR_STOP=1 -f /tmp/extraer_grafo.sql > /tmp/mesh-grafo.cypher" 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "El ETL del grafo fallo extrayendo de PostgreSQL:"
+        Write-Host $errExtraer -ForegroundColor Red
+        exit 1
+    }
+
+    $local = Join-Path $tmp "mesh-grafo.cypher"
+    docker cp "mesh-postgres:/tmp/mesh-grafo.cypher" "$local" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo traer mesh-grafo.cypher de PostgreSQL"; exit 1 }
+
+    # Un archivo vacio aqui quiere decir que la consulta no devolvio nada.
+    # Cargarlo dejaria el grafo vacio sin un solo error, que es justo el fallo
+    # que esta comprobacion existe para evitar: las sentencias de resenas
+    # empiezan con tres MATCH, y si los nodos no estuvieran no fallarian,
+    # simplemente no crearian nada.
+    if (-not (Test-Path $local) -or (Get-Item $local).Length -eq 0) {
+        Error1 "La consulta del grafo no devolvio ni una linea."
+        Error1 "Revisa que migrations/datos/ se haya cargado en PostgreSQL."
+        exit 1
+    }
+
+    # --- 4. Cargar en Neo4j ---
+    docker cp "$local" "mesh-neo4j:/tmp/mesh-grafo.cypher" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar mesh-grafo.cypher a Neo4j"; exit 1 }
+
+    $salidaCarga = docker exec mesh-neo4j sh -c (Comando-Cypher "--file /tmp/mesh-grafo.cypher") 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "El ETL del grafo fallo cargando en Neo4j:"
+        Write-Host $salidaCarga -ForegroundColor Red
+        exit 1
+    }
+    Ok "grafo cargado desde PostgreSQL"
+
+    Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+}
+
+
+# El cuarto argumento dice si se le perdona a un archivo el error "already
+# exists". Existe porque las dos carpetas NO se parecen en esto:
+#
+#   migrations/*.sql        se perdona. Son CREATE TABLE / CREATE TYPE, y sobre
+#                           una base ya migrada fallan asi de propio. Es la
+#                           forma en que este script sabe que ya estaban.
+#
+#   migrations/datos/*.sql  NO se perdona, y es lo que arregla un fallo real.
+#                           Ese archivo no es idempotente, asi que sobre una
+#                           base con datos muere en el primer INSERT repetido
+#                           con "duplicate key value violates unique
+#                           constraint" -- cuyo DETAIL de psql dice, palabra
+#                           por palabra, "Key (nombre)=(Electronica) already
+#                           exists." El perdon lo agarraba por esa linea y
+#                           pintaba un "ya estaba aplicada" amarillo y
+#                           tranquilizador con el archivo cargado hasta la
+#                           linea 99 de 10000. Sobre una base a medias, eso
+#                           deja el conjunto de datos incompleto y el arranque
+#                           en verde.
+#
+# O sea: el perdon no distingue "esto ya estaba" de "esto choco a la mitad".
+# Para el esquema la diferencia no importa porque un CREATE no deja nada a
+# medias; para los datos es la diferencia entre cargado y roto. Ahora los datos
+# se saltan enteros cuando la base ya los tiene (ver mas abajo) y, si igual
+# llegan a correr, cualquier error los tumba fuerte.
+function Correr-Migraciones($carpeta, $rutaContenedor, $etiqueta, $perdonarExistente) {
     $scripts = @(Get-ChildItem -LiteralPath $carpeta -Filter "*.sql" -ErrorAction SilentlyContinue | Sort-Object Name)
 
     if ($scripts.Count -eq 0) {
@@ -494,7 +779,7 @@ function Correr-Migraciones($carpeta, $rutaContenedor, $etiqueta) {
 
         if ($LASTEXITCODE -eq 0) {
             Ok "$etiqueta$($s.Name)"
-        } elseif ($salida -match "already exists") {
+        } elseif ($perdonarExistente -and ($salida -match "already exists")) {
             Aviso "$etiqueta$($s.Name) ya estaba aplicada"
         } else {
             Error1 "$etiqueta$($s.Name) FALLO"
@@ -505,10 +790,54 @@ function Correr-Migraciones($carpeta, $rutaContenedor, $etiqueta) {
 }
 
 Paso "Corriendo migraciones del esquema"
-Correr-Migraciones "$PSScriptRoot\migrations" "/migrations" "migrations/"
+Correr-Migraciones "$PSScriptRoot\migrations" "/migrations" "migrations/" $true
 
+
+# ------------------------------------------------------------
+# 5b. Los conjuntos de datos solo entran en una base VACIA
+# ------------------------------------------------------------
+# migrations/datos/001_catalogo.sql NO es idempotente: 15 de sus 20 INSERT no
+# llevan guardia. Corrrerlo sobre una base que ya tiene el conjunto muere en la
+# primera categoria repetida, y hasta hoy este script lo corria en CADA
+# arranque. Que pasaba en el segundo arranque, medido y no supuesto:
+#
+#   psql:/migrations/datos/001_catalogo.sql:99: ERROR: duplicate key value
+#   violates unique constraint "idx_categorias_nombre_raiz"
+#   DETAIL: Key (nombre)=(Electronica) already exists.
+#
+# psql sale con codigo 3, y el "already exists" del DETAIL caia justo en el
+# perdon de Correr-Migraciones. Resultado: un "ya estaba aplicada" amarillo, el
+# arranque terminando en verde, y el archivo aplicado hasta la linea 99 de mas
+# de diez mil. Sobre una base entera no se nota; sobre una base a medias
+# (alguien recargando datos, un -Reiniciar interrumpido) deja el conjunto
+# incompleto DICIENDO que estaba bien.
+#
+# La guardia es la base misma y no una tabla de control: si hay productos, el
+# conjunto ya entro. Se mira `productos` porque es lo primero que carga el
+# archivo despues de las categorias, y porque es la tabla de la que cuelga todo
+# lo demas -- ofertas, resenas y pedidos no existen sin ella.
+#
+# Lo que esta guardia NO puede hacer, y hay que decirlo: si manana se agrega un
+# migrations/datos/002_*.sql, este arranque tampoco lo va a correr, porque la
+# base ya tiene productos. No es un descuido -- es que estos archivos no se
+# pueden correr sobre una base cargada, punto. La via para ese caso es
+# -Reiniciar (rehace todo desde cero) o correr ese archivo a mano. Se avisa en
+# amarillo en cada arranque justamente para que nadie suponga otra cosa.
 Paso "Corriendo conjuntos de datos"
-Correr-Migraciones "$PSScriptRoot\migrations\datos" "/migrations/datos" "migrations/datos/"
+
+$productosEnBase = ("SELECT count(*) FROM productos;" |
+    docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
+if (($productosEnBase -match '^\d+$') -and ([int]$productosEnBase -gt 0)) {
+    Aviso "La base ya tiene $productosEnBase productos: me salto migrations/datos/"
+    Aviso "Esos archivos no son idempotentes y solo entran en una base vacia."
+    Aviso "Para recargarlos desde cero:  .\arrancar.ps1 -Reiniciar"
+} else {
+    # Sin perdon: aqui la base esta vacia, asi que cualquier error es un error
+    # de verdad y tiene que tumbar el arranque en vez de disfrazarse de "ya
+    # estaba aplicada".
+    Correr-Migraciones "$PSScriptRoot\migrations\datos" "/migrations/datos" "migrations/datos/" $false
+}
 
 
 # ------------------------------------------------------------
@@ -520,12 +849,7 @@ Correr-Migraciones "$PSScriptRoot\migrations\datos" "/migrations/datos" "migrati
 
 Paso "Esperando a MongoDB"
 
-$listoMongo = $false
-for ($i = 0; $i -lt 60; $i++) {
-    $estado = docker inspect -f "{{.State.Health.Status}}" mesh-mongo 2>&1
-    if ("$estado".Trim() -eq "healthy") { $listoMongo = $true; break }
-    Start-Sleep -Seconds 2
-}
+$listoMongo = Esperar-Contenedor "mesh-mongo" 120
 
 if (-not $listoMongo) {
     Error1 "MongoDB no respondio. Mira el log:"
@@ -754,7 +1078,236 @@ if ($faltantes.Count -gt 0) {
 
 
 # ------------------------------------------------------------
-# 8. Resumen
+# 8. Redis
+# ------------------------------------------------------------
+# Redis no tiene ETL ni migraciones: es el carrito y el contador de la oferta
+# de inventario limitado, y los dos nacen vacios a proposito -- un carrito
+# sembrado no es de nadie, y el contador se siembra desde oferta.stock cuando
+# se abre la venta, no al arrancar la maquina.
+#
+# Los scripts de redis/*.lua tampoco se cargan aqui: los carga el backend al
+# arrancar, porque un SCRIPT LOAD se pierde con cada reinicio de Redis y el
+# unico que puede volver a cargarlo en ese momento es quien lo va a usar. Esta
+# escrito en redis/README.md, seccion 5.
+#
+# Asi que lo unico que hace falta de este lado es esperar a que este sano. El
+# healthcheck del compose hace un "redis-cli -a $REDIS_PASSWORD ping" con la
+# contrasena de adentro, asi que sano quiere decir tambien que la contrasena
+# del .env es la que la base acepta. No hace falta comprobarlo aparte.
+Paso "Esperando a Redis"
+
+if (-not (Esperar-Contenedor "mesh-redis" 60)) {
+    Error1 "Redis no respondio. Mira el log:"
+    Error1 "   docker logs mesh-redis --tail 30"
+    exit 1
+}
+Ok "Redis respondiendo"
+
+
+# ------------------------------------------------------------
+# 9. Neo4j
+# ------------------------------------------------------------
+# El plazo es de 4 minutos y no de 1, y no es por si acaso: Neo4j tarda unos 40
+# segundos en aceptar Cypher, y su healthcheck lo refleja con start_period 40s
+# y 10 reintentos cada 15s. O sea que el propio compose se da hasta ~190
+# segundos antes de declararlo enfermo. Un plazo mas corto aqui declararia
+# muerto un contenedor que todavia esta arrancando bien.
+Paso "Esperando a Neo4j"
+
+if (-not (Esperar-Contenedor "mesh-neo4j" 240)) {
+    Error1 "Neo4j no respondio. Mira el log:"
+    Error1 "   docker logs mesh-neo4j --tail 30"
+    exit 1
+}
+Ok "Neo4j respondiendo"
+
+
+# ------------------------------------------------------------
+# 9b. El grafo de resenas
+# ------------------------------------------------------------
+# La misma idea que el catalogo de Mongo: no se migra en cada arranque, se
+# compara lo que hay contra lo que tendria que haber. Y la lista se escribe
+# igual, por la misma razon que dice la seccion 7 -- dos veces fallo alli por
+# mirar de menos una coleccion, asi que aqui no se compara "las resenas" a
+# secas sino cada clase de nodo que el ETL escribe.
+#
+# La consulta de cada uno NO es un count(*) de la tabla que se le parece:
+#
+#   Usuario   si es count(*) de usuarios. El ETL carga todas las cuentas,
+#             incluso las que no escribieron ni una resena, porque una cuenta
+#             sin resenas igual puede compartir direccion con otra y eso es
+#             una senal.
+#   Producto  son los productos CON resena, no los 102 del catalogo. Un
+#             producto que nadie califico no es alcanzable por ningun camino
+#             del modelo, y cargarlo solo agrega nodos sueltos.
+#   Resena    count(*) de resena, uno a uno.
+#
+#
+# LAS RELACIONES TAMBIEN SE CUENTAN, Y ESO ERA EL AGUJERO
+# ============================================================
+# Antes esta lista tenia solo nodos, y con eso el arranque daba verde sobre un
+# grafo INUTIL. Reproducido: se borraron las 272 relaciones dejando los 163
+# nodos intactos y arrancar.ps1 imprimio "Ya cargado (Usuario 10/10, Producto
+# 54/54, Resena 86/86)" -- salto el ETL -- despues las tres cuentas en verde y
+# EXIT 0. Sobre ese grafo la consulta de varios saltos contesta "0 anillos".
+# Peor: como los conteos de nodos cuadraban, el ETL no volvia a correr NUNCA.
+#
+# Las tres primeras valen todas count(*) de `resena` y son gratis: la sentencia
+# 5 de etl/extraer_grafo.sql crea el nodo :Resena y sus tres aristas en la misma
+# fila, asi que si hay 86 resenas tiene que haber 86 de cada una.
+#
+#
+# :Direccion Y :VIVE_EN SI TIENEN NUMERO COMPARABLE
+# ============================================================
+# Antes :Direccion se imprimia en verde y no decidia nada -- no estaba en esta
+# lista ni entraba en el veredicto. Reproducido: borrando los 12 nodos
+# :Direccion (y con ellos las 14 :VIVE_EN), el arranque imprimia "Direccion 0"
+# con el color de Ok, saltaba el ETL y terminaba en 0, mientras la consulta de
+# domicilios contestaba "0 pares". Y no se autoreparaba nunca.
+#
+# El argumento que lo dejaba fuera era que "11 nodos contra 15 filas dispararia
+# el ETL en cada arranque". Eso vale contra count(*) de la tabla, no contra el
+# count(DISTINCT) de la clave NORMALIZADA, que es exactamente lo que el ETL
+# construye: hoy da 12 y hay 12 nodos, clavado.
+#
+# EL PRECIO, dicho de frente: la normalizacion queda escrita en DOS lugares,
+# aqui y en pg_temp.clave_direccion de etl/extraer_grafo.sql. Si alguien toca
+# una y no la otra, los numeros dejan de cuadrar y ESTE arranque se pone rojo --
+# o sea que la copia se vigila sola, en la direccion que importa: si esta se
+# vuelve mas estricta que el ETL, rojo; si se vuelve mas laxa, el -lt lo deja
+# pasar y ahi si hay que estar despierto. No se puede evitar la copia sin dejar
+# una funcion permanente en la base, y extraer_grafo.sql es un extractor: no
+# debe escribir nada.
+$CLAVE_DIRECCION = @'
+lower(regexp_replace(
+    trim(translate(
+        coalesce(pais, '') || '|' || coalesce(departamento, '') || '|' ||
+        coalesce(ciudad, '') || '|' || coalesce(direccion_exacta, ''),
+        chr(225) || chr(233) || chr(237) || chr(243) || chr(250) ||
+        chr(252) || chr(241) || chr(193) || chr(201) || chr(205) ||
+        chr(211) || chr(218) || chr(220) || chr(209),
+        'aeiouunAEIOUUN')),
+    '\s+', ' ', 'g'))
+'@
+
+$NODOS_ETL = @(
+    @{ etiqueta = 'Usuario';   clase = 'nodo';   sql = 'SELECT count(*) FROM usuarios;' },
+    @{ etiqueta = 'Producto';  clase = 'nodo';   sql = 'SELECT count(DISTINCT id_producto_mongo) FROM resena;' },
+    @{ etiqueta = 'Resena';    clase = 'nodo';   sql = 'SELECT count(*) FROM resena;' },
+    @{ etiqueta = 'Direccion'; clase = 'nodo';   sql = "SELECT count(DISTINCT $CLAVE_DIRECCION) FROM direcciones;" },
+    @{ etiqueta = 'ESCRIBIO';   clase = 'arista'; sql = 'SELECT count(*) FROM resena;' },
+    @{ etiqueta = 'CALIFICA_A'; clase = 'arista'; sql = 'SELECT count(*) FROM resena;' },
+    @{ etiqueta = 'SOBRE';      clase = 'arista'; sql = 'SELECT count(*) FROM resena;' },
+    @{ etiqueta = 'VIVE_EN';    clase = 'arista'; sql = "SELECT count(*) FROM (SELECT DISTINCT id_usuario, $CLAVE_DIRECCION AS clave FROM direcciones) v;" }
+)
+
+# Cuenta lo que sea, nodo o arista, segun lo diga la entrada de la lista.
+function Contar-EnGrafo($entrada) {
+    if ($entrada.clase -eq 'arista') { return Contar-Aristas $entrada.etiqueta }
+    return Contar-Nodos $entrada.etiqueta
+}
+
+Paso "Grafo de resenas en Neo4j"
+
+$grafoAlDia   = $true
+$resumenGrafo = @()
+
+foreach ($n in $NODOS_ETL) {
+    $enGrafo = Contar-EnGrafo $n
+
+    # Por stdin y no con -c, igual que las cuentas de Mongo: asi la consulta no
+    # pasa por el armado de linea de comandos de PowerShell, que es donde se
+    # pierden las comillas y los parentesis.
+    $enPostgres = ($n.sql |
+        docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
+    # Si una cuenta no salio se corre el ETL igual. Es idempotente, y saltarselo
+    # por no poder contar dejaria el grafo a medias sin avisar.
+    if (($null -eq $enGrafo) -or ($enPostgres -notmatch '^\d+$')) {
+        $grafoAlDia = $false
+        $resumenGrafo += "$($n.etiqueta) ?/$enPostgres"
+        continue
+    }
+
+    # -lt y no -ne, por lo mismo que en Mongo: que el grafo tenga MAS no es un
+    # fallo. Lo sembrado a mano para una demostracion
+    # (neo4j/consultas/siembra.cypher crea seis cuentas de prueba y las borra)
+    # sube la cuenta un rato, y con -ne cada demostracion a medias dejaria el
+    # arranque migrando de mas.
+    if ($enGrafo -lt [int]$enPostgres) { $grafoAlDia = $false }
+
+    $resumenGrafo += "$($n.etiqueta) $enGrafo/$enPostgres"
+}
+
+if (-not $Etl -and -not $ReiniciarGrafo -and $grafoAlDia) {
+    Ok "Ya cargado ($($resumenGrafo -join ', ')). Para volver a migrarlo: .\arrancar.ps1 -Etl"
+} else {
+    Correr-EtlGrafo $ReiniciarGrafo
+}
+
+
+# ------------------------------------------------------------
+# 9c. El grafo NO puede quedar vacio
+# ------------------------------------------------------------
+# El gemelo de la comprobacion 7b, y existe por el mismo fallo: un ETL que se
+# salta y un script que termina en verde. Aqui es peor de detectar que en
+# Mongo, porque nadie mira el grafo todos los dias -- se mira el dia de la
+# entrega, cuando la consulta de varios saltos tiene que senalar las cuentas
+# anomalas, y para entonces ya no hay tiempo de arreglarlo.
+#
+# Se comprueba el RESULTADO y no que los pasos "parezcan" haber ido bien: las
+# sentencias de resenas empiezan con tres MATCH y no fallan si los nodos no
+# estan, simplemente no crean nada y salen con codigo cero.
+#
+# Se compara contra PostgreSQL en vez de exigir "que no este vacio" porque un
+# grafo con 3 resenas de 86 pasaria en verde: la consulta de anillos correria
+# sobre un vecindario incompleto y contestaria "no hay nada raro", que es una
+# respuesta creible y falsa. Y se compara con -lt para que una base sin resenas
+# (0 contra 0) no de un rojo por estar legitimamente vacia.
+#
+# Y se comprueban NODOS Y ARISTAS, no solo nodos. Contar nodos NO es comprobar
+# el resultado: un grafo con los 163 nodos y CERO relaciones pasaba esta seccion
+# entera en verde, y sobre el las cinco consultas de la entrega contestan que no
+# hay nada. Esta medido y contado arriba, donde se arma $NODOS_ETL.
+Paso "Comprobando que el grafo quedo cargado"
+
+$faltanNodos = @()
+foreach ($n in $NODOS_ETL) {
+    $enGrafo = Contar-EnGrafo $n
+
+    if ($null -eq $enGrafo) {
+        $faltanNodos += "$($n.etiqueta) (no se pudo contar)"
+        continue
+    }
+
+    $esperados = ($n.sql |
+        docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
+    if ($esperados -notmatch '^\d+$') {
+        # No se pudo contar del otro lado. No se inventa un veredicto: se dice.
+        Aviso "$($n.etiqueta)  $enGrafo  (no se pudo contar en PostgreSQL para comparar)"
+    } elseif ($enGrafo -lt [int]$esperados) {
+        $faltanNodos += "$($n.etiqueta) ($enGrafo de $esperados)"
+    } else {
+        Ok "$($n.etiqueta)  $enGrafo de $esperados"
+    }
+}
+
+if ($faltanNodos.Count -gt 0) {
+    Error1 "El grafo de Neo4j NO quedo completo: $($faltanNodos -join ', ')"
+    Error1 ""
+    Error1 "Las resenas si estan en PostgreSQL, pero la deteccion de cuentas"
+    Error1 "anomalas se corre sobre el grafo, asi que va a contestar que no hay"
+    Error1 "nada raro. Lo que falla es el ETL del grafo."
+    Error1 ""
+    Error1 "Para ver el error completo:  .\arrancar.ps1 -Etl"
+    Error1 "Para reconstruirlo desde cero:  .\arrancar.ps1 -ReiniciarGrafo"
+    exit 1
+}
+
+
+# ------------------------------------------------------------
+# 10. Resumen
 # ------------------------------------------------------------
 Paso "Listo"
 docker ps --format "   {{.Names}}  {{.Status}}"
@@ -762,13 +1315,32 @@ docker ps --format "   {{.Names}}  {{.Status}}"
 Write-Host ""
 Write-Host "   pgAdmin        http://localhost:5050    ventana de PostgreSQL" -ForegroundColor White
 Write-Host "   DbGate         http://localhost:3001    ventana de MongoDB" -ForegroundColor White
+Write-Host "   RedisInsight   http://localhost:5540    ventana de Redis, con el TTL contando" -ForegroundColor White
+# El navegador de Neo4j no es un visor mas: DIBUJA el grafo, y un anillo de
+# cuentas que se califican entre si solo se ve dibujado. En una tabla de filas
+# es una lista de pares que no dice nada.
+Write-Host "   Neo4j          http://localhost:7474    ventana del grafo, lo dibuja" -ForegroundColor White
 Write-Host ""
 Write-Host "   PostgreSQL     localhost:5432   base $($env_['DB_NAME'])   usuario $($env_['DB_USER'])" -ForegroundColor White
 Write-Host "   MongoDB        localhost:27018  base $($env_['MONGO_DB'])   usuario $($env_['MONGO_USER'])" -ForegroundColor White
+Write-Host "   Redis          localhost:6379   con contrasena (requirepass)" -ForegroundColor White
+Write-Host "   Neo4j          localhost:7687   bolt   usuario neo4j" -ForegroundColor White
 Write-Host ""
 Write-Host "   Falta arrancar a mano:" -ForegroundColor DarkGray
 Write-Host "     cd backend  ; npm run start:dev" -ForegroundColor DarkGray
 Write-Host "     cd frontend ; npm run dev" -ForegroundColor DarkGray
-Write-Host "" 
+Write-Host ""
 Write-Host "   Consola de MongoDB:  .\arrancar.ps1 -Mongo" -ForegroundColor DarkGray
+# Se imprime con "bash" delante y no con la redireccion que habia antes. La
+# linea vieja era esta:
+#
+#   docker exec -i mesh-neo4j cypher-shell ... --format plain < neo4j/002_fraude.cypher
+#
+# y quien acaba de correr este .ps1 esta en PowerShell, donde ese comando ni
+# siquiera llega a ejecutarse: PowerShell 5.1 contesta "The '<' operator is
+# reserved for future use" y sale con codigo 1 sin correr una sola consulta.
+# Comprobado pegandola tal cual. La linea de al lado ya marcaba "bash" para las
+# pruebas de Redis, asi que esta se leia como ejecutable en la misma consola.
+Write-Host "   Consultas de fraude: bash neo4j/correr_fraude.sh" -ForegroundColor DarkGray
+Write-Host "   Pruebas de Redis:    bash redis/prueba_concurrencia.sh   y   bash redis/prueba_carrito.sh" -ForegroundColor DarkGray
 Write-Host ""
