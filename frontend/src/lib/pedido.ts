@@ -88,6 +88,14 @@ export interface DireccionDelPedido {
 	pais: string;
 	departamento: string;
 	ciudad: string;
+	/**
+	 * La calle, el numero, la zona y las referencias, en una linea.
+	 *
+	 * Puede venir NULL, y no es un error: la columna es de la migracion 008 y
+	 * las versiones del historial anteriores a ella no la tienen. Nadie sabe
+	 * que calle regia entonces, asi que NULL dice exactamente eso.
+	 */
+	direccion_exacta: string | null;
 	codigo_postal: string | null;
 	fecha_creacion: string;
 }
@@ -246,6 +254,8 @@ export interface DireccionUsuario {
 	pais: string;
 	departamento: string;
 	ciudad: string;
+	/** La calle. Puede ser NULL en las direcciones anteriores a la migracion 008. */
+	direccion_exacta: string | null;
 	codigo_postal: string | null;
 	fecha_creacion: string;
 	id_estado_direccion: number;
@@ -256,24 +266,45 @@ export function traerDirecciones() {
 	return pedir<DireccionUsuario[]>('/direccion-usuario');
 }
 
-/** Crea una direccion. El codigo postal es lo unico opcional. */
+/**
+ * Crea una direccion. El codigo postal es lo unico opcional.
+ *
+ * `direccion_exacta` va OBLIGATORIA: el backend responde 400 sin ella, porque
+ * sin calle no se puede entregar un pedido. Al EDITAR si es opcional, pero esta
+ * funcion solo crea.
+ */
 export function crearDireccion(datos: {
 	pais: string;
 	departamento: string;
 	ciudad: string;
+	direccion_exacta: string;
 	codigo_postal?: string | null;
 }) {
 	return pedir<DireccionUsuario>('/direccion-usuario', conJson('POST', datos));
 }
 
-/** Como se lee una direccion en una linea. */
+/**
+ * Como se lee una direccion en una linea.
+ *
+ * La calle va DELANTE porque es lo que de verdad lleva el paquete a la puerta;
+ * lo demas es el punto del mapa. Va opcional en el tipo y con `filter(Boolean)`
+ * porque puede ser NULL en las direcciones anteriores a la migracion 008, y en
+ * ese caso la linea sale como salia antes en vez de con un hueco.
+ *
+ * OJO al tocar esta funcion: su texto tambien alimenta la comparacion de
+ * Checkout que avisa "esa es la version que se guardo" (`entregaDesactualizada`).
+ * Si la calle entrara aqui pero no viniera en las dos respuestas del backend, el
+ * aviso quedaria encendido para siempre. Comprobado antes de agregarla: la traen
+ * las dos, `GET /direccion-usuario` y la direccion del pedido.
+ */
 export function direccionEnUnaLinea(d: {
 	ciudad: string;
 	departamento: string;
 	pais: string;
+	direccion_exacta?: string | null;
 	codigo_postal?: string | null;
 }): string {
-	const partes = [d.ciudad, d.departamento, d.pais].filter(Boolean);
+	const partes = [d.direccion_exacta, d.ciudad, d.departamento, d.pais].filter(Boolean);
 	const texto = partes.join(', ');
 	return d.codigo_postal ? `${texto} (${d.codigo_postal})` : texto;
 }

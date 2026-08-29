@@ -42,6 +42,8 @@
 		pais: string;
 		departamento: string;
 		ciudad: string;
+		/** La calle. NULL en las direcciones anteriores a la migracion 008. */
+		direccion_exacta: string | null;
 		codigo_postal: string | null;
 		fecha_creacion: string;
 		id_estado_direccion: number;
@@ -53,6 +55,7 @@
 		pais: string;
 		departamento: string;
 		ciudad: string;
+		direccion_exacta: string | null;
 		codigo_postal: string | null;
 		fecha_creacion: string;
 	}
@@ -101,6 +104,14 @@
 	let departamentoElegido = $state(false);
 	let ciudad = $state('');
 	let ciudadElegida = $state(false);
+	/**
+	 * La calle, el numero, la zona y las referencias, en una sola linea.
+	 *
+	 * No lleva autocompletado ni bandera `elegido` como pais/departamento/ciudad:
+	 * es texto libre y no hay lista de la que elegir. Una direccion guatemalteca
+	 * no se deja partir en campos fijos sin pelear.
+	 */
+	let direccionExacta = $state('');
 	let codigoPostal = $state('');
 
 	let guardando = $state(false);
@@ -177,6 +188,7 @@
 		departamentoElegido = false;
 		ciudad = '';
 		ciudadElegida = false;
+		direccionExacta = '';
 		codigoPostal = '';
 		opcionesDepartamento = [];
 		opcionesCiudad = [];
@@ -219,6 +231,7 @@
 			return;
 		}
 
+		direccionExacta = d.direccion_exacta ?? '';
 		codigoPostal = d.codigo_postal ?? '';
 
 		pais = d.pais;
@@ -249,7 +262,11 @@
 	 * "Guatemala- 03001" pegado.
 	 */
 	function resumen(v: Version): string {
-		const base = v.ciudad + ', ' + v.departamento + ', ' + v.pais;
+		// La calle va delante, y con un {#if} implicito: las versiones anteriores
+		// a la migracion 008 la tienen en NULL y ahi la linea sale como salia
+		// antes, sin un hueco ni una coma suelta.
+		const partes = [v.direccion_exacta, v.ciudad, v.departamento, v.pais].filter(Boolean);
+		const base = partes.join(', ');
 		return v.codigo_postal ? base + ' — ' + v.codigo_postal : base;
 	}
 
@@ -307,6 +324,18 @@
 			errorForm = 'El pais no puede tener mas de 100 caracteres';
 			return false;
 		}
+		// Se exige tambien al EDITAR, aunque ahi el backend la deje opcional. El
+		// motivo es que las direcciones anteriores a la migracion 008 la tienen en
+		// NULL, y pedirla al editar es lo que hace que se vayan completando solas
+		// en vez de quedarse a medias para siempre.
+		if (!direccionExacta.trim()) {
+			errorForm = 'La direccion exacta es obligatoria';
+			return false;
+		}
+		if (direccionExacta.trim().length > 255) {
+			errorForm = 'La direccion exacta no puede tener mas de 255 caracteres';
+			return false;
+		}
 		if (codigoPostal.trim().length > 20) {
 			errorForm = 'El codigo postal no puede tener mas de 20 caracteres';
 			return false;
@@ -333,6 +362,7 @@
 			pais: pais.trim(),
 			departamento: paraLeer(departamento.trim()),
 			ciudad: ciudad.trim(),
+			direccion_exacta: direccionExacta.trim(),
 			codigo_postal: codigoPostal.trim()
 		};
 
@@ -395,13 +425,28 @@
 				{#each direcciones as d (d.id_direccion)}
 					<li>
 						<div>
-							<p class="linea">{d.ciudad}, {d.departamento}</p>
-							<p class="detalle">
-								{d.pais}
-								{#if d.codigo_postal}
-									&mdash; {d.codigo_postal}
-								{/if}
-							</p>
+							<!-- La calle es la linea fuerte: es lo que lleva el paquete a la
+							     puerta. Lo demas es el punto del mapa y pasa a ser detalle.
+							     El {#if} hace falta porque puede ser NULL en las direcciones
+							     anteriores a la migracion 008. -->
+							{#if d.direccion_exacta}
+								<p class="linea">{d.direccion_exacta}</p>
+								<p class="detalle">
+									{d.ciudad}, {d.departamento}, {d.pais}
+									{#if d.codigo_postal}
+										&mdash; {d.codigo_postal}
+									{/if}
+								</p>
+							{:else}
+								<p class="linea">{d.ciudad}, {d.departamento}</p>
+								<p class="detalle">
+									{d.pais}
+									{#if d.codigo_postal}
+										&mdash; {d.codigo_postal}
+									{/if}
+									<span class="sinCalle">&mdash; sin calle, editala para poder entregarla</span>
+								</p>
+							{/if}
 						</div>
 						<button type="button" onclick={() => abrirEditar(d)}>Editar</button>
 					</li>
@@ -459,6 +504,24 @@
 						Codigo postal <span class="nota">opcional</span>
 					</label>
 					<input id="d-postal" type="text" autocomplete="off" bind:value={codigoPostal} />
+				</div>
+			</div>
+
+			<!-- Va en su propia fila y a lo ancho: una calle con zona y referencia no
+			     cabe a medias. `.pareja` de una sola columna para heredar su
+			     margen inferior, que `.campo` suelto no trae. -->
+			<div class="pareja sola">
+				<div class="campo">
+					<label for="d-calle">Calle, numero y zona</label>
+					<input
+						id="d-calle"
+						type="text"
+						autocomplete="street-address"
+						maxlength="255"
+						placeholder="5a. Avenida Norte 22, frente al Arco de Santa Catalina"
+						bind:value={direccionExacta}
+					/>
+					<p class="suave">Sin esto no se puede entregar el pedido.</p>
 				</div>
 			</div>
 
@@ -610,6 +673,20 @@
 		grid-template-columns: 1fr 1fr;
 		gap: 16px;
 		margin-bottom: 16px;
+	}
+
+	/* Una fila de un solo campo, para lo que no cabe a medias: la calle. Es
+	   `.pareja` y no `.campo` suelto porque el margen entre filas lo pone
+	   `.pareja`, y sin el se pega al bloque de abajo. */
+	.pareja.sola {
+		grid-template-columns: 1fr;
+	}
+
+	/* Las direcciones anteriores a la migracion 008 no tienen calle. Se avisa en
+	   la ficha en vez de esconderlo: con esa direccion no se entrega un pedido, y
+	   quien la mire tiene que saber que le falta algo y que se arregla editando. */
+	.sinCalle {
+		color: var(--rojo);
 	}
 
 	.campo {

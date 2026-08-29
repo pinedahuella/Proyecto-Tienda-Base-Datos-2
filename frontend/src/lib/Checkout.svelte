@@ -109,6 +109,8 @@
 	let dirPais = $state('');
 	let dirDepartamento = $state('');
 	let dirCiudad = $state('');
+	/** La calle. Texto libre y obligatoria: sin ella no se entrega el pedido. */
+	let dirExacta = $state('');
 	let dirPostal = $state('');
 	let guardandoDireccion = $state(false);
 	let errorNueva = $state('');
@@ -501,6 +503,7 @@
 		dirPais = '';
 		dirDepartamento = '';
 		dirCiudad = '';
+		dirExacta = '';
 		dirPostal = '';
 		errorNueva = '';
 		paisElegido = false;
@@ -540,6 +543,12 @@
 		}
 		if (dirCiudad.trim() === '') return 'La ciudad es obligatoria';
 		if (dirCiudad.trim().length > 100) return 'La ciudad no puede tener mas de 100 caracteres';
+		// La calle: obligatoria, y con el mensaje del backend palabra por palabra,
+		// que es el criterio que sigue toda esta funcion.
+		if (dirExacta.trim() === '') return 'La direccion exacta es obligatoria';
+		if (dirExacta.trim().length > 255) {
+			return 'La direccion exacta no puede tener mas de 255 caracteres';
+		}
 		if (dirPostal.trim().length > 20) {
 			return 'El codigo postal no puede tener mas de 20 caracteres';
 		}
@@ -576,6 +585,10 @@
 			// desde el panel -- y encima con una palabra en ingles.
 			departamento: paraLeer(dirDepartamento.trim()),
 			ciudad: dirCiudad.trim(),
+			// Esta NO va como null cuando esta vacia, a diferencia del codigo
+			// postal: es obligatoria, y el formulario ya no deja llegar aqui sin
+			// ella.
+			direccion_exacta: dirExacta.trim(),
 			// El vacio va como null y no como '': la columna es opcional, y ''
 			// seria un codigo postal que existe y esta en blanco.
 			codigo_postal: dirPostal.trim() === '' ? null : dirPostal.trim()
@@ -1081,6 +1094,18 @@
 										compacto
 									/>
 								</div>
+
+								<label class="ancho">
+									Calle, numero y zona
+									<input
+										type="text"
+										maxlength="255"
+										autocomplete="street-address"
+										placeholder="5a. Avenida Norte 22, frente al Arco"
+										bind:value={dirExacta}
+										disabled={guardandoDireccion}
+									/>
+								</label>
 
 								<label class="ancho">
 									Codigo postal <span class="opcional">opcional</span>

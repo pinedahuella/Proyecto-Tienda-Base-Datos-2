@@ -62,7 +62,17 @@
 	} = $props();
 
 	// ---------------------------------------------------------------- tipos
-	type EstadoOferta = 'activa' | 'pausada' | 'retirada';
+	type EstadoOferta = 'pendiente' | 'activa' | 'pausada' | 'retirada' | 'rechazada';
+
+	/**
+	 * Un rechazo de la tienda. Son varios por oferta: si se corrige y se vuelve a
+	 * rechazar, queda otra fila, y por eso se listan del mas nuevo al mas viejo.
+	 */
+	interface Rechazo {
+		id_rechazo_oferta: string;
+		razon_rechazo: string;
+		fecha_rechazo: string;
+	}
 
 	/**
 	 * Un precio, como llega. De PostgreSQL viene como texto y de Mongo como
@@ -158,9 +168,52 @@
 	 *             Es lo que ven la tienda y el admin.
 	 * 'publicar'  buscar un producto para publicar una oferta nueva.
 	 */
-	type Vista = 'lista' | 'publicar' | 'catalogo';
+	type Vista = 'lista' | 'publicar' | 'catalogo' | 'revision';
 
-	const ESTADOS: EstadoOferta[] = ['activa', 'pausada', 'retirada'];
+	/**
+	 * Una oferta esperando el visto bueno de la tienda, tal como la manda
+	 * GET /vendedor/ofertas/pendientes. Trae el vendedor, que en la lista propia
+	 * no hace falta: aqui son de otros.
+	 */
+	interface Pendiente {
+		id_oferta: string;
+		id_producto: number;
+		id_producto_variante: number;
+		nombre_producto: string;
+		nombre_variante: string;
+		imagen: string | null;
+		precio: string;
+		stock: number;
+		fecha_creacion: string;
+		vendedor: {
+			id_usuario: string;
+			usuario: string;
+			nombre: string;
+			apellido: string | null;
+		};
+	}
+
+	const ESTADOS: EstadoOferta[] = ['pendiente', 'activa', 'pausada', 'retirada', 'rechazada'];
+
+	/**
+	 * Si el vendedor puede poner una oferta `activa` o `pausada` el solo.
+	 *
+	 * La verdad la tiene `oferta.fecha_aprobacion`, pero el backend no la manda en
+	 * el resumen, asi que se deduce del estado. Y se deduce SOLO donde es seguro:
+	 *
+	 *   pendiente / rechazada  ->  nunca aprobada, seguro. El backend da 409.
+	 *   activa / pausada       ->  aprobada, seguro. A esos estados no se llega sin.
+	 *   retirada               ->  NO SE SABE. Pudo retirarla estando aprobada, o
+	 *                              estando pendiente sin que nadie la mirara.
+	 *
+	 * Con la ambigua se deja el boton y se confia en el backend: si no estaba
+	 * aprobada contesta 409 con un mensaje que ya explica que hacer. Esconder el
+	 * boton en ese caso seria peor, porque dejaria sin salida a una oferta
+	 * retirada que SI estaba aprobada.
+	 */
+	function sinAprobar(estado: EstadoOferta): boolean {
+		return estado === 'pendiente' || estado === 'rechazada';
+	}
 
 	/** Cuantos productos por tanda en la vista de catalogo. */
 	const POR_TANDA = 20;
@@ -253,6 +306,18 @@
 
 	// la edicion de una fila
 	let editando = $state<string | null>(null);
+
+	/**
+	 * Los rechazos de UNA oferta, la que se este mirando.
+	 *
+	 * Se guarda el id de la abierta y no un booleano por fila, igual que
+	 * `editando`: asi solo puede haber una desplegada a la vez y volver a pulsar
+	 * el mismo boton la cierra.
+	 */
+	let rechazosDe = $state<string | null>(null);
+	let rechazos = $state<Rechazo[]>([]);
+	let cargandoRechazos = $state(false);
+	let errorRechazos = $state('');
 	let precioNuevo = $state('');
 	let estadoNuevo = $state<EstadoOferta>('activa');
 	let ajusteStock = $state('');
@@ -297,6 +362,17 @@
 	 * "Q[object Object]": Number() de un objeto da NaN y el texto crudo era el
 	 * objeto. Se vio en las variantes al publicar.
 	 */
+	/** Solo para ensenar: dia y hora en corto. Mismo formato que Direcciones. */
+	function cuando(iso: string): string {
+		return new Date(iso).toLocaleString('es-GT', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
+
 	function quetzales(precio: Precio): string {
 		if (precio == null) return '-';
 		const texto =
@@ -356,9 +432,11 @@
 	/** Cuantas hay de cada estado, para las pestanas. */
 	let conteos = $derived({
 		todas: ofertas.length,
+		pendiente: ofertas.filter((o) => o.estado === 'pendiente').length,
 		activa: ofertas.filter((o) => o.estado === 'activa').length,
 		pausada: ofertas.filter((o) => o.estado === 'pausada').length,
-		retirada: ofertas.filter((o) => o.estado === 'retirada').length
+		retirada: ofertas.filter((o) => o.estado === 'retirada').length,
+		rechazada: ofertas.filter((o) => o.estado === 'rechazada').length
 	});
 
 	// ---------------------------------------------------------------- cargar
@@ -607,6 +685,35 @@
 	 * Pausar o reactivar sin abrir el formulario: es el cambio mas frecuente y
 	 * no necesita escribir nada.
 	 */
+	/**
+	 * Trae los motivos por los que la tienda devolvio una oferta.
+	 *
+	 * Es GET, asi que va sin `conJson`: `conJson` solo arma el cuerpo de las que
+	 * mandan JSON, y pasarselo a un GET no rompe pero sobra.
+	 */
+	async function verRechazos(idOferta: string) {
+		if (rechazosDe === idOferta) {
+			rechazosDe = null;
+			return;
+		}
+
+		rechazosDe = idOferta;
+		rechazos = [];
+		errorRechazos = '';
+		cargandoRechazos = true;
+
+		const r = await pedir<Rechazo[]>(`/vendedor/ofertas/${idOferta}/rechazos`);
+		cargandoRechazos = false;
+
+		if (expiro(r)) return;
+
+		if (r.ok && r.payload) {
+			rechazos = r.payload;
+		} else {
+			errorRechazos = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+		}
+	}
+
 	async function cambiarEstado(o: OfertaEditable, estado: EstadoOferta) {
 		aviso = '';
 		error = '';
@@ -917,6 +1024,82 @@
 	 * Va como arreglo reasignado y no como Set mutado: un Set normal no es
 	 * reactivo en Svelte 5, asi que agregarle un id no volveria a pintar nada.
 	 */
+	// ------------------------------------------------ la cola de revision
+	/**
+	 * Solo la ve quien administra la tienda. Es una cola de trabajo, asi que va
+	 * de la mas vieja a la mas nueva -- el backend ya la manda en ese orden.
+	 */
+	let pendientes = $state<Pendiente[]>([]);
+	let cargandoPendientes = $state(false);
+	let errorPendientes = $state('');
+	/** El id de la oferta que se esta rechazando, para pedirle el motivo. */
+	let rechazando = $state<string | null>(null);
+	let razonRechazo = $state('');
+	/** El id de la que se esta mandando, para bloquear solo esa fila. */
+	let revisando = $state<string | null>(null);
+
+	async function cargarPendientes() {
+		errorPendientes = '';
+		cargandoPendientes = true;
+
+		const r = await pedir<Pendiente[]>('/vendedor/ofertas/pendientes');
+		cargandoPendientes = false;
+
+		if (expiro(r)) return;
+
+		if (r.ok && r.payload) {
+			pendientes = r.payload;
+		} else {
+			errorPendientes = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+		}
+	}
+
+	function abrirRevision() {
+		vista = 'revision';
+		rechazando = null;
+		razonRechazo = '';
+		cargarPendientes();
+	}
+
+	/**
+	 * Aprueba o rechaza una oferta pendiente.
+	 *
+	 * La fila se quita de la lista en cuanto el backend confirma, sin recargar
+	 * toda la cola: es una cola de trabajo y recargar movería lo que la persona
+	 * esta mirando.
+	 */
+	async function revisar(o: Pendiente, decision: 'aprobar' | 'rechazar') {
+		if (decision === 'rechazar' && !razonRechazo.trim()) {
+			errorPendientes = 'La razon del rechazo es obligatoria';
+			return;
+		}
+
+		errorPendientes = '';
+		revisando = o.id_oferta;
+
+		const cuerpo =
+			decision === 'aprobar' ? { decision } : { decision, razon: razonRechazo.trim() };
+		const r = await pedir<unknown>(
+			`/vendedor/ofertas/${o.id_oferta}/revision`,
+			conJson('PATCH', cuerpo)
+		);
+		revisando = null;
+
+		if (expiro(r)) return;
+
+		if (r.ok) {
+			pendientes = pendientes.filter((p) => p.id_oferta !== o.id_oferta);
+			rechazando = null;
+			razonRechazo = '';
+			aviso =
+				decision === 'aprobar'
+					? `Aprobaste "${o.nombre_producto} - ${o.nombre_variante}" de ${o.vendedor.nombre}`
+					: `Rechazaste "${o.nombre_producto} - ${o.nombre_variante}" y ${o.vendedor.nombre} ya puede corregirla`;
+		} else {
+			errorPendientes = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+		}
+	}
+
 	let rotas = $state<string[]>([]);
 
 	function marcarRota(id: string) {
@@ -932,12 +1115,18 @@
 					Tus ofertas, por producto
 				{:else if vista === 'lista'}
 					Mis ofertas
+				{:else if vista === 'revision'}
+					Ofertas por revisar
 				{:else}
 					Publicar una oferta
 				{/if}
 			</h2>
 			<p class="sub">
-				{#if vista === 'catalogo'}
+				{#if vista === 'revision'}
+					Lo que otros vendedores quieren publicar. Hasta que la apruebes no se ve en la
+					tienda ni se puede comprar. Al rechazar hay que decir por que: el vendedor lo lee
+					y corrige.
+				{:else if vista === 'catalogo'}
 					La tienda oferta todo el catalogo, asi que se entra por el producto: abri uno y
 					ajusta ahi el precio y las existencias de cada presentacion.
 				{:else if vista === 'lista'}
@@ -957,6 +1146,7 @@
 				<button type="button" class="principal" onclick={abrirPublicar}>
 					Publicar una oferta
 				</button>
+				<button type="button" onclick={abrirRevision}>Revisar ofertas</button>
 				{#if !traidasTodas}
 					<!--
 						Traerse las 202 de golpe sigue siendo posible, pero solo si
@@ -982,10 +1172,16 @@
 					Publicar una oferta
 				</button>
 				{#if administraLaTienda}
+					<button type="button" onclick={abrirRevision}>Revisar ofertas</button>
 					<button type="button" class="enlace" onclick={volverAlCatalogo}>
 						Volver al catalogo
 					</button>
 				{/if}
+			{:else if vista === 'revision'}
+				<button type="button" onclick={volverAlCatalogo}>Volver al catalogo</button>
+				<button type="button" class="enlace" onclick={cargarPendientes} disabled={cargandoPendientes}>
+					Actualizar
+				</button>
 			{:else if administraLaTienda}
 				<button type="button" onclick={volverAlCatalogo}>Volver al catalogo</button>
 			{:else}
@@ -998,7 +1194,87 @@
 		<p class="hecho" role="status">{aviso}</p>
 	{/if}
 
-	{#if vista === 'catalogo'}
+	{#if vista === 'revision'}
+		{#if errorPendientes}
+			<p class="malo" role="alert">{errorPendientes}</p>
+		{/if}
+
+		{#if cargandoPendientes && pendientes.length === 0}
+			<p class="menor">Buscando lo que falta por revisar...</p>
+		{:else if pendientes.length === 0}
+			<p class="vacio">No hay nada esperando revision. Todo lo que se publico ya paso por aqui.</p>
+		{:else}
+			<ul class="cola">
+				{#each pendientes as o (o.id_oferta)}
+					<li class="fila">
+						<div class="datos">
+							<h3>{o.nombre_producto}</h3>
+							<p class="menor">{o.nombre_variante}</p>
+							<p class="menor">
+								La pide {o.vendedor.nombre}
+								{o.vendedor.apellido ?? ''} ({o.vendedor.usuario}) &middot; {cuando(o.fecha_creacion)}
+							</p>
+						</div>
+
+						<div class="numeros">
+							<strong class="precio">{quetzales(o.precio)}</strong>
+							<span class="menor">{o.stock} unidades</span>
+						</div>
+
+						<div class="acciones">
+							<button
+								type="button"
+								class="principal"
+								disabled={revisando === o.id_oferta}
+								onclick={() => revisar(o, 'aprobar')}
+							>
+								Aprobar
+							</button>
+							<button
+								type="button"
+								class="peligro"
+								disabled={revisando === o.id_oferta}
+								onclick={() => {
+									rechazando = rechazando === o.id_oferta ? null : o.id_oferta;
+									razonRechazo = '';
+									errorPendientes = '';
+								}}
+							>
+								{rechazando === o.id_oferta ? 'Cancelar' : 'Rechazar'}
+							</button>
+						</div>
+
+						{#if rechazando === o.id_oferta}
+							<!-- El motivo es obligatorio: el backend responde 400 sin el, y
+							     ademas es lo unico que el vendedor va a leer para saber que
+							     corregir. -->
+							<div class="edicion">
+								<label>
+									Por que se rechaza
+									<input
+										type="text"
+										maxlength="500"
+										placeholder="El precio no corresponde a esta presentacion"
+										bind:value={razonRechazo}
+									/>
+								</label>
+								<div class="botones">
+									<button
+										type="button"
+										class="peligro"
+										disabled={revisando === o.id_oferta || !razonRechazo.trim()}
+										onclick={() => revisar(o, 'rechazar')}
+									>
+										Rechazar y avisarle
+									</button>
+								</div>
+							</div>
+						{/if}
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	{:else if vista === 'catalogo'}
 		<!-- ------------------------------------------------------ catalogo -->
 		<!--
 			El catalogo de 20 en 20, con GET /productos (publico y ya paginado).
@@ -1388,10 +1664,15 @@
 							<div class="datos">
 								<h3>{o.nombre_producto}</h3>
 								<p class="menor">{o.nombre_variante}</p>
+								<!-- Las clases van con `class:` y no interpoladas: Svelte borra del
+								     bundle los selectores que no ve escritos en el marcado, y con
+								     `class="chip {o.estado}"` no los ve. -->
 								<span
 									class="chip"
 									class:activo={o.estado === 'activa'}
-									class:inactivo={o.estado === 'retirada'}>{o.estado}</span
+									class:inactivo={o.estado === 'retirada'}
+									class:espera={o.estado === 'pendiente'}
+									class:negado={o.estado === 'rechazada'}>{o.estado}</span
 								>
 							</div>
 
@@ -1401,13 +1682,23 @@
 							</div>
 
 							<div class="acciones">
+								<!-- Antes esto era un `{:else}` que ofrecia "Activar" para cualquier
+								     estado que no fuera activa. Con `pendiente` y `rechazada` eso es
+								     un 409 seguro: el vendedor no puede aprobarse a si mismo. Ahora
+								     se nombran los estados y a los que esperan revision se les
+								     ofrece lo unico que si pueden hacer, que es corregirla. -->
 								{#if o.estado === 'activa'}
 									<button type="button" onclick={() => cambiarEstado(o, 'pausada')} disabled={guardando}>
 										Pausar
 									</button>
-								{:else}
+								{:else if !sinAprobar(o.estado)}
 									<button type="button" onclick={() => cambiarEstado(o, 'activa')} disabled={guardando}>
 										Activar
+									</button>
+								{/if}
+								{#if o.estado === 'rechazada'}
+									<button type="button" class="enlace" onclick={() => verRechazos(o.id_oferta)}>
+										{rechazosDe === o.id_oferta ? 'Ocultar el motivo' : 'Ver por que'}
 									</button>
 								{/if}
 								<button
@@ -1419,8 +1710,42 @@
 								</button>
 							</div>
 
+							{#if rechazosDe === o.id_oferta}
+								<div class="motivos">
+									{#if cargandoRechazos}
+										<p class="menor">Buscando el motivo...</p>
+									{:else if errorRechazos}
+										<p class="malo" role="alert">{errorRechazos}</p>
+									{:else if rechazos.length === 0}
+										<p class="menor">La tienda no dejo ningun motivo.</p>
+									{:else}
+										<ul>
+											{#each rechazos as r (r.id_rechazo_oferta)}
+												<li>
+													<p>{r.razon_rechazo}</p>
+													<span class="menor">{cuando(r.fecha_rechazo)}</span>
+												</li>
+											{/each}
+										</ul>
+										<p class="menor">
+											Corregi el precio o las existencias y la oferta vuelve sola a la cola de
+											revision.
+										</p>
+									{/if}
+								</div>
+							{/if}
+
 							{#if editando === o.id_oferta}
 								<div class="edicion">
+									{#if sinAprobar(o.estado)}
+										<!-- Se dice ANTES de que lo intente: el select de abajo no ofrece
+										     activa ni pausada porque el backend las rechaza con un 409
+										     mientras la tienda no la apruebe. -->
+										<p class="menor nota">
+											Esta oferta todavia no la aprobo la tienda. Al guardar un cambio vuelve a
+											quedar pendiente de revision.
+										</p>
+									{/if}
 									<div class="campos">
 										<label>
 											Precio
@@ -1429,8 +1754,10 @@
 
 										<label>
 											Estado
+											<!-- Sin aprobar, las unicas salidas son dejarla como esta o
+											     retirarla: `activa` y `pausada` dan 409. -->
 											<select bind:value={estadoNuevo}>
-												{#each ESTADOS as e}
+												{#each sinAprobar(o.estado) ? ESTADOS.filter((e) => e === o.estado || e === 'retirada') : ESTADOS as e}
 													<option value={e}>{e}</option>
 												{/each}
 											</select>
@@ -1716,6 +2043,22 @@
 		gap: 0.75rem;
 	}
 
+	/* La cola de revision reusa `.fila`, que es la misma tarjeta de la lista de
+	   ofertas: es la misma cosa mirada por otro. Solo hace falta el contenedor,
+	   que aqui es un <ul> y por eso lleva su reset. */
+	.cola {
+		display: flex;
+		flex-direction: column;
+		gap: 0.75rem;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.cola .edicion {
+		flex-basis: 100%;
+	}
+
 	.fila {
 		display: flex;
 		align-items: center;
@@ -1771,6 +2114,44 @@
 		border-radius: 999px;
 		background: var(--panel);
 		color: var(--gris);
+	}
+
+	/* Los dos estados nuevos. `espera` es neutro a proposito: pendiente no es
+	   ni bueno ni malo, es que todavia no la miraron. `negado` usa el rojo del
+	   sistema, el mismo de los mensajes de error. */
+	.chip.espera {
+		background: var(--panel);
+		color: var(--gris);
+	}
+
+	.chip.negado {
+		background: var(--rojo-cl);
+		color: var(--rojo);
+	}
+
+	/* El motivo por el que devolvieron una oferta. Va pegado debajo de su fila,
+	   como el bloque de edicion, para que se lea junto a la oferta y no aparte. */
+	.motivos {
+		margin: 8px 0 0;
+		padding: 12px 14px;
+		background: var(--rojo-cl);
+		border-radius: var(--r);
+	}
+
+	.motivos ul {
+		margin: 0 0 8px;
+		padding: 0;
+		list-style: none;
+		display: grid;
+		gap: 8px;
+	}
+
+	.motivos li p {
+		margin: 0;
+	}
+
+	.nota {
+		margin: 0 0 12px;
 	}
 
 	.chip.activo {
