@@ -179,6 +179,70 @@ export class ResenasService {
   }
 
   /**
+   * `¿La cuenta compro este producto?` -- true si tiene al menos un pedido
+   * con pago `pagado` y estado del pedido distinto de `cancelado` que
+   * incluya una linea de ese producto. **No** mira el vendedor: es "lo
+   * compre" a secas, a diferencia de la regla de `POST /resenas` que si
+   * exige que sea a ESE vendedor.
+   */
+  async comproProducto(
+    idUsuario: string,
+    idProductoParametro: string,
+  ): Promise<{ comprado: boolean }> {
+    if (!REGEX_ID.test(idProductoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idProducto = Number(idProductoParametro);
+
+    try {
+      const resultado = await pool.query(
+        `SELECT 1
+           FROM pedido pe
+           JOIN pago            pg  ON pg.id_pedido        = pe.id_pedido
+           JOIN estado_pago     epa ON epa.id_estado_pago  = pg.id_estado_pago
+           JOIN estado_pedido   epe ON epe.id_estado_pedido = pe.id_estado_pedido
+           JOIN pedido_producto pp  ON pp.id_pedido        = pe.id_pedido
+          WHERE pe.id_usuario = $1
+            AND pp.id_producto_mongo = $2
+            AND epa.estado_pago_nombre    = 'pagado'
+            AND epe.estado_pedido_nombre <> 'cancelado'
+          LIMIT 1`,
+        [idUsuario, idProducto],
+      );
+      return { comprado: (resultado.rowCount ?? 0) > 0 };
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * `¿La cuenta ya reseno este producto?` -- true si tiene al menos una fila
+   * en `resena` para ese `id_producto_mongo`, sea cual sea el vendedor (se
+   * puede resenar el mismo producto a varios vendedores).
+   */
+  async resenoProducto(
+    idUsuario: string,
+    idProductoParametro: string,
+  ): Promise<{ resenado: boolean }> {
+    if (!REGEX_ID.test(idProductoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idProducto = Number(idProductoParametro);
+
+    try {
+      const resultado = await pool.query(
+        `SELECT 1 FROM resena
+          WHERE id_usuario = $1 AND id_producto_mongo = $2
+          LIMIT 1`,
+        [idUsuario, idProducto],
+      );
+      return { resenado: (resultado.rowCount ?? 0) > 0 };
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
    * Escribe una resena: un comentario raiz con el texto y, apuntandolo, la
    * fila de `resena`. Van en una sola sentencia (un CTE), que PostgreSQL
    * ejecuta de forma atomica -- un fallo en el segundo INSERT no deja un

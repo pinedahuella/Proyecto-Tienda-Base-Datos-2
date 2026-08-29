@@ -5,6 +5,10 @@ import { BaseDatosController } from './controllers/base-datos.controller';
 import { BaseDatosService } from './services/base-datos.service';
 import { BaseDatosDocumentalController } from './controllers/base-datos-documental.controller';
 import { BaseDatosDocumentalService } from './services/base-datos-documental.service';
+import { BaseDatosClaveValorController } from './controllers/base-datos-clave-valor.controller';
+import { BaseDatosClaveValorService } from './services/base-datos-clave-valor.service';
+import { BaseDatosGrafoController } from './controllers/base-datos-grafo.controller';
+import { BaseDatosGrafoService } from './services/base-datos-grafo.service';
 import { UsuarioController } from './controllers/usuario.controller';
 import { UsuarioService } from './services/usuario.service';
 import { AdminUsuariosController } from './controllers/admin/admin-usuarios.controller';
@@ -42,6 +46,8 @@ import { ResenasService } from './services/resenas/resenas.service';
     InicioController,
     BaseDatosController,
     BaseDatosDocumentalController,
+    BaseDatosClaveValorController,
+    BaseDatosGrafoController,
     UsuarioController,
     AdminUsuariosController,
     AdminCatalogosController,
@@ -59,6 +65,8 @@ import { ResenasService } from './services/resenas/resenas.service';
     InicioService,
     BaseDatosService,
     BaseDatosDocumentalService,
+    BaseDatosClaveValorService,
+    BaseDatosGrafoService,
     UsuarioService,
     AdminUsuariosService,
     AdminCatalogosService,

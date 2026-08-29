@@ -5,12 +5,12 @@ con su conversación (respuestas) y sus votos. Las tres tablas viven en
 PostgreSQL desde `migrations/011_resenas.sql` (`resena`, `comentario`,
 `likes`).
 
-> **Estado (2026-08-29): las cinco rutas del bloque 1 están hechas y
-> probadas** (29 + 40 comprobaciones, 0 fallos — ver "Pruebas"):
-> `GET /productos/:id/resenas`, `POST /resenas`,
-> `POST /resenas/:id/respuestas`, `PUT /comentarios/:id/voto` y
-> `DELETE /comentarios/:id/voto`. Dos diferencias deliberadas con
-> `BACKEND-PENDIENTE.md`, ambas decididas por el equipo:
+> **Estado (2026-08-29): 7 rutas hechas y probadas.** Las cinco del bloque 1
+> de `BACKEND-PENDIENTE.md` (`GET /productos/:id/resenas`, `POST /resenas`,
+> `POST /resenas/:id/respuestas`, `PUT`/`DELETE /comentarios/:id/voto` — 29 +
+> 40 comprobaciones) más dos consultas de estado que pidió el equipo:
+> `GET /productos/:id/comprado` y `GET /productos/:id/resenado`.
+> Dos diferencias deliberadas con `BACKEND-PENDIENTE.md`, ambas del equipo:
 > 1. `POST /resenas` **exige haber comprado** el producto a ese vendedor
 >    (ver "La regla del equipo").
 > 2. **A una reseña puede responder cualquiera** con sesión, no solo el
@@ -167,6 +167,77 @@ Un producto sin reseñas devuelve `resenas: []`, `resumen.total: 0`,
 { "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
 { "ok": false, "mensaje": "No se pudieron obtener las resenas", "payload": null }
 ```
+
+---
+
+## GET /productos/:id/comprado
+
+**Pide sesión.** Respuesta corta: ¿la cuenta logueada **compró y pagó** este
+producto alguna vez? Un `pedido` suyo con `pago` en estado `pagado` y
+`pedido` en estado distinto de `cancelado` que incluya una línea de ese
+producto.
+
+**No mira el vendedor** — es "lo compré" a secas. (La regla de `POST
+/resenas` sí exige que la compra sea a *ese* vendedor; ésta no.)
+
+```
+GET /productos/1/comprado
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Ya compraste este producto",
+  "payload": { "comprado": true }
+}
+```
+
+`mensaje` es `"Ya compraste este producto"` o `"Todavia no has comprado
+este producto"` según el booleano.
+
+### 400 / 401
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+```
+
+---
+
+## GET /productos/:id/resenado
+
+**Pide sesión.** ¿La cuenta logueada **ya reseñó** este producto? True si
+tiene al menos una fila en `resena` para ese `id_producto_mongo`, sea cual
+sea el vendedor (se puede reseñar el mismo producto a varios vendedores).
+
+```
+GET /productos/35/resenado
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Ya resenaste este producto",
+  "payload": { "resenado": true }
+}
+```
+
+### 400 / 401
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+```
+
+> Las dos son independientes: se puede haber **comprado sin reseñar**
+> (`comprado: true`, `resenado: false`) o **reseñado sin comprar** — la
+> reseña no exige compra en la base; la exige `POST /resenas`, y sólo desde
+> que se puso esa regla. Probado en vivo con `compradora_norte`: compró el
+> producto 1 (no lo reseñó) y reseñó el 35 (no lo compró).
 
 ---
 

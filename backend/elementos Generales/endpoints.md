@@ -64,6 +64,63 @@
 
 ---
 
+## GET /clave-valor
+
+Comprueba la conexion con **Redis** (el almacen clave-valor: carrito y
+oferta limitada de la Entrega 2). Mismo patron que `GET /db` y
+`GET /documental`. No lee ni escribe ninguna clave, solo hace `PING` +
+`INFO server`. Si Redis no responde en 5 s, corta con 503 (no se queda
+colgada).
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Conexion establecida con Redis",
+  "payload": {
+    "version": "8.10.1",
+    "modo": "standalone"
+  }
+}
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
+```
+
+---
+
+## GET /grafo
+
+Comprueba la conexion con **Neo4j** (el grafo de deteccion de fraude de la
+Entrega 2). Mismo patron. Verifica la conexion Bolt y de paso cuenta los
+nodos: `nodos: 0` significa que conecta pero el grafo esta vacio (falta
+correr `etl/cargar_grafo.sh`). Timeout de 6 s -> 503.
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Conexion establecida con Neo4j",
+  "payload": {
+    "version": "Neo4j/5.26.30",
+    "nodos": 150
+  }
+}
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con Neo4j", "payload": null }
+```
+
+---
+
 ## POST /usuario/registro
 
 Cuerpo:

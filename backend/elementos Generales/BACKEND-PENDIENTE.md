@@ -6,6 +6,17 @@ Lo que YA esta hecho y te espera: las tablas, los datos, los scripts de Redis,
 el grafo de Neo4j y las pantallas. Nada de eso hay que escribirlo otra vez.
 Lo unico que falta son las rutas HTTP que las unen.
 
+> **Avance (2026-08-29): la capa de conexion a Redis y a Neo4j ya esta.**
+> `src/database/redis.ts` (cliente `ioredis`, exporta `redis`) y
+> `src/database/neo4j.ts` (driver oficial, exporta `neo4jDriver` y el helper
+> `consultarGrafo(cypher, params)` que abre/cierra sesion de solo lectura).
+> Deps `ioredis` + `neo4j-driver` instaladas; vars `REDIS_*` / `NEO4J_*` en
+> `.env` y `.env.example`. Dos health-checks nuevos, iguales a `GET /db` y
+> `GET /documental`: **`GET /clave-valor`** y **`GET /grafo`** (este ultimo
+> devuelve el conteo de nodos, para ver de un vistazo si el grafo esta
+> cargado). Probados con el contenedor arriba (200) y abajo (503 en ~0.2 s,
+> no se cuelga). Falta la logica de negocio: bloques 2, 3 y 4.
+
 Este documento dice **exactamente** que ruta, que recibe y que devuelve. Las
 pantallas ya estan escritas contra estas firmas: si las respetas, funcionan sin
 tocar el frontend.
