@@ -688,7 +688,7 @@
           </mxGeometry>
         </mxCell>
         <mxCell id="hFkzNxPJHSJBE4gR1udl-25" parent="1" style="swimlane;fontStyle=0;childLayout=stackLayout;horizontal=1;startSize=26;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;collapsible=1;marginBottom=0;align=center;fontSize=14;" value="Oferta" vertex="1">
-          <mxGeometry height="296" width="170" x="1380" y="439" as="geometry" />
+          <mxGeometry height="326" width="170" x="1380" y="439" as="geometry" />
         </mxCell>
         <mxCell id="hFkzNxPJHSJBE4gR1udl-26" parent="hFkzNxPJHSJBE4gR1udl-25" style="text;strokeColor=none;fillColor=none;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=12;whiteSpace=wrap;html=1;" value="id_oferta" vertex="1">
           <mxGeometry height="30" width="170" y="26" as="geometry" />
@@ -716,6 +716,9 @@
         </mxCell>
         <mxCell id="ICYj_GFPzT9rQBGenATL-1" parent="hFkzNxPJHSJBE4gR1udl-25" style="text;strokeColor=none;fillColor=none;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=12;whiteSpace=wrap;html=1;" value="fecha_aprobacion" vertex="1">
           <mxGeometry height="30" width="170" y="266" as="geometry" />
+        </mxCell>
+        <mxCell id="mesh-of2-aprobo" parent="hFkzNxPJHSJBE4gR1udl-25" style="text;strokeColor=none;fillColor=none;spacingLeft=4;spacingRight=4;overflow=hidden;rotatable=0;points=[[0,0.5],[1,0.5]];portConstraint=eastwest;fontSize=12;whiteSpace=wrap;html=1;" value="id_usuario_aprobo" vertex="1">
+          <mxGeometry height="30" width="170" y="296" as="geometry" />
         </mxCell>
         <mxCell id="hFkzNxPJHSJBE4gR1udl-30" edge="1" parent="1" source="hFkzNxPJHSJBE4gR1udl-9" style="edgeStyle=orthogonalEdgeStyle;fontSize=12;html=1;endArrow=ERoneToMany;rounded=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="awAX8dI2GxHHVnKtxEuv-2" value="">
           <mxGeometry height="100" relative="1" width="100" as="geometry">
