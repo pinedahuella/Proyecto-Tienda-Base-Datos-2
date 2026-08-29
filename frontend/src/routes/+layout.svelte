@@ -107,6 +107,18 @@
 	   ══════════════════════════════════════════════════════════ */
 
 	:global(:root) {
+		/* El tema de Mesh lo manda data-tema, no el sistema operativo, y hay que
+		   decirselo a Chrome: lo que el navegador pinta por su cuenta -- el fondo
+		   de los campos autocompletados, los iconos nativos, la barra de scroll --
+		   sale del color-scheme, no de la paleta de abajo. Sin esta linea Chrome
+		   asumia "claro" siempre, asi que con la app en oscuro autocompletaba con
+		   su azul palido (rgb(232,240,254)) debajo de un texto casi blanco
+		   (--tinta) y no se veia lo que uno escribia. Con color-scheme puesto,
+		   Chrome usa su fondo oscuro y el problema desaparece de raiz, en TODOS
+		   los estados de autocompletado -- incluida la vista previa del
+		   desplegable de sugerencias, que ninguna regla de CSS puede alcanzar. */
+		color-scheme: light;
+
 		--tinta: #16181f;
 		--texto: #3a3e49;
 		/* Los grises estan medidos contra el fondo, no elegidos a ojo: con los
@@ -148,6 +160,8 @@
 	   principal y --blanco la superficie de las tarjetas. Asi ningun componente
 	   necesita saber en que tema esta. */
 	:global(html[data-tema='oscuro']) {
+		color-scheme: dark;
+
 		--tinta: #edeff7;
 		--texto: #bcc2d2;
 		--gris: #a6adc0;
@@ -430,12 +444,12 @@
 		cursor: pointer;
 	}
 
-	:global(input[type='date']),
-	:global(input[type='search']) {
-		/* Los dos traen icono propio de Chrome, que en tema oscuro sale
-		   negro sobre fondo oscuro y no se ve. */
-		color-scheme: light dark;
-	}
+	/* Los iconos propios de Chrome de input[type=date] y [type=search] salian
+	   negros sobre fondo oscuro. Aqui se les ponia `color-scheme: light dark`,
+	   que los ataba a la preferencia del SISTEMA OPERATIVO en vez de al tema de
+	   la app: con Windows en claro y Mesh en oscuro, volvian a salir negros.
+	   Ya no hace falta la excepcion -- color-scheme se hereda, y la raiz ahora
+	   declara el que de verdad corresponde al tema puesto. */
 
 	:global(img),
 	:global(svg) {

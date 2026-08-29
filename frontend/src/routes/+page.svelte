@@ -1660,6 +1660,13 @@
 		aspect-ratio: 4 / 3;
 		background: var(--panel);
 		border-bottom: 1px solid var(--linea);
+		/* Sin esto el aspect-ratio no manda: el height: 100% de la imagen no
+		   resuelve contra una altura derivada de aspect-ratio, la foto cae a su
+		   tamano natural y estira la caja. Una foto vertical de 720x1280 se
+		   pintaba a 476px de alto en un hueco de 268px de ancho, la fila entera
+		   crecia hasta la mas alta y el titulo de cada tarjeta arrancaba a
+		   distinta altura. Es lo mismo que ya hace .grande en la ficha. */
+		overflow: hidden;
 	}
 
 	.foto img {
