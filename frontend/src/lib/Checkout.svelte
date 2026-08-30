@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
-	import type { RespuestaApi } from './api';
+	import { conJson, pedir, type RespuestaApi } from './api';
 	import Autocompletar from './Autocompletar.svelte';
 	import {
 		cargarPaises,
@@ -70,6 +70,7 @@
 		lineas = [],
 		alCerrar,
 		alComprado,
+		modo = 'pedido',
 		alExpirarSesion
 	}: {
 		abierto?: boolean;
@@ -77,6 +78,23 @@
 		lineas?: LineaPedido[];
 		alCerrar?: () => void;
 		alComprado?: (resultado: ResultadoCompra) => void;
+		/**
+		 * De donde sale lo que se compra.
+		 *
+		 *   'pedido'  el de siempre: hay una fila de `pedido` en `pendiente`,
+		 *             la direccion se le puso antes con un PATCH, y se compra
+		 *             con POST /comprador/pedidos/:id/comprar
+		 *   'carrito' el de la Entrega 2: el carrito vive en Redis y no hay
+		 *             pedido todavia. La direccion viaja EN el cuerpo de la
+		 *             compra, y POST /carrito/comprar crea el pedido, le mete
+		 *             las lineas y lo compra de una sola vez.
+		 *
+		 * Todo lo demas -- elegir direccion, crear una nueva, la forma de pago,
+		 * la tarjeta -- es identico, y por eso esto es un modo y no un segundo
+		 * componente: duplicar 1800 lineas para cambiar la ultima llamada seria
+		 * garantizar que las dos se separen.
+		 */
+		modo?: 'pedido' | 'carrito';
 		alExpirarSesion?: () => void;
 	} = $props();
 
@@ -249,13 +267,27 @@
 	 * hueco y comprar a la de antes -- justo lo que esta pantalla existe para
 	 * que no pase.
 	 */
+	/**
+	 * Las dos condiciones que cambian entre los modos, y por que.
+	 *
+	 * En modo carrito NO hay `idPedido` (lo crea la compra) ni
+	 * `direccionPedido` (no hay pedido al que ponersela). Lo que sustituye a
+	 * las dos es `idElegida`: la direccion que la persona marco aqui y que
+	 * viaja en el cuerpo de POST /carrito/comprar.
+	 *
+	 * Exigir las de arriba en modo carrito dejaba el boton apagado para
+	 * siempre, sin decir por que -- se veia igual que si estuviera roto.
+	 */
+	let listoElPedido = $derived(
+		modo === 'carrito' ? idElegida !== '' : idPedido != null && direccionPedido != null
+	);
+
 	let sePuedeConfirmar = $derived(
 		!cobrando &&
 			!vacio &&
 			bloqueo === '' &&
 			metodoElegido !== '' &&
-			idPedido != null &&
-			direccionPedido != null &&
+			listoElPedido &&
 			!sinDirecciones &&
 			!cambiandoDireccion &&
 			!guardandoDireccion
@@ -335,6 +367,40 @@
 
 		errorEntrega = '';
 		errorCambio = '';
+
+		// En modo carrito NO hay pedido, y eso es lo normal: el pedido lo crea
+		// la compra. Las direcciones se leen igual -- son de la CUENTA, no del
+		// pedido -- y la elegida viaja despues en el cuerpo de
+		// POST /carrito/comprar.
+		//
+		// Sin esta rama la pantalla salia sin una sola direccion y con el boton
+		// de pagar apagado para siempre, porque el unico camino que las cargaba
+		// pedia un idPedido que en este modo nunca existe.
+		if (modo === 'carrito') {
+			cargandoEntrega = true;
+			const rDir = await traerDirecciones();
+			if (mia !== cargaEntrega) return;
+			cargandoEntrega = false;
+
+			if (expiro(rDir)) return;
+
+			if (rDir.ok && Array.isArray(rDir.payload)) {
+				direcciones = rDir.payload;
+				listaLeida = true;
+				// No hay direccion "del pedido" que preseleccionar, asi que se
+				// elige la primera. Con una sola direccion -- el caso normal --
+				// eso evita un paso que no decide nada; con varias, se puede
+				// cambiar.
+				direccionPedido = null;
+				idElegida = direcciones[0]?.id_direccion ?? '';
+			} else {
+				direcciones = [];
+				listaLeida = false;
+				idElegida = '';
+				errorEntrega = motivo(rDir, 'No se pudieron leer tus direcciones');
+			}
+			return;
+		}
 
 		if (id == null) {
 			// Sin pedido no hay direccion de entrega que ensenar. No es un error
@@ -428,6 +494,12 @@
 	 * y se ensena tal cual, sin traducirlo.
 	 */
 	async function ponerDireccion(idDireccion: string): Promise<boolean> {
+		// En modo carrito no hay pedido al que ponerle la direccion: todavia no
+		// existe. Se elige aqui y viaja en el cuerpo de POST /carrito/comprar.
+		// Devolver true no es mentir: la direccion QUEDO elegida, que es lo que
+		// esta funcion promete a quien la llama.
+		if (modo === 'carrito') return true;
+
 		const id = idPedido;
 		if (id == null || idDireccion === '') return false;
 
@@ -804,8 +876,14 @@
 	 * vuelve a avisar y no compra.
 	 */
 	async function confirmar(confirmarCambios = false) {
-		if (idPedido == null) {
+		// En modo carrito NO hay idPedido, y no es un error: lo crea la propia
+		// compra. Solo el modo viejo lo exige.
+		if (modo === 'pedido' && idPedido == null) {
 			error = 'No hay un pedido abierto que comprar';
+			return;
+		}
+		if (modo === 'carrito' && idElegida === '') {
+			error = 'Elige una direccion de entrega';
 			return;
 		}
 		if (metodoElegido === '') {
@@ -842,7 +920,25 @@
 		if (confirmarCambios) cuerpo.confirmar_cambios = true;
 
 		cobrando = true;
-		const r = await comprarPedido(idPedido, cuerpo);
+		// La unica linea que cambia entre los dos modos.
+		//
+		// `confirmar_cambios` no viaja en modo carrito y no es un olvido: esa
+		// bandera existe para confirmar que el precio cambio ENTRE que se
+		// agrego al carrito y se paga, y el carrito de Redis no guarda el
+		// precio que se vio, asi que no hay con que comparar. Cerrar esa
+		// ventana es la fase 2 (guardar id_precio_historial por linea), y esta
+		// anotada en docs/BACKEND-PENDIENTE.md.
+		const r =
+			modo === 'carrito'
+				? await pedir<ResultadoCompra>(
+						'/carrito/comprar',
+						conJson('POST', {
+							id_direccion: idElegida,
+							metodo_pago: cuerpo.metodo_pago,
+							...(cuerpo.tarjeta ? { tarjeta: cuerpo.tarjeta } : {})
+						})
+					)
+				: await comprarPedido(idPedido as string, cuerpo);
 		cobrando = false;
 
 		if (expiro(r)) return;

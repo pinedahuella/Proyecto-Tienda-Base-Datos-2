@@ -457,3 +457,170 @@ pantalla.
 Si algo de esto no cuadra con como tenes armado el backend, decilo y se cambia
 la forma **antes** de que escribas la ruta: cambiar el frontend es barato,
 cambiar las dos mitades cuando ya estan hechas no.
+
+---
+
+# BLOQUE 5 -- Resenar desde el pedido (agregado el 2026-08-29)
+
+## Por que
+
+Con la regla de compra verificada, la ficha del producto es un mal sitio para
+escribir una resena: se llega ahi ANTES de comprar, y el boton solo aparece
+despues. Hay que volver al producto a proposito, que es al reves de como pasa.
+
+El sitio natural es **el pedido**: ahi esta lo que compraste y a quien.
+
+## Lo que hay que agregar: DOS campos, no una ruta
+
+`GET /comprador/pedidos/:id` ya devuelve por linea `id_producto_mongo`,
+`id_usuario_vendedor`, `nombre_producto` y `nombre_vendedor`. Eso ya identifica
+el par (producto, vendedor), que es lo que se resena. **Solo falta saber si ya
+esta escrita.**
+
+Cada objeto de `detalles` suma:
+
+```jsonc
+"id_resena": null,        // el id si ya la escribio; null si no
+"puede_resenar": true     // true = se le puede ofrecer el boton
+```
+
+## El cambio, sobre tu consulta de `pedidos.service.ts`
+
+```sql
+ SELECT pp.id_pedido_producto, pp.id_pedido, pp.id_precio_historial,
+        pp.id_producto_mongo, pp.id_producto_variante_mongo, pp.cantidad,
+        pp.nombre_producto, pp.nombre_variante, pp.nombre_vendedor,
+        ph.precio AS precio_unitario, ph.id_oferta,
+        o.id_usuario AS id_usuario_vendedor,
++       r.id_resena,
++       (r.id_resena IS NULL AND o.id_usuario <> $2) AS puede_resenar
+   FROM pedido_producto pp
+   JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+   JOIN oferta o ON o.id_oferta = ph.id_oferta
++  LEFT JOIN resena r
++         ON r.id_usuario          = $2
++        AND r.id_usuario_vendedor = o.id_usuario
++        AND r.id_producto_mongo   = pp.id_producto_mongo
+  WHERE pp.id_pedido = $1
+  ORDER BY pp.id_pedido_producto
+```
+
+y pasarle `[idPedidoParametro, idUsuario]` en vez de solo `[idPedidoParametro]`.
+
+`LEFT JOIN` y no `EXISTS` porque ademas del si/no queremos el `id_resena`.
+
+## Cuatro trampas, y la cuarta es la que muerde
+
+**1. Hay que exigir tambien que el pedido este PAGADO y no cancelado.** Es la
+misma condicion que ya aplica tu `puede_calificar`. Sin ella, un pedido
+`pendiente` ofreceria el boton y `POST /resenas` lo rechazaria despues: el
+frontend habria prometido algo que el servidor niega.
+
+Como el estado del pedido ya lo tienes en la primera consulta, lo mas simple es
+calcular un booleano del pedido entero y multiplicarlo por linea al armar la
+respuesta -- no hace falta meter el `JOIN pago` a la consulta de detalles.
+
+**2. Nadie se resena a si mismo.** De ahi el `o.id_usuario <> $2`. La tabla
+tiene `CHECK (id_usuario <> id_usuario_vendedor)`, asi que sin esto el boton
+aparece y el POST revienta.
+
+**3. `$2` es el comprador del PEDIDO, no "el usuario logueado" en abstracto.**
+Son el mismo (la ruta ya filtra `p.id_usuario = $2`), pero si algun dia un admin
+puede ver pedidos ajenos, `puede_resenar` tiene que seguir siendo "puede el
+DUENO del pedido", o le ofreceras a un admin resenar la compra de otro.
+
+**4. LA IMPORTANTE: la resena es del par (producto, vendedor), no de la linea.**
+Un pedido puede traer dos lineas del mismo producto y el mismo vendedor -- dos
+variantes, dos tallas -- y esas dos lineas comparten UNA sola resena. En el
+conjunto de datos ya pasa: el pedido 1 tiene 2 lineas y 1 solo producto.
+
+Con el campo por linea, esas dos lineas dirian las dos `puede_resenar: true`, el
+frontend pintaria dos botones para la misma resena, y al usar uno el otro
+quedaria mintiendo hasta recargar.
+
+No hace falta que lo arregles en el backend -- el frontend agrupa por
+(`id_producto_mongo`, `id_usuario_vendedor`) y pinta un boton por par. Pero
+tenlo presente si algun dia devuelves un resumen contado: contar lineas daria de
+mas.
+
+## Opcional, si te sobra un rato
+
+En la LISTA `GET /comprador/pedidos`, un `resenas_pendientes: 2` por pedido.
+Sirve para poner un aviso en `/pedidos` sin abrir cada uno. Es un `count` con la
+misma condicion. Si no esta, la pantalla simplemente no lo muestra.
+
+---
+
+# BLOQUE 6 -- `POST /carrito/comprar` (lo unico que bloquea el frontend)
+
+Las cuatro rutas del carrito estan hechas y probadas (25 comprobaciones en
+`pruebas/carrito.sh`). Falta la quinta, y **hasta que exista el frontend no
+puede migrar**.
+
+## Por que bloquea
+
+El carrito viejo es una fila de `pedido` en `pendiente`, con el `id_pedido` en
+`localStorage`, y el checkout va por ahi. El carrito de Redis **no tiene
+id_pedido**. No hay forma de migrar a medias: si el frontend pasa a Redis sin
+esta ruta, se llena un carrito que no se puede comprar.
+
+Son ocho archivos del frontend los que cuelgan del carrito viejo, asi que el
+cambio se hace de una sola vez, cuando esto exista.
+
+## Lo que hace
+
+```
+POST /carrito/comprar
+{ "id_direccion_historial": 12, "metodo_pago": "tarjeta" }
+```
+
+1. Lee el carrito de Redis (`HGETALL`)
+2. Lo arma como el arreglo `p_lineas` que ya recibe `agregar_linea`
+3. Llama a **`comprar_carrito()`** -- migracion `012_comprar_carrito.sql`, ya
+   existe y esta probada: hace crear + agregar + comprar en UNA transaccion,
+   y un intento fallido no deja ni un pedido a medias (verificado con
+   conexiones separadas: 27 pedidos antes, error, 27 despues)
+4. Si salio bien: `DEL` de la clave del carrito
+5. Devuelve el `id_pedido` que trae la funcion
+
+```sql
+SELECT comprar_carrito($id_usuario, $id_direccion_historial, $lineas::jsonb, $metodo_pago);
+```
+
+Cada elemento de `$lineas` es el mismo objeto que ya usa `agregar_linea`:
+
+```jsonc
+{ "id_oferta": 12, "cantidad": 2, "id_producto": 5,
+  "id_producto_variante": 9, "nombre_producto": "...", "nombre_variante": "..." }
+```
+
+## Tres cosas que decidir antes de escribirla
+
+**1. El `DEL` va DESPUES del COMMIT, nunca antes.** Si se borra el carrito y la
+compra falla, la persona pierde el carrito y no compro nada. Al reves -- comprar
+y que el `DEL` falle -- solo deja un carrito repetido que se puede vaciar a
+mano. De los dos errores posibles, hay que elegir el que se puede deshacer.
+
+**2. Que hacer con las lineas que no se pueden comprar.** `GET /carrito` ya las
+marca (`disponible: false`). Al comprar hay dos opciones y hay que elegir una:
+rechazar la compra entera diciendo cuales, o comprar las que si y dejar las
+otras en el carrito. **Rechazar entera es mas facil de explicar** y no sorprende
+a nadie con un total distinto al que vio.
+
+**3. EL PRECIO. Esto no es un detalle.**
+
+`agregar_linea()` congela el precio en el momento de agregar al carrito -- la
+007 lo dice textual: *"si el vendedor lo sube despues, este pedido conserva el
+que se le mostro a la persona"*.
+
+Con el carrito en Redis, agregar y comprar pasan **en el mismo instante**, asi
+que el precio que se congela es el del momento de PAGAR. Si el vendedor lo subio
+mientras el carrito esperaba, **se le cobra el nuevo, sin ningun error y sin que
+nadie se entere**.
+
+La salida: que el carrito de Redis guarde tambien el `id_precio_historial` de
+cada linea y poder pasarselo a `agregar_linea` en vez de que ella lo busque.
+Eso es un cambio en la 007 (mio) y en esta ruta (tuyo): **avisame y lo escribo**.
+
+Mientras no se resuelva, `GET /carrito` esta devolviendo un precio que puede no
+ser el que se cobre. Es un cobro incorrecto, no un detalle de presentacion.
