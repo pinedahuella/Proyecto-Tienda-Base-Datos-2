@@ -8,6 +8,7 @@
 /** Por que una linea no se puede comprar tal como esta. */
 export type MotivoNoDisponible =
   | 'oferta_no_disponible' // la oferta esta pausada/retirada/pendiente/rechazada
+  | 'variante_no_disponible' // la variante se desactivo en el catalogo
   | 'agotado' // stock 0
   | 'stock_insuficiente' // hay stock, pero menos que la cantidad pedida
   | 'oferta_no_existe'; // el id de oferta del carrito no existe (id invalido en un PUT)

@@ -4,10 +4,10 @@ El carrito de compra de la Entrega 2. **Vive solo en Redis** — reemplaza al
 carrito viejo, que era una fila de `pedido` en estado `pendiente` en
 PostgreSQL con el `id_pedido` en `localStorage`.
 
-> **Estado (2026-08-29):** hechas y probadas `GET /carrito`,
-> `PUT /carrito/lineas/:idOferta`, `DELETE /carrito/lineas/:idOferta` y
-> `DELETE /carrito` (43 comprobaciones, 0 fallos — ver "Pruebas").
-> **Pendiente:** `POST /carrito/comprar` (checkout → `comprar_carrito()`).
+> **Estado (2026-08-29): las cinco rutas del carrito están hechas y
+> probadas** — `GET /carrito`, `PUT /carrito/lineas/:idOferta`,
+> `DELETE /carrito/lineas/:idOferta`, `DELETE /carrito` (43 comprobaciones)
+> y `POST /carrito/comprar` (29 comprobaciones), 0 fallos — ver "Pruebas".
 
 Código: `src/controllers/carrito/carrito.controller.ts` +
 `src/services/carrito/carrito.service.ts`. Cliente Redis:
@@ -37,6 +37,7 @@ segundos. Se resuelven al vuelo en `GET /carrito` y al pagar.
 | `DELETE /carrito/lineas/:idOferta` | `HDEL` + `EXPIRE` | **nada** |
 | `DELETE /carrito` | `DEL` | **nada** |
 | `GET /carrito` | `HGETALL` + `EXPIRE` | 1 consulta a `oferta` + 1 a `productos` (Mongo), **en lote**, para todo el carrito de una |
+| `POST /carrito/comprar` | `HGETALL`, y `DEL` al final | el `GET` de arriba + `resolverDireccionHistorial` + `comprar_carrito()` (una transacción) + recálculo de campos calculados en Mongo |
 
 Agregar / cambiar cantidad / quitar es **Redis puro**: ni una consulta a
 PostgreSQL. El stock no se comprueba al agregar — nunca fue una reserva —
@@ -255,21 +256,122 @@ DELETE /carrito
 
 ---
 
-## Pendiente: POST /carrito/comprar
+## POST /carrito/comprar
 
-El checkout. Leerá el carrito, armará el arreglo de líneas, llamará a
-`comprar_carrito()` (`migrations/012_comprar_carrito.sql`, una transacción)
-y, **solo si sale bien**, hará `DELETE /carrito`. Si algún precio cambió o
-falta stock, devolverá `{ comprado: false, avisos/cambios: [...] }` para que
-el cliente reconfirme — mismo patrón que
-`POST /comprador/pedidos/:id/comprar`.
+El **checkout**. Lee el carrito, comprueba que todo se pueda comprar, y lo
+compra llamando a **`comprar_carrito()`**
+(`migrations/012_comprar_carrito.sql`), que crea el pedido, le mete todas
+las líneas y lo compra en **una sola transacción** — un fallo no deja ni
+pedido ni líneas a medias. Si sale bien: `DEL` del carrito y recálculo de
+los campos calculados de Mongo de cada producto tocado.
+
+```
+POST /carrito/comprar
+```
+
+```json
+{
+  "id_direccion": 2,
+  "metodo_pago": "efectivo contra entrega"
+}
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `id_direccion` | Sí | El id normal (el que da `GET /direccion-usuario`), number o string. El backend resuelve su versión vigente en `direccion_historial` y exige que sea **de la cuenta** |
+| `metodo_pago` | Sí | `"tarjeta"`, `"transferencia"` o `"efectivo contra entrega"` |
+| `tarjeta` | Solo si `metodo_pago` es `"tarjeta"` | `{ numero, vencimiento (MM/AA), cvv, titular }` — se valida y "cobra" el mock (`helpers/validaciones-tarjeta.ts`) |
+
+**El precio que se cobra es el del momento de pagar** (el que muestra
+`GET /carrito`). El carrito de Redis no guarda el precio que se vio, así que
+no hay `confirmar_cambios` ni lista de `avisos` de cambio de precio (a
+diferencia de `POST /comprador/pedidos/:id/comprar`). Cerrar la ventana de
+carrera entre ver y pagar es la **fase 2**: guardar `id_precio_historial`
+en cada línea del carrito y que `agregar_linea` lo respete — cambio en
+`migrations/007` (del compañero). Ver `BACKEND-PENDIENTE.md`.
+
+### 201
+
+```json
+{
+  "ok": true,
+  "mensaje": "Compra realizada correctamente",
+  "payload": {
+    "comprado": true,
+    "id_pedido": 3,
+    "total": "12950.00",
+    "stock": [
+      { "id_oferta": 7, "id_usuario": 2, "id_producto": 1, "id_producto_variante": 12, "stock": 32 },
+      { "id_oferta": 11, "id_usuario": 2, "id_producto": 2, "id_producto_variante": 11, "stock": 25 }
+    ]
+  }
+}
+```
+
+`stock` es el saldo resultante de cada oferta tocada — lo que ya se puso al
+día en Mongo. Con `id_pedido` se abre el detalle de la compra
+(`GET /comprador/pedidos/:id`).
+
+### 400 / 401
+
+```json
+{ "ok": false, "mensaje": "El metodo_pago es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El id_direccion es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
+{ "ok": false, "mensaje": "El numero de tarjeta no es valido", "payload": null }
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+```
+
+### 402
+
+```json
+{ "ok": false, "mensaje": "La tarjeta esta vencida", "payload": null }
+```
+
+Datos de tarjeta bien formados pero el cobro (mock) se rechaza. No se toca
+nada del pedido.
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una direccion con ese id", "payload": null }
+```
+
+`id_direccion` no existe, o es de otra cuenta (mismo mensaje).
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "El carrito esta vacio", "payload": null }
+{ "ok": false, "mensaje": "\"64 GB / 2 TB\" ya no esta disponible; \"Cable 3 m\" no tiene stock suficiente", "payload": null }
+```
+
+El carrito está vacío, o alguna línea no se puede comprar. El chequeo
+previo (con `GET /carrito`) arma la **lista** de todos los problemas; si
+algo cambia entre ese chequeo y `comprar_carrito()`, la propia función lo
+rechaza dentro de su transacción y no queda nada escrito.
+
+Motivos de bloqueo: oferta pausada/retirada (`ya no esta disponible`),
+variante desactivada en el catálogo (`ya no esta disponible en el
+catalogo`), stock 0 (`esta agotada`), stock insuficiente (`no tiene stock
+suficiente`), id de oferta inexistente (`ya no existe`).
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
+{ "ok": false, "mensaje": "No se pudo completar la compra", "payload": null }
+```
 
 ---
 
-## Pruebas — 43/43 contra el Redis real (2026-08-29)
+## Pruebas — contra las bases reales (2026-08-29)
 
-Script fuera del repo. Las rutas del carrito **no escriben en PostgreSQL ni
-en Mongo**, así que el teardown es solo borrar la clave de prueba de Redis.
+Scripts fuera del repo. Las cuatro primeras rutas **no escriben en
+PostgreSQL ni en Mongo** (teardown = borrar la clave de Redis). El checkout
+sí: crea un pedido real; el teardown lo borra y restaura el stock exacto.
+
+### `GET` / `PUT` / `DELETE` del carrito — 43/43
 
 **`PUT /carrito/lineas/:idOferta`:**
 
@@ -305,4 +407,24 @@ en Mongo**, así que el teardown es solo borrar la clave de prueba de Redis.
 | Quitar todas las líneas | la clave del carrito **desaparece sola** |
 | `:idOferta` no numérico / sin sesión | 400 / 401 |
 
-Regresión: reseñas 29/29, votos 40/40 — verdes.
+### `POST /carrito/comprar` — 29/29
+
+| Caso | Resultado |
+|---|---|
+| **Happy path**: comprar oferta 7 ×2 + oferta 11 ×1 | 201; `total: "12950.00"`; pedido creado en estado `comprado`, pago `pagado`, 2 líneas, `monto` = 12950.00; stock de las ofertas baja 2 y 1; 2 movimientos de kardex (`venta`); **el carrito de Redis se vacía** |
+| Carrito vacío | 409 "El carrito esta vacio" |
+| Comprar otra vez (carrito ya vacío tras la compra) | 409 |
+| Línea con oferta **pausada** | 409 "... ya no esta disponible" |
+| Línea con **stock insuficiente** (piden 3, stock 1) | 409 "... no tiene stock suficiente" |
+| Línea con `id_oferta` **inexistente** | 409 "... ya no existe" |
+| `id_direccion` ausente / inválida | 400 |
+| `id_direccion` inexistente o de otra cuenta | 404 |
+| `metodo_pago` ausente | 400 |
+| `metodo_pago: "tarjeta"` con tarjeta inválida | 400 |
+| Sin sesión | 401 |
+
+Teardown verificado: pedidos vuelve a 2, el stock de las ofertas a su valor
+original, y los campos calculados de Mongo (`stock_tienda` / `stock_total`
+/ `total_ofertas`) quedan iguales a la suma real en PostgreSQL.
+
+Regresión: reseñas 29/29, votos 40/40, bug 1 36/36 — verdes.

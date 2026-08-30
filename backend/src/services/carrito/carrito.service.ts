@@ -2,12 +2,22 @@ import { Injectable, Logger } from '@nestjs/common';
 import { redis } from '../../database/redis';
 import { pool } from '../../database/postgres';
 import { mongoDb } from '../../database/mongo';
-import { ErrorValidacion } from '../../helpers/errores';
+import {
+  ErrorConflicto,
+  ErrorNoEncontrado,
+  ErrorValidacion,
+} from '../../helpers/errores';
 import { manejarErrorRedis } from '../../helpers/manejar-error-redis';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
+import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
+import { validarYCobrarTarjeta } from '../../helpers/validaciones-tarjeta';
 import { validarCantidadCarrito } from '../../helpers/validaciones-carrito';
 import { DefinirCantidadCarritoPeticion } from '../../dto/definir-cantidad-carrito';
+import {
+  ComprarCarritoPeticion,
+  ComprarCarritoRespuesta,
+} from '../../dto/comprar-carrito';
 import {
   Carrito,
   CarritoLinea,
@@ -15,9 +25,24 @@ import {
   MotivoNoDisponible,
   ResumenCarrito,
 } from '../../models/carrito';
+import { METODO_PAGO_TARJETA } from '../../models/metodo-pago';
 import { Producto } from '../../models/producto';
+import { ProductosService } from '../productos/productos.service';
 
 const REGEX_ID = /^\d+$/;
+
+/** Lo que devuelve comprar_carrito() de PostgreSQL, tal cual. */
+interface CompraCarritoPostgres {
+  id_pedido: number;
+  total: string;
+  stock: {
+    id_oferta: number;
+    id_usuario: number;
+    id_producto: number;
+    id_producto_variante: number;
+    stock: number;
+  }[];
+}
 
 /** Fila cruda de `oferta` + estado + vendedor, para enriquecer el carrito. */
 interface FilaOferta {
@@ -38,6 +63,7 @@ interface ProductoLigero {
   variantes: {
     id_producto_variante: number;
     nombre_variante: string;
+    estado: string;
     imagenes: string[];
   }[];
 }
@@ -89,6 +115,8 @@ interface ProductoLigero {
 @Injectable()
 export class CarritoService {
   private readonly logger = new Logger(CarritoService.name);
+
+  constructor(private readonly productosService: ProductosService) {}
 
   /** TTL del carrito, en segundos: 24 h de INACTIVIDAD (se re-pone en cada toque). */
   static readonly TTL_SEGUNDOS = 60 * 60 * 24;
@@ -158,6 +186,7 @@ export class CarritoService {
       const { disponible, motivo } = this.evaluarDisponibilidad(
         oferta,
         cantidad,
+        variante?.estado,
       );
 
       return {
@@ -256,6 +285,111 @@ export class CarritoService {
     }
   }
 
+  /**
+   * El checkout. Lee el carrito, comprueba que todo se pueda comprar, y lo
+   * compra llamando a `comprar_carrito()` de PostgreSQL
+   * (`migrations/012_comprar_carrito.sql`), que crea el pedido, le mete
+   * todas las lineas y lo compra en **una sola transaccion** -- un fallo no
+   * deja ni pedido ni lineas a medias.
+   *
+   * Orden:
+   *   1. `verCarrito()` -> lineas enriquecidas (nombre, precio, stock,
+   *      disponibilidad). Carrito vacio -> 409.
+   *   2. Si alguna linea no se puede comprar (oferta pausada, variante
+   *      desactivada, sin stock, o un id inventado) -> 409 con la lista, sin
+   *      tocar nada. Es un chequeo previo para dar un buen mensaje; la
+   *      verdad la vuelve a comprobar `comprar_carrito()` dentro de su
+   *      transaccion, con `FOR UPDATE`.
+   *   3. Se resuelve `id_direccion_historial` (exige que la direccion sea de
+   *      la cuenta) y, si el metodo es tarjeta, se valida/cobra el mock.
+   *   4. `SELECT comprar_carrito(...)` con las lineas ya con nombre.
+   *   5. `DEL` del carrito y recalculo de los campos calculados de Mongo de
+   *      cada producto tocado. Si el recalculo falla, la compra NO se
+   *      deshace: solo queda una tarjeta del catalogo desfasada un rato
+   *      (mismo criterio que `comprarPedido`).
+   *
+   * El precio que se cobra es el del momento de pagar (el que muestra
+   * `GET /carrito`), porque el carrito de Redis no guarda el precio visto
+   * -- ver el DTO y `endpoints-carrito.md`.
+   */
+  async comprarCarrito(
+    idUsuario: string,
+    datos: ComprarCarritoPeticion,
+  ): Promise<ComprarCarritoRespuesta> {
+    if (!esTextoNoVacio(datos.metodo_pago)) {
+      throw new ErrorValidacion('El metodo_pago es obligatorio');
+    }
+    const idDireccion = this.resolverIdDireccion(datos.id_direccion);
+
+    const carrito = await this.verCarrito(idUsuario);
+    if (carrito.lineas.length === 0) {
+      throw new ErrorConflicto('El carrito esta vacio');
+    }
+
+    const bloqueantes = carrito.lineas
+      .filter((linea) => !linea.disponible)
+      .map(
+        (linea) =>
+          `"${linea.nombre_variante}" ${this.motivoATexto(linea.motivo)}`,
+      );
+    if (bloqueantes.length > 0) {
+      throw new ErrorConflicto(bloqueantes.join('; '));
+    }
+
+    const idDireccionHistorial = await this.resolverDireccionHistorial(
+      idUsuario,
+      idDireccion,
+    );
+
+    if (datos.metodo_pago === METODO_PAGO_TARJETA) {
+      validarYCobrarTarjeta(datos.tarjeta);
+    }
+
+    // Las lineas en el formato que espera agregar_linea (dentro de
+    // comprar_carrito). El nombre del producto/variante ya lo resolvio
+    // verCarrito desde Mongo; el del vendedor lo pone la propia funcion.
+    const lineas = carrito.lineas.map((linea) => ({
+      id_oferta: linea.id_oferta,
+      cantidad: linea.cantidad,
+      id_producto: linea.id_producto,
+      id_producto_variante: linea.id_producto_variante,
+      nombre_producto: linea.nombre_producto,
+      nombre_variante: linea.nombre_variante,
+    }));
+
+    let compra: CompraCarritoPostgres;
+    try {
+      const resultado = await pool.query<{
+        comprar_carrito: CompraCarritoPostgres;
+      }>('SELECT comprar_carrito($1, $2, $3::jsonb, $4)', [
+        idUsuario,
+        idDireccionHistorial,
+        JSON.stringify(lineas),
+        datos.metodo_pago,
+      ]);
+      compra = resultado.rows[0].comprar_carrito;
+    } catch (error) {
+      // La oferta se pauso / se agoto entre verCarrito y esta llamada:
+      // comprar_carrito lo rechaza y no queda nada escrito.
+      if (this.esErrorDeNegocio(error)) {
+        throw new ErrorConflicto((error as Error).message);
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+
+    await this.vaciar(idUsuario);
+
+    const idsProducto = compra.stock.map((linea) => linea.id_producto);
+    await this.productosService.recalcularCamposCalculados(idsProducto);
+
+    return {
+      comprado: true,
+      id_pedido: compra.id_pedido,
+      total: compra.total,
+      stock: compra.stock,
+    };
+  }
+
   // ---------------------------------------------------------------------
   // Privados
   // ---------------------------------------------------------------------
@@ -310,9 +444,16 @@ export class CarritoService {
   private evaluarDisponibilidad(
     oferta: FilaOferta,
     cantidad: number,
+    estadoVariante: string | undefined,
   ): { disponible: boolean; motivo: MotivoNoDisponible | null } {
     if (oferta.estado_oferta_nombre !== 'activa') {
       return { disponible: false, motivo: 'oferta_no_disponible' };
+    }
+    // La variante puede haberse desactivado en el catalogo despues de
+    // agregarla. Si el producto no aparece en Mongo, `estadoVariante` es
+    // undefined y se deja pasar (el nombre ya sale como "(no encontrada)").
+    if (estadoVariante != null && estadoVariante !== 'activa') {
+      return { disponible: false, motivo: 'variante_no_disponible' };
     }
     if (oferta.stock <= 0) {
       return { disponible: false, motivo: 'agotado' };
@@ -360,6 +501,7 @@ export class CarritoService {
               nombre: 1,
               'variantes.id_producto_variante': 1,
               'variantes.nombre_variante': 1,
+              'variantes.estado': 1,
               'variantes.imagenes': 1,
             },
           },
@@ -369,5 +511,84 @@ export class CarritoService {
     } catch (error) {
       manejarErrorConexionMongo(this.logger, error);
     }
+  }
+
+  /** Un `motivo` de no-disponible, en texto para el mensaje de 409. */
+  private motivoATexto(motivo: MotivoNoDisponible | null): string {
+    switch (motivo) {
+      case 'oferta_no_disponible':
+        return 'ya no esta disponible';
+      case 'variante_no_disponible':
+        return 'ya no esta disponible en el catalogo';
+      case 'agotado':
+        return 'esta agotada';
+      case 'stock_insuficiente':
+        return 'no tiene stock suficiente';
+      case 'oferta_no_existe':
+        return 'ya no existe';
+      default:
+        return 'no se puede comprar';
+    }
+  }
+
+  /**
+   * Acepta el `id_direccion` como number o como el string que devuelve
+   * GET /direccion-usuario (es un bigint y el driver pg lo da como texto).
+   * Mismo criterio que PedidosCompradorService.
+   */
+  private resolverIdDireccion(valor: number | string): number {
+    const id =
+      typeof valor === 'string' && /^\d+$/.test(valor) ? Number(valor) : valor;
+    if (typeof id !== 'number' || !Number.isInteger(id) || id <= 0) {
+      throw new ErrorValidacion(
+        'El id_direccion es obligatorio y debe ser un numero entero mayor a 0',
+      );
+    }
+    return id;
+  }
+
+  /**
+   * La version mas reciente de esa direccion en `direccion_historial`.
+   * Exige que sea de la cuenta logueada -- una direccion ajena da el mismo
+   * 404 que una que no existe. Mismo criterio y misma consulta que
+   * PedidosCompradorService.
+   */
+  private async resolverDireccionHistorial(
+    idUsuario: string,
+    idDireccion: number,
+  ): Promise<string> {
+    try {
+      const resultado = await pool.query<{ id_direccion_historial: string }>(
+        `SELECT dh.id_direccion_historial
+           FROM direccion_historial dh
+           JOIN direcciones d ON d.id_direccion = dh.id_direccion
+          WHERE dh.id_direccion = $1 AND d.id_usuario = $2
+          ORDER BY dh.fecha_creacion DESC
+          LIMIT 1`,
+        [idDireccion, idUsuario],
+      );
+      const historial = resultado.rows[0];
+      if (historial == null) {
+        throw new ErrorNoEncontrado('No existe una direccion con ese id');
+      }
+      return historial.id_direccion_historial;
+    } catch (error) {
+      if (error instanceof ErrorNoEncontrado) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * 23503 (foreign_key_violation) y 23514 (check_violation): los dos codigos
+   * con los que `crear_pedido` / `agregar_linea` / `comprar_pedido` levantan
+   * sus errores de negocio (oferta inexistente, no activa, sin stock,
+   * direccion ajena, metodo de pago invalido). Mismo criterio que
+   * PedidosCompradorService.
+   */
+  private esErrorDeNegocio(error: unknown): boolean {
+    const codigo = (error as { code?: string } | undefined)?.code;
+    return codigo === '23503' || codigo === '23514';
   }
 }

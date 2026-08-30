@@ -278,16 +278,29 @@ tendria por que llegar.
 La capa de Redis esta escrita y probada en `redis/`. Leete `redis/README.md`:
 tiene el diseno de claves, el TTL y la explicacion que va al informe.
 
-> **Avance (2026-08-29): el carrito ya vive en Redis.** Hechas y probadas
-> (43 comprobaciones) `GET /carrito`, `PUT /carrito/lineas/:idOferta`
-> (cantidad ABSOLUTA), `DELETE /carrito/lineas/:idOferta` y `DELETE /carrito`.
-> Ver `endpoints-carrito.md`. Decisiones de diseno tomadas con el usuario:
-> el carrito es un HASH `mesh:carrito:<id_usuario>` de `id_oferta -> cantidad`
-> y **nada mas** (ni nombre ni precio ni stock -- se resuelven en lote en el
-> `GET`); agregar/quitar es **Redis puro, cero PostgreSQL**; el stock no se
-> valida al agregar, solo al pintar el carrito y al pagar; no hay carrito de
-> invitado por ahora (pide sesion). **Falta `POST /carrito/comprar`**
-> (checkout -> `comprar_carrito()` + vaciar).
+> **HECHO (2026-08-29): el carrito completo vive en Redis.** Las cinco
+> rutas hechas y probadas (43 + 29 comprobaciones): `GET /carrito`,
+> `PUT /carrito/lineas/:idOferta` (cantidad ABSOLUTA),
+> `DELETE /carrito/lineas/:idOferta`, `DELETE /carrito` y
+> **`POST /carrito/comprar`** (checkout -> `comprar_carrito()` +
+> vaciar + recalcular Mongo). Ver `endpoints-carrito.md`.
+>
+> Decisiones de diseno tomadas con el usuario: el carrito es un HASH
+> `mesh:carrito:<id_usuario>` de `id_oferta -> cantidad` y **nada mas**
+> (nombre/precio/stock se resuelven en lote en el `GET` y en el checkout);
+> agregar/quitar es **Redis puro, cero PostgreSQL**; el stock no se valida
+> al agregar, solo al pintar el carrito y de forma bloqueante al pagar; no
+> hay carrito de invitado (pide sesion).
+>
+> **Fase 2 pendiente (te toca a vos, en `migrations/007`):** el carrito no
+> guarda `precio_visto` ni `id_precio_historial`, asi que `comprar_carrito`
+> congela el precio del momento de PAGAR (el mismo que muestra
+> `GET /carrito`). Para cerrar la ventana de carrera entre ver y pagar,
+> `agregar_linea` tiene que aceptar un `id_precio_historial` en la linea y
+> usarlo (validando que sea de esa oferta) -- ver `redis/README.md`
+> seccion 5.6 y la cabecera de `012_comprar_carrito.sql`. Cuando eso este,
+> el carrito de Redis guardara ese id por linea y `POST /carrito/comprar`
+> lo pasara.
 
 Lo que falta es cambiar de donde sale el carrito.
 

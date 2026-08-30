@@ -4,6 +4,7 @@ import {
   Delete,
   Get,
   Param,
+  Post,
   Put,
   UseGuards,
 } from '@nestjs/common';
@@ -12,6 +13,7 @@ import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { DefinirCantidadCarritoPeticion } from '../../dto/definir-cantidad-carrito';
+import type { ComprarCarritoPeticion } from '../../dto/comprar-carrito';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import { CarritoService } from '../../services/carrito/carrito.service';
 
@@ -28,7 +30,7 @@ import { CarritoService } from '../../services/carrito/carrito.service';
  *   PUT    /carrito/lineas/:idOferta    -> fijar la cantidad de una oferta
  *   DELETE /carrito/lineas/:idOferta    -> quitar una oferta
  *   DELETE /carrito                     -> vaciar
- *   (POST /carrito/comprar -- proximo paso)
+ *   POST   /carrito/comprar             -> el checkout (comprar_carrito)
  */
 @Controller('carrito')
 @UseGuards(SesionGuard)
@@ -92,6 +94,23 @@ export class CarritoController {
       return exito(null, 'Carrito vaciado');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo vaciar el carrito');
+    }
+  }
+
+  // POST /carrito/comprar -- el checkout
+  @Post('comprar')
+  async comprar(
+    @Body() cuerpo: ComprarCarritoPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const resultado = await this.carritoService.comprarCarrito(
+        usuarioActual.id_usuario,
+        cuerpo,
+      );
+      return exito(resultado, 'Compra realizada correctamente');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo completar la compra');
     }
   }
 }
