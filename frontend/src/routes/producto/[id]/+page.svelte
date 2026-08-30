@@ -4,7 +4,7 @@
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
 	import Resenas from '$lib/Resenas.svelte';
-	import { pedir } from '$lib/api';
+	import { conJson, mensajeUtil, pedir } from '$lib/api';
 	import {
 		agregarLinea,
 		crearPedido,
@@ -383,97 +383,82 @@
 	 * y el precio de la propia oferta.
 	 */
 	async function alPedido(v: Variante, o: Oferta) {
-		avisoPedido = '';
 		errorPedido = '';
+		avisoPedido = '';
 		salidaDelError = null;
 		ofertaDelAviso = o.id_oferta;
 
-		const escrito = cantidades[Number(o.id_oferta)];
-		// El campo esta vacio casi siempre: agregar de a uno es lo normal.
-		const cantidad = escrito == null || String(escrito).trim() === '' ? 1 : Number(escrito);
-		if (!Number.isInteger(cantidad) || cantidad <= 0) {
+		if (!haySesion) {
+			errorPedido = 'Inicia sesion para agregar al carrito.';
+			salidaDelError = { texto: 'Iniciar sesion', href: '/entrar' };
+			return;
+		}
+
+		// String(x ?? '') antes de trim: si esto se llenara desde un input
+		// numerico, .trim() sobre un numero revienta. Ya paso en este proyecto.
+		const escrito = String(cantidades[Number(o.id_oferta)] ?? '').trim();
+		const cantidad = escrito === '' ? 1 : Number(escrito);
+
+		if (!Number.isInteger(cantidad) || cantidad < 1) {
 			errorPedido = 'La cantidad debe ser un numero entero mayor a 0';
 			return;
 		}
 
 		agregando = o.id_oferta;
-		const idPedido = await pedidoAbierto();
-		if (idPedido == null) {
+
+		// PUT /carrito/lineas/:id FIJA la cantidad, no la suma. Y este boton
+		// dice "Agregar": apretarlo dos veces con 2 tiene que dejar 4, no 2.
+		//
+		// Por eso se lee el carrito antes, para saber cuanto habia. Son dos
+		// viajes en vez de uno, y se aceptan: la alternativa era guardar aqui
+		// una copia de las cantidades, que se desincroniza en cuanto la persona
+		// toca el carrito en otra pestana -- y el carrito ES de la cuenta, asi
+		// que esa otra pestana puede ser de otro dispositivo.
+		let yaHabia = 0;
+		const actual = await pedir<{ lineas: { id_oferta: number; cantidad: number }[] }>('/carrito');
+
+		if (actual.estado === 401) {
 			agregando = '';
+			haySesion = false;
+			errorPedido = 'Se acabo tu sesion. Vuelve a entrar para seguir.';
+			salidaDelError = { texto: 'Iniciar sesion', href: '/entrar' };
+			return;
+		}
+		if (actual.ok && actual.payload) {
+			const linea = actual.payload.lineas.find((l) => Number(l.id_oferta) === Number(o.id_oferta));
+			yaHabia = linea?.cantidad ?? 0;
+		}
+
+		const total = yaHabia + cantidad;
+
+		// El tope del backend es 1000 por linea. Se avisa aqui con el numero
+		// concreto en vez de gastar el viaje para recibir el mismo error.
+		if (total > 1000) {
+			agregando = '';
+			errorPedido = `Ya tienes ${yaHabia} y el maximo por producto es 1000.`;
 			return;
 		}
 
-		const r = await agregarLinea(idPedido, {
-			id_oferta: Number(o.id_oferta),
-			cantidad
-		});
+		const r = await pedir(`/carrito/lineas/${o.id_oferta}`, conJson('PUT', { cantidad: total }));
 		agregando = '';
 
-		if (r.ok && r.payload) {
-			avisoPedido =
-				`"${v.nombre_variante}" de ${o.vendedor.usuario} queda en ${r.payload.cantidad} ` +
-				`en tu carrito (le quedan ${r.payload.stock_disponible}).`;
+		if (r.ok) {
+			// No se afirma cuanto stock queda: el PUT no lo mira -- agregar al
+			// carrito nunca fue una reserva -- y decir un numero que el servidor
+			// no comprobo seria inventarlo. La disponibilidad se ve en el
+			// carrito, que la calcula al pintarlo.
+			avisoPedido = `"${v.nombre_variante}" de ${o.vendedor.usuario} queda en ${total} en tu carrito.`;
 			cantidades[Number(o.id_oferta)] = '';
-			// Se abre el carrito y se vuelve a contar. Es lo que hace que se
-			// vea que "algo paso": antes el unico rastro era una linea de texto
-			// junto al boton, y habia que ir al panel para comprobarlo.
+			// Se abre el carrito y se vuelve a contar: es lo que hace que se vea
+			// que "algo paso". Antes el unico rastro era una linea de texto.
 			await carrito.recontar();
 			carrito.abrir();
 		} else if (r.estado === 401) {
 			haySesion = false;
 			errorPedido = 'Se acabo tu sesion. Vuelve a entrar para seguir.';
 			salidaDelError = { texto: 'Iniciar sesion', href: '/entrar' };
-		} else if (r.estado === 404) {
-			// OJO: este 404 tiene TRES motivos posibles y solo uno de ellos es
-			// del pedido (el otro es que el producto este oculto, y el otro que
-			// la variante no sea de este producto). Olvidar el pedido a la
-			// primera de cambio seria tirar el unico hilo que lo une a este
-			// navegador -- no hay ruta para volver a encontrarlo -- por un fallo
-			// que ni siquiera era suyo. Asi que primero se pregunta.
-			const rPedido = await traerPedido(idPedido);
-			if (pedidoCaduco(rPedido)) {
-				// El pedido guardado ya no sirve (se compro, se cancelo, o la
-				// base se rehizo). Antes esto se quedaba en un aviso -- "prueba
-				// otra vez y se abre uno nuevo" -- que obligaba a pulsar
-				// Agregar dos veces para hacer una sola cosa. Se abre el pedido
-				// nuevo y se reintenta aqui mismo, una sola vez: si el segundo
-				// intento tambien falla, el fallo es otro y ese si se cuenta.
-				olvidarPedidoAbierto();
-				agregando = o.id_oferta;
-				const idNuevo = await pedidoAbierto();
-				if (idNuevo == null) {
-					agregando = '';
-					return;
-				}
-
-				const rReintento = await agregarLinea(idNuevo, {
-					id_oferta: Number(o.id_oferta),
-					cantidad
-				});
-				agregando = '';
-
-				if (rReintento.ok && rReintento.payload) {
-					avisoPedido =
-						`"${v.nombre_variante}" de ${o.vendedor.usuario} queda en ` +
-						`${rReintento.payload.cantidad} en tu carrito ` +
-						`(le quedan ${rReintento.payload.stock_disponible}).`;
-					ofertaDelAviso = o.id_oferta;
-					cantidades[Number(o.id_oferta)] = '';
-					await carrito.recontar();
-					carrito.abrir();
-				} else {
-					errorPedido =
-						rReintento.estado === 0
-							? 'No se pudo conectar con el servidor'
-							: rReintento.mensaje;
-				}
-			} else {
-				errorPedido = r.mensaje;
-			}
 		} else {
-			// El 409 trae el motivo real del backend ("no hay suficiente stock",
-			// "No hay inventario para la variante N del producto M"): se cita.
-			errorPedido = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			errorPedido = mensajeUtil(r);
 		}
 	}
 

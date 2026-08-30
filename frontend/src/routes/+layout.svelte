@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import Trama from '$lib/Trama.svelte';
-	import Carrito from '$lib/Carrito.svelte';
+	import CarritoRedis from '$lib/CarritoRedis.svelte';
 	import Checkout from '$lib/Checkout.svelte';
 	import { carrito } from '$lib/estadoCarrito.svelte';
 	import { cerrarSesion } from '$lib/sesion';
@@ -30,7 +30,11 @@
 	 * para pintar el resumen del checkout, no para elegir que se cobra.
 	 */
 	function alPedirComprar(idPedido: string, lineas: LineaPedido[]) {
-		idPedidoAComprar = idPedido;
+		// idPedido llega vacio y esta bien: con el carrito en Redis el pedido
+		// NO existe todavia -- lo crea POST /carrito/comprar, en la misma
+		// transaccion en que lo compra. El checkout va en modo "carrito" y no
+		// lo necesita; las lineas siguen sirviendo para pintar el resumen.
+		idPedidoAComprar = idPedido || null;
 		lineasAComprar = lineas;
 		carrito.cerrar();
 		checkoutAbierto = true;
@@ -40,9 +44,11 @@
 		const comprado = idPedidoAComprar;
 
 		checkoutAbierto = false;
-		// El pedido dejo de estar pendiente, asi que ya no es "el carrito". Sin
-		// olvidarlo, el panel volveria a abrir un pedido comprado como si fuera
-		// el carrito y el backend contestaria 409 al intentar comprarlo de nuevo.
+		// Ya no hay id de pedido guardado que olvidar: el carrito vive en Redis
+		// y lo borra el propio backend tras el COMMIT de la compra. Se sigue
+		// llamando a olvidarPedidoAbierto() una vez para limpiar el localStorage
+		// de quien venia del carrito viejo -- si no, esa llave se queda ahi
+		// para siempre sin que nada la lea.
 		olvidarPedidoAbierto();
 		carrito.fijarCuenta(0);
 		idPedidoAComprar = null;
@@ -80,7 +86,10 @@
 	{@render children()}
 </div>
 
-<Carrito
+<!-- El carrito de la Entrega 2: vive en Redis. Reemplazo a Carrito.svelte,
+     que leia una fila de `pedido` en `pendiente` de PostgreSQL con su id en
+     localStorage. Ya no hay id que guardar: el carrito es de la CUENTA. -->
+<CarritoRedis
 	abierto={carrito.abierto}
 	alCerrar={() => carrito.cerrar()}
 	alExpirarSesion={sesionExpirada}
@@ -91,6 +100,7 @@
 	abierto={checkoutAbierto}
 	idPedido={idPedidoAComprar}
 	lineas={lineasAComprar}
+	modo="carrito"
 	alCerrar={() => (checkoutAbierto = false)}
 	{alComprado}
 	alExpirarSesion={sesionExpirada}

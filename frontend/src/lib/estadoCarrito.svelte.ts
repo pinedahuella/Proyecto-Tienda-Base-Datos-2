@@ -1,4 +1,4 @@
-import { leerPedidoAbierto, listarPedidos, traerPedido, guardarPedidoAbierto } from './pedido';
+import { pedir } from './api';
 
 /**
  * El estado del carrito, compartido por toda la aplicacion.
@@ -12,9 +12,15 @@ import { leerPedidoAbierto, listarPedidos, traerPedido, guardarPedidoAbierto } f
  * archivos que Svelte compila, y un `.ts` normal no lo es.
  *
  * OJO con lo que este modulo NO es: no guarda las lineas. La verdad de lo que
- * hay en el pedido vive en PostgreSQL y la pide el propio Carrito.svelte cada
+ * hay en el carrito vive en REDIS y la pide el propio CarritoRedis.svelte cada
  * vez que se abre. Aqui solo esta lo que hace falta para pintar el boton --
  * cuantas lineas hay -- y si el panel esta abierto.
+ *
+ * Esto cambio con la Entrega 2: antes el carrito era una fila de `pedido` en
+ * `pendiente` de PostgreSQL, con su id en localStorage. Ya no hay id que
+ * guardar -- el carrito es de la CUENTA y sale del token -- asi que tampoco
+ * hay que buscarlo entre los pedidos propios al entrar desde otro navegador:
+ * simplemente esta.
  */
 
 /**
@@ -82,30 +88,23 @@ class EstadoCarrito {
 	 */
 	async recontar(): Promise<void> {
 		try {
-			const guardado = leerPedidoAbierto();
+			// UNA peticion, y ya no hace falta el rodeo de antes: se leia el id
+			// del localStorage, se pedia ese pedido, y si no servia se listaban
+			// todos los pedidos propios para encontrar el pendiente. Tres
+			// caminos posibles para contestar "cuantas lineas tengo".
+			//
+			// Con el carrito en Redis la clave sale del token, asi que la
+			// pregunta se contesta preguntando.
+			const r = await pedir<{ total_lineas: number }>('/carrito');
 
-			if (guardado) {
-				const r = await traerPedido(guardado);
-				if (r.ok && r.payload) {
-					_cuenta = r.payload.detalles.length;
-					return;
-				}
-				// 404: el pedido guardado ya no sirve (no existe, o es de otra
-				// cuenta). Se sigue de largo y se busca entre los propios.
-				if (r.estado !== 404) return;
-			}
-
-			const rLista = await listarPedidos();
-			if (!rLista.ok || !rLista.payload) return;
-
-			const pendiente = rLista.payload.find((p) => p.estado_pedido_nombre === 'pendiente');
-			if (!pendiente) {
-				_cuenta = 0;
+			// 401 = no hay sesion. No es 0: es "no se sabe", y pintar un cero
+			// donde no se sabe es lo que hacia parpadear la burbuja.
+			if (r.estado === 401) {
+				_cuenta = -1;
 				return;
 			}
 
-			guardarPedidoAbierto(pendiente.id_pedido);
-			_cuenta = pendiente.cantidad_lineas;
+			if (r.ok && r.payload) _cuenta = r.payload.total_lineas;
 		} catch {
 			// Ver arriba: sin red no se sabe, y no saber no se pinta como cero.
 		}

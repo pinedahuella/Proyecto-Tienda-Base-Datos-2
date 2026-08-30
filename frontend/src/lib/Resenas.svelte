@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { conJson, pedir } from './api';
+	import { conJson, mensajeUtil, pedir } from './api';
 
 	/**
 	 * Las resenas de un producto, en su ficha.
@@ -32,23 +32,28 @@
 	 * las respuestas.
 	 *
 	 *
-	 * LAS RUTAS QUE ESTE COMPONENTE ESPERA -- todavia no existen
+	 * LAS CINCO RUTAS, YA CONSTRUIDAS Y PROBADAS
 	 * ---------------------------------------------------------------
-	 * El backend es de Jose David y aqui no se toca. Este componente ya esta
-	 * escrito contra las rutas que hacen falta:
-	 *
 	 *   GET    /productos/:id/resenas       la lista con sus respuestas
 	 *   POST   /resenas                     escribir una
-	 *   POST   /resenas/:id/respuestas      contestar (el vendedor)
+	 *   POST   /resenas/:id/respuestas      contestar
 	 *   PUT    /comentarios/:id/voto        votar a favor o en contra
 	 *   DELETE /comentarios/:id/voto        quitar el voto
 	 *
-	 * La forma exacta de cada una esta en docs/BACKEND-PENDIENTE.md. Mientras
-	 * no existan, la seccion dice que las resenas todavia no estan conectadas
-	 * en vez de quedarse vacia como si el producto no tuviera ninguna. Un
-	 * "todavia no hay resenas" cuando en realidad hay 86 en la base es una
-	 * mentira en pantalla, y de las caras: nadie sale a buscar un bug que la
-	 * pantalla afirma que no existe.
+	 * DOS REGLAS DEL BACKEND que esta pantalla obedece y no endurece:
+	 *
+	 * 1. Para calificar hay que HABER COMPRADO Y PAGADO ese producto a ese
+	 *    vendedor. Por eso el boton de escribir sale de `puede_calificar`, que
+	 *    ya viene filtrado, y no de una lista de vendedores armada aqui: si se
+	 *    armara aqui, ofreceria vendedores que el servidor va a rechazar.
+	 * 2. Contesta CUALQUIERA con sesion, no solo el vendedor calificado.
+	 *
+	 * Las dos las decidio el backend y estan en su endpoints-resenas.md.
+	 *
+	 * El estado "todavia no estan conectadas" se queda por si el backend se
+	 * cae o alguien corre el frontend sin el: dice eso en vez de "no hay
+	 * resenas", que seria mentira teniendo 86 en la base -- y de las caras,
+	 * porque nadie sale a buscar un bug que la pantalla afirma que no existe.
 	 */
 
 	let {
@@ -108,6 +113,44 @@
 	let error = $state('');
 	let sinConectar = $state(false);
 
+	/**
+	 * Las dos preguntas que contestan POR QUE no se puede escribir.
+	 *
+	 *   GET /productos/:id/comprado  -> { comprado: boolean }
+	 *   GET /productos/:id/resenado  -> { resenado: boolean }
+	 *
+	 * `null` = no se sabe (sin sesion, o el backend todavia no las expone).
+	 *
+	 * Existen para arreglar un problema concreto de esta pantalla: cuando no se
+	 * puede escribir, el boton simplemente NO ESTABA. Una ausencia no explica
+	 * nada -- se ve igual que si estuviera roto, y de hecho asi se reporto.
+	 * Con estas dos, cada caso dice lo suyo.
+	 *
+	 * NO reemplazan a `puede_calificar`, que sigue siendo quien decide: es el
+	 * unico que sabe a QUE vendedores se puede calificar todavia. `resenado` es
+	 * mas grueso -- dice "ya resenaste este producto a ALGUIEN" -- y puede ser
+	 * `true` mientras aun queden vendedores por calificar. Usarlo para ocultar
+	 * el boton esconderia una accion legitima.
+	 */
+	let comprado = $state<boolean | null>(null);
+	let resenado = $state<boolean | null>(null);
+
+	/**
+	 * Que hacer con el area de escribir. Un solo lugar donde se decide, en vez
+	 * de tres condiciones repartidas por el marcado que se contradicen sin que
+	 * nadie lo note.
+	 */
+	let estadoEscribir = $derived.by(() => {
+		if (!haySesion) return 'sin-sesion';
+		if (puedeCalificar.length > 0) return 'puede';
+		if (comprado === false) return 'no-comprado';
+		if (resenado === true) return 'ya-resenado';
+		// Con sesion, sin vendedores calificables y sin saber por que: es lo que
+		// pasa mientras el backend no exponga las dos rutas de arriba. No se
+		// inventa un motivo -- no se dice nada.
+		return 'nada';
+	});
+
 	/** El formulario de escribir. Cerrado hasta que se pide. */
 	let escribiendo = $state(false);
 	let vendedorElegido = $state('');
@@ -151,7 +194,7 @@
 		}
 
 		if (!respuesta.ok || !respuesta.payload) {
-			error = respuesta.mensaje;
+			error = mensajeUtil(respuesta);
 			return;
 		}
 
@@ -162,6 +205,37 @@
 		// Si solo hay un vendedor calificable, se elige solo: un select de una
 		// sola opcion es un paso que no decide nada.
 		if (puedeCalificar.length === 1) vendedorElegido = puedeCalificar[0].correo;
+
+		await cargarPorQue();
+	}
+
+	/**
+	 * Las dos rutas que explican el porque. Solo con sesion: sin ella contestan
+	 * 401 y la respuesta ya se sabe ("inicia sesion").
+	 *
+	 * Van juntas y DESPUES de la lista, no antes: la lista es lo que la persona
+	 * vino a leer y no tiene que esperar por dos booleanos que solo cambian un
+	 * texto.
+	 *
+	 * Si alguna contesta 404 -- porque el backend todavia no la tiene, o porque
+	 * no compila -- se queda en `null` y la pantalla no dice nada en vez de
+	 * inventar un motivo. Es la misma regla del resto del componente: callar
+	 * antes que afirmar algo que no se sabe.
+	 */
+	async function cargarPorQue() {
+		if (!haySesion) {
+			comprado = null;
+			resenado = null;
+			return;
+		}
+
+		const [c, r] = await Promise.all([
+			pedir<{ comprado: boolean }>(`/productos/${idProducto}/comprado`),
+			pedir<{ resenado: boolean }>(`/productos/${idProducto}/resenado`)
+		]);
+
+		comprado = c.ok && c.payload ? c.payload.comprado : null;
+		resenado = r.ok && r.payload ? r.payload.resenado : null;
 	}
 
 	function abrirFormulario() {
@@ -204,7 +278,7 @@
 		enviando = false;
 
 		if (!respuesta.ok) {
-			errorFormulario = respuesta.mensaje;
+			errorFormulario = mensajeUtil(respuesta);
 			return;
 		}
 
@@ -222,7 +296,7 @@
 		);
 
 		if (!respuesta.ok) {
-			error = respuesta.mensaje;
+			error = mensajeUtil(respuesta);
 			return;
 		}
 
@@ -255,14 +329,29 @@
 		}
 
 		const respuesta = quitando
-			? await pedir(`/comentarios/${idComentario}/voto`, { method: 'DELETE' })
-			: await pedir(`/comentarios/${idComentario}/voto`, conJson('PUT', { valor }));
+			? await pedir<Voto>(`/comentarios/${idComentario}/voto`, { method: 'DELETE' })
+			: await pedir<Voto>(`/comentarios/${idComentario}/voto`, conJson('PUT', { valor }));
 
 		if (!respuesta.ok) {
 			voto.mio = antes.mio;
 			voto.a_favor = antes.a_favor;
 			voto.en_contra = antes.en_contra;
-			error = respuesta.mensaje;
+			error = mensajeUtil(respuesta);
+			return;
+		}
+
+		// Las dos cuentas de arriba fueron una SUPOSICION para que el boton
+		// respondiera al instante. El backend devuelve las de verdad, contadas
+		// por el trigger, asi que se pisan con ellas.
+		//
+		// No es un detalle: si otra persona voto el mismo comentario mientras
+		// esta estaba mirando, la suposicion queda corta y no hay nada que la
+		// corrija hasta recargar la pagina. Con la respuesta del servidor, cada
+		// voto pone el numero al dia de paso.
+		if (respuesta.payload) {
+			voto.mio = respuesta.payload.mio;
+			voto.a_favor = respuesta.payload.a_favor;
+			voto.en_contra = respuesta.payload.en_contra;
 		}
 	}
 
@@ -295,7 +384,7 @@
 		{#if resumen && resumen.total > 0}
 			<span class="etiqueta">{resumen.total} {resumen.total === 1 ? 'resena' : 'resenas'}</span>
 		{/if}
-		{#if haySesion && !sinConectar && !cargando && puedeCalificar.length > 0 && !escribiendo}
+		{#if estadoEscribir === 'puede' && !sinConectar && !cargando && !escribiendo}
 			<div class="acciones">
 				<button type="button" onclick={abrirFormulario}>Escribir una resena</button>
 			</div>
@@ -306,6 +395,28 @@
 		Cada resena califica a <strong>un vendedor</strong> sobre este producto, no al producto en
 		si: el catalogo es compartido y lo que se juzga es a quien te lo vendio.
 	</p>
+
+	<!-- Por que no se puede escribir. Antes de esto el boton simplemente no
+	     aparecia, y una ausencia no explica nada: se ve igual que si la pantalla
+	     estuviera rota. Cada caso dice lo suyo, y el caso 'nada' -- cuando no se
+	     sabe el motivo -- no dice nada, que es mejor que inventarlo. -->
+	{#if !sinConectar && !cargando && !escribiendo}
+		{#if estadoEscribir === 'sin-sesion'}
+			<p class="porque-no">
+				<a href="/entrar">Inicia sesion</a> para escribir una resena.
+			</p>
+		{:else if estadoEscribir === 'no-comprado'}
+			<p class="porque-no">
+				Solo puedes resenar a un vendedor al que le compraste este producto. Cuando lo
+				compres y se pague, vas a poder calificarlo.
+			</p>
+		{:else if estadoEscribir === 'ya-resenado'}
+			<p class="porque-no">
+				Ya resenaste a todos los vendedores de este producto a los que les compraste. Se
+				puede escribir una resena por vendedor.
+			</p>
+		{/if}
+	{/if}
 
 	{#if confirmacion}
 		<p class="hecho" role="status">{confirmacion}</p>
@@ -440,6 +551,13 @@
 						<div class="cabeza">
 							<span class="estrellas">{estrellas(resena.calificacion)}</span>
 							<span class="autor">{resena.autor_usuario}</span>
+							<!-- Marcar la propia no es decoracion: cuando ya calificaste a
+							     todos los vendedores del producto, `puede_calificar` viene
+							     vacio y el boton de escribir DESAPARECE sin decir por que.
+							     Esta pastilla es la respuesta a esa pregunta. -->
+							{#if correoSesion && correoSesion === resena.autor_correo}
+								<span class="tuya">tu resena</span>
+							{/if}
 							<span class="gris">sobre</span>
 							<span class="vendedor">{resena.vendedor_nombre}</span>
 							<span class="gris fecha">{fecha(resena.fecha_publicacion)}</span>
@@ -467,10 +585,14 @@
 								No util ({resena.voto.en_contra})
 							</button>
 
-							<!-- Solo el vendedor calificado puede contestar su resena. Es
-							     la regla del backend; aqui se apaga el control en vez de
-							     dejar intentarlo para recibir un 403. -->
-							{#if haySesion && correoSesion === resena.vendedor_correo}
+							<!-- Contesta CUALQUIERA con sesion, no solo el vendedor
+							     calificado. Es la regla que eligio el backend y esta
+							     escrita en endpoints-resenas.md; aqui se sigue, no se
+							     endurece: un frontend mas estricto que el servidor esconde
+							     una funcionalidad que existe, y nadie encuentra por que.
+							     Antes esto exigia ser el vendedor y le apagaba el boton a
+							     todo el mundo menos a uno. -->
+							{#if haySesion}
 								<button
 									type="button"
 									class="contestar"
@@ -564,6 +686,23 @@
 		margin-bottom: 20px;
 		color: var(--gris);
 		font-size: 0.94rem;
+	}
+
+	/* El motivo por el que no se puede escribir. Va en la caja del panel y no
+	   como texto suelto: es informacion sobre una accion que falta, no una
+	   nota al pie. */
+	.porque-no {
+		max-width: 620px;
+		margin-bottom: 20px;
+		padding: 10px 14px;
+		font-size: 0.92rem;
+		color: var(--gris);
+		background: var(--panel);
+		border-radius: var(--r);
+	}
+
+	.porque-no a {
+		color: var(--indigo);
 	}
 
 	.gris {
@@ -893,6 +1032,14 @@
 	.vendedor {
 		font-weight: 500;
 		color: var(--indigo);
+	}
+
+	.tuya {
+		padding: 2px 9px;
+		font-size: 0.78rem;
+		color: var(--indigo);
+		background: var(--indigo-cl);
+		border-radius: 999px;
 	}
 
 	.fecha {
