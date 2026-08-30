@@ -278,6 +278,17 @@ tendria por que llegar.
 La capa de Redis esta escrita y probada en `redis/`. Leete `redis/README.md`:
 tiene el diseno de claves, el TTL y la explicacion que va al informe.
 
+> **Avance (2026-08-29): el carrito ya vive en Redis.** Hechas y probadas
+> (43 comprobaciones) `GET /carrito`, `PUT /carrito/lineas/:idOferta`
+> (cantidad ABSOLUTA), `DELETE /carrito/lineas/:idOferta` y `DELETE /carrito`.
+> Ver `endpoints-carrito.md`. Decisiones de diseno tomadas con el usuario:
+> el carrito es un HASH `mesh:carrito:<id_usuario>` de `id_oferta -> cantidad`
+> y **nada mas** (ni nombre ni precio ni stock -- se resuelven en lote en el
+> `GET`); agregar/quitar es **Redis puro, cero PostgreSQL**; el stock no se
+> valida al agregar, solo al pintar el carrito y al pagar; no hay carrito de
+> invitado por ahora (pide sesion). **Falta `POST /carrito/comprar`**
+> (checkout -> `comprar_carrito()` + vaciar).
+
 Lo que falta es cambiar de donde sale el carrito.
 
 ## Como funciona hoy, y por que hay que cambiarlo

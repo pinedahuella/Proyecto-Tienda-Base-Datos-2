@@ -33,6 +33,8 @@ import { PedidosCompradorController } from './controllers/compradores/pedidos.co
 import { PedidosCompradorService } from './services/compradores/pedidos.service';
 import { ResenasController } from './controllers/resenas/resenas.controller';
 import { ResenasService } from './services/resenas/resenas.service';
+import { CarritoController } from './controllers/carrito/carrito.controller';
+import { CarritoService } from './services/carrito/carrito.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -60,6 +62,7 @@ import { ResenasService } from './services/resenas/resenas.service';
     OfertasVendedorController,
     PedidosCompradorController,
     ResenasController,
+    CarritoController,
   ],
   providers: [
     InicioService,
@@ -79,6 +82,7 @@ import { ResenasService } from './services/resenas/resenas.service';
     OfertasVendedorService,
     PedidosCompradorService,
     ResenasService,
+    CarritoService,
   ],
 })
 export class AppModule {}
