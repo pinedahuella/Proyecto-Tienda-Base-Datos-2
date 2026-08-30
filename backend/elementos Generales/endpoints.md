@@ -119,6 +119,10 @@ correr `etl/cargar_grafo.sh`). Timeout de 6 s -> 503.
 { "ok": false, "mensaje": "No se pudo conectar con Neo4j", "payload": null }
 ```
 
+> El **panel de fraude** que consume este grafo
+> (`GET /admin/fraude/anillos`, solo admin) está documentado aparte, en
+> `endpoints-fraude.md`.
+
 ---
 
 ## POST /usuario/registro

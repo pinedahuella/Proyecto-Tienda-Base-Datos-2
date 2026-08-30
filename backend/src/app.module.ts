@@ -35,6 +35,10 @@ import { ResenasController } from './controllers/resenas/resenas.controller';
 import { ResenasService } from './services/resenas/resenas.service';
 import { CarritoController } from './controllers/carrito/carrito.controller';
 import { CarritoService } from './services/carrito/carrito.service';
+import { FraudeController } from './controllers/fraude/fraude.controller';
+import { FraudeService } from './services/fraude/fraude.service';
+import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
+import { AdminReportesService } from './services/admin/admin-reportes.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -63,6 +67,8 @@ import { CarritoService } from './services/carrito/carrito.service';
     PedidosCompradorController,
     ResenasController,
     CarritoController,
+    FraudeController,
+    AdminReportesController,
   ],
   providers: [
     InicioService,
@@ -83,6 +89,8 @@ import { CarritoService } from './services/carrito/carrito.service';
     PedidosCompradorService,
     ResenasService,
     CarritoService,
+    FraudeService,
+    AdminReportesService,
   ],
 })
 export class AppModule {}
