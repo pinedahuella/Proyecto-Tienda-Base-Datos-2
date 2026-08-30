@@ -1787,6 +1787,11 @@ w(`-- ============================================================`);
 w(`-- No se insertan a mano: se arman con las MISMAS funciones que usa la`);
 w(`-- aplicacion. Asi el conjunto de datos no puede contradecir al flujo real,`);
 w(`-- y de paso queda probado que las funciones corren.`);
+w(`--`);
+w(`-- Estos dos son los del camino de tres llamadas -- crear_pedido,`);
+w(`-- agregar_linea, comprar_pedido -- y se quedan justamente por eso: son los`);
+w(`-- unicos que lo recorren. Las compras que respaldan las resenas van mas`);
+w(`-- abajo y usan comprar_carrito, que es el camino de una sola.`);
 w(``);
 w(`DO $bloque$`);
 w(`DECLARE`);
@@ -1937,17 +1942,57 @@ const TEXTOS_RESPUESTA = [
 // rechaza, y el conjunto de datos no puede ser el unico que no cumple la regla
 // que el sistema exige.
 //
-// Solo ofertas `activa`: una pausada no se pudo comprar.
+// Y ademas de existir, el par tiene que poder COMPRARSE, porque cada resena
+// sembrada se respalda con su compra unas lineas mas abajo. Por eso el par
+// guarda la oferta elegida y no solo el correo: sin saber que variante se
+// compro no hay linea de pedido que armar.
+//
+// Solo ofertas `activa`: una pausada la rechaza `agregar_linea`.
+//
+// El stock minimo es 4 y no 1, y son cuatro unidades por dos motivos
+// distintos: un mismo par lo pueden resenar los DOS compradores (dos
+// unidades), y los dos pedidos de mas arriba eligen su oferta por id_oferta
+// -- no por stock -- asi que pueden llevarse hasta dos unidades de cualquiera
+// de estas sin que aqui se pueda saber de cual. Si la oferta se quedara corta,
+// `comprar_pedido` levanta excepcion y tumba la migracion entera.
+const STOCK_MINIMO_PAR = 4;
+
+// Las ofertas a las que se les movio el precio quedan FUERA. `agregar_linea`
+// congela siempre la ultima fila de precio_historial por fecha, y esos cambios
+// estan fechados dos meses DESPUES del nacimiento de la oferta -- hasta agosto.
+// Una compra de marzo que congela un precio de agosto es un anacronismo que la
+// base no puede detectar: la fila existe y la llave foranea cuadra.
+//
+// Descartarlas y no solo preferirlas cuesta barato -- medido, quedan 249 pares
+// de los 302 que pasan el filtro de stock, y hacen falta 80 -- y preferirlas
+// dejaba 18 de las 94 lineas congelando un precio del futuro. Un "casi" en una
+// invariante es una invariante que no existe.
+const OFERTAS_CON_CAMBIO = new Set(
+  CAMBIOS.filter((c) => c.fechaFila !== c.fecha)
+         .map((c) => `${c.correo}|${c.producto}|${c.variante}`));
+
 const PARES_RESENABLES = [];
 {
-  const visto = new Set();
+  // Un vendedor puede tener varias variantes del mismo producto y la resena es
+  // del PRODUCTO, asi que hay que quedarse con una. Antes se guardaba la
+  // primera que apareciera, que servia mientras nadie comprara; ahora la
+  // elegida es la que se va a comprar, asi que se queda la de mas stock: la
+  // primera podia ser justo una de las que nacen en cero a proposito.
+  const mejor = new Map();
   OFERTAS.forEach((o) => {
     if (o.estado !== 'activa') return;
+    if (o.stock < STOCK_MINIMO_PAR) return;
+    if (OFERTAS_CON_CAMBIO.has(`${o.correo}|${o.producto}|${o.variante}`)) return;
     const clave = `${o.correo}|${o.producto}`;
-    if (visto.has(clave)) return;   // un vendedor puede tener varias variantes
-    visto.add(clave);               // del mismo producto; la resena es del producto
-    PARES_RESENABLES.push({ correo: o.correo, producto: o.producto });
+    const actual = mejor.get(clave);
+    if (actual === undefined || o.stock > actual.stock) {
+      mejor.set(clave, {
+        correo: o.correo, producto: o.producto, variante: o.variante,
+        stock: o.stock, fecha: o.fecha,
+      });
+    }
   });
+  PARES_RESENABLES.push(...mejor.values());
 }
 
 // Barajado de Fisher-Yates con la semilla social. Sin barajar, las resenas
@@ -1971,23 +2016,37 @@ function notaCreible() {
   return 1;
 }
 
-// La fecha de la resena va DESPUES de que el producto exista. Se cuelga del mes
-// del producto, no de un rango fijo: una resena fechada antes de que el producto
-// naciera pasa la carga sin una queja y despues aparece en el historial como un
-// evento imposible.
+// La fecha de la compra. El dia 28 a las 18:00 y no una fecha sorteada: las
+// ofertas nacen con dia <= 28 y hora entre las 08 y las 12, asi que el 28 a las
+// seis de la tarde esta despues de CUALQUIER oferta de su mes. Una compra
+// fechada antes de que existiera la oferta que compra es un evento imposible, y
+// la base no tiene como negarse -- la llave foranea cuadra igual.
+//
+// Todas las lineas de un pedido comparten esta fecha porque el pedido se agrupa
+// justo por (comprador, mes de la oferta): ver mas abajo.
+function fechaCompra(fechaOferta) {
+  return `2026-${fechaOferta.slice(5, 7)}-28 18:00:00-06`;
+}
+
+// La fecha de la resena cuelga de la COMPRA, no del producto. Antes colgaba del
+// producto y bastaba, porque no habia compra que contradecir; ahora la regla que
+// exige el backend es "compro y despues califico", y una resena anterior a su
+// propia compra la cumple en la tabla y la desmiente en el calendario.
+//
+// Uno o dos meses despues siempre cabe: el mes de compra es como mucho mayo --
+// es el ultimo en que nace una oferta -- asi que sumar uno nunca pasa de junio,
+// que es el tope. Y como cae en un mes POSTERIOR, el dia y la hora ya no
+// pueden dejarla antes de la compra.
 //
 // Dia hasta 28 y mes hasta 6, que es lo que exige el validador del final.
-function fechaResena(fechaProducto) {
-  const mesProd = Number(fechaProducto.slice(5, 7));
-  const diaProd = Number(fechaProducto.slice(8, 10));
-  const mes = Math.min(6, mesProd + entreSocial(0, 2));
-  const dia = mes === mesProd ? entreSocial(Math.min(diaProd, 28), 28) : entreSocial(1, 28);
+function fechaResena(fechaDeCompra) {
+  const mesCompra = Number(fechaDeCompra.slice(5, 7));
+  const mes = Math.min(6, mesCompra + entreSocial(1, 2));
+  const dia = entreSocial(1, 28);
   const hh = String(entreSocial(8, 21)).padStart(2, '0');
   const mm = String(entreSocial(0, 59)).padStart(2, '0');
   return `2026-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')} ${hh}:${mm}:00-06`;
 }
-
-const fechaDeProducto = new Map(PRODUCTOS.map((p) => [p.nombre, p.fecha]));
 
 // Cuantas. No son todas las que se pueden: un catalogo donde CADA producto de
 // CADA vendedor tiene resena no se parece a ninguna tienda real, y de paso
@@ -2001,13 +2060,16 @@ for (let i = 0; i < CUANTAS_RESENAS; i++) {
   // una alternancia perfecta, que tampoco se ve real.
   const autor = COMPRADORES[azarSocial() < 0.5 ? 0 : 1];
   const nota = notaCreible();
+  const compra = fechaCompra(par.fecha);
   RESENAS.push({
     autor: autor.correo,
     vendedor: par.correo,
     producto: par.producto,
+    variante: par.variante,
     nota,
     texto: unoDe(TEXTOS_RESENA[nota]),
-    fecha: fechaResena(fechaDeProducto.get(par.producto) || '2026-01-10 10:00:00-06'),
+    compra,
+    fecha: fechaResena(compra),
   });
 }
 
@@ -2028,12 +2090,181 @@ for (let i = 0; i < CUANTAS_RESENAS; i++) {
       autor: otro.correo,
       vendedor: r.vendedor,
       producto: r.producto,
+      variante: r.variante,
       nota,
       texto: unoDe(TEXTOS_RESENA[nota]),
-      fecha: fechaResena(fechaDeProducto.get(r.producto) || '2026-01-10 10:00:00-06'),
+      compra: r.compra,
+      fecha: fechaResena(r.compra),
     });
   }
 }
+
+// ============================================================
+// Las compras que respaldan cada resena
+// ============================================================
+// Jose David dejo escrito en su servicio que solo se puede calificar a un
+// vendedor al que se le compro y se le PAGO ese producto -- es la "compra
+// verificada" de siempre, y la comprueba `exigirCompraPagada`. La regla se
+// queda; lo que no se podia quedar es que la semilla fuera la unica que no la
+// cumple: 86 resenas contra 2 compras, y el boton de "Escribir una resena" sin
+// aparecer en casi ninguna ficha porque el sistema hace lo que dice.
+//
+// Va aqui, entre las resenas y su emision, porque el orden importa en los dos
+// sentidos: la compra necesita saber que se reseno, y el SQL de la compra tiene
+// que salir ANTES del de la resena para que la fecha de una preceda a la otra
+// tambien en el archivo.
+const LINEAS_COMPRA = RESENAS.map((r) => ({
+  comprador: r.autor,
+  vendedor: r.vendedor,
+  producto: r.producto,
+  variante: r.variante,
+  fecha: r.compra,
+}));
+
+// Y compras de sobra, sin resena encima. No son relleno: `pruebas/resenas.sh`
+// arranca buscando un par que compradora.norte ya compro y TODAVIA no reseno, y
+// hace exit 1 si no queda ninguno. Si cada compra sembrada trajera su resena
+// puesta, el arnes moriria antes de probar una sola ruta y su segunda parte --
+// el mapa de en que producto SI aparece el boton -- saldria vacia.
+//
+// Salen de la cola de PARES_RESENABLES, que empieza justo donde terminan los
+// resenados: asi no hace falta comprobar que no choquen con ninguna resena,
+// no pueden.
+const SOBRAS_POR_COMPRADOR = 4;
+COMPRADORES.forEach((c, i) => {
+  for (let k = 0; k < SOBRAS_POR_COMPRADOR; k++) {
+    const par = PARES_RESENABLES[CUANTAS_RESENAS + i * SOBRAS_POR_COMPRADOR + k];
+    if (par === undefined) continue;
+    LINEAS_COMPRA.push({
+      comprador: c.correo,
+      vendedor: par.correo,
+      producto: par.producto,
+      variante: par.variante,
+      fecha: fechaCompra(par.fecha),
+    });
+  }
+});
+
+// Los pedidos se agrupan por (comprador, mes de la OFERTA), no por mes de la
+// resena. Por mes de resena el grupo mezcla ofertas de meses distintos, la mas
+// nueva queda posterior a la resena mas vieja del mismo grupo, y no existe una
+// fecha que sirva para el pedido entero sin contradecir a una de las dos
+// puntas. Por mes de oferta, todas las lineas nacieron antes del 28 de ese mes
+// y una sola fecha les vale a todas.
+//
+// Pedidos gordos y no uno por linea: una tienda donde cada persona hizo ochenta
+// pedidos de un solo producto no se parece a ninguna, y de paso el pedido de
+// varias lineas es el caso que hay que poder ensenar -- es el unico que existe
+// en un modelo multi-vendedor.
+const PEDIDOS = [];
+{
+  const porGrupo = new Map();
+  LINEAS_COMPRA.forEach((l) => {
+    const clave = `${l.comprador}|${l.fecha}`;
+    if (!porGrupo.has(clave)) {
+      porGrupo.set(clave, { comprador: l.comprador, fecha: l.fecha, lineas: [] });
+    }
+    porGrupo.get(clave).lineas.push(l);
+  });
+  // El metodo de pago rota en vez de sortearse: son tres y hacen falta los tres
+  // repartidos, no que el azar deje alguno sin usar y esa columna del catalogo
+  // sin un solo pedido que la ensene.
+  const METODOS = ['tarjeta', 'transferencia', 'efectivo contra entrega'];
+  [...porGrupo.values()].forEach((p, i) => {
+    PEDIDOS.push({ ...p, metodo: METODOS[i % METODOS.length] });
+  });
+}
+
+const FILAS_COMPRA = [];
+PEDIDOS.forEach((p) => p.lineas.forEach((l) => FILAS_COMPRA.push({ ...l, metodo: p.metodo })));
+
+w(`-- ============================================================`);
+w(`-- Las compras que respaldan las resenas: ${PEDIDOS.length} pedidos, ${FILAS_COMPRA.length} lineas`);
+w(`-- ============================================================`);
+w(`-- El backend solo deja calificar a un vendedor al que se le compro y se le`);
+w(`-- pago ESE producto. Sin estas compras, las resenas de mas abajo serian`);
+w(`-- filas que el propio sistema no habria dejado escribir, y el boton de`);
+w(`-- "Escribir una resena" no apareceria en ninguna ficha.`);
+w(`--`);
+w(`-- Se compra con comprar_carrito() -- la de la 012 -- y no con INSERT: ella`);
+w(`-- compone crear_pedido, agregar_linea y comprar_pedido, congela el`);
+w(`-- id_precio_historial correcto y arma el nombre del vendedor desde la base.`);
+w(`-- Un INSERT a mano tendria que copiar las tres reglas y quedaria libre de`);
+w(`-- desviarse de ellas sin que nada avise.`);
+w(`--`);
+w(`-- LAS FECHAS, que es la parte que muerde: crear_pedido no recibe fecha y`);
+w(`-- pedido.fecha_creacion es DEFAULT now(), asi que la compra saldria HOY y la`);
+w(`-- resena en abril. Resenada antes de comprada, sin que nada falle. Por eso`);
+w(`-- se compra primero y despues se corrigen las tres fechas que la compra`);
+w(`-- escribio con now(): la del pedido, la del pago y la del kardex. Se puede`);
+w(`-- hacer con un UPDATE pelado porque ninguna de las tres tablas tiene`);
+w(`-- trigger encima.`);
+w(``);
+w(`DO $compras$`);
+w(`DECLARE`);
+w(`    v_grupo    record;`);
+w(`    v_usuario  bigint;`);
+w(`    v_dir      bigint;`);
+w(`    v_pedido   bigint;`);
+w(`BEGIN`);
+w(`    -- Las lineas llegan sueltas y se agrupan aqui en el arreglo que pide`);
+w(`    -- comprar_carrito. El id_oferta se resuelve en este mismo SELECT, contra`);
+w(`    -- correo y nombre: ningun id va escrito.`);
+w(`    FOR v_grupo IN`);
+w(`        SELECT t.comprador, t.fecha, t.metodo,`);
+w(`               jsonb_agg(jsonb_build_object(`);
+w(`                   'id_oferta',            o.id_oferta,`);
+w(`                   'cantidad',             1,`);
+w(`                   'id_producto',          p.id_producto,`);
+w(`                   'id_producto_variante', pv.id_producto_variante,`);
+w(`                   'nombre_producto',      p.nombre,`);
+w(`                   'nombre_variante',      pv.nombre_variante`);
+w(`               ) ORDER BY o.id_oferta) AS lineas`);
+w(`        FROM (VALUES`);
+w(FILAS_COMPRA.map((l, i) =>
+  `            (${txt(l.comprador)}, ${txt(l.fecha)}, ${txt(l.metodo)}, ${txt(l.vendedor)}, ${txt(l.producto)}, ${txt(l.variante)})` +
+  (i < FILAS_COMPRA.length - 1 ? ',' : '')).join('\n'));
+w(`        ) AS t(comprador, fecha, metodo, vendedor, producto, variante)`);
+w(`        JOIN usuarios            uv ON uv.correo_electronico = t.vendedor`);
+w(`        JOIN productos           p  ON p.nombre = t.producto`);
+w(`        JOIN productos_variantes pv ON pv.id_producto = p.id_producto`);
+w(`                                    AND pv.nombre_variante = t.variante`);
+w(`        JOIN oferta              o  ON o.id_producto_mongo = p.id_producto`);
+w(`                                    AND o.id_producto_variante_mongo = pv.id_producto_variante`);
+w(`                                    AND o.id_usuario = uv.id_usuario`);
+w(`        GROUP BY t.comprador, t.fecha, t.metodo`);
+w(`        ORDER BY t.comprador, t.fecha`);
+w(`    LOOP`);
+w(`        SELECT u.id_usuario, dh.id_direccion_historial INTO v_usuario, v_dir`);
+w(`        FROM usuarios u`);
+w(`        JOIN direcciones d          ON d.id_usuario = u.id_usuario`);
+w(`        JOIN direccion_historial dh ON dh.id_direccion = d.id_direccion`);
+w(`        WHERE u.correo_electronico = v_grupo.comprador`);
+w(`        LIMIT 1;`);
+w(``);
+w(`        CONTINUE WHEN v_usuario IS NULL OR v_dir IS NULL;`);
+w(`        -- Guardado por la fecha, igual que la resena se guarda por su llave:`);
+w(`        -- un pedido de verdad nace con now() y nunca cae en un 28 a las seis`);
+w(`        -- en punto, asi que esa fecha reconoce a los sembrados sin hacer`);
+w(`        -- falta una tabla de control.`);
+w(`        CONTINUE WHEN EXISTS (`);
+w(`            SELECT 1 FROM pedido`);
+w(`            WHERE id_usuario = v_usuario`);
+w(`              AND fecha_creacion = v_grupo.fecha::timestamptz);`);
+w(``);
+w(`        -- El id del pedido viene DENTRO del jsonb que devuelve: quien llama`);
+w(`        -- no lo conocia, lo creo ella. Y el metodo va casteado porque sale de`);
+w(`        -- un VALUES sin tipos y la funcion lo pide varchar.`);
+w(`        v_pedido := (comprar_carrito(v_usuario, v_dir, v_grupo.lineas, v_grupo.metodo::varchar)->>'id_pedido')::bigint;`);
+w(``);
+w(`        UPDATE pedido           SET fecha_creacion    = v_grupo.fecha::timestamptz WHERE id_pedido = v_pedido;`);
+w(`        UPDATE pago             SET fecha_cancelacion = v_grupo.fecha::timestamptz WHERE id_pedido = v_pedido;`);
+w(`        UPDATE stock_movimiento SET fecha_movimiento  = v_grupo.fecha::timestamptz WHERE id_pedido = v_pedido;`);
+w(`    END LOOP;`);
+w(`END`);
+w(`$compras$;`);
+w(``);
+
 
 // Las respuestas del vendedor. Una de cada tres y media, mas seguido en las
 // malas: un vendedor contesta cuando le reclaman.
@@ -2190,13 +2421,469 @@ w(``);
 
 
 // ============================================================
+// El anillo de fraude, en la fuente de verdad
+// ============================================================
+// Tres cuentas dadas de alta la misma noche, en la misma casa, que se venden
+// barato entre si para poder calificarse con cinco estrellas en la misma
+// tarde. Es lo que hace que GET /admin/fraude/anillos devuelva algo sin que
+// nadie siembre nada a mano: el ETL lo arrastra al grafo igual que arrastra
+// cualquier otra resena, y las consultas de neo4j/consultas/A*.cypher lo
+// encuentran solas.
+//
+//
+// POR QUE AQUI Y NO EN CYPHER, si ya habia un anillo
+// ============================================================
+// El que habia vive en neo4j/consultas/siembra.cypher, con ids negativos y
+// etiqueta :Prueba, y SE QUEDA: es lo que demuestra que las cinco consultas
+// sirven, porque se siembra, se corre y se borra en la misma pasada. Pero un
+// anillo que solo existe en la proyeccion no prueba nada del camino completo
+// -- PostgreSQL, el ETL, el backend, el panel -- y contra los datos de verdad
+// el panel salia vacio: para ensenarlo habia que acordarse de correr un
+// script. Este existe en la fuente, se proyecta solo y no hay paso extra que
+// recordar.
+//
+// Los dos no se pisan ni se confunden: la siembra usa correos @prueba.local
+// con ids negativos y se borra por su etiqueta; estas son filas normales con
+// correos anillo.*@mesh.com. Ese prefijo es la unica forma de reconocerlas, y
+// por eso es constante: borrar el anillo es borrar lo que cuelga de esos tres
+// correos, en el orden que exigen las llaves foraneas.
+//
+//
+// LO QUE LO HACE DIFICIL, Y ES EL PUNTO
+// ============================================================
+// Para calificar a alguien hay que haberle COMPRADO Y PAGADO -- lo exige
+// exigirCompraPagada() en el backend y lo vigilan las comprobaciones 10 y 11
+// de mas abajo, que fallan la migracion entera. Asi que un anillo no se puede
+// limitar a escribir resenas: tiene que montar tienda (ofertas propias sobre
+// productos del catalogo compartido, que no es de nadie) y comprarse entre si
+// ANTES de calificarse.
+//
+// Eso no es un obstaculo del conjunto de datos, es lo que hace un anillo de
+// verdad, y aqui se ve por que: la venta no es el negocio, la resena si. Por
+// eso las cuatro ofertas salen a la cuarta parte del precio de la tienda --
+// mover una unidad barata es el peaje para poder escribir la resena.
+//
+// El orden de las fechas es lo unico que sostiene las dos comprobaciones, y
+// va en una sola direccion:
+//
+//     alta (02-mar) -> oferta (04-mar) -> compra (06-mar) -> resena (08-mar)
+//
+// Una compra anterior a la oferta que compra, o una resena anterior a su
+// compra, son eventos imposibles que la base no tiene como negar: las llaves
+// foraneas cuadran igual.
+//
+//
+// QUE PATRON DISPARA CADA COSA
+// ============================================================
+//   uno -> dos -> tres -> uno   el circulo cerrado, 6 saltos          (A.1, `ciclo`)
+//   uno <-> dos sobre P1        los dos sentidos, mismo producto      (A.2, `reiterado`)
+//   las tres en la misma casa   con calle, que es lo que la hace senal (A.4, `direccion`)
+//   todas 5 estrellas, cuatro horas y media de ventana, y las tres cuentas
+//   dadas de alta la misma noche: las tres frases que redacta el servicio.
+//
+// El sorteo: NINGUNO. Todo lo de aqui abajo esta elegido a mano o derivado
+// del catalogo, sin sacar un solo numero de azar() ni de azarSocial(). No es
+// pereza: azar() es una secuencia global y su ultimo consumidor esta doce
+// pantallas mas arriba; un sorteo nuevo metido en cualquier parte le corre la
+// cola y reescribe las 552 ofertas. Aqui no hay nada que sortear -- un anillo
+// de tres cuentas es una figura concreta, no un reparto.
+
+const CLAVE_ANILLO = CLAVE_VENDEDOR;
+
+// La calle esta escrita de tres formas distintas A PROPOSITO, y es la mitad
+// de la demostracion: comparadas tal cual son tres direcciones diferentes y
+// la senal se pierde. Lo que las junta en un solo nodo :Direccion es la
+// normalizacion de clave_direccion() en etl/extraer_grafo.sql -- minusculas,
+// sin tildes y espacios colapsados -- que es la IDENTIDAD del nodo y no un
+// filtro de la consulta.
+//
+// Lo que NO se puede variar es un espacio pegado a la barra: la clave
+// concatena los cuatro campos con '|' y el colapso de espacios deja uno, no
+// cero, asi que una calle que empiece con espacio cae en OTRO nodo. Por eso
+// las tres variantes cambian por dentro y nunca al principio.
+//
+// El apellido es el mismo en las tres. No lo mira ninguna consulta; esta para
+// que quien abra el panel vea de una que no son tres desconocidos.
+const CUENTAS_ANILLO = [
+  { correo: 'anillo.uno@mesh.com',  usuario: 'anillo_uno',  nombre: 'Kevin', apellido: 'Batres',
+    alta: '2026-03-02 20:40:00-06', calle: 'Callejon del Manzano 4, Casa B',
+    compra: '2026-03-06 17:40:00-06' },
+  { correo: 'anillo.dos@mesh.com',  usuario: 'anillo_dos',  nombre: 'Dulce', apellido: 'Batres',
+    alta: '2026-03-02 20:51:00-06', calle: 'Callejon del Manzano 4,  casa b',
+    compra: '2026-03-06 17:55:00-06' },
+  { correo: 'anillo.tres@mesh.com', usuario: 'anillo_tres', nombre: 'Erick', apellido: 'Batres',
+    alta: '2026-03-02 21:03:00-06', calle: 'Callejon  del Manzano 4, Casa B',
+    compra: '2026-03-06 18:10:00-06' },
+];
+const [ANILLO_A, ANILLO_B, ANILLO_C] = CUENTAS_ANILLO;
+
+const ANILLO_CIUDAD = { pais: 'Guatemala', departamento: 'Guatemala', ciudad: 'Guatemala', codigo: '01011' };
+const ANILLO_FECHA_OFERTA = '2026-03-04 09:00:00-06';
+const ANILLO_STOCK = 5;
+
+// Los tres productos que usa el anillo salen del catalogo COMPARTIDO -- un
+// producto no es de nadie, la oferta si -- y son los tres mas baratos que
+// existen. Elegidos asi y no sorteados por dos razones: no hace falta gastar
+// azar para tomar tres, y sobre todo es lo que haria el anillo. Su costo real
+// es lo que pierde en cada compra cruzada, y ese costo se minimiza vendiendose
+// lo mas barato del catalogo.
+//
+// Se guarda la variante mas barata de cada producto porque la oferta es por
+// (usuario, producto, VARIANTE) mientras que la resena es del producto: sin
+// fijar cual se compro no hay linea de pedido que armar.
+const PRODUCTOS_ANILLO = (() => {
+  const barata = new Map();
+  VARIANTES.forEach((v) => {
+    const precio = Math.round(v.precioBase * v.factor);
+    const actual = barata.get(v.producto);
+    if (actual === undefined || precio < actual.precio) {
+      barata.set(v.producto, { producto: v.producto, variante: v.nombre, precio });
+    }
+  });
+  // El desempate por nombre no es adorno: dos productos al mismo precio
+  // saldrian en el orden en que los recorrio el Map, y eso cambia el dia que
+  // alguien reordene el catalogo. El generador tiene que escribir el mismo
+  // archivo siempre.
+  return [...barata.values()]
+    .sort((a, b) => a.precio - b.precio || (a.producto < b.producto ? -1 : 1))
+    .slice(0, 3);
+})();
+const [ANILLO_P1, ANILLO_P2, ANILLO_P3] = PRODUCTOS_ANILLO;
+
+// Un cuarto del precio de la tienda. Es lo que convierte "se resenan entre
+// si" en algo que la base deja escribir: hay que comprar para poder calificar,
+// y el anillo abarata la compra todo lo que puede.
+const precioAnillo = (item) => Math.max(1, Math.round(item.precio * 0.25));
+
+// Las ofertas. A y B publican EL MISMO producto (P1) porque eso es justo lo
+// que hace posible el par mutuo de A.2: A le compra P1 a B y B le compra el
+// mismo P1 a A. Nadie intercambia consigo mismo el mismo articulo; dos cuentas
+// del mismo dueno publicandolo y resenandose encima, si.
+const OFERTAS_ANILLO = [
+  { cuenta: ANILLO_B, item: ANILLO_P1 },
+  { cuenta: ANILLO_A, item: ANILLO_P1 },
+  { cuenta: ANILLO_C, item: ANILLO_P2 },
+  { cuenta: ANILLO_A, item: ANILLO_P3 },
+];
+
+// Las compras, que son el permiso para resenar. Una unidad cada una: el
+// anillo no quiere inventario, quiere el recibo.
+//
+// Se agrupan por comprador, asi que salen tres pedidos y el de `dos` lleva DOS
+// lineas de dos vendedores distintos -- el caso multi-vendedor -- sin que haya
+// que armarlo aparte.
+const COMPRAS_ANILLO = [
+  { comprador: ANILLO_A, vendedor: ANILLO_B, item: ANILLO_P1 },
+  { comprador: ANILLO_B, vendedor: ANILLO_A, item: ANILLO_P1 },
+  { comprador: ANILLO_B, vendedor: ANILLO_C, item: ANILLO_P2 },
+  { comprador: ANILLO_C, vendedor: ANILLO_A, item: ANILLO_P3 },
+];
+
+const PEDIDOS_ANILLO = (() => {
+  const METODOS = ['tarjeta', 'transferencia', 'efectivo contra entrega'];
+  return CUENTAS_ANILLO.map((c, i) => ({
+    comprador: c,
+    fecha: c.compra,
+    metodo: METODOS[i % METODOS.length],
+    lineas: COMPRAS_ANILLO.filter((l) => l.comprador === c),
+  })).filter((p) => p.lineas.length > 0);
+})();
+
+// El MISMO texto en las cuatro. Es senal por si misma y viaja al grafo:
+// cuatro cuentas distintas que escriben palabra por palabra lo mismo no son
+// cuatro personas. Ninguna consulta lo mira todavia -- es lo primero que este
+// grafo deberia crecer -- pero el dato tiene que estar ahi para poder mirarlo.
+const TEXTO_ANILLO = 'Excelente vendedor, todo llego perfecto y en tiempo. Lo recomiendo.';
+
+// Las cuatro resenas, todas de 5 y todas de la misma tarde. Cuatro horas y
+// media de punta a punta, muy dentro de las 72 horas que el servicio llama
+// rafaga.
+//
+//   uno -> dos  (P1)   arista 1 del circulo, y mitad del par mutuo
+//   dos -> uno  (P1)   la otra mitad: los dos sentidos sobre el MISMO producto
+//   dos -> tres (P2)   arista 2 del circulo
+//   tres -> uno (P3)   arista 3: el circulo cierra
+const NOTA_ANILLO = 5;
+const RESENAS_ANILLO = [
+  { autor: ANILLO_A, vendedor: ANILLO_B, item: ANILLO_P1, fecha: '2026-03-08 09:12:00-06' },
+  { autor: ANILLO_B, vendedor: ANILLO_A, item: ANILLO_P1, fecha: '2026-03-08 10:41:00-06' },
+  { autor: ANILLO_B, vendedor: ANILLO_C, item: ANILLO_P2, fecha: '2026-03-08 12:05:00-06' },
+  { autor: ANILLO_C, vendedor: ANILLO_A, item: ANILLO_P3, fecha: '2026-03-08 13:37:00-06' },
+];
+
+const CORREOS_ANILLO = CUENTAS_ANILLO.map((c) => txt(c.correo)).join(', ');
+
+w(`-- ============================================================`);
+w(`-- El anillo de fraude: ${CUENTAS_ANILLO.length} cuentas, ${OFERTAS_ANILLO.length} ofertas, ${PEDIDOS_ANILLO.length} pedidos, ${RESENAS_ANILLO.length} resenas`);
+w(`-- ============================================================`);
+w(`-- Tres cuentas de la misma casa, dadas de alta la misma noche, que se`);
+w(`-- venden barato entre si para poder calificarse con cinco estrellas la`);
+w(`-- misma tarde. Es lo que hace que el panel de fraude`);
+w(`-- (GET /admin/fraude/anillos) encuentre algo con los datos de verdad, sin`);
+w(`-- que nadie tenga que acordarse de sembrar nada en Neo4j: el ETL lo lleva`);
+w(`-- al grafo como lleva cualquier otra resena.`);
+w(`--`);
+w(`-- SE RECONOCEN POR EL CORREO: anillo.*@mesh.com, y ese prefijo es`);
+w(`-- constante a proposito. Es lo unico que hace falta saber para sacarlas.`);
+w(`--`);
+w(`-- Y no se pueden limitar a escribir resenas. El backend solo deja calificar`);
+w(`-- a quien se le compro y se le pago, y las comprobaciones 10 y 11 de mas`);
+w(`-- abajo lo vigilan: si el anillo no se compra a si mismo, la migracion se`);
+w(`-- cae entera. Por eso cada cuenta publica ofertas propias sobre productos`);
+w(`-- del catalogo compartido y se compra una unidad barata antes de resenar.`);
+w(`-- Es lo que hace un anillo de verdad: la venta no es el negocio.`);
+w(`--`);
+w(`-- El orden de las fechas es lo unico que sostiene esas dos comprobaciones,`);
+w(`-- y va en una sola direccion:`);
+w(`--`);
+w(`--     alta (02-mar) -> oferta (04-mar) -> compra (06-mar) -> resena (08-mar)`);
+w(``);
+
+w(`-- Las tres cuentas. Van en su propio INSERT y no con las otras ocho porque`);
+w(`-- llevan fecha_creacion escrita: las de arriba nacen con now() y aqui hace`);
+w(`-- falta una noche del pasado, la misma para las tres. "Creadas el mismo`);
+w(`-- dia" es una de las frases que redacta el panel.`);
+w(`--`);
+w(`-- Mismas dos guardias que el INSERT de las otras cuentas, y por lo mismo:`);
+w(`-- usuarios tiene DOS restricciones unicas y quien ya se registro con ese`);
+w(`-- nombre de usuario revienta un ON CONFLICT sobre el correo.`);
+w(`INSERT INTO usuarios (correo_electronico, usuario, nombre, apellido, contrasena_hash, fecha_creacion, id_rol_usuario, id_estado_usuario)`);
+w(`SELECT v.correo, v.usuario, v.nombre, v.apellido, ${txt(CLAVE_ANILLO)}, v.alta::timestamptz, r.id_rol_usuario, e.id_estado_usuario`);
+w(`FROM (VALUES`);
+w(CUENTAS_ANILLO.map((c, i) =>
+  `    (${txt(c.correo)}, ${txt(c.usuario)}, ${txt(c.nombre)}, ${txt(c.apellido)}, ${txt(c.alta)})` +
+  (i < CUENTAS_ANILLO.length - 1 ? ',' : '')).join('\n'));
+w(`) AS v(correo, usuario, nombre, apellido, alta)`);
+w(`JOIN rol_usuario    r ON r.rol_usuario_nombre    = 'vendedor'`);
+w(`JOIN estado_usuario e ON e.estado_usuario_nombre = 'activo'`);
+w(`WHERE NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.correo_electronico = v.correo)`);
+w(`  AND NOT EXISTS (SELECT 1 FROM usuarios u WHERE u.usuario            = v.usuario);`);
+w(``);
+
+w(`-- La casa, escrita de tres formas distintas. Es la mitad de la senal: tal`);
+w(`-- cual estan son tres direcciones diferentes, y lo que las junta en UN solo`);
+w(`-- nodo :Direccion es la normalizacion del ETL (minusculas, sin tildes,`);
+w(`-- espacios colapsados), que es la identidad del nodo y no un filtro de la`);
+w(`-- consulta.`);
+w(`--`);
+w(`-- Y llevan calle. Sin ella la clave normalizada termina en barra y junta a`);
+w(`-- todo el que declaro esa ciudad, asi que A.4 exige d.tiene_calle: una`);
+w(`-- direccion sin calle no identifica una casa. Un anillo sin calle no se`);
+w(`-- veria, y con razon.`);
+w(`INSERT INTO direcciones (id_usuario, pais, departamento, ciudad, direccion_exacta, codigo_postal, fecha_creacion, id_estado_direccion)`);
+w(`SELECT u.id_usuario, ${txt(ANILLO_CIUDAD.pais)}, ${txt(ANILLO_CIUDAD.departamento)}, ${txt(ANILLO_CIUDAD.ciudad)}, v.calle, ${txt(ANILLO_CIUDAD.codigo)}, v.alta::timestamptz, ed.id_estado_direccion`);
+w(`FROM (VALUES`);
+w(CUENTAS_ANILLO.map((c, i) =>
+  `    (${txt(c.correo)}, ${txt(c.calle)}, ${txt(c.alta)})` +
+  (i < CUENTAS_ANILLO.length - 1 ? ',' : '')).join('\n'));
+w(`) AS v(correo, calle, alta)`);
+w(`JOIN usuarios u ON u.correo_electronico = v.correo`);
+w(`JOIN estado_direccion ed ON ed.estado_direccion_nombre = 'activa'`);
+w(`WHERE NOT EXISTS (SELECT 1 FROM direcciones d WHERE d.id_usuario = u.id_usuario);`);
+w(``);
+w(`-- Su primera version en el historial: es a donde apunta el pedido, no a`);
+w(`-- direcciones. Sin esta fila crear_pedido no tiene que darle, y las compras`);
+w(`-- de mas abajo no existirian.`);
+w(`INSERT INTO direccion_historial (id_direccion, pais, departamento, ciudad, direccion_exacta, codigo_postal, fecha_creacion)`);
+w(`SELECT d.id_direccion, d.pais, d.departamento, d.ciudad, d.direccion_exacta, d.codigo_postal, d.fecha_creacion`);
+w(`FROM direcciones d`);
+w(`JOIN usuarios u ON u.id_usuario = d.id_usuario`);
+w(`WHERE u.correo_electronico IN (${CORREOS_ANILLO})`);
+w(`  AND NOT EXISTS (SELECT 1 FROM direccion_historial h WHERE h.id_direccion = d.id_direccion);`);
+w(``);
+
+w(`-- Las ofertas del anillo. Un usuario nuevo no tiene nada que vender, y sin`);
+w(`-- vender no le pueden comprar, y sin compra no puede haber resena: esta es`);
+w(`-- la pieza que hace posible todo lo de abajo.`);
+w(`--`);
+w(`-- Los productos son del catalogo COMPARTIDO -- no son "del anillo", nadie`);
+w(`-- es dueno de un producto -- y son los tres mas baratos que hay. Es lo que`);
+w(`-- haria el anillo: su costo real es lo que pierde en cada compra cruzada.`);
+w(`-- Encima ofertan a la cuarta parte del precio de la tienda.`);
+w(`--`);
+w(`-- ${ANILLO_A.usuario} y ${ANILLO_B.usuario} publican EL MISMO producto (${ANILLO_P1.producto}), y no es un`);
+w(`-- descuido: es lo que hace posible el par mutuo sobre el mismo articulo que`);
+w(`-- busca A.2. Nadie intercambia consigo mismo la misma cosa.`);
+w(`--`);
+w(`-- Nacen 'activa' y con fecha_aprobacion y aprobador puestos, como cualquier`);
+w(`-- oferta que no es de la tienda: a 'activa' no se llega sin el visto bueno,`);
+w(`-- y las comprobaciones 4, 5 y 6 tumban la migracion si falta. Que la tienda`);
+w(`-- las haya aprobado es parte del retrato -- la revision mira una oferta, no`);
+w(`-- una red de cuentas, y por eso el anillo pasa.`);
+w(`INSERT INTO oferta (id_producto_mongo, id_producto_variante_mongo, id_usuario, precio, stock, id_estado_oferta, fecha_creacion, fecha_actualizacion, fecha_aprobacion, id_usuario_aprobo)`);
+w(`SELECT p.id_producto, pv.id_producto_variante, u.id_usuario, v.precio, v.stock, eo.id_estado_oferta,`);
+w(`       v.fecha::timestamptz, v.fecha::timestamptz, v.fecha::timestamptz, ut.id_usuario`);
+w(`FROM (VALUES`);
+w(OFERTAS_ANILLO.map((o, i) =>
+  `    (${txt(o.cuenta.correo)}, ${txt(o.item.producto)}, ${txt(o.item.variante)}, ${num(precioAnillo(o.item))}.00, ${num(ANILLO_STOCK)}, ${txt(ANILLO_FECHA_OFERTA)})` +
+  (i < OFERTAS_ANILLO.length - 1 ? ',' : '')).join('\n'));
+w(`) AS v(correo, producto, variante, precio, stock, fecha)`);
+w(`JOIN usuarios            u  ON u.correo_electronico = v.correo`);
+w(`JOIN productos           p  ON p.nombre = v.producto`);
+w(`JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_variante = v.variante`);
+w(`JOIN estado_oferta       eo ON eo.estado_oferta_nombre = 'activa'`);
+w(`JOIN usuarios            ut ON ut.correo_electronico = ${txt(TIENDA.correo)}`);
+w(`WHERE NOT EXISTS (`);
+w(`    SELECT 1 FROM oferta o`);
+w(`    WHERE o.id_usuario = u.id_usuario`);
+w(`      AND o.id_producto_mongo = p.id_producto`);
+w(`      AND o.id_producto_variante_mongo = pv.id_producto_variante);`);
+w(``);
+w(`-- El nacimiento de su precio y el kardex que explica su stock. Las dos`);
+w(`-- filas salen DERIVADAS de la oferta que se acaba de escribir, no de una`);
+w(`-- lista aparte: escritas dos veces podrian discrepar, y las comprobaciones`);
+w(`-- 1 y 2 de mas abajo se caen justo por eso.`);
+w(`--`);
+w(`-- Hacen falta a mano porque el trigger que las escribiria sigue apagado`);
+w(`-- desde el principio del archivo -- pondria now() y aqui todo es de marzo.`);
+w(`INSERT INTO precio_historial (id_oferta, precio, id_usuario_modifico, fecha_creacion)`);
+w(`SELECT o.id_oferta, o.precio, o.id_usuario, o.fecha_creacion`);
+w(`FROM oferta o`);
+w(`JOIN usuarios u ON u.id_usuario = o.id_usuario`);
+w(`WHERE u.correo_electronico IN (${CORREOS_ANILLO})`);
+w(`  AND NOT EXISTS (SELECT 1 FROM precio_historial ph WHERE ph.id_oferta = o.id_oferta);`);
+w(``);
+w(`INSERT INTO stock_movimiento (id_oferta, id_motivo_movimiento, id_usuario_modifico, id_pedido, cantidad, stock_resultante, fecha_movimiento)`);
+w(`SELECT o.id_oferta, m.id_motivo_movimiento, o.id_usuario, NULL, o.stock, o.stock, o.fecha_creacion`);
+w(`FROM oferta o`);
+w(`JOIN usuarios u ON u.id_usuario = o.id_usuario`);
+w(`JOIN motivo_movimiento m ON m.motivo_nombre = 'reposicion'`);
+w(`WHERE u.correo_electronico IN (${CORREOS_ANILLO})`);
+w(`  AND o.stock > 0`);
+w(`  AND NOT EXISTS (SELECT 1 FROM stock_movimiento sm WHERE sm.id_oferta = o.id_oferta);`);
+w(``);
+
+w(`-- Las compras cruzadas: el permiso para resenar.`);
+w(`--`);
+w(`-- Mismo camino que las compras que respaldan las otras resenas`);
+w(`-- -- comprar_carrito() de la 012 y despues corregir las tres fechas que`);
+w(`-- escribio con now() -- y por lo mismo: ella congela el id_precio_historial`);
+w(`-- correcto y arma el nombre del vendedor desde la base. Un INSERT a mano`);
+w(`-- tendria que copiar esas reglas y quedaria libre de desviarse.`);
+w(`--`);
+w(`-- Una unidad por linea. El anillo no quiere inventario, quiere el recibo.`);
+w(`-- Y el pedido de ${ANILLO_B.usuario} lleva dos lineas de dos vendedores distintos sin`);
+w(`-- que haya que armarlo aparte: sale de agrupar por comprador.`);
+w(`DO $anillo_compras$`);
+w(`DECLARE`);
+w(`    v_grupo    record;`);
+w(`    v_usuario  bigint;`);
+w(`    v_dir      bigint;`);
+w(`    v_pedido   bigint;`);
+w(`BEGIN`);
+w(`    FOR v_grupo IN`);
+w(`        SELECT t.comprador, t.fecha, t.metodo,`);
+w(`               jsonb_agg(jsonb_build_object(`);
+w(`                   'id_oferta',            o.id_oferta,`);
+w(`                   'cantidad',             1,`);
+w(`                   'id_producto',          p.id_producto,`);
+w(`                   'id_producto_variante', pv.id_producto_variante,`);
+w(`                   'nombre_producto',      p.nombre,`);
+w(`                   'nombre_variante',      pv.nombre_variante`);
+w(`               ) ORDER BY o.id_oferta) AS lineas`);
+w(`        FROM (VALUES`);
+w(PEDIDOS_ANILLO.flatMap((p) => p.lineas.map((l) =>
+  `            (${txt(p.comprador.correo)}, ${txt(p.fecha)}, ${txt(p.metodo)}, ${txt(l.vendedor.correo)}, ${txt(l.item.producto)}, ${txt(l.item.variante)})`))
+  .join(',\n'));
+w(`        ) AS t(comprador, fecha, metodo, vendedor, producto, variante)`);
+w(`        JOIN usuarios            uv ON uv.correo_electronico = t.vendedor`);
+w(`        JOIN productos           p  ON p.nombre = t.producto`);
+w(`        JOIN productos_variantes pv ON pv.id_producto = p.id_producto`);
+w(`                                    AND pv.nombre_variante = t.variante`);
+w(`        JOIN oferta              o  ON o.id_producto_mongo = p.id_producto`);
+w(`                                    AND o.id_producto_variante_mongo = pv.id_producto_variante`);
+w(`                                    AND o.id_usuario = uv.id_usuario`);
+w(`        GROUP BY t.comprador, t.fecha, t.metodo`);
+w(`        ORDER BY t.comprador, t.fecha`);
+w(`    LOOP`);
+w(`        SELECT u.id_usuario, dh.id_direccion_historial INTO v_usuario, v_dir`);
+w(`        FROM usuarios u`);
+w(`        JOIN direcciones d          ON d.id_usuario = u.id_usuario`);
+w(`        JOIN direccion_historial dh ON dh.id_direccion = d.id_direccion`);
+w(`        WHERE u.correo_electronico = v_grupo.comprador`);
+w(`        LIMIT 1;`);
+w(``);
+w(`        CONTINUE WHEN v_usuario IS NULL OR v_dir IS NULL;`);
+w(`        CONTINUE WHEN EXISTS (`);
+w(`            SELECT 1 FROM pedido`);
+w(`            WHERE id_usuario = v_usuario`);
+w(`              AND fecha_creacion = v_grupo.fecha::timestamptz);`);
+w(``);
+w(`        v_pedido := (comprar_carrito(v_usuario, v_dir, v_grupo.lineas, v_grupo.metodo::varchar)->>'id_pedido')::bigint;`);
+w(``);
+w(`        UPDATE pedido           SET fecha_creacion    = v_grupo.fecha::timestamptz WHERE id_pedido = v_pedido;`);
+w(`        UPDATE pago             SET fecha_cancelacion = v_grupo.fecha::timestamptz WHERE id_pedido = v_pedido;`);
+w(`        UPDATE stock_movimiento SET fecha_movimiento  = v_grupo.fecha::timestamptz WHERE id_pedido = v_pedido;`);
+w(`    END LOOP;`);
+w(`END`);
+w(`$anillo_compras$;`);
+w(``);
+
+w(`-- Y las resenas, que son el producto del anillo.`);
+w(`--`);
+w(`-- Las cuatro con la nota maxima y todas de la misma tarde: cuatro horas y`);
+w(`-- media de punta a punta, muy dentro de las 72 horas que el servicio llama`);
+w(`-- rafaga. El texto es identico en las cuatro, y eso tambien es senal --`);
+w(`-- cuatro cuentas que escriben palabra por palabra lo mismo no son cuatro`);
+w(`-- personas.`);
+w(`--`);
+w(`-- El circulo se cierra: ${ANILLO_A.usuario} califica a ${ANILLO_B.usuario}, ${ANILLO_B.usuario} a ${ANILLO_C.usuario} y`);
+w(`-- ${ANILLO_C.usuario} a ${ANILLO_A.usuario}. Ninguna se califica a si misma -- la 011 lo`);
+w(`-- prohibe con un CHECK -- pero el circulo consigue el mismo efecto repartido`);
+w(`-- entre tres, y ninguna de estas cuatro filas, mirada sola, se ve rara.`);
+w(`--`);
+w(`-- Y las dos primeras van en los DOS sentidos sobre el mismo producto, que`);
+w(`-- es la frase literal del enunciado de la entrega.`);
+w(`--`);
+w(`-- Mismo bloque plpgsql que las otras resenas, y por lo mismo: la resena`);
+w(`-- necesita el id del comentario que acaba de nacer, y ese id no se puede`);
+w(`-- escribir a mano ni adivinar.`);
+w(`DO $anillo_resenas$`);
+w(`DECLARE`);
+w(`    v_fila        record;`);
+w(`    v_autor       bigint;`);
+w(`    v_vendedor    bigint;`);
+w(`    v_producto    bigint;`);
+w(`    v_comentario  bigint;`);
+w(`BEGIN`);
+w(`    FOR v_fila IN`);
+w(`        SELECT * FROM (VALUES`);
+w(RESENAS_ANILLO.map((r, i) =>
+  `            (${txt(r.autor.correo)}, ${txt(r.vendedor.correo)}, ${txt(r.item.producto)}, ${num(NOTA_ANILLO)}, ${txt(TEXTO_ANILLO)}, ${txt(r.fecha)})` +
+  (i < RESENAS_ANILLO.length - 1 ? ',' : '')).join('\n'));
+w(`        ) AS t(autor, vendedor, producto, nota, texto, fecha)`);
+w(`    LOOP`);
+w(`        SELECT id_usuario  INTO v_autor     FROM usuarios  WHERE correo_electronico = v_fila.autor;`);
+w(`        SELECT id_usuario  INTO v_vendedor  FROM usuarios  WHERE correo_electronico = v_fila.vendedor;`);
+w(`        SELECT id_producto INTO v_producto  FROM productos WHERE nombre = v_fila.producto;`);
+w(``);
+w(`        CONTINUE WHEN v_autor IS NULL OR v_vendedor IS NULL OR v_producto IS NULL;`);
+w(`        CONTINUE WHEN EXISTS (`);
+w(`            SELECT 1 FROM resena`);
+w(`            WHERE id_usuario = v_autor`);
+w(`              AND id_usuario_vendedor = v_vendedor`);
+w(`              AND id_producto_mongo = v_producto);`);
+w(``);
+w(`        INSERT INTO comentario (id_usuario, comentario, fecha_publicacion)`);
+w(`        VALUES (v_autor, v_fila.texto, v_fila.fecha::timestamptz)`);
+w(`        RETURNING id_comentario INTO v_comentario;`);
+w(``);
+w(`        INSERT INTO resena (id_usuario, id_usuario_vendedor, id_producto_mongo, calificacion, id_comentario)`);
+w(`        VALUES (v_autor, v_vendedor, v_producto, v_fila.nota, v_comentario);`);
+w(`    END LOOP;`);
+w(`END`);
+w(`$anillo_resenas$;`);
+w(``);
+
+
+// ============================================================
 // Cierre: encender el trigger y comprobarse a si mismo
 // ============================================================
 w(`-- ============================================================`);
 w(`-- El trigger vuelve, y el conjunto se comprueba a si mismo`);
 w(`-- ============================================================`);
 w(`-- Un conjunto de datos que no se verifica es un conjunto de datos que`);
-w(`-- miente en silencio. Estas nueve comprobaciones fallan la migracion entera`);
+w(`-- miente en silencio. Estas doce comprobaciones fallan la migracion entera`);
 w(`-- si algo no cuadra, en vez de dejar la base torcida y que alguien lo`);
 w(`-- descubra tres semanas despues.`);
 w(``);
@@ -2350,7 +3037,110 @@ w(`    IF v_mal > 0 THEN`);
 w(`        RAISE EXCEPTION '% comentarios tienen los contadores desincronizados de likes', v_mal;`);
 w(`    END IF;`);
 w(``);
-w(`    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones, direcciones y la parte social cuadran';`);
+w(`    -- 10. Toda resena tiene detras una compra pagada A ESE VENDEDOR.`);
+w(`    --     Es la regla que el backend exige para dejar calificar, y hasta`);
+w(`    --     ahora nada la vigilaba de este lado: 84 de las 86 resenas`);
+w(`    --     sembradas no la cumplian, o sea que eran filas que el propio`);
+w(`    --     sistema no habria dejado escribir.`);
+w(`    --`);
+w(`    --     Los JOIN son LOS MISMOS que exigirCompraPagada() en`);
+w(`    --     backend/src/services/resenas/resenas.service.ts, y eso incluye las`);
+w(`    --     dos condiciones que es facil dejarse: que la oferta comprada sea`);
+w(`    --     DEL vendedor calificado -- se llega por`);
+w(`    --     pedido_producto -> precio_historial -> oferta -- y que el pedido no`);
+w(`    --     este cancelado. Un candado que comprueba algo distinto de lo que`);
+w(`    --     el sistema exige es peor que no tenerlo: aprueba en verde datos`);
+w(`    --     que la aplicacion despues rechaza.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM resena r`);
+w(`    WHERE NOT EXISTS (`);
+w(`        SELECT 1`);
+w(`          FROM pedido pe`);
+w(`          JOIN pago             pg  ON pg.id_pedido          = pe.id_pedido`);
+w(`          JOIN estado_pago      epa ON epa.id_estado_pago    = pg.id_estado_pago`);
+w(`          JOIN estado_pedido    epe ON epe.id_estado_pedido  = pe.id_estado_pedido`);
+w(`          JOIN pedido_producto  pp  ON pp.id_pedido          = pe.id_pedido`);
+w(`          JOIN precio_historial ph  ON ph.id_precio_historial = pp.id_precio_historial`);
+w(`          JOIN oferta           o   ON o.id_oferta           = ph.id_oferta`);
+w(`         WHERE pe.id_usuario = r.id_usuario`);
+w(`           AND o.id_usuario  = r.id_usuario_vendedor`);
+w(`           AND pp.id_producto_mongo = r.id_producto_mongo`);
+w(`           AND epa.estado_pago_nombre    = 'pagado'`);
+w(`           AND epe.estado_pedido_nombre <> 'cancelado');`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% resenas no tienen detras una compra pagada a ese vendedor', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    -- 11. Y ninguna esta fechada ANTES de la compra que la habilita. La 10`);
+w(`    --     sola no lo ve: una resena de marzo con su compra en mayo la pasa`);
+w(`    --     entera, porque la fila existe. El calendario es lo unico que la`);
+w(`    --     desmiente, y nadie mira el calendario hasta que alguien ordena el`);
+w(`    --     historial de una cuenta y ve la resena antes que el pedido.`);
+w(`    --     La fecha de la resena vive en su comentario raiz, no en resena.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM resena r`);
+w(`    JOIN comentario c ON c.id_comentario = r.id_comentario`);
+w(`    WHERE NOT EXISTS (`);
+w(`        SELECT 1`);
+w(`          FROM pedido pe`);
+w(`          JOIN pago             pg  ON pg.id_pedido          = pe.id_pedido`);
+w(`          JOIN estado_pago      epa ON epa.id_estado_pago    = pg.id_estado_pago`);
+w(`          JOIN estado_pedido    epe ON epe.id_estado_pedido  = pe.id_estado_pedido`);
+w(`          JOIN pedido_producto  pp  ON pp.id_pedido          = pe.id_pedido`);
+w(`          JOIN precio_historial ph  ON ph.id_precio_historial = pp.id_precio_historial`);
+w(`          JOIN oferta           o   ON o.id_oferta           = ph.id_oferta`);
+w(`         WHERE pe.id_usuario = r.id_usuario`);
+w(`           AND o.id_usuario  = r.id_usuario_vendedor`);
+w(`           AND pp.id_producto_mongo = r.id_producto_mongo`);
+w(`           AND epa.estado_pago_nombre    = 'pagado'`);
+w(`           AND epe.estado_pedido_nombre <> 'cancelado'`);
+w(`           AND pe.fecha_creacion < c.fecha_publicacion);`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% resenas estan fechadas antes de la compra que las habilita', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    -- 12. Y queda al menos un circulo cerrado de calificaciones: A califica`);
+w(`    --     a B, B a C y C a A. Es la unica comprobacion de este bloque que`);
+w(`    --     falla con CERO en vez de con mas de cero, y esta escrita al reves`);
+w(`    --     a proposito: lo que hay que impedir aqui no es un dato torcido,`);
+w(`    --     es una AUSENCIA.`);
+w(`    --`);
+w(`    --     El panel de fraude llevaba semanas devolviendo "anillos: []" con`);
+w(`    --     los datos sembrados, y eso no se veia como un fallo: se veia como`);
+w(`    --     una tienda sana. Si alguien toca el anillo de arriba y el circulo`);
+w(`    --     deja de cerrar, el panel vuelve a salir vacio y otra vez nadie se`);
+w(`    --     entera. Un cero legitimo que se calla es justo lo que hay que`);
+w(`    --     poner a gritar.`);
+w(`    --`);
+w(`    --     Se cuenta el triangulo y no las cuentas anillo.*@mesh.com: lo que`);
+w(`    --     el panel necesita es la FIGURA, y el dia que el circulo lo cierren`);
+w(`    --     otras cuentas esta comprobacion sigue diciendo la verdad.`);
+w(`    --`);
+w(`    --     Lo que NO se comprueba aqui es la casa compartida, y hay que`);
+w(`    --     decirlo: normalizar la direccion es cosa de clave_direccion() en`);
+w(`    --     etl/extraer_grafo.sql, y copiarla aqui dejaria dos textos que se`);
+w(`    --     desincronizan sin avisar -- el fallo que este proyecto ya pago`);
+w(`    --     antes. La comprobacion 7 garantiza que la calle existe, que es la`);
+w(`    --     mitad que si depende de este archivo.`);
+w(`    --`);
+w(`    --     El filtro descarta el caso degenerado del par mutuo (A califica a`);
+w(`    --     B y B a A), que con tres JOIN se veria como un triangulo de dos`);
+w(`    --     cuentas. La otra mitad la impide el CHECK de la 011: nadie se`);
+w(`    --     califica a si mismo.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM resena a`);
+w(`    JOIN resena b ON b.id_usuario          = a.id_usuario_vendedor`);
+w(`    JOIN resena c ON c.id_usuario          = b.id_usuario_vendedor`);
+w(`                 AND c.id_usuario_vendedor = a.id_usuario`);
+w(`    WHERE a.id_usuario <> b.id_usuario_vendedor;`);
+w(``);
+w(`    IF v_mal = 0 THEN`);
+w(`        RAISE EXCEPTION 'No quedo ni un circulo cerrado de calificaciones: el panel de fraude vuelve a salir vacio';`);
+w(`    END IF;`);
+w(``);
+w(`    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones, direcciones, las compras que respaldan las resenas, la parte social y el circulo del anillo cuadran';`);
 w(`END`);
 w(`$verificar$;`);
 w(``);
@@ -2399,4 +3189,7 @@ console.log(`  historial    ${FILAS_HIST.length} filas de producto, ${FILAS_HIST
 console.log(`  ofertas      ${OFERTAS.length}`);
 console.log(`  precios      ${CAMBIOS.length} filas de historial`);
 console.log(`  usuarios     ${USUARIOS.length}`);
+console.log(`  compras      ${PEDIDOS.length} pedidos, ${FILAS_COMPRA.length} lineas (${FILAS_COMPRA.length - RESENAS.length} sin resena, para el arnes)`);
 console.log(`  social       ${RESENAS.length} resenas, ${RESPUESTAS.length} respuestas, ${VOTOS.length} votos`);
+console.log(`  anillo       ${CUENTAS_ANILLO.length} cuentas, ${OFERTAS_ANILLO.length} ofertas, ${PEDIDOS_ANILLO.length} pedidos, ${COMPRAS_ANILLO.length} lineas, ${RESENAS_ANILLO.length} resenas`);
+console.log(`               sobre ${PRODUCTOS_ANILLO.map((p) => `${p.producto} (Q${p.precio})`).join(', ')}`);

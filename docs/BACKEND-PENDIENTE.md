@@ -47,9 +47,16 @@ Si te falta `REDIS_PASSWORD` o `NEO4J_PASSWORD` en tu `.env`, copialas de
 
 # BLOQUE 1 -- Las resenas (Entrega 1, completa el modelo)
 
-Las tres tablas existen desde la migracion `011_resenas.sql`. Hay **86 resenas,
-115 comentarios y 46 votos** sembrados. Hoy no hay forma de verlos desde la
-aplicacion.
+Las tres tablas existen desde la migracion `011_resenas.sql`. Hay **90 resenas,
+118 comentarios y 62 votos** sembrados, y desde el 2026-08-30 **las 90 tienen
+detras una compra pagada a ese mismo vendedor** -- antes solo 2 la tenian, asi
+que el boton de escribir no aparecia casi en ningun producto. Lo vigilan las
+comprobaciones 10 y 11 de `001_catalogo.sql`, que fallan la migracion entera.
+
+**Cuatro de esas 90 son el anillo de fraude** (`anillo.*@mesh.com`): tres
+cuentas que se compran entre si para poder calificarse 5 estrellas en circulo.
+Estan sembradas a proposito para que `GET /admin/fraude/anillos` tenga algo real
+que devolver. No son un error del conjunto de datos.
 
 ## Lo que hay que saber del modelo antes de escribir la ruta
 

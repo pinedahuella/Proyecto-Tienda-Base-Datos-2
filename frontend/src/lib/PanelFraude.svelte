@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { pedir } from './api';
+	import { mensajeUtil, pedir } from './api';
 
 	/**
 	 * Panel de manipulacion de resenas. Es una pantalla que pide el enunciado
@@ -12,38 +12,54 @@
 	 *    productos"
 	 *
 	 * Lo que ensena NO se calcula aqui ni en PostgreSQL: sale del grafo de
-	 * Neo4j, que es la familia que el equipo eligio implementar. La consulta
-	 * vive en neo4j/002_fraude.cypher y el backend la expone.
+	 * Neo4j, que es la familia que el equipo eligio implementar. Las consultas
+	 * viven en neo4j/consultas/A1_anillo.cypher .. A5_puntaje.cypher y el
+	 * backend las expone ya resueltas.
 	 *
 	 *
-	 * LA RUTA QUE ESTE PANEL ESPERA -- todavia no existe
+	 * LA RUTA -- conectada desde el 2026-08-30
 	 * ---------------------------------------------------------------
-	 * El backend es de Jose David y aqui no se toca. Este componente ya esta
-	 * escrito contra la ruta que hace falta, para que el dia que exista solo
-	 * haya que levantarla:
+	 *   GET /admin/fraude/anillos     (solo admin; la tienda recibe 403)
 	 *
-	 *   GET /admin/fraude/anillos
+	 * El backend es de Jose David y aqui no se toca. El contrato quedo igual
+	 * al que este componente ya esperaba -- se comprobo campo por campo contra
+	 * `backend/src/models/fraude.ts` -- asi que las interfaces de abajo son
+	 * las suyas y no una copia que se pueda desfasar en silencio.
 	 *
-	 * La forma exacta del payload esta en docs/BACKEND-PENDIENTE.md y en la
-	 * interfaz `Anillo` de aqui abajo. Mientras la ruta no exista, la pantalla
-	 * NO se rompe ni miente: dice que el analisis todavia no esta conectado y
-	 * deja ver un ejemplo para poder revisar el diseno.
+	 * La ruta NO devuelve 404 nunca. Los codigos que si contesta son
+	 * 401 (sesion), 403 (no sos admin), 503 (Neo4j caido o el analisis paso de
+	 * 15 s) y 500. Por eso ya no hay un estado "todavia no conectado": seria
+	 * codigo que describe un mundo que dejo de existir.
 	 *
 	 *
-	 * POR QUE EL VACIO ES UN RESULTADO Y NO UN ERROR
+	 * LOS DOS VACIOS, QUE NO SON EL MISMO
 	 * ---------------------------------------------------------------
-	 * Esto es lo mas facil de hacer mal en esta pantalla.
+	 * Esto es lo mas facil de hacer mal en esta pantalla, y son DOS casos que
+	 * llegan identicos: `anillos: []` y un 200.
 	 *
-	 * El conjunto de datos sembrado NO tiene anillo: se comprobo y da 0 pares
-	 * que se califiquen mutuamente y 0 autocalificaciones. Asi que la consulta
-	 * de fraude, corriendo perfectamente, devuelve CERO. Eso es lo correcto.
+	 * 1. **Se analizo y no habia nada.** La consulta corrio perfecta y devolvio
+	 *    CERO. Una pantalla que ante eso dice "no hay datos" hace pensar que
+	 *    esta rota, asi que aqui se dice cuantas cuentas y cuantas resenas se
+	 *    ANALIZARON para llegar a ese cero. Un cero con denominador es un
+	 *    resultado; un cero solo es una duda.
 	 *
-	 * Una pantalla que ante cero resultados dice "no hay datos" o se queda en
-	 * blanco hace pensar que esta rota, y a quien la revise le va a parecer
-	 * que la consulta no funciona. Por eso el estado vacio de aqui abajo dice
-	 * lo contrario: cuantas cuentas y cuantas resenas se ANALIZARON para
-	 * llegar a ese cero. Un cero con denominador es un resultado; un cero solo
-	 * es una duda.
+	 *    Con el conjunto sembrado esto ya NO deberia pasar: desde el 2026-08-30
+	 *    la semilla trae un anillo de verdad -- tres cuentas `anillo.*@mesh.com`
+	 *    que se compran entre si para poder calificarse en circulo -- y la ruta
+	 *    devuelve tres grupos (`ciclo`, `reiterado` y `direccion`). Si esta
+	 *    pantalla sale vacia contra la semilla, algo se rompio: mira el grafo.
+	 *
+	 *    Aqui ya no hay datos de ejemplo. Los hubo mientras la ruta no existia,
+	 *    y se quitaron el dia que hubo un anillo real: una pantalla de fraude
+	 *    con nombres inventados adentro es la ultima que uno quiere ensenar.
+	 *
+	 * 2. **No se analizo nada, porque el grafo esta vacio.** Si nadie corrio
+	 *    `etl/cargar_grafo.sh`, la ruta contesta 200 con `analizado` en CEROS.
+	 *    Ensenar "se recorrieron 0 cuentas y 0 resenas sin encontrar nada" es
+	 *    presentar una auditoria que no ocurrio como si fuera una auditoria
+	 *    limpia. Es la peor de las dos mentiras posibles aqui, porque tiene
+	 *    forma de buena noticia. Se detecta con `analizado.cuentas === 0` y se
+	 *    dice lo que hay que hacer para arreglarlo.
 	 */
 
 	let { alExpirarSesion }: { alExpirarSesion: () => void } = $props();
@@ -118,10 +134,13 @@
 
 	let cargando = $state(true);
 	let error = $state('');
-	/** La ruta todavia no existe en el backend. Es un estado propio, no un error. */
-	let sinConectar = $state(false);
-	/** Si se esta viendo el ejemplo en vez de datos de verdad. Se avisa en pantalla, siempre. */
-	let viendoEjemplo = $state(false);
+	/**
+	 * El grafo esta vacio: la ruta contesto bien pero no habia nada que
+	 * recorrer. Es un estado propio y no un resultado -- ver la nota de arriba.
+	 */
+	let grafoVacio = $derived(
+		anillos.length === 0 && analizado !== null && analizado.cuentas === 0
+	);
 
 	/** Que tarjeta esta desplegada. Una a la vez: son largas. */
 	let abierta = $state<string | null>(null);
@@ -134,8 +153,6 @@
 	async function cargar() {
 		cargando = true;
 		error = '';
-		sinConectar = false;
-		viendoEjemplo = false;
 
 		const respuesta = await pedir<RespuestaFraude>('/admin/fraude/anillos');
 
@@ -146,17 +163,16 @@
 			return;
 		}
 
-		// 404 quiere decir que la ruta no existe todavia, y eso NO es un fallo
-		// del panel ni de la sesion: es trabajo pendiente del backend. Se
-		// distingue a proposito de un error de verdad, porque el mensaje que
-		// hay que ensenar es completamente distinto.
-		if (respuesta.estado === 404) {
-			sinConectar = true;
-			return;
-		}
-
 		if (!respuesta.ok || !respuesta.payload) {
-			error = respuesta.mensaje;
+			// mensajeUtil y no `respuesta.mensaje` a secas. Si el cuerpo no trae
+			// `mensaje` -- un 500 que no salio del controlador, un proxy en el
+			// medio -- `error` quedaba en undefined, que es FALSY, y la pantalla
+			// se caia en la rama del vacio: ensenaba "no se encontro ningun
+			// patron anomalo" habiendo fallado. Un fallo disfrazado de auditoria
+			// limpia es exactamente lo que este panel no puede hacer.
+			error = mensajeUtil(respuesta);
+			anillos = [];
+			analizado = null;
 			return;
 		}
 
@@ -164,137 +180,23 @@
 		analizado = respuesta.payload.analizado ?? null;
 	}
 
-	/**
-	 * Datos de ejemplo para poder revisar el diseno de la pantalla mientras la
-	 * ruta no existe.
-	 *
-	 * Van detras de un boton y NUNCA se cargan solos: una pantalla que ensena
-	 * datos inventados sin decirlo es peor que una pantalla vacia. Mientras
-	 * estan puestos, arriba se ve un aviso que no se puede quitar.
-	 */
-	function verEjemplo() {
-		viendoEjemplo = true;
-		sinConectar = false;
-		error = '';
-		analizado = { cuentas: 14, resenas: 98, relaciones: 294 };
-		anillos = [
-			{
-				id: 'ejemplo-1',
-				tipo: 'ciclo',
-				saltos: 6,
-				cuentas: [
-					{
-						id_usuario: 101,
-						usuario: 'ventas_altiplano',
-						correo_electronico: 'ventas.altiplano@mesh.com',
-						nombre: 'Rodrigo',
-						apellido: 'Similox'
-					},
-					{
-						id_usuario: 102,
-						usuario: 'ventas_bocacosta',
-						correo_electronico: 'ventas.bocacosta@mesh.com',
-						nombre: 'Ileana',
-						apellido: 'Chavarria'
-					},
-					{
-						id_usuario: 103,
-						usuario: 'ventas_izabal',
-						correo_electronico: 'ventas.izabal@mesh.com',
-						nombre: 'Byron',
-						apellido: 'Melgar'
-					}
-				],
-				productos: [
-					{ id_producto: 12, nombre: 'Laptop Ambar Campus 14' },
-					{ id_producto: 34, nombre: 'Audifonos Cenzontle Pro' }
-				],
-				resenas: [
-					{
-						id_resena: 901,
-						autor: 'ventas_altiplano',
-						vendedor: 'ventas_bocacosta',
-						producto: 'Laptop Ambar Campus 14',
-						calificacion: 5,
-						fecha: '2026-05-11T14:02:00.000Z'
-					},
-					{
-						id_resena: 902,
-						autor: 'ventas_bocacosta',
-						vendedor: 'ventas_izabal',
-						producto: 'Laptop Ambar Campus 14',
-						calificacion: 5,
-						fecha: '2026-05-11T14:09:00.000Z'
-					},
-					{
-						id_resena: 903,
-						autor: 'ventas_izabal',
-						vendedor: 'ventas_altiplano',
-						producto: 'Audifonos Cenzontle Pro',
-						calificacion: 5,
-						fecha: '2026-05-11T14:15:00.000Z'
-					}
-				],
-				senales: [
-					'Las tres calificaciones son de 5 estrellas',
-					'Las tres se escribieron en un intervalo de 13 minutos',
-					'Ninguna de las tres cuentas compro el producto que califico'
-				]
-			},
-			{
-				id: 'ejemplo-2',
-				tipo: 'direccion',
-				saltos: 2,
-				cuentas: [
-					{
-						id_usuario: 104,
-						usuario: 'compras_zona4',
-						correo_electronico: 'compras.zona4@mesh.com',
-						nombre: 'Marta',
-						apellido: 'Ixcot'
-					},
-					{
-						id_usuario: 105,
-						usuario: 'compras_zona4b',
-						correo_electronico: 'compras.zona4b@mesh.com',
-						nombre: 'Marta',
-						apellido: 'Ixcot'
-					}
-				],
-				productos: [{ id_producto: 12, nombre: 'Laptop Ambar Campus 14' }],
-				resenas: [
-					{
-						id_resena: 904,
-						autor: 'compras_zona4',
-						vendedor: 'ventas_altiplano',
-						producto: 'Laptop Ambar Campus 14',
-						calificacion: 5,
-						fecha: '2026-05-11T14:20:00.000Z'
-					},
-					{
-						id_resena: 905,
-						autor: 'compras_zona4b',
-						vendedor: 'ventas_altiplano',
-						producto: 'Laptop Ambar Campus 14',
-						calificacion: 5,
-						fecha: '2026-05-11T14:22:00.000Z'
-					}
-				],
-				senales: [
-					'Las dos cuentas tienen la misma direccion normalizada',
-					'Las dos calificaron al mismo vendedor con 5 estrellas',
-					'Las dos cuentas se crearon el mismo dia'
-				]
-			}
-		];
-	}
-
 	function alternar(id: string) {
 		abierta = abierta === id ? null : id;
 	}
 
+	/**
+	 * La fecha de una resena, para leerse.
+	 *
+	 * Se blinda porque es el unico campo del payload que el backend manda tal
+	 * como sale del grafo, sin valor de respaldo. `new Date(null)` no lanza:
+	 * devuelve una fecha invalida que se pinta como "Invalid Date" en medio de
+	 * la tabla. Un guion dice lo mismo sin ensuciar.
+	 */
 	function fecha(valor: string): string {
-		return new Date(valor).toLocaleString('es-GT', {
+		if (!valor) return '--';
+		const d = new Date(valor);
+		if (Number.isNaN(d.getTime())) return '--';
+		return d.toLocaleString('es-GT', {
 			day: 'numeric',
 			month: 'short',
 			year: 'numeric',
@@ -311,7 +213,7 @@
 <section class="fraude">
 	<div class="titulo">
 		<h2>Manipulacion de resenas</h2>
-		{#if !cargando && !sinConectar && !error}
+		{#if !cargando && !error && !grafoVacio}
 			<span class="etiqueta" class:limpio={anillos.length === 0}>
 				{anillos.length}
 				{anillos.length === 1 ? 'grupo senalado' : 'grupos senalados'}
@@ -330,38 +232,31 @@
 		no consultando una tabla.
 	</p>
 
-	{#if viendoEjemplo}
-		<!-- No se puede cerrar. Mientras haya datos inventados en pantalla,
-		     tiene que decirlo: la alternativa es que alguien lea estos nombres
-		     como si fueran cuentas de verdad. -->
-		<p class="ejemplo-aviso" role="status">
-			Estas viendo <strong>datos de ejemplo</strong>, no cuentas reales. Sirven para revisar el
-			diseno de la pantalla mientras el analisis no esta conectado.
-			<button type="button" onclick={cargar}>Volver a lo real</button>
-		</p>
-	{/if}
-
 	{#if cargando}
 		<p class="gris">Analizando el grafo de resenas...</p>
-	{:else if sinConectar}
-		<!-- Ni error ni vacio: es trabajo que falta, y decirlo con precision
-		     ahorra que alguien salga a buscar un bug que no existe. -->
-		<div class="pendiente">
-			<h3>El analisis todavia no esta conectado</h3>
-			<p>
-				Esta pantalla espera la ruta <code>GET /admin/fraude/anillos</code>, que corre la
-				consulta de varios saltos contra Neo4j. El backend todavia no la expone.
-			</p>
-			<p class="gris">
-				La forma exacta que espera esta en <code>docs/BACKEND-PENDIENTE.md</code>. Las
-				consultas ya estan escritas en <code>neo4j/002_fraude.cypher</code>.
-			</p>
-			<button type="button" onclick={verEjemplo}>Ver con datos de ejemplo</button>
-		</div>
 	{:else if error}
 		<div class="fallo" role="alert">
 			<p>{error}</p>
 			<button type="button" onclick={cargar}>Reintentar</button>
+		</div>
+	{:else if grafoVacio}
+		<!-- El OTRO vacio: la ruta contesto bien, pero no habia grafo que
+		     recorrer. Sin esta rama, el bloque de abajo diria "se recorrieron 0
+		     cuentas y 0 resenas sin encontrar nada", que es una auditoria que
+		     nunca ocurrio presentada como una auditoria limpia. -->
+		<div class="pendiente">
+			<h3>El grafo esta vacio: no se analizo nada</h3>
+			<p>
+				La consulta corrio y contesto bien, pero Neo4j no tiene ni una cuenta ni una resena
+				que recorrer. <strong>Esto no quiere decir que no haya fraude</strong>: quiere decir
+				que todavia no se ha mirado.
+			</p>
+			<p class="gris">
+				El grafo es una proyeccion de PostgreSQL y se carga con
+				<code>bash etl/cargar_grafo.sh</code> (desde Git Bash). Se corre solo tambien al
+				arrancar con <code>.\arrancar.ps1</code>.
+			</p>
+			<button type="button" onclick={cargar}>Volver a analizar</button>
 		</div>
 	{:else if anillos.length === 0}
 		<!-- El vacio con su denominador. Ver la nota larga de arriba. -->
@@ -384,10 +279,19 @@
 		</div>
 	{:else}
 		<ul class="lista">
-			{#each anillos as anillo (anillo.id)}
-				{@const desplegada = abierta === anillo.id}
+			<!-- La clave lleva el indice ademas del id, y no es paranoia: el id
+			     de un grupo `direccion` se arma solo con los ids de sus cuentas,
+			     asi que dos direcciones distintas habitadas por LAS MISMAS dos
+			     cuentas producen el mismo id dos veces. Pasa de verdad -- la
+			     misma casa esta cargada varias veces escrita distinto, lo
+			     documenta etl/extraer_grafo.sql -- y una clave repetida en un
+			     {#each} de Svelte 5 no degrada la lista: lanza
+			     `each_key_duplicate` y revienta el panel entero. -->
+			{#each anillos as anillo, i (anillo.id + '#' + i)}
+				{@const clave = anillo.id + '#' + i}
+				{@const desplegada = abierta === clave}
 				<li class="anillo" class:desplegada>
-					<button type="button" class="cabeza" onclick={() => alternar(anillo.id)}>
+					<button type="button" class="cabeza" onclick={() => alternar(clave)}>
 						<span class="tipo tipo-{anillo.tipo}">{NOMBRE_TIPO[anillo.tipo]}</span>
 
 						<span class="cuentas-resumen">
@@ -524,8 +428,7 @@
 
 	.acciones button,
 	.pendiente button,
-	.fallo button,
-	.ejemplo-aviso button {
+	.fallo button {
 		padding: 8px 16px;
 		font-family: inherit;
 		font-size: 0.92rem;
@@ -540,8 +443,7 @@
 	}
 
 	.acciones button:hover,
-	.pendiente button:hover,
-	.ejemplo-aviso button:hover {
+	.pendiente button:hover {
 		border-color: var(--indigo);
 		color: var(--indigo);
 	}
@@ -570,24 +472,6 @@
 	}
 
 	/* -- estados que no son la lista -- */
-
-	.ejemplo-aviso {
-		display: flex;
-		align-items: center;
-		gap: 12px;
-		flex-wrap: wrap;
-		margin-bottom: 18px;
-		padding: 10px 14px;
-		font-size: 0.92rem;
-		color: var(--tinta);
-		background: var(--indigo-cl);
-		border: 1px solid var(--indigo);
-		border-radius: var(--r);
-	}
-
-	.ejemplo-aviso button {
-		margin-left: auto;
-	}
 
 	.pendiente,
 	.limpio-caja {

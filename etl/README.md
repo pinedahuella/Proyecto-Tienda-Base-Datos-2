@@ -546,7 +546,7 @@ Ni los votos de `likes` ni las respuestas a las resenas.
 Las respuestas las escribe el vendedor dentro de su propia resena, asi que no
 agregan ningun camino entre cuentas que `ESCRIBIO` no de ya. Los votos si
 agregarian uno -- quien apoya a quien -- y son lo primero que este grafo deberia
-crecer si hiciera falta mas senal; hoy son 46 votos de dos cuentas, que no
+crecer si hiciera falta mas senal; hoy son 62 votos de dos cuentas, que no
 alcanza para un patron y entraria como ruido con nombre.
 
 ## Por que Cypher y no JSON

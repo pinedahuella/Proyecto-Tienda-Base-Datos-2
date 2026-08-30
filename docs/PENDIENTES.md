@@ -2,13 +2,13 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-08-29.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-08-30.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
 |---|---|---|---|---|
 | 1 | El precio se congela al PAGAR, no al agregar | los dos | ~2 h | **alta: es un cobro incorrecto** |
-| 2 | La semilla no respalda con compras las 86 resenas | Meme | ~2 h | media |
+| ~~2~~ | ~~La semilla no respalda con compras las 86 resenas~~ | -- | -- | **CERRADO el 2026-08-30** |
 | 3 | `Carrito.svelte` quedo muerto (937 lineas) | Meme | 5 min | baja |
 | 4 | El grafo se queda viejo y el ETL relee todo | Meme | ver su doc | baja |
 
@@ -17,12 +17,16 @@ Y de la **Entrega 2** falta trabajo que no es un bug:
 | Que | Puntos | De quien |
 |---|---|---|
 | Oferta de inventario limitado enchufada al backend | 3 | Jose David (`redis/` ya tiene el Lua y el arnes) |
-| `GET /admin/fraude/anillos` | parte de 3 | Jose David (`neo4j/` ya tiene las consultas) |
+| ~~`GET /admin/fraude/anillos`~~ | ~~parte de 3~~ | **HECHA el 2026-08-30, y el panel ya la consume** |
 | Resenar desde el pedido (bloque 5 de BACKEND-PENDIENTE) | -- | Jose David |
 | **Comparativa grafos vs columnar**, con la defensa de la NO elegida | 1.5 | **nadie todavia** |
 | **Diagrama de arquitectura** (el ER no lo es) | parte de 1 | **nadie todavia** |
 
 Los dos ultimos **no dependen de nadie mas** y son 2.5 puntos.
+
+Jose David agrego ademas **dos reportes de admin** que nadie habia pedido y que
+suman: `GET /admin/reportes/ventas` y `GET /admin/reportes/reservaciones`. Su
+pantalla es `frontend/src/lib/PanelReportes.svelte`, hecha el 2026-08-30.
 
 ---
 
@@ -71,75 +75,89 @@ lo dice y pide confirmar. No hay que inventar nada, hay que portarlo.
 
 ---
 
-# 2. Las 86 resenas sembradas no tienen compra detras
+# 2. Las 86 resenas sembradas no tienen compra detras -- CERRADO el 2026-08-30
+
+**Ya no aplica.** Se deja escrito porque el arreglo cambio numeros que otros
+documentos citan, y porque el candado que lo cierra hay que saber que existe.
+
+## Que pasaba
 
 Jose David decidio, y lo dejo escrito en su servicio, que **solo se puede
-calificar a un vendedor al que se le compro y se le pago**. Es su decision y se
-queda: es la "compra verificada" de Amazon y es defendible.
+calificar a un vendedor al que se le compro y se le pago** -- y al MISMO
+vendedor, por la cadena `pedido_producto -> precio_historial -> oferta ->
+oferta.id_usuario`. Es su decision y se queda: es la "compra verificada" de
+Amazon y es defendible.
 
-El problema no es la regla: es que **la semilla no la cumple**. Medido:
+El problema no era la regla: era que **la semilla no la cumplia**. Solo 2 de las
+86 resenas tenian una compra detras, asi que 84 describian algo que el propio
+sistema habria rechazado al escribirlo, y el boton "Escribir una resena" no
+aparecia casi en ningun producto.
+
+## Como quedo, medido contra una base recien creada
 
 ```
-  pares (comprador, producto) con compra pagada ....... 11
-  de las 86 resenas sembradas, con compra detras ....... 2
+  resenas ......................................... 86
+  de esas, con compra pagada a ESE vendedor ....... 86   (antes 2)
+  resenas fechadas antes de su compra .............  0
+  pedidos sembrados ...............................  10  (antes 2)
+  lineas de pedido ................................  97  (antes 3)
+  pares comprados y AUN sin resenar ...............  11
 ```
 
-**84 de las 86 no se podrian haber escrito bajo la regla que el sistema exige.**
+Los 11 sin resenar son a proposito: `pruebas/resenas.sh` busca un par comprado
+y todavia sin calificar, y hace `exit 1` si no queda ninguno. Si cada compra
+llevara su resena encima, **el arnes moriria antes de probar las 5 rutas** y su
+mapa de "donde SI se puede resenar" saldria vacio. Hoy imprime 8 productos.
 
-## Que se rompe hoy
+## Como se hizo, y las cuatro decisiones que no son obvias
 
-En casi todos los productos el boton "Escribir una resena" no aparece. Existe la
-funcionalidad y no se puede demostrar salvo en unos pocos productos.
+Todo en `migrations/datos/generador.js`; no se toco ninguna migracion numerada.
 
-**Mientras tanto:** `bash pruebas/resenas.sh` imprime en que producto y con que
-cuenta SI aparece. Es el mapa hasta que esto se arregle.
+1. **Se compra con `comprar_carrito()` de la 012**, no con `INSERT` a mano: ella
+   congela el `id_precio_historial` y arma `nombre_vendedor` desde la base, dos
+   cosas que a mano se copian mal y que `pedido_producto` no protege con ningun
+   UNIQUE.
+2. **Las fechas se corrigen despues de comprar.** `crear_pedido` usa `now()`, asi
+   que la compra saldria HOY y la resena en abril -- resenada antes de comprada,
+   sin que nada falle. Se hace `UPDATE` de `pedido.fecha_creacion`,
+   `pago.fecha_cancelacion` y `stock_movimiento.fecha_movimiento`; se comprobo
+   que no hay ningun trigger sobre esas tres tablas.
+3. **Los pedidos se agrupan por el mes de la OFERTA, no por el de la resena.**
+   Agrupando por la resena, la oferta mas nueva del grupo queda posterior a la
+   resena mas vieja y el pedido no se puede fechar sin quedar antes de que la
+   oferta existiera.
+4. **El sorteo nuevo va DESPUES de la linea 1718 del generador**, que es la
+   ultima extraccion de la secuencia global `azar()`. Uno metido antes reescribe
+   las 552 ofertas enteras. Comprobado con un `diff`: todo lo anterior a la parte
+   social quedo bit a bit igual.
 
-## El arreglo
+## El candado, que es lo que impide que vuelva
 
-En `migrations/datos/generador.js`: que cada resena tenga su compra. Las seis
-trampas:
+Dos comprobaciones nuevas en el `DO` final de `001_catalogo.sql`, la **10** y la
+**11**: que toda resena tenga una compra pagada a ese vendedor, y que ninguna
+este fechada antes de su compra. Fallan la migracion entera.
 
-1. **Usar las funciones, no INSERT a mano** -- `comprar_carrito()` de la 012 hace
-   las tres de una.
-2. **Comprar mueve el stock**, y hay numeros DOCUMENTADOS que dependen de el (las
-   "6 variantes donde la tienda no tiene y otro si" de `docs/base-de-datos.md`).
-   Hay que remedirlos o el documento pasa a mentir.
-3. **Una de cada diez ofertas nace con stock 0** a proposito: `comprar_pedido`
-   las rechaza.
-4. **Las fechas quedan al reves**: `crear_pedido` usa `now()`, asi que la compra
-   sale hoy y la resena en abril. Resenada antes de comprada, sin que nada falle.
-5. **Doce pedidos de varias lineas**, no 86 pedidos.
-6. **El azar va DESPUES de la linea 1718**, o se reescriben las 552 ofertas.
+**Los JOIN de la 10 son calcados de `exigirCompraPagada` del backend**, con su
+`estado_pedido_nombre <> 'cancelado'` incluido. El SQL que este mismo documento
+proponia antes **no miraba el vendedor ni el cancelado**: habria aprobado una
+resena de Ana a Carlos por algo que Ana le compro a Lucia. Un candado que valida
+algo distinto de lo que el sistema exige es peor que no tenerlo.
 
-## Y el candado, que es lo que impide que vuelva
+## Lo que cambio de numeros, y donde estaba escrito
 
-La contradiccion aparecio porque nada la vigilaba. Va la comprobacion **10** al
-`DO` del final de `001_catalogo.sql`:
+`115 comentarios / 46 votos / 29 respuestas` pasaron a **114 / 62 / 28**: los
+pares elegidos cambian (ahora se filtran por stock y por precio quieto) y
+`azarSocial` reparte distinto. Se actualizaron `docs/base-de-datos.md`,
+`docs/BACKEND-PENDIENTE.md`, `migrations/README.md`, `neo4j/README.md`,
+`etl/README.md` y `etl/extraer_grafo.sql`.
 
-```sql
--- 10. Toda resena tiene una compra pagada detras.
-SELECT count(*) INTO v_mal
-FROM resena r
-WHERE NOT EXISTS (
-    SELECT 1 FROM pedido pe
-    JOIN pago pg USING (id_pedido)
-    JOIN estado_pago epa USING (id_estado_pago)
-    JOIN pedido_producto pp USING (id_pedido)
-    WHERE pe.id_usuario = r.id_usuario
-      AND pp.id_producto_mongo = r.id_producto_mongo
-      AND epa.estado_pago_nombre = 'pagado');
+## Y una afirmacion que hay que dejar de repetir
 
-IF v_mal > 0 THEN
-    RAISE EXCEPTION '% resenas no tienen una compra pagada detras', v_mal;
-END IF;
-```
-
-## La consecuencia para la Entrega 2
-
-Con esta regla, **el anillo de fraude tiene que comprarse entre si antes de
-calificarse**. Es mas realista -- un anillo de verdad compra barato para poder
-resenar -- pero **hay que sembrarlo asi**, y no se puede descubrir el dia de la
-demostracion.
+Este documento decia que **"el anillo de fraude tiene que comprarse entre si
+antes de calificarse"**. No es cierto para el anillo que existe: se siembra en
+**Neo4j**, con cuentas de id negativo y etiqueta `:Prueba`, y no pasa por
+`POST /resenas` ni toca PostgreSQL. Solo aplicaria si algun dia se sembrara en
+la fuente de verdad, que `neo4j/README.md` ya descarto por escrito.
 
 ---
 

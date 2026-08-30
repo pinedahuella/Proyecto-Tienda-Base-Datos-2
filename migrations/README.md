@@ -115,8 +115,9 @@ De sus **20 `INSERT` de primer nivel, 17 no llevan ninguna guardia** -- ni
 (`usuarios`, `direcciones` y `direccion_historial`), y lo estan por otro motivo:
 son las tablas que tambien escribe la aplicacion. El bloque social del final
 (`DO $social$`) tambien esta guardado, con `NOT EXISTS` y un `ON CONFLICT DO
-NOTHING`. Todo lo demas -- categorias, caracteristicas, productos, variantes,
-imagenes, ofertas, precios y el kardex -- entra a pelo.
+NOTHING`, y el de las compras que lo precede (`DO $compras$`) reconoce sus
+pedidos por la fecha. Todo lo demas -- categorias, caracteristicas, productos,
+variantes, imagenes, ofertas, precios y el kardex -- entra a pelo.
 
 Medido sobre una base desechable, esquema completo y el archivo corrido dos
 veces seguidas:
@@ -132,9 +133,26 @@ segunda pasada   EXIT=3
   DETAIL: Key (nombre)=(Electronica) already exists.
 ```
 
+Esa medicion es de ANTES del bloque de compras (`DO $compras$`, 2026-08-30) y
+sus conteos caducaron con el. Lo que la medicion demuestra -- que la segunda
+pasada falla y se deshace entera -- no cambia; los numeros de adentro si, y se
+dejan como se midieron para no inventar una medicion que nadie corrio.
+
+Los de hoy, contados contra una base recien creada con `.\arrancar.ps1
+-Reiniciar`:
+
+```
+102 productos, 202 variantes, 556 ofertas, 11 usuarios,
+90 resenas, 118 comentarios (28 de ellos respuestas), 62 likes,
+13 pedidos y 101 lineas
+
+  de eso, el anillo de fraude aporta: 3 usuarios, 4 ofertas,
+  4 resenas, 3 pedidos, 4 lineas y 1 direccion compartida
+```
+
 **Lo que salva la situacion es que el archivo abre con `BEGIN;` (linea 33) y
 cierra con `COMMIT;`**, asi que la pasada que falla se deshace ENTERA: tras la
-segunda corrida los conteos seguian exactamente en 102/202/552/8/86/115/46. Una
+segunda corrida los conteos seguian exactamente en los de la primera. Una
 base ya cargada no se ensucia; simplemente no se carga nada. Sin ese
 `BEGIN`/`COMMIT` quedaria a medias hasta la linea 99 de mas de cuatro mil, que
 es mucho peor que fallar.
@@ -189,7 +207,7 @@ numeracion entre archivos, porque ya no hay numeracion que coordinar.
 
 ## El conjunto se comprueba a si mismo
 
-`001_catalogo.sql` termina con **nueve** verificaciones dentro de un `DO`, y cada
+`001_catalogo.sql` termina con **once** verificaciones dentro de un `DO`, y cada
 una **falla la migracion entera** si no cuadra:
 
 1. el saldo de cada oferta es la suma de su kardex
@@ -201,11 +219,13 @@ una **falla la migracion entera** si no cuadra:
 7. toda direccion tiene calle, en la fila viva y en su historial
 8. toda resena cuelga de un comentario RAIZ (`id_comentario_padre` en NULL)
 9. `cantidad_likes` y `cantidad_dislikes` de cada comentario cuadran con `likes`
+10. toda resena tiene detras una compra pagada **a ese vendedor**
+11. ninguna resena esta fechada antes de la compra que la habilita
 
-Las 4, 5 y 6 nacieron con la 010, la 7 con la 008, y **las dos ultimas con la
-011**. Aqui decia "seis" y listaba seis, pero le faltaban tres: las dos de la
-011 y, desde antes, la 6. Una lista escrita a mano caduca sin avisar; el archivo
-no. Antes de creerle a esta, contalos:
+Las 4, 5 y 6 nacieron con la 010, la 7 con la 008, y las dos que cierran la
+parte social con la **011**. Aqui decia "seis" y listaba seis, pero le faltaban
+tres: las dos de la 011 y, desde antes, la 6. Una lista escrita a mano caduca
+sin avisar; el archivo no. Antes de creerle a esta, contalos:
 
 ```bash
 grep -c "RAISE EXCEPTION" migrations/datos/001_catalogo.sql
@@ -216,7 +236,7 @@ columna es lo que decide si un vendedor puede publicar su oferta sin que la
 tienda la vea, asi que una fila mal puesta no es un dato torcido, es un permiso
 regalado.
 
-**Las dos nuevas comprueban justo lo que la 011 NO puede exigir sola**, y por eso
+**La 8 y la 9 comprueban justo lo que la 011 NO puede exigir sola**, y por eso
 existen:
 
 La 8 es una invariante que ningun `CHECK` puede sostener, porque un `CHECK` no ve
@@ -230,6 +250,21 @@ el dato, valida que el trigger de verdad corrio -- que no es lo mismo que
 suponer que existe. Cuenta `valor = 1` y `valor = -1` explicitamente, igual que
 el trigger: si el candado contara de otra forma, aprobaria o fallaria midiendo
 algo distinto de lo que vigila.
+
+**La 10 y la 11 vigilan una regla que vive en el backend**, no en el esquema:
+solo se puede calificar a un vendedor al que se le compro y se le pago ese
+producto. La base no la puede exigir con una llave foranea -- para llegar del
+vendedor calificado a la oferta comprada hay que cruzar `pedido_producto ->
+precio_historial -> oferta` -- asi que nada la vigilaba de este lado, y la
+semilla llego a tener 86 resenas con 2 compras detras. La 10 copia los `JOIN`
+de `exigirCompraPagada()` tal cual, incluidos los dos filtros que es facil
+dejarse: que la oferta sea **del vendedor calificado** y que el pedido no este
+cancelado. Un candado que comprueba algo distinto de lo que el sistema exige
+aprueba en verde datos que la aplicacion despues rechaza.
+
+La 11 existe porque la 10 sola no ve el calendario: una resena de marzo con su
+compra en mayo la pasa entera, porque la fila existe. La fecha de la resena vive
+en su comentario raiz, y tiene que ir despues de la del pedido.
 
 Un conjunto de datos que no se verifica es un conjunto de datos que miente en
 silencio. Vale mas fallar al cargar que descubrirlo tres semanas despues.

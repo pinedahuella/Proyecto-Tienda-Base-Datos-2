@@ -10,6 +10,7 @@
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
 	import PanelFraude from '$lib/PanelFraude.svelte';
+	import PanelReportes from '$lib/PanelReportes.svelte';
 	import {
 		cerrarSesion,
 		CORREO_TIENDA,
@@ -493,6 +494,13 @@
 				     tienda, asi que se le pintan las mismas pantallas. Sin esto,
 				     tenia el permiso y ninguna forma de usarlo. -->
 				<PanelAdmin alExpirarSesion={expiro} />
+				<!-- Los dos reportes de admin: ventas y reservaciones. Van
+				     ARRIBA de las pantallas de catalogo porque son de lectura y
+				     de un vistazo -- se abre el panel para ver como va el
+				     dinero mas veces de las que se entra a editar una oferta.
+				     Como el panel de fraude, son SOLO de admin y no de la
+				     tienda: el backend le contesta 403 a la tienda. -->
+				<PanelReportes alExpirarSesion={expiro} />
 				<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
 				<PanelVendedor alExpirarSesion={expiro} />
 				<!-- La cola de productos propuestos por otros vendedores. Va al final

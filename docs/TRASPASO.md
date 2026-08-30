@@ -3,7 +3,7 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-08-29**.
+Ultima actualizacion: **2026-08-30**.
 
 ---
 
@@ -100,6 +100,8 @@ por eventos, los indices y las agregaciones. El informe lo hizo el equipo.
 | **Resenas, comentarios y likes** | 7 rutas, pantalla completa | `bash pruebas/resenas.sh` (15 OK) |
 | **Inventario limitado (Lua)** | escrito y probado, **falta enchufarlo** | `bash redis/prueba_concurrencia.sh` |
 | **Grafo de fraude (Neo4j)** | ETL + 5 consultas | `bash neo4j/correr_fraude.sh` |
+| **Panel de fraude, de punta a punta** | `GET /admin/fraude/anillos` + `PanelFraude.svelte` | entra como `admin@mesh.com` a `/panel` |
+| **Reportes de admin** | ventas y reservaciones + `PanelReportes.svelte` | lo mismo |
 
 **El carrito ya compra de verdad.** Verificado contra la base: pedido creado,
 pago `pagado`, kardex con el motivo `venta`, stock descontado, y la clave de
@@ -117,7 +119,11 @@ nadie resena una variante.
 
 **2. No hay FK de `resena` a `pedido`, a proposito.** La resena sin compra es la
 senal de fraude mas fuerte; exigir la compra la borra del modelo. Jose David SI
-la exige **en la aplicacion** (compra verificada), y eso es reversible.
+la exige **en la aplicacion** (compra verificada, y **al mismo vendedor**), y eso
+es reversible. Desde el 2026-08-30 **la semilla cumple esa regla**: las 86
+resenas tienen su compra pagada detras, y las comprobaciones 10 y 11 de
+`001_catalogo.sql` fallan la migracion si alguna deja de tenerla. Antes solo 2 la
+tenian y el boton de escribir no aparecia casi nunca.
 
 **3. El grafo tiene TRES nodos, no cuatro.** `:Usuario`, `:Resena`, `:Producto`
 (mas `:Direccion`). **No hay `:Vendedor`**: en Mesh comprar no pide rol, asi que
