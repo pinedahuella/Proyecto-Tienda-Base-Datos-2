@@ -48,9 +48,15 @@ export class BaseDatosClaveValorService {
     }
   }
 
-  /** Saca `campo:valor` del texto que devuelve `INFO`. */
-  private leerCampo(info: string, campo: string): string | null {
-    const linea = info.split('\n').find((l) => l.startsWith(`${campo}:`));
+  /**
+   * Saca `campo:valor` del texto que devuelve `INFO`. Recibe `unknown` y lo
+   * pasa por `String()` a proposito: segun la version de ioredis, el tipo de
+   * lo que devuelve `redis.info()` cambia, y asi el metodo no depende de eso
+   * ni se rompe si algun dia llega `null`.
+   */
+  private leerCampo(info: unknown, campo: string): string | null {
+    const texto = typeof info === 'string' ? info : '';
+    const linea = texto.split('\n').find((l) => l.startsWith(`${campo}:`));
     return linea ? linea.slice(campo.length + 1).trim() : null;
   }
 }
