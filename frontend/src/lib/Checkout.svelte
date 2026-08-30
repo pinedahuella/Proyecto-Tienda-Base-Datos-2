@@ -628,13 +628,27 @@
 	}
 
 	/**
-	 * Crea la direccion y ademas se la pone al pedido: crearla sola no cambia a
-	 * donde se entrega, y quien la escribe aqui la escribe para ESTE envio.
+	 * Crea la direccion y ademas la deja usada para ESTE envio: crearla sola no
+	 * cambia a donde se entrega, y quien la escribe aqui la escribe para esta
+	 * compra.
+	 *
+	 * Como se "usa" depende del modo, igual que en `cargarEntrega` y en
+	 * `listoElPedido`:
+	 *
+	 *   modo pedido   -> se le pone al pedido con un PATCH (hay fila que tocar)
+	 *   modo carrito  -> se marca en `idElegida`, que es lo que viaja despues en
+	 *                    el cuerpo de POST /carrito/comprar
+	 *
+	 * Esta rama FALTABA y era un callejon sin salida: en modo carrito no hay
+	 * `idPedido` -- lo crea la compra -- asi que el formulario contestaba "No
+	 * hay un pedido abierto al que ponersela" y no guardaba nada. A quien no
+	 * tuviera ya una direccion guardada le dejaba el checkout muerto: no podia
+	 * crearla aqui, y sin direccion el boton de pagar nunca se enciende.
 	 */
 	async function crearYUsar(evento: SubmitEvent) {
 		evento.preventDefault();
 
-		if (idPedido == null) {
+		if (modo === 'pedido' && idPedido == null) {
 			errorNueva = 'No hay un pedido abierto al que ponersela';
 			return;
 		}
@@ -689,6 +703,16 @@
 		const nueva = r.payload;
 		direcciones = [nueva, ...direcciones];
 		listaLeida = true;
+
+		// En modo carrito no hay pedido al que ponersela: basta con marcarla.
+		// Es la misma direccion que viaja en el cuerpo de la compra, asi que
+		// con esto el boton de pagar ya se enciende.
+		if (modo === 'carrito') {
+			guardandoDireccion = false;
+			idElegida = nueva.id_direccion;
+			cerrarNueva();
+			return;
+		}
 
 		const puesta = await ponerDireccion(nueva.id_direccion);
 		guardandoDireccion = false;
@@ -1267,11 +1291,30 @@
 					</p>
 					<!-- Se dice aqui y no solo cuando cambia: es la regla del modelo,
 					     y saberla antes evita la sorpresa de ver otro precio en la
-					     ficha del producto. -->
-					<p class="menor nota">
-						Se cobra el precio que quedo congelado al agregar cada linea, aunque el
-						vendedor lo haya cambiado despues.
-					</p>
+					     ficha del producto.
+
+					     Y el texto DEPENDE DEL MODO, porque hoy la regla no es la
+					     misma en los dos. En modo pedido el precio se congelo de
+					     verdad al agregar la linea, que es lo que decia esta nota.
+					     En modo carrito NO: el carrito de Redis guarda intencion
+					     (`id_oferta -> cantidad`) y el precio se resuelve al pagar,
+					     asi que prometer aqui un precio congelado es prometer algo
+					     que el sistema todavia no hace -- y sobre dinero. Es el
+					     pendiente #1: la migracion 013 ya deja congelarlo, pero
+					     falta que el carrito guarde el `id_precio_historial`.
+					     Cuando eso exista, las dos ramas dicen lo mismo y esto se
+					     vuelve una sola linea otra vez. -->
+					{#if modo === 'carrito'}
+						<p class="menor nota">
+							Se cobra el precio de <strong>ahora</strong>. Si el vendedor lo cambio
+							mientras el carrito esperaba, el total de arriba ya es el nuevo.
+						</p>
+					{:else}
+						<p class="menor nota">
+							Se cobra el precio que quedo congelado al agregar cada linea, aunque el
+							vendedor lo haya cambiado despues.
+						</p>
+					{/if}
 				{/if}
 			</section>
 
