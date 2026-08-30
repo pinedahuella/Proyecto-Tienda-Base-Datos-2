@@ -7,9 +7,9 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 
 | # | Que | De quien | Cuanto | Urgencia |
 |---|---|---|---|---|
-| 1 | El precio se congela al PAGAR, no al agregar | los dos | ~2 h | **alta: es un cobro incorrecto** |
+| 1 | El precio se congela al PAGAR, no al agregar | **falta la mitad de Jose David** | ~1 h | **alta: es un cobro incorrecto** |
 | ~~2~~ | ~~La semilla no respalda con compras las 86 resenas~~ | -- | -- | **CERRADO el 2026-08-30** |
-| 3 | `Carrito.svelte` quedo muerto (937 lineas) | Meme | 5 min | baja |
+| ~~3~~ | ~~`Carrito.svelte` quedo muerto~~ | -- | -- | **CERRADO el 2026-08-30** |
 | 4 | El grafo se queda viejo y el ETL relee todo | Meme | ver su doc | baja |
 
 Y de la **Entrega 2** falta trabajo que no es un bug:
@@ -54,20 +54,42 @@ puede no ser el que se cobre. El endpoint del carrito lo reconoce por escrito
 
 ## El arreglo, y son dos mitades
 
-**La de Jose David:** que el carrito de Redis guarde tambien el
-`id_precio_historial` de cada linea. El hash pasa de `id_oferta -> cantidad` a
-`id_oferta -> cantidad:id_precio_historial`, o a dos campos.
+**La de Meme: HECHA el 2026-08-30, es `migrations/013_precio_del_carrito.sql`.**
+`agregar_linea()` acepta un `id_precio_historial` DENTRO de `p_linea` y lo usa
+en vez de buscar el vigente. La firma no cambio, asi que la 012 no se toco y el
+campo viaja solo. Sin el campo se comporta igual que antes, para que la
+migracion pudiera correr antes que el backend y para que la semilla siguiera
+cargando.
 
-**La de Meme (migracion 013):** que `agregar_linea()` acepte un
-`id_precio_historial` opcional y lo use en vez de buscar el vigente. **La 007 no
-se edita** -- es la regla de `migrations/README.md` -- se hace la siguiente.
+Ademas exige que ese precio sea **de esa misma oferta**: sin ese filtro,
+mandar el id de una fila de otra oferta seria elegir el precio a voluntad. Y no
+bloquea la compra cuando el precio ya no es el vigente: **cobra el congelado y
+lo dice**, con `precio_cambio`, `precio_congelado` y `precio_actual` en lo que
+devuelve. La base informa; la politica la decide la aplicacion.
 
-## La trampa
+Medido en una transaccion con ROLLBACK: precio visto Q6,263, el vendedor lo
+sube a Q31,315, se compran 3 unidades -> **cobra Q18,789** (3 x 6,263) en vez de
+Q93,945. Con un precio de otra oferta o un id inventado, levanta excepcion.
+
+**La de Jose David, que es lo que FALTA:** que el carrito de Redis guarde
+tambien el `id_precio_historial` de cada linea -- el hash pasa de
+`id_oferta -> cantidad` a llevar los dos datos -- que `POST /carrito/comprar` lo
+mande, y que mire `precio_cambio` para armar los `avisos`. Los tres pasos estan
+escritos al final de la 013.
+
+**Hasta que eso exista, el precio se sigue congelando al pagar.** La 013 lo
+habilita, no lo termina.
+
+## La trampa, que sigue SIN decidirse
 
 Un `id_precio_historial` de hace 24 horas puede apuntar a un precio que ya no
 rige, y la persona tiene derecho a ese precio... hasta cierto punto. Hay que
 decidir **cuanto vale un precio congelado**: si es para siempre mientras el
 carrito viva, o si pasadas N horas se recalcula avisando.
+
+La 013 **no la decide a proposito**: cobra el congelado y marca `precio_cambio`.
+Cuanto vale la palabra que se le dio a un cliente es una decision comercial y no
+le toca a la base -- le toca a quien escriba el paso 3 del backend.
 
 `POST /comprador/pedidos/:id/comprar` ya resuelve esto con `confirmar_cambios` y
 una lista de `avisos`. **Lo mismo sirve aqui**: si el precio cambio, el checkout
@@ -103,6 +125,11 @@ aparecia casi en ningun producto.
   lineas de pedido ................................  97  (antes 3)
   pares comprados y AUN sin resenar ...............  11
 ```
+
+**Esos numeros son de ese momento.** Ese mismo dia, mas tarde, se sembro el
+anillo de fraude y subieron a **90 resenas, 13 pedidos y 101 lineas** (11
+usuarios, 556 ofertas). Se dejan como se midieron: lo que la medicion demuestra
+-- que las 86 pasaron de 2 a 86 respaldadas -- no cambia.
 
 Los 11 sin resenar son a proposito: `pruebas/resenas.sh` busca un par comprado
 y todavia sin calificar, y hace `exit 1` si no queda ninguno. Si cada compra
@@ -161,22 +188,41 @@ la fuente de verdad, que `neo4j/README.md` ya descarto por escrito.
 
 ---
 
-# 3. `Carrito.svelte` quedo muerto
+# 3. `Carrito.svelte` quedo muerto -- CERRADO el 2026-08-30
 
-937 lineas que ya no importa nadie: el panel lateral es `CarritoRedis.svelte`
-desde la mudanza a Redis.
+Borrado. 937 lineas que ya no importaba nadie: el panel lateral es
+`CarritoRedis.svelte` desde la mudanza a Redis. Se comprobo primero que ningun
+archivo lo importara.
 
-Se dejo un dia por si hacia falta de referencia. **Borrarlo**, junto con lo que
-solo el usaba de `pedido.ts` (las funciones del carrito viejo:
-`leerPedidoAbierto`, `guardarPedidoAbierto`, `olvidarPedidoAbierto`,
+## Y la lista que traia este pendiente estaba MAL
+
+Decia que con el se podian borrar ocho funciones de `pedido.ts`
+(`leerPedidoAbierto`, `guardarPedidoAbierto`, `olvidarPedidoAbierto`,
 `crearPedido`, `agregarLinea`, `restarLinea`, `quitarLinea`,
-`cambiarDireccionPedido`).
+`cambiarDireccionPedido`). **Siete de esas ocho siguen vivas**, medido buscando
+cada nombre por todo el frontend:
 
-Ojo antes de borrar de `pedido.ts`: **`MisPedidos` y `Pedido.svelte` siguen
-usando parte de ese archivo**. Hay que mirar cual, no borrar el archivo entero.
+| Funcion | Quien la usa todavia |
+|---|---|
+| `leerPedidoAbierto` | `Pedido.svelte`, `producto/[id]` |
+| `guardarPedidoAbierto` | `Pedido.svelte`, `producto/[id]` |
+| `olvidarPedidoAbierto` | `Pedido.svelte`, `sesion.ts`, `+layout.svelte`, `producto/[id]` |
+| `crearPedido` | `Pedido.svelte`, `producto/[id]` |
+| `agregarLinea` | `Pedido.svelte`, `producto/[id]` |
+| `quitarLinea` | `Pedido.svelte` |
+| `cambiarDireccionPedido` | `Checkout.svelte` |
 
-Un componente muerto que se parece al vivo es una trampa para el siguiente que
-entre.
+Borrar las ocho habria roto cinco archivos. Lo que si estaba muerto son **tres**,
+y dos ni figuraban en la lista: `restarLinea` (con su interfaz `LineaRestada`),
+`leerDesmarcadas` y `guardarDesmarcadas`. Esas tres se fueron.
+
+`LLAVE_MARCADAS` se queda: ya nadie la escribe, pero `olvidarPedidoAbierto` la
+sigue BORRANDO a proposito, porque en los navegadores que usaron el carrito
+viejo quedo escrita y solo se va por ahi.
+
+**La leccion, que es la de siempre en este proyecto:** una lista de codigo
+muerto escrita a mano caduca sin avisar. Antes de borrar, se mide -- un `grep`
+por nombre cuesta un minuto y aqui evito romper cinco archivos.
 
 ---
 

@@ -209,34 +209,11 @@ export function guardarPedidoAbierto(idPedido: string) {
 export function olvidarPedidoAbierto() {
 	if (!browser) return;
 	localStorage.removeItem(LLAVE);
+	// LLAVE_MARCADAS ya no la escribe nadie: era del carrito viejo, que se
+	// borro con `Carrito.svelte`. Se sigue BORRANDO a proposito, porque en los
+	// navegadores que usaron aquella version la clave quedo escrita y solo se
+	// va por aqui. Es limpieza de lo que dejamos, no codigo muerto.
 	localStorage.removeItem(LLAVE_MARCADAS);
-}
-
-// ------------------------------------------------------------ que esta marcado
-/**
- * Los id de linea marcados para comprar.
- *
- * Se guarda lo DESMARCADO y no lo marcado: una linea nueva tiene que nacer
- * marcada, y con la lista de marcadas habria que acordarse de agregarla en
- * cada sitio donde se agrega una. Guardando lo desmarcado, lo que no aparece
- * esta marcado, que es justo el caso normal.
- */
-export function leerDesmarcadas(): string[] {
-	if (!browser) return [];
-	try {
-		const crudo = localStorage.getItem(LLAVE_MARCADAS);
-		const lista: unknown = crudo ? JSON.parse(crudo) : [];
-		return Array.isArray(lista) ? lista.filter((x): x is string => typeof x === 'string') : [];
-	} catch {
-		// Si alguien lo dejo corrupto, se empieza de cero: perder que estaba
-		// desmarcado es molesto, reventar la pantalla del carrito es peor.
-		return [];
-	}
-}
-
-export function guardarDesmarcadas(ids: string[]) {
-	if (!browser) return;
-	localStorage.setItem(LLAVE_MARCADAS, JSON.stringify(ids));
 }
 
 // ------------------------------------------------------------ las rutas
@@ -379,38 +356,6 @@ export function agregarLinea(
 	return pedir<LineaAgregada>(
 		`/comprador/pedidos/${idPedido}/detalles`,
 		conJson('POST', linea)
-	);
-}
-
-/** Lo que devuelve PATCH /comprador/pedidos/:id/detalles. */
-export interface LineaRestada {
-	id_pedido: number;
-	/** Ausente cuando la resta dejo la linea en 0 y se borro. */
-	id_pedido_producto?: number;
-	id_oferta: number;
-	cantidad: number;
-	/** true si la resta llego a 0 y la linea se quito del pedido. */
-	eliminada: boolean;
-}
-
-/**
- * El "-1" de agregarLinea: resta unidades en vez de sumarlas.
- *
- * Si la resta deja la cantidad en 0 o menos, **la linea se borra sola** y
- * devuelve `eliminada: true` -- no hace falta llamar despues a quitarLinea.
- * Por eso quien lo llame tiene que releer el pedido y no dar por hecho que la
- * linea sigue ahi.
- *
- * No comprueba stock, y no le hace falta: restar unidades nunca puede dejar
- * sin existencias a nadie.
- */
-export function restarLinea(
-	idPedido: string,
-	linea: { id_oferta: number; cantidad: number }
-) {
-	return pedir<LineaRestada>(
-		`/comprador/pedidos/${idPedido}/detalles`,
-		conJson('PATCH', linea)
 	);
 }
 
