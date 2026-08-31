@@ -184,7 +184,7 @@ neo4j/               el modelo del grafo y las 5 consultas de fraude
 redis/               el carrito, el Lua del inventario limitado y sus arneses
 pruebas/             arneses de las rutas: resenas.sh y carrito.sh
 docs/                base-de-datos.md manda sobre el modelo;
-                     GUIA-PRESENTACION.md es el guion para defenderlo
+                     GUIA-PRESENTACION.txt es el guion para defenderlo
 backend/             de Jose David. NO SE TOCA. Su doc buena esta en
                      "elementos Generales/endpoints-*.md"
 ```
