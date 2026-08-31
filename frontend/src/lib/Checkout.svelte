@@ -308,6 +308,22 @@
 		modo === 'carrito' ? idElegida !== '' : idPedido != null && direccionPedido != null
 	);
 
+	/**
+	 * A donde se entrega, en los dos modos.
+	 *
+	 * En modo pedido la verdad es la del pedido, que ya la guardo el servidor.
+	 * En modo carrito el pedido no existe todavia, asi que es la que este
+	 * marcada en la lista -- la misma que viaja en POST /carrito/comprar.
+	 *
+	 * Existe para que el pie de la pantalla no tenga que preguntar por
+	 * `direccionPedido`, que en carrito es null siempre.
+	 */
+	let entregaFinal = $derived(
+		modo === 'carrito'
+			? (direcciones.find((d) => d.id_direccion === idElegida) ?? null)
+			: direccionPedido
+	);
+
 	let sePuedeConfirmar = $derived(
 		!cobrando &&
 			!vacio &&
@@ -575,7 +591,20 @@
 		// fallo, el punto vuelve solo a donde estaba.
 		idElegida = idDireccion;
 		await ponerDireccion(idDireccion);
-		idElegida = direccionPedido?.id_direccion ?? '';
+
+		// Esa relectura es SOLO del modo pedido, y olvidarlo rompia el otro.
+		//
+		// En modo carrito no hay pedido, asi que `direccionPedido` es null
+		// SIEMPRE y esta linea dejaba `idElegida` en '': marcabas una direccion
+		// y se desmarcaba sola, sin ningun error. Y como `listoElPedido` en
+		// este modo es justo `idElegida !== ''`, quedaba sin poder pagar.
+		//
+		// `ponerDireccion` ya trae su rama para el carrito -- se acordaron de
+		// esta funcion y no de la de al lado. Por eso el candado va aqui y no
+		// dentro: la que sabe si hay pedido del que releer es esta.
+		if (modo !== 'carrito') {
+			idElegida = direccionPedido?.id_direccion ?? '';
+		}
 	}
 
 	/**
@@ -1525,9 +1554,16 @@
 			<!-- La direccion otra vez, pegada al boton que cobra: arriba se pudo
 			     leer hace tres pantallas de scroll, y lo que importa es que se lea
 			     en el momento de pagar. -->
-			{#if direccionPedido}
+			<!--
+				`direccionPedido` es la del PEDIDO, y en modo carrito no hay pedido:
+				es null siempre. Preguntando solo por ella, este pie enseñaba el
+				aviso rojo "no se sabe a donde se entrega" con la direccion marcada
+				ahi arriba, en la misma pantalla. Decia que faltaba algo que no
+				faltaba, justo al lado del boton de pagar.
+			-->
+			{#if entregaFinal}
 				<p class="entrega-pie">
-					Se entrega en <strong>{direccionEnUnaLinea(direccionPedido)}</strong>
+					Se entrega en <strong>{direccionEnUnaLinea(entregaFinal)}</strong>
 				</p>
 			{:else if !cargandoEntrega}
 				<p class="malo" role="alert">
