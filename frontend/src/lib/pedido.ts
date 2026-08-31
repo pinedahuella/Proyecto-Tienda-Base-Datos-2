@@ -287,6 +287,50 @@ export function direccionEnUnaLinea(d: {
 }
 
 /**
+ * Una caracteristica reconstruida. `valor` puede ser una lista ("Contenido del
+ * paquete"), un numero con unidad ("Garantia: 18 meses") o un texto suelto.
+ */
+export interface CaracteristicaEnFecha {
+	nombre: string;
+	valor: string | number | boolean | string[];
+	unidad?: string | null;
+}
+
+/** Una presentacion del producto, tal como estaba ese dia. */
+export interface VarianteEnFecha {
+	id_producto_variante: number;
+	nombre_variante: string;
+	descripcion?: string | null;
+	caracteristicas_adicionales?: CaracteristicaEnFecha[];
+	caracteristicas_personalizadas?: CaracteristicaEnFecha[];
+}
+
+/**
+ * Lo que devuelve GET /productos/:id/historial?fecha=
+ *
+ * TODOS los campos menos `_id` son opcionales o admiten null, y no es
+ * pereza al tipar: la reconstruccion fusiona eventos, y cada evento aporta
+ * solo lo que cambio. Un producto cuya creacion es el unico evento anterior
+ * a la fecha trae lo que tuviera ese dia y nada mas.
+ *
+ * OJO -- este tipo se quedo corto una vez y costo caro: declaraba solo
+ * `nombre` y `descripcion`, asi que la pantalla de pedidos ensenaba dos
+ * campos de los cinco que la ruta manda. No daba ningun error, ni de
+ * TypeScript ni en consola: los otros tres simplemente no existian. Si esta
+ * ruta empieza a mandar un campo mas, se agrega AQUI, que es de donde
+ * cuelgan las pantallas.
+ */
+export interface ProductoEnFecha {
+	_id: number;
+	nombre: string | null;
+	descripcion: string | null;
+	categoria?: { nombre: string; id_categoria?: number; categoria_padre?: string | null } | null;
+	variantes?: VarianteEnFecha[];
+	caracteristicas_adicionales?: CaracteristicaEnFecha[];
+	caracteristicas_personalizadas?: CaracteristicaEnFecha[];
+}
+
+/**
  * Reconstruye un producto tal como estaba en una fecha.
  *
  * Publica, y a diferencia de GET /productos/:id **no oculta** los productos
@@ -296,8 +340,34 @@ export function direccionEnUnaLinea(d: {
  * La fecha va como AAAA-MM-DD.
  */
 export function traerProductoEnFecha(idProducto: string | number, fecha: string) {
-	return pedir<{ _id: number; nombre: string; descripcion: string | null }>(
+	return pedir<ProductoEnFecha>(
 		`/productos/${idProducto}/historial?fecha=${encodeURIComponent(fecha)}`
+	);
+}
+
+/** Precio y existencias de una oferta, tal como estaban ese dia. */
+export interface OfertaEnFecha {
+	id_oferta: string;
+	/** Decimal de PostgreSQL: viaja como texto para no perder centavos. */
+	precio: string;
+	stock: number;
+}
+
+/**
+ * El precio y el stock que tenia una oferta en una fecha.
+ *
+ * Va aparte del producto y no se puede unir: el catalogo de Mongo no guarda
+ * ninguno de los dos, porque al volverse multi-vendedor dejaron de ser del
+ * producto. Su historia vive en `precio_historial` y `stock_movimiento`, en
+ * PostgreSQL, y hay una por vendedor.
+ *
+ * Un 404 aqui significa "la oferta no existia en esa fecha", que es un dato
+ * y no un fallo (lo distingue el backend por que no haya ninguna fila de
+ * precio_historial anterior; ver ProductosService.reconstruirOfertaEnFecha).
+ */
+export function traerOfertaEnFecha(idOferta: string | number, fecha: string) {
+	return pedir<OfertaEnFecha>(
+		`/productos/ofertas/${idOferta}/historial?fecha=${encodeURIComponent(fecha)}`
 	);
 }
 
