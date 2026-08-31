@@ -925,7 +925,20 @@
 			return 'El numero de tarjeta debe tener entre 13 y 19 digitos';
 		}
 		if (!pasaLuhn(digitos)) {
-			return 'El numero de tarjeta no es valido. Revisa que no falte ni sobre un digito';
+			// El mensaje de antes decia "revisa que no falte ni sobre un digito",
+			// y eso habla de la LONGITUD -- que a estas alturas ya paso. Con 19
+			// digitos, que es el maximo que acepta el campo, se leia como que la
+			// pantalla se contradecia: te deja escribir 19 y luego te dice que
+			// cuentes los digitos.
+			//
+			// Lo que falla es otra cosa y conviene decirla: el ultimo digito de
+			// una tarjeta no es libre, se calcula a partir de los demas (Luhn),
+			// asi que una tirada de numeros al azar casi nunca cuadra.
+			return (
+				'Ese numero no puede ser de una tarjeta: el ultimo digito es una cifra de ' +
+				'control que se calcula con los demas, y no cuadra. Para probar usa ' +
+				'4242 4242 4242 4242.'
+			);
 		}
 
 		const mm = /^(\d{2})\/(\d{2})$/.exec(vencimiento.trim());
