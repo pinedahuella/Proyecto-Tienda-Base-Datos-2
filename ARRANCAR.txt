@@ -1,0 +1,80 @@
+LOS DOS COMANDOS
+==================================================
+
+Se corren desde la RAIZ del proyecto (esta carpeta), en PowerShell.
+El .\ del principio es obligatorio.
+
+
+1) ARRANCAR, SIN BORRAR NADA
+--------------------------------------------------
+
+  .\arrancar.ps1
+
+Es el de todos los dias. Levanta los 7 contenedores y deja la base como
+estaba: lo que compraste, los productos que creaste y las cuentas nuevas
+siguen ahi.
+
+Es seguro correrlo las veces que quieras. Lo que ya esta hecho no lo
+vuelve a hacer, solo comprueba que este bien:
+
+  - levanta PostgreSQL, MongoDB, Redis, Neo4j y las 3 consolas web
+  - corre las migraciones que falten (las corridas no se repiten)
+  - comprueba que MongoDB tenga el catalogo completo, y si le falta
+    algo lo vuelve a cargar
+  - comprueba que el grafo de Neo4j este cargado
+
+Tarda ~1 minuto.
+
+
+2) BORRAR TODO Y EMPEZAR DE CERO
+--------------------------------------------------
+
+  .\arrancar.ps1 -Reiniciar
+
+Hace `docker compose down -v`, que BORRA LOS VOLUMENES: se van las
+CUATRO bases enteras -- PostgreSQL, MongoDB, Redis y Neo4j -- y despues
+las vuelve a construir desde los archivos del repositorio.
+
+ESTO NO SE DESHACE. Se pierde todo lo que hayas hecho a mano:
+pedidos, productos nuevos, resenas, cuentas creadas, el carrito.
+
+Lo que queda despues es la semilla fija:
+103 productos, 8 cuentas base y el anillo de fraude de la demostracion.
+
+Usalo cuando los datos quedaron inconsistentes o para dejar la
+demostracion igual que en tu maquina. Tarda ~2 minutos.
+
+
+DESPUES DE CUALQUIERA DE LOS DOS
+==================================================
+
+Las bases quedan arriba, pero la aplicacion no. En dos terminales:
+
+  cd backend  ; npm run start:dev     -> http://localhost:3000
+  cd frontend ; npm run dev           -> http://localhost:5173
+
+Las cuentas de la semilla:
+
+  admin@mesh.com            Admin123
+  tienda@mesh.com           Vendedor123
+  ventas.*@mesh.com         Vendedor123
+  compradora.norte@mesh.com Comprador123
+  comprador.sur@mesh.com    Comprador123
+
+
+SI ALGO FALLA
+==================================================
+
+"no se reconoce arrancar.ps1"
+  Te falto el .\ , o no estas en la raiz.
+
+"Falta el archivo .env"
+  El .env no viene en el pull porque lleva contrasenas.
+  Copialo:  copy .env.example .env
+  Y ojo, son DOS: el de la raiz y backend\.env
+
+Se queja de variables que faltan
+  Compara tu .env con .env.example y agrega las que falten.
+
+Todo lo demas (las otras banderas, que hace cada paso por dentro)
+esta en comandos.txt, en esta misma carpeta.

@@ -2,13 +2,22 @@ GUIA DE PRESENTACION - MESH (Bases de Datos 2)
 Respuestas con archivo, linea y texto exacto para buscar con Ctrl+F.
 ====================================================================
 
-ACTUALIZADA EL 2026-08-30. Se escribio para la Entrega 1 y sigue valiendo
-entera; lo que cambio desde entonces esta marcado con [AL DIA 30-AGO] y
-resumido al final, en la PARTE 9. Los numeros de esta guia se remidieron
-contra una base recien creada con  .rrancar.ps1 -Reiniciar
+ACTUALIZADA EL 2026-08-31.
+
+Se escribio para la Entrega 1 y sigue valiendo entera; lo que cambio
+desde entonces esta marcado con [AL DIA 30-AGO] y resumido al final, en
+la PARTE 9. Los conteos se remidieron contra una base recien creada con
+.\arrancar.ps1 -Reiniciar
+
+OJO: los numeros de linea se volvieron a verificar el 31-AGO contra los
+archivos de verdad. Habia 20 desfasados -- arrancar.ps1 paso de 700 a
+1380 lineas -- y una cita apuntaba al archivo equivocado. Ya estan
+corregidos. Si volves a tocar el codigo, el TEXTO del Ctrl+F sigue
+sirviendo aunque el numero se mueva: busca por texto, no por linea.
 
 INDICE DE ESTA GUIA
   PARTE 1 - EL ETL (esta la explicas vos, va desarrollada)
+           1.9 es el arranque completo y el SEGUNDO ETL, el de Neo4j
   PARTE 2 - Indice compuesto
   PARTE 3 - Como se relacionan las dos bases
   PARTE 4 - Que guardamos en Mongo y por que
@@ -141,7 +150,7 @@ Son tres funciones que se llaman en cascada. Explicalas en este orden:
 
   d) eventosDe(producto)      linea 162   <- el algoritmo completo
 
-     Ctrl+F:  const orden = [...new Set(fechas)]     (linea 178)
+     Ctrl+F:  const orden = [...new Set(fechas)]     (linea 177)
 
      Pasos, en orden:
        1. calcula el nacimiento (primera fila de historial)
@@ -151,12 +160,12 @@ Son tres funciones que se llaman en cascada. Explicalas en este orden:
           new Set y las ordena
        4. para cada fecha llama a estadoEn() y compara con la anterior
        5. la PRIMERA genera operacion 'creacion' con el campo datos
-          Ctrl+F:  operacion: 'creacion'      (linea 191)
+          Ctrl+F:  operacion: 'creacion'      (linea 195)
        6. las demas generan 'modificacion' con el campo cambios
-          Ctrl+F:  operacion: 'modificacion'  (linea 198)
+          Ctrl+F:  operacion: 'modificacion'  (linea 202)
 
      UN DETALLE FINO QUE IMPRESIONA:
-     Ctrl+F:  if (Object.keys(cambios).length === 0) continue;   (linea 197)
+     Ctrl+F:  if (Object.keys(cambios).length === 0) continue;   (linea 201)
      Si dos historiales coinciden en fecha y describen el mismo estado,
      el evento saldria VACIO. No solo no aporta nada: ademas correria la
      numeracion de todos los que vienen despues. Por eso se salta.
@@ -237,11 +246,11 @@ DONDE VIVE:
 QUIEN LO LLAMA:
   arrancar.ps1, el script de arranque del proyecto.
 
-  Ctrl+F:  function Correr-Etl      arrancar.ps1:421   <- la funcion
-  Ctrl+F:  Correr-Etl               arrancar.ps1:668   <- la llamada
-  Ctrl+F:  [switch]$Etl             arrancar.ps1:14    <- el flag
+  Ctrl+F:  function Correr-Etl      arrancar.ps1:601   <- la funcion
+  Ctrl+F:  Correr-Etl               arrancar.ps1:1026   <- la llamada
+  Ctrl+F:  [switch]$Etl             arrancar.ps1:40    <- el flag
 
-  La decision, arrancar.ps1:665
+  La decision, arrancar.ps1:1023
 
       if (-not $Etl -and $alDia) {
           Ok "Ya cargado (...). Para volver a migrarlo: .\arrancar.ps1 -Etl"
@@ -252,16 +261,16 @@ QUIEN LO LLAMA:
   O sea: corre si lo pediste con -Etl, o si NO esta al dia.
 
   COMO DECIDE SI ESTA AL DIA ($alDia), dos comprobaciones:
-    arrancar.ps1:616-626  compara el numero de documentos de cada
+    arrancar.ps1:983-1001  compara el numero de documentos de cada
                           coleccion contra su tabla en PostgreSQL
-    arrancar.ps1:657-663  compara el id mas ALTO dentro del tramo del
+    arrancar.ps1:1012-1020  compara el id mas ALTO dentro del tramo del
                           ETL en las dos bases
 
   Lo segundo es fino: si mirara el maximo absoluto de Mongo, un producto
   publicado desde el panel (id mas alto, sin fila en PostgreSQL) lo haria
   creerse desfasado y volveria a migrar en cada arranque.
 
-COMO CORRE, PASO A PASO (funcion Correr-Etl, lineas 421-478):
+COMO CORRE, PASO A PASO (funcion Correr-Etl, lineas 601-660):
    1. docker cp del .sql al contenedor de PostgreSQL
    2. docker exec ... psql -f /tmp/extraer.sql > /tmp/mesh-productos.json
    3. docker cp del .json de vuelta al host
@@ -326,6 +335,183 @@ R: Tampoco esta en los eventos, por la misma razon: los historiales de
 P: Cuanto tarda?
 R: Es una pasada por producto y tres bulkWrite. Sobre 102 productos es
    inmediato.
+
+
+--------------------------------------------------------------------
+1.9  EL ARRANQUE COMPLETO   <<< SI PREGUNTAN "Y COMO SE LEVANTA ESTO"
+--------------------------------------------------------------------
+El ETL no se corre a mano: es UN PASO dentro de arrancar.ps1, y conviene
+saber donde cae, porque la pregunta natural despues de explicarlo es
+"y eso quien lo dispara, y que pasa antes y despues".
+
+  .\arrancar.ps1              levanta todo sin borrar nada
+  .\arrancar.ps1 -Reiniciar   borra las 4 bases y empieza de cero
+
+LOS PASOS, EN ORDEN (cada uno imprime su titulo en pantalla):
+
+   1. Revisando el archivo .env            arrancar.ps1:339
+   2. Generando la configuracion de pgAdmin  :413
+   3. Revisando Docker                       :455
+   4. Levantando contenedores                :499
+   5. Esperando a PostgreSQL                 :511
+   6. Sincronizando la contrasena            :526
+   7. Corriendo migraciones del esquema      :826   migrations/*.sql
+   8. Corriendo conjuntos de datos           :860   migrations/datos/*.sql
+   9. Esperando a MongoDB                    :884
+  10. Comprobando el acceso                  :896
+  11. Creando colecciones                    :924   mongo/001_productos.js
+  12. Catalogo en MongoDB                    :979   <-- AQUI VA EL ETL
+  13. Comprobando que el catalogo quedo cargado :1041
+  14. Esperando a Redis                      :1131
+  15. Esperando a Neo4j                      :1149
+  16. Grafo de resenas en Neo4j              :1244  <-- EL SEGUNDO ETL
+  17. Comprobando que el grafo quedo cargado :1306
+  18. Listo                                  :1346
+
+LA FRASE QUE RESUME ESTO:
+"PostgreSQL es la fuente de verdad. Mongo y Neo4j son bases DERIVADAS,
+y el arranque las reconstruye desde PostgreSQL cada vez que hace falta.
+Por eso hay dos ETL, no uno."
+
+HAY DOS ETL, Y ES LO QUE MAS SE OLVIDA DECIR:
+
+  ETL 1 -> MongoDB   funcion Correr-Etl        arrancar.ps1:601-660
+           el catalogo: productos, categorias y sus eventos
+           lo hace etl/cargar.js
+
+  ETL 2 -> Neo4j     funcion Correr-EtlGrafo   arrancar.ps1:688-774
+           el grafo de resenas para detectar fraude
+           lo hace etl/cargar_grafo.sh, y es de la Entrega 2
+
+  Ctrl+F:  function Correr-EtlGrafo      arrancar.ps1:688
+  Ctrl+F:  Correr-EtlGrafo               arrancar.ps1:1279   <- la llamada
+
+  La bandera -Etl dispara LOS DOS a la vez, a proposito. El comentario
+  del principio del script lo explica: quien la teclea no tiene por que
+  saber si el dato que corrigio viaja a Mongo, a Neo4j o a los dos, y
+  una bandera por destino garantiza que algun dia alguien elija mal y se
+  vaya con la mitad al dia y la otra mitad vieja, sin un solo error.
+  Los dos ETL son idempotentes, asi que correr de mas es gratis.
+
+  -ReiniciarGrafo si va aparte, y tambien tiene motivo: BORRA el grafo
+  antes de rehacerlo. El ETL del grafo solo SUMA, asi que una resena
+  borrada en PostgreSQL se queda en el grafo hasta que alguien lo vacie.
+  No va pegado a -Etl porque si alguien sembro un anillo a mano para una
+  demostracion, un borrado automatico se lo lleva en media demostracion.
+
+CADA ETL SE COMPRUEBA DESPUES DE CORRERLO (pasos 13 y 17), Y NO ES ADORNO:
+  El script cuenta las colecciones de Mongo y los nodos de Neo4j y los
+  compara contra PostgreSQL. Si no cuadran, TERMINA EN ERROR.
+  Antes solo miraba que no estuviera vacio, y con eso un ETL que cargara
+  3 productos de 102 pasaba en verde.
+
+QUE HACE -Reiniciar, EXACTAMENTE:
+  Ctrl+F:  docker compose down -v        arrancar.ps1:488
+  Borra los VOLUMENES, o sea las cuatro bases enteras, y despues las
+  reconstruye con los pasos de arriba. No se deshace: se pierde todo lo
+  hecho a mano y se vuelve a la semilla fija.
+
+DESPUES DEL ARRANQUE, LA APLICACION VA APARTE:
+  cd backend  ; npm run start:dev    :3000
+  cd frontend ; npm run dev          :5173
+  El script no los levanta, y lo dice al terminar.
+
+
+--------------------------------------------------------------------
+1.10  DEL FRONTEND AL BACKEND: QUIEN LLAMA A QUE
+--------------------------------------------------------------------
+Verificado el 31-AGO cruzando las llamadas del frontend con los
+decoradores de los controladores: 52 rutas se llaman y las 52 cuadran.
+
+TODAS PASAN POR EL MISMO SITIO. No hay fetch sueltos por las paginas:
+
+  frontend/src/lib/api.ts:7    export const API = 'http://localhost:3000'
+  frontend/src/lib/api.ts:39   export async function pedir(...)
+
+  pedir() hace el fetch, manda credentials para que viaje la cookie de
+  sesion, y SIEMPRE devuelve la misma forma { ok, mensaje, payload,
+  estado } aunque el backend conteste 400, 409 o no conteste. Por eso
+  ninguna pantalla lleva try/catch alrededor de una peticion.
+
+EL CAMINO COMPLETO, SIEMPRE EL MISMO:
+
+  pantalla .svelte  ->  pedir('/ruta')  ->  api.ts  ->  fetch
+       -> Nest enruta por el decorador -> *.controller.ts
+       -> *.service.ts  ->  PostgreSQL / MongoDB / Redis / Neo4j
+
+EL MAPA, POR PANTALLA (ruta -> controlador -> servicio):
+
+CATALOGO   routes/+page.svelte
+  GET  /productos/paginacion    productos/productos.controller.ts
+                                -> productosService.listarPaginado()
+  GET  /categorias              productos/categorias.controller.ts
+                                -> categoriasService.listarValidas()
+
+FICHA      routes/producto/[id]/+page.svelte
+  GET  /productos/:id           productos/productos.controller.ts
+                                -> productosService.obtenerPublico()
+       Es la que junta las DOS bases: el documento de Mongo mas un
+       SELECT a PostgreSQL para traer las ofertas.
+
+CARRITO    lib/CarritoRedis.svelte          (todo en Redis)
+  GET    /carrito               carrito/carrito.controller.ts -> verCarrito()
+  PUT    /carrito/lineas/:id                                  -> definirCantidad()
+  DELETE /carrito/lineas/:id                                  -> quitarLinea()
+  DELETE /carrito                                             -> vaciar()
+
+PAGO       lib/Checkout.svelte
+  POST /carrito/comprar         carrito/carrito.controller.ts
+                                -> carritoService.comprarCarrito()
+       Manda: { id_direccion, metodo_pago, tarjeta? }
+       OJO: metodo_pago es el NOMBRE ("tarjeta"), no el id.
+       Crea el pedido, lo cobra y borra el carrito en una transaccion.
+
+PEDIDOS    lib/MisPedidos.svelte, lib/pedido.ts
+  GET  /comprador/pedidos       compradores/pedidos.controller.ts -> listar()
+  GET  /comprador/pedidos/:id                                     -> obtener()
+  POST /comprador/pedidos/:id/cancelar                            -> cancelarPedido()
+  GET  /productos/:id/historial            productos/productos.controller.ts
+                                -> productosService.reconstruirEnFecha()
+  GET  /productos/ofertas/:id/historial
+                                -> productosService.reconstruirOfertaEnFecha()
+       Las dos ultimas son el modal "como se veia": la primera saca el
+       producto de los eventos de Mongo, la segunda el precio y el stock
+       de PostgreSQL. Son dos porque viven en bases distintas.
+
+RESENAS    lib/Resenas.svelte
+  GET  /productos/:id/resenas   resenas/resenas.controller.ts -> listar()
+  POST /resenas                                               -> crear()
+  POST /resenas/:id/respuestas                                -> responder()
+  PUT/DELETE /comentarios/:id/voto                            -> votar()/quitarVoto()
+
+PANEL VENDEDOR   lib/PanelVendedor.svelte, lib/OfertasVendedor.svelte
+  GET   /vendedor/productos/paginado   vendedores/productos.controller.ts
+                                       -> listarPropiosPaginado()
+  POST  /vendedor/productos                              -> crear()
+  PATCH /vendedor/productos/:id                          -> editar()
+  POST  /vendedor/productos/propuestas                   -> proponer()
+  PATCH /vendedor/productos/:id/revision                 -> revisarPropuesta()
+  GET   /vendedor/ofertas              vendedores/ofertas.controller.ts
+                                       -> listarPropias()
+
+PANEL ADMIN      lib/PanelAdmin.svelte, PanelFraude, PanelReportes
+  GET   /admin/usuarios         admin/admin-usuarios.controller.ts -> listar()
+  PATCH /admin/usuarios/:id                                        -> actualizar()
+  GET   /admin/fraude/anillos   fraude/fraude.controller.ts -> fraudeService.analizar()
+                                Esta es la de Neo4j: recorre el grafo.
+  GET   /admin/reportes/ventas  admin/admin-reportes.controller.ts -> ventas()
+
+SESION     lib/sesion.ts, lib/Cabecera.svelte
+  POST /usuario/login           usuario.controller.ts -> usuarioService.login()
+       Manda { identificador, contrasena }. identificador es el correo
+       O el usuario: el frontend no adivina cual de los dos escribieron.
+       La sesion es una COOKIE, no un token en el header.
+  GET  /usuario/yo                                    -> obtenerPorId()
+  POST /usuario/logout                                -> logout()
+
+LAS CUATRO DE SALUD (sirven para ensenar que las 4 bases responden):
+  GET /db  /documental  /clave-valor  /grafo
+  base-datos*.controller.ts, uno por base.
 
 
 ####################################################################
@@ -406,7 +592,7 @@ conjunto, volumen, tasa de cambio):
                          producto entero
 
 PRUEBA EN CODIGO DE QUE LAS OFERTAS NO DEBEN ESTAR:
-  Ctrl+F:  ofertas          mongo/001_productos.js:166
+  Ctrl+F:  ofertas          mongo/001_productos.js:180
   Si quedo una coleccion 'ofertas' de una version anterior, la BORRA.
   Comentario: "una copia vieja aqui es peor que no tenerla, porque parece
   al dia".
@@ -434,9 +620,9 @@ PARTE 5 - DONDE ESTA EL CODIGO DE MONGO
   eventos a Node.js para fusionarlos ahi.
 
   ESCRITURAS:
-  backend/src/services/vendedores/productos.service.ts:153   insertOne (producto)
-  backend/src/services/vendedores/productos.service.ts:366   insertOne (evento)
-  backend/src/services/vendedores/productos.service.ts:572   updateOne
+  backend/src/services/vendedores/productos.service.ts:192   insertOne (producto)
+  backend/src/services/vendedores/productos.service.ts:1039   insertOne (evento)
+  backend/src/services/vendedores/productos.service.ts:578   updateOne
 
 
 ####################################################################
@@ -446,8 +632,8 @@ NO tenemos un proceso que sincronice cada dos minutos, y DECIRLO ES LA
 RESPUESTA CORRECTA. El diseno hace que no haga falta. Tres razones:
 
 (1) LA APLICACION ESCRIBE DIRECTO EN MONGO
-    services/vendedores/productos.service.ts:153  insertOne
-    services/vendedores/productos.service.ts:572  updateOne
+    services/vendedores/productos.service.ts:192  insertOne
+    services/vendedores/productos.service.ts:578  updateOne
     Publicar o editar un producto escribe en MongoDB, NO en PostgreSQL.
     No hay nada que sincronizar porque no hay dos escrituras. Las tablas
     productos de PostgreSQL son el ORIGEN de la migracion, no un espejo.
@@ -455,16 +641,16 @@ RESPUESTA CORRECTA. El diseno hace que no haga falta. Tres razones:
 (2) LO UNICO QUE ES COPIA SON CINCO NUMEROS, y se recalculan EN EL MISMO
     MOMENTO, no en dos minutos:
     Ctrl+F:  recalcularCamposCalculados
-      services/compradores/pedidos.service.ts:603   tras comprar
-      services/compradores/pedidos.service.ts:653   tras cancelar
-      services/vendedores/ofertas.service.ts:239    al crear/editar oferta
+      services/compradores/pedidos.service.ts:606   tras comprar
+      services/compradores/pedidos.service.ts:656   tras cancelar
+      services/vendedores/ofertas.service.ts:338    al crear/editar oferta
     Definida en services/productos/productos.service.ts:509
     Los cinco: precio_tienda, precio_desde, stock_tienda, stock_total,
     total_ofertas.
 
 (3) EL ETL SOLO RECONSTRUYE DESDE CERO
-      arrancar.ps1:616-626   la lista de colecciones que compara
-      arrancar.ps1:668       dispara Correr-Etl
+      arrancar.ps1:983-1001   la lista de colecciones que compara
+      arrancar.ps1:1026       dispara Correr-Etl
     Solo si alguna coleccion tiene MENOS documentos que su tabla.
     A mano:  .\arrancar.ps1 -Etl
 
@@ -571,7 +757,7 @@ R: etl/cargar.js, linea 215.
 
    Ctrl+F:  _id:         producto.id_producto     (cargar.js:215)
    Ctrl+F:  _id:         producto.id_producto + '-' + numero   (:188)
-   Ctrl+F:  _id                                   (:346, categorias)
+   Ctrl+F:  _id                                   (:352, categorias)
 
    El reparto exacto, que es lo que hay que decir:
      etl/extraer.sql          saca las filas de PostgreSQL, con su
