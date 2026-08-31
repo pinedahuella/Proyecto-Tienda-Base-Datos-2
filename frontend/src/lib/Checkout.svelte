@@ -227,6 +227,32 @@
 	let vacio = $derived(lineas.length === 0);
 
 	/**
+	 * La clave de cada linea en el resumen.
+	 *
+	 * NO puede ser `id_pedido_producto` a secas, y esto tumbaba la pantalla:
+	 * en modo carrito ese campo llega VACIO en todas las lineas -- lo crea la
+	 * compra, y aqui todavia no hay pedido (ver `aLineasDePedido` en
+	 * CarritoRedis.svelte). Con una sola linea no se notaba; con dos, las dos
+	 * claves eran `''`, Svelte reventaba con `each_key_duplicate` y el
+	 * checkout entero dejaba de pintarse: el boton de pagar no aparecia y no
+	 * habia forma de comprar.
+	 *
+	 * `id_oferta` sirve para los dos modos: el carrito de Redis guarda UNA
+	 * linea por oferta (PUT /carrito/lineas/:idOferta fija la cantidad
+	 * absoluta), y en un pedido dos lineas del mismo producto son de ofertas
+	 * distintas -- otra variante, u otro vendedor.
+	 *
+	 * Se prefiere `id_pedido_producto` cuando existe porque es la identidad de
+	 * verdad de la fila: si algun dia un pedido llegara a tener dos lineas de
+	 * la misma oferta, ese id las sigue distinguiendo.
+	 */
+	function claveLinea(l: LineaPedido): string {
+		return l.id_pedido_producto !== '' && l.id_pedido_producto != null
+			? `linea-${l.id_pedido_producto}`
+			: `oferta-${l.id_oferta}`;
+	}
+
+	/**
 	 * Que la persona NO tiene ni una direccion, y no que no se pudieron leer:
 	 * son dos cosas distintas y solo la primera impide pagar. Si la peticion se
 	 * cayo, `listaLeida` se queda en false y el boton no se bloquea por eso.
@@ -1269,7 +1295,7 @@
 					</p>
 				{:else}
 					<ul class="resumen">
-						{#each lineas as l (l.id_pedido_producto)}
+						{#each lineas as l (claveLinea(l))}
 							<li class="linea">
 								<span class="datos">
 									<strong>{l.nombre_producto}</strong>
