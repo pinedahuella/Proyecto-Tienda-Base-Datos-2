@@ -16,8 +16,10 @@ corregidos. Si volves a tocar el codigo, el TEXTO del Ctrl+F sigue
 sirviendo aunque el numero se mueva: busca por texto, no por linea.
 
 INDICE DE ESTA GUIA
+  PARTE 0 - SI TE TRABAN CON UN "POR QUE"   <<< LEE ESTO PRIMERO
   PARTE 1 - EL ETL (esta la explicas vos, va desarrollada)
-           1.9 es el arranque completo y el SEGUNDO ETL, el de Neo4j
+           1.9  el arranque completo y el SEGUNDO ETL, el de Neo4j
+           1.10 del frontend al backend: quien llama a que
   PARTE 2 - Indice compuesto
   PARTE 3 - Como se relacionan las dos bases
   PARTE 4 - Que guardamos en Mongo y por que
@@ -25,6 +27,98 @@ INDICE DE ESTA GUIA
   PARTE 6 - Sincronizacion (la pregunta trampa)
   PARTE 7 - Como probamos que usamos los dos modelos
   PARTE 8 - Extras: contenedores, transparencia, numeros
+
+
+####################################################################
+PARTE 0 - SI TE TRABAN CON UN "POR QUE"
+####################################################################
+
+Las decisiones SI estan escritas, y en el formato que pide el enunciado
+(seccion 5.3: contexto, alternativas, decision, justificacion,
+consecuencias). No hay que improvisar ninguna: hay que saber DONDE ESTA.
+
+LOS DOS ARCHIVOS QUE HAY QUE TENER ABIERTOS EN LA PRESENTACION:
+
+  docs/base-de-datos.md   1155 lineas. El "por que" del MODELO.
+                          Ctrl+F:  Registro de decisiones arquitectonicas
+                          (linea 529). Ahi estan los ADR.
+
+  etl/README.md            619 lineas. El "por que" de LOS DOS ETL.
+
+LOS CINCO ADR, EN UNA LINEA CADA UNO (por si solo da tiempo a eso):
+
+  ADR-1  Migrar el catalogo a MongoDB.
+         Porque los atributos cambian por categoria y en el relacional
+         caian en `descripcion` como texto libre, o sea SIN PODER
+         FILTRAR. Medido: ningun producto llena el 100% de lo que su
+         categoria ofrece, el promedio es 59%. Una tabla de columnas
+         fijas quedaria casi toda nula.
+
+  ADR-2  NO migrar las ofertas: se quedan en PostgreSQL.
+         El criterio que decide es CONSISTENCIA: el descuento de stock
+         tiene que ser atomico y no vender dos veces la ultima unidad.
+         Eso lo sostiene un SELECT ... FOR UPDATE. Medido: cero
+         sobreventas sobre 555 ofertas.
+         OJO: el motivo NO es el volumen. Un documento aguanta 16 MB.
+
+  ADR-3  Las imagenes, embebidas dentro de su VARIANTE (no del producto).
+         Porque la foto es de la variante: la camisa azul y la blanca no
+         comparten imagen. Y desaparece `numero_orden`, porque en un
+         arreglo la posicion YA es el orden.
+
+  ADR-4  Quien propuso un producto va en PostgreSQL, no en el documento.
+         Por integridad referencial: proponente y aprobador son dos FK
+         contra `usuarios`. En el documento serian dos numeros sueltos.
+         Y la frase que hay que decir: ES ATRIBUCION, NO PROPIEDAD.
+
+  ADR-5  Todo lo social (resenas, comentarios, likes) en PostgreSQL.
+         Es de la Entrega 2. MongoDB entro por UNA razon -- atributos
+         heterogeneos -- y un comentario tiene siempre los mismos cuatro
+         campos: autor, texto, fecha y padre. Heterogeneidad CERO.
+         Llevarlo alla seria usar Mongo porque esta, no porque el dato
+         lo pida.
+
+LA TRAMPA QUE MAS VAN A INTENTAR, Y LA RESPUESTA:
+
+  "Y por que no migraron TODO a MongoDB?"
+  Porque el propio enunciado (criterio 5.5) dice que justificar QUEDARSE
+  en relacional se evalua con la misma exigencia que justificar migrar.
+  De las cinco decisiones, TRES son decisiones de NO migrar (ADR-2,
+  ADR-4, ADR-5) y estan argumentadas con el mismo cuidado que la de
+  migrar. Eso no es un descuido: es la respuesta.
+
+  "Y por que no usaron jsonb en PostgreSQL y ya?"
+  Esta contestada dentro del ADR-1 y hay que decirla con honestidad:
+  jsonb era viable de verdad. Se descarto porque el enunciado pide una
+  base documental y ejercitar su marco de agregacion y sus indices; con
+  jsonb se resolveria el problema pero no el ejercicio.
+
+  "Que se PIERDE con haber migrado?"  (la pregunta que separa)
+  La integridad referencial entre la linea del pedido y el producto:
+  `pedido_producto.id_producto_mongo` NO es llave foranea y no puede
+  serlo. Ese enlace lo sostiene la aplicacion. Y aparece un ETL que hay
+  que mantener. Esta escrito en las consecuencias del ADR-1.
+
+DONDE ESTA CADA "POR QUE", POR TEMA:
+
+  de fotos a eventos, y por que          etl/README.md, "De fotos a eventos"
+  por que dos ETL y no uno               etl/README.md, y aqui en 1.9
+  por que Cypher y no JSON               etl/README.md, "Por que Cypher"
+  la direccion es un NODO, no propiedad  etl/README.md
+  por que correrlo dos veces no duplica  etl/README.md
+  el ETL solo manda sobre su tramo       etl/README.md, y aqui en 1.6
+  el catalogo compartido vs la oferta    docs/base-de-datos.md:42
+  la linea del pedido no copia el precio docs/base-de-datos.md:129
+  el stock con kardex                    docs/base-de-datos.md:312
+  que no se venda dos veces la ultima    docs/base-de-datos.md:356
+  que se embebe y que se referencia      docs/base-de-datos.md:629
+  que se puede reconstruir y que no      docs/base-de-datos.md:811
+  la resena es del VENDEDOR              docs/base-de-datos.md:832
+  los historiales no llevan estado       docs/base-de-datos.md:1037
+  las reglas de las migraciones          migrations/README.md
+  por que los indices que hay, y no mas  mongo/001_productos.js (comentarios)
+                                         y .\mongo\demostracion_indices.ps1,
+                                         que lo MIDE delante de quien mire
 
 
 ####################################################################
