@@ -33,7 +33,8 @@ Ultima actualizacion: **2026-08-30**.
 >
 > **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene arneses:
 > `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`,
-> `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`.
+> `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`,
+> `.\mongo\demostracion_indices.ps1`.
 > Y antes de creerle a un arnes, **rompe el codigo a proposito y comprueba que
 > falla**: aqui ya aparecio un arnes que validaba copias pegadas de las
 > consultas en vez de las consultas de la entrega.
@@ -102,11 +103,79 @@ por eventos, los indices y las agregaciones. El informe lo hizo el equipo.
 | **Grafo de fraude (Neo4j)** | ETL + 5 consultas | `bash neo4j/correr_fraude.sh` |
 | **Panel de fraude, de punta a punta** | `GET /admin/fraude/anillos` + `PanelFraude.svelte` | entra como `admin@mesh.com` a `/panel` |
 | **Reportes de admin** | ventas y reservaciones + `PanelReportes.svelte` | lo mismo |
+| **Los indices de Mongo, demostrados** | 4 pasos, 12 comprobaciones | `.\mongo\demostracion_indices.ps1` |
+| **El pedido reconstruido, completo** | modal con lo pagado + precio y stock de ese dia | entra como `compradora.norte@` a `/pedidos` |
 
 **El carrito ya compra de verdad.** Verificado contra la base: pedido creado,
 pago `pagado`, kardex con el motivo `venta`, stock descontado, y la clave de
 Redis borrada. Una compra fallida no deja ni un pedido a medias **y no borra el
 carrito**.
+
+### Los indices de Mongo, para ensenarlos
+
+```powershell
+.\mongo\demostracion_indices.ps1     # mide y abre la pagina
+```
+
+Corre los cuatro pasos que Jose David mando al grupo, mide cada uno con
+`explain("executionStats")` y **corre cada uno otra vez con
+`hint({$natural:1})`**, que obliga a MongoDB a no usar ningun indice. Con eso
+arma `demostracion_indices.html` (en la raiz): una pagina suelta, sin internet, con
+los dos numeros uno encima del otro.
+
+La comparacion es el punto entero. Un `explain` a secas dice "uso
+`catalogo_categoria`" y suena bien, pero no dice cuanto; lo que significa algo
+es **cuantos documentos hubo que abrir**:
+
+| Paso | Con indice | Sin ninguno |
+|---|---|---|
+| 2 -- categoria + orden | 7 | 102 |
+| 3 -- rango de precio | 9 | 102 |
+| 4 -- categoria + `$or` de caracteristicas | 7 (devuelve 3) | 102 |
+
+**El paso 4 es el que hay que saber contar.** Ese `$or` son cuatro
+`$elemMatch` sobre arrays embebidos y **ningun indice puede resolverlo**. Lo
+que hace el indice es otra cosa: baja el problema de 102 documentos a los 7 de
+la categoria, y el `$or` se evalua solo sobre esos. El indice no contesta la
+pregunta, **la hace pequena**.
+
+Dos cosas medidas que conviene no olvidar:
+
+- **`Memoria RAM` solo existe dentro de las VARIANTES**, no en las
+  caracteristicas del producto. Las dos primeras ramas del `$or` no encuentran
+  nada nunca. Estan escritas igual porque otras caracteristicas (`Marca`,
+  `Garantia`) si viven arriba, y la consulta busca en los dos sitios sin tener
+  que saber en cual esta cada una.
+- **El valor es un entero, no texto.** Con `valor: 8` salen 3 productos; con
+  `valor: "8"`, cero y sin ningun error.
+
+El arnes se probo rompiendolo: quitando `catalogo_categoria` a mano, 6 de las
+12 comprobaciones se ponen en rojo y el paso 3 -- que usa el otro indice --
+sigue en verde. Un arnes que no distingue eso no esta midiendo nada. El indice
+se devuelve corriendo `mongo/001_productos.js`, que es idempotente.
+
+La pagina **no se sube al repositorio** (esta en `.gitignore`): sus cifras son
+de la base que tenga quien la corra, y una copia versionada envejeceria en
+silencio.
+
+### El pedido reconstruido ensena todo
+
+En `/pedidos`, cada linea abre un modal con **lo que se pago** (presentacion,
+vendedor, precio unitario, cantidad, subtotal), **el precio y el stock que
+tenia esa oferta ese dia**, y el producto reconstruido del catalogo con su
+categoria, sus caracteristicas y todas sus presentaciones, marcando la que se
+compro.
+
+Los dos precios salen de sitios distintos y **pueden diferir sin que ninguno
+este mal**: el de la linea se congelo al comprar, el reconstruido es el ultimo
+precio de ese dia. Cuando no coinciden, el modal lo dice.
+
+Ojo con la trampa que tenia esto y que no daba ningun error: el tipo de
+`traerProductoEnFecha` declaraba solo `nombre` y `descripcion`, asi que se
+guardaban dos campos de los cinco que manda la ruta. El marcado de la
+categoria y las caracteristicas ya estaba escrito y **no se ejecutaba nunca**.
+Si esa ruta empieza a mandar un campo mas, se agrega en `ProductoEnFecha`
+(`frontend/src/lib/pedido.ts`), que es de donde cuelgan las pantallas.
 
 ---
 
