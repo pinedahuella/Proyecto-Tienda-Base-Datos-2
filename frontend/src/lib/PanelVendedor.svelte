@@ -265,7 +265,13 @@
 		if (r.ok && r.payload) {
 			categorias = r.payload;
 		} else {
-			errorForma = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			// Por el mismo motivo que en cambiarEstado: guardar un producto que
+			// paso a `en_revision` en otra pestana devuelve el mismo texto con
+			// la ruta y el verbo HTTP dentro.
+			errorForma =
+				r.estado === 0
+					? 'No se pudo conectar con el servidor'
+					: mensajeParaPersona(r.mensaje);
 		}
 	}
 
@@ -595,11 +601,50 @@
 			vista = 'lista';
 			await cargar();
 		} else {
-			errorForma = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			// Por el mismo motivo que en cambiarEstado: guardar un producto que
+			// paso a `en_revision` en otra pestana devuelve el mismo texto con
+			// la ruta y el verbo HTTP dentro.
+			errorForma =
+				r.estado === 0
+					? 'No se pudo conectar con el servidor'
+					: mensajeParaPersona(r.mensaje);
 		}
 	}
 
 	/** Publicar o retirar sin abrir el formulario entero. */
+	/**
+	 * Los dos estados del flujo de propuesta.
+	 *
+	 * Se resuelven aprobando o rechazando la propuesta, no editando el
+	 * producto: `PATCH /vendedor/productos/:id` los rechaza a proposito.
+	 */
+	const ESTADOS_EN_PROPUESTA = ['en_revision', 'rechazado'];
+
+	function enPropuesta(p: ProductoGuardado): boolean {
+		return ESTADOS_EN_PROPUESTA.includes(p.estado);
+	}
+
+	/**
+	 * Traduce el mensaje del backend cuando habla en lenguaje de API.
+	 *
+	 * Es una red por debajo, no el arreglo: el arreglo es no ofrecer el boton
+	 * (ver la fila del listado). Pero el mismo rechazo puede llegar por otro
+	 * camino -- dos pestanas abiertas y la propuesta resuelta en la otra -- y
+	 * un mensaje que dice "usa PATCH /vendedor/productos/:id/revision" delante
+	 * de quien administra el catalogo no es un error suyo que pueda corregir:
+	 * es una nota para quien programa.
+	 *
+	 * Se compara por el texto porque el backend contesta 409 para varias cosas
+	 * distintas y no manda un codigo propio; si algun dia lo manda, esto se
+	 * cambia por ese codigo.
+	 */
+	function mensajeParaPersona(texto: string): string {
+		if (texto.includes('flujo de propuesta')) {
+			return 'Este producto todavia es una propuesta. Se resuelve en "Productos por revisar", con Aprobar o Rechazar.';
+		}
+		return texto;
+	}
+
 	async function cambiarEstado(p: ProductoGuardado, nuevoEstado: string) {
 		aviso = '';
 		error = '';
@@ -612,7 +657,11 @@
 			aviso = `"${p.nombre}" ahora esta en ${nuevoEstado}`;
 			await cargar();
 		} else {
-			error = r.mensaje;
+			error = mensajeParaPersona(r.mensaje);
+			// Si el rechazo fue por el flujo de propuesta, la lista que se tiene
+			// en pantalla ya no es la de verdad: se recarga para que el boton
+			// que no debia estar ahi desaparezca solo.
+			if (r.mensaje.includes('flujo de propuesta')) await cargar();
 		}
 	}
 
@@ -870,14 +919,39 @@
 							</p>
 						</div>
 
+						<!--
+							Un producto del flujo de propuesta NO se publica ni se edita
+							por aqui: el backend rechaza `PATCH /vendedor/productos/:id`
+							para `en_revision` y `rechazado`, porque esos se resuelven
+							aprobando o rechazando la propuesta.
+
+							Antes la fila le ofrecia "Publicar" igual -- la condicion era
+							solo `estado !== 'activo'` -- y al pulsarlo salia en rojo el
+							mensaje del backend, que nombra la ruta y el verbo HTTP. A
+							quien administra el catalogo eso no le dice nada y ademas le
+							hace creer que algo se rompio, cuando lo unico que pasa es
+							que el boton estaba de mas.
+						-->
 						<div class="acciones">
-							{#if p.estado !== 'activo'}
-								<button type="button" onclick={() => cambiarEstado(p, 'activo')}>Publicar</button>
+							{#if enPropuesta(p)}
+								<span class="menor nota-propuesta">
+									Se resuelve en <strong>Productos por revisar</strong>, con Aprobar o
+									Rechazar.
+								</span>
+								<button type="button" onclick={() => abrirHistorial(p)}>Historial</button>
 							{:else}
-								<button type="button" onclick={() => cambiarEstado(p, 'inactivo')}>Retirar</button>
+								{#if p.estado !== 'activo'}
+									<button type="button" onclick={() => cambiarEstado(p, 'activo')}>
+										Publicar
+									</button>
+								{:else}
+									<button type="button" onclick={() => cambiarEstado(p, 'inactivo')}>
+										Retirar
+									</button>
+								{/if}
+								<button type="button" onclick={() => editar(p)}>Editar</button>
+								<button type="button" onclick={() => abrirHistorial(p)}>Historial</button>
 							{/if}
-							<button type="button" onclick={() => editar(p)}>Editar</button>
-							<button type="button" onclick={() => abrirHistorial(p)}>Historial</button>
 						</div>
 					</article>
 				{/each}
@@ -1340,6 +1414,14 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+	}
+
+	/* Ocupa el lugar de los botones que no van, para que la fila no quede
+	   vacia y parezca que a ese producto no se le puede hacer nada. */
+	.nota-propuesta {
+		align-self: center;
+		max-width: 18rem;
+		text-align: right;
 	}
 
 	.chip.inactivo {
