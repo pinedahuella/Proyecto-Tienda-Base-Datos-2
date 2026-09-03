@@ -77,7 +77,7 @@ Y de la **Entrega 2** falta trabajo que no es un bug:
 
 | Que | Puntos | De quien |
 |---|---|---|
-| Oferta de inventario limitado enchufada al backend | 3 | Jose David (`redis/` ya tiene el Lua y el arnes) |
+| Oferta de inventario limitado enchufada al backend | 3 | **casi**: Jose David la conecto al carrito el 2026-09-03. Faltan sus pasos 2 y 4 (ver `backend/elementos Generales/plan pendiente/inventario-limitado.md`). La migracion 014 y el frontend YA estan |
 | ~~`GET /admin/fraude/anillos`~~ | ~~parte de 3~~ | **HECHA el 2026-08-30, y el panel ya la consume** |
 | Resenar desde el pedido (bloque 5 de BACKEND-PENDIENTE) | -- | Jose David |
 | **Comparativa grafos vs columnar**, con la defensa de la NO elegida | 1.5 | **nadie todavia** |
