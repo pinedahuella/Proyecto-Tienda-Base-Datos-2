@@ -79,14 +79,21 @@
 		disponible: boolean;
 		motivo: string | null;
 		/**
-		 * true si esta oferta se vende con el mecanismo de venta relampago de
-		 * Redis. Cambia una regla del carrito que hasta ahora no tenia
-		 * excepciones: agregarla RESERVO esas unidades de verdad, con un plazo.
-		 * Una linea normal no reserva nada al agregarse, solo al pagar.
+		 * true si TENES UNIDADES RESERVADAS de esta oferta, con un plazo.
 		 *
-		 * Por eso se ensena. Quien tiene una de estas en el carrito no esta
-		 * mirando una lista de deseos: tiene unidades apartadas que se le van a
-		 * soltar solas si tarda.
+		 * El nombre invita a leerlo como "esta oferta es de venta relampago", y
+		 * NO es eso. El backend lo calcula como `ticket != null` (ver
+		 * carrito.service.ts, la linea del `const esInventarioLimitado`): mira
+		 * si VOS tenes un ticket de reserva, no si la oferta esta marcada.
+		 *
+		 * La diferencia se midio y muerde: una linea de una oferta marcada como
+		 * relampago, metida al carrito sin pasar por la reserva, llega aqui con
+		 * este campo en FALSE. Correctamente, porque no hay nada apartado.
+		 *
+		 * Por eso la insignia dice lo que dice. No anuncia una promocion:
+		 * avisa de que esas unidades ya son tuyas por un rato y se sueltan
+		 * solas si tardas. Una linea normal no reserva nada al agregarse, solo
+		 * al pagar; esta es la unica excepcion a esa regla.
 		 */
 		es_inventario_limitado: boolean;
 	}
