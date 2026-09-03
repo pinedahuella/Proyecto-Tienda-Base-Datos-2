@@ -94,6 +94,40 @@ esto: la misma semilla da exactamente el mismo lote. Si le pasas esa
 linea a un companero, el va a ver el mismo catalogo que tu, producto
 por producto. Si cambias la semilla, sale un lote distinto.
 
+Y si NO le pones semilla, el script elige una libre y te la DICE:
+
+  Sin -Semilla: se usa la 3, que esta libre
+  Para volver a generar ESTE mismo lote:  .\arrancar.ps1 -Productos 300 -Semilla 3
+
+O sea que puedes correr -Productos las veces que quieras y cada vez
+sale un lote nuevo, sin chocar con los anteriores. Anota el numero que
+te dijo y ese lote lo puedes volver a crear cuando quieras.
+
+Ojo con repetir la semilla: si le das una que ya usaste, NO genera el
+doble, te avisa de que ese lote ya existe y no hace nada.
+
+
+BORRAR LOS PRODUCTOS DE PRUEBA
+==================================================
+
+  .\arrancar.ps1 -Borrar 500      los 500 mas nuevos
+  .\arrancar.ps1 -Borrar todos    todos los inventados
+
+Borra en las DOS bases, PostgreSQL y MongoDB, que es la parte que se
+olvida si se hace a mano.
+
+Si pides mas de los que hay, borra los que hay y te lo dice. No falla.
+
+Dos cosas que NO hace, y las dos a proposito:
+
+  - No borra los productos de la semilla original. No es por prudencia:
+    varios de ellos tienen ventas detras, y borrarlos obligaria a borrar
+    los pedidos que los compraron. Para dejar la base como recien
+    instalada esta  .\arrancar.ps1 -Reiniciar
+
+  - No borra un producto inventado que alguien haya comprado. Se lo
+    salta, borra todos los demas, y te dice cuantos se salto y por que.
+
 Tres cosas que conviene saber antes de escribirlo:
 
   - El numero de productos va de 1 a 9999.
