@@ -443,6 +443,132 @@ elseif op == 'devolver' then
 
 
 -- ============================================================
+-- redimensionar -- cambiar la cantidad de una reserva que ya existe
+-- ============================================================
+-- Existe porque `PUT /carrito/lineas/:idOferta` fija la cantidad ABSOLUTA de
+-- la linea: no es un mas uno ni un menos uno, se manda "quiero 5" y esa pasa a
+-- ser la cantidad. Sobre una oferta de inventario limitado eso significa
+-- cambiar cuantas unidades tengo APARTADAS, y con las operaciones que ya
+-- habia solo se podia en dos llamadas.
+--
+-- POR QUE DOS LLAMADAS NO SIRVEN, Y NO ES UNA CUESTION DE ESTILO
+--
+-- Cada operacion de este script es atomica por separado, pero DOS seguidas no
+-- lo son entre si. Y las dos formas de encadenarlas estan rotas, cada una a su
+-- manera:
+--
+--   devolver y luego reservar
+--       Entre las dos llamadas las unidades viejas ya volvieron al stock y
+--       cualquier otro comprador puede llevarselas. Quien solo queria bajar de
+--       3 a 2 se puede quedar con CERO, habiendo tenido tres un instante
+--       antes. Le quitamos algo que ya era suyo por intentar ajustarlo.
+--
+--   reservar y luego devolver
+--       Evita ese hueco y crea uno peor. Como lo viejo sigue reservado
+--       mientras se pide lo nuevo, se exige que haya tantas unidades libres
+--       AJENAS como la cantidad nueva entera. Quien tiene 2 y quiere 3
+--       necesitaria que aparecieran 3 libres, cuando con 1 le alcanza. Se le
+--       niega una compra que si se podia hacer.
+--
+-- Esta operacion hace las dos cosas en un solo paso: nadie se mete en el
+-- medio, y la cuenta se hace contra lo que hay libre MAS lo que esta reserva
+-- va a soltar, que es el numero honesto.
+--
+-- ARGV[3] es el ticket que la persona ya tenia, o cadena vacia si no tenia
+-- ninguno. Con cadena vacia se comporta igual que `reservar`, y eso no es un
+-- caso raro: es exactamente lo que pasa cuando la reserva vencio sola y la
+-- persona cambia la cantidad para volver a intentarlo. Un ticket que ya no
+-- existe tampoco es un error por lo mismo -- no hay nada que acreditar.
+--
+-- El ticket SIEMPRE es nuevo, incluso si la cantidad no cambio. Sale mas
+-- barato que decidir cuando reusarlo, y quien llama tiene que guardar el que
+-- se devuelve de todos modos.
+elseif op == 'redimensionar' then
+    local id_usuario     = ARGV[2]
+    local ticket_viejo   = ARGV[3]
+    local cantidad_nueva = tonumber(ARGV[4])
+    local ttl_res        = tonumber(ARGV[5])
+
+    if not cantidad_nueva or cantidad_nueva <= 0 then
+        return redis.error_reply('redimensionar: la cantidad tiene que ser > 0')
+    end
+
+    local ahora = ahora_ms()
+    cosechar(ahora)
+
+    local stock = campo('stock')
+
+    -- Igual que en `reservar`: sin hash no hay venta que redimensionar, y eso
+    -- se distingue de "agotado" porque son dos problemas distintos para quien
+    -- llama.
+    if not stock then
+        return {'SIN_OFERTA', 0, 0}
+    end
+
+    -- Lo que la reserva vieja va a liberar. Se mira DESPUES de cosechar: si
+    -- vencio, la cosecha ya la solto y aqui no queda nada que acreditar, que
+    -- es justo lo que tiene que pasar.
+    local cantidad_vieja = nil
+    if ticket_viejo ~= nil and ticket_viejo ~= '' then
+        cantidad_vieja = campo('r:' .. ticket_viejo)
+
+        -- Nadie redimensiona la reserva de otro. Sin esta comprobacion,
+        -- mandar el ticket ajeno seria quitarle sus unidades a su dueno y
+        -- ponerlas a nombre propio, en una sola llamada y sin dejar rastro.
+        if cantidad_vieja then
+            local dueno = redis.call('HGET', CLAVE, 'u:' .. ticket_viejo)
+            if dueno ~= id_usuario then
+                return {'TICKET_AJENO', 0, stock}
+            end
+        end
+    end
+
+    -- El stock EFECTIVO, que es la parte que arregla el problema. No se
+    -- compara contra lo que hay libre ahora, sino contra lo que habra cuando
+    -- esta reserva suelte lo suyo. Comparar contra `stock` a secas es
+    -- exactamente el segundo error de la cabecera.
+    local efectivo = stock + (cantidad_vieja or 0)
+
+    -- Todas las salidas por rechazo van ANTES del primer HINCRBY, que es la
+    -- regla de este archivo entera: Redis no deshace lo que el script ya
+    -- escribio, asi que un return despues de haber tocado el stock dejaria
+    -- unidades desaparecidas.
+    if cantidad_nueva > efectivo then
+        redis.call('HINCRBY', CLAVE, 'rechazos', 1)
+        return {'AGOTADO', 0, efectivo}
+    end
+
+    -- De aqui abajo ya no hay ningun return que rechace: todo lo que sigue
+    -- pasa entero.
+    if cantidad_vieja then
+        redis.call('ZREM', RESERVAS, ticket_viejo)
+        redis.call('HDEL', CLAVE, 'r:' .. ticket_viejo, 'u:' .. ticket_viejo)
+        redis.call('HINCRBY', CLAVE, 'reservado', -cantidad_vieja)
+        redis.call('HINCRBY', CLAVE, 'stock', cantidad_vieja)
+    end
+
+    local ticket   = redis.call('HINCRBY', CLAVE, 'ticket', 1)
+    local restante = redis.call('HINCRBY', CLAVE, 'stock', -cantidad_nueva)
+    redis.call('HINCRBY', CLAVE, 'reservado', cantidad_nueva)
+    redis.call('HSET', CLAVE, 'r:' .. ticket, cantidad_nueva, 'u:' .. ticket, id_usuario)
+
+    if ttl_res and ttl_res > 0 then
+        redis.call('ZADD', RESERVAS, ahora + (ttl_res * 1000), ticket)
+    else
+        redis.call('ZADD', RESERVAS, '+inf', ticket)
+    end
+
+    -- Mismo criterio que `reservar`, y por el mismo motivo: el vencimiento del
+    -- ZSET se copia del que le queda al hash para que las dos claves de la
+    -- oferta desaparezcan juntas.
+    local ttl_oferta = redis.call('TTL', CLAVE)
+    if ttl_oferta > 0 then
+        redis.call('EXPIRE', RESERVAS, ttl_oferta)
+    end
+
+    return {'REDIMENSIONADO', ticket, restante}
+
+-- ============================================================
 -- estado -- para mirar, y sobre todo para que la prueba compruebe
 -- ============================================================
 -- No cosecha ni renueva nada: es de solo lectura a proposito. Una prueba que

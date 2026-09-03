@@ -1011,106 +1011,37 @@
 
 		if (confirmarCambios) cuerpo.confirmar_cambios = true;
 
-		// ------------------------------------------------------------------
-		// PARCHE: releer los precios justo antes de cobrar (solo modo carrito)
-		// ------------------------------------------------------------------
-		// ESTO NO ES EL ARREGLO. El arreglo esta en el backend y es el
-		// pendiente 1 de docs/PENDIENTES.md: que el carrito de Redis guarde el
-		// `id_precio_historial` de cada linea, para que se cobre el precio que
-		// se le ENSENO a la persona y no el que rija al pagar. La migracion 013
-		// ya deja hacerlo desde la base; falta la mitad de la aplicacion.
-		//
-		// Mientras eso no exista, el precio que se cobra es el del instante del
-		// pago. Esta pantalla ensena unos precios y un total, la persona decide
-		// con esos numeros, y si el vendedor los mueve entre que ella lee y
-		// pulsa, se le cobra otra cosa SIN QUE NADIE SE ENTERE. Eso es lo que
-		// esta relectura convierte en visible.
-		//
-		// LO QUE CUBRE:  que el precio cambie mientras esta pantalla esta
-		//                abierta. Es el caso que de verdad pasa, porque elegir
-		//                direccion y forma de pago lleva su rato.
-		//
-		// LO QUE NO CUBRE, y hay que decirlo:  la carrera de verdad. Entre esta
-		//                comprobacion y el cobro pasan milisegundos, y en esos
-		//                milisegundos el precio todavia puede moverse. Cerrar
-		//                ESA ventana no lo puede hacer el frontend: hace falta
-		//                que el precio viaje congelado desde el carrito. Un
-		//                aviso no es un mecanismo.
-		//
-		// En modo pedido no corre, y no es un olvido: alla el precio SI esta
-		// congelado (`agregar_linea` guardo su `id_precio_historial`), y es el
-		// propio backend quien devuelve los `avisos` con `comprado:false`. Este
-		// bloque existe solo porque el carrito de Redis todavia no tiene eso.
-		//
-		// CUANDO SE BORRA: en cuanto el backend mande `avisos` en modo carrito.
-		// Ese dia esta relectura pasa de util a estorbo, porque avisaria de un
-		// cambio que ya no afecta a lo que se cobra.
-		if (modo === 'carrito' && !confirmarCambios && lineas.length > 0) {
-			const antes = await pedir<{ lineas: { id_oferta: number; precio: string }[] }>(
-				'/carrito'
-			);
-			if (expiro(antes)) return;
-
-			// Si no se pudo releer, NO se cobra a ciegas. Cobrar sin haber
-			// podido comprobar es exactamente el fallo silencioso que este
-			// bloque existe para evitar, y un reintento cuesta un clic.
-			if (!antes.ok || antes.payload == null) {
-				error =
-					'No se pudieron comprobar los precios antes de cobrar. Vuelve a intentarlo.';
-				return;
-			}
-
-			const ahora = new Map<string, string>();
-			for (const l of antes.payload.lineas) ahora.set(String(l.id_oferta), l.precio);
-
-			// Se comparan como TEXTO y no como numero, a proposito: los dos
-			// lados vienen del mismo decimal de PostgreSQL y compararlos como
-			// double podria decir que 4269.00 y 4269 son distintos, o peor,
-			// que dos precios distintos son iguales por redondeo.
-			const movidos: AvisoDePrecio[] = [];
-			for (const l of lineas) {
-				const nuevo = ahora.get(String(l.id_oferta));
-				// Una linea que ya no esta en el carrito no es un cambio de
-				// precio: es otro problema, y de ese avisa el propio backend al
-				// cobrar. Aqui se ignora para no inventar un aviso que confunda.
-				if (nuevo == null) continue;
-				if (nuevo !== l.precio_unitario) {
-					movidos.push({
-						// Aqui va el id de la OFERTA y no el de una linea de
-						// pedido, porque en modo carrito el pedido todavia no
-						// existe: lo crea la compra. El campo solo se usa como
-						// clave del {#each} de los avisos, y el id de oferta es
-						// unico dentro del carrito, que es lo que esa clave
-						// necesita. Se convierte a numero porque la interfaz lo
-						// pide asi desde el modo pedido.
-						id_pedido_producto: Number(l.id_oferta),
-						nombre_producto: l.nombre_producto,
-						nombre_variante: l.nombre_variante,
-						// "congelado" es el nombre que trae la interfaz del modo
-						// pedido, donde el precio SI esta congelado. Aqui es "el
-						// que se le enseno en esta pantalla", que es justo lo
-						// que todavia no se congela y por eso hace falta avisar.
-						precio_congelado: l.precio_unitario,
-						precio_actual: nuevo
-					});
-				}
-			}
-
-			if (movidos.length > 0) {
-				avisos = movidos;
-				return;
-			}
-		}
-
 		cobrando = true;
-		// La unica linea que cambia entre los dos modos.
+
+		// EL PRECIO QUE SE VIO VIAJA CON LA COMPRA, y esto cambio hace poco.
 		//
-		// `confirmar_cambios` no viaja en modo carrito y no es un olvido: esa
-		// bandera existe para confirmar que el precio cambio ENTRE que se
-		// agrego al carrito y se paga, y el carrito de Redis no guarda el
-		// precio que se vio, asi que no hay con que comparar. Cerrar esa
-		// ventana es la fase 2 (guardar id_precio_historial por linea), y esta
-		// anotada en docs/BACKEND-PENDIENTE.md.
+		// El carrito de Redis guarda `id_oferta -> cantidad` y nada mas: no
+		// guarda el precio, a proposito, porque el precio no es del carrito,
+		// es de la oferta. La consecuencia era un cobro incorrecto silencioso:
+		// esta pantalla ensenaba un total, la persona decidia con ese numero, y
+		// si el vendedor lo movia antes del clic se le cobraba otro sin que
+		// nadie se enterara.
+		//
+		// La solucion NO fue guardar el precio en Redis. Es que se acuerde
+		// quien lo enseno: el frontend manda de vuelta lo que puso en pantalla,
+		// y el backend compara contra el precio de hoy DENTRO de la misma
+		// peticion que cobra. Ahi esta la gracia, y es lo que una comprobacion
+		// hecha aqui antes de llamar no puede dar: entre mirar y cobrar no
+		// queda ninguna ventana, porque son el mismo viaje.
+		//
+		// Si algo no cuadra, el backend no cobra nada -- ni Redis, ni Postgres,
+		// ni Mongo -- y contesta `comprado: false` con los `avisos`. La segunda
+		// pulsacion manda `confirmar_cambios: true` y acepta el precio de hoy.
+		//
+		// `confirmar_cambios` SI viaja ahora en modo carrito. Antes no, y aqui
+		// habia escrito que no era un olvido sino que no habia con que
+		// comparar. Eso dejo de ser cierto en cuanto existio
+		// `lineas_precio_visto`.
+		//
+		// El precio se manda TAL CUAL vino, como texto. Son decimales de
+		// PostgreSQL y el backend los compara como tales: pasarlos por Number
+		// aqui podria convertir 4269.00 en 4269 y hacer que dos precios iguales
+		// parezcan distintos.
 		const r =
 			modo === 'carrito'
 				? await pedir<ResultadoCompra>(
@@ -1118,7 +1049,12 @@
 						conJson('POST', {
 							id_direccion: idElegida,
 							metodo_pago: cuerpo.metodo_pago,
-							...(cuerpo.tarjeta ? { tarjeta: cuerpo.tarjeta } : {})
+							...(cuerpo.tarjeta ? { tarjeta: cuerpo.tarjeta } : {}),
+							lineas_precio_visto: lineas.map((l) => ({
+								id_oferta: Number(l.id_oferta),
+								precio_visto: l.precio_unitario
+							})),
+							...(confirmarCambios ? { confirmar_cambios: true } : {})
 						})
 					)
 				: await comprarPedido(idPedido as string, cuerpo);
@@ -1149,7 +1085,35 @@
 
 			// ok con comprado:false NO es un fallo: no se toco el stock, ni el
 			// pago, ni el estado del pedido. Es la unica parada antes de cobrar.
-			avisos = r.payload.avisos ?? [];
+			//
+			// LAS DOS RUTAS NO MANDAN EL MISMO AVISO, y hay que normalizarlo.
+			//
+			//   pedido    { id_pedido_producto, precio_congelado, precio_actual }
+			//   carrito   { id_oferta,          precio_visto,     precio_actual }
+			//
+			// Los nombres distintos no son un descuido de nadie: describen cosas
+			// distintas. En el pedido el precio esta CONGELADO y el aviso dice
+			// "esto vale otra cosa hoy, pero te cobro el tuyo". En el carrito no
+			// hay nada congelado: el aviso dice "esto ya no vale lo que viste, y
+			// si sigues te cobro el de hoy". Son avisos opuestos.
+			//
+			// Se traducen al tipo del pedido porque es el que pinta la tabla, y
+			// la tabla ya distingue los dos casos por el modo. Meter aqui un
+			// `as` para taparlo compilaria y ensenaria celdas vacias: los campos
+			// no existen con ese nombre.
+			avisos = (r.payload.avisos ?? []).map((a) => {
+				const c = a as unknown as Partial<AvisoDePrecio> & {
+					id_oferta?: number;
+					precio_visto?: string;
+				};
+				return {
+					id_pedido_producto: c.id_pedido_producto ?? c.id_oferta ?? 0,
+					nombre_producto: c.nombre_producto ?? '',
+					nombre_variante: c.nombre_variante ?? '',
+					precio_congelado: c.precio_congelado ?? c.precio_visto ?? '0',
+					precio_actual: c.precio_actual ?? '0'
+				};
+			});
 			if (avisos.length === 0) {
 				// No deberia pasar, pero si el backend contesta "no compre" sin
 				// decir por que, callarlo dejaria la ventana igual que antes y
