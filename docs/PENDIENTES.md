@@ -77,7 +77,7 @@ Y de la **Entrega 2** falta trabajo que no es un bug:
 
 | Que | Puntos | De quien |
 |---|---|---|
-| Oferta de inventario limitado enchufada al backend | 3 | **casi**: Jose David la conecto al carrito el 2026-09-03. Faltan sus pasos 2 y 4 (ver `backend/elementos Generales/plan pendiente/inventario-limitado.md`). La migracion 014 y el frontend YA estan |
+| Oferta de inventario limitado enchufada al backend | 3 | **casi**: Jose David la conecto al carrito el 2026-09-03. Falta su paso 2, que son las DOS RUTAS para abrir y cerrar la venta: sin ellas no hay boton posible y el contrato exacto esta en el BLOQUE 9 de `docs/BACKEND-PENDIENTE.md`. Falta tambien su paso 4. La migracion 014 y el resto del frontend YA estan |
 | ~~`GET /admin/fraude/anillos`~~ | ~~parte de 3~~ | **HECHA el 2026-08-30, y el panel ya la consume** |
 | Resenar desde el pedido (bloque 5 de BACKEND-PENDIENTE) | -- | Jose David |
 | **Comparativa grafos vs columnar**, con la defensa de la NO elegida | 1.5 | **nadie todavia** |

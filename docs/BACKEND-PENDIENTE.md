@@ -1150,3 +1150,90 @@ desde aqui:
 
 Lo que no es una opcion es dejarlo como esta y no escribirlo en ningun sitio,
 que era la situacion antes de este bloque.
+
+---
+
+# BLOQUE 9 -- Las dos rutas que faltan para abrir la venta relampago (agregado el 2026-09-03)
+
+**Esto es lo unico que bloquea el frontend del inventario limitado.** Todo lo
+demas ya funciona y esta probado en el navegador: reservar al agregar,
+redimensionar, soltar al quitar, el 409 cuando no alcanza, la etiqueta naranja
+en la linea del carrito y el aviso de reserva vencida.
+
+Lo que no existe es **el interruptor para encenderla**. Medido con grep sobre
+`backend/src/`:
+
+```
+rutas HTTP que abran una venta limitada .... ninguna
+quien llama a activar() .................... nadie
+```
+
+`activar()` y `revertir()` estan escritos y funcionan (los ejercite a mano
+llamando al Lua directamente), pero son metodos huerfanos: no hay controlador
+que los invoque. Sin ruta no puedo poner el boton en el panel del vendedor,
+porque no tendria a que llamar.
+
+
+## Lo que necesito, en concreto
+
+Dos rutas, en el controlador de vendedores.
+
+### `POST /vendedor/ofertas/:id/venta-limitada`
+
+Abre la venta. Por dentro es una llamada a `inventarioLimitadoService.activar(idOferta, ttlSegundos)`.
+
+Cuerpo:
+
+```json
+{ "duracion_segundos": 3600 }
+```
+
+`duracion_segundos` opcional. Si no viene, que `activar` use su valor por
+defecto (hoy 0, o sea sin vencimiento de la venta entera).
+
+Respuesta 201 con lo que ya devuelve `activar`:
+
+```json
+{ "stock_sembrado": 33 }
+```
+
+### `DELETE /vendedor/ofertas/:id/venta-limitada`
+
+La cierra. Por dentro, `revertir(idOferta)`. Respuesta 200 sin cuerpo, o con un
+resumen si te resulta util.
+
+
+## Los errores que el frontend necesita distinguir
+
+`activar` ya lanza estos dos y los quiero tal cual, porque el boton tiene que
+decir cosas distintas:
+
+- La oferta no esta activa -> **409**, mensaje ya escrito en el servicio.
+- La oferta YA esta en modo venta limitada -> **409**, mensaje ya escrito.
+  Este importa: es lo que evita que un segundo clic borre las reservas vivas.
+
+Y hace falta uno mas, que hoy no esta:
+
+- La oferta no es de quien la pide -> **403**, o el 404 disfrazado que usa el
+  resto del panel. Un vendedor no puede abrir una venta relampago sobre la
+  oferta de otro.
+
+
+## Lo que hare yo en cuanto existan
+
+En `frontend/src/lib/OfertasVendedor.svelte`, en la fila de cada oferta:
+
+- Un boton "Abrir venta relampago" cuando la oferta esta activa y no marcada.
+- Un campo para la duracion.
+- Cuando ya esta abierta, la fila la marca y el boton pasa a "Cerrar la venta".
+- Los dos 409 se pintan como aviso en la fila, no como error de pantalla.
+
+Son unas pocas lineas y no dependen de nada mas.
+
+
+## Si preferis otros nombres de ruta
+
+Sin problema, decime cuales y ajusto. Lo unico que pido es que **no cambien
+despues de que yo escriba el boton**, porque el boton llama por nombre y un
+cambio silencioso da un 404 que en la pantalla se ve como "no pasa nada al
+hacer clic".
