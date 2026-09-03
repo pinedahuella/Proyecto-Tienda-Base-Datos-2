@@ -631,3 +631,522 @@ Eso es un cambio en la 007 (mio) y en esta ruta (tuyo): **avisame y lo escribo**
 
 Mientras no se resuelva, `GET /carrito` esta devolviendo un precio que puede no
 ser el que se cobre. Es un cobro incorrecto, no un detalle de presentacion.
+
+---
+
+# BLOQUE 7 -- El filtro por calificacion en el catalogo (agregado el 2026-09-02)
+
+## Por que
+
+El catalogo ya puede filtrar por precio y por stock, pero no por lo que la
+gente mira primero cuando hay veinte vendedores del mismo producto: la nota.
+Lo de este lado ya esta hecho y desplegado, asi que lo unico que falta para
+que sirva es un query param.
+
+## Lo que ya esta hecho y te espera
+
+El documento de cada producto en Mongo trae **dos campos nuevos** que escribe
+el ETL de `etl/cargar.js`:
+
+```jsonc
+"resenas_promedio": 4.33,   // numero, de 1.00 a 5.00. 0 si no tiene resenas.
+                            // El tipo BSON no es siempre el mismo: mira el
+                            // apartado del tipo mas abajo antes de filtrar
+"resenas_total": 3          // entero, cuantas resenas se promediaron
+```
+
+Y el indice que los sirve ya existe, en `mongo/002_resenas.js`:
+
+```
+catalogo_rating  { categoria.id_categoria: 1, estado: 1, resenas_promedio: -1, _id: 1 }
+```
+
+Ese archivo ademas **rellena con 0 los dos campos** en todo producto que no
+los tenga, y ese relleno importa mas de lo que parece. Esta explicado abajo,
+en la trampa del campo ausente.
+
+## El contrato: un query param, `resenas_min`
+
+```
+GET /productos?resenas_min=4
+GET /productos?id_categoria=9&resenas_min=4.5&limite=12
+```
+
+Decimal de **1 a 5**. Es un minimo, sin maximo: nadie busca "productos de
+hasta 3 estrellas".
+
+Se llama `resenas_min` y no `rating_min` por dos motivos que van juntos. El
+primero es que casa con el campo del documento (`resenas_promedio`,
+`resenas_total`), asi que quien lea el query param sabe contra que se compara
+sin abrir el codigo. El segundo es que la convencion del catalogo ya esta
+puesta y es en espanol: `precio_min`, `precio_max`, `stock_min`,
+`stock_tienda_min`. Un `rating_min` seria el unico filtro en ingles de la
+lista.
+
+## Hay que declararlo en CUATRO sitios, no en uno
+
+Esta es la parte que se olvida. `resenas_min` tiene que aparecer en los
+cuatro:
+
+Los cuatro se localizan con `Ctrl+F` por el texto que va en la columna del
+medio, como hace `docs/GUIA-PRESENTACION.txt`, y no por numero de linea: los
+cuatro archivos se estan tocando y un numero se cae solo.
+
+| Archivo | `Ctrl+F` | Que se agrega | De quien es |
+|---|---|---|---|
+| `backend/src/services/productos/productos.service.ts` | `const CLAVES_RESERVADAS = new Set([` | `'resenas_min'` al Set | tuyo |
+| `backend/src/dto/listar-productos.ts` | `export interface ListarProductosQuery {` | `resenas_min?: string;` | tuyo |
+| `backend/src/dto/paginar-productos.ts` | `export interface PaginarProductosQuery {` | `resenas_min?: string;` | tuyo |
+| `frontend/src/routes/+page.svelte` | `const CLAVES_RESERVADAS = new Set([` | `'resenas_min'` al Set | mio |
+
+Los dos DTO son dos archivos distintos y **ya vienen desincronizados**, asi
+que no vale mirar uno y suponer el otro: `ListarProductosQuery` declara
+`despues_de`, `precio_tienda_min` y `precio_tienda_max`, y
+`PaginarProductosQuery` no declara ninguno de los tres, aunque las dos rutas
+comparten `construirFiltro` y `CLAVES_RESERVADAS`. El comentario de
+`CLAVES_RESERVADAS` dice que la lista es una sola para las dos rutas; los DTO
+no lo son.
+
+La copia del frontend es mia y la actualizo yo, pero conviene que sepas para
+que sirve: la lista esta ahi para que una caracteristica personalizada que se
+llame igual que un filtro fijo no se mande cruda. Quien publica un producto le
+pone el nombre que quiera a sus caracteristicas personalizadas, y el dia que
+alguien cree una llamada `resenas_min`, si el frontend no sabe que ese nombre
+esta reservado la manda tal cual y el backend la toma por el filtro fijo del
+mismo nombre. Devuelve otra cosa y no da ningun error.
+
+## EL FALLO MAS CARO: si falta en CLAVES_RESERVADAS, no da error
+
+Esto es lo unico de este bloque que hay que leer dos veces.
+
+Si `resenas_min` llega y **no** esta en `CLAVES_RESERVADAS`, no revienta nada.
+El bucle de `construirFiltrosDinamicos` se salta las claves reservadas y trata
+todo lo demas como una caracteristica adicional, asi que `resenas_min=4` se
+convierte en esto:
+
+```jsonc
+{ "$or": [
+  { "caracteristicas_adicionales":            { "$elemMatch": { "nombre": "resenas_min", "valor": 4 } } },
+  { "caracteristicas_personalizadas":         { "$elemMatch": { "nombre": "resenas_min", "valor": 4 } } },
+  { "variantes.caracteristicas_adicionales":  { "$elemMatch": { "nombre": "resenas_min", "valor": 4 } } },
+  { "variantes.caracteristicas_personalizadas": { "$elemMatch": { "nombre": "resenas_min", "valor": 4 } } }
+]}
+```
+
+O sea, la busqueda de una caracteristica llamada `resenas_min` que ningun
+producto del catalogo tiene. `esNombreCaracteristicaValido` la deja pasar sin
+quejarse, porque solo mira que no este vacia y que quepa en el `varchar(100)`.
+
+**Resultado: 200 con la lista vacia.** El filtro parece funcionar y parece
+decir que no hay ni un producto bien calificado. No hay excepcion, no hay log,
+no hay nada que revisar. Es exactamente la misma clase de fallo que el campo
+ausente de mas abajo, y las dos veces la respuesta es una lista corta que nadie
+sabe leer como un error.
+
+Si escribes el filtro y la primera prueba devuelve vacio, mira esa lista antes
+que cualquier otra cosa.
+
+## El filtro tiene que exigir ADEMAS `resenas_total > 0`
+
+```jsonc
+{ "resenas_promedio": { "$gte": 4 }, "resenas_total": { "$gt": 0 } }
+```
+
+El `resenas_total` no es adorno. `resena.calificacion` en PostgreSQL es un
+`smallint` con `CHECK BETWEEN 1 AND 5`, asi que un promedio de verdad nunca
+baja de 1. El **0 de `resenas_promedio` significa "todavia nadie ha
+calificado esto"**, y sin la segunda condicion ese 0 entra a la comparacion
+como si fuera una nota.
+
+Con un `resenas_min` alto no se nota, porque el 0 queda fuera igual. Se nota
+el dia que se ordene por nota o que alguien pida `resenas_min=0`: un producto
+sin ninguna opinion quedaria por debajo de uno con una sola estrella, cuando
+lo que pasa es que no se sabe nada de el. Poner la condicion desde el
+principio cuesta una linea; descubrirlo despues cuesta explicar por que el
+catalogo ordena mal.
+
+## El tipo NO es `Decimal128`, y tampoco es `double` en todos los documentos
+
+Aqui habia escrito que `resenas_promedio` se guarda como `double`. **Es falso**,
+y conviene saber por que antes de escribir el filtro.
+
+**El mecanismo.** El ETL corre dentro de `mesh-mongo` con `mongosh`, y `mongosh`
+guarda un numero de JavaScript segun su **valor**, no segun su significado. Un
+promedio que sale entero (un producto con una sola resena de 5, o el 0 del
+relleno) se escribe como **int32**; uno con decimales (4.33) se escribe como
+**double**. Como el promedio de cada producto cae de un lado o del otro segun
+sus resenas, **el campo queda repartido entre los dos tipos dentro de la misma
+coleccion**, y esa mezcla no es un fallo que alguien vaya a arreglar: es como se
+comporta el escritor. `resenas_total` no tiene el problema porque un conteo
+siempre es entero.
+
+El reparto se recuenta cuando haga falta, y esta es la consulta:
+
+```js
+db.productos.aggregate([{ $group: { _id: { $type: "$resenas_promedio" },
+                                    n: { $sum: 1 } } }])
+```
+
+**Ejemplo de una corrida concreta, la del 2026-09-02:** 395 documentos con el
+campo en `int` y 11 en `double`. O sea que **la mayoria son `int`**, no
+`double`.
+
+### Lo que eso significa para tu filtro, en tres reglas
+
+**1. Compara con un numero normal de JavaScript, y ya.** Mongo compara ENTRE
+tipos numericos: un `$gte: 4` encuentra igual el `int` 5 y el `double` 4.67, y
+un `$sort` los ordena juntos. No hay que hacer nada especial por la mezcla.
+
+```ts
+// asi
+{ resenas_promedio: { $gte: 4.5 } }
+```
+
+**2. NO construyas el extremo con `Decimal128.fromString`.** Eso es lo que hace
+`construirRangoDecimal` para el precio, porque el precio SI se guarda como
+`Decimal128`. Reutilizarlo aqui seria copiar la precaucion del dinero a un campo
+que no la necesita, y meter un tercer tipo en una comparacion que ya funciona:
+
+```ts
+// asi NO
+{ resenas_promedio: { $gte: Decimal128.fromString('4.5') } }
+```
+
+El motivo de que el dinero sea `Decimal128` y la nota no es que el dinero tiene
+centavos que no se pueden perder, y la nota es un promedio que ya se calculo y
+que cabe exacto en un double con sus dos decimales.
+
+**3. NO filtres por `$type` sobre este campo.** Es la trampa que la mezcla deja
+puesta. Un `{ resenas_promedio: { $type: "double" } }` parece una precaucion
+razonable y **deja fuera a la mayoria de los productos**, sin dar ningun error:
+la respuesta es 200 con una lista mas corta, igual que los otros dos fallos
+silenciosos de este bloque.
+
+Medido el 2026-09-02, sobre la misma base del ejemplo de arriba: `$gte: 4` a
+secas devolvia 43 productos, y el mismo `$gte: 4` con el `$type: "double"`
+pegado devolvia 9. Los 34 que faltaban tenian su nota entera, guardada como
+`int`.
+
+Esto vale tambien para cualquier prueba que escribas: verificar el filtro
+preguntando por el tipo del campo te va a dar un resultado que no es el que ve
+el catalogo.
+
+## Un `$gte` sobre un campo AUSENTE no hace match
+
+Regla de Mongo, y es la razon de que `mongo/002_resenas.js` rellene con 0.
+
+Un documento que **no tiene** `resenas_promedio` no cumple
+`{ resenas_promedio: { $gte: 1 } }`. Ausente no se compara como 0, no se
+compara con nada. Y el ETL solo escribe los productos que extrae de
+PostgreSQL, asi que los productos que nacieron en Mongo desde el panel del
+vendedor nunca reciben esos dos campos por su cuenta.
+
+Sin el relleno, esos productos **desaparecen del catalogo** en cuanto alguien
+use el filtro. Sin error. El vendedor ve que su producto ya no aparece y no
+hay a quien preguntarle.
+
+El relleno ya esta hecho y es idempotente (filtra por `$exists: false`). Pero
+**no cierra el agujero entero**, y eso hay que leerlo en el apartado siguiente
+antes de dar el filtro por terminado: el relleno vive en `mongo/002_resenas.js`
+y corre **en cada arranque**, o sea que lo que se publica entre dos arranques
+se queda fuera hasta el siguiente.
+
+## Los DOS agujeros que quedan abiertos, y no son teoricos
+
+Esto lo encontro la verificacion del bloque, no estaba escrito en ningun lado,
+y los dos te tocan a vos porque los dos se cierran del lado del backend.
+
+### a) Un producto creado desde el panel nace SIN los dos campos
+
+`backend/src/services/vendedores/productos.service.ts` tiene **dos**
+`insertOne` sobre `db.productos`: uno en `crear()` y otro en `proponer()` (se
+buscan con `Ctrl+F` por `await coleccionProductos.insertOne(producto);`, que
+aparece exactamente dos veces; no doy numero de linea porque en ese archivo se
+mueven). Los dos arman el literal `producto` con `_id`, `nombre`,
+`descripcion`, `fecha_creacion`, `estado`, `categoria`, los calculados que
+nacen en cero (`precio_tienda`, `precio_desde`, `stock_tienda`, `stock_total`,
+`total_ofertas`), `variantes` y las caracteristicas. **Ni `resenas_promedio` ni
+`resenas_total` aparecen en ninguno de los dos.** Comprobado ademas sobre todo
+el arbol: `grep -rn "resenas_promedio" backend/src` no devuelve nada, o sea que
+el backend no escribe ese campo en ninguna parte.
+
+El relleno de `mongo/002_resenas.js` solo corre al arrancar (`arrancar.ps1`,
+paso "Creando colecciones", que recorre todos los `.js` de `mongo/`). Junta las
+dos cosas y sale esto:
+
+> **Entre dos arranques, cada producto publicado desde el panel es invisible
+> para cualquier filtro por nota.**
+
+Y es invisible por la regla de arriba, la del campo ausente: no es que salga
+con nota 0 y quede por debajo, es que **no hace match** y desaparece de la
+lista. No hay excepcion, no hay log, no hay nada. El vendedor publica, entra al
+catalogo, filtra por nota y no encuentra su producto. Otra vez la misma forma de
+fallo que recorre todo este bloque: un 200 con una lista mas corta de la cuenta,
+que nadie sabe leer como un error.
+
+Lo que lo cierra es una linea en cada uno de los dos literales:
+`resenas_promedio: 0, resenas_total: 0`. Es exactamente el piso que ya escribe
+`mongo/002_resenas.js`, puesto en el momento en que el documento nace en vez de
+en el siguiente arranque.
+
+### b) Los productos que viven SOLO en Mongo no actualizan NUNCA su nota
+
+Este es mas hondo que el anterior y no se arregla con dos lineas.
+
+`etl/extraer.sql` calcula los dos campos con dos subconsultas sobre `resena`,
+pero la consulta entera itera `FROM productos p`, o sea **la tabla de
+PostgreSQL** (se busca con `Ctrl+F` por `FROM productos p`, que aparece una
+sola vez, al final del archivo). Un producto que solo existe en Mongo no tiene
+fila ahi, asi que nunca entra en esa consulta, nunca aparece en el bulk de
+`etl/cargar.js`, y **su nota se queda en el 0 del relleno para siempre**,
+corra el ETL las veces que corra.
+
+**Y esto no es teorico, esta medido.** Estas son las dos consultas que lo
+comprueban, y hay que volver a correrlas antes de creerle un numero a este
+parrafo:
+
+```sql
+-- productos que viven solo en Mongo pero YA tienen oferta en PostgreSQL
+SELECT DISTINCT o.id_producto_mongo
+  FROM oferta o
+ WHERE NOT EXISTS (SELECT 1 FROM productos p
+                    WHERE p.id_producto = o.id_producto_mongo);
+
+-- y de esos, los que ya se VENDIERON, o sea los que ya se pueden resenar:
+-- es el mismo JOIN que usa el candado de `comprado()` en resenas.service.ts
+SELECT pp.id_producto_mongo, pp.nombre_producto, count(*)
+  FROM pedido pe
+  JOIN pago            pg  ON pg.id_pedido         = pe.id_pedido
+  JOIN estado_pago     epa ON epa.id_estado_pago   = pg.id_estado_pago
+  JOIN estado_pedido   epe ON epe.id_estado_pedido = pe.id_estado_pedido
+  JOIN pedido_producto pp  ON pp.id_pedido         = pe.id_pedido
+ WHERE NOT EXISTS (SELECT 1 FROM productos p
+                    WHERE p.id_producto = pp.id_producto_mongo)
+   AND epa.estado_pago_nombre    = 'pagado'
+   AND epe.estado_pedido_nombre <> 'cancelado'
+ GROUP BY 1, 2;
+```
+
+**Ejemplo de una corrida concreta, la del 2026-09-02:** cuatro productos vivian
+solo en Mongo; tres de ellos tenian oferta en PostgreSQL, y dos --
+`barbuchin` y `crepas` -- tenian pedidos **pagados y no cancelados**. O sea que
+sus compradores pasan hoy el candado de `comprado()` y pueden publicar una
+resena ahora mismo. Esa resena entraria en `resena` de PostgreSQL, y el
+promedio de esos productos en Mongo seguiria en 0 despues de cualquier ETL.
+
+**El arreglo de fondo, y no es un parche.** El promedio tiene que calcularse
+desde `resena` **agrupando por `id_producto_mongo`**, con independencia de que
+ese producto tenga o no fila en `productos`. `resena.id_producto_mongo` es un
+`bigint` sin llave foranea a `productos` (se ve en `\d resena`), asi que
+agrupar por ahi es legal y cubre a los huerfanos igual que a los demas. Eso no
+cabe en la consulta de extraccion actual, que esta armada producto a producto
+desde el relacional: es **una etapa nueva del ETL**, que escriba los dos campos
+con un `updateOne` por cada `id_producto_mongo` que aparezca en `resena`, sea
+cual sea la base donde vive el producto.
+
+### La pregunta que te toca a vos, y no la decido yo
+
+**Deberia el backend escribir `resenas_promedio` y `resenas_total` en el
+documento de Mongo cada vez que se publica una resena?**
+
+Es lo unico que cerraria el agujero de verdad, y por eso la pregunta es tuya:
+`POST /resenas` ya existe y es tuya (`resenas.service.ts`), y hoy escribe
+**solo en PostgreSQL** -- un `INSERT INTO resena` y nada mas. El documento de
+Mongo no se entera, asi que la nota que ve el catalogo es la de la ultima
+corrida del ETL, no la de ahora.
+
+Las dos caras, para que las peses vos:
+
+- Si el backend los escribe, la nota del catalogo queda al dia al instante y
+  los productos huerfanos dejan de ser un caso aparte, porque el que escribe la
+  resena si sabe a que `id_producto_mongo` va. El costo es que el promedio pasa
+  a tener **dos escritores** -- el backend y el ETL -- y hay que decidir cual
+  manda cuando no coincidan, que es exactamente la clase de cosa que ya
+  reconoce `etl/extraer.sql` sobre el redondeo.
+- Si no los escribe, el promedio sigue teniendo un solo escritor, pero entonces
+  la etapa nueva del ETL del punto (b) es obligatoria y hay que decir cada
+  cuanto corre, porque la nota del catalogo va a ir siempre por detras.
+
+Lo que no es una opcion es dejarlo asi y que nadie lo sepa, que era la
+situacion antes de este apartado.
+
+## El ORDEN no viene con el filtro, y no es cosmetico
+
+Hoy `listar()` de `productos.service.ts` ordena **fijo por `_id` ascendente**
+(`Ctrl+F` por `.sort({ _id: 1 })`) y la paginacion por cursor **depende de ese
+orden**: el cursor es un `$gt` sobre `_id` (`Ctrl+F` por
+`filtro._id = { $gt: despuesDe };`, unas lineas mas arriba, en el mismo
+metodo). Las dos cosas son la misma cosa.
+
+Un "ordenar por mejor calificado" cambia el orden y por lo tanto **rompe el
+contrato del cursor**: con `sort({ resenas_promedio: -1, _id: 1 })`, un
+`despues_de` que es un `_id` ya no significa "lo que viene despues", porque lo
+que viene despues ya no va por `_id`. La pagina 2 repetiria productos o se
+saltaria otros, sin dar error.
+
+Por eso el orden se decide **aparte del filtro** y no se cuela en el mismo
+cambio. El filtro no toca el cursor y se puede escribir hoy. El orden hay que
+disenarlo con su cursor propio (el par `resenas_promedio` mas `_id`, que es
+justamente por lo que el indice lleva `_id` de ultimo desempate) y eso es otra
+conversacion.
+
+El indice `catalogo_rating` ya soporta las dos, el filtro y el orden, sin etapa
+`SORT`. Esta ahi para el dia que se quiera, no porque haga falta ahora.
+
+## No reutilices `validarPrecio` para la nota
+
+Tentador, porque `resenas_min` es un decimal igual que `precio_min`. No sirve,
+por dos razones y las dos muerden:
+
+**1. Su regex no tiene tope superior.** Es `/^\d+(\.\d{1,2})?$/`, asi que un
+`resenas_min=9` pasa la validacion entera. El filtro sale contra Mongo, ningun
+producto tiene un promedio de 9, y la respuesta es 200 con lista vacia. Otra
+vez el mismo fallo silencioso: la nota SI tiene un maximo y la validacion
+tiene que decirlo.
+
+**2. Devuelve `string`, no `number`.** `validarPrecio` devuelve el texto tal
+cual para que `Decimal128.fromString` lo reciba. Aqui hace falta un numero,
+asi que aunque el rango se validara bien habria que convertirlo, y una
+conversion implicita es justo lo que pone un `string` dentro de un `$gte` de
+un campo `double`.
+
+Lo que hace falta es un validador propio, en la linea de los que ya estan en
+`backend/src/helpers/validaciones-productos.ts`: opcional, decimal, **entre 1
+y 5 inclusive**, devuelve `number | null`, y lanza `ErrorValidacion` con el
+rango escrito en el mensaje cuando no cuadra. Un 400 que dice "la calificacion
+minima va de 1 a 5" se arregla solo; un 200 vacio hay que ir a buscarlo.
+
+---
+
+# BLOQUE 8 -- AVISO: dos asignadores distintos para el id de producto
+
+Esto **no lo pidio nadie y no es una tarea**. Salio de medir las dos bases
+mientras se preparaba otra cosa, y existe aunque no se toque nada mas. Es tu
+area, asi que va escrito como lo que es: los hechos medidos y la pregunta que
+te toca a vos decidir.
+
+## Los hechos, medidos contra el ambiente vivo
+
+**1.** `backend/src/services/vendedores/productos.service.ts` lo dice por
+escrito en el comentario de la clase (`Ctrl+F` por `Todo vive en MongoDB:`):
+
+> Todo vive en MongoDB: los productos ya no se registran en PostgreSQL (las
+> migraciones de productos fueron solo para el ETL que cargo los datos de
+> prueba). Por eso el id del producto y el de cada variante no salen de un
+> bigserial: se calculan como "el maximo que ya existe, mas 1"
+
+La funcion es `siguienteIdProducto` -- se busca con `Ctrl+F` por ese nombre y
+no por numero de linea, que en ese archivo se mueve -- y **lee el maximo de
+MONGO**: un `find().sort({ _id: -1 }).limit(1)` sobre `db.productos`.
+
+**2.** PostgreSQL sigue teniendo su `bigserial` en `productos.id_producto`, y
+esta vivo: cada `INSERT INTO productos` consume un numero de esa secuencia, sin
+enterarse de lo que Mongo haya repartido.
+
+**3.** La forma de la divergencia, que es lo que no caduca: **Mongo va por
+delante de la secuencia de PostgreSQL en exactamente tantos numeros como
+productos se hayan publicado desde el panel**, porque cada uno de esos gasta un
+`_id` de Mongo y ninguno del `bigserial`. El hueco solo puede crecer, y nada lo
+cierra solo. Lo mismo pasa con las variantes.
+
+Aqui se mide, y son las consultas que hay que correr antes de creerle un numero
+a este bloque:
+
+```sql
+-- PostgreSQL
+SELECT last_value FROM productos_id_producto_seq;
+SELECT last_value FROM productos_variantes_id_producto_variante_seq;
+SELECT count(*)   FROM productos;
+```
+
+```js
+// MongoDB
+db.productos.countDocuments({})
+db.productos.aggregate([{ $group: { _id: null, m: { $max: "$_id" } } }])
+db.productos.aggregate([{ $unwind: "$variantes" },
+    { $group: { _id: null, m: { $max: "$variantes.id_producto_variante" } } }])
+```
+
+**Ejemplo de una corrida concreta, la del 2026-09-02**, y vale como ejemplo de
+la forma, no como el estado de la base de hoy:
+
+```
+PostgreSQL   secuencia de productos en 102, de variantes en 202, 102 filas
+MongoDB      106 productos, max id_producto_variante 206
+             los _id 103, 104, 105 y 106 nacieron en el panel
+             (tecnokid, barbuchin, "PRUEBA candado propuesta", crepas)
+             y no tienen fila en PostgreSQL
+```
+
+## La consecuencia, que es lo que importa
+
+Los dos asignadores ya divergieron. El siguiente `INSERT INTO productos` de
+PostgreSQL entrega un numero que en Mongo **ya es de otro** -- en el ejemplo de
+arriba, el 103, que es tecnokid.
+
+Cuando el ETL corra despues de ese insert, `etl/cargar.js` escribe con
+
+```js
+replaceOne: { filter: { _id: doc._id }, replacement: doc, upsert: true }
+```
+
+y **machaca el documento del vendedor entero**, sin un solo error. `replaceOne`
+reemplaza el documento completo, asi que no queda ni un campo del original. El
+vendedor abre su producto y encuentra otro.
+
+**Y nada avisa.** `etl/cargar.js` tiene `deleteMany` sobre `db.categorias` y
+sobre `db.productos_eventos`, pero **no sobre `db.productos`**. Es a proposito
+y esta comentado alli mismo: un producto nacido en Mongo no tiene fila en
+PostgreSQL y el barrido lo borraria. Lo que ese comentario cubre es el
+BORRADO. El `replaceOne` por `_id` se cuela por debajo de esa proteccion:
+respeta al producto huerfano solo mientras nadie de PostgreSQL reclame su
+numero.
+
+## Esto no es la carrera que ya esta reconocida
+
+Ese mismo comentario de la clase reconoce un riesgo y lo acepta:
+
+> el riesgo aceptado es que dos creaciones en el mismo instante choquen y una
+> falle, recuperable con solo reintentar
+
+Esa carrera es aceptable tal como dice: falla ruidosamente y se arregla
+reintentando. La divergencia entre las dos bases es otra cosa y no esta
+reconocida en ningun lado: no falla, no se puede reintentar, y el dato que se
+pierde no vuelve.
+
+## Como lo esquiva el generador de lotes, y por que eso no es el arreglo
+
+`migrations/lote/generar_lote.sql` (ver su `README.md`) tiene que insertar
+productos en PostgreSQL, asi que se encuentra con esto de frente. Lo que hace
+es alinear las dos secuencias con `setval` contra el maximo de las DOS bases
+antes de insertar, usando los maximos de Mongo que se le pasan por variable.
+Deja un hueco de ids en PostgreSQL -- los numeros que van desde su propio
+maximo hasta el de Mongo no van a tener nunca una fila de este lado -- y ese
+hueco es correcto: son numeros que ya estan ocupados del otro lado.
+
+Eso es **un parche del lado de las migraciones**, no un arreglo. Solo protege
+a los inserts que pasan por ese archivo. Cualquier otro `INSERT INTO productos`
+(a mano, desde otra migracion, desde el backend si algun dia vuelve a escribir
+ahi) sigue entregando el id que le toque a la secuencia.
+
+## La pregunta que te toca decidir
+
+**De donde sale el id de un producto: de una sola fuente, o de dos?**
+
+Y si es de una sola, cual. No la contesto yo porque es tu area y las opciones
+tienen costos distintos segun como tengas armado el backend. Las que se ven
+desde aqui:
+
+- Que PostgreSQL siga siendo el asignador y el panel pida el id alla antes de
+  escribir en Mongo. Es la que respeta que PostgreSQL sea la fuente de verdad,
+  y es la que mas toca tu codigo.
+- Que Mongo sea el asignador y PostgreSQL deje de tener secuencia para
+  productos. Es la que menos toca el panel, y obliga a decidir que pasa con
+  las filas que la tabla `productos` ya tiene y con todo lo que cuelga de
+  ellas por `id_producto_mongo`.
+- Que haya un contador aparte, en una coleccion o en una tabla, que las dos
+  consulten. Es la unica que no depende de que el otro lado exista, y es la
+  que agrega una pieza nueva.
+
+Lo que no es una opcion es dejarlo como esta y no escribirlo en ningun sitio,
+que era la situacion antes de este bloque.

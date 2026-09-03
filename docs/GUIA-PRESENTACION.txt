@@ -2,18 +2,31 @@ GUIA DE PRESENTACION - MESH (Bases de Datos 2)
 Respuestas con archivo, linea y texto exacto para buscar con Ctrl+F.
 ====================================================================
 
-ACTUALIZADA EL 2026-08-31.
+ACTUALIZADA EL 2026-09-02.
 
 Se escribio para la Entrega 1 y sigue valiendo entera; lo que cambio
 desde entonces esta marcado con [AL DIA 30-AGO] y resumido al final, en
-la PARTE 9. Los conteos se remidieron contra una base recien creada con
-.\arrancar.ps1 -Reiniciar
+la PARTE 9. Lo que se agrego el 02-SEP va en la PARTE 10.
 
-OJO: los numeros de linea se volvieron a verificar el 31-AGO contra los
-archivos de verdad. Habia 20 desfasados -- arrancar.ps1 paso de 700 a
-1380 lineas -- y una cita apuntaba al archivo equivocado. Ya estan
-corregidos. Si volves a tocar el codigo, el TEXTO del Ctrl+F sigue
-sirviendo aunque el numero se mueva: busca por texto, no por linea.
+OJO: los numeros de linea se volvieron a verificar el 02-SEP contra los
+archivos de verdad, uno por uno y abriendo el archivo citado. Se movieron
+otra vez, y bastante: arrancar.ps1 paso de 1380 a mas de 1800 lineas,
+etl/extraer.sql de 348 a mas de 440 y etl/cargar.js de 389 a mas de 450.
+
+Y esta vez se movieron MIENTRAS se corregia esta guia, o sea que la
+leccion ya no es "hay que reverificar de vez en cuando": es que EL NUMERO
+DE LINEA NO ES UN DATO ESTABLE Y NO HAY QUE TRATARLO COMO SI LO FUERA.
+Por eso ahora cada cita de aqui abajo lleva SU TEXTO EXACTO, que es lo
+que de verdad la localiza, y el numero va detras como "aprox." y solo
+sirve para llegar mas rapido. Si el numero no cae donde dice, no esta
+roto nada: se busca el texto con Ctrl+F y aparece. Busca por texto,
+nunca por linea.
+
+Y la regla que este documento se aplica a si mismo: una cifra del
+conjunto de datos NO se escribe como "el estado de hoy". Desde el 02-SEP
+el catalogo puede crecer a voluntad con .\arrancar.ps1 -Productos N, asi
+que cualquier conteo que leas aqui es una MEDICION FECHADA, no la verdad
+de este momento. Las que quedan escritas dicen de cuando son.
 
 INDICE DE ESTA GUIA
   PARTE 0 - SI TE TRABAN CON UN "POR QUE"   <<< LEE ESTO PRIMERO
@@ -27,6 +40,13 @@ INDICE DE ESTA GUIA
   PARTE 6 - Sincronizacion (la pregunta trampa)
   PARTE 7 - Como probamos que usamos los dos modelos
   PARTE 8 - Extras: contenedores, transparencia, numeros
+  PARTE 9 - Lo que cambio despues de la Entrega 1  [30-AGO]
+  PARTE 10 - Lo que se agrego el 02-SEP
+           10.1 la calificacion embebida en el documento de Mongo
+           10.2 la pregunta incomoda de la resena, contestada
+           10.3 el indice catalogo_rating, y por que luce
+           10.4 el generador de lotes y los DOS asignadores de id
+           10.5 la demostracion de indices, ahora con volumen
 
 
 ####################################################################
@@ -39,11 +59,11 @@ consecuencias). No hay que improvisar ninguna: hay que saber DONDE ESTA.
 
 LOS DOS ARCHIVOS QUE HAY QUE TENER ABIERTOS EN LA PRESENTACION:
 
-  docs/base-de-datos.md   1155 lineas. El "por que" del MODELO.
+  docs/base-de-datos.md   El "por que" del MODELO. Pasa de las 1150 lineas.
                           Ctrl+F:  Registro de decisiones arquitectonicas
                           (linea 529). Ahi estan los ADR.
 
-  etl/README.md            619 lineas. El "por que" de LOS DOS ETL.
+  etl/README.md           El "por que" de LOS DOS ETL. Pasa de las 600.
 
 LOS CINCO ADR, EN UNA LINEA CADA UNO (por si solo da tiempo a eso):
 
@@ -53,12 +73,27 @@ LOS CINCO ADR, EN UNA LINEA CADA UNO (por si solo da tiempo a eso):
          FILTRAR. Medido: ningun producto llena el 100% de lo que su
          categoria ofrece, el promedio es 59%. Una tabla de columnas
          fijas quedaria casi toda nula.
+         Ese 59% es un PORCENTAJE de llenado, no un conteo: crece el
+         catalogo y sigue diciendo lo mismo. Se remidio el 02-SEP sobre
+         un catalogo de 406 documentos y dio 63%, con CERO productos al
+         100%. Sube el promedio y la conclusion no se mueve, que es lo
+         que importa: lo que sostiene el ADR no es el 59 ni el 63, es
+         que NINGUNO llega al 100 y que una tabla de columnas fijas
+         quedaria con mas de un tercio de huecos.
 
   ADR-2  NO migrar las ofertas: se quedan en PostgreSQL.
          El criterio que decide es CONSISTENCIA: el descuento de stock
          tiene que ser atomico y no vender dos veces la ultima unidad.
          Eso lo sostiene un SELECT ... FOR UPDATE. Medido: cero
          sobreventas sobre 555 ofertas.
+         Ese 555 es el tamano de la muestra de LA CORRIDA en que se
+         midio, no cuantas ofertas hay ahora. En la PARTE 7 vas a ver
+         556 para la comprobacion del kardex, que se remidio el 30-AGO,
+         y en docs/base-de-datos.md hay ademas un 552 de la primera
+         corrida sobre el conjunto recien cargado. Los tres numeros son
+         correctos y no se contradicen: cambian porque la base crecio
+         entre una corrida y otra. Lo que demuestra la prueba es el
+         CERO, no el total.
          OJO: el motivo NO es el volumen. Un documento aguanta 16 MB.
 
   ADR-3  Las imagenes, embebidas dentro de su VARIANTE (no del producto).
@@ -99,6 +134,13 @@ LA TRAMPA QUE MAS VAN A INTENTAR, Y LA RESPUESTA:
   serlo. Ese enlace lo sostiene la aplicacion. Y aparece un ETL que hay
   que mantener. Esta escrito en las consecuencias del ADR-1.
 
+  Y hay un segundo ejemplo, mejor que ese porque no es teorico y lo
+  destapamos nosotros: se PIERDE el asignador unico de identidad. Con los
+  productos partidos en dos motores acabaron existiendo DOS repartidores
+  de id_producto que no se hablan, y ya habian divergido. Esta contado
+  entero en la PARTE 10.4, y es la mejor respuesta que tenemos a esta
+  pregunta: el que decidio migrar tambien se llevo esto, y lo sabemos.
+
 DONDE ESTA CADA "POR QUE", POR TEMA:
 
   de fotos a eventos, y por que          etl/README.md, "De fotos a eventos"
@@ -119,6 +161,12 @@ DONDE ESTA CADA "POR QUE", POR TEMA:
   por que los indices que hay, y no mas  mongo/001_productos.js (comentarios)
                                          y .\mongo\demostracion_indices.ps1,
                                          que lo MIDE delante de quien mire
+  por que la nota va DENTRO del producto mongo/002_resenas.js, y aqui en 10.1
+  por que catalogo_rating no lleva SORT  mongo/002_resenas.js, Ctrl+F:
+                                         "TERCERO resenas_promedio"
+  por que existe el generador de lotes   migrations/lote/generar_lote.sql,
+                                         Ctrl+F: "PASO 1. Alinear las
+                                         secuencias con MongoDB"
 
 
 ####################################################################
@@ -146,7 +194,7 @@ Que quiere decir:
   (EVENTOS)           lo que cambio. El primero es la creacion y lleva
                       todo; los siguientes solo el campo tocado.
 
-  Ejemplo real, producto 19 (la camisa de lino):
+  Ejemplo real, EL PRODUCTO 51, "Camisa de lino manga larga":
     evento 1  12 ene  creacion       nombre + descripcion + variantes
     evento 2   4 mar  modificacion   solo la descripcion
     evento 3  12 mar  modificacion   solo las variantes
@@ -156,15 +204,34 @@ Que quiere decir:
   Si tomaras solo la creacion + la ultima modificacion, tendrias el
   nombre correcto pero la descripcion vieja. Ese es el punto.
 
+  OJO, ESTO SE CORRIGIO EL 02-SEP: la guia decia "producto 19" y el 19
+  es otra cosa, unos audifonos con UN SOLO evento. Si abrias el 19
+  delante del profesor no salia nada de lo de arriba. El de la camisa es
+  el 51. Antes de ensenarlo en vivo, compruebalo, que es una linea:
+
+    db.productos_eventos.find({ id_producto: 51 }).sort({ numero: 1 })
+
+  El id sale del conjunto de datos y no se mueve con el generador de
+  lotes (10.4), que solo agrega por encima del ultimo id. Pero si algun
+  dia se rehace el conjunto de datos, este numero puede cambiar otra vez:
+  el que manda es el producto que tenga cuatro eventos, no el numero.
+
 
 --------------------------------------------------------------------
 1.2  LOS ARCHIVOS (carpeta etl/)
 --------------------------------------------------------------------
-  extraer.sql             348 lineas   E - saca un JSON por producto
-  extraer_categorias.sql   66 lineas   E - saca la paleta de categorias
-  cargar.js               389 lineas   T y L - transforma y escribe
-  reconstruir.js           76 lineas   la consulta de "como estaba tal dia"
-  correr.sh                52 lineas   los encadena (solo Linux/Mac)
+  extraer.sql             E - saca un JSON por producto
+  extraer_categorias.sql  E - saca la paleta de categorias
+  cargar.js               T y L - transforma y escribe
+  reconstruir.js          la consulta de "como estaba tal dia"
+  correr.sh               los encadena (solo Linux/Mac)
+
+  El largo de cada uno NO se pone aqui a proposito: son los archivos que
+  mas se mueven del repositorio y cualquier numero que escribamos caduca
+  el mismo dia. Lo que hay que saber decir es lo de abajo.
+
+  Y los dos del SEGUNDO ETL, el de Neo4j, que viven en la misma carpeta:
+  extraer_grafo.sql y cargar_grafo.sh. Van explicados en 1.9 y en 9.3.
 
 Dato para decir: NO HAY NADA QUE INSTALAR. PostgreSQL arma el JSON el
 solo con jsonb_build_object, y mongosh ya viene dentro del contenedor
@@ -174,9 +241,12 @@ de Mongo. El ETL no tiene dependencias.
 --------------------------------------------------------------------
 1.3  EXTRACCION  ->  archivo etl/extraer.sql
 --------------------------------------------------------------------
-Ctrl+F:   jsonb_build_object          (linea 71 y 85)
-Ctrl+F:   CASE td.tipo_dato           (linea 186)
-Ctrl+F:   WHEN 'lista'                (linea 187)
+Ctrl+F:   SELECT jsonb_build_object(          aprox. 71
+Ctrl+F:   'categoria', jsonb_build_object(    aprox. 85
+Ctrl+F:   'valor',  CASE td.tipo_dato         aprox. 288
+          Esa es la del PRODUCTO. La misma estructura se repite mas
+          abajo para las caracteristicas de la VARIANTE, asi que si
+          buscas solo "CASE td.tipo_dato" vas a dar con las dos.
 
 Que decir: "la extraccion es SQL puro. PostgreSQL nos entrega el
 producto YA con forma de documento, no filas sueltas."
@@ -184,7 +254,7 @@ producto YA con forma de documento, no filas sueltas."
 Y OJO CON ESTO, es lo mas tecnico y lo que mas puntos da:
 LA CONVERSION DE TIPOS SE HACE EN EL SQL, NO EN JAVASCRIPT.
 
-  extraer.sql, linea 186 en adelante:
+  extraer.sql, Ctrl+F: 'valor',  CASE td.tipo_dato   (aprox. 288)
 
       'valor',  CASE td.tipo_dato
           WHEN 'lista'    THEN jsonb_agg(to_jsonb(pc.valor) ...)
@@ -213,23 +283,23 @@ LA CONVERSION DE TIPOS SE HACE EN EL SQL, NO EN JAVASCRIPT.
 --------------------------------------------------------------------
 Son tres funciones que se llaman en cascada. Explicalas en este orden:
 
-  Ctrl+F:   function vigenteEn        (linea 73)
-  Ctrl+F:   function estadoEn         (linea 92)
-  Ctrl+F:   function diferencias      (linea 152)
-  Ctrl+F:   function eventosDe        (linea 162)
+  Ctrl+F:   function vigenteEn        aprox. 75
+  Ctrl+F:   function estadoEn         aprox. 94
+  Ctrl+F:   function diferencias      aprox. 154
+  Ctrl+F:   function eventosDe        aprox. 164
 
 
-  a) vigenteEn(filas, t)      linea 73
+  a) vigenteEn(filas, t)
      "de todas las filas de historial, dame la que regia en la fecha t"
      O sea: la ultima con fecha <= t. Nada mas.
 
-  b) estadoEn(producto, t)    linea 92
+  b) estadoEn(producto, t)
      Arma el estado COMPLETO del producto en la fecha t.
      Dos detalles que puedes citar:
        - una variante que nacio despues de t NO entra
        - se agrupa por id para quedarse con la ultima version de cada una
 
-  c) diferencias(antes, ahora)   linea 152
+  c) diferencias(antes, ahora)
      Compara dos estados campo por campo:
 
          if (JSON.stringify(antes[campo]) !== JSON.stringify(ahora[campo]))
@@ -242,9 +312,9 @@ Son tres funciones que se llaman en cascada. Explicalas en este orden:
      superficial. Si guardaramos media categoria, al fusionar borraria
      la otra mitad.
 
-  d) eventosDe(producto)      linea 162   <- el algoritmo completo
+  d) eventosDe(producto)   <- el algoritmo completo
 
-     Ctrl+F:  const orden = [...new Set(fechas)]     (linea 177)
+     Ctrl+F:  const orden = [...new Set(fechas)]     aprox. 179
 
      Pasos, en orden:
        1. calcula el nacimiento (primera fila de historial)
@@ -254,12 +324,12 @@ Son tres funciones que se llaman en cascada. Explicalas en este orden:
           new Set y las ordena
        4. para cada fecha llama a estadoEn() y compara con la anterior
        5. la PRIMERA genera operacion 'creacion' con el campo datos
-          Ctrl+F:  operacion: 'creacion'      (linea 195)
+          Ctrl+F:  operacion: 'creacion'      aprox. 197
        6. las demas generan 'modificacion' con el campo cambios
-          Ctrl+F:  operacion: 'modificacion'  (linea 202)
+          Ctrl+F:  operacion: 'modificacion'  aprox. 204
 
      UN DETALLE FINO QUE IMPRESIONA:
-     Ctrl+F:  if (Object.keys(cambios).length === 0) continue;   (linea 201)
+     Ctrl+F:  if (Object.keys(cambios).length === 0) continue;   aprox. 203
      Si dos historiales coinciden en fecha y describen el mismo estado,
      el evento saldria VACIO. No solo no aporta nada: ademas correria la
      numeracion de todos los que vienen despues. Por eso se salta.
@@ -269,21 +339,24 @@ Son tres funciones que se llaman en cascada. Explicalas en este orden:
      el historial de sus variantes, y renombrar una variante no escribe
      nada en el del producto. El evento no sale de una tabla: sale de
      juntar las fechas de las dos y rearmar el estado en cada una.
-     (Esta explicado en el comentario de cargar.js linea 68.)
+     (Esta explicado en el comentario de cabecera de cargar.js.
+      Ctrl+F:  el evento no sale de una tabla     aprox. 70)
 
 
 --------------------------------------------------------------------
 1.5  CARGA  ->  etl/cargar.js, parte final
 --------------------------------------------------------------------
-  Ctrl+F:   replaceOne: { filter:      (lineas 317, 329, 361)
-  Ctrl+F:   bulkWrite                  (lineas 368, 369, 370)
-  Ctrl+F:   deleteMany                 (lineas 336, 380)
+  Ctrl+F:   replaceOne: { filter:      sale TRES veces, una por coleccion
+  Ctrl+F:   bulkWrite                  las tres van juntas, al final
+  Ctrl+F:   deleteMany                 sale DOS veces: los eventos que
+                                       sobran y las categorias borradas
 
   Se escribe con replaceOne + upsert: true, en bulkWrite (una sola ida
   a la base por coleccion, no una escritura por producto).
 
   POR QUE replaceOne Y NO updateOne CON $set:
-  el comentario esta en el codigo, linea 314:
+  el comentario esta en el codigo.
+  Ctrl+F:  el documento se deriva entero de     (aprox. 382)
       "el documento se deriva entero de PostgreSQL, asi que un campo que
        ya no exista alla tampoco debe quedar aqui"
   Con $set, un campo borrado en el origen se quedaria para siempre en
@@ -291,12 +364,16 @@ Son tres funciones que se llaman en cascada. Explicalas en este orden:
 
   POR QUE CORRERLO DOS VECES NO DUPLICA (te lo van a preguntar):
   los _id NO los genera Mongo, se CALCULAN.
-      producto -> _id = id_producto            (ej. 19)
-      evento   -> _id = id_producto + "-" + n  (ej. "19-3")
+      producto -> _id = id_producto            (ej. 51)
+      evento   -> _id = id_producto + "-" + n  (ej. "51-3")
+  Los ejemplos son el 51 y no el 19 por lo que dice 1.1: el 19 tiene un
+  solo evento, asi que un "19-3" no existe en la base y no se puede
+  ensenar.
   Como el _id es el mismo, el upsert cae siempre sobre el mismo
   documento: lo actualiza, no crea otro. Eso se llama idempotente.
 
-  Y EL deleteMany DE LA LINEA 336, QUE ES EL DETALLE FINO:
+  Y EL deleteMany DE LOS EVENTOS, QUE ES EL DETALLE FINO
+  Ctrl+F:  db.productos_eventos.deleteMany     (aprox. 404)
       db.productos_eventos.deleteMany({
           id_producto: producto.id_producto,
           numero: { $gt: eventos.length }
@@ -321,10 +398,24 @@ Y NO ES TEORICO: paso de verdad en pruebas, desaparecieron dos productos.
 Por eso puede haber mas documentos en Mongo que filas en PostgreSQL, y
 esta bien asi.
 
-[AL DIA 30-AGO] Sobre una base RECIEN CREADA son 102 y 102: nadie ha
+[AL DIA 30-AGO] Sobre una base RECIEN CREADA eran 102 y 102: nadie habia
 publicado nada desde el panel todavia. El 107 de antes venia de una base
 ya usada. Los dos numeros son correctos; lo que hay que saber decir es
 POR QUE pueden diferir, no cual es la cifra.
+
+[AL DIA 02-SEP] Y desde el 02-SEP hay una tercera fuente de diferencia,
+el generador de lotes de 10.4, asi que la cifra caduca todavia mas rapido.
+NO la lleves memorizada. Si el profesor la pide, se cuenta delante de el,
+que ademas queda mejor:
+
+  Mongo       docker exec mesh-mongo mongosh ... --eval
+              'db.productos.countDocuments({})'
+  PostgreSQL  docker exec mesh-postgres psql ... -c
+              'SELECT count(*) FROM productos;'
+
+La linea completa con usuario y contrasena la arma arrancar.ps1 en su
+funcion Comando-Mongo, o mas facil todavia: el paso 13 del arranque
+imprime las dos cuentas de cada coleccion, una al lado de la otra.
 
 
 --------------------------------------------------------------------
@@ -340,11 +431,10 @@ DONDE VIVE:
 QUIEN LO LLAMA:
   arrancar.ps1, el script de arranque del proyecto.
 
-  Ctrl+F:  function Correr-Etl      arrancar.ps1:601   <- la funcion
-  Ctrl+F:  Correr-Etl               arrancar.ps1:1026   <- la llamada
-  Ctrl+F:  [switch]$Etl             arrancar.ps1:40    <- el flag
-
-  La decision, arrancar.ps1:1023
+  Ctrl+F:  function Correr-Etl {           aprox. 814   <- la funcion
+  Ctrl+F:  if (-not $Etl -and $alDia) {    aprox. 1469  <- la decision
+           y justo debajo, en el else, esta la unica llamada a Correr-Etl
+  Ctrl+F:  [switch]$Etl,                   aprox. 129   <- el flag
 
       if (-not $Etl -and $alDia) {
           Ok "Ya cargado (...). Para volver a migrarlo: .\arrancar.ps1 -Etl"
@@ -355,16 +445,18 @@ QUIEN LO LLAMA:
   O sea: corre si lo pediste con -Etl, o si NO esta al dia.
 
   COMO DECIDE SI ESTA AL DIA ($alDia), dos comprobaciones:
-    arrancar.ps1:983-1001  compara el numero de documentos de cada
-                          coleccion contra su tabla en PostgreSQL
-    arrancar.ps1:1012-1020  compara el id mas ALTO dentro del tramo del
-                          ETL en las dos bases
+    Ctrl+F:  foreach ($col in $COLECCIONES_ETL)     aprox. 1430
+             compara el numero de documentos de cada coleccion contra
+             su tabla en PostgreSQL
+    Ctrl+F:  $topEnPostgres =                       aprox. 1458
+             compara el id mas ALTO dentro del tramo del ETL en las
+             dos bases
 
   Lo segundo es fino: si mirara el maximo absoluto de Mongo, un producto
   publicado desde el panel (id mas alto, sin fila en PostgreSQL) lo haria
   creerse desfasado y volveria a migrar en cada arranque.
 
-COMO CORRE, PASO A PASO (funcion Correr-Etl, lineas 601-660):
+COMO CORRE, PASO A PASO (dentro de la funcion Correr-Etl):
    1. docker cp del .sql al contenedor de PostgreSQL
    2. docker exec ... psql -f /tmp/extraer.sql > /tmp/mesh-productos.json
    3. docker cp del .json de vuelta al host
@@ -427,8 +519,11 @@ R: Tampoco esta en los eventos, por la misma razon: los historiales de
    PostgreSQL no guardan estado, vive solo en la fila viva.
 
 P: Cuanto tarda?
-R: Es una pasada por producto y tres bulkWrite. Sobre 102 productos es
-   inmediato.
+R: Es una pasada por producto y tres bulkWrite, o sea lineal en el numero
+   de productos y con TRES idas a la base en total, no una por producto.
+   Con el catalogo del conjunto de datos es inmediato; con un lote de
+   cientos generado por -Productos sigue siendo cuestion de segundos,
+   porque lo que crece es el bucle en memoria y no el numero de viajes.
 
 
 --------------------------------------------------------------------
@@ -440,27 +535,40 @@ saber donde cae, porque la pregunta natural despues de explicarlo es
 
   .\arrancar.ps1              levanta todo sin borrar nada
   .\arrancar.ps1 -Reiniciar   borra las 4 bases y empieza de cero
+  .\arrancar.ps1 -Productos N genera N productos mas encima de los que
+                              haya, sin borrar nada. Ver 10.4.
 
-LOS PASOS, EN ORDEN (cada uno imprime su titulo en pantalla):
+LOS PASOS, EN ORDEN. Cada uno imprime su titulo en pantalla, y ese titulo
+es el Ctrl+F: en arrancar.ps1 se busca  Paso "<el titulo>"  entre comillas
+y aparece siempre, se haya movido lo que se haya movido. Los numeros son
+aproximados y del 02-SEP:
 
-   1. Revisando el archivo .env            arrancar.ps1:339
-   2. Generando la configuracion de pgAdmin  :413
-   3. Revisando Docker                       :455
-   4. Levantando contenedores                :499
-   5. Esperando a PostgreSQL                 :511
-   6. Sincronizando la contrasena            :526
-   7. Corriendo migraciones del esquema      :826   migrations/*.sql
-   8. Corriendo conjuntos de datos           :860   migrations/datos/*.sql
-   9. Esperando a MongoDB                    :884
-  10. Comprobando el acceso                  :896
-  11. Creando colecciones                    :924   mongo/001_productos.js
-  12. Catalogo en MongoDB                    :979   <-- AQUI VA EL ETL
-  13. Comprobando que el catalogo quedo cargado :1041
-  14. Esperando a Redis                      :1131
-  15. Esperando a Neo4j                      :1149
-  16. Grafo de resenas en Neo4j              :1244  <-- EL SEGUNDO ETL
-  17. Comprobando que el grafo quedo cargado :1306
-  18. Listo                                  :1346
+   1. Revisando el archivo .env              aprox. 552
+   2. Generando la configuracion de pgAdmin  aprox. 626
+   3. Revisando Docker                       aprox. 668
+   4. Levantando contenedores                aprox. 712
+   5. Esperando a PostgreSQL                 aprox. 724
+   6. Sincronizando la contrasena            aprox. 739
+   7. Corriendo migraciones del esquema      aprox. 1039  migrations/*.sql
+   8. Corriendo conjuntos de datos           aprox. 1073  migrations/datos/
+   8b. Generando un lote de N productos      aprox. 1192  <-- SOLO con
+                                                   -Productos. Ver 10.4.
+   9. Esperando a MongoDB                    aprox. 1330
+  10. Comprobando el acceso                  aprox. 1342
+  11. Creando colecciones                    aprox. 1370  corre TODOS los
+                                                   mongo/*.js, o sea
+                                                   001_productos.js Y
+                                                   002_resenas.js
+  12. Catalogo en MongoDB                    aprox. 1425  <-- AQUI VA EL ETL
+  13. Comprobando que el catalogo quedo cargado  aprox. 1487
+  14. Esperando a Redis                      aprox. 1577
+  15. Esperando a Neo4j                      aprox. 1595
+  16. Grafo de resenas en Neo4j              aprox. 1690  <-- EL SEGUNDO ETL
+  17. Comprobando que el grafo quedo cargado aprox. 1752
+  18. Listo                                  aprox. 1792
+
+  El 8b es nuevo y su sitio en la lista no es casualidad: va DESPUES de
+  los conjuntos de datos y ANTES del ETL, y esta explicado en 10.4.
 
 LA FRASE QUE RESUME ESTO:
 "PostgreSQL es la fuente de verdad. Mongo y Neo4j son bases DERIVADAS,
@@ -469,16 +577,17 @@ Por eso hay dos ETL, no uno."
 
 HAY DOS ETL, Y ES LO QUE MAS SE OLVIDA DECIR:
 
-  ETL 1 -> MongoDB   funcion Correr-Etl        arrancar.ps1:601-660
+  ETL 1 -> MongoDB   funcion Correr-Etl
            el catalogo: productos, categorias y sus eventos
            lo hace etl/cargar.js
+           Ctrl+F:  function Correr-Etl {              aprox. 814
 
-  ETL 2 -> Neo4j     funcion Correr-EtlGrafo   arrancar.ps1:688-774
+  ETL 2 -> Neo4j     funcion Correr-EtlGrafo
            el grafo de resenas para detectar fraude
            lo hace etl/cargar_grafo.sh, y es de la Entrega 2
-
-  Ctrl+F:  function Correr-EtlGrafo      arrancar.ps1:688
-  Ctrl+F:  Correr-EtlGrafo               arrancar.ps1:1279   <- la llamada
+           Ctrl+F:  function Correr-EtlGrafo($limpiar) {   aprox. 901
+           Ctrl+F:  Correr-EtlGrafo $ReiniciarGrafo        aprox. 1725
+                    <- la llamada, la unica que hay
 
   La bandera -Etl dispara LOS DOS a la vez, a proposito. El comentario
   del principio del script lo explica: quien la teclea no tiene por que
@@ -497,10 +606,10 @@ CADA ETL SE COMPRUEBA DESPUES DE CORRERLO (pasos 13 y 17), Y NO ES ADORNO:
   El script cuenta las colecciones de Mongo y los nodos de Neo4j y los
   compara contra PostgreSQL. Si no cuadran, TERMINA EN ERROR.
   Antes solo miraba que no estuviera vacio, y con eso un ETL que cargara
-  3 productos de 102 pasaba en verde.
+  tres productos del catalogo entero pasaba en verde.
 
 QUE HACE -Reiniciar, EXACTAMENTE:
-  Ctrl+F:  docker compose down -v        arrancar.ps1:488
+  Ctrl+F:  docker compose down -v        aprox. 701
   Borra los VOLUMENES, o sea las cuatro bases enteras, y despues las
   reconstruye con los pasos de arriba. No se deshace: se pierde todo lo
   hecho a mano y se vuelve a la semilla fija.
@@ -612,10 +721,14 @@ LAS CUATRO DE SALUD (sirven para ensenar que las 4 bases responden):
 PARTE 2 - INDICE COMPUESTO
 ####################################################################
 Archivo: mongo/001_productos.js
-  Ctrl+F:  catalogo_categoria             (linea 123)
-  Ctrl+F:  catalogo_precio                (linea 136)
-  Ctrl+F:  eventos_por_producto_fecha     (linea 153)
-  Ctrl+F:  categorias_por_nombre          (linea 159)  <- este es simple
+  Ctrl+F:  name: 'catalogo_categoria'          aprox. 139
+  Ctrl+F:  name: 'catalogo_precio'             aprox. 152
+  Ctrl+F:  name: 'eventos_por_producto_fecha'  aprox. 169
+  Ctrl+F:  name: 'categorias_por_nombre'       aprox. 175  <- este es simple
+
+Archivo: mongo/002_resenas.js   <- el cuarto compuesto, del 02-SEP
+  Ctrl+F:  name: 'catalogo_rating'             aprox. 190
+  Es el mejor de los cuatro para defender y esta contado entero en 10.3.
 
   db.productos.createIndex(
       { 'categoria.id_categoria': 1, estado: 1, _id: 1 },
@@ -635,6 +748,15 @@ base, igual que un CREATE INDEX vive en la migracion y no en el INSERT.
 
 EL DE EVENTOS sirve para las dos primeras etapas del pipeline a la vez:
 filtrar por id_producto y recorrer por fecha en orden.
+
+Y SI PREGUNTAN POR QUE catalogo_precio NO LLEVA EL _id AL FINAL, que es
+la pregunta natural despues de explicar catalogo_categoria: porque detras
+de un RANGO un indice ya no entrega las claves ordenadas por lo que viene
+despues. El rango cae sobre precio_desde y el orden sobre _id, dos campos
+distintos, asi que el orden hay que pagarlo aparte. Esa renuncia es la
+que catalogo_rating SI se ahorra, y por eso los dos se explican juntos
+en 10.3. Comparar esos dos indices es lo que demuestra que se entendio
+la regla, y es de lo mas barato que hay para ganar puntos aqui.
 
 
 ####################################################################
@@ -669,7 +791,8 @@ EL CRUCE EN VIVO:
 ####################################################################
 PARTE 4 - QUE GUARDAMOS EN MONGO Y POR QUE
 ####################################################################
-Tres colecciones (mongo/001_productos.js:78-82):
+Tres colecciones. En mongo/001_productos.js,
+Ctrl+F:  const COLECCIONES =      (aprox. 74):
   productos          categoria, variantes, imagenes y caracteristicas embebidas
   categorias         la paleta: que caracteristicas ofrece cada categoria
   productos_eventos  el historial
@@ -684,9 +807,14 @@ conjunto, volumen, tasa de cambio):
   Ofertas     NO van     precio, stock y estado cambian en cada venta
   Resenas     NO van     volumen sin techo, y cada una reescribiria el
                          producto entero
+  La NOTA     SI va      [02-SEP] los dos numeros agregados de la resena
+  de resenas             -- resenas_promedio y resenas_total -- si estan
+                         embebidos, aunque las resenas no. No es una
+                         contradiccion y hay que saber decir por que:
+                         ver 10.1.
 
 PRUEBA EN CODIGO DE QUE LAS OFERTAS NO DEBEN ESTAR:
-  Ctrl+F:  ofertas          mongo/001_productos.js:180
+  Ctrl+F:  indexOf('ofertas')      mongo/001_productos.js, aprox. 180
   Si quedo una coleccion 'ofertas' de una version anterior, la BORRA.
   Comentario: "una copia vieja aqui es peor que no tenerla, porque parece
   al dia".
@@ -694,7 +822,10 @@ PRUEBA EN CODIGO DE QUE LAS OFERTAS NO DEBEN ESTAR:
 POR QUE MONGO (el dato que convence):
   Medido sobre el conjunto: ningun producto llena el 100% de lo que su
   categoria ofrece, y el promedio es 59%. Una tabla de columnas fijas
-  quedaria mayoritariamente nula. Y en el relacional esos atributos caian
+  quedaria mayoritariamente nula.
+  Remedido el 02-SEP sobre 406 documentos: 63% de promedio y SIGUE sin
+  haber un solo producto al 100%. La cifra se mueve con el catalogo; el
+  argumento no, porque el argumento es el CERO al 100%. Y en el relacional esos atributos caian
   en 'descripcion' como texto libre, o sea que NO SE PODIA FILTRAR POR
   ATRIBUTO, que es funcionalidad que el enunciado pide.
 
@@ -732,7 +863,8 @@ RESPUESTA CORRECTA. El diseno hace que no haga falta. Tres razones:
     No hay nada que sincronizar porque no hay dos escrituras. Las tablas
     productos de PostgreSQL son el ORIGEN de la migracion, no un espejo.
 
-(2) LO UNICO QUE ES COPIA SON CINCO NUMEROS, y se recalculan EN EL MISMO
+(2) LO UNICO QUE ES COPIA SON SIETE NUMEROS -- eran cinco hasta el
+    02-SEP -- y los cinco del precio y el stock se recalculan EN EL MISMO
     MOMENTO, no en dos minutos:
     Ctrl+F:  recalcularCamposCalculados
       services/compradores/pedidos.service.ts:606   tras comprar
@@ -742,16 +874,28 @@ RESPUESTA CORRECTA. El diseno hace que no haga falta. Tres razones:
     Los cinco: precio_tienda, precio_desde, stock_tienda, stock_total,
     total_ofertas.
 
+    LOS OTROS DOS SON DEL 02-SEP y se comportan distinto, asi que hay que
+    decirlo aparte y no meterlos en la misma frase: resenas_promedio y
+    resenas_total los escribe EL ETL, no la aplicacion, asi que NO se
+    recalculan al instante. Una resena escrita hace un minuto no mueve
+    esa nota hasta la siguiente corrida del ETL. Eso es una copia que
+    envejece, esta asumido, y la explicacion completa esta en 10.1.
+
 (3) EL ETL SOLO RECONSTRUYE DESDE CERO
-      arrancar.ps1:983-1001   la lista de colecciones que compara
-      arrancar.ps1:1026       dispara Correr-Etl
+      Ctrl+F:  $COLECCIONES_ETL = @(        la lista que compara
+      Ctrl+F:  if (-not $Etl -and $alDia) {  la que dispara Correr-Etl
     Solo si alguna coleccion tiene MENOS documentos que su tabla.
     A mano:  .\arrancar.ps1 -Etl
 
 SI PREGUNTAN "Y SI NO COINCIDEN":
-  Que no coincidan es LO NORMAL Y ESPERADO. Hoy: 102 en PostgreSQL, 107 en
-  Mongo. Los cinco de mas se crearon desde el panel y viven solo en Mongo.
-  No es un desajuste: es la prueba de que la migracion se completo.
+  Que no coincidan es LO NORMAL Y ESPERADO, y el mecanismo es el que hay
+  que decir, no la cifra: Mongo tiene los productos que vinieron de
+  PostgreSQL MAS los que nacieron en el panel del vendedor, que no tienen
+  fila en PostgreSQL y nunca la van a tener. Por eso Mongo va por encima,
+  y esa diferencia es la prueba de que la migracion se completo, no un
+  desajuste. Si te piden el numero, se cuenta ahi mismo con las dos
+  consultas de 1.6 -- o mas facil, se ensena la salida del paso 13 del
+  arranque, que las imprime juntas.
 
 SI PREGUNTAN POR EL RIESGO REAL:
   Lo asumimos y esta documentado. Si el recalculo de los cinco numeros
@@ -820,6 +964,28 @@ TRANSPARENCIA DE LOS DATOS
   El frontend nunca sabe de que base salio un dato.
 
 NUMEROS PARA CITAR   [AL DIA 30-AGO, contra una base recien creada]
+
+  ANTES DE LEER ESTA LISTA, LEE ESTO. Estas cifras son una MEDICION
+  FECHADA del 30-AGO sobre una base recien creada con -Reiniciar. NO son
+  el estado de la base que vas a tener abierta en la presentacion, y se
+  quedan escritas asi a proposito: son las que respaldan lo que se
+  afirmo, y cambiarlas cada vez que la base se mueve seria perseguir un
+  numero para siempre. Se citan como "el 30-AGO medimos", nunca como
+  "ahora hay".
+
+  Y desde el 02-SEP hay UNA razon nueva y grande para que no cuadren: el
+  generador de lotes (10.4). Con .\arrancar.ps1 -Productos N el catalogo
+  crece a voluntad, y con el crecen productos, variantes, ofertas y
+  eventos. Todo lo demas de esta lista se queda quieto.
+
+  Cuales se mueven con -Productos y cuales no:
+    SE MUEVEN   productos, documentos en Mongo, eventos, variantes,
+                ofertas
+    NO SE MUEVEN  las 42 tablas, las 23 categorias, las cuentas, las
+                resenas, los comentarios, los likes y las paginas del
+                informe
+
+  Las cifras del 30-AGO:
   42 tablas de 42 del diagrama: la 011 agrego Resena, Comentario y Likes,
      asi que YA NO FALTA NINGUNA. (Antes decia 36 de 39.)
   102 productos en PostgreSQL / 102 documentos en Mongo / 112 eventos
@@ -831,10 +997,30 @@ NUMEROS PARA CITAR   [AL DIA 30-AGO, contra una base recien creada]
   0 descuadres de stock sobre 556 ofertas
   60 paginas el informe
 
+  DE LAS DE ARRIBA, LAS DOS QUE SIGUEN VALIENDO PASE LO QUE PASE, porque
+  no son un conteo del momento sino una medicion que demuestra algo:
+    - el 59% de llenado promedio de caracteristicas, que es lo que
+      sostiene el ADR-1. Un producto no llena ni dos tercios de lo que su
+      categoria ofrece. Remedido el 02-SEP sobre 406 documentos: 63%, y
+      sigue sin haber UN SOLO producto al 100%. Ver PARTE 4.
+    - los 0 descuadres de stock, que es lo que sostiene la parte c de la
+      PARTE 7. El "sobre 556 ofertas" dice el tamano de la muestra de esa
+      corrida, no cuantas ofertas hay hoy.
+
   OJO AL CITAR: el informe de la Entrega 1 dice 8 cuentas y 552 ofertas.
-  La base de hoy dice 11 y 556 -- son las 3 cuentas del anillo de fraude
-  de la Entrega 2 y sus 4 ofertas. No es un error del informe ni de la
-  base: es que el conjunto de datos crecio despues de entregarlo.
+  La base del 30-AGO decia 11 y 556 -- son las 3 cuentas del anillo de
+  fraude de la Entrega 2 y sus 4 ofertas. No es un error del informe ni
+  de la base: es que el conjunto de datos crecio despues de entregarlo.
+  Esa misma frase sirve para cualquier numero que no cuadre en vivo, y es
+  la respuesta correcta: se explica POR QUE crecio, no se discute la
+  cifra.
+
+  SI TE PIDEN EL NUMERO DE AHORA, se cuenta delante del profesor. Es una
+  linea y queda mejor que recitarlo:
+    docker exec mesh-postgres psql -U <DB_USER> -d <DB_NAME> -qtAX \
+      -c "SELECT count(*) FROM productos;"
+  y la de Mongo esta en 1.6. La regla de este proyecto es que un numero
+  que se puede contar con una consulta no se escribe a mano.
 
 
 ####################################################################
@@ -847,24 +1033,42 @@ preguntan por algo que la guia vieja no cubre.
 9.0  LA PREGUNTA QUE YA FALLAMOS UNA VEZ
 --------------------------------------------------------------------
 P: Que archivo pasa los id de producto a _id en Mongo?
-R: etl/cargar.js, linea 215.
+R: etl/cargar.js, dentro de la funcion documentoDe.
 
-   Ctrl+F:  _id:         producto.id_producto     (cargar.js:215)
-   Ctrl+F:  _id:         producto.id_producto + '-' + numero   (:188)
-   Ctrl+F:  _id                                   (:352, categorias)
+   Ctrl+F:  function documentoDe            cargar.js, aprox. 215
+            ahi dentro esta  _id: producto.id_producto
+   Ctrl+F:  producto.id_producto + '-' + numero   aprox. 190
+            el _id del evento
+   Ctrl+F:  _id:                      categoria.id_categoria
+            el de las categorias, mas abajo en el mismo archivo
 
    El reparto exacto, que es lo que hay que decir:
      etl/extraer.sql          saca las filas de PostgreSQL, con su
                               id_producto. NO menciona _id.
-     etl/cargar.js:215        AQUI se hace el mapeo id_producto -> _id
+     etl/cargar.js            AQUI se hace el mapeo id_producto -> _id,
+                              dentro de la funcion documentoDe
      mongo/001_productos.js   SOLO createCollection y createIndex.
                               NO inserta documentos, ni en blanco ni de
                               ningun tipo. Comprobado: 0 insert en todo
                               el archivo.
 
+   MATIZ DEL 02-SEP, por si alguien mira el otro archivo de mongo/ y
+   parece que esto se contradice: mongo/002_resenas.js SI escribe en los
+   documentos, con un updateMany. Pero tampoco INSERTA ninguno y tampoco
+   pone ningun _id: solo agrega dos campos a documentos que ya existen,
+   y solo a los que les faltan. La frase se sostiene entera: en mongo/
+   nadie crea documentos, los crea el ETL o el panel del vendedor. El
+   por que de ese updateMany esta en 10.1.b.
+
    Y el remate: el _id se CALCULA, no lo genera Mongo. Por eso el ETL es
    idempotente -- el replaceOne con upsert cae siempre sobre el mismo
-   documento (cargar.js:317).
+   documento (cargar.js, Ctrl+F: replaceOne: { filter: ).
+
+   OJO, Y ESTO ES DEL 02-SEP: que el _id se calcule tiene un precio que
+   descubrimos construyendo el generador de lotes, y conviene llevarlo
+   contestado porque cae justo aqui. Si alguien calcula ese mismo _id por
+   otro camino, este replaceOne pisa documentos ajenos sin dar un solo
+   error. Esta contado entero en 10.4.
 
 --------------------------------------------------------------------
 9.1  LAS TRES TABLAS QUE FALTABAN: YA ESTAN
@@ -977,3 +1181,373 @@ id_precio_historial DENTRO de p_linea y lo use en vez del vigente.
                                        limpiando un anillo de mentira
     bash redis/prueba_concurrencia.sh  cero sobreventa con 1000
                                        solicitudes / 50 clientes
+
+
+####################################################################
+PARTE 10 - LO QUE SE AGREGO EL 02-SEP
+####################################################################
+Cuatro cosas, y las cuatro son defendibles. Si solo da tiempo a una, que
+sea la 10.4: es la que contesta la pregunta que el propio enunciado usa
+para separar a quien migro por moda de quien migro entendiendo.
+
+--------------------------------------------------------------------
+10.1  LA CALIFICACION AHORA VIVE DENTRO DEL DOCUMENTO DE MONGO
+--------------------------------------------------------------------
+QUE CAMBIO, en una frase: el documento de cada producto en Mongo lleva
+ahora dos campos mas, resenas_promedio y resenas_total, y los escribe el
+ETL calculandolos desde la tabla `resena` de PostgreSQL.
+
+  Ctrl+F:  'resenas_promedio', (
+           etl/extraer.sql, aprox. 254   <- se calcula aqui, en SQL
+  Ctrl+F:  'resenas_total', (
+           etl/extraer.sql, aprox. 259
+  Ctrl+F:  resenas_promedio: producto.resenas_promedio
+           etl/cargar.js, aprox. 302     <- se escribe aqui, en el documento
+  Ctrl+F:  Los dos campos nuevos los escribe el ETL
+           mongo/002_resenas.js, la cabecera
+
+  resenas_promedio  la nota media, de 1.00 a 5.00, o 0 si no hay ninguna
+  resenas_total     cuantas resenas se promediaron
+
+LA PREGUNTA QUE VA A HACER EL PROFESOR, palabra por palabra:
+"Por que denormalizan un dato que ya vive en el relacional?"
+
+LA RESPUESTA, Y ES LA QUE VALE:
+  Porque la LISTA del catalogo pinta esa nota en CADA TARJETA. Sin ella
+  dentro del documento habria que consultar PostgreSQL una vez por
+  producto de la pagina, o hacer un $lookup por tarjeta. Con veinte
+  productos por pagina eso son veinte viajes a la otra base para pintar
+  veinte estrellas.
+
+  Y el remate que cierra la pregunta: NO ES UNA EXCEPCION. Son el SEXTO y
+  el SEPTIMO numero derivado que se embebe, exactamente por el mismo
+  motivo que los cinco que ya estaban -- precio_tienda, precio_desde,
+  stock_tienda, stock_total y total_ofertas (PARTE 6, punto 2). Lo que se
+  embebe es siempre lo mismo: un AGREGADO que la lista necesita en cada
+  tarjeta. Las resenas de verdad, su texto, su autor y su fecha, siguen
+  en PostgreSQL, que es la fuente de verdad. Aqui viajan dos numeros.
+
+LA CONSECUENCIA, Y HAY QUE DECIRLA SIN QUE LA PREGUNTEN:
+  Es una COPIA, y una copia envejece. Una resena escrita hace un minuto
+  no mueve esta nota hasta la siguiente corrida del ETL. Eso esta asumido
+  y escrito. Se acepta exactamente por la misma razon que se acepto en
+  los cinco de precio y stock, y por lo mismo no rompe nada: quien decide
+  si alcanza el inventario o cuanto se cobra es PostgreSQL dentro de la
+  transaccion. Esta nota no decide dinero, decide en que orden se pintan
+  unas tarjetas.
+
+DOS DETALLES FINOS QUE IMPRESIONAN SI SALEN:
+
+  a) EL 0 NO ES UNA MALA NOTA, ES LA AUSENCIA DE NOTAS.
+     resena.calificacion es smallint con CHECK BETWEEN 1 AND 5, asi que
+     un promedio real nunca puede dar menos de 1. Por eso el 0 se puede
+     leer como "todavia nadie califico esto" sin un campo aparte. Y por
+     eso hacen falta LOS DOS campos: quien filtre por nota minima tiene
+     que exigir ademas resenas_total mayor que 0, o los productos sin
+     ninguna resena se le cuelan por debajo de los de una estrella en vez
+     de quedarse fuera.
+     Ctrl+F:  POR QUE SON DOS CAMPOS Y NO UNO
+              etl/extraer.sql, aprox. 188
+
+  b) EL PISO PARA LOS PRODUCTOS QUE EL ETL NUNCA TOCA.
+     mongo/002_resenas.js escribe resenas_promedio 0 y resenas_total 0
+     a todo documento al que le FALTEN esos campos.
+     Ctrl+F:  { resenas_promedio: { $exists: false } }
+     Por que hace falta: los productos que nacieron en el panel del
+     vendedor no tienen fila en PostgreSQL, asi que el ETL no los ve
+     nunca y jamas les escribiria esos dos campos. Y en MongoDB un campo
+     AUSENTE no es un 0: es "no comparable", asi que un
+     { resenas_promedio: { $gte: 1 } } no los encuentra y esos productos
+     DESAPARECEN del catalogo en cuanto alguien filtre por nota. Sin
+     error, sin log, con un 200 y una lista mas corta.
+     Ctrl+F:  De ahi el filtro     mongo/002_resenas.js, aprox. 249
+
+--------------------------------------------------------------------
+10.2  LA PREGUNTA INCOMODA, Y HAY QUE LLEVARLA CONTESTADA
+--------------------------------------------------------------------
+Si el profesor mira ese promedio con atencion, va a llegar solo a esto, y
+es mejor decirlo antes que lo pregunte:
+
+  LA RESENA ES DE UN VENDEDOR SOBRE UN PRODUCTO, no del producto solo.
+  resena(id_usuario, id_usuario_vendedor, id_producto_mongo, ...).
+  O sea que resenas_promedio MEZCLA VENDEDORES: una queja de envio de uno
+  le baja la nota AL PRODUCTO ENTERO, y con el a todos los demas
+  vendedores que lo ofrecen.
+
+ESTA DECIDIDO A PROPOSITO Y YA ESTABA ESCRITO ANTES DE QUE NADIE LO
+PREGUNTARA, que es la parte que hay que ensenar:
+
+  Ctrl+F:  QUE SE ESTA CALIFICANDO, QUE NO ES OBVIO
+           frontend/src/lib/Resenas.svelte, aprox. 12
+           Es el sitio donde ya estaba escrito antes de que nadie lo
+           preguntara, y por eso es el que hay que ensenar.
+  Ctrl+F:  QUE ESTA PROMEDIANDO, que no es obvio
+           etl/extraer.sql, aprox. 199
+  Ctrl+F:  La resena es del VENDEDOR sobre un PRODUCTO
+           docs/base-de-datos.md, aprox. 832
+
+EL ARGUMENTO, TAL CUAL:
+  El catalogo es COMPARTIDO y un producto no es de nadie. "Esta laptop es
+  mala" no tiene a quien reclamarle; "Carlos me la mando tarde" si. Por
+  eso la resena cuelga del vendedor.
+
+  Y la honestidad, que es lo que da puntos: Amazon SEPARA la nota del
+  producto de la del vendedor, y tiene razon. Aqui van juntas. Sabemos lo
+  que eso cuesta -- el promedio del producto arrastra la mala logistica
+  de un vendedor -- y se acepto porque el catalogo de Mesh es compartido
+  y la reclamacion siempre es contra alguien. La estructura ya permite
+  separarlas el dia que se quiera, porque la resena guarda
+  id_usuario_vendedor: agrupar por vendedor es un GROUP BY, no un cambio
+  de modelo.
+
+  Si insisten en por que no colgo de la OFERTA, que seria lo obvio: la
+  oferta es unica por (usuario, producto, VARIANTE), y nadie resena una
+  variante. Esta en 9.1.
+
+--------------------------------------------------------------------
+10.3  EL INDICE catalogo_rating, Y POR QUE ES EL QUE MEJOR LUCE
+--------------------------------------------------------------------
+Archivo: mongo/002_resenas.js
+  Ctrl+F:  NOMBRE_INDICE = 'catalogo_rating'      aprox. 172
+  Ctrl+F:  name: 'catalogo_rating'                aprox. 190
+  Ctrl+F:  TERCERO resenas_promedio               aprox. 100
+           <- este es el comentario que explica el punto entero
+
+  db.productos.createIndex(
+      { 'categoria.id_categoria': 1, estado: 1,
+        resenas_promedio: -1, _id: 1 },
+      { name: 'catalogo_rating' } );
+
+LA CONSULTA QUE RESPONDE:
+  "los mejor calificados de esta categoria, sin los ocultos, con al menos
+  tal nota, paginados". O sea un find con dos igualdades mas un rango,
+  ordenado por nota.
+
+POR QUE ESE ORDEN, LAS CUATRO CLAVES:
+  1. categoria.id_categoria   igualdad, y casi siempre viene en el filtro
+  2. estado                   igualdad, y el backend SIEMPRE la exige
+  3. resenas_promedio         el rango Y el orden, los dos a la vez
+  4. _id                      no filtra nada: es el desempate para paginar
+
+  Las dos igualdades van AL FRENTE porque una igualdad delante corta el
+  rango de claves que hay que recorrer; una igualdad DETRAS de un rango
+  ya no corta nada.
+
+  El _id va al final y no sobra: sin el, dos productos con la misma nota
+  pueden salir en distinto orden en dos consultas seguidas, y entonces la
+  pagina 2 repite o se salta productos.
+
+  Y las DIRECCIONES tampoco son adorno. El -1 en resenas_promedio con el
+  1 en _id es exactamente el sort { resenas_promedio: -1, _id: 1 } que
+  pide el catalogo. Tienen que coincidir con el sort o ser su reverso
+  COMPLETO: un indice se recorre al derecho o al reves entero, no
+  mezclando. Con 1 y 1 ese sort ya no se podria servir desde el indice y
+  volveria la etapa SORT que este indice existe para quitar.
+
+EL PUNTO BUENO, Y ES EL QUE HAY QUE DECIR SI SOLO DA TIEMPO A UNA FRASE:
+
+  En catalogo_rating el campo del RANGO y el campo del ORDEN son EL MISMO
+  campo, resenas_promedio. Por eso el indice sirve para las dos cosas a
+  la vez y en el explain NO APARECE ETAPA SORT.
+
+  En catalogo_precio no se pudo. Alli el rango cae sobre precio_desde y
+  el orden sobre _id, dos campos distintos, y detras de un rango un
+  indice deja de entregar las claves ordenadas por lo que viene despues.
+  Hubo que renunciar al orden y pagarlo aparte.
+
+  Esa comparacion entre los dos es la que demuestra que se entendio la
+  regla, no la lista de indices. La regla es: un indice sirve el orden
+  gratis mientras el campo por el que ordenas venga antes de cualquier
+  rango, o sea el rango mismo.
+
+MEDIDO, NO SUPUESTO. Corrido el 02-SEP contra un catalogo de 406
+documentos (generado con -Productos, ver 10.4), con
+explain("executionStats") y comparando cada consulta contra ella misma
+con hint({$natural:1}), o sea contra no tener el indice:
+
+  catalogo_rating, categoria 11, nota >= 1, orden por nota y por _id
+    con el indice     4 documentos y 4 claves para devolver 4
+                      plan  FETCH <- IXSCAN        SIN etapa SORT
+    sin el indice   406 documentos                para devolver los mismos 4
+                      plan  SORT <- COLLSCAN      la etapa SORT aparece
+
+  catalogo_precio, activos con precio_desde >= 500, pidiendo ademas el
+  orden por _id, que es lo que ensena la diferencia
+    forzado a usar catalogo_precio, con hint
+                    191 documentos y 191 claves para devolver 191
+                      plan  SORT <- FETCH <- IXSCAN
+                      LA ETAPA SORT ESTA AHI, y es la que no se pudo
+                      quitar
+
+  Los dos usan un indice; solo uno se ahorra el ordenamiento. Esa es
+  toda la demostracion.
+
+  Y UN DETALLE HONESTO QUE CONVIENE LLEVAR, porque si alguien corre esa
+  consulta SIN forzar el indice va a ver otra cosa: el planificador de
+  MongoDB prefiere no pagar el SORT y se va por el indice del _id,
+  recorriendolo entero. Medido el mismo dia: 406 documentos y 406 claves
+  para devolver los mismos 191, y sin etapa SORT. O sea que el coste de
+  ordenar detras de un rango no desaparece, cambia de sitio: o se paga
+  un SORT, o se paga leer la coleccion entera. Eso es justo lo que
+  catalogo_rating no tiene que pagar de ninguna de las dos formas, y por
+  eso la comparacion vale.
+
+PRECAUCION, PORQUE PARECE QUE SOBRA UN INDICE Y NO SOBRA:
+  catalogo_rating NO reemplaza a catalogo_categoria. La navegacion normal
+  del catalogo ordena por _id, y para eso hace falta el prefijo
+  { categoria.id_categoria, estado, _id }. En catalogo_rating el
+  resenas_promedio se mete justo en medio de ese prefijo y lo rompe. Los
+  dos tienen que convivir: uno sirve la navegacion por id y el otro la de
+  mejor calificados.
+  Ctrl+F:  PRECAUCION      mongo/002_resenas.js, aprox. 166
+
+--------------------------------------------------------------------
+10.4  EL GENERADOR DE LOTES, Y LOS DOS ASIGNADORES DE ID
+--------------------------------------------------------------------
+QUE ES:
+  migrations/lote/generar_lote.sql, un generador INCREMENTAL de productos
+  y ofertas en SQL puro. Se corre asi:
+
+      .\arrancar.ps1 -Productos 300 -Semilla 42
+
+  Misma semilla, mismos productos, en cualquier maquina. Y no toca ni una
+  fila de las que ya estan: solo suma.
+
+POR QUE EXISTE:
+  Porque con el catalogo pequeno la demostracion de indices no demuestra
+  nada. Ver 10.5.
+
+DONDE VIVE Y POR QUE AHI, que ya es un punto:
+  En migrations/lote/, una SUBCARPETA. arrancar.ps1 recoge las
+  migraciones con Get-ChildItem SIN -Recurse, asi que ningun bucle la ve
+  nunca. Ese archivo CREA datos cada vez que corre; si un arranque normal
+  lo ejecutara, el catalogo se duplicaria en cada reinicio de la maquina
+  y nadie sabria de donde salieron esos productos. Su unica puerta es la
+  bandera -Productos.
+
+DONDE CAE EN EL ARRANQUE Y POR QUE AHI
+(Ctrl+F:  Paso "Generando un lote de   en arrancar.ps1):
+  Entre los conjuntos de datos y MongoDB. Puesto ahi NO hace falta forzar
+  el ETL: las guardias que ya existen lo disparan solas, porque van a ver
+  mas filas en PostgreSQL que documentos en Mongo. Y ponerlo DESPUES del
+  ETL seria un error grave y silencioso: el verificador del paso 13
+  compara cada coleccion contra su tabla con -lt, veria Mongo por debajo
+  y mataria el arranque acusando al ETL, con todo bien.
+
+Y AHORA LO QUE DE VERDAD VALE PUNTOS, QUE ES LO QUE ESTE GENERADOR
+DESTAPO AL CONSTRUIRLO:
+
+  HAY DOS ASIGNADORES DE id_producto Y NO SE HABLAN ENTRE SI.
+
+    PostgreSQL   el bigserial de productos.id_producto
+    MongoDB      el maximo _id mas uno, que calcula el panel del vendedor
+                 cuando alguien publica un producto
+
+  Y YA HABIAN DIVERGIDO. Un producto publicado desde el panel nace SOLO
+  en Mongo, con un _id por encima del ultimo que PostgreSQL llego a
+  entregar. Asi que la secuencia de PostgreSQL apunta a numeros que en
+  Mongo YA ESTAN OCUPADOS por productos de vendedores.
+
+  QUE HABRIA PASADO SIN DARSE CUENTA:
+  el siguiente producto insertado en PostgreSQL se lleva un id que en
+  Mongo ya es de otro producto. Corre el ETL. El ETL escribe con
+  replaceOne sobre el _id. Y MACHACA el producto del vendedor. Sin un
+  solo error, sin aviso, sin nada que revisar: un replaceOne que pisa un
+  documento ajeno se ve exactamente igual que uno que actualiza el suyo.
+  El vendedor entra un dia y su producto es otro.
+
+  COMO SE ARREGLA, y es lo que justifica los dos parametros raros del
+  generador: antes de insertar nada, empuja las dos secuencias de
+  PostgreSQL al MAYOR DE LOS DOS MUNDOS, con los topes que le llegan
+  leidos de Mongo. Lo que se pierde es un hueco de numeros en PostgreSQL,
+  y ese hueco es correcto y deliberado: esos numeros son de Mongo, y
+  reclamarlos seria justo el choque que el paso viene a evitar.
+
+    Ctrl+F:  PASO 1. Alinear las secuencias con MongoDB
+             migrations/lote/generar_lote.sql, aprox. 263
+    Ctrl+F:  DOS asignadores de
+             el mismo archivo, unas lineas mas abajo, y es donde esta
+             contado el choque con nombre y apellido
+    Ctrl+F:  Por que el generador recibe los topes de Mongo
+             arrancar.ps1, en el comentario del paso del lote
+
+  Y el nombre de la secuencia sale de pg_get_serial_sequence() y no
+  escrito a mano: si algun dia la columna cambia de nombre, esto falla en
+  voz alta en vez de empujar una secuencia que ya no manda.
+
+CON QUE PREGUNTA SE ENLAZA, Y ESTA ES LA JUGADA:
+
+  Con "QUE SE PIERDE CON HABER MIGRADO", la que la PARTE 0 identifica
+  como la pregunta que separa. La respuesta de la Entrega 1 era la
+  integridad referencial: id_producto_mongo no es llave foranea y no
+  puede serlo.
+
+  Esto es la MISMA perdida, un piso mas abajo y con consecuencias peores:
+  al partir los productos en dos motores tambien se partio QUIEN REPARTE
+  LA IDENTIDAD. Con una sola base esto no puede pasar, porque una
+  secuencia es una sola cosa y la unicidad la garantiza el motor. Con
+  dos, la unicidad del _id la tiene que sostener la aplicacion, igual que
+  el enlace del pedido, y aqui ya se le habia escapado.
+
+  La frase para cerrar: "no lo leimos en un libro, lo encontramos
+  nosotros construyendo el generador, y por eso el generador arranca
+  preguntandole a Mongo por donde va".
+
+--------------------------------------------------------------------
+10.5  LA DEMOSTRACION DE INDICES, AHORA CON VOLUMEN
+--------------------------------------------------------------------
+POR QUE LA PRUEBA MIDE DOCUMENTOS EXAMINADOS Y NO TIEMPO, que es la
+pregunta que se hace cualquiera que mire la pagina:
+
+  Porque con el catalogo pequeno las dos versiones daban 0 ms, con indice
+  y sin el. Sobre cien documentos MongoDB recorre la coleccion entera mas
+  rapido de lo que el reloj sabe medir, asi que el tiempo no distingue
+  nada. Lo que si distingue siempre son los DOCUMENTOS ABIERTOS, que es
+  lo que el indice de verdad ahorra y no depende de lo ocupada que este
+  la maquina. Por eso se mide eso.
+
+  Y esa decision se defiende sola: medir tiempo en una prueba asi es
+  medir el instrumento, no el indice.
+
+CON EL CATALOGO GRANDE LA DIFERENCIA YA SE VE, Y ESO ES LO NUEVO.
+Corrido el 02-SEP con .\mongo\demostracion_indices.ps1 sobre un catalogo
+de 406 documentos (generado con -Productos, ver 10.4). Las 12
+comprobaciones pasan:
+
+  paso 2  la navegacion por categoria, sobre "Laptops"
+          con catalogo_categoria   23 documentos abiertos, 23 claves
+          sin ningun indice       406 documentos abiertos
+          17.7 veces menos documentos abiertos
+          y el plan pasa de SORT <- COLLSCAN a FETCH <- IXSCAN
+
+  paso 3  el filtro de precio, activos desde 4000
+          con catalogo_precio      28 documentos abiertos, 28 claves
+          sin ningun indice       406 documentos abiertos
+          14.5 veces menos
+
+  paso 4  filtrar por una caracteristica dentro de una categoria
+          con catalogo_categoria   23 abiertos para devolver 9
+          sin ningun indice       406 abiertos para devolver los mismos 9
+          Aqui el indice NO contesta la pregunta -- los cuatro $elemMatch
+          se evaluan igual --, la hace PEQUENA: reduce el problema de 406
+          documentos a los 23 de la categoria.
+
+  Y el catalogo_rating de 10.3, medido aparte el mismo dia:
+          con el indice             4 abiertos, 4 claves, SIN etapa SORT
+          sin el                  406 abiertos, con etapa SORT
+
+COMO SE CORRE DELANTE DEL PROFESOR:
+  .\mongo\demostracion_indices.ps1     desde PowerShell, en la raiz
+  Escribe demostracion_indices.html en la RAIZ del proyecto y lo abre
+  solo en el navegador. Con -NoAbrir lo escribe y no lo abre, que es lo
+  que conviene si estas compartiendo pantalla y no quieres que se te
+  abra una ventana encima.
+  Ninguna cifra de esa pagina esta escrita a mano: todas salen de la
+  corrida, y la pagina lo dice. Si el catalogo cambio, los numeros de
+  arriba ya no son los que va a ensenar la pagina, y esta bien: lo que
+  no cambia es la FORMA de la diferencia, que es lo que se defiende.
+
+  Si quieren ver la diferencia crecer en vivo, se arranca con un lote
+  grande y se vuelve a correr:
+      .\arrancar.ps1 -Productos 300 -Semilla 42
+      .\mongo\demostracion_indices.ps1

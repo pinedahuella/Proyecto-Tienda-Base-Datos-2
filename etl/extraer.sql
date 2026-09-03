@@ -44,8 +44,8 @@
 -- compra. Ver el apartado de embeber o referenciar en docs/base-de-datos.md.
 --
 -- Son una COPIA y hay que recalcularlas: si un vendedor cambia su precio o se
--- queda sin unidades, estos dos numeros quedan viejos hasta la proxima
--- corrida del ETL o hasta que el backend los actualice.
+-- queda sin unidades, los cinco quedan viejos hasta la proxima corrida del ETL
+-- o hasta que el backend los actualice.
 
 -- Las fechas salen con la zona del cliente. Fijandola aqui, el mismo producto
 -- extraido desde dos maquinas da el mismo texto, y las comparaciones que hace
@@ -158,6 +158,108 @@ SELECT jsonb_build_object(
                                     AND pv2.id_producto_variante = o.id_producto_variante_mongo
         WHERE pv2.id_producto = p.id_producto
           AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+    ),
+
+    -- La nota del producto y cuantas resenas la sostienen. Son el SEXTO y el
+    -- SEPTIMO numero derivado que se embebe, y van pegados al grupo de los
+    -- cinco de arriba porque son de la misma clase: valores que la LISTA del
+    -- catalogo necesita en cada tarjeta y que, sin ellos, obligarian a
+    -- preguntar una vez por producto de la pagina.
+    --
+    -- Les vale entera la advertencia que la cabecera ya dejo escrita para los
+    -- cinco primeros: son una COPIA y quedan viejos hasta la proxima corrida
+    -- del ETL. Una resena escrita hace un minuto no mueve esta nota. No es un
+    -- defecto de la consulta, es el precio de tenerla embebida.
+    --
+    -- VAN COMO NUMERO Y NO COMO TEXTO, que es la unica diferencia con los cinco
+    -- de arriba. El dinero sale con ::text porque el punto flotante de JSON
+    -- redondea y porque comparar texto es exacto; ninguno de los dos motivos
+    -- aplica aqui. Una nota de 1 a 5 con dos decimales cabe exacta en un
+    -- double, asi que no hay precision que perder. Y sobre todo hay algo que
+    -- ganar: estos dos campos existen para FILTRAR y ORDENAR. Si
+    -- resenas_promedio fuera texto, un "de 4 estrellas para arriba" y un orden
+    -- por nota en Mongo compararian una cadena contra un numero, y eso no da
+    -- error: devuelve el resultado equivocado en silencio, que es peor. Por eso
+    -- tampoco entran en CAMPOS_DECIMALES de etl/cargar.js, que es la lista
+    -- blanca de lo que se convierte a NumberDecimal al escribir en Mongo: esa
+    -- lista es solo para el dinero, y dejar estos dos fuera es la decision, no
+    -- un olvido.
+    --
+    -- POR QUE SON DOS CAMPOS Y NO UNO. El 0 de resenas_promedio NO es una nota,
+    -- es la ausencia de notas. resena.calificacion es smallint CHECK BETWEEN 1
+    -- AND 5, asi que un promedio de verdad nunca puede dar 0 y ese 0 solo puede
+    -- significar que nadie califico el producto. Se elige 0 y no null para
+    -- decir lo mismo que ya devuelve el backend en su resumen de resenas, y no
+    -- dos cosas distintas segun a quien se le pregunte. La consecuencia hay que
+    -- tenerla presente al consultar: quien filtre por nota minima tiene que
+    -- exigir ademas resenas_total mayor que 0, o los productos sin ninguna
+    -- resena se le cuelan por DEBAJO de los de una estrella en vez de quedarse
+    -- fuera.
+    --
+    -- QUE ESTA PROMEDIANDO, que no es obvio. La resena es de un VENDEDOR sobre
+    -- un PRODUCTO, no del producto solo; esta explicado en la cabecera de
+    -- migrations/011_resenas.sql. Este promedio, entonces, MEZCLA vendedores:
+    -- una queja de envio de uno le baja la nota al producto entero. Esta
+    -- decidido asi a proposito y ya quedo escrito en el apartado QUE SE ESTA
+    -- CALIFICANDO de la cabecera de frontend/src/lib/Resenas.svelte (se busca
+    -- por ese titulo y no por numero de linea, que se corre en cuanto alguien
+    -- edite el archivo). Amazon separa la nota del producto de la del
+    -- vendedor; aqui van juntas.
+    --
+    -- DOS SUBCONSULTAS Y NO UNA SOLA CON DOS AGREGADOS porque
+    -- jsonb_build_object necesita un escalar por valor, y porque el archivo
+    -- entero esta escrito con una subconsulta escalar por clave: ese es el
+    -- patron y es lo que lo deja leerse de corrido. Lo que cuesta son dos
+    -- recorridos del mismo indice idx_resena_producto sobre id_producto_mongo,
+    -- que es barato; partirlo en un LATERAL para ahorrar uno romperia el patron
+    -- del archivo a cambio de un ahorro que nadie midio.
+    --
+    -- EL REDONDEO NO COINCIDE SIEMPRE CON EL DEL BACKEND, y conviene decirlo de
+    -- frente. armarResumen, en
+    -- backend/src/services/resenas/resenas.service.ts, calcula el promedio en
+    -- JavaScript con Math.round((suma / total) * 100) / 100 sobre un double;
+    -- aqui se calcula con round(avg(...), 2) sobre numeric.
+    --
+    -- EL MECANISMO, que es lo que no caduca. Los dos coinciden salvo en el
+    -- empate exacto de medio centesimo, y ni siquiera en todos: solo cuando el
+    -- double no logra representar ese empate. El producto suma/total*100 cae
+    -- entonces una pizca POR DEBAJO del .5, y Math.round baja; el numeric no
+    -- pierde nada, ve el empate entero y round sube. Cuando el double si cae
+    -- justo en el .5, los dos suben y dan el mismo numero.
+    --
+    -- Esto no es una cifra de la base ni depende de cuantas resenas haya hoy:
+    -- es aritmetica, y se comprueba entera en dos comandos que no tocan datos.
+    -- Con 40 resenas que sumen 169 -- nueve de cinco estrellas y treinta y una
+    -- de cuatro -- el promedio exacto es 4.225, y los dos motores discrepan:
+    --
+    --   node -e "console.log(Math.round((169/40)*100)/100)"          -> 4.22
+    --   psql -U meme -d mesh -qtAX -c "SELECT round(169::numeric/40, 2)"
+    --                                                                -> 4.23
+    --
+    -- El culpable se ve pidiendole a node el paso de en medio: (169/40)*100 no
+    -- da 422.5 sino 422.49999999999994, y de ahi el 4.22.
+    --
+    -- Y NO PASA EN TODOS LOS EMPATES, que es la parte util: con 40 resenas que
+    -- sumen 121 los dos dicen 3.03. O sea que no se puede confiar ni en que
+    -- coincidan ni en que difieran, y por eso no se usa uno para verificar al
+    -- otro. Con las mismas 40 resenas si divergen las sumas 41, 51, 87, 97,
+    -- 169, 179, 189 y 199, comprobadas con los dos comandos de arriba
+    -- cambiando el 169.
+    --
+    -- No se fuerza a que coincidan; lo que se reparte es quien manda para que.
+    -- El numero que se le ENSENA a la persona sale del backend en vivo,
+    -- calculado sobre las resenas de ese momento; este de aqui es el que se usa
+    -- para FILTRAR y ORDENAR el catalogo. No son la misma verdad y no tienen
+    -- por que serlo.
+    'resenas_promedio', (
+        SELECT coalesce(round(avg(r.calificacion), 2), 0)
+        FROM resena r
+        WHERE r.id_producto_mongo = p.id_producto
+    ),
+    'resenas_total', (
+        SELECT count(*)
+        FROM resena r
+        WHERE r.id_producto_mongo = p.id_producto
     ),
 
     -- Las caracteristicas van como arreglo de {nombre, valor, unidad} y no

@@ -7,6 +7,11 @@
 #   .\arrancar.ps1 -ReiniciarGrafo   rehace solo el grafo de Neo4j, desde cero
 #   .\arrancar.ps1 -Mongo            abre la consola de MongoDB y ya
 #   .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a Mongo Y el grafo a Neo4j
+#   .\arrancar.ps1 -Productos 300              arranca normal y ademas genera 300 productos
+#                                              con sus variantes y sus ofertas. De 1 a 9999,
+#                                              en digitos: 300 si, 300.5 y 0x10 no
+#   .\arrancar.ps1 -Productos 300 -Semilla 7   lo mismo pero repetible: la misma semilla
+#                                              vuelve a dar exactamente el mismo lote
 
 # Por que -Etl fuerza LOS DOS ETL y no hay un -EtlGrafo aparte
 # ------------------------------------------------------------
@@ -32,12 +37,98 @@
 # -ReiniciarMongo, que es lo mismo un piso mas abajo: tirar una base derivada
 # y volverla a llenar sin tocar PostgreSQL, que es la fuente de verdad.
 
+# Por que -Productos y -Semilla se reciben como TEXTO y no como [int]
+# ---------------------------------------------------------------------
+# Porque [int] no valida: CONVIERTE, y convierte antes de que este script pueda
+# mirar nada. Esto no es teorico, esta medido en PowerShell 5.1 contra este
+# mismo param(), y ninguno de estos casos da error ni aviso:
+#
+#   -Productos 2.7     llega 3       redondea, y al PAR: 2.5 llega 2 y 3.5 llega 4
+#   -Productos 0.4     llega 0       o sea, "no generes nada"
+#   -Productos 0x10    llega 16      lee hexadecimal
+#   -Productos 1e3     llega 1000    lee notacion cientifica
+#   -Productos 2,5     llega 25      la coma es separador de MILES en la cultura
+#                                    de la maquina, asi que no parte el numero:
+#                                    lo junta, y "dos y medio" sale veinticinco
+#   -Productos " 5 "   llega 5       recorta los espacios
+#   -Productos ""      llega 0       y con la bandera contada como escrita
+#
+# Todos escriben en la base un numero distinto del que la persona tecleo, o se
+# tragan la peticion entera. Un dedo que resbala en el punto convierte "quiero
+# 2 productos" en 3 filas que nadie pidio, y encima quema esa semilla: la
+# guardia del generador no deja repetirla, asi que el intento de arreglarlo
+# rebota.
+#
+# Y NO se arregla mirando $PSBoundParameters, que es lo primero que uno piensa.
+# Tambien esta medido: $PSBoundParameters['Productos'] ya viene convertido a
+# Int32. La conversion ocurre al ENLAZAR el parametro, o sea antes de que corra
+# la primera linea del script, y a esa altura el texto que la persona escribio
+# ya no existe en ninguna parte. $PSBoundParameters sirve para la unica cosa que
+# si sabe -- SI la bandera se escribio o no -- y para eso si se usa aqui abajo.
+#
+# Asi que las dos banderas entran como [string], que PowerShell entrega tal
+# cual, y de convertirlas se encarga Leer-Entero, que exige digitos y nada mas.
+#
+# Por que -Productos 0 se RECHAZA y ya no quiere decir "no generes nada"
+# ----------------------------------------------------------------------
+# Mientras el parametro era [int], el cero tecleado a mano y el cero por defecto
+# eran el mismo cero y no habia forma de separarlos, asi que los dos se
+# colapsaban en "no toques nada". Con el parametro como texto esa excusa se
+# termino: $PSBoundParameters dice si la bandera se escribio, y entonces
+# -Productos 0 es una peticion de generar que no se puede cumplir, no una
+# ausencia de peticion.
+#
+# Se rechaza por la misma razon por la que se rechaza -Semilla sola: quien
+# escribio la bandera quiere un lote, y terminar en verde sin haber generado
+# nada le entrega un "todo bien" que no responde a lo que pidio. "Genera
+# exactamente cero productos" no es un caso de uso -- quien quiere cero no
+# escribe la bandera -- asi que un cero escrito es un dedo que resbalo o un
+# script que calculo mal, y las dos cosas se dicen en voz alta.
+#
+# Sin la bandera, el arranque de todos los dias sigue siendo exactamente el de
+# antes: no entra al paso 5c, no imprime un encabezado de mas y no corre contra
+# PostgreSQL una migracion que nadie pidio. Equivocarse hacia ese lado no
+# produce un error, produce ruido permanente, que es peor porque nadie lo
+# denuncia nunca.
+#
+# El rango 1 a 9999 no se inventa aqui: es el que exige la guardia de
+# migrations/lote/generar_lote.sql, y el tope sale de que el marcador que ese
+# archivo pega al nombre de cada producto lleva cuatro digitos. Se repite de
+# este lado para que un numero fuera de rango se sepa en un segundo, y no
+# despues de levantar los contenedores y correr las migraciones enteras.
+#
+# Por que -Semilla sin -Productos se para y no hace absolutamente nada
+# --------------------------------------------------------------------
+# Una semilla sola no tiene ningun significado posible, asi que solo quedan tres
+# salidas y dos son malas. Adivinar un numero de productos es inventarle una
+# intencion a quien tecleo la linea. Tragarse la bandera en silencio y arrancar
+# normal es peor todavia: esa linea se escribio para generar, el arranque
+# terminaria en verde sin haber generado nada, y quien la tecleo se llevaria un
+# "todo bien" que no responde a lo que pidio. Queda la tercera, que es la que se
+# hace: decirlo y parar antes de tocar Docker, donde no hay nada que deshacer y
+# volver a teclear la linea completa cuesta cinco segundos.
+#
+# El caso que antes se colaba -- -Semilla 0 sin -Productos, indistinguible de no
+# haberla escrito -- ya no se cuela, por lo mismo que -Productos 0: con el
+# parametro como texto se sabe si la bandera se escribio.
+#
+# Por que la semilla admite hasta un bigint y no hasta un [int]
+# --------------------------------------------------------------
+# Porque bigint es el tipo al que la castea el generador, y porque su propia
+# documentacion propone usar el CID como semilla. Un CID de trece digitos NO
+# cabe en un Int32, asi que con el parametro como [int] PowerShell lo rechazaba
+# de entrada con "Value was either too large or too small for an Int32" --
+# comprobado -- un mensaje que habla de un tipo de .NET y no de una semilla, y
+# que manda a buscar el problema donde no esta.
+
 param(
     [switch]$Reiniciar,
     [switch]$ReiniciarMongo,
     [switch]$ReiniciarGrafo,
     [switch]$Mongo,
-    [switch]$Etl
+    [switch]$Etl,
+    [string]$Productos = '',
+    [string]$Semilla   = ''
 )
 
 Set-Location -LiteralPath $PSScriptRoot
@@ -46,6 +137,128 @@ function Paso($t)  { Write-Host "`n>> $t" -ForegroundColor Cyan }
 function Ok($t)    { Write-Host "   $t"   -ForegroundColor Green }
 function Aviso($t) { Write-Host "   $t"   -ForegroundColor Yellow }
 function Error1($t){ Write-Host "   $t"   -ForegroundColor Red }
+
+
+# ------------------------------------------------------------
+# Leer un numero de la linea de comandos sin que PowerShell lo cambie antes
+# ------------------------------------------------------------
+# Esta funcion es la razon de que -Productos y -Semilla entren como [string].
+# Lo que hace es lo que [int] NO hace: mirar el texto que la persona escribio y
+# rechazar todo lo que no sea un entero escrito tal cual.
+#
+# La expresion regular es deliberadamente estrecha -- signo opcional y digitos,
+# nada mas -- y esa estrechez es el punto: cada cosa que deja fuera es una que
+# [int] aceptaba convirtiendola en otro numero (el punto decimal, la coma de
+# miles, el 0x, la e de la notacion cientifica, los espacios de los lados).
+# Cualquier permiso que se le agregue aqui reabre uno de esos agujeros.
+#
+# Devuelve $null cuando rechaza, y quien llama sale. No se puede usar el valor
+# como condicion (if ($n) ...) porque 0 es un valor legitimo para la semilla:
+# hay que comparar contra $null de forma explicita.
+#
+# El limite lo pone [long] y no [int] porque el generador castea la semilla a
+# bigint. TryParse ademas atrapa el numero con demasiados digitos, que la
+# expresion regular deja pasar y un cast pelado tumbaria con una excepcion de
+# .NET en vez de con una frase.
+function Leer-Entero($texto, $bandera, $minimo, $maximo) {
+    $texto = "$texto"
+
+    if ($texto.Trim() -eq "") {
+        Error1 "$bandera se escribio sin valor."
+        Error1 "Se esperaba un entero entre $minimo y $maximo, escrito en digitos."
+        return $null
+    }
+
+    if ($texto -notmatch '^-?[0-9]+$') {
+        Error1 "$bandera recibio [$texto], que no es un entero escrito en digitos."
+        Error1 "Se esperaba un entero entre $minimo y $maximo, tal cual: sin punto"
+        Error1 "ni coma, sin 0x, sin notacion cientifica y sin espacios."
+        return $null
+    }
+
+    [long]$n = 0
+    if (-not [long]::TryParse($texto, [ref]$n)) {
+        Error1 "$bandera recibio [$texto], que tiene demasiados digitos."
+        Error1 "Se esperaba un entero entre $minimo y $maximo."
+        return $null
+    }
+
+    if ($n -lt $minimo -or $n -gt $maximo) {
+        Error1 "$bandera recibio $n, que esta fuera de rango."
+        Error1 "Se esperaba un entero entre $minimo y $maximo."
+        return $null
+    }
+
+    return $n
+}
+
+
+# Las banderas del lote se revisan AQUI, antes de la primera linea que habla con
+# Docker, y no pegadas al paso que las usa. El paso vive despues de las
+# migraciones, asi que avisar alli obligaria a esperar el arranque entero para
+# enterarse de un error de tecleo, y a esas alturas ya se levantaron todos los
+# contenedores del compose para nada. El por que de cada regla esta escrito
+# arriba, junto al param(), que es donde alguien va a ir a buscarlo.
+#
+# Se pregunta por $PSBoundParameters y no por el valor, porque es lo unico que
+# distingue "la bandera no se escribio" de "la bandera se escribio con un valor
+# que resulto ser el mismo que el de por defecto". Esa diferencia es justo la
+# que antes no existia y dejaba pasar -Productos 0 y -Semilla 0 en silencio.
+$pidioLote    = $PSBoundParameters.ContainsKey('Productos')
+$pidioSemilla = $PSBoundParameters.ContainsKey('Semilla')
+
+# -Mongo es una salida temprana TOTAL: abre la consola y sale del script sin
+# llegar a ninguna otra seccion. O sea que con -Mongo la bandera del lote no es
+# que corra tarde, es que no corre nunca, y hasta hoy no se decia una palabra.
+# El comentario del param() ya llamaba a eso la peor de las tres salidas --
+# terminar sin haber hecho lo que se pidio, sin un solo aviso -- y estaba
+# pasando aqui mismo.
+#
+# Se para en vez de avisar y seguir a la consola, por lo mismo que -Semilla
+# sola: el aviso se iria hacia arriba en cuanto mongosh pinte su banner, y quien
+# tecleo la linea saldria de la consola creyendo que su lote esta en la base.
+#
+# OJO, lo que esto NO cubre: -Mongo se traga IGUAL a -Reiniciar, -ReiniciarMongo,
+# -ReiniciarGrafo y -Etl. No se persiguen aqui porque no tienen lectura posible
+# junto a "abreme la consola", mientras que -Productos con -Mongo si la tiene
+# (generar y despues mirar el resultado), que es lo que la hace peligrosa.
+if ($Mongo -and ($pidioLote -or $pidioSemilla)) {
+    Error1 "-Mongo abre la consola de MongoDB y sale, asi que no genera ningun lote."
+    Error1 "Son dos ordenes distintas y van en dos lineas, en este orden:"
+    Error1 "   .\arrancar.ps1 -Productos 300"
+    Error1 "   .\arrancar.ps1 -Mongo"
+    exit 1
+}
+
+if ($pidioSemilla -and -not $pidioLote) {
+    Error1 "-Semilla no dice nada sin -Productos, y cuantos generar no se adivina."
+    Error1 "Si lo que querias era un lote repetible:"
+    Error1 "   .\arrancar.ps1 -Productos 300 -Semilla $Semilla"
+    exit 1
+}
+
+# El rango de -Productos es el de la guardia de generar_lote.sql, copiado a
+# proposito para que el error llegue en un segundo y no despues del arranque
+# entero. Si algun dia esa guardia cambia de rango, este numero se queda viejo y
+# el error volveria a llegar tarde, pero nunca de mas: aqui se rechaza lo que el
+# SQL tambien rechazaria.
+$ProductosPedidos = 0
+$SemillaPedida    = 0
+
+# Se declara aqui arriba y no donde se usa, para que el resumen del final pueda
+# preguntarle sin depender de que el paso 5c haya llegado a correr. Guarda el
+# texto del lote que el generador rechazo, o queda en $null si no hubo ninguno.
+$loteRechazado    = $null
+
+if ($pidioLote) {
+    $ProductosPedidos = Leer-Entero $Productos '-Productos' 1 9999
+    if ($null -eq $ProductosPedidos) { exit 1 }
+}
+
+if ($pidioSemilla) {
+    $SemillaPedida = Leer-Entero $Semilla '-Semilla' 0 ([long]::MaxValue)
+    if ($null -eq $SemillaPedida) { exit 1 }
+}
 
 
 # ------------------------------------------------------------
@@ -875,6 +1088,239 @@ if (($productosEnBase -match '^\d+$') -and ([int]$productosEnBase -gt 0)) {
 
 
 # ------------------------------------------------------------
+# 5c. Un lote extra de productos y ofertas, solo si se pidio
+# ------------------------------------------------------------
+# El generador es migrations/lote/generar_lote.sql y vive en una SUBCARPETA a
+# proposito. Los dos bucles de migraciones de aqui arriba usan Get-ChildItem sin
+# -Recurse, asi que ninguno lo ve nunca: no hay forma de que un arranque normal
+# lo corra por accidente, ni siquiera el dia que alguien renombre archivos. La
+# unica puerta que tiene es la bandera -Productos.
+#
+# Por que este paso va AQUI, entre los conjuntos de datos y MongoDB
+# ------------------------------------------------------------------
+# Son dos razones y la segunda es la que de verdad manda.
+#
+# 1. Es la ultima costura donde todavia se escribe en PostgreSQL. A esta altura
+#    ya estan garantizados el contenedor sano, la contrasena sincronizada y el
+#    esquema aplicado, que es todo lo que el generador necesita para correr, y
+#    todavia no ha empezado nada que dependa de las filas que va a crear.
+#
+# 2. Sobre todo: puesto aqui NO hace falta forzar el ETL. La guardia del tope de
+#    id de la seccion 7 hace ese trabajo sola, y hace falta ser preciso sobre
+#    CUAL de las dos guardias es, porque la otra no se puede usar de excusa:
+#
+#    - La comparacion de CUENTAS no sirve para esto. Compara con -lt, y Mongo
+#      esta legitimamente por encima de PostgreSQL: los productos que publica un
+#      vendedor desde el panel nacen solo en Mongo y no tienen fila del otro
+#      lado (es lo mismo que explica el -lt de la seccion 7b). Mientras ese
+#      sobrante sea mayor que el lote, PostgreSQL sigue por debajo y la
+#      comparacion no dice ni una palabra. O sea que puede quedarse callada
+#      justo cuando la necesitas, y depende de un numero que este script no
+#      controla.
+#
+#    - La del TOPE DE ID si dispara siempre, y por construccion, no por suerte.
+#      El generador arranca sus id POR ENCIMA del mayor _id que Mongo tiene
+#      (para eso se le pasan los dos topes, ver mas abajo). Asi que en cuanto el
+#      lote entra, max(id_producto) de PostgreSQL queda por encima del _id mas
+#      alto que Mongo tiene dentro del tramo del ETL, los dos dejan de coincidir
+#      y $alDia se cae. No hay lote que pueda entrar sin moverlo.
+#
+#    Cualquiera de las dos que se caiga deja $alDia en falso y Correr-Etl sale
+#    por su cuenta, pero la que garantiza que pase es la segunda. O sea que el
+#    lote llega a Mongo sin que este paso sepa nada del ETL ni lo llame, que es
+#    justamente lo que evita tener que acordarse de nada.
+#
+# Y la advertencia, que es lo que no hay que olvidar nunca: poner este paso
+# DESPUES del ETL seria un error grave y ademas silencioso hasta el final. El
+# verificador de la seccion 7b compara cada coleccion de Mongo contra el count
+# de su tabla en PostgreSQL con -lt, o sea que Mongo por debajo es fallo. Con el
+# lote generado despues del ETL, PostgreSQL tendria las filas nuevas y Mongo no,
+# el verificador leeria una cuenta de Mongo por debajo de la de PostgreSQL y
+# mataria el arranque con exit 1 acusando al ETL, con absolutamente todo bien.
+#
+# El grafo de Neo4j no se mueve con esto y esta bien que no se mueva, pero la
+# razon NO es que el grafo ignore los productos: si tiene un contador :Producto,
+# esta en $NODOS_ETL y cuenta nodos de verdad. La razon es cual es su consulta.
+# Ese contador no cuenta el catalogo, cuenta los productos CON RESENA
+# (count(DISTINCT id_producto_mongo) FROM resena), y este generador no escribe
+# ni una resena: sus INSERT van a productos, variantes, caracteristicas,
+# imagenes, ofertas y kardex, y ninguno toca resena, usuarios ni direcciones,
+# que son las tres tablas de las que sale el grafo entero. Asi que un lote no
+# mueve ninguno de los contadores del grafo y no lo deja viejo.
+#
+# La vuelta que si hay que ver venir: el dia que alguien escriba resenas sobre
+# los productos del lote, esas resenas SI mueven los contadores de la seccion 9b
+# -- :Producto, :Resena y sus aristas -- y esa guardia dispara el ETL del grafo
+# sola, sin que este paso tenga que hacer nada tampoco.
+#
+# Por que el generador recibe los topes de Mongo y no solo la secuencia
+# ----------------------------------------------------------------------
+# Los dos asignadores de id ya divergieron. Hay productos que nacieron en el
+# panel de un vendedor y viven SOLO en Mongo, por encima del ultimo id que
+# PostgreSQL llego a entregar. Si el generador arrancara desde la secuencia de
+# PostgreSQL, los id nuevos caerian justo encima de esos, y el replaceOne del
+# ETL los machacaria sin decir una palabra: el producto de un vendedor
+# desaparecido y reemplazado por uno generado, sin un solo error por ningun
+# lado. Por eso se le pasan los dos topes que tiene Mongo y el empieza por
+# encima del mas alto de los dos mundos.
+#
+# Las dos consultas van con el mismo Comando-Mongo que usa el resto del archivo.
+# Dos detalles medidos contra el contenedor vivo, los dos porque fallan de forma
+# que engana:
+#
+#   - Las comillas dobles de "$variantes" tienen que ir escritas \" . Sin la
+#     barra invertida PowerShell se las come al armar la linea de docker (es la
+#     regla 2 del comentario de mas arriba), mongosh recibe el nombre suelto y
+#     contesta "ReferenceError: $variantes is not defined". Con la barra
+#     contesta un numero, que es el id de variante mas alto que hay en Mongo.
+#     Aqui no se escribe cual: es un dato vivo que sube con cada lote y con cada
+#     producto que publique un vendedor, asi que cualquier cifra clavada en este
+#     comentario miente a las pocas horas. Se comprueba corriendo la consulta.
+#
+#   - Las dos consultas llevan pegado un guardia para cuando no hay nada. La
+#     forma directa, toArray()[0]._id, sobre un Mongo recien creado muere con
+#     "TypeError: Cannot read properties of undefined (reading '_id')". Con el
+#     .map(...)[0]||0 devuelve 0, que es lo que el generador espera oir cuando
+#     del otro lado no hay nada que respetar.
+#
+# Y si aun asi la respuesta no es un numero, este paso se para en vez de mandar
+# un cero a ciegas: un cero inventado le dice al generador que Mongo esta vacio
+# cuando no lo esta, y eso es exactamente el pisoton que el tope existe para
+# impedir. Una cadena vacia colandose a psql como valor de -v es peor todavia,
+# porque no da un error de conexion, da un SQL con un hueco en medio.
+if ($ProductosPedidos -gt 0) {
+    Paso "Generando un lote de $ProductosPedidos productos"
+
+    # El archivo se comprueba desde el host aunque psql lo vaya a leer desde
+    # /migrations/lote. Si falta, el error de psql habla de una ruta de dentro
+    # del contenedor y manda a buscarlo donde no esta.
+    $rutaLote = "$PSScriptRoot\migrations\lote\generar_lote.sql"
+    if (-not (Test-Path -LiteralPath $rutaLote)) {
+        Error1 "Falta migrations\lote\generar_lote.sql, que es lo que genera el lote."
+        exit 1
+    }
+
+    # A Mongo todavia no lo ha esperado nadie: eso pasa en la seccion 6, mas
+    # abajo. En un arranque en frio puede estar levantando cuando este paso le
+    # pregunta, asi que se espera aqui explicitamente en vez de suponerlo.
+    # Esperarlo dos veces es gratis: la funcion contesta en la primera vuelta
+    # cuando el contenedor ya esta sano.
+    if (-not (Esperar-Contenedor "mesh-mongo" 120)) {
+        Error1 "MongoDB no respondio, y sin el no se sabe por que id empezar."
+        Error1 "Arranca sin la bandera y repite despues:  .\arrancar.ps1"
+        exit 1
+    }
+
+    $evalTopeProducto = '--eval ''db.productos.find().sort({_id:-1}).limit(1).toArray().map(d=>d._id)[0]||0'''
+    $evalTopeVariante = '--eval ''db.productos.aggregate([{$unwind:\"$variantes\"},{$group:{_id:null,m:{$max:\"$variantes.id_producto_variante\"}}}]).toArray().map(d=>d.m)[0]||0'''
+
+    $topeProducto = (docker exec mesh-mongo sh -c (Comando-Mongo $evalTopeProducto) 2>&1 | Out-String).Trim()
+    $topeVariante = (docker exec mesh-mongo sh -c (Comando-Mongo $evalTopeVariante) 2>&1 | Out-String).Trim()
+
+    # La otra razon por la que esto puede no ser un numero, y no es rara: la
+    # contrasena de Mongo se repara en la seccion 6, que todavia no ha corrido.
+    # Sobre una maquina con el .env cambiado, aqui mongosh contesta
+    # "Authentication failed". No se sigue a ciegas -- se dice que arranque una
+    # vez sin la bandera, que es lo que repara la contrasena, y que repita.
+    if (($topeProducto -notmatch '^\d+$') -or ($topeVariante -notmatch '^\d+$')) {
+        Error1 "No se pudo leer de MongoDB por que id seguir, y sin eso el lote"
+        Error1 "podria pisar los productos que solo existen alli."
+        Error1 "Arranca una vez sin la bandera y repite despues:  .\arrancar.ps1"
+        exit 1
+    }
+
+    Ok "Mongo va por el producto $topeProducto y la variante $topeVariante"
+
+    # -f y no stdin, igual que Correr-Migraciones: el archivo esta montado dentro
+    # del contenedor y asi no pasa por la codificacion de PowerShell. Los cuatro
+    # -v son numeros pelados, sin espacios ni comillas, asi que estos si viajan
+    # enteros por la linea de comandos.
+    #
+    # VERBOSITY=verbose no es adorno, es lo que permite distinguir un lote
+    # RECHAZADO de un fallo de verdad, y esta explicado entero mas abajo, donde
+    # se usa. Sin el, psql imprime el texto del error pero no su SQLSTATE.
+    $salidaLote = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] `
+        -v ON_ERROR_STOP=1 -q -v VERBOSITY=verbose `
+        -v productos=$ProductosPedidos `
+        -v semilla=$SemillaPedida `
+        -v max_mongo_producto=$topeProducto `
+        -v max_mongo_variante=$topeVariante `
+        -f "/migrations/lote/generar_lote.sql" 2>&1 | Out-String
+
+    # Un lote rechazado NO tumba el arranque, y un fallo de verdad si
+    # -------------------------------------------------------------------
+    # Hasta hoy este bloque hacia exit 1 con cualquier fallo, y eso convertia
+    # una peticion opcional en un arranque muerto: quien escribia dos veces la
+    # misma semilla se quedaba sin que nadie comprobara Mongo, Redis ni Neo4j,
+    # con el ambiente perfectamente sano. El lote es un extra; el ambiente es lo
+    # que este script existe para dejar en pie.
+    #
+    # Los dos casos SI se distinguen, y no por el texto del mensaje. Medido
+    # contra el contenedor vivo, con las cuatro formas de fallar:
+    #
+    #   generador rechaza la peticion   psql sale 3  y el error lleva P0001
+    #   no encuentra el archivo .sql    psql sale 1  y no lleva P0001
+    #   no puede conectarse a la base   psql sale 2  y no lleva P0001
+    #   error de SQL de cualquier otra  psql sale 3  con el SQLSTATE de ese
+    #   clase                                        error, que no es P0001
+    #
+    # P0001 es el SQLSTATE de RAISE EXCEPTION, o sea de las guardias que el
+    # propio generador escribio: fuera de rango, semilla repetida, topes de
+    # Mongo incoherentes, y las verificaciones que corre sobre su propio
+    # resultado al final. Todas quieren decir lo mismo -- "no voy a escribir
+    # esto" -- y todas dejan la base intacta, porque generar_lote.sql envuelve
+    # el archivo entero en BEGIN/COMMIT y cualquier excepcion lo revierte. Esto
+    # tambien esta comprobado: con la guardia disparada, el count de productos
+    # antes y despues es el mismo.
+    #
+    # Se mira el SQLSTATE y NO el texto del mensaje a proposito. Este mismo
+    # archivo tiene la cicatriz de haber hecho lo contrario: el perdon de
+    # Correr-Migraciones agarraba la frase "already exists" y pintaba de amarillo
+    # un conjunto de datos cargado a la mitad. Una frase la reescribe cualquiera
+    # el dia que traduzca un mensaje; un SQLSTATE lo fija PostgreSQL.
+    #
+    # Lo que esta distincion NO cubre, dicho de frente: un P0001 tambien puede
+    # venir de las verificaciones finales del generador, que no son "tu peticion
+    # no me gusta" sino "genere algo que no cuadra". Se tratan igual, como aviso
+    # y no como muerte, y la razon es que el resultado para el ambiente es
+    # identico: la transaccion se revirtio y PostgreSQL quedo como estaba. El
+    # riesgo de equivocarse hacia este lado es imprimir amarillo por algo grave;
+    # el de equivocarse hacia el otro es matar un arranque sano. El aviso se
+    # repite al final del script justamente para que ese amarillo no se pierda.
+    if ($LASTEXITCODE -ne 0) {
+        if ($LASTEXITCODE -eq 3 -and ($salidaLote -match 'ERROR:\s+P0001:')) {
+            $loteRechazado = "se pidieron $ProductosPedidos productos con semilla $SemillaPedida"
+
+            Aviso "El generador RECHAZO el lote. No se escribio ni una fila:"
+            Aviso "generar_lote.sql envuelve todo en una transaccion y la revirtio."
+            Write-Host ""
+            # La linea LOCATION de psql se quita al imprimir. Dice el archivo y
+            # la linea del codigo C de PostgreSQL donde nacio la excepcion
+            # (exec_stmt_raise, pl_exec.c), que no le sirve a nadie aqui y manda
+            # a leer las fuentes de PostgreSQL en vez del motivo, que esta en la
+            # linea de arriba. El resto de la salida se imprime entera.
+            foreach ($linea in ($salidaLote -split "`n")) {
+                if ($linea -notmatch '^\s*LOCATION:') { Write-Host $linea -ForegroundColor Yellow }
+            }
+            Aviso "El arranque sigue: el lote es un extra y el ambiente esta bien."
+        } else {
+            Error1 "migrations/lote/generar_lote.sql FALLO"
+            Write-Host $salidaLote -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        # La salida del generador no se imprime cuando todo va bien, y es a
+        # proposito: es un generador de N filas, y el dia que alguien le ponga un
+        # aviso por producto un lote de mil llena la pantalla y tapa el resto del
+        # arranque. Que llego es algo que se ve dos pasos mas abajo, cuando la
+        # seccion 7b imprime las cuentas de cada coleccion. Cuando falla si se
+        # imprime entera, que es cuando hace falta.
+        Ok "Pedidos $ProductosPedidos productos con semilla $SemillaPedida"
+    }
+}
+
+
+# ------------------------------------------------------------
 # 6. MongoDB
 # ------------------------------------------------------------
 # El contenedor ya subio con el "docker compose up -d" de arriba. Aqui se
@@ -1378,3 +1824,26 @@ Write-Host "   Consola de MongoDB:  .\arrancar.ps1 -Mongo" -ForegroundColor Dark
 Write-Host "   Consultas de fraude: bash neo4j/correr_fraude.sh" -ForegroundColor DarkGray
 Write-Host "   Pruebas de Redis:    bash redis/prueba_concurrencia.sh   y   bash redis/prueba_carrito.sh" -ForegroundColor DarkGray
 Write-Host ""
+
+# El aviso del lote rechazado se repite AQUI, y es lo ultimo que se imprime.
+#
+# El arranque siguio adelante a proposito (esta explicado en el paso 5c), pero
+# seguir adelante no puede acabar en una pantalla que solo diga cosas buenas: el
+# amarillo del paso 5c queda enterrado bajo las cuentas de Mongo, las de Neo4j y
+# el resumen entero, y quien tecleo la linea se va creyendo que su lote esta en
+# la base. Repetirlo al final es lo que evita el "todo bien" que no responde a
+# lo que se pidio, que es el fallo que este archivo persigue en todas partes.
+#
+# El script igual sale con codigo 0, y hay que decir por que se eligio asi: el
+# codigo de salida habla del AMBIENTE, que es lo que este script promete dejar
+# en pie, y el ambiente quedo bien. El lote es una peticion opcional que se
+# rechazo sin escribir nada. El precio de esa eleccion es que un script que
+# encadene con este no se entera del rechazo; el precio del otro lado seria
+# pintar de rojo un arranque sano, que es peor porque manda a buscar una averia
+# que no existe.
+if ($loteRechazado) {
+    Aviso "OJO: el lote NO se genero ($loteRechazado)."
+    Aviso "Las bases quedaron arriba y completas, pero sin ese lote."
+    Aviso "El motivo esta mas arriba, en el paso de generacion."
+    Write-Host ""
+}

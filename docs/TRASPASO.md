@@ -3,7 +3,7 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-08-30**.
+Ultima actualizacion: **2026-09-03**.
 
 ---
 
@@ -105,6 +105,65 @@ por eventos, los indices y las agregaciones. El informe lo hizo el equipo.
 | **Reportes de admin** | ventas y reservaciones + `PanelReportes.svelte` | lo mismo |
 | **Los indices de Mongo, demostrados** | 4 pasos, 12 comprobaciones | `.\mongo\demostracion_indices.ps1` |
 | **El pedido reconstruido, completo** | modal con lo pagado + precio y stock de ese dia | entra como `compradora.norte@` a `/pedidos` |
+| **La nota en el catalogo de Mongo** | `resenas_promedio` y `resenas_total` en cada documento, con su indice | `.\arrancar.ps1 -Etl` y mirar un producto en Mongo |
+| **Generador incremental de productos** | lotes reproducibles por semilla | `.\arrancar.ps1 -Productos 300 -Semilla 7` |
+
+### La nota del producto, embebida en el catalogo
+
+Cada documento de MongoDB trae ahora dos campos mas, que calcula `etl/extraer.sql`
+desde la tabla `resena` de PostgreSQL:
+
+```
+resenas_promedio   la nota media, 0 cuando no tiene ninguna resena
+resenas_total      cuantas resenas la sostienen
+```
+
+**Son el sexto y el septimo numero derivado que se embebe**, y existen por lo
+mismo que los cinco de precio y stock que ya estaban: la lista del catalogo los
+necesita en cada tarjeta, y sin ellos habria que consultar PostgreSQL una vez por
+producto de la pagina. Comparten tambien su contrapartida, que es una copia que
+envejece hasta la proxima corrida del ETL.
+
+Van **dos campos y no uno** por una razon que no es obvia: `calificacion` es
+`CHECK BETWEEN 1 AND 5`, asi que un promedio real nunca puede dar 0. El 0
+significa "no tiene resenas", y quien filtre por nota minima tiene que exigir
+ademas `resenas_total > 0` o los productos sin opiniones se ordenarian por debajo
+de los de una estrella.
+
+El indice es `catalogo_rating` y esta en `mongo/002_resenas.js`. Su gracia, y es
+lo que conviene saber contar: como el RANGO y el ORDEN caen sobre el mismo campo,
+el indice sirve para las dos cosas y **no aparece etapa SORT**. En
+`catalogo_precio` no se pudo, porque ahi el rango cae sobre `precio_desde` y el
+orden sobre `_id`, que son dos campos distintos.
+
+Medido con el catalogo en 406 productos: filtrando por nota en una categoria,
+2 documentos examinados para 2 devueltos con el indice, contra 406 sin ninguno.
+
+**El filtro del catalogo todavia no existe**: el campo esta y el indice esta,
+pero ninguna ruta del backend lo consume. El contrato de lo que falta esta en
+`docs/BACKEND-PENDIENTE.md`.
+
+### El generador de lotes
+
+`migrations/lote/generar_lote.sql` agrega productos y ofertas **sobre una base ya
+cargada**, en cualquier momento. Es lo contrario de `migrations/datos/001_catalogo.sql`,
+que solo entra en una base vacia.
+
+```powershell
+.\arrancar.ps1 -Productos 300 -Semilla 7
+```
+
+Misma semilla, mismo catalogo, en cualquier maquina, sin guardar nada. Cada
+producto se genera **clonando** uno del catalogo curado, asi que hereda una
+categoria valida, caracteristicas del tipo correcto y una foto que carga. Las
+imagenes se reusan por la tabla puente y **no se inserta ni una URL nueva**.
+
+Su documentacion entera esta en `migrations/lote/README.md`, incluido como se
+deshace un lote, que son dos mitades: el SQL de PostgreSQL **y un borrado aparte
+en MongoDB**, porque correr el ETL no los quita.
+
+Y lo que destapo construirlo esta en el pendiente 5, que es lo mas grave que
+salio hoy: **hay dos asignadores de id de producto que no se hablan.**
 
 **El carrito ya compra de verdad.** Verificado contra la base: pedido creado,
 pago `pagado`, kardex con el motivo `venta`, stock descontado, y la clave de

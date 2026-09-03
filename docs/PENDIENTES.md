@@ -2,7 +2,7 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-08-30.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-09-03.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
@@ -11,6 +11,67 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~2~~ | ~~La semilla no respalda con compras las 86 resenas~~ | -- | -- | **CERRADO el 2026-08-30** |
 | ~~3~~ | ~~`Carrito.svelte` quedo muerto~~ | -- | -- | **CERRADO el 2026-08-30** |
 | 4 | El grafo se queda viejo y el ETL relee todo | Meme | ver su doc | baja |
+| 5 | Dos asignadores de id de producto que no se hablan | Jose David decide | ver abajo | **alta: puede machacar un producto sin dar error** |
+| 6 | La nota no llega al catalogo hasta que corre el ETL | sin dueno | ver abajo | media |
+
+---
+
+# 5. Dos asignadores de id de producto que no se hablan
+
+**Se encontro midiendo, no leyendo, y existe aunque nadie haga nada mas.**
+
+`backend/src/services/vendedores/productos.service.ts` deja escrito que los
+productos ya no se registran en PostgreSQL y que su id sale de "el maximo que ya
+existe, mas uno". Ese maximo lo lee de **MongoDB**, en `siguienteIdProducto`.
+Mientras tanto `productos.id_producto` de PostgreSQL sigue siendo un `bigserial`
+con su propia cuenta.
+
+Son dos numeradores independientes sobre el mismo espacio de ids, y **ya habian
+divergido**: MongoDB tenia cuatro productos publicados desde el panel cuya fila
+no existe en PostgreSQL, y la secuencia de PostgreSQL estaba a punto de entregar
+justo esos numeros. El primer producto insertado en PostgreSQL se habria llevado
+un id que en MongoDB ya era de otro producto, y el `replaceOne` del ETL lo
+habria machacado **sin un solo error**.
+
+Y no hay nada que avise: `etl/cargar.js` barre sobrantes en `categorias` y en
+`productos_eventos`, pero **no tiene ningun barrido para `db.productos`**. El
+verificador del arranque tampoco lo ve, porque solo se queja si Mongo tiene
+MENOS documentos que PostgreSQL, y aqui tendria de mas.
+
+**Lo que hay hoy es un parche, no un arreglo.** `migrations/lote/generar_lote.sql`
+recibe los dos maximos de MongoDB, comprueba que sean creibles y alinea las dos
+secuencias con `setval` antes de insertar. Eso resuelve el caso del generador y
+deja los dos numeradores de acuerdo hacia adelante, pero **solo para ese
+camino**. Cualquier otro `INSERT` en `productos` de PostgreSQL sigue expuesto.
+
+La decision de fondo le toca a Jose David y esta escrita en
+`docs/BACKEND-PENDIENTE.md`: si el id de producto debe salir de una sola fuente,
+y cual.
+
+---
+
+# 6. La nota del catalogo no se refresca sola
+
+Los documentos de MongoDB ya traen `resenas_promedio` y `resenas_total`, y salen
+del ETL. Eso deja dos huecos conocidos, los dos medidos:
+
+**Una resena nueva no mueve la nota** hasta que alguien corre el ETL. Es el mismo
+problema del pendiente 4 y de `docs/PENDIENTE-OUTBOX.md`, ahora con un dato mas
+encima. Mientras tanto la ficha del producto y la lista del catalogo pueden
+ensenar dos numeros distintos: la ficha calcula en vivo contra PostgreSQL y la
+lista lee la copia de Mongo.
+
+**Un producto que solo vive en MongoDB nunca actualiza su nota.** `etl/extraer.sql`
+itera sobre la tabla `productos` de PostgreSQL, asi que un producto publicado
+desde el panel no pasa por ahi jamas y su nota se queda en el 0 con que lo
+rellena `mongo/002_resenas.js`. Y no es teorico: esos productos tienen ofertas y
+se pueden comprar, o sea que se pueden resenar hoy.
+
+El arreglo de fondo es que el promedio se calcule agrupando `resena` por
+`id_producto_mongo`, con independencia de que el producto tenga fila en
+PostgreSQL. Es una etapa nueva del ETL, no un parche.
+
+---
 
 Y de la **Entrega 2** falta trabajo que no es un bug:
 
