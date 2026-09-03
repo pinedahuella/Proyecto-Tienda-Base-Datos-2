@@ -128,6 +128,32 @@ Dos cosas que NO hace, y las dos a proposito:
   - No borra un producto inventado que alguien haya comprado. Se lo
     salta, borra todos los demas, y te dice cuantos se salto y por que.
 
+
+HAY UN SEGUNDO GENERADOR, Y ES DISTINTO
+==================================================
+
+  .\arrancar.ps1 -ProductosMongo 200
+  .\arrancar.ps1 -BorrarMongo 7
+
+Hace lo mismo pero los productos nacen en MongoDB en vez de en
+PostgreSQL. Suena a detalle y no lo es: asi es como nacen hoy los
+productos de verdad, los que publica un vendedor desde el panel.
+
+En corto:
+
+  -Productos       el producto pasa por PostgreSQL y el ETL lo copia a
+                   MongoDB. Tiene historial completo.
+  -ProductosMongo  el producto solo existe en MongoDB. El ETL no lo
+                   toca nunca.
+
+Usa el primero si quieres el catalogo completo de siempre. Usa el
+segundo si quieres probar como se porta la tienda con productos
+publicados por vendedores, o llenar MongoDB rapido sin esperar al ETL.
+
+Se borran con banderas distintas porque son cosas distintas: -Borrar
+para los primeros, -BorrarMongo para los segundos. Y -BorrarMongo lleva
+la SEMILLA del lote, no un numero de productos.
+
 Tres cosas que conviene saber antes de escribirlo:
 
   - El numero de productos va de 1 a 9999.

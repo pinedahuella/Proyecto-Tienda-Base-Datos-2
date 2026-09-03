@@ -25,6 +25,22 @@
 #   Los 102 productos curados NO los borra -Borrar, y no se puede: 59 de ellos tienen
 #   ventas detras y pedido_producto los sujeta con ON DELETE RESTRICT. Para dejar la base
 #   como recien instalada esta -Reiniciar, que la reconstruye entera desde el repositorio.
+#
+#   .\arrancar.ps1 -ProductosMongo 200          crea 200 productos que viven SOLO en
+#                                              MongoDB, como los que publica un vendedor
+#                                              desde el panel. Sin -Semilla elige una libre
+#   .\arrancar.ps1 -ProductosMongo 200 -Semilla 7   el mismo lote, repetible
+#   .\arrancar.ps1 -BorrarMongo 7                borra el lote M7 de las dos bases
+#
+#   La diferencia entre -Productos y -ProductosMongo no es de tamano ni de velocidad, es
+#   de ORIGEN, y decide como se comportan despues:
+#
+#     -Productos       nacen en PostgreSQL y el ETL los lleva a Mongo. Tienen historial
+#                      completo y son reconstruibles por fecha. Cada corrida del ETL los
+#                      vuelve a escribir.
+#     -ProductosMongo  nacen en MongoDB y no tienen fila en `productos`. El ETL no los
+#                      mira NUNCA. Es como nacen hoy los productos de verdad, porque el
+#                      panel de vendedor ya no los registra en PostgreSQL.
 
 # Por que -Etl fuerza LOS DOS ETL y no hay un -EtlGrafo aparte
 # ------------------------------------------------------------
@@ -142,7 +158,9 @@ param(
     [switch]$Etl,
     [string]$Productos = '',
     [string]$Semilla   = '',
-    [string]$Borrar    = ''
+    [string]$Borrar    = '',
+    [string]$ProductosMongo = '',
+    [string]$BorrarMongo    = ''
 )
 
 Set-Location -LiteralPath $PSScriptRoot
@@ -324,6 +342,47 @@ if ($PSBoundParameters.ContainsKey('Borrar')) {
     # existir. Se avisa y se sigue, porque no rompe nada.
     if ($Reiniciar) {
         Aviso "-Reiniciar ya deja la base sin productos generados: -Borrar no va a encontrar nada."
+    }
+}
+
+
+# Las dos banderas del lote de MongoDB. Se revisan igual que las de PostgreSQL y
+# por el mismo motivo: un error de tecleo tiene que costar un segundo y no un
+# arranque entero.
+$MongoPedidos = 0
+$MongoBorrar  = -1
+
+if ($PSBoundParameters.ContainsKey('ProductosMongo')) {
+    $MongoPedidos = Leer-Entero $ProductosMongo '-ProductosMongo' 1 9999
+    if ($null -eq $MongoPedidos) { exit 1 }
+
+    # Las cuatro banderas de lote se rechazan entre si, y no por prudencia: los
+    # pasos corren en un orden fijo, asi que combinarlas hace cosas que nadie
+    # pidio. Generar y borrar en la misma corrida deja la base igual que
+    # estaba, despues de dos minutos de trabajo.
+    if ($pidioLote) {
+        Error1 "-Productos y -ProductosMongo no se pueden usar en la misma corrida."
+        Aviso  "   Son dos origenes distintos y conviene ver el resultado de uno antes"
+        Aviso  "   de encimarle el otro. Corre primero uno y despues el otro."
+        exit 1
+    }
+    if ($BorrarPedido -ne '') {
+        Error1 "-ProductosMongo y -Borrar no se pueden usar en la misma corrida."
+        exit 1
+    }
+}
+
+if ($PSBoundParameters.ContainsKey('BorrarMongo')) {
+    $MongoBorrar = Leer-Entero $BorrarMongo '-BorrarMongo' 0 ([long]::MaxValue)
+    if ($null -eq $MongoBorrar) {
+        Aviso "   -BorrarMongo lleva la SEMILLA del lote, no cuantos borrar."
+        Aviso "   No hay un borra-todos aqui: en MongoDB un producto de lote y uno que"
+        Aviso "   publico una persona son indistinguibles salvo por el marcador del nombre."
+        exit 1
+    }
+    if ($MongoPedidos -gt 0) {
+        Error1 "-ProductosMongo y -BorrarMongo no se pueden usar en la misma corrida."
+        exit 1
     }
 }
 
@@ -1638,6 +1697,207 @@ if ($coleccionesJs.Count -eq 0) {
     }
 }
 
+
+# ------------------------------------------------------------
+# 6b. Lote de productos que viven SOLO en MongoDB
+# ------------------------------------------------------------
+# El gemelo de la seccion 5c, por el otro extremo.
+#
+#   5c  producto en PostgreSQL -> el ETL lo lleva a Mongo
+#   6b  documento en Mongo, y sus ofertas en PostgreSQL. SIN fila en `productos`
+#
+# La diferencia no es de gusto. El backend dice por escrito, en
+# vendedores/productos.service.ts, que "los productos ya no se registran en
+# PostgreSQL": los que publica un vendedor nacen asi. Este paso es la unica
+# forma de tener muchos de ese tipo para probar, y de comprobar que un catalogo
+# con los dos origenes mezclados se comporta.
+#
+# POR QUE VA AQUI Y NO EN LA 5c
+#
+# Porque necesita MongoDB vivo y con sus colecciones creadas, y eso pasa en la
+# seccion 6. En la 5c todavia no se comprobo ni el acceso.
+#
+# Y va ANTES de la 7 a proposito: la 7 es el ETL, que compara cuentas para
+# decidir si corre. Estos productos NO salen de PostgreSQL, asi que suben el
+# conteo de Mongo sin subir el de PostgreSQL. El verificador 7b compara con
+# -lt, o sea que solo se queja si Mongo tiene MENOS, y tener de mas es
+# exactamente lo normal aqui: ahi viven tambien los productos del panel.
+#
+# SON DOS PASOS Y NO UNO, Y ES LO QUE HAY QUE ENTENDER
+#
+# El producto es un documento de Mongo; sus ofertas son filas de PostgreSQL
+# (ADR-2: el descuento de stock tiene que ser atomico). Ningun script habla con
+# las dos bases, asi que el precio lo sortea el generador de Mongo, lo escribe
+# en un csv, y este paso lleva el archivo de un contenedor al otro con el mismo
+# docker cp que ya usa Correr-Etl.
+#
+# Que el precio viaje como DATO y no se vuelva a sortear del otro lado es la
+# decision que evita el fallo clasico: dos implementaciones del mismo azar que
+# tienen que coincidir para siempre, y que el dia que una cambie dejan el
+# documento diciendo un precio y la oferta otro.
+if ($MongoPedidos -gt 0) {
+
+    $rutaGen = "$PSScriptRoot\mongo\lote\generar_lote_mongo.js"
+    $rutaOf  = "$PSScriptRoot\migrations\lote\ofertas_mongo.sql"
+    foreach ($f in @($rutaGen, $rutaOf)) {
+        if (-not (Test-Path -LiteralPath $f)) {
+            Error1 "Falta $f"
+            exit 1
+        }
+    }
+
+    Paso "Generando un lote de $MongoPedidos productos en MongoDB"
+
+    # Los dos topes de PostgreSQL. El generador NO puede consultarlos: solo
+    # habla con Mongo. Y sin ellos numeraria desde el mayor _id de Mongo, que es
+    # justo el error que deja una bomba puesta -- un id que PostgreSQL todavia
+    # puede repartir, y que el ETL machacaria en su proxima corrida.
+    $maxPgProd = "$(docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX -c "SELECT coalesce(max(id_producto),0) FROM productos;" 2>&1)".Trim()
+    $maxPgVar  = "$(docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX -c "SELECT coalesce(max(id_producto_variante),0) FROM productos_variantes;" 2>&1)".Trim()
+
+    if ($maxPgProd -notmatch '^\d+$' -or $maxPgVar -notmatch '^\d+$') {
+        Error1 "No se pudieron leer los topes de PostgreSQL."
+        Write-Host "$maxPgProd / $maxPgVar" -ForegroundColor Red
+        exit 1
+    }
+    Ok "PostgreSQL va por el producto $maxPgProd y la variante $maxPgVar"
+
+    # La semilla NO se busca aqui: la elige el propio generador si no viene, y
+    # la imprime. El dato que hay que mirar son los nombres de los productos de
+    # MongoDB, y el unico que los ve es el script. Averiguarlo desde aqui
+    # obligaria a mandar una agregacion entera por la linea de comandos.
+    $semillaMongo = if ($pidioSemilla) { "$SemillaPedida" } else { "" }
+
+    docker cp $rutaGen mesh-mongo:/tmp/generar_lote_mongo.js | Out-Null
+
+    $salidaGen = docker exec `
+        -e "LOTE_PRODUCTOS=$MongoPedidos" `
+        -e "LOTE_SEMILLA=$semillaMongo" `
+        -e "LOTE_MAX_PG_PRODUCTO=$maxPgProd" `
+        -e "LOTE_MAX_PG_VARIANTE=$maxPgVar" `
+        mesh-mongo sh -c (Comando-Mongo "--file /tmp/generar_lote_mongo.js") 2>&1 | Out-String
+
+    if ($LASTEXITCODE -ne 0) {
+        # Igual que en la 5c: un rechazo del propio generador (semilla repetida,
+        # parametro fuera de rango) es un aviso y no un arranque roto. El
+        # ambiente estaba bien y lo unico que fallo es una peticion opcional.
+        if ($salidaGen -match "ya genero|tiene que ser un entero|no llego") {
+            Aviso "No se genero el lote de MongoDB."
+            foreach ($linea in ($salidaGen -split "`r?`n")) {
+                if ($linea -match "^(ERROR|HINT)") { Aviso ("   " + $linea.Trim()) }
+            }
+        } else {
+            Error1 "mongo/lote/generar_lote_mongo.js FALLO"
+            Write-Host $salidaGen -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        # La semilla que de verdad se uso. Hace falta capturarla porque sin
+        # -Semilla la eligio el generador, y los avisos de mas abajo dicen como
+        # deshacer el lote: un "-BorrarMongo " sin numero no sirve de nada.
+        foreach ($linea in ($salidaGen -split "`r?`n")) {
+            if ($linea -match "^LOTE_SEMILLA_USADA=(\d+)") { $semillaMongo = $Matches[1] }
+            if ($linea -match "^Sin -Semilla|^Para volver a generar|^Lote M|^FALTA POSTGRESQL") {
+                Ok $linea.Trim()
+            }
+        }
+
+        # La segunda mitad: las ofertas. El csv va de un contenedor al otro
+        # pasando por el host, que es el unico camino -- mesh-mongo y
+        # mesh-postgres no comparten sistema de archivos.
+        $csvHost = Join-Path $env:TEMP "mesh-lote-mongo.csv"
+        docker cp mesh-mongo:/tmp/mesh-lote-mongo.csv $csvHost | Out-Null
+        if (-not (Test-Path -LiteralPath $csvHost)) {
+            Error1 "El generador no dejo el csv de las ofertas."
+            Aviso  "Los productos YA estan en MongoDB pero sin ofertas: no tienen precio."
+            Aviso  "Borralos con:  .\arrancar.ps1 -BorrarMongo $semillaMongo"
+            exit 1
+        }
+        docker cp $csvHost mesh-postgres:/tmp/mesh-lote-mongo.csv | Out-Null
+
+        $salidaOf = docker exec mesh-postgres psql `
+            -U $env_["DB_USER"] -d $env_["DB_NAME"] `
+            -v ON_ERROR_STOP=1 -q -f "/migrations/lote/ofertas_mongo.sql" 2>&1 | Out-String
+
+        if ($LASTEXITCODE -ne 0) {
+            Error1 "migrations/lote/ofertas_mongo.sql FALLO"
+            Write-Host $salidaOf -ForegroundColor Red
+            Aviso "Los productos YA estan en MongoDB pero sin ofertas: no tienen precio."
+            Aviso "Borralos con:  .\arrancar.ps1 -BorrarMongo $semillaMongo"
+            exit 1
+        }
+        foreach ($linea in ($salidaOf -split "`r?`n")) {
+            if ($linea -match "NOTICE:\s+Ofertas verificadas") {
+                Ok ($linea -replace '^.*NOTICE:\s+', '')
+            }
+        }
+        Remove-Item -LiteralPath $csvHost -ErrorAction SilentlyContinue
+    }
+}
+
+
+# ------------------------------------------------------------
+# 6c. Borrar un lote de MongoDB
+# ------------------------------------------------------------
+# Las mismas dos mitades al reves: primero los documentos, despues sus ofertas.
+# Ese orden y no el contrario, porque la lista de ids sale de los documentos: si
+# se borraran primero las ofertas no habria por donde empezar.
+if ($MongoBorrar -ge 0) {
+
+    $rutaBorrarJs  = "$PSScriptRoot\mongo\lote\borrar_lote_mongo.js"
+    $rutaBorrarSql = "$PSScriptRoot\migrations\lote\borrar_ofertas_mongo.sql"
+    foreach ($f in @($rutaBorrarJs, $rutaBorrarSql)) {
+        if (-not (Test-Path -LiteralPath $f)) {
+            Error1 "Falta $f"
+            exit 1
+        }
+    }
+
+    Paso "Borrando el lote M$MongoBorrar de MongoDB"
+
+    docker cp $rutaBorrarJs mesh-mongo:/tmp/borrar_lote_mongo.js | Out-Null
+
+    $salidaBorr = docker exec -e "LOTE_SEMILLA=$MongoBorrar" `
+        mesh-mongo sh -c (Comando-Mongo "--file /tmp/borrar_lote_mongo.js") 2>&1 | Out-String
+
+    if ($LASTEXITCODE -ne 0) {
+        if ($salidaBorr -match "no genero ningun producto|tiene que ser un entero") {
+            Aviso "No se borro nada."
+            foreach ($linea in ($salidaBorr -split "`r?`n")) {
+                if ($linea -match "^(ERROR|HINT)") { Aviso ("   " + $linea.Trim()) }
+            }
+        } else {
+            Error1 "mongo/lote/borrar_lote_mongo.js FALLO"
+            Write-Host $salidaBorr -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        foreach ($linea in ($salidaBorr -split "`r?`n")) {
+            if ($linea -match "^Lote M") { Ok $linea.Trim() }
+        }
+
+        $idsHost = Join-Path $env:TEMP "mesh-lote-mongo-borrados.csv"
+        docker cp mesh-mongo:/tmp/mesh-lote-mongo-borrados.csv $idsHost | Out-Null
+        docker cp $idsHost mesh-postgres:/tmp/mesh-lote-mongo-borrados.csv | Out-Null
+
+        $salidaBorrSql = docker exec mesh-postgres psql `
+            -U $env_["DB_USER"] -d $env_["DB_NAME"] `
+            -v ON_ERROR_STOP=1 -q -f "/migrations/lote/borrar_ofertas_mongo.sql" 2>&1 | Out-String
+
+        if ($LASTEXITCODE -ne 0) {
+            Error1 "migrations/lote/borrar_ofertas_mongo.sql FALLO"
+            Write-Host $salidaBorrSql -ForegroundColor Red
+            Aviso "Los documentos YA se borraron de MongoDB; sus ofertas siguen en PostgreSQL."
+            exit 1
+        }
+        foreach ($linea in ($salidaBorrSql -split "`r?`n")) {
+            if ($linea -match "NOTICE:\s+(Borrado verificado|Se saltan)") {
+                Ok ($linea -replace '^.*NOTICE:\s+', '')
+            }
+        }
+        Remove-Item -LiteralPath $idsHost -ErrorAction SilentlyContinue
+    }
+}
 
 # ------------------------------------------------------------
 # 7. El catalogo en MongoDB
