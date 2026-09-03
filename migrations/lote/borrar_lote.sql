@@ -91,6 +91,33 @@ SELECT (:'cuantos')::bigint  AS cuantos,
 -- uno publicado desde el panel. La expresion regular exige el formato completo
 -- (espacio, L, digitos, guion, cuatro digitos, y fin de cadena) para que un
 -- producto curado que por casualidad lleve una L y un numero no caiga aqui.
+--
+-- LOS VENDIDOS SE SALTAN, NO PARAN EL BORRADO
+--
+-- Un producto generado nace sin ventas, pero nada impide comprarlo desde la
+-- aplicacion entre que se genera y que se borra. Si eso paso, ese producto no
+-- se puede borrar: pedido_producto -> precio_historial es ON DELETE RESTRICT, y
+-- borrarlo exigiria borrar el pedido, que es lo que el esquema prohibe.
+--
+-- La primera version de este archivo abortaba la transaccion entera en cuanto
+-- encontraba uno. Estaba mal, y por la misma razon por la que pedir mas de los
+-- que hay no es un error: un solo producto vendido dejaba sin borrar los otros
+-- mil novecientos noventa y nueve, y para desatascarlo habia que averiguar a
+-- mano cual era y excluirlo. Quien teclea "borra todos" quiere que se borre
+-- todo lo que se pueda borrar.
+--
+-- Asi que se EXCLUYEN aqui, y al final se dice cuantos fueron y por que. La
+-- diferencia importa: el borrado no falla, informa.
+--
+-- Ojo con donde va el descarte: va ANTES del LIMIT. Si se descartaran despues,
+-- "borrame 500" borraria menos de 500 aunque hubiera de sobra, porque los
+-- vendidos habrian ocupado sitio en la cuenta sin llegar a borrarse.
+CREATE TEMP TABLE borrado_vendidos ON COMMIT DROP AS
+SELECT DISTINCT o.id_producto_mongo AS id_producto
+FROM pedido_producto pp
+JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+JOIN oferta o           ON o.id_oferta = ph.id_oferta;
+
 CREATE TEMP TABLE borrado_ids ON COMMIT DROP AS
 WITH p AS (SELECT * FROM borrado_parametro),
 candidatos AS (
@@ -99,6 +126,7 @@ candidatos AS (
     WHERE pr.nombre ~ ' L[0-9]+-[0-9]{4}$'
       AND (p.semilla < 0
            OR pr.nombre ~ (' L' || p.semilla::text || '-[0-9]{4}$'))
+      AND pr.id_producto NOT IN (SELECT id_producto FROM borrado_vendidos)
 )
 SELECT id_producto
 FROM candidatos, p
@@ -148,22 +176,29 @@ BEGIN
                      v_cuantos, v_hay, v_hay;
     END IF;
 
-    -- La red de seguridad que de verdad importa. Los productos generados nacen
-    -- sin ventas, pero nada impide que alguien compre uno desde la aplicacion
-    -- entre que se genera y que se borra. Si eso paso, el borrado va a chocar
-    -- contra pedido_producto y toda la transaccion se deshace: mejor decir
-    -- CUALES y por que, antes de que el error hable de una llave foranea.
-    SELECT count(DISTINCT o.id_producto_mongo) INTO v_vendidos
-    FROM pedido_producto pp
-    JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
-    JOIN oferta o           ON o.id_oferta = ph.id_oferta
-    WHERE o.id_producto_mongo IN (SELECT id_producto FROM borrado_ids);
+    -- Cuantos se quedaron fuera por tener ventas. Ya estan excluidos de
+    -- borrado_ids; esto es solo para poder decirlo. Se cuentan sobre los
+    -- candidatos que la peticion abarcaba, no sobre la base entera, o el numero
+    -- hablaria de productos que a esta corrida no le tocaban.
+    SELECT count(*) INTO v_vendidos
+    FROM productos pr
+    WHERE pr.nombre ~ ' L[0-9]+-[0-9]{4}$'
+      AND (v_semilla < 0 OR pr.nombre ~ (' L' || v_semilla::text || '-[0-9]{4}$'))
+      AND pr.id_producto IN (SELECT id_producto FROM borrado_vendidos);
 
     IF v_vendidos > 0 THEN
-        RAISE EXCEPTION '% de los productos que se iban a borrar tienen ventas detras', v_vendidos
-            USING HINT = 'Un producto comprado no se puede borrar sin borrar el '
-                         'pedido, y un pedido sin lineas miente sobre lo que se '
-                         'vendio. Excluilos, o usa .\arrancar.ps1 -Reiniciar.';
+        RAISE NOTICE 'Se saltan % productos que tienen ventas detras: esos no se pueden borrar.', v_vendidos;
+        RAISE NOTICE 'Borrarlos exigiria borrar los pedidos que los compraron, y un pedido';
+        RAISE NOTICE 'sin lineas miente sobre lo que se vendio. Se borra todo lo demas.';
+    END IF;
+
+    -- Que TODOS los candidatos esten vendidos si es un caso sin salida: no hay
+    -- nada que borrar y hay que decirlo claro, no terminar en verde sin haber
+    -- hecho nada.
+    IF v_a_borrar = 0 THEN
+        RAISE EXCEPTION 'Los % productos que se pidio borrar tienen todos ventas detras', v_hay
+            USING HINT = 'Ninguno se puede borrar sin borrar antes su pedido. '
+                         'Para dejar la base como nueva:  .\arrancar.ps1 -Reiniciar';
     END IF;
 
     RAISE NOTICE 'A borrar: % productos generados (de % que hay)', v_a_borrar, v_hay;
