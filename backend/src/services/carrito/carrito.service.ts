@@ -391,22 +391,31 @@ export class CarritoService {
   }
 
   /**
-   * Vacia el carrito de una cuenta: un `DEL` de la clave. Se usa desde
-   * `DELETE /carrito` y despues de un checkout correcto. Idempotente.
+   * Vacia el carrito de una cuenta: un `DEL` de la clave. Idempotente.
    *
-   * OJO -- limitacion conocida, a proposito por ahora: NO suelta las
-   * reservas de inventario limitado que pudiera haber en el carrito. La
-   * razon es que esta misma funcion se llama tambien DESPUES de una
-   * compra exitosa (`comprarCarrito`), y ahi las reservas ya deberian
-   * quedar CONFIRMADAS, no devueltas -- pero conectar `confirmar` al
-   * checkout es el paso 4 del plan, todavia sin construir. Hacer que
-   * `vaciar` suelte reservas ahora soltaria por error unidades recien
-   * vendidas. Mientras tanto, una reserva que quede colgada por un
-   * `DELETE /carrito` manual se libera igual, sola, cuando vence su TTL
-   * (ver `TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS`) -- no se pierde para
-   * siempre, solo tarda hasta 15 minutos en volver a estar disponible.
+   * `soltarReservas` decide que pasa con las reservas de inventario
+   * limitado que hubiera en el carrito (campos `t:<id_oferta>`):
+   *
+   *   - `true` (vaciado MANUAL, `DELETE /carrito`): antes del `DEL` se
+   *     recorren esos tickets y se devuelven (op `devolver`), para que sus
+   *     unidades vuelvan al contador de Redis en el acto en vez de esperar
+   *     a que venza cada reserva (`TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS`).
+   *   - `false` (vaciado tras un checkout correcto, desde `comprarCarrito`):
+   *     esas reservas YA se confirmaron (op `confirmar`) una por una antes
+   *     de llegar aca -- devolverlas soltaria unidades recien vendidas.
    */
-  async vaciar(idUsuario: string): Promise<void> {
+  async vaciar(idUsuario: string, soltarReservas = false): Promise<void> {
+    if (soltarReservas) {
+      const { tickets } = await this.leerHashCompleto(idUsuario);
+      await this.devolverReservas(
+        idUsuario,
+        Object.entries(tickets).map(([idOferta, ticket]) => ({
+          idOferta: Number(idOferta),
+          ticket,
+        })),
+      );
+    }
+
     try {
       await redis.del(this.clave(idUsuario));
     } catch (error) {
@@ -461,6 +470,18 @@ export class CarritoService {
     if (carrito.lineas.length === 0) {
       throw new ErrorConflicto('El carrito esta vacio');
     }
+
+    // Las lineas de inventario limitado que traen una reserva viva en Redis
+    // (campo `t:<id_oferta>` del hash), con su numero de ticket. Se leen
+    // ANTES de comprar porque el `vaciar()` del final borra el hash del
+    // carrito -- y con el, los tickets: despues de pagar hay que CONFIRMAR
+    // cada uno (op `confirmar` de `redis/inventario_limitado.lua`), y si el
+    // pago no se concreta, DEVOLVERLO. Es el paso 4 de
+    // `plan pendiente/inventario-limitado.md`.
+    const lineasConReserva = await this.leerLineasConReserva(
+      idUsuario,
+      carrito.lineas,
+    );
 
     const lineasBloqueantes = carrito.lineas.filter(
       (linea) => !linea.disponible,
@@ -523,12 +544,22 @@ export class CarritoService {
       compra = resultado.rows[0].comprar_carrito;
     } catch (error) {
       // La oferta se pauso / se agoto entre verCarrito y esta llamada:
-      // comprar_carrito lo rechaza y no queda nada escrito.
+      // comprar_carrito lo rechaza y no queda nada escrito. Como el pago no
+      // se concreto, se sueltan las reservas de inventario limitado que se
+      // habian tomado -- sus unidades vuelven al contador de Redis en el
+      // acto, en vez de esperar los 15 min del TTL de cada reserva.
+      await this.devolverReservas(idUsuario, lineasConReserva);
       if (this.esErrorDeNegocio(error)) {
         throw new ErrorConflicto((error as Error).message);
       }
       manejarErrorConexion(this.logger, error);
     }
+
+    // El pago paso: cada reserva de inventario limitado pasa de "reservada"
+    // a "vendida" (op `confirmar`). Best-effort -- la venta ya esta cerrada
+    // en PostgreSQL y un fallo de Redis aca no la deshace (ver
+    // confirmarReservas).
+    await this.confirmarReservas(idUsuario, lineasConReserva);
 
     await this.vaciar(idUsuario);
 
@@ -643,15 +674,25 @@ export class CarritoService {
    *
    * Tambien borra el campo ticket companero (`t:<id_oferta>`) de cada
    * linea, si tenia -- sin esto, quedaria un ticket huerfano en el
-   * carrito, apuntando a una linea que ya no esta. No llama `devolver`:
-   * si el motivo del bloqueo fue `reserva_vencida`, la reserva ya se
-   * libero sola; para los demas motivos (oferta pausada, etc.) esta linea
-   * nunca fue de inventario limitado.
+   * carrito, apuntando a una linea que ya no esta. Y si esa linea todavia
+   * tenia una reserva de inventario limitado viva (por ejemplo, la oferta
+   * se pauso pero su venta relampago sigue abierta en Redis), se suelta
+   * con `devolver` antes de quitarla -- si no, la reserva quedaria colgada
+   * hasta que venza su TTL. Una reserva ya vencida (`reserva_vencida`)
+   * contesta `SIN_TICKET` sin efecto, no es un error.
    */
   private async quitarLineasDelCarrito(
     idUsuario: string,
     idsOferta: number[],
   ): Promise<void> {
+    const { tickets } = await this.leerHashCompleto(idUsuario);
+    const conReserva = idsOferta
+      .filter((id) => tickets[id] != null)
+      .map((id) => ({ idOferta: id, ticket: tickets[id] }));
+    if (conReserva.length > 0) {
+      await this.devolverReservas(idUsuario, conReserva);
+    }
+
     try {
       const campos = idsOferta.flatMap((id) => [
         String(id),
@@ -660,6 +701,93 @@ export class CarritoService {
       await redis.hdel(this.clave(idUsuario), ...campos);
     } catch (error) {
       manejarErrorRedis(this.logger, error);
+    }
+  }
+
+  /**
+   * De las lineas del carrito, las de inventario limitado que tienen una
+   * reserva viva (campo `t:<id_oferta>` en el hash) junto con su numero de
+   * ticket. Una sola lectura del hash (`HGETALL`), barata porque el
+   * carrito es chico.
+   */
+  private async leerLineasConReserva(
+    idUsuario: string,
+    lineas: CarritoLinea[],
+  ): Promise<{ idOferta: number; ticket: number }[]> {
+    const { tickets } = await this.leerHashCompleto(idUsuario);
+    return lineas
+      .filter((linea) => tickets[linea.id_oferta] != null)
+      .map((linea) => ({
+        idOferta: linea.id_oferta,
+        ticket: tickets[linea.id_oferta],
+      }));
+  }
+
+  /**
+   * Tras un pago exitoso, marca como vendidas (op `confirmar` de
+   * `redis/inventario_limitado.lua`) las reservas de inventario limitado
+   * del carrito.
+   *
+   * Best-effort a proposito: cuando esto corre, `comprar_carrito()` ya
+   * cerro la venta en PostgreSQL, que es el libro contable real (con su
+   * `FOR UPDATE`). Si `confirmar` falla aca -- Redis caido, o el ticket ya
+   * vencio -- NO se deshace la compra: se registra y se sigue. Una reserva
+   * que quedo sin confirmar vence sola a los 15 min y `cosechar` devuelve
+   * su unidad al contador de Redis; es un desajuste chico y acotado entre
+   * los dos contadores, no una sobreventa, y `revertir` borra las claves
+   * de Redis cuando la venta cierra. Mismo criterio que el recalculo de
+   * Mongo de mas abajo.
+   */
+  private async confirmarReservas(
+    idUsuario: string,
+    lineas: { idOferta: number; ticket: number }[],
+  ): Promise<void> {
+    for (const { idOferta, ticket } of lineas) {
+      try {
+        const { resultado } = await this.inventarioLimitadoService.confirmar(
+          idOferta,
+          idUsuario,
+          ticket,
+        );
+        if (resultado !== 'CONFIRMADO') {
+          this.logger.warn(
+            `Reserva de inventario limitado no confirmada (oferta ${idOferta}, ticket ${ticket}): ${resultado}. La compra ya se concreto en PostgreSQL.`,
+          );
+        }
+      } catch (error) {
+        this.logger.error(
+          `No se pudo confirmar la reserva de inventario limitado (oferta ${idOferta}, ticket ${ticket}); la compra ya se concreto: ` +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
+  }
+
+  /**
+   * El pago no se concreto: suelta (op `devolver`) las reservas de
+   * inventario limitado que se habian tomado, para que sus unidades
+   * vuelvan al contador en el acto. Best-effort y nunca lanza: ya estamos
+   * en el camino de error (o de vaciado manual), y el 409/503 original es
+   * el que tiene que llegar al cliente. Si `devolver` falla, la reserva
+   * vence sola igual a los 15 min.
+   */
+  private async devolverReservas(
+    idUsuario: string,
+    lineas: { idOferta: number; ticket: number }[],
+  ): Promise<void> {
+    for (const { idOferta, ticket } of lineas) {
+      try {
+        await this.inventarioLimitadoService.devolver(
+          idOferta,
+          idUsuario,
+          ticket,
+        );
+      } catch (error) {
+        this.logger.error(
+          `No se pudo devolver la reserva de inventario limitado (oferta ${idOferta}, ticket ${ticket}): ` +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
     }
   }
 

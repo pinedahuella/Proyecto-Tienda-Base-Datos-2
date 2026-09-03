@@ -1,10 +1,12 @@
 # Plan pendiente — Venta de inventario limitado (Redis)
 
-> **Estado (2026-09-03, tarde): pasos 1, 3 y 5 cerrados y probados en
-> vivo. Faltan el 2 (ruta para que el vendedor abra la venta) y el 4
-> (conectar `confirmar`/`devolver` al checkout).** Ver el detalle de cada
-> uno más abajo, y la evidencia completa en `endpoints-carrito.md`
-> (sección "Inventario limitado en PUT / DELETE / GET del carrito").
+> **Estado (2026-09-03, noche): pasos 1, 3, 4 y 5 cerrados y probados en
+> vivo. Falta solo el 2 (ruta para que el vendedor abra la venta), que
+> necesita decisiones de autorización antes de construirse.** Ver el
+> detalle de cada uno más abajo, y la evidencia completa en
+> `endpoints-carrito.md` (secciones "Inventario limitado en PUT / DELETE /
+> GET del carrito" y "Paso 4 — `confirmar` / `devolver` conectados al
+> checkout").
 
 ## El problema
 
@@ -147,22 +149,37 @@ donde una línea puntual trae un reloj más corto que las demás, no dos
 experiencias de compra distintas conviviendo. Se corrigió el diseño para
 seguir ese patrón.
 
-## Paso 4 — conectar el resultado del pago (PENDIENTE, es lo que sigue)
+## Paso 4 — conectar el resultado del pago (CERRADO, 2026-09-03)
 
-Después de `comprar_carrito()`: si salió bien, llamar `confirmar` con el
-ticket de cada línea de inventario limitado que tuviera; si falló,
-`devolver`. Falta:
-- Tocar `CarritoService.comprarCarrito()` para que, tras el
-  `SELECT comprar_carrito(...)`, recorra las líneas con ticket y llame lo
-  que corresponda.
-- **Una vez esto exista, `vaciar()` puede dejar de tener la limitación
-  anotada en `endpoints-carrito.md`** (hoy no suelta reservas al vaciar
-  el carrito completo, justamente porque antes de este paso no hay forma
-  de distinguir "se vació por una compra exitosa, ya se confirmó" de "se
-  vació a mano, hay que devolver").
-- Los dos piden `id_usuario` — el de la sesión, nunca confiar en que el
-  ticket sea secreto (ver `redis/inventario_limitado.lua`, la sección
-  sobre `TICKET_AJENO`).
+Después de `comprar_carrito()`: si salió bien, `confirmar` el ticket de
+cada línea de inventario limitado; si `comprar_carrito()` tiró error,
+`devolver`. Hecho en `CarritoService.comprarCarrito()`:
+
+- Las líneas con reserva se leen del hash del carrito (`t:<id_oferta>`)
+  **antes** del pago — el `vaciar()` del final borra el hash.
+- Éxito → `confirmarReservas()`: recorre esas líneas y llama `confirmar`.
+  Es *best-effort* (no relanza): la venta ya está cerrada en PostgreSQL,
+  que es el libro real; una reserva sin confirmar vence sola y `cosechar`
+  devuelve su unidad — desajuste chico y acotado entre los dos contadores,
+  no una sobreventa. Mismo criterio que el recálculo de Mongo.
+- Fallo de `comprar_carrito()` → `devolverReservas()` antes de propagar el
+  409/503. El carrito **no** se vacía; en el siguiente `GET /carrito` la
+  línea sale `reserva_vencida` y hay que re-agregarla (re-reservar) para
+  reintentar. El chequeo de precio (`comprado: false`) **no** dispara
+  `devolver` — la reserva sigue viva mientras el cliente confirma.
+- `confirmar`/`devolver` reciben el `id_usuario` de la sesión (nunca se
+  confía en que el ticket sea secreto — ver `redis/inventario_limitado.lua`,
+  `TICKET_AJENO`).
+
+**`vaciar()` ya no tiene la limitación anotada:** ahora recibe
+`soltarReservas` (`DELETE /carrito` lo pasa en `true` → suelta las reservas
+antes del `DEL`; el vaciado post-compra lo deja en `false` → ya están
+confirmadas). Y `quitarLineasDelCarrito` (rama del interruptor
+`QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR`) también suelta la reserva de una
+línea limitada que quede bloqueante antes de quitarla.
+
+Evidencia: `endpoints-carrito.md`, sección "Paso 4" — 74 comprobaciones,
+0 fallos, base local intacta.
 
 **Fuera de nuestro alcance, o de otra persona:**
 - El frontend tiene que tratar `AGOTADO` como respuesta normal, no error

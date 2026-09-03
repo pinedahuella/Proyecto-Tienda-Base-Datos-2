@@ -8,6 +8,12 @@ PostgreSQL con el `id_pedido` en `localStorage`.
 > probadas** — `GET /carrito`, `PUT /carrito/lineas/:idOferta`,
 > `DELETE /carrito/lineas/:idOferta`, `DELETE /carrito` (43 comprobaciones)
 > y `POST /carrito/comprar` (29 comprobaciones), 0 fallos — ver "Pruebas".
+>
+> **2026-09-03:** chequeo de precio al pagar (`lineas_precio_visto`) +
+> reconocimiento de ofertas de inventario limitado en `PUT`/`DELETE`/`GET`
+> + **paso 4**: `POST /carrito/comprar` y `DELETE /carrito` conectan
+> `confirmar`/`devolver` de la venta relámpago. Ver las secciones de
+> "Pruebas" con fecha 2026-09-03.
 
 Código: `src/controllers/carrito/carrito.controller.ts` +
 `src/services/carrito/carrito.service.ts`. Cliente Redis:
@@ -69,11 +75,12 @@ el carrito sin hacer nada.
 
 ## El inventario limitado (venta relámpago) — construcción en curso
 
-> **Estado (2026-09-03): PUT / DELETE / GET del carrito ya reconocen una
-> oferta de inventario limitado — probado en vivo. Lo que falta:
-> conectar `confirmar`/`devolver` al checkout (`POST /carrito/comprar`)
-> y una ruta para que el vendedor abra la venta. Detalle completo del
-> diseño y lo pendiente en `elementos Generales/plan pendiente/inventario-limitado.md`.**
+> **Estado (2026-09-03): PUT / DELETE / GET del carrito reconocen una oferta
+> de inventario limitado, y `POST /carrito/comprar` ya conecta
+> `confirmar`/`devolver` (paso 4) — todo probado en vivo. Lo único que
+> falta es una ruta para que el vendedor abra la venta (paso 2). Detalle
+> completo del diseño y lo pendiente en
+> `elementos Generales/plan pendiente/inventario-limitado.md`.**
 
 Una oferta puntual puede operar en modo "venta relámpago": el stock no lo
 decide PostgreSQL con `FOR UPDATE` sino un script Lua de Redis
@@ -309,16 +316,14 @@ DELETE /carrito/lineas/3
 Vacía el carrito entero: un `DEL` de la clave. **Idempotente**. Se llama
 también (internamente) tras un checkout correcto.
 
-> **Limitación conocida (2026-09-03), a propósito por ahora:** si el
-> carrito tenía una línea de inventario limitado con una reserva viva,
-> esta ruta **no la suelta** — la reserva se libera sola cuando vence
-> (hasta 15 min), no de inmediato. Es a propósito: `vaciar()` también se
-> llama tras una compra exitosa, y ahí las reservas deberían quedar
-> **confirmadas**, no devueltas — pero conectar `confirmar` al checkout
-> es el paso 4 del plan, todavía sin construir (ver
-> `plan pendiente/inventario-limitado.md`). Mientras tanto, para soltar
-> una reserva puntual de inmediato, usar
-> `DELETE /carrito/lineas/:idOferta` (esa ruta sí la suelta).
+**Vaciado manual y reservas de inventario limitado (2026-09-03, paso 4):**
+si el carrito tenía líneas de inventario limitado con reserva viva, este
+vaciado **manual** las suelta (`devolver`) antes del `DEL` — sus unidades
+vuelven al contador de Redis en el acto, no cuando vence el TTL. El vaciado
+que hace `POST /carrito/comprar` tras una compra correcta **no** las suelta:
+ahí ya se confirmaron (`confirmar`) una por una, devolverlas soltaría
+unidades recién vendidas. Lo decide el parámetro interno `soltarReservas`
+de `CarritoService.vaciar()` (el controlador de esta ruta lo pasa en `true`).
 
 ```
 DELETE /carrito
@@ -402,6 +407,31 @@ nada con qué compararla.
 pausada, etc. — ver 409 abajo): eso siempre rechaza la compra, con o sin
 `confirmar_cambios`. El aviso de precio solo aplica cuando todas las líneas
 sí se pueden comprar y lo único que cambió es cuánto cuestan.
+
+### Líneas de inventario limitado (paso 4, 2026-09-03)
+
+Si el carrito trae líneas de venta relámpago con reserva viva (campo
+`t:<id_oferta>` en el hash), el checkout las cierra en Redis además de en
+PostgreSQL — el cliente no manda nada distinto, es todo del lado del
+servidor:
+
+- **La compra sale bien** (`comprar_carrito()` devolvió): cada reserva pasa
+  de *reservada* a *vendida* (`confirmar`, op de
+  `redis/inventario_limitado.lua`). Es *best-effort*: la venta ya está
+  cerrada en PostgreSQL (el libro contable, con su `FOR UPDATE`), así que
+  un fallo de Redis aquí **no** deshace la compra — se registra y sigue. Una
+  reserva que quede sin confirmar vence sola a los 15 min y su unidad
+  vuelve al contador de Redis (un desajuste chico y acotado entre los dos
+  contadores, no una sobreventa).
+- **`comprar_carrito()` falla** (oferta pausada/agotada entre ver y pagar,
+  o error de conexión): las reservas se sueltan (`devolver`) — sus unidades
+  vuelven al contador de Redis en el acto, sin esperar el TTL. El carrito
+  **no** se vacía; en el siguiente `GET /carrito` esas líneas salen
+  `disponible: false, motivo: "reserva_vencida"` y hay que volver a
+  agregarlas (re-reservar) antes de reintentar.
+- **El chequeo de precio devuelve `comprado: false`**: no se toca nada —
+  las reservas siguen vivas, el cliente confirma y reintenta dentro del
+  TTL.
 
 ### 201 — compra completada
 
@@ -619,6 +649,28 @@ stock = ...` para restaurar el número original).
 | `POST /carrito/comprar` con esa línea vencida | 409 "... era una venta relampago y la reserva ya vencio" — el bloqueo de siempre, sin cambios en esa lógica |
 | Regresión: `GET` vacío → `PUT` normal → `GET` → `DELETE` → `GET` vacío | idéntico al comportamiento de antes de este cambio |
 
-`npx tsc --noEmit` limpio en cada paso. Pendiente (paso 4 del plan, no
-hecho): conectar `confirmar`/`devolver` a `POST /carrito/comprar` — ver
-la limitación anotada en `DELETE /carrito` arriba.
+`npx tsc --noEmit` limpio en cada paso.
+
+### Paso 4 — `confirmar` / `devolver` conectados al checkout (2026-09-03)
+
+Contra el servidor y las bases reales (`test-paso4.sh` + `test-paso4-flagG.sh`
+en el scratchpad — no van al repo). Venta relámpago sembrada a mano
+(`HSET mesh:oferta:<id> stock N reservado 0 ...`, que es lo que hace la op
+`sembrar`); tras cada caso: pedido de prueba borrado, `stock` de la oferta
+restaurado, `es_inventario_limitado` a `false`, Redis limpio. Base local
+devuelta a su estado inicial (2 pedidos, stock original).
+
+| Grupo | Caso | Resultado |
+|---|---|---|
+| A | Comprar carrito con 1 línea limitada (reserva de 2) + 1 normal | 201; Redis oferta: `vendidas 2`, `reservado 0`, `stock` intacto (confirmar no toca stock), `r:<ticket>`/`u:<ticket>` borrados, ZSET vacío; carrito vaciado; PG: stock de las 2 ofertas bajó, pedido con 2 líneas |
+| B | `PUT` x2 → `PUT` x3 (redimensiona) → comprar | 201; se confirma el **ticket nuevo** (`vendidas 3`, `reservado 0`); el ticket viejo ya estaba liberado por el redimensionar |
+| C | Comprar con `metodo_pago` inválido (falla dentro de `comprar_carrito()`) | 409; Redis: `stock` devuelto (`reservado 0`, `vendidas 0`), `r:`/`u:` borrados; **el carrito NO se vacía**; `GET /carrito` marca la línea `reserva_vencida`; re-`PUT` vuelve a reservar y el reintento compra bien (201, `vendidas 2`) |
+| D | `DELETE /carrito` con línea limitada + línea normal | 200; Redis: reserva soltada (`stock` restaurado, `reservado 0`); carrito borrado |
+| E | `DELETE /carrito/lineas/:id` de la línea limitada (regresión) | 200; reserva soltada; campo `t:<id>` del carrito borrado |
+| F | Carrito 100% normal (regresión, sin ninguna oferta sembrada) | 201; `total` correcto; carrito vaciado; ninguna clave `mesh:oferta:*` en Redis |
+| G | Interruptor `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR` en `true`: línea limitada con reserva viva que además queda bloqueante (vendedor pausó la oferta) | 409; la línea y su campo `t:<id>` se quitan del carrito **y su reserva se suelta antes** (`stock` restaurado, `reservado 0`) — antes del paso 4 quedaba una reserva colgada 15 min |
+
+**74 comprobaciones (60 + 14), 0 fallos.** `npx tsc --noEmit` limpio; log
+del servidor sin warnings ni errores de `confirmar`/`devolver`. Interruptor
+`QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR` probado en `true` (grupo G) y
+devuelto a `false` al terminar.

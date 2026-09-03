@@ -90,7 +90,7 @@ export class CarritoController {
   @Delete()
   async vaciar(@UsuarioActual() usuarioActual: TokenUsuario) {
     try {
-      await this.carritoService.vaciar(usuarioActual.id_usuario);
+      await this.carritoService.vaciar(usuarioActual.id_usuario, true);
       return exito(null, 'Carrito vaciado');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo vaciar el carrito');

@@ -372,6 +372,14 @@ Es lo que mas pesa de la entrega, y es donde el enunciado es mas exigente:
 mecanismo se sostiene bajo solicitudes concurrentes simuladas y **sin recurrir a
 bloqueos a nivel de aplicacion**"*.
 
+> **Avance (2026-09-03): casi todo hecho.** El carrito ya reserva/redimensiona
+> en `PUT`, suelta en `DELETE`, y `POST /carrito/comprar` conecta
+> `confirmar`/`devolver` (paso 4). `InventarioLimitadoService` tiene
+> `activar`/`revertir`/`reservar`/`redimensionar`/`confirmar`/`devolver`.
+> Falta **solo** la ruta HTTP para que el vendedor abra la venta (paso 2) --
+> necesita decidir quien puede llamarla y con que parametros. Detalle y
+> evidencia en `plan pendiente/inventario-limitado.md` y `endpoints-carrito.md`.
+
 ## Por que no sirve lo que hay
 
 `comprar_pedido()` usa `SELECT ... FOR UPDATE` (linea 469 de la 007). Funciona
