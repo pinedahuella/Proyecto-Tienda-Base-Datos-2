@@ -70,6 +70,8 @@ vacía, no un error. No cuentan como parte del catálogo público.
 | `estado_variante` | texto | No | Igualdad exacta sobre `variantes[].estado` |
 | `stock_min` / `stock_max` | entero | No | Rango sobre `stock_total` (existencias activas entre TODOS los vendedores, ya sumadas sobre las variantes) |
 | `stock_tienda_min` / `stock_tienda_max` | entero | No | Rango sobre `stock_tienda` (existencias activas solo de la tienda, ya sumadas sobre las variantes) |
+| `resenas_promedio_min` / `resenas_promedio_max` | decimal | No | Rango sobre `resenas_promedio` (nota media del producto, 1 a 5). Exige además que el producto tenga al menos una reseña |
+| `resenas_total_min` / `resenas_total_max` | entero | No | Rango sobre `resenas_total` (cuántas reseñas tiene el producto) |
 | _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada) — igualdad por defecto, o `min_`/`max_`/`contiene_` como prefijo — ver abajo |
 
 ### Paginación por cursor: ejemplo
@@ -124,6 +126,18 @@ la tarjeta del catálogo sin ir a pedir las ofertas reales.
   con las existencias de la tienda (`stock_tienda`). Los dos son campos ya
   calculados en el documento — filtrar por ellos es directo, no hace falta
   ninguna agregación previa.
+- **`resenas_promedio_min`/`resenas_promedio_max`** van sobre
+  `resenas_promedio` (la nota media del producto, de 1 a 5, entre TODAS sus
+  reseñas y todos sus vendedores) y **`resenas_total_min`/`resenas_total_max`**
+  sobre `resenas_total` (cuántas reseñas tiene). Los dos son campos ya
+  calculados en la raíz del documento — las reseñas apuntan a producto +
+  vendedor, nunca a una variante, así que estos dos números **no bajan a
+  `variantes[]`**. Los mantiene al día el ETL y el backend cuando se publica
+  una reseña. Un detalle: **cualquier filtro sobre `resenas_promedio` exige
+  además que el producto tenga al menos una reseña** — "filtrar por nota"
+  implica "tiene notas", así que un producto sin reseñas (`resenas_promedio`
+  = 0) no se cuela en un `resenas_promedio_max` bajo. Para "productos sin
+  reseñas" el filtro es `resenas_total_max=0`.
 
 ### Filtros dinámicos (características, del catálogo o personalizadas)
 
@@ -245,6 +259,8 @@ Ejemplo real, contra el catálogo cargado hoy (`GET /productos?limite=1`):
         "stock_tienda": 22,
         "stock_total": 43,
         "total_ofertas": 3,
+        "resenas_promedio": 4.5,
+        "resenas_total": 2,
         "variantes": [
           {
             "id_producto_variante": 1,
@@ -276,13 +292,17 @@ Ejemplo real, contra el catálogo cargado hoy (`GET /productos?limite=1`):
 nadie) ni `porcentaje_comision` (salió del alcance), y las variantes ya no
 traen `precio` ni `stock` propios — eso es de cada oferta, que vive solo
 en PostgreSQL (ver `docs/base-de-datos.md`). Lo que sí trae, sin tener que
-pedirlo con ningún query param, son cuatro números ya calculados —
-`precio_tienda`, `stock_tienda`, `stock_total`, `total_ofertas` — tanto en
-la raíz del producto como dentro de cada variante; en la raíz, los dos de
-stock son la SUMA de las variantes. Son una copia (se recalculan cuando
-una oferta cambia de precio, se queda sin unidades o se pausa), no la
-verdad: la ficha completa, con las ofertas reales de cada vendedor, está
-en `GET /productos/:id`.
+pedirlo con ningún query param, son números ya calculados:
+`precio_tienda`, `precio_desde`, `stock_tienda`, `stock_total` y
+`total_ofertas` van tanto en la raíz como dentro de cada variante (en la
+raíz, los dos de stock son la SUMA de las variantes); `resenas_promedio`
+(nota media, 1 a 5) y `resenas_total` van **solo en la raíz** (una reseña
+apunta a producto + vendedor, nunca a una variante), y valen `0` mientras
+el producto no tenga ninguna reseña. Todos son una copia (se recalculan
+cuando una oferta cambia de precio / unidades / estado, o cuando se publica
+una reseña), no la verdad: la ficha completa, con las ofertas reales de
+cada vendedor, está en `GET /productos/:id`, y la nota media autoritativa
+(calculada en vivo desde PostgreSQL) está en `GET /productos/:id/resenas`.
 
 `siguiente_cursor` es `null` cuando esa tanda ya trajo el último producto
 del catálogo (o de lo que quedaba despues de aplicar los filtros).
@@ -299,6 +319,8 @@ del catálogo (o de lo que quedaba despues de aplicar los filtros).
 { "ok": false, "mensaje": "stock_max debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "stock_tienda_min debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "stock_tienda_max debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "resenas_promedio_min debe ser un numero valido, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "resenas_total_min debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "El filtro \"<nombre>\" no es un nombre de caracteristica valido", "payload": null }
 ```
 
@@ -375,6 +397,8 @@ Ejemplo real (`GET /productos/1`):
     "stock_tienda": 22,
     "stock_total": 43,
     "total_ofertas": 3,
+    "resenas_promedio": 4.5,
+    "resenas_total": 2,
     "variantes": [ "... misma forma que en GET /productos ..." ],
     "caracteristicas_adicionales": [ "..." ],
     "ofertas": [
@@ -459,15 +483,23 @@ diferencia de `GET /productos/:id`, **no oculta** productos en `borrador`
 o `inactivo`: un pedido tiene que poder mostrar su producto aunque hoy ya
 no esté visible en el catálogo activo.
 
-Reconstruye el producto **como estaba en una fecha específica**: toma el
-evento de creación y todos los de modificación anteriores a esa fecha (o
-de ese mismo día), en orden, y los fusiona uno encima del otro con el
-framework de agregación de Mongo — mismo mecanismo, mismo resultado, que
+Reconstruye el producto **como estaba en un momento específico**: toma el
+evento de creación y todos los de modificación hasta ese momento, en
+orden, y los fusiona uno encima del otro con el framework de agregación de
+Mongo — mismo mecanismo, mismo resultado, que
 `GET /vendedor/productos/:id/historial` (ver ese archivo para el detalle
 del pipeline).
 
+**El query param `fecha` acepta dos formas:**
+
+| Forma | Qué significa |
+| --- | --- |
+| `AAAA-MM-DD` | Todo ese día. El día se cuenta en hora de Guatemala (-06:00) y el corte es la medianoche del día siguiente, exclusivo. Es el comportamiento de siempre. |
+| `AAAA-MM-DDTHH:MM` o `AAAA-MM-DDTHH:MM:SS` | Hasta ese instante **inclusive**. La hora se interpreta en **UTC**, igual que como la API devuelve las fechas de los eventos (`"2026-02-18T21:00:00.000Z"`): pedir `fecha=2026-02-18T21:00` incluye el evento que ocurrió exactamente a esa hora. Los segundos son opcionales (por defecto `:00`). Un espacio en vez de la `T` también vale (`2026-02-18 21:00`, URL-encoded). |
+
 ```
 GET /productos/2/historial?fecha=2026-01-10
+GET /productos/2/historial?fecha=2026-01-10T14:30
 ```
 
 ### 200
@@ -485,8 +517,9 @@ GET /productos/2/historial?fecha=2026-01-10
 ```json
 { "ok": false, "mensaje": "El id no es valido", "payload": null }
 { "ok": false, "mensaje": "La fecha es obligatoria", "payload": null }
-{ "ok": false, "mensaje": "La fecha debe tener el formato AAAA-MM-DD", "payload": null }
+{ "ok": false, "mensaje": "La fecha debe tener el formato AAAA-MM-DD o AAAA-MM-DDTHH:MM (con :SS opcional)", "payload": null }
 { "ok": false, "mensaje": "La fecha no es valida", "payload": null }
+{ "ok": false, "mensaje": "La hora no es valida", "payload": null }
 ```
 
 ### 401
@@ -532,8 +565,14 @@ tal como estaban ese día — el lado económico vive en PostgreSQL
 GET /productos/ofertas/3/historial?fecha=2026-01-10
 ```
 
+> **`fecha` aquí es solo `AAAA-MM-DD`** (día completo), a diferencia de
+> `GET /productos/:id/historial`, que ya acepta también `AAAA-MM-DDTHH:MM`.
+> Si hace falta reconstruir un pedido a la hora exacta, esta ruta todavía
+> redondea al día — pendiente de igualar.
+
 Dos consultas de solo lectura, ambas hasta la medianoche del día
-**siguiente** al pedido (zona Guatemala, igual que `:id/historial`):
+**siguiente** al pedido (zona Guatemala, igual que el caso de solo fecha de
+`:id/historial`):
 
 - **`precio`**: la última fila de `precio_historial` antes de esa fecha —
   siempre hay al menos una desde que nace la oferta (el trigger
@@ -614,7 +653,7 @@ mínimo, no el total del catálogo entero.
 | --- | --- | --- | --- |
 | `pagina` | entero | No (por defecto 1) | Qué página pedir, 1 es la primera |
 | `limite` | entero | No (por defecto 20, tope 100) | Cuántos productos trae cada página |
-| `nombre`, `estado`, `id_categoria`, `precio_min`, `precio_max`, `precio_tienda_min`, `precio_tienda_max`, `estado_variante`, `stock_min`, `stock_max`, `stock_tienda_min`, `stock_tienda_max` | — | No | Los mismos filtros fijos de `GET /productos` |
+| `nombre`, `estado`, `id_categoria`, `precio_min`, `precio_max`, `precio_tienda_min`, `precio_tienda_max`, `estado_variante`, `stock_min`, `stock_max`, `stock_tienda_min`, `stock_tienda_max`, `resenas_promedio_min`, `resenas_promedio_max`, `resenas_total_min`, `resenas_total_max` | — | No | Los mismos filtros fijos de `GET /productos` |
 | _cualquier otro nombre_ | texto | No | Filtro dinámico de característica (catálogo o personalizada), igualdad por defecto o `min_`/`max_`/`contiene_` como prefijo, igual que en `GET /productos` |
 
 ### Ejemplo
@@ -657,6 +696,8 @@ sigue diciendo cuántas páginas hay de verdad.
 { "ok": false, "mensaje": "stock_max debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "stock_tienda_min debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "stock_tienda_max debe ser un numero entero", "payload": null }
+{ "ok": false, "mensaje": "resenas_promedio_min debe ser un numero valido, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "resenas_total_min debe ser un numero entero", "payload": null }
 { "ok": false, "mensaje": "El filtro \"<nombre>\" no es un nombre de caracteristica valido", "payload": null }
 ```
 
@@ -801,6 +842,10 @@ más arriba).
 | `stock_max` | `GET /productos?stock_max=0` | Productos con `stock_total` = 0 (agotados en todos lados) |
 | `stock_tienda_min` | `GET /productos?stock_tienda_min=10` | Productos con `stock_tienda` >= 10 |
 | `stock_tienda_max` | `GET /productos?stock_tienda_max=0` | Productos sin existencias de la tienda (aunque otro vendedor sí tenga) |
+| `resenas_promedio_min` | `GET /productos?resenas_promedio_min=4` | Productos con nota media >= 4 (y al menos una reseña) |
+| `resenas_promedio_max` | `GET /productos?resenas_promedio_max=2` | Productos con nota media <= 2 (y al menos una reseña; los que no tienen ninguna NO entran) |
+| `resenas_total_min` | `GET /productos?resenas_total_min=3` | Productos con 3 o más reseñas |
+| `resenas_total_max` | `GET /productos?resenas_total_max=0` | Productos sin ninguna reseña |
 
 ### Filtros dinámicos — un ejemplo por tipo de dato
 
@@ -836,3 +881,56 @@ del catálogo:
 | `max_` | `GET /productos?max_Nucleos=8` | Productos cuyo procesador tiene 8 núcleos o menos |
 | `min_` + `max_` | `GET /productos?min_Nucleos=6&max_Nucleos=10` | Productos con entre 6 y 10 núcleos |
 | `contiene_` | `GET /productos?contiene_Marca=Tec` | Productos cuya marca contiene "Tec" (sin distinguir mayúsculas) |
+
+---
+
+## Pruebas — filtros por reseñas (14/14, 2026-09-02)
+
+Fixture: se poblaron `resenas_promedio` / `resenas_total` en Mongo desde
+PostgreSQL (`ROUND(AVG(calificacion), 2)` y `COUNT(*)` por
+`id_producto_mongo` — lo que hará la migración del compañero; hoy 54 de los
+107 productos tienen reseñas), se corrieron los casos, y el teardown hizo
+`$unset` de los dos campos en todos los productos. Cada caso se comparó
+contra un `countDocuments` equivalente en Mongo y contra
+`GET /productos/paginacion` (paginado) además de `GET /productos` (cursor).
+
+| Caso | Resultado |
+|---|---|
+| `?resenas_promedio_min=4.5` | 27 productos (media ≥ 4.5 y ≥ 1 reseña); mismos 27 por cursor y por paginación |
+| `?resenas_promedio_max=2` | 3 productos — los que tienen 0 reseñas **no** entran |
+| `?resenas_promedio_min=2&resenas_promedio_max=2` | 2 productos (media exactamente 2.0) |
+| `?resenas_total_min=3` | 7 productos |
+| `?resenas_total_min=4` | 3 productos |
+| `?resenas_total_min=2&resenas_total_max=2` | 15 productos (exactamente 2 reseñas) |
+| `?resenas_promedio_min=3&resenas_promedio_max=3.5` | 10 productos |
+| `?resenas_total_min=3&resenas_promedio_min=4` | 4 productos (combina los dos rangos) |
+| `?resenas_promedio_min=1&resenas_total_min=3` | 7 productos — el `>= 1 reseña` que impone el filtro de media **no pisa** un `resenas_total_min` mayor pedido por el cliente |
+| `?resenas_promedio_min=abc` | 400 "resenas_promedio_min debe ser un numero valido, con hasta 2 decimales" |
+| `?resenas_total_min=1.5` / `?resenas_total_min=-2` | 400 "resenas_total_min debe ser un numero entero" |
+| `GET /productos?limite=3` (sin filtros de reseña) | 200 — no rompe |
+
+---
+
+## Pruebas — reconstrucción por fecha y hora (28/28, 2026-09-02)
+
+Sobre el producto 7 (eventos reales de la semilla: crea `2026-01-04T16:52Z`
+con nombre "Laptop Aurora 14"; `2026-02-18T21:00Z` renombra a "Laptop
+Aurora 14 (2026)"; `2026-03-04T20:00Z` cambia las variantes;
+`2026-04-18T20:00Z` vuelve el nombre a "Laptop Aurora 14").
+
+| Caso | Resultado |
+|---|---|
+| `?fecha=2026-01-04` / `?fecha=2026-02-18` / `?fecha=2026-04-18` (solo fecha, regresión) | nombre "Laptop Aurora 14" / "…(2026)" / "Laptop Aurora 14" — idéntico a antes |
+| `?fecha=2026-02-18T20:59` y `?fecha=2026-02-18T20:59:59` | nombre "Laptop Aurora 14" — el evento de las 21:00Z **no** entra |
+| `?fecha=2026-02-18T21:00` y `?fecha=2026-02-18T21:00:00` | nombre "Laptop Aurora 14 (2026)" — el instante exacto **sí** entra (`$lte`) |
+| `?fecha=2026-02-18%2021:00` (espacio en vez de `T`) | igual que con `T` |
+| `?fecha=2026-03-04T19:59` vs `?fecha=2026-03-04T20:00` | variante 0 pasa de "16 GB" a "16 GB / 512 GB" — el corte por hora también aplica a un evento de modificación |
+| `?fecha=2026-01-04T16:52` | 200, estado de creación; `?fecha=2026-01-04T16:51` → 404 "El producto no existia en esa fecha" |
+| `?fecha=` / `hola` / `2026-02-30` / `2026-13-01` | 400: "La fecha es obligatoria" / formato / "La fecha no es valida" ×2 |
+| `?fecha=2026-02-18T25:00` / `T21:60` / `T21:00:99` | 400 "La hora no es valida" |
+| `?fecha=2026-02-18T21` (sin minutos) | 400 formato |
+| sin sesión | 401; id no numérico → 400 "El id no es valido" |
+| `GET /vendedor/productos/7/historial?fecha=…` (ruta gemela) | mismo resultado, misma validación |
+
+`GET /productos/ofertas/:id/historial` (precio/stock de la oferta, lado
+PostgreSQL) **no** se tocó: sigue aceptando solo `AAAA-MM-DD`.

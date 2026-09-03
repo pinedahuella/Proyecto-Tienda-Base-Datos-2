@@ -104,6 +104,25 @@ export interface Producto {
   stock_total: number;
   /** Cuantos vendedores distintos lo tienen activo. Copia calculada. */
   total_ofertas: number;
+  /**
+   * Nota media (1 a 5, dos decimales) de TODAS las resenas del producto,
+   * entre todos sus vendedores. `0` cuando todavia no tiene ninguna. Copia
+   * calculada a nivel de producto (las resenas apuntan a producto + vendedor,
+   * nunca a una variante, asi que este numero no baja a `variantes[]`).
+   *
+   * Es una copia de lo que vive en PostgreSQL (`resena`): la mantiene al dia
+   * `ProductosService.recalcularCamposCalculados`, que ahora corre tambien
+   * despues de publicar una resena. La media autoritativa se calcula en vivo
+   * en `GET /productos/:id/resenas` (`resumen.promedio`); este campo es solo
+   * para la tarjeta y el filtro del catalogo. No es editable: ninguna ruta
+   * de edicion de producto lo toca, y no genera evento de modificacion, asi
+   * que reconstruir el producto a una fecha pasada devuelve el valor con el
+   * que nacio en el evento de creacion (0), nunca la nota que tenia ese dia
+   * -- exactamente igual que `precio_tienda`/`stock_tienda`.
+   */
+  resenas_promedio: number;
+  /** Cuantas resenas tiene el producto en total. `0` si ninguna. Copia calculada, misma fuente y reglas que `resenas_promedio`. */
+  resenas_total: number;
   variantes: ProductoVariante[];
   /** Opcional: caracteristicas del producto, del catalogo de la app. */
   caracteristicas_adicionales?: EntradaCaracteristica[];

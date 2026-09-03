@@ -19,6 +19,9 @@ import {
 } from '../../helpers/validaciones-oferta';
 import {
   AprobadorOferta,
+  FilaOfertaNueva,
+  FilaOfertaPendiente,
+  FilaOfertaPropia,
   OfertaPendiente,
   OfertaPropia,
   OfertaPropiaResumen,
@@ -41,40 +44,11 @@ const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
 const CODIGO_CHECK_VIOLATION = '23514';
 
-/** Fila cruda de `oferta` (mas el nombre de su estado), antes de mezclarla con el catalogo. */
-interface FilaOfertaPropia {
-  id_oferta: string;
-  id_producto_mongo: string;
-  id_producto_variante_mongo: string;
-  precio: string;
-  stock: number;
-  estado_oferta_nombre: string;
-  /** NULL mientras la tienda no la haya aprobado (ver flujo de aprobacion de ofertas). */
-  fecha_aprobacion: Date | null;
-  /** NULL si no consta aprobador: oferta de la tienda/admin, o anterior al flujo. */
-  id_usuario_aprobo: string | null;
-  aprobo_usuario: string | null;
-  aprobo_nombre: string | null;
-  aprobo_apellido: string | null;
-  fecha_creacion: Date;
-  fecha_actualizacion: Date;
-}
-
-/** Fila cruda de la cola de revisión: `oferta` pendiente + su vendedor (JOIN a `usuarios`). */
-interface FilaOfertaPendiente {
-  id_oferta: string;
-  id_producto_mongo: string;
-  id_producto_variante_mongo: string;
-  precio: string;
-  stock: number;
-  fecha_creacion: Date;
-  id_usuario: string;
-  usuario: string;
-  nombre: string;
-  apellido: string | null;
-}
-
-/** Solo lo que hace falta de un producto para ponerle nombre a una oferta: nada de caracteristicas ni historial. */
+/**
+ * Solo lo que hace falta de un producto para ponerle nombre a una oferta:
+ * nada de caracteristicas ni historial. Proyeccion interna de Mongo, se
+ * queda aca -- no es una fila de PostgreSQL ni una forma de la API.
+ */
 interface ProductoLigero {
   _id: number;
   nombre: string;
@@ -83,17 +57,6 @@ interface ProductoLigero {
     nombre_variante: string;
     imagenes: string[];
   }[];
-}
-
-/** Lo que devuelve el INSERT de una oferta nueva. */
-interface FilaOfertaNueva {
-  id_oferta: string;
-  precio: string;
-  stock: number;
-  /** now() si nace `activa` (tienda/admin); NULL si nace `pendiente`. */
-  fecha_aprobacion: Date | null;
-  fecha_creacion: Date;
-  fecha_actualizacion: Date;
 }
 
 /**

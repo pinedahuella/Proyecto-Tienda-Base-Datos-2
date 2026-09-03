@@ -108,7 +108,10 @@ export class CarritoController {
         usuarioActual.id_usuario,
         cuerpo,
       );
-      return exito(resultado, 'Compra realizada correctamente');
+      const mensaje = resultado.comprado
+        ? 'Compra realizada correctamente'
+        : 'Hay cambios que revisar antes de comprar';
+      return exito(resultado, mensaje);
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo completar la compra');
     }

@@ -1298,21 +1298,28 @@ Mismos casos que las demás rutas.
 rutas de `/vendedor/productos`. Misma reconstrucción, mismo resultado, que
 `GET /productos/:id/historial` (endpoints-productos.md), pública y sin
 restricción de dueño — esta ruta solo le suma el chequeo de "tienda o
-admin" antes de delegar. Reconstruye un producto **como estaba en una
-fecha específica**: toma el evento de creación y todos los de
-modificación anteriores a esa fecha (o de ese mismo día), en orden, y los
-fusiona uno encima del otro.
+admin" antes de delegar (llama al mismo método). Reconstruye un producto
+**como estaba en un momento específico**: toma el evento de creación y
+todos los de modificación hasta ese momento, en orden, y los fusiona uno
+encima del otro.
+
+**El query param `fecha` acepta `AAAA-MM-DD` (todo ese día, hora de
+Guatemala) o `AAAA-MM-DDTHH:MM[:SS]` (hasta ese instante inclusive, hora en
+UTC)** — el detalle completo, con la tabla de las dos formas, está en
+`endpoints-productos.md` (`GET /productos/:id/historial`).
 
 **Se arma con el framework de agregación de Mongo, no en el código del
 backend**: la búsqueda, el orden y la fusión de eventos pasan dentro de un
 pipeline de `db.productos_eventos.aggregate(...)` (`$match`, `$sort`,
 `$group`, `$reduce`, `$mergeObjects`) — el backend solo valida el id y la
-fecha, y le agrega el `_id` de vuelta al resultado.
+fecha, y le agrega el `_id` de vuelta al resultado. El `$match` usa `$lt`
+sobre la medianoche del día siguiente cuando se da solo la fecha, y `$lte`
+sobre el instante exacto cuando se da hora.
 
 Como cada evento aporta el estado completo de lo que cambió (`datos` en la
 creación, `cambios` en cada modificación — nunca un campo suelto), fusionar
 todos en orden con `$mergeObjects` reconstruye el documento exacto de ese
-día: si algo cambió dos veces antes de la fecha pedida, se queda con el
+momento: si algo cambió dos veces antes del momento pedido, se queda con el
 valor de la segunda vez, porque se fusiona después y lo sobrescribe.
 
 **Nunca trae `variantes[].stock`**, ni de la fecha pedida ni de hoy: el
@@ -1326,6 +1333,7 @@ mensaje distinto (el producto sencillamente no existía todavía).
 
 ```
 GET /vendedor/productos/52/historial?fecha=2026-01-07
+GET /vendedor/productos/52/historial?fecha=2026-01-07T13:00
 ```
 
 ### 200
@@ -1343,8 +1351,9 @@ GET /vendedor/productos/52/historial?fecha=2026-01-07
 ```json
 { "ok": false, "mensaje": "El id no es valido", "payload": null }
 { "ok": false, "mensaje": "La fecha es obligatoria", "payload": null }
-{ "ok": false, "mensaje": "La fecha debe tener el formato AAAA-MM-DD", "payload": null }
+{ "ok": false, "mensaje": "La fecha debe tener el formato AAAA-MM-DD o AAAA-MM-DDTHH:MM (con :SS opcional)", "payload": null }
 { "ok": false, "mensaje": "La fecha no es valida", "payload": null }
+{ "ok": false, "mensaje": "La hora no es valida", "payload": null }
 ```
 
 ### 404

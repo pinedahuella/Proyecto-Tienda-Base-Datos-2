@@ -249,6 +249,20 @@ comentario raíz con el texto y, apuntándolo, la fila de `resena`. Los dos
 `INSERT` van en **una sola sentencia** (un CTE), que PostgreSQL ejecuta de
 forma atómica.
 
+**Efecto sobre el catálogo en Mongo.** Ya escrita la reseña, se recalculan
+`resenas_promedio` y `resenas_total` en el documento del producto
+(`ProductosService.recalcularCamposCalculados`, el mismo que ya corre
+cuando cambia una oferta). Son campos calculados que usan la tarjeta del
+catálogo y los filtros `resenas_promedio_min/max` y `resenas_total_min/max`
+de `GET /productos` — **no** la fuente de verdad: la nota media autoritativa
+la calcula en vivo `GET /productos/:id/resenas` (`resumen.promedio`) desde
+PostgreSQL. Si ese recálculo fallara, la reseña igual queda publicada (está
+en PostgreSQL); la copia de Mongo se pone al día en el siguiente cambio o
+corrida del ETL. `resenas_promedio`/`resenas_total` no son editables por
+ninguna ruta de producto y no generan evento de modificación, así que
+reconstruir el producto a una fecha pasada devuelve `0`, no la nota de ese
+día (igual que `precio_tienda`).
+
 ```
 POST /resenas
 ```
@@ -546,6 +560,23 @@ trigger en su valor original.
 | `correo_vendedor` inexistente | 404 |
 | Calificarse a sí mismo | 400 "No puedes calificarte a ti mismo" |
 | Tras publicar: `GET` como `compradora_norte` | `ventas_oriente` sale de `puede_calificar`, `ventas_sur` sigue, `resumen.total` = 1 |
+
+**Recálculo de `resenas_promedio` / `resenas_total` en Mongo (6/6, 2026-09-02):**
+
+| Caso | Resultado |
+|---|---|
+| Producto 67 (ya tenía 4 reseñas, media 3.50) — se dispara un recálculo (PATCH no-op a una oferta de la tienda) | El documento de Mongo pasa a `resenas_promedio: 3.5`, `resenas_total: 4` |
+| Producto 1 (0 reseñas) — `compradora_norte` publica una reseña de 5 a `ventas_oriente` | Mongo: `resenas_promedio: 5`, `resenas_total: 1` |
+| La misma cuenta publica una 2ª reseña de 2 a `ventas_sur` (mismo producto, otro vendedor) | Mongo: `resenas_promedio: 3.5`, `resenas_total: 2` — y `GET /productos/1/resenas` `resumen` (cálculo en vivo) da lo mismo |
+| Teardown: se borran las 2 reseñas de prueba + un recálculo | Mongo vuelve a `resenas_promedio: 0`, `resenas_total: 0`; `resena` queda en 86 filas |
+
+> Nota para la migración del compañero: hoy **ningún** documento de
+> `productos` trae `resenas_promedio` / `resenas_total` (los tests los
+> escriben y los borran). La migración / el ETL tiene que agregar los dos
+> campos a cada producto, calculados desde `resena`
+> (`ROUND(AVG(calificacion), 2)` y `COUNT(*)` por `id_producto_mongo`, `0`
+> cuando no hay ninguna). El backend ya sabe mantenerlos al día a partir de
+> ahí.
 
 ### `POST /resenas/:id/respuestas`, `PUT`/`DELETE /comentarios/:id/voto` — 40/40
 

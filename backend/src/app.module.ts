@@ -39,6 +39,7 @@ import { FraudeController } from './controllers/fraude/fraude.controller';
 import { FraudeService } from './services/fraude/fraude.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
 import { AdminReportesService } from './services/admin/admin-reportes.service';
+import { InventarioLimitadoService } from './services/inventario-limitado/inventario-limitado.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -91,6 +92,7 @@ import { AdminReportesService } from './services/admin/admin-reportes.service';
     CarritoService,
     FraudeService,
     AdminReportesService,
+    InventarioLimitadoService,
   ],
 })
 export class AppModule {}

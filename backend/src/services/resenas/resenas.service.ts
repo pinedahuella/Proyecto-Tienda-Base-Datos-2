@@ -26,6 +26,7 @@ import {
   VotoActualizado,
   VotoResena,
 } from '../../models/resena';
+import { ProductosService } from '../productos/productos.service';
 
 const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
@@ -74,10 +75,18 @@ interface FilaRespuesta {
  * pedido con pago `pagado` y estado distinto de `cancelado`. Es decision de
  * Jose David y se puede quitar despues si el profesor no la quiere; mientras
  * tanto, tanto `POST /resenas` como la lista `puede_calificar` la aplican.
+ *
+ * Al publicar una resena (`crear`) se recalculan los campos `resenas_promedio`
+ * y `resenas_total` que Mongo guarda como copia en el documento del producto
+ * (via `ProductosService.recalcularCamposCalculados`): son los que usan la
+ * tarjeta y el filtro del catalogo. La media autoritativa la sigue calculando
+ * en vivo `listarDeProducto` desde PostgreSQL (`resumen.promedio`).
  */
 @Injectable()
 export class ResenasService {
   private readonly logger = new Logger(ResenasService.name);
+
+  constructor(private readonly productosService: ProductosService) {}
 
   /**
    * Todas las resenas de un producto, con su vendedor, su autor, sus
@@ -257,6 +266,12 @@ export class ResenasService {
    *
    * El `UNIQUE (id_usuario, id_usuario_vendedor, id_producto_mongo)` de la
    * tabla rechaza la segunda resena del mismo trio -> 409.
+   *
+   * Ya escrita, se recalculan `resenas_promedio`/`resenas_total` en el
+   * documento de Mongo del producto. Si ese recalculo falla no revienta la
+   * publicacion: la resena ya esta en PostgreSQL (la fuente de verdad) y
+   * `recalcularCamposCalculados` se traga sus propios errores -- la copia
+   * del catalogo se pondra al dia en el proximo cambio o corrida del ETL.
    */
   async crear(
     idUsuario: string,
@@ -292,6 +307,7 @@ export class ResenasService {
         [idUsuario, comentario, idVendedor, idProducto, calificacion],
       );
       const fila = resultado.rows[0];
+      await this.productosService.recalcularCamposCalculados([idProducto]);
       return {
         id_resena: Number(fila.id_resena),
         id_comentario: Number(fila.id_comentario),

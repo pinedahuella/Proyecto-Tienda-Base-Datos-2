@@ -13,8 +13,13 @@ import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
 import { validarYCobrarTarjeta } from '../../helpers/validaciones-tarjeta';
 import { validarCantidadCarrito } from '../../helpers/validaciones-carrito';
+import {
+  QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR,
+  TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS,
+} from '../../helpers/constantes';
 import { DefinirCantidadCarritoPeticion } from '../../dto/definir-cantidad-carrito';
 import {
+  AvisoPrecioCarrito,
   ComprarCarritoPeticion,
   ComprarCarritoRespuesta,
 } from '../../dto/comprar-carrito';
@@ -28,6 +33,7 @@ import {
 import { METODO_PAGO_TARJETA } from '../../models/metodo-pago';
 import { Producto } from '../../models/producto';
 import { ProductosService } from '../productos/productos.service';
+import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
 
 const REGEX_ID = /^\d+$/;
 
@@ -116,7 +122,10 @@ interface ProductoLigero {
 export class CarritoService {
   private readonly logger = new Logger(CarritoService.name);
 
-  constructor(private readonly productosService: ProductosService) {}
+  constructor(
+    private readonly productosService: ProductosService,
+    private readonly inventarioLimitadoService: InventarioLimitadoService,
+  ) {}
 
   /** TTL del carrito, en segundos: 24 h de INACTIVIDAD (se re-pone en cada toque). */
   static readonly TTL_SEGUNDOS = 60 * 60 * 24;
@@ -135,7 +144,8 @@ export class CarritoService {
    * una a `productos` de Mongo.
    */
   async verCarrito(idUsuario: string): Promise<Carrito> {
-    const crudo = await this.leerHash(idUsuario);
+    const { cantidades: crudo, tickets } =
+      await this.leerHashCompleto(idUsuario);
     const idsOferta = Object.keys(crudo).map(Number);
 
     if (idsOferta.length === 0) {
@@ -150,65 +160,92 @@ export class CarritoService {
     ];
     const productos = await this.consultarProductos(idsProducto);
 
-    const lineas: CarritoLinea[] = idsOferta.map((idOferta) => {
-      const cantidad = crudo[idOferta];
-      const oferta = ofertas.get(idOferta);
+    // Async por linea (no un .map sincrono): las lineas de inventario
+    // limitado necesitan una consulta mas a Redis (ticketVigente) para
+    // saber si la reserva que las respalda sigue viva.
+    const lineas: CarritoLinea[] = await Promise.all(
+      idsOferta.map(async (idOferta) => {
+        const cantidad = crudo[idOferta];
+        const oferta = ofertas.get(idOferta);
+        const ticket = tickets[idOferta] ?? null;
+        const esInventarioLimitado = ticket != null;
 
-      if (oferta == null) {
-        // El id de oferta esta en el carrito pero no existe en `oferta`
-        // (un PUT con un id inventado). Se muestra como no disponible en
-        // vez de desaparecer sin avisar.
+        if (oferta == null) {
+          // El id de oferta esta en el carrito pero no existe en `oferta`
+          // (un PUT con un id inventado). Se muestra como no disponible en
+          // vez de desaparecer sin avisar.
+          return {
+            id_oferta: idOferta,
+            cantidad,
+            id_producto: 0,
+            id_producto_variante: 0,
+            nombre_producto: '(oferta no encontrada)',
+            nombre_variante: '(oferta no encontrada)',
+            imagen: null,
+            precio: '0.00',
+            subtotal: '0.00',
+            vendedor: { usuario: '', nombre: '' },
+            stock_disponible: 0,
+            disponible: false,
+            motivo: 'oferta_no_existe' as const,
+            es_inventario_limitado: esInventarioLimitado,
+          };
+        }
+
+        const idProducto = Number(oferta.id_producto_mongo);
+        const idVariante = Number(oferta.id_producto_variante_mongo);
+        const producto = productos.get(idProducto);
+        const variante = producto?.variantes.find(
+          (v) => v.id_producto_variante === idVariante,
+        );
+
+        const subtotal = (Number(oferta.precio) * cantidad).toFixed(2);
+        let { disponible, motivo } = this.evaluarDisponibilidad(
+          oferta,
+          cantidad,
+          variante?.estado,
+        );
+
+        // Para una linea de inventario limitado, el stock de PostgreSQL
+        // esta CONGELADO desde que se abrio la venta (sembrar copio el
+        // numero una sola vez) -- no refleja lo que de verdad queda en
+        // Redis. La disponibilidad real de esta linea es "la reserva
+        // sigue viva", no "hay stock en Postgres": si la reserva vencio
+        // sola (nadie confirmo ni redimensiono a tiempo), se marca no
+        // disponible aunque Postgres todavia diga que hay stock.
+        if (esInventarioLimitado && disponible) {
+          const vigente = await this.inventarioLimitadoService.ticketVigente(
+            idOferta,
+            ticket,
+          );
+          if (!vigente) {
+            disponible = false;
+            motivo = 'reserva_vencida';
+          }
+        }
+
         return {
           id_oferta: idOferta,
           cantidad,
-          id_producto: 0,
-          id_producto_variante: 0,
-          nombre_producto: '(oferta no encontrada)',
-          nombre_variante: '(oferta no encontrada)',
-          imagen: null,
-          precio: '0.00',
-          subtotal: '0.00',
-          vendedor: { usuario: '', nombre: '' },
-          stock_disponible: 0,
-          disponible: false,
-          motivo: 'oferta_no_existe',
+          id_producto: idProducto,
+          id_producto_variante: idVariante,
+          nombre_producto: producto?.nombre ?? '(producto no encontrado)',
+          nombre_variante:
+            variante?.nombre_variante ?? '(variante no encontrada)',
+          imagen: variante?.imagenes[0] ?? null,
+          precio: oferta.precio,
+          subtotal,
+          vendedor: {
+            usuario: oferta.vendedor_usuario,
+            nombre: oferta.vendedor_nombre,
+          },
+          stock_disponible: oferta.stock,
+          disponible,
+          motivo,
+          es_inventario_limitado: esInventarioLimitado,
         };
-      }
-
-      const idProducto = Number(oferta.id_producto_mongo);
-      const idVariante = Number(oferta.id_producto_variante_mongo);
-      const producto = productos.get(idProducto);
-      const variante = producto?.variantes.find(
-        (v) => v.id_producto_variante === idVariante,
-      );
-
-      const subtotal = (Number(oferta.precio) * cantidad).toFixed(2);
-      const { disponible, motivo } = this.evaluarDisponibilidad(
-        oferta,
-        cantidad,
-        variante?.estado,
-      );
-
-      return {
-        id_oferta: idOferta,
-        cantidad,
-        id_producto: idProducto,
-        id_producto_variante: idVariante,
-        nombre_producto: producto?.nombre ?? '(producto no encontrado)',
-        nombre_variante:
-          variante?.nombre_variante ?? '(variante no encontrada)',
-        imagen: variante?.imagenes[0] ?? null,
-        precio: oferta.precio,
-        subtotal,
-        vendedor: {
-          usuario: oferta.vendedor_usuario,
-          nombre: oferta.vendedor_nombre,
-        },
-        stock_disponible: oferta.stock,
-        disponible,
-        motivo,
-      };
-    });
+      }),
+    );
 
     const total = lineas
       .reduce((suma, linea) => suma + Number(linea.subtotal), 0)
@@ -225,9 +262,21 @@ export class CarritoService {
 
   /**
    * Fija la cantidad ABSOLUTA de una oferta en el carrito (no un +1/-1). Si
-   * la clave del carrito no existe, `HSET` la crea. Renueva el TTL. Redis
-   * puro: ninguna consulta a PostgreSQL -- la oferta y su stock se
-   * comprueban al pintar el carrito y al pagar.
+   * la clave del carrito no existe, `HSET` la crea. Renueva el TTL.
+   *
+   * Para una oferta NORMAL sigue siendo Redis puro, sin una sola consulta
+   * a PostgreSQL -- el stock se comprueba al pintar el carrito y al pagar,
+   * como siempre.
+   *
+   * Para una oferta de INVENTARIO LIMITADO (se detecta con
+   * `existeVentaLimitada`, una sola consulta a Redis, `EXISTS`, tampoco
+   * toca Postgres) es la UNICA excepcion a "agregar nunca reserva nada":
+   * llama a `redimensionar` (acredita el ticket viejo si esta linea ya
+   * tenia uno, y pide la cantidad nueva, las dos cosas en un solo paso
+   * atomico -- ver `plan pendiente/redimensionar-reserva.lua`). Si no
+   * alcanza, 409 de una vez, ANTES de tocar el carrito -- a diferencia de
+   * una oferta normal, que se deja agregar siempre y se avisa recien en
+   * `GET /carrito`.
    */
   async definirCantidad(
     idUsuario: string,
@@ -236,6 +285,56 @@ export class CarritoService {
   ): Promise<LineaCarritoDefinida> {
     const idOferta = this.validarIdOferta(idOfertaParametro);
     const cantidad = validarCantidadCarrito(datos.cantidad);
+
+    const esInventarioLimitado =
+      await this.inventarioLimitadoService.existeVentaLimitada(idOferta);
+
+    if (esInventarioLimitado) {
+      const ticketViejo = await this.leerTicket(idUsuario, idOferta);
+      const resultado = await this.inventarioLimitadoService.redimensionar(
+        idOferta,
+        idUsuario,
+        ticketViejo,
+        cantidad,
+        TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS,
+      );
+
+      if (resultado.resultado === 'AGOTADO') {
+        throw new ErrorConflicto(
+          `No hay suficiente stock en la venta relampago de la oferta ${idOferta}: pediste ${cantidad} y hay ${resultado.numero} disponibles (contando lo que ya tenias reservado)`,
+        );
+      }
+      if (resultado.resultado === 'TICKET_AJENO') {
+        // No deberia pasar en circunstancias normales -- el ticket viejo
+        // sale del propio carrito de ESTE usuario. Defensivo: si pasa, es
+        // que algo mas toco esa reserva por fuera.
+        throw new ErrorConflicto(
+          'No se pudo actualizar la reserva de esta oferta',
+        );
+      }
+
+      try {
+        const clave = this.clave(idUsuario);
+        await redis.hset(
+          clave,
+          String(idOferta),
+          String(cantidad),
+          this.campoTicket(idOferta),
+          String(resultado.ticket),
+        );
+        await redis.expire(clave, CarritoService.TTL_SEGUNDOS);
+      } catch (error) {
+        manejarErrorRedis(this.logger, error);
+      }
+
+      const resumen = await this.resumen(idUsuario);
+      return {
+        id_oferta: idOferta,
+        cantidad,
+        es_inventario_limitado: true,
+        ...resumen,
+      };
+    }
 
     try {
       const clave = this.clave(idUsuario);
@@ -246,13 +345,26 @@ export class CarritoService {
     }
 
     const resumen = await this.resumen(idUsuario);
-    return { id_oferta: idOferta, cantidad, ...resumen };
+    return {
+      id_oferta: idOferta,
+      cantidad,
+      es_inventario_limitado: false,
+      ...resumen,
+    };
   }
 
   /**
    * Quita una oferta del carrito. Idempotente: si la linea no estaba,
    * responde igual. Si era la ultima linea, Redis borra la clave sola (un
    * HASH sin campos deja de existir).
+   *
+   * Si la linea era de inventario limitado (tenia ticket guardado), suelta
+   * la reserva con `devolver` ANTES de quitarla del carrito -- si no, la
+   * unidad quedaria "reservada" en Redis hasta que venza sola, en vez de
+   * liberarse al toque para el siguiente comprador. `devolver` sobre un
+   * ticket que ya vencio o ya se confirmo no es un error (contesta
+   * `SIN_TICKET`/`TICKET_AJENO`, no lanza nada) -- solo un fallo real de
+   * conexion a Redis detiene esto.
    */
   async quitarLinea(
     idUsuario: string,
@@ -260,9 +372,14 @@ export class CarritoService {
   ): Promise<ResumenCarrito> {
     const idOferta = this.validarIdOferta(idOfertaParametro);
 
+    const ticket = await this.leerTicket(idUsuario, idOferta);
+    if (ticket != null) {
+      await this.inventarioLimitadoService.devolver(idOferta, idUsuario, ticket);
+    }
+
     try {
       const clave = this.clave(idUsuario);
-      await redis.hdel(clave, String(idOferta));
+      await redis.hdel(clave, String(idOferta), this.campoTicket(idOferta));
       // Si quedan lineas, se renueva el TTL. Si el hash quedo vacio, la
       // clave ya no existe y EXPIRE no hace nada (devuelve 0).
       await redis.expire(clave, CarritoService.TTL_SEGUNDOS);
@@ -276,6 +393,18 @@ export class CarritoService {
   /**
    * Vacia el carrito de una cuenta: un `DEL` de la clave. Se usa desde
    * `DELETE /carrito` y despues de un checkout correcto. Idempotente.
+   *
+   * OJO -- limitacion conocida, a proposito por ahora: NO suelta las
+   * reservas de inventario limitado que pudiera haber en el carrito. La
+   * razon es que esta misma funcion se llama tambien DESPUES de una
+   * compra exitosa (`comprarCarrito`), y ahi las reservas ya deberian
+   * quedar CONFIRMADAS, no devueltas -- pero conectar `confirmar` al
+   * checkout es el paso 4 del plan, todavia sin construir. Hacer que
+   * `vaciar` suelte reservas ahora soltaria por error unidades recien
+   * vendidas. Mientras tanto, una reserva que quede colgada por un
+   * `DELETE /carrito` manual se libera igual, sola, cuando vence su TTL
+   * (ver `TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS`) -- no se pierde para
+   * siempre, solo tarda hasta 15 minutos en volver a estar disponible.
    */
   async vaciar(idUsuario: string): Promise<void> {
     try {
@@ -296,21 +425,28 @@ export class CarritoService {
    *   1. `verCarrito()` -> lineas enriquecidas (nombre, precio, stock,
    *      disponibilidad). Carrito vacio -> 409.
    *   2. Si alguna linea no se puede comprar (oferta pausada, variante
-   *      desactivada, sin stock, o un id inventado) -> 409 con la lista, sin
-   *      tocar nada. Es un chequeo previo para dar un buen mensaje; la
-   *      verdad la vuelve a comprobar `comprar_carrito()` dentro de su
-   *      transaccion, con `FOR UPDATE`.
-   *   3. Se resuelve `id_direccion_historial` (exige que la direccion sea de
+   *      desactivada, sin stock, o un id inventado) -> 409 con la lista,
+   *      SIEMPRE (no hay forma de saltarse esto). Segun el interruptor
+   *      `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR`
+   *      (`helpers/constantes.ts`), esas lineas ademas se quitan del
+   *      carrito en Redis antes de responder, o se dejan intactas. Es un
+   *      chequeo previo para dar un buen mensaje; la verdad la vuelve a
+   *      comprobar `comprar_carrito()` dentro de su transaccion, con
+   *      `FOR UPDATE`.
+   *   3. Si no hay bloqueantes, se compara el `precio_visto` que mando el
+   *      cliente (por linea, en `lineas_precio_visto`) contra el precio
+   *      actual. Si alguno discrepa y `confirmar_cambios` no vino en
+   *      `true` -> se devuelve `{comprado: false, avisos}` (sin tocar
+   *      nada); reenviar con `confirmar_cambios: true` deja pasar la
+   *      compra al precio de hoy. Mismo criterio que
+   *      `PedidosCompradorService.revisarCambiosAntesDeComprar`.
+   *   4. Se resuelve `id_direccion_historial` (exige que la direccion sea de
    *      la cuenta) y, si el metodo es tarjeta, se valida/cobra el mock.
-   *   4. `SELECT comprar_carrito(...)` con las lineas ya con nombre.
-   *   5. `DEL` del carrito y recalculo de los campos calculados de Mongo de
+   *   5. `SELECT comprar_carrito(...)` con las lineas ya con nombre.
+   *   6. `DEL` del carrito y recalculo de los campos calculados de Mongo de
    *      cada producto tocado. Si el recalculo falla, la compra NO se
    *      deshace: solo queda una tarjeta del catalogo desfasada un rato
    *      (mismo criterio que `comprarPedido`).
-   *
-   * El precio que se cobra es el del momento de pagar (el que muestra
-   * `GET /carrito`), porque el carrito de Redis no guarda el precio visto
-   * -- ver el DTO y `endpoints-carrito.md`.
    */
   async comprarCarrito(
     idUsuario: string,
@@ -326,14 +462,31 @@ export class CarritoService {
       throw new ErrorConflicto('El carrito esta vacio');
     }
 
-    const bloqueantes = carrito.lineas
-      .filter((linea) => !linea.disponible)
-      .map(
-        (linea) =>
-          `"${linea.nombre_variante}" ${this.motivoATexto(linea.motivo)}`,
-      );
-    if (bloqueantes.length > 0) {
-      throw new ErrorConflicto(bloqueantes.join('; '));
+    const lineasBloqueantes = carrito.lineas.filter(
+      (linea) => !linea.disponible,
+    );
+    if (lineasBloqueantes.length > 0) {
+      if (QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR) {
+        await this.quitarLineasDelCarrito(
+          idUsuario,
+          lineasBloqueantes.map((linea) => linea.id_oferta),
+        );
+      }
+      const mensaje = lineasBloqueantes
+        .map(
+          (linea) =>
+            `"${linea.nombre_variante}" ${this.motivoATexto(linea.motivo)}`,
+        )
+        .join('; ');
+      throw new ErrorConflicto(mensaje);
+    }
+
+    const avisos = this.detectarAvisosPrecio(
+      carrito.lineas,
+      datos.lineas_precio_visto,
+    );
+    if (avisos.length > 0 && datos.confirmar_cambios !== true) {
+      return { comprado: false, avisos };
     }
 
     const idDireccionHistorial = await this.resolverDireccionHistorial(
@@ -403,10 +556,37 @@ export class CarritoService {
 
   /** El HASH del carrito como `{ id_oferta: cantidad }`, filtrando basura. */
   private async leerHash(idUsuario: string): Promise<Record<number, number>> {
+    const { cantidades } = await this.leerHashCompleto(idUsuario);
+    return cantidades;
+  }
+
+  /**
+   * El HASH del carrito completo, separado en dos mapas: las cantidades
+   * normales (`<id_oferta>: cantidad`) y los tickets de inventario
+   * limitado (`t:<id_oferta>: ticket`). Son campos DEL MISMO hash de
+   * Redis -- mismo truco que usa `inventario_limitado.lua` para no
+   * necesitar una clave nueva por cada reserva (ver ese archivo).
+   */
+  private async leerHashCompleto(
+    idUsuario: string,
+  ): Promise<{
+    cantidades: Record<number, number>;
+    tickets: Record<number, number>;
+  }> {
     try {
       const crudo = await redis.hgetall(this.clave(idUsuario));
-      const mapa: Record<number, number> = {};
+      const cantidades: Record<number, number> = {};
+      const tickets: Record<number, number> = {};
+
       for (const [campo, valor] of Object.entries(crudo)) {
+        if (campo.startsWith('t:')) {
+          const idOferta = Number(campo.slice(2));
+          const ticket = Number(valor);
+          if (Number.isInteger(idOferta) && Number.isInteger(ticket)) {
+            tickets[idOferta] = ticket;
+          }
+          continue;
+        }
         const id = Number(campo);
         const cantidad = Number(valor);
         if (
@@ -414,10 +594,31 @@ export class CarritoService {
           Number.isInteger(cantidad) &&
           cantidad > 0
         ) {
-          mapa[id] = cantidad;
+          cantidades[id] = cantidad;
         }
       }
-      return mapa;
+      return { cantidades, tickets };
+    } catch (error) {
+      manejarErrorRedis(this.logger, error);
+    }
+  }
+
+  /** El nombre del campo companero (dentro del mismo HASH del carrito) que guarda el ticket de una linea de inventario limitado. */
+  private campoTicket(idOferta: number): string {
+    return `t:${idOferta}`;
+  }
+
+  /** El ticket guardado para esta linea, o `null` si no tiene (oferta normal, o nunca tuvo). */
+  private async leerTicket(
+    idUsuario: string,
+    idOferta: number,
+  ): Promise<number | null> {
+    try {
+      const valor = await redis.hget(
+        this.clave(idUsuario),
+        this.campoTicket(idOferta),
+      );
+      return valor == null ? null : Number(valor);
     } catch (error) {
       manejarErrorRedis(this.logger, error);
     }
@@ -431,6 +632,70 @@ export class CarritoService {
       total_lineas: ids.length,
       total_items: ids.reduce((suma, id) => suma + mapa[id], 0),
     };
+  }
+
+  /**
+   * `HDEL` de una o mas lineas del carrito -- usado solo cuando
+   * `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR` esta en `true` y el checkout
+   * encontro lineas que ya no se pueden comprar. La compra de todos modos
+   * se rechaza (409); esto solo deja el carrito limpio para el proximo
+   * intento.
+   *
+   * Tambien borra el campo ticket companero (`t:<id_oferta>`) de cada
+   * linea, si tenia -- sin esto, quedaria un ticket huerfano en el
+   * carrito, apuntando a una linea que ya no esta. No llama `devolver`:
+   * si el motivo del bloqueo fue `reserva_vencida`, la reserva ya se
+   * libero sola; para los demas motivos (oferta pausada, etc.) esta linea
+   * nunca fue de inventario limitado.
+   */
+  private async quitarLineasDelCarrito(
+    idUsuario: string,
+    idsOferta: number[],
+  ): Promise<void> {
+    try {
+      const campos = idsOferta.flatMap((id) => [
+        String(id),
+        this.campoTicket(id),
+      ]);
+      await redis.hdel(this.clave(idUsuario), ...campos);
+    } catch (error) {
+      manejarErrorRedis(this.logger, error);
+    }
+  }
+
+  /**
+   * Compara el `precio_visto` que mando el cliente por linea (lo que le
+   * mostro el ultimo `GET /carrito`) contra el precio actual de esa misma
+   * linea. Texto contra texto (los dos `numeric(12,2)` formateados igual
+   * por PostgreSQL) -- exacto, sin el redondeo binario de comparar como
+   * numero de JavaScript. Una linea que el cliente no menciono en
+   * `lineas_precio_visto` no genera aviso: no hay nada que comparar.
+   */
+  private detectarAvisosPrecio(
+    lineas: CarritoLinea[],
+    lineasVisto: ComprarCarritoPeticion['lineas_precio_visto'],
+  ): AvisoPrecioCarrito[] {
+    if (lineasVisto == null || lineasVisto.length === 0) {
+      return [];
+    }
+    const precioVistoPorOferta = new Map(
+      lineasVisto.map((linea) => [linea.id_oferta, linea.precio_visto]),
+    );
+
+    const avisos: AvisoPrecioCarrito[] = [];
+    for (const linea of lineas) {
+      const precioVisto = precioVistoPorOferta.get(linea.id_oferta);
+      if (precioVisto != null && precioVisto !== linea.precio) {
+        avisos.push({
+          id_oferta: linea.id_oferta,
+          nombre_producto: linea.nombre_producto,
+          nombre_variante: linea.nombre_variante,
+          precio_visto: precioVisto,
+          precio_actual: linea.precio,
+        });
+      }
+    }
+    return avisos;
   }
 
   private async renovarTtl(idUsuario: string): Promise<void> {
@@ -526,6 +791,8 @@ export class CarritoService {
         return 'no tiene stock suficiente';
       case 'oferta_no_existe':
         return 'ya no existe';
+      case 'reserva_vencida':
+        return 'era una venta relampago y la reserva ya vencio';
       default:
         return 'no se puede comprar';
     }

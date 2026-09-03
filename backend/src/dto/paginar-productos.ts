@@ -23,6 +23,12 @@ export interface PaginarProductosQuery {
   /** Filtra por stock_tienda: existencias activas solo de la tienda. */
   stock_tienda_min?: string;
   stock_tienda_max?: string;
+  /** Filtra por resenas_promedio: nota media del producto (1 a 5). Exige tener >= 1 resena. */
+  resenas_promedio_min?: string;
+  resenas_promedio_max?: string;
+  /** Filtra por resenas_total: cuantas resenas tiene el producto. */
+  resenas_total_min?: string;
+  resenas_total_max?: string;
   [claveAtributo: string]: string | undefined;
 }
 

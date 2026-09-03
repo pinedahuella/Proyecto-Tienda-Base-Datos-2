@@ -172,14 +172,17 @@ export class ProductosVendedorService {
           nombre: categoria.nombre,
           categoria_padre: categoria.categoria_padre as string,
         },
-        // Los cuatro calculados nacen en 0/null: todavia no existe ninguna
-        // oferta sobre este producto (eso es de otro servicio, sobre
-        // `oferta` en PostgreSQL).
+        // Los calculados nacen en 0/null: todavia no existe ninguna oferta
+        // sobre este producto (eso es de otro servicio, sobre `oferta` en
+        // PostgreSQL) ni ninguna resena (nace en `nuevo`, aun no se puede
+        // comprar).
         precio_tienda: null,
         precio_desde: null,
         stock_tienda: 0,
         stock_total: 0,
         total_ofertas: 0,
+        resenas_promedio: 0,
+        resenas_total: 0,
         variantes,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
@@ -285,6 +288,8 @@ export class ProductosVendedorService {
         stock_tienda: 0,
         stock_total: 0,
         total_ofertas: 0,
+        resenas_promedio: 0,
+        resenas_total: 0,
         variantes,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,

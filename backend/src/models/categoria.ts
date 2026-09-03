@@ -1,10 +1,13 @@
-import { Decimal128 } from 'mongodb';
-
 /**
  * Documentos de la coleccion `categorias` en MongoDB: el menu de que
  * caracteristicas ofrece cada categoria (sin valores, esos van en
  * `productos`). Ver
  * backend/elementos Generales/Elementos Documentales/ejemplos_bson_productos.md
+ *
+ * No hay campo de comision: `porcentaje_comision` y la tabla
+ * `categorias_historial` salieron del alcance con el giro a multi-vendedor
+ * (ver docs/base-de-datos.md y cambios-multivendedor.md), y la coleccion en
+ * Mongo ya no lo trae.
  */
 
 export type TipoDato = 'texto' | 'entero' | 'decimal' | 'booleano' | 'lista';
@@ -26,7 +29,13 @@ export interface CategoriaDocumento {
   nombre: string;
   /** null solo en las categorias raiz. */
   categoria_padre: string | null;
-  porcentaje_comision: Decimal128;
+  /**
+   * true en las categorias raiz. Es redundante con `categoria_padre === null`
+   * y el backend no lo usa (filtra siempre por `categoria_padre`), pero vive
+   * en el documento de Mongo, asi que se declara para que este tipo lo
+   * refleje.
+   */
+  es_raiz: boolean;
   fecha_creacion: Date;
   caracteristicas: CaracteristicaDefinicion[];
   caracteristicas_variante: CaracteristicaDefinicion[];
@@ -41,7 +50,7 @@ export interface Categoria {
   id_categoria: number;
   nombre: string;
   categoria_padre: string | null;
-  porcentaje_comision: Decimal128;
+  es_raiz: boolean;
   fecha_creacion: Date;
   caracteristicas: CaracteristicaDefinicion[];
   caracteristicas_variante: CaracteristicaDefinicion[];

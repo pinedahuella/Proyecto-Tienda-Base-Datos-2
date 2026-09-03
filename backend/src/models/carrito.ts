@@ -11,7 +11,8 @@ export type MotivoNoDisponible =
   | 'variante_no_disponible' // la variante se desactivo en el catalogo
   | 'agotado' // stock 0
   | 'stock_insuficiente' // hay stock, pero menos que la cantidad pedida
-  | 'oferta_no_existe'; // el id de oferta del carrito no existe (id invalido en un PUT)
+  | 'oferta_no_existe' // el id de oferta del carrito no existe (id invalido en un PUT)
+  | 'reserva_vencida'; // era de inventario limitado y la reserva vencio sola
 
 /** Una linea del carrito, ya enriquecida con los datos del catalogo. */
 export interface CarritoLinea {
@@ -34,6 +35,14 @@ export interface CarritoLinea {
   disponible: boolean;
   /** Por que no, si `disponible` es false. `null` si `disponible` es true. */
   motivo: MotivoNoDisponible | null;
+  /**
+   * `true` si esta oferta esta operando bajo el mecanismo de venta
+   * relampago de Redis (`oferta.es_inventario_limitado` -- ver
+   * `plan pendiente/inventario-limitado.md`). Cuando es `true`, agregarla
+   * al carrito reservo de verdad esas unidades (a diferencia de una linea
+   * normal, que nunca reserva nada al agregar).
+   */
+  es_inventario_limitado: boolean;
 }
 
 /** La respuesta de GET /carrito. */
@@ -62,4 +71,6 @@ export interface ResumenCarrito {
 export interface LineaCarritoDefinida extends ResumenCarrito {
   id_oferta: number;
   cantidad: number;
+  /** Ver `CarritoLinea.es_inventario_limitado`. */
+  es_inventario_limitado: boolean;
 }

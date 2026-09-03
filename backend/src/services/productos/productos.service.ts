@@ -7,6 +7,7 @@ import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { CORREO_TIENDA } from '../../helpers/constantes';
 import { validarFechaHistorial } from '../../helpers/validaciones-direccion';
+import { interpretarMomentoHistorial } from '../../helpers/momento-historial';
 import {
   esNombreCaracteristicaValido,
   escaparRegex,
@@ -79,6 +80,10 @@ const CLAVES_RESERVADAS = new Set([
   'stock_max',
   'stock_tienda_min',
   'stock_tienda_max',
+  'resenas_promedio_min',
+  'resenas_promedio_max',
+  'resenas_total_min',
+  'resenas_total_max',
 ]);
 
 /** Los filtros que las dos rutas de listado tienen en comun. */
@@ -94,13 +99,14 @@ export class ProductosService {
    * scroll infinito: cada tanda trae el cursor para pedir la siguiente, no
    * un numero de pagina.
    *
-   * Admite filtros fijos (nombre, estado, categoria, precio de la tienda,
-   * estado de variante, stock total y stock de la tienda) y filtros
-   * dinamicos sobre caracteristicas_adicionales, tanto del producto como de
-   * sus variantes. precio_tienda, stock_tienda, stock_total y total_ofertas
-   * ya vienen calculados en el documento (los mantiene al dia el ETL y el
-   * backend cuando cambia una oferta), asi que filtrar por ellos es un
-   * $match directo, sin agregacion previa.
+   * Admite filtros fijos (nombre, estado, categoria, precio, estado de
+   * variante, stock total y de la tienda, nota media y numero de resenas) y
+   * filtros dinamicos sobre caracteristicas_adicionales, tanto del producto
+   * como de sus variantes. precio_tienda, precio_desde, stock_tienda,
+   * stock_total, total_ofertas, resenas_promedio y resenas_total ya vienen
+   * calculados en el documento (los mantiene al dia el ETL y el backend
+   * cuando cambia una oferta o se publica una resena), asi que filtrar por
+   * ellos es un $match directo, sin agregacion previa.
    */
   async listar(query: ListarProductosQuery): Promise<ProductosPagina> {
     const limite = validarLimite(query.limite);
@@ -272,12 +278,15 @@ export class ProductosService {
   }
 
   /**
-   * Reconstruye un producto **como estaba en una fecha específica**: toma
-   * el evento de creación y todos los de modificación anteriores a esa
-   * fecha (o de ese mismo día), en orden, y los fusiona uno encima del
-   * otro con el framework de agregación de Mongo ($match, $sort, $group,
-   * $reduce, $mergeObjects) -- sin traer los eventos a Node.js para
-   * combinarlos ahí.
+   * Reconstruye un producto **como estaba en un momento específico**: toma
+   * el evento de creación y todos los de modificación hasta ese momento, en
+   * orden, y los fusiona uno encima del otro con el framework de agregación
+   * de Mongo ($match, $sort, $group, $reduce, $mergeObjects) -- sin traer
+   * los eventos a Node.js para combinarlos ahí.
+   *
+   * El query param `fecha` acepta `AAAA-MM-DD` (todo ese día, como siempre)
+   * o `AAAA-MM-DDTHH:MM[:SS]` (hasta ese instante inclusive, hora en UTC);
+   * ver `interpretarMomentoHistorial`.
    *
    * Ruta general, sin restricción de rol ni de dueño: cualquiera con
    * sesión puede pedir el historial de cualquier producto (el mismo
@@ -293,7 +302,7 @@ export class ProductosService {
    * Cada evento aporta "datos" (solo la creación) o "cambios" (solo las
    * modificaciones); como cada uno es el estado completo de lo que cambió
    * (nunca un campo suelto), fusionarlos en orden con $mergeObjects
-   * reconstruye el documento tal como estaba ese día.
+   * reconstruye el documento tal como estaba en ese momento.
    */
   async reconstruirEnFecha(
     idProductoParametro: string,
@@ -302,7 +311,7 @@ export class ProductosService {
     if (!REGEX_ID.test(idProductoParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }
-    validarFechaHistorial(fecha);
+    const momento = interpretarMomentoHistorial(fecha);
     const idProducto = Number(idProductoParametro);
 
     try {
@@ -314,17 +323,15 @@ export class ProductosService {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
       }
 
-      // "hasta ese dia completo": el limite es la medianoche del dia
-      // siguiente, igual que en GET /direccion-usuario/historial. El dia
-      // se cuenta en la zona de Guatemala (-06:00), no en UTC (ver el
-      // mismo razonamiento en ProductosVendedorService.obtenerHistorialPropio).
-      const fechaLimite = new Date(`${fecha}T00:00:00.000-06:00`);
-      fechaLimite.setUTCDate(fechaLimite.getUTCDate() + 1);
-
       const resultado = await mongoDb
         .collection('productos_eventos')
         .aggregate([
-          { $match: { id_producto: idProducto, fecha: { $lt: fechaLimite } } },
+          {
+            $match: {
+              id_producto: idProducto,
+              fecha: { [momento.comparador]: momento.limite },
+            },
+          },
           { $sort: { numero: 1 } },
           {
             $group: {
@@ -494,17 +501,24 @@ export class ProductosService {
   }
 
   /**
-   * Recalcula precio_tienda/precio_desde/stock_tienda/stock_total/total_ofertas (raiz y
-   * cada variante) de estos productos contra las ofertas reales de
-   * PostgreSQL, y los deja al dia en Mongo con $set. Hay que llamarla
-   * despues de cualquier cosa que cambie una oferta: comprar, cancelar,
-   * publicar una oferta nueva, cambiarle el precio o el estado. Son
-   * copias, no la verdad (ver docs/base-de-datos.md) -- por eso hay que
-   * recalcularlas a mano en vez de esperar a la proxima corrida del ETL.
+   * Recalcula los campos que Mongo guarda como copia de lo que vive en
+   * PostgreSQL y los deja al dia con $set:
    *
-   * Un producto a la vez: despues de comprar_pedido()/cancelar_pedido()
-   * normalmente son uno o dos productos distintos, nunca el catalogo
-   * entero, asi que no hace falta una sola consulta masiva.
+   *   - de las ofertas (`oferta`): precio_tienda, precio_desde, stock_tienda,
+   *     stock_total y total_ofertas, tanto en la raiz como en cada variante.
+   *   - de las resenas (`resena`): resenas_promedio y resenas_total, solo en
+   *     la raiz (una resena apunta a producto + vendedor, nunca a una
+   *     variante).
+   *
+   * Hay que llamarla despues de cualquier cosa que cambie una oferta
+   * (comprar, cancelar, publicar una oferta nueva, cambiarle el precio o el
+   * estado) y despues de publicar una resena. Son copias, no la verdad (ver
+   * docs/base-de-datos.md) -- por eso hay que recalcularlas a mano en vez de
+   * esperar a la proxima corrida del ETL.
+   *
+   * Un producto a la vez: despues de comprar_pedido()/cancelar_pedido() o de
+   * una resena normalmente es uno o dos productos distintos, nunca el
+   * catalogo entero, asi que no hace falta una sola consulta masiva.
    */
   async recalcularCamposCalculados(idsProductoMongo: number[]): Promise<void> {
     const idsUnicos = [...new Set(idsProductoMongo)];
@@ -515,7 +529,7 @@ export class ProductosService {
 
   private async recalcularUnProducto(idProducto: number): Promise<void> {
     try {
-      const [porVariante, totalEnRaiz] = await Promise.all([
+      const [porVariante, totalEnRaiz, resumenResenas] = await Promise.all([
         pool.query<FilaCalculoVariante>(
           `WITH tienda AS (
              SELECT id_usuario FROM usuarios WHERE correo_electronico = $2
@@ -548,11 +562,33 @@ export class ProductosService {
            WHERE o.id_producto_mongo = $1 AND eo.estado_oferta_nombre = 'activa'`,
           [idProducto],
         ),
+        // Nota media y total de resenas del producto (todas, entre todos los
+        // vendedores). AVG da NULL y COUNT da 0 cuando no hay ninguna.
+        pool.query<{ promedio: string | null; total: number }>(
+          `SELECT ROUND(AVG(calificacion), 2)::text AS promedio,
+                  COUNT(*)::int AS total
+           FROM resena
+           WHERE id_producto_mongo = $1`,
+          [idProducto],
+        ),
       ]);
 
+      const resenasTotal = resumenResenas.rows[0]?.total ?? 0;
+      const resenasPromedio =
+        resenasTotal > 0 ? Number(resumenResenas.rows[0].promedio) : 0;
+
       // Sin ofertas (nunca deberia pasar para un producto que ya tuvo una
-      // compra, pero por si acaso): no hay nada que recalcular.
+      // compra, pero por si acaso): no hay campos de oferta que recalcular,
+      // pero los de resenas si -- un producto puede recibir su primera
+      // resena sin que nada cambie del lado de las ofertas.
       if (porVariante.rows.length === 0) {
+        const soloResenas = {
+          resenas_promedio: resenasPromedio,
+          resenas_total: resenasTotal,
+        };
+        await mongoDb
+          .collection<Producto>('productos')
+          .updateOne({ _id: idProducto }, { $set: soloResenas });
         return;
       }
 
@@ -594,6 +630,8 @@ export class ProductosService {
         stock_tienda: stockTiendaRaiz,
         stock_total: stockTotalRaiz,
         total_ofertas: totalEnRaiz.rows[0]?.total_ofertas ?? 0,
+        resenas_promedio: resenasPromedio,
+        resenas_total: resenasTotal,
       };
       const arrayFilters: Record<string, unknown>[] = [];
 
@@ -627,7 +665,7 @@ export class ProductosService {
       // tarjeta del catalogo con un numero viejo un rato es peor UI, no un
       // dato incorrecto en la base de verdad.
       this.logger.error(
-        `No se pudo recalcular precio_tienda/stock del producto ${idProducto}: ` +
+        `No se pudieron recalcular los campos calculados (precio/stock/resenas) del producto ${idProducto}: ` +
           (error instanceof Error ? error.message : String(error)),
       );
     }
@@ -664,6 +702,22 @@ export class ProductosService {
     const stockTiendaMax = validarEnteroPositivo(
       query.stock_tienda_max,
       'stock_tienda_max',
+    );
+    const resenasPromedioMin = validarPrecio(
+      query.resenas_promedio_min,
+      'resenas_promedio_min',
+    );
+    const resenasPromedioMax = validarPrecio(
+      query.resenas_promedio_max,
+      'resenas_promedio_max',
+    );
+    const resenasTotalMin = validarEnteroPositivo(
+      query.resenas_total_min,
+      'resenas_total_min',
+    );
+    const resenasTotalMax = validarEnteroPositivo(
+      query.resenas_total_max,
+      'resenas_total_max',
     );
 
     const filtro: Record<string, unknown> = {};
@@ -739,6 +793,41 @@ export class ProductosService {
         rango.$lte = stockTiendaMax;
       }
       filtro.stock_tienda = rango;
+    }
+
+    // resenas_promedio (nota media, 1 a 5) y resenas_total (cuantas resenas)
+    // ya vienen calculados en la raiz del documento -- las resenas apuntan a
+    // producto + vendedor, nunca a una variante, asi que estos dos numeros no
+    // bajan a variantes[]. resenas_promedio se compara como numero normal (es
+    // un double en el documento, no Decimal128: no es dinero).
+    const rangoResenasTotal: Record<string, number> = {};
+    if (resenasTotalMin != null) {
+      rangoResenasTotal.$gte = resenasTotalMin;
+    }
+    if (resenasTotalMax != null) {
+      rangoResenasTotal.$lte = resenasTotalMax;
+    }
+
+    if (resenasPromedioMin != null || resenasPromedioMax != null) {
+      const rango: Record<string, number> = {};
+      if (resenasPromedioMin != null) {
+        rango.$gte = Number(resenasPromedioMin);
+      }
+      if (resenasPromedioMax != null) {
+        rango.$lte = Number(resenasPromedioMax);
+      }
+      filtro.resenas_promedio = rango;
+      // Filtrar por nota implica "tiene notas": un producto sin resenas
+      // (resenas_promedio = 0) no debe colarse en un resenas_promedio_max
+      // bajo. Se exige >= 1 resena, sin pisar un resenas_total_min mayor que
+      // el cliente ya haya pedido.
+      if (rangoResenasTotal.$gte == null || rangoResenasTotal.$gte < 1) {
+        rangoResenasTotal.$gte = 1;
+      }
+    }
+
+    if (Object.keys(rangoResenasTotal).length > 0) {
+      filtro.resenas_total = rangoResenasTotal;
     }
 
     // Filtros dinamicos: cualquier query param que no sea uno de los fijos

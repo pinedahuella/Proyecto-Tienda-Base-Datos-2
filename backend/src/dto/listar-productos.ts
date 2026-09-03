@@ -26,6 +26,14 @@ import { Producto } from '../models/producto';
  * donde otro vendedor lo tiene mas barato; con el filtro sobre precio_tienda
  * esos quedaban fuera de la busqueda aunque si le sirvieran. Los tres son campos ya calculados en el
  * documento, no se agregan al vuelo.
+ *
+ * Resenas: resenas_promedio_min/max filtran por la nota media del producto
+ * (resenas_promedio, 1 a 5) y resenas_total_min/max por cuantas resenas
+ * tiene (resenas_total). Los dos son campos ya calculados en el documento.
+ * Cualquier filtro sobre resenas_promedio exige ademas que el producto
+ * tenga al menos una resena: "filtrar por nota" implica "tiene notas", asi
+ * que un producto sin resenas (resenas_promedio = 0) no cuela en un
+ * resenas_promedio_max bajo.
  */
 export interface ListarProductosQuery {
   limite?: string;
@@ -46,6 +54,12 @@ export interface ListarProductosQuery {
   /** Filtra por stock_tienda: existencias activas solo de la tienda. */
   stock_tienda_min?: string;
   stock_tienda_max?: string;
+  /** Filtra por resenas_promedio: nota media del producto (1 a 5). Exige tener >= 1 resena. */
+  resenas_promedio_min?: string;
+  resenas_promedio_max?: string;
+  /** Filtra por resenas_total: cuantas resenas tiene el producto. */
+  resenas_total_min?: string;
+  resenas_total_max?: string;
   [claveAtributo: string]: string | undefined;
 }
 
