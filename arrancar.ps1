@@ -9,9 +9,22 @@
 #   .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a Mongo Y el grafo a Neo4j
 #   .\arrancar.ps1 -Productos 300              arranca normal y ademas genera 300 productos
 #                                              con sus variantes y sus ofertas. De 1 a 9999,
-#                                              en digitos: 300 si, 300.5 y 0x10 no
-#   .\arrancar.ps1 -Productos 300 -Semilla 7   lo mismo pero repetible: la misma semilla
-#                                              vuelve a dar exactamente el mismo lote
+#                                              en digitos: 300 si, 300.5 y 0x10 no.
+#                                              Sin -Semilla elige una libre y te DICE cual,
+#                                              asi que se puede correr las veces que haga
+#                                              falta y cada vez sale un lote distinto
+#   .\arrancar.ps1 -Productos 300 -Semilla 7   lo mismo pero con la semilla puesta a mano:
+#                                              la misma semilla vuelve a dar exactamente el
+#                                              mismo lote, en cualquier maquina
+#   .\arrancar.ps1 -Borrar 500                 borra los 500 productos generados MAS NUEVOS,
+#                                              en PostgreSQL y en MongoDB. Si pides mas de
+#                                              los que hay, borra los que hay y lo dice
+#   .\arrancar.ps1 -Borrar todos               borra todos los generados y deja los curados
+#   .\arrancar.ps1 -Borrar todos -Semilla 7    borra solo el lote de esa semilla
+#
+#   Los 102 productos curados NO los borra -Borrar, y no se puede: 59 de ellos tienen
+#   ventas detras y pedido_producto los sujeta con ON DELETE RESTRICT. Para dejar la base
+#   como recien instalada esta -Reiniciar, que la reconstruye entera desde el repositorio.
 
 # Por que -Etl fuerza LOS DOS ETL y no hay un -EtlGrafo aparte
 # ------------------------------------------------------------
@@ -128,7 +141,8 @@ param(
     [switch]$Mongo,
     [switch]$Etl,
     [string]$Productos = '',
-    [string]$Semilla   = ''
+    [string]$Semilla   = '',
+    [string]$Borrar    = ''
 )
 
 Set-Location -LiteralPath $PSScriptRoot
@@ -258,6 +272,59 @@ if ($pidioLote) {
 if ($pidioSemilla) {
     $SemillaPedida = Leer-Entero $Semilla '-Semilla' 0 ([long]::MaxValue)
     if ($null -eq $SemillaPedida) { exit 1 }
+}
+
+
+# -Borrar acepta un numero o la palabra "todos", y esa es la unica bandera del
+# script que no es ni un interruptor ni un entero. La palabra existe porque
+# "borrame todos" no tiene un numero que teclear: obligar a poner 999999 seria
+# pedirle a alguien que adivine un tope, y un cero para decir "todos" ya
+# significa "ninguno" en -Productos. Dos banderas del mismo script no pueden
+# darle sentidos opuestos al mismo cero.
+$BorrarPedido  = ''
+$BorrarCuantos = 0
+$BorrarTodos   = $false
+
+if ($PSBoundParameters.ContainsKey('Borrar')) {
+    $BorrarPedido = $Borrar.Trim()
+
+    if ($BorrarPedido -eq '') {
+        Error1 "-Borrar necesita un valor: un numero, o la palabra todos."
+        Aviso  "   .\arrancar.ps1 -Borrar 500"
+        Aviso  "   .\arrancar.ps1 -Borrar todos"
+        exit 1
+    }
+
+    if ($BorrarPedido -match '^(todos|todo)$') {
+        $BorrarTodos = $true
+    } else {
+        $BorrarCuantos = Leer-Entero $BorrarPedido '-Borrar' 1 2147483647
+        if ($null -eq $BorrarCuantos) {
+            Aviso "   Tambien vale la palabra todos:  .\arrancar.ps1 -Borrar todos"
+            exit 1
+        }
+    }
+
+    # Las dos juntas se rechazan, y no por prudencia: el paso que genera corre
+    # ANTES del que borra, asi que "-Productos 100 -Borrar todos" generaria cien
+    # productos y acto seguido los borraria, dejando la base igual que estaba
+    # despues de dos minutos de trabajo. Lo que quien teclea eso quiere es lo
+    # contrario, y adivinarselo seria peor que pararse aqui.
+    if ($pidioLote) {
+        Error1 "-Productos y -Borrar no se pueden usar en la misma corrida."
+        Aviso  "   El lote se genera antes de borrar, asi que juntas se anulan."
+        Aviso  "   Corre primero el borrado y despues la generacion:"
+        Aviso  "     .\arrancar.ps1 -Borrar todos"
+        Aviso  "     .\arrancar.ps1 -Productos 100 -Semilla 5"
+        exit 1
+    }
+
+    # -Reiniciar ya deja la base con sus 102 productos curados y nada mas, asi
+    # que borrar despues de reiniciar es pedirle que borre algo que acaba de no
+    # existir. Se avisa y se sigue, porque no rompe nada.
+    if ($Reiniciar) {
+        Aviso "-Reiniciar ya deja la base sin productos generados: -Borrar no va a encontrar nada."
+    }
 }
 
 
@@ -1231,6 +1298,43 @@ if ($ProductosPedidos -gt 0) {
 
     Ok "Mongo va por el producto $topeProducto y la variante $topeVariante"
 
+    # SIN -Semilla SE ELIGE UNA LIBRE, y esta es la decision que hace que la
+    # bandera se comporte como uno espera.
+    #
+    # Antes, sin -Semilla se usaba la semilla 0 siempre, asi que
+    # ".\arrancar.ps1 -Productos 1000" funcionaba la primera vez y la segunda
+    # moria contra la guardia diciendo que el lote L0 ya existia. Eso es lo
+    # contrario de lo que quiere quien teclea solo -Productos: esa persona no
+    # esta pidiendo un lote reproducible, esta pidiendo mas productos y ya.
+    #
+    # Ahora se toma la mayor semilla que ya existe en la base y se suma uno. Los
+    # lotes salen L1, L2, L3 y nunca chocan.
+    #
+    # Y LO QUE HACE QUE ESTO NO PIERDA NADA: la semilla elegida SE IMPRIME. Un
+    # lote generado sin -Semilla sigue siendo tan reproducible como cualquier
+    # otro, solo que el numero lo eligio el script y hay que leerlo de la
+    # pantalla en vez de haberlo tecleado. Sin ese Ok, "aleatorio" querria decir
+    # "irrepetible", y entonces la mitad de la funcion se habria perdido.
+    #
+    # No se usa la hora ni un numero al azar a proposito: max+1 es predecible,
+    # cabe en el marcador del nombre, y deja los lotes numerados en el orden en
+    # que se crearon, que es como alguien los va a querer mirar despues.
+    if (-not $pidioSemilla) {
+        $sqlSemilla = "SELECT coalesce(max(substring(nombre from ' L([0-9]+)-[0-9]{4}$')::bigint), 0) + 1 FROM productos WHERE nombre ~ ' L[0-9]+-[0-9]{4}$'"
+        $libre = "$(docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX -c $sqlSemilla 2>&1)".Trim()
+
+        if ($LASTEXITCODE -ne 0 -or $libre -notmatch '^\d+$') {
+            Error1 "No se pudo averiguar que semilla esta libre."
+            Write-Host $libre -ForegroundColor Red
+            Aviso "Pasala a mano:  .\arrancar.ps1 -Productos $ProductosPedidos -Semilla 1"
+            exit 1
+        }
+
+        $SemillaPedida = [long]$libre
+        Ok "Sin -Semilla: se usa la $SemillaPedida, que esta libre"
+        Ok "Para volver a generar ESTE mismo lote:  .\arrancar.ps1 -Productos $ProductosPedidos -Semilla $SemillaPedida"
+    }
+
     # -f y no stdin, igual que Correr-Migraciones: el archivo esta montado dentro
     # del contenedor y asi no pasa por la codificacion de PowerShell. Los cuatro
     # -v son numeros pelados, sin espacios ni comillas, asi que estos si viajan
@@ -1316,6 +1420,152 @@ if ($ProductosPedidos -gt 0) {
         # seccion 7b imprime las cuentas de cada coleccion. Cuando falla si se
         # imprime entera, que es cuando hace falta.
         Ok "Pedidos $ProductosPedidos productos con semilla $SemillaPedida"
+    }
+}
+
+
+# ------------------------------------------------------------
+# 5d. Borrar productos generados
+# ------------------------------------------------------------
+# El que deshace lo que hace 5c.
+#
+#   .\arrancar.ps1 -Borrar 500       los 500 generados MAS NUEVOS
+#   .\arrancar.ps1 -Borrar todos     todos los generados
+#   .\arrancar.ps1 -Borrar todos -Semilla 7   solo el lote de esa semilla
+#
+# Va detras del paso que genera y no delante, para que las dos banderas juntas
+# hagan lo que uno lee: primero borra lo viejo, despues genera lo nuevo... no.
+# Al reves, y conviene decirlo porque es la trampa: generar va PRIMERO, asi que
+# ".\arrancar.ps1 -Productos 100 -Borrar todos" generaria 100 y despues los
+# borraria, dejando la base igual que antes y con un minuto perdido. Por eso las
+# dos juntas se rechazan arriba, en la revision de banderas.
+#
+# SON DOS MITADES, Y LA SEGUNDA ES LA QUE SE OLVIDA
+#
+# borrar_lote.sql solo habla con PostgreSQL. Los productos tambien viven en
+# MongoDB, y correr el ETL despues NO los quita: etl/cargar.js escribe con
+# replaceOne y upsert, o sea que agrega y actualiza pero nunca borra, y su unico
+# barrido de sobrantes cubre `categorias` y `productos_eventos`. Para
+# `db.productos` no hay ninguno. Medido: borrar 300 productos en PostgreSQL y
+# correr el ETL dejaba los 300 en Mongo, y el verificador ni protestaba, porque
+# solo se queja si Mongo tiene MENOS que PostgreSQL.
+#
+# Asi que aqui se hace la segunda mitad. Y se hace por RECONCILIACION y no
+# borrando una lista: se le pasa a Mongo la lista de los generados que SIGUEN
+# vivos en PostgreSQL, y Mongo borra todo documento con marcador de lote que no
+# este en ella. Tiene dos ventajas sobre mandar la lista de borrados:
+#
+#   - Limpia tambien los fantasmas de borrados anteriores que se hicieron a
+#     mano y se dejaron a medias. Se arregla solo.
+#   - No depende de que psql y mongosh se pongan de acuerdo sobre que se borro.
+#     La fuente de verdad es PostgreSQL, y Mongo se ajusta a ella, que es la
+#     misma regla que sigue todo el ETL.
+#
+# La lista viaja por ARCHIVO y no por linea de comandos, con el mismo docker cp
+# que ya usa Correr-Etl. Con dos mil ids una linea de comandos se pasa de largo
+# en PowerShell 5.1 y el fallo seria un error de sintaxis de JavaScript, que
+# manda a buscar el problema al sitio equivocado.
+#
+# Solo se tocan los documentos con MARCADOR DE LOTE. Los 102 curados y los que
+# nacieron en el panel no llevan marcador y este paso no los mira nunca.
+if ($BorrarPedido -ne '') {
+
+    $rutaBorrar = "$PSScriptRoot\migrations\lote\borrar_lote.sql"
+    if (-not (Test-Path -LiteralPath $rutaBorrar)) {
+        Error1 "Falta migrations\lote\borrar_lote.sql, que es lo que borra el lote."
+        exit 1
+    }
+
+    if ($BorrarTodos) {
+        Paso "Borrando los productos generados"
+    } else {
+        Paso "Borrando $BorrarCuantos productos generados"
+    }
+
+    # cuantos = 0 quiere decir "todos" para el SQL. semilla = -1 quiere decir
+    # "de cualquier lote".
+    $cuantosArg = if ($BorrarTodos) { 0 } else { $BorrarCuantos }
+    $semillaArg = if ($SemillaPedida -eq $null -or $SemillaPedida -eq '') { -1 } else { $SemillaPedida }
+
+    $salidaBorrado = docker exec mesh-postgres psql `
+        -U $env_["DB_USER"] -d $env_["DB_NAME"] `
+        -v ON_ERROR_STOP=1 `
+        -v cuantos=$cuantosArg `
+        -v semilla=$semillaArg `
+        -q -f "/migrations/lote/borrar_lote.sql" 2>&1 | Out-String
+
+    if ($LASTEXITCODE -ne 0) {
+        # Igual que en el paso que genera: un rechazo del propio archivo (no hay
+        # nada que borrar, o algo tiene ventas detras) es un aviso y no un
+        # arranque roto. El ambiente estaba bien y lo unico que fallo es una
+        # peticion opcional, asi que se avisa en amarillo y el arranque sigue.
+        if ($salidaBorrado -match "No hay ningun producto generado|no genero ningun producto|tienen ventas detras") {
+            Aviso "No se borro nada."
+            foreach ($linea in ($salidaBorrado -split "`r?`n")) {
+                if ($linea -match "ERROR:|HINT:") { Aviso ("   " + $linea.Trim()) }
+            }
+            Aviso "borrar_lote.sql envuelve todo en una transaccion y la revirtio."
+        } else {
+            Error1 "migrations/lote/borrar_lote.sql FALLO"
+            Write-Host $salidaBorrado -ForegroundColor Red
+            exit 1
+        }
+    } else {
+        foreach ($linea in ($salidaBorrado -split "`r?`n")) {
+            if ($linea -match "NOTICE:\s+(Se pidieron|Borrado verificado)") {
+                Ok ($linea -replace '^.*NOTICE:\s+', '')
+            }
+        }
+
+        # La segunda mitad: MongoDB.
+        $listaHost = Join-Path $env:TEMP "mesh-vivos.txt"
+        docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX `
+            -c "SELECT id_producto FROM productos WHERE nombre ~ ' L[0-9]+-[0-9]{4}$'" `
+            > $listaHost 2>$null
+
+        if ($LASTEXITCODE -ne 0) {
+            Error1 "No se pudo leer de PostgreSQL que productos generados quedan vivos."
+            Aviso "PostgreSQL quedo bien; lo que falta es limpiar MongoDB."
+            exit 1
+        }
+
+        docker cp $listaHost mesh-mongo:/tmp/mesh-vivos.txt | Out-Null
+
+        $js = @'
+const texto = fs.readFileSync('/tmp/mesh-vivos.txt', 'utf8');
+const vivos = texto.split('\n').map(s => s.trim()).filter(s => s.length > 0).map(Number);
+const marcador = / L[0-9]+-[0-9]{4}$/;
+const sobran = db.productos.find({ nombre: marcador }, { _id: 1 })
+                 .toArray().map(d => d._id)
+                 .filter(id => vivos.indexOf(id) === -1);
+if (sobran.length > 0) {
+    db.productos.deleteMany({ _id: { $in: sobran } });
+    db.productos_eventos.deleteMany({ id_producto: { $in: sobran } });
+}
+print('mongo_borrados=' + sobran.length);
+print('mongo_quedan=' + db.productos.countDocuments({}));
+'@
+        $rutaJs = Join-Path $env:TEMP "mesh-limpiar-mongo.js"
+        [System.IO.File]::WriteAllText($rutaJs, $js, (New-Object System.Text.UTF8Encoding($false)))
+        docker cp $rutaJs mesh-mongo:/tmp/mesh-limpiar-mongo.js | Out-Null
+
+        $salidaMongo = docker exec mesh-mongo mongosh --quiet `
+            -u $env_["MONGO_USER"] -p $env_["MONGO_PASSWORD"] `
+            --authenticationDatabase admin $env_["MONGO_DB"] `
+            --file /tmp/mesh-limpiar-mongo.js 2>&1 | Out-String
+
+        if ($LASTEXITCODE -ne 0) {
+            Error1 "PostgreSQL quedo limpio pero MongoDB NO."
+            Write-Host $salidaMongo -ForegroundColor Red
+            Aviso "Los productos borrados siguen en el catalogo de Mongo. Hay que"
+            Aviso "quitarlos a mano; el procedimiento esta en migrations/lote/README.md."
+            exit 1
+        }
+
+        if ($salidaMongo -match "mongo_borrados=(\d+)") {
+            Ok "MongoDB: $($Matches[1]) documentos quitados del catalogo"
+        }
+        Remove-Item -LiteralPath $listaHost, $rutaJs -ErrorAction SilentlyContinue
     }
 }
 

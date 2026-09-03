@@ -1,7 +1,24 @@
 # migrations/lote/
 
-Un solo archivo, `generar_lote.sql`, y esta carpeta existe para que ese archivo
-NO se corra solo.
+Dos archivos, `generar_lote.sql` y `borrar_lote.sql`, y esta carpeta existe para
+que no se corran solos.
+
+| | |
+|---|---|
+| `generar_lote.sql` | agrega N productos con sus variantes y sus ofertas |
+| `borrar_lote.sql` | borra productos generados, los mas nuevos primero |
+
+Los dos se manejan mejor por `arrancar.ps1`, con `-Productos` y con `-Borrar`,
+porque el catalogo vive en DOS bases y el script hace las dos mitades. Corridos
+a mano solo tocan PostgreSQL y hay que limpiar MongoDB aparte.
+
+## La semilla, en dos lineas
+
+`.\arrancar.ps1 -Productos 300` sin mas **elige una semilla libre y te dice
+cual**, asi que se puede correr las veces que haga falta y cada vez sale un lote
+nuevo. Poner `-Semilla 7` fija el numero a mano y sirve para que dos personas
+generen exactamente el mismo catalogo. Las dos formas son igual de
+reproducibles: la diferencia es quien elige el numero.
 
 ## Que es
 
