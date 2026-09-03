@@ -1011,6 +1011,97 @@
 
 		if (confirmarCambios) cuerpo.confirmar_cambios = true;
 
+		// ------------------------------------------------------------------
+		// PARCHE: releer los precios justo antes de cobrar (solo modo carrito)
+		// ------------------------------------------------------------------
+		// ESTO NO ES EL ARREGLO. El arreglo esta en el backend y es el
+		// pendiente 1 de docs/PENDIENTES.md: que el carrito de Redis guarde el
+		// `id_precio_historial` de cada linea, para que se cobre el precio que
+		// se le ENSENO a la persona y no el que rija al pagar. La migracion 013
+		// ya deja hacerlo desde la base; falta la mitad de la aplicacion.
+		//
+		// Mientras eso no exista, el precio que se cobra es el del instante del
+		// pago. Esta pantalla ensena unos precios y un total, la persona decide
+		// con esos numeros, y si el vendedor los mueve entre que ella lee y
+		// pulsa, se le cobra otra cosa SIN QUE NADIE SE ENTERE. Eso es lo que
+		// esta relectura convierte en visible.
+		//
+		// LO QUE CUBRE:  que el precio cambie mientras esta pantalla esta
+		//                abierta. Es el caso que de verdad pasa, porque elegir
+		//                direccion y forma de pago lleva su rato.
+		//
+		// LO QUE NO CUBRE, y hay que decirlo:  la carrera de verdad. Entre esta
+		//                comprobacion y el cobro pasan milisegundos, y en esos
+		//                milisegundos el precio todavia puede moverse. Cerrar
+		//                ESA ventana no lo puede hacer el frontend: hace falta
+		//                que el precio viaje congelado desde el carrito. Un
+		//                aviso no es un mecanismo.
+		//
+		// En modo pedido no corre, y no es un olvido: alla el precio SI esta
+		// congelado (`agregar_linea` guardo su `id_precio_historial`), y es el
+		// propio backend quien devuelve los `avisos` con `comprado:false`. Este
+		// bloque existe solo porque el carrito de Redis todavia no tiene eso.
+		//
+		// CUANDO SE BORRA: en cuanto el backend mande `avisos` en modo carrito.
+		// Ese dia esta relectura pasa de util a estorbo, porque avisaria de un
+		// cambio que ya no afecta a lo que se cobra.
+		if (modo === 'carrito' && !confirmarCambios && lineas.length > 0) {
+			const antes = await pedir<{ lineas: { id_oferta: number; precio: string }[] }>(
+				'/carrito'
+			);
+			if (expiro(antes)) return;
+
+			// Si no se pudo releer, NO se cobra a ciegas. Cobrar sin haber
+			// podido comprobar es exactamente el fallo silencioso que este
+			// bloque existe para evitar, y un reintento cuesta un clic.
+			if (!antes.ok || antes.payload == null) {
+				error =
+					'No se pudieron comprobar los precios antes de cobrar. Vuelve a intentarlo.';
+				return;
+			}
+
+			const ahora = new Map<string, string>();
+			for (const l of antes.payload.lineas) ahora.set(String(l.id_oferta), l.precio);
+
+			// Se comparan como TEXTO y no como numero, a proposito: los dos
+			// lados vienen del mismo decimal de PostgreSQL y compararlos como
+			// double podria decir que 4269.00 y 4269 son distintos, o peor,
+			// que dos precios distintos son iguales por redondeo.
+			const movidos: AvisoDePrecio[] = [];
+			for (const l of lineas) {
+				const nuevo = ahora.get(String(l.id_oferta));
+				// Una linea que ya no esta en el carrito no es un cambio de
+				// precio: es otro problema, y de ese avisa el propio backend al
+				// cobrar. Aqui se ignora para no inventar un aviso que confunda.
+				if (nuevo == null) continue;
+				if (nuevo !== l.precio_unitario) {
+					movidos.push({
+						// Aqui va el id de la OFERTA y no el de una linea de
+						// pedido, porque en modo carrito el pedido todavia no
+						// existe: lo crea la compra. El campo solo se usa como
+						// clave del {#each} de los avisos, y el id de oferta es
+						// unico dentro del carrito, que es lo que esa clave
+						// necesita. Se convierte a numero porque la interfaz lo
+						// pide asi desde el modo pedido.
+						id_pedido_producto: Number(l.id_oferta),
+						nombre_producto: l.nombre_producto,
+						nombre_variante: l.nombre_variante,
+						// "congelado" es el nombre que trae la interfaz del modo
+						// pedido, donde el precio SI esta congelado. Aqui es "el
+						// que se le enseno en esta pantalla", que es justo lo
+						// que todavia no se congela y por eso hace falta avisar.
+						precio_congelado: l.precio_unitario,
+						precio_actual: nuevo
+					});
+				}
+			}
+
+			if (movidos.length > 0) {
+				avisos = movidos;
+				return;
+			}
+		}
+
 		cobrando = true;
 		// La unica linea que cambia entre los dos modos.
 		//
@@ -1500,18 +1591,46 @@
 			{#if avisos.length > 0}
 				<section class="bloque aviso" role="status">
 					<h3>Hay precios que cambiaron</h3>
-					<p class="menor">
-						Todavia no se compro nada. Estas lineas valen hoy otra cosa, pero se te
-						cobra el precio congelado:
-					</p>
+					<!--
+						El texto cambia con el modo porque LO QUE PASA es distinto, y
+						decirlo igual en los dos seria mentir en uno.
+
+						En modo pedido el precio SI esta congelado: se cobra el que se
+						guardo al agregar la linea, y el de hoy es solo informacion.
+
+						En modo carrito NO hay nada congelado todavia: se cobra el de
+						HOY, que es justo el problema que el pendiente 1 arregla. Aqui
+						la pantalla enseno un numero y el cobro va a ser otro, asi que
+						el aviso tiene que decir cual de los dos manda.
+					-->
+					{#if modo === 'carrito'}
+						<p class="menor">
+							Todavia no se compro nada. El precio cambio desde que abriste esta
+							pantalla, y en el carrito NO se congela: si sigues, se te cobra el
+							precio de hoy.
+						</p>
+					{:else}
+						<p class="menor">
+							Todavia no se compro nada. Estas lineas valen hoy otra cosa, pero se te
+							cobra el precio congelado:
+						</p>
+					{/if}
 
 					<div class="rodillo">
 						<table>
 							<thead>
 								<tr>
 									<th scope="col">Linea</th>
-									<th scope="col">Se te cobra</th>
-									<th scope="col">Precio de hoy</th>
+									<!--
+										En modo carrito las dos columnas significan lo contrario
+										que en modo pedido, y por eso cambian de nombre. Alla la
+										primera es la que se cobra; aqui la que se cobra es la
+										segunda, la de hoy. Dejarlas con el mismo encabezado
+										haria que la tabla dijera exactamente al reves de lo que
+										va a pasar.
+									-->
+									<th scope="col">{modo === 'carrito' ? 'Lo que viste' : 'Se te cobra'}</th>
+									<th scope="col">{modo === 'carrito' ? 'Se te cobra hoy' : 'Precio de hoy'}</th>
 								</tr>
 							</thead>
 							<tbody>

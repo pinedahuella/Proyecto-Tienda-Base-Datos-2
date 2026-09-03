@@ -7,7 +7,7 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 
 | # | Que | De quien | Cuanto | Urgencia |
 |---|---|---|---|---|
-| 1 | El precio se congela al PAGAR, no al agregar | **falta la mitad de Jose David** | ~1 h | **alta: es un cobro incorrecto** |
+| 1 | El precio se congela al PAGAR, no al agregar | **falta la mitad de Jose David** | ~1 h | **alta: es un cobro incorrecto**. El frontend ya avisa si el precio se mueve mientras el checkout esta abierto, pero eso es un parche: no cierra la carrera |
 | ~~2~~ | ~~La semilla no respalda con compras las 86 resenas~~ | -- | -- | **CERRADO el 2026-08-30** |
 | ~~3~~ | ~~`Carrito.svelte` quedo muerto~~ | -- | -- | **CERRADO el 2026-08-30** |
 | 4 | El grafo se queda viejo y el ETL relee todo | Meme | ver su doc | baja |
