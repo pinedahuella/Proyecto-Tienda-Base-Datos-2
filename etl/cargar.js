@@ -38,9 +38,11 @@
 // quedan en PostgreSQL, que es donde ademas se decide si alcanza para vender.
 //
 // Lo unico que viaja de ellas son cinco numeros AGREGADOS por producto
-// (precio_tienda, stock_tienda, stock_total, total_ofertas), que los calcula
-// extraer.sql. Esos si son copias, pero de un dato agregado y para pintar una
-// tarjeta: si quedan viejos la lista miente un rato, no se vende de mas.
+// (precio_tienda, precio_desde, stock_tienda, stock_total y total_ofertas),
+// que los calcula extraer.sql. La lista tiene que decir los cinco: contarlos
+// mal aqui hace creer que sobra o falta uno al comparar con la consulta. Esos
+// si son copias, pero de un dato agregado y para pintar una tarjeta: si quedan
+// viejos la lista miente un rato, no se vende de mas.
 //
 // La ficha del producto, que si necesita las ofertas de verdad, las pide a
 // PostgreSQL.
@@ -233,6 +235,72 @@ function documentoDe(producto) {
         stock_tienda:   producto.stock_tienda,
         stock_total:    producto.stock_total,
         total_ofertas:  producto.total_ofertas,
+
+        // Las dos de resenas se quedan FUERA de CAMPOS_DECIMALES, y es a
+        // proposito. Esa lista convierte por NOMBRE del campo y solo cuando el
+        // valor llega como string; estas dos vienen ya como numero desde
+        // extraer.sql, asi que pasan intactas. Tienen que quedarse numero: el
+        // catalogo VA A FILTRAR con $gte y a ORDENAR con $sort sobre
+        // resenas_promedio -- para eso existe ya el indice catalogo_rating de
+        // mongo/002_resenas.js --, y Mongo compara un campo de texto contra un
+        // numero sin dar ningun error, devolviendo resultados equivocados en
+        // silencio.
+        //
+        // EN FUTURO Y NO EN PRESENTE, que la diferencia importa: esa consulta
+        // TODAVIA NO EXISTE. No hay una sola linea en backend/ ni en frontend/
+        // que lea resenas_promedio, y se comprueba en un comando:
+        //
+        //   grep -rn resenas_promedio backend/ frontend/
+        //
+        // que hoy no devuelve nada. El campo se escribe con el tipo correcto y
+        // se indexa ANTES de que la consulta llegue, y es deliberado: el dia en
+        // que alguien conecte el filtro, un campo de texto no daria error, solo
+        // listas equivocadas en silencio, y para entonces ya llevaria un rato
+        // mintiendo. El argumento vale entero; lo que no vale es contarlo como
+        // algo que ya esta pasando.
+        //
+        // El dinero es el caso contrario y por eso si entra en esa lista.
+        // Postgres lo manda como texto justo para que el double de JavaScript
+        // no le redondee los centavos, y aqui se convierte a NumberDecimal. Un
+        // promedio y un conteo no cargan plata, asi que no necesitan ese
+        // cuidado y si necesitan comparar como numero.
+        //
+        // OJO CON EL TIPO BSON, porque no es el que uno supone. mongosh escribe
+        // un numero de JavaScript segun su VALOR y no segun su significado: un
+        // valor con parte decimal como 4.67 se guarda como double, y un valor
+        // entero como 5 o como 0 se guarda como int32. Y el promedio de una
+        // nota de 1 a 5 sale entero unas veces y con decimales otras, asi que
+        // este campo queda REPARTIDO entre los dos tipos dentro de la misma
+        // coleccion, con un reparto que se mueve solo cada vez que alguien
+        // escribe una resena.
+        //
+        // Cuantos hay de cada tipo NO se escribe aqui, porque cambia sin avisar
+        // y un numero a mano se queda mintiendo. Se cuenta cuando haga falta:
+        //
+        //   db.productos.countDocuments({resenas_promedio: {$type: "int"}})
+        //   db.productos.countDocuments({resenas_promedio: {$type: "double"}})
+        //
+        // Se deja asi A PROPOSITO, y la alternativa se probo y es PEOR.
+        // Envolver el valor en new Double() parece lo correcto y rompe el campo
+        // entero. El motivo es mecanico y no depende de los datos: para
+        // JavaScript new Double(4.67) es un objeto, y aDecimal recorre el
+        // documento reconstruyendo campo por campo todo lo que sea objeto y no
+        // sea Date. Asi que lo desarma y lo vuelve a montar como un objeto
+        // plano {value: 4.67}, que ya no tiene tipo BSON numerico ninguno. Con
+        // eso TODOS los productos quedan con tipo "object" y el $gte del
+        // catalogo deja de encontrar absolutamente nada, sin un solo error.
+        //
+        // Que el tipo este repartido NO afecta a lo que este campo tiene que
+        // hacer: Mongo compara entre tipos numericos, asi que un $gte de 4
+        // encuentra igual el int 5 y el double 4.67, y el $sort los ordena
+        // juntos. Lo unico que hay que no hacer nunca es preguntar por el tipo:
+        // un {$type: "double"} sobre este campo se dejaria fuera la mayoria de
+        // los productos.
+        //
+        // resenas_total es siempre int, y ahi si es lo correcto: es un conteo,
+        // y un conteo con parte decimal no significa nada.
+        resenas_promedio: producto.resenas_promedio,
+        resenas_total:    producto.resenas_total,
 
         variantes:      producto.variantes.map(v => Object.assign({}, v, {
             fecha_creacion: new Date(v.fecha_creacion)

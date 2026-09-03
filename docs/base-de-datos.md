@@ -14,8 +14,13 @@ docker exec -i mesh-postgres psql -U meme -d mesh -tAc \
 
 > **Los numeros de este documento describen el conjunto de datos que genera
 > `migrations/datos/generador.js` con su semilla fija** -- 102 productos, 202
-> variantes, 552 ofertas, 8 cuentas, y desde la 011 tambien 86 resenas, 115
-> comentarios y 46 votos -- no el estado de una base que ya se uso.
+> variantes, **556 ofertas, 11 cuentas**, y desde la 011 tambien **90 resenas,
+> 118 comentarios** y 62 votos, mas los **13 pedidos de 101 lineas** que las
+> respaldan -- no el estado de una base que ya se uso.
+>
+> Tres de esas cuentas (`anillo.*@mesh.com`) y 4 de esas resenas son el **anillo
+> de fraude**, sembrado a proposito para que el panel de la Entrega 2 tenga algo
+> real que ensenar. Ver `docs/PENDIENTES.md`.
 > Una base sobre la que alguien compro, publico una oferta o creo un producto
 > tiene mas, y eso es normal, no un desajuste. Para volver a los numeros de
 > aqui: `.\arrancar.ps1 -Reiniciar`.
@@ -784,9 +789,24 @@ otro.
 
 **Y hay un caso que la pantalla tiene que decidir:** `stock_tienda = 0` con
 `stock_total > 0` **no es agotado**. La tienda no tiene, pero otro vendedor si.
-En el conjunto de datos pasa en 6 variantes, a proposito: si la tienda tuviera
-existencias de todo, el filtro devolveria el catalogo entero siempre y nadie
-sabria si funciona.
+En el conjunto de datos pasa en **18 de las 202 variantes**, a proposito: si la
+tienda tuviera existencias de todo, el filtro devolveria el catalogo entero
+siempre y nadie sabria si funciona. **Agotadas de verdad** (`stock_total = 0`)
+son **6**, que es un caso distinto y se pinta distinto.
+
+> Aqui decia "6 variantes" para el primer caso, y el 6 era el numero del
+> SEGUNDO: se habian mezclado las dos cifras. Se remidieron las dos el
+> 2026-08-30 contra el catalogo recien cargado, con la definicion literal del
+> ETL (por variante, solo ofertas activas). Se cuentan asi:
+>
+> ```js
+> db.productos.aggregate([{ $unwind: "$variantes" }, { $group: { _id: null,
+>   tiendaCeroOtroSi: { $sum: { $cond: [ { $and: [
+>       { $eq: ["$variantes.stock_tienda", 0] },
+>       { $gt: ["$variantes.stock_total", 0] } ] }, 1, 0 ] } },
+>   agotadasDeVerdad: { $sum: { $cond: [
+>       { $eq: ["$variantes.stock_total", 0] }, 1, 0 ] } } } }])
+> ```
 
 ### Que se puede reconstruir y que no
 
@@ -870,18 +890,62 @@ compra la borraria del modelo: el fraude mas obvio dejaria de poder
 representarse, y la consulta de varios saltos perderia su hallazgo mas util.
 
 Es la diferencia entre un modelo que **impide** el fraude y uno que lo puede
-**observar**. Aqui hace falta el segundo. En el conjunto de datos son 83 de las
-86 resenas las que no tienen un pedido detras:
+**observar**. Aqui hace falta el segundo.
+
+**Ojo con lo que esto dice y lo que no, porque es facil leerlo al reves.** Que
+el ESQUEMA no exija la compra no significa que el SISTEMA la regale: el backend
+si la exige, en la aplicacion (`exigirCompraPagada`), y ademas al mismo vendedor.
+Son dos capas distintas a proposito -- una regla de aplicacion se cambia con un
+`if`, una llave foranea no se puede quitar sin migrar la base -- y la de arriba
+se puede levantar el dia que haga falta representar el fraude.
+
+Y aqui hay que corregir lo que esta seccion afirmaba hasta el 2026-08-30. Decia
+que **83 de las 86 resenas no tenian un pedido detras**, y lo presentaba como la
+prueba de que el modelo puede observar el fraude. Eso ya no es cierto, y lo que
+es peor: **nunca fue una virtud, era una contradiccion**. El conjunto de datos
+describia resenas que el propio sistema habria rechazado al escribirlas, y la
+consecuencia visible era que el boton "Escribir una resena" no aparecia casi en
+ningun producto.
+
+> **Ojo con el 83 y el 84**, que aparecen los dos en la documentacion vieja y
+> parecen contradecirse: no lo son, cuentan cosas distintas. El **83** salia de
+> la consulta que estaba escrita aqui, que solo miraba `(comprador, producto)`.
+> El **84** sale de la condicion que el backend exige de verdad, que ademas pide
+> que la compra sea **a ese vendedor**. La condicion mas estricta encuentra una
+> resena huerfana mas, como tiene que ser. La cifra que importa es la segunda,
+> porque es la que decide si el boton aparece.
+
+Hoy la semilla las respalda:
 
 ```sql
+-- Resenas SIN una compra pagada a ese vendedor detras.
+-- Los JOIN son los mismos de exigirCompraPagada, a proposito: contarlo de otra
+-- forma seria medir algo distinto de lo que el sistema exige.
 SELECT count(*) FROM resena r
 WHERE NOT EXISTS (
-  SELECT 1 FROM pedido p
-  JOIN pedido_producto pp ON pp.id_pedido = p.id_pedido
-  WHERE p.id_usuario = r.id_usuario
-    AND pp.id_producto_mongo = r.id_producto_mongo);
--- 83
+  SELECT 1 FROM pedido pe
+  JOIN pago             pg  ON pg.id_pedido           = pe.id_pedido
+  JOIN estado_pago      epa ON epa.id_estado_pago     = pg.id_estado_pago
+  JOIN estado_pedido    epe ON epe.id_estado_pedido   = pe.id_estado_pedido
+  JOIN pedido_producto  pp  ON pp.id_pedido           = pe.id_pedido
+  JOIN precio_historial ph  ON ph.id_precio_historial = pp.id_precio_historial
+  JOIN oferta           o   ON o.id_oferta            = ph.id_oferta
+  WHERE pe.id_usuario = r.id_usuario
+    AND o.id_usuario  = r.id_usuario_vendedor
+    AND pp.id_producto_mongo = r.id_producto_mongo
+    AND epa.estado_pago_nombre    = 'pagado'
+    AND epe.estado_pedido_nombre <> 'cancelado');
+-- 0   (antes de arreglar la semilla: 84)
 ```
+
+Es la comprobacion **10** del `DO` final de `001_catalogo.sql`, asi que la
+migracion entera falla si alguna vez vuelve a haber una.
+
+**Entonces, sin resenas huerfanas, como se demuestra la senal?** Sembrando el
+anillo, que es donde tiene que vivir: `bash neo4j/correr_fraude.sh` lo mete en
+**Neo4j** con cuentas de id negativo y etiqueta `:Prueba`, corre las cinco
+consultas y lo borra. Que no toque PostgreSQL no es comodidad -- es que el
+grafo es una proyeccion y se puede ensuciar sin mentirle a la fuente de verdad.
 
 ### Por que `comentario` lleva `id_usuario` aunque el diagrama no lo tenga
 
@@ -892,7 +956,7 @@ podria sacarlo de `resena.id_usuario`, pero una respuesta no cuelga de ninguna
 resena -- cuelga de otro comentario -- y se quedaria sin forma de saber quien la
 escribio. No se podria ni pintar "Carlos respondio: ..." ni contar cuentas que se
 comentan entre si, que es una de las senales de la Entrega 2. En el conjunto de
-datos hay 29 respuestas sobre 86 raices.
+datos hay 28 respuestas sobre 86 raices.
 
 Para la raiz queda repetido con `resena.id_usuario`. Es redundancia real y se
 acepta a sabiendas: la alternativa era dejar las respuestas sin autor. La

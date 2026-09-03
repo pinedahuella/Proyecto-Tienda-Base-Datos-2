@@ -346,7 +346,7 @@ UNION ALL
 -- votos de `likes`. Las respuestas las escribe el vendedor en su propia
 -- resena, asi que no agregan ningun camino entre cuentas que ESCRIBIO no de ya;
 -- los votos si agregarian uno (quien apoya a quien), y son la primera cosa que
--- este grafo deberia crecer si hiciera falta mas senal. Hoy son 46 votos de
+-- este grafo deberia crecer si hiciera falta mas senal. Hoy son 62 votos de
 -- dos cuentas: no alcanza para un patron y meterlos seria ruido con nombre.
 SELECT 5 AS orden,
        'UNWIND [' || coalesce(string_agg(

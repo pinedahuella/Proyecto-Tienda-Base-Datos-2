@@ -198,18 +198,29 @@ acumulacion, y por eso existe la A.5.
 
 ## Como se prueba que la consulta sirve
 
-Aqui esta la parte incomoda, y esta escrita a proposito:
+Aqui esta la parte incomoda, y esta escrita a proposito.
 
-> **Contra los datos sembrados de hoy, A.1, A.2 y A.3 devuelven VACIO.**
+**Hasta el 2026-08-30 esta seccion decia que A.1, A.2 y A.3 devolvian VACIO**
+contra los datos sembrados, y que eso era lo correcto porque el conjunto no
+tenia ningun anillo. Era cierto, y era tambien el problema: el panel de fraude
+de la Entrega 2 no tenia **nada real** que ensenar, y para demostrarlo habia que
+sembrar un anillo de mentira en Neo4j o mirar datos inventados en el frontend.
 
-No es un fallo. En las 86 resenas del conjunto de datos no hay ni un par mutuo
-ni un anillo: se comprobo en PostgreSQL con un join de `resena` contra si misma
-y da **0 filas**. Una consulta de fraude que siempre encuentra algo no esta
-detectando, esta adivinando.
+Ahora el anillo es de verdad y vive en **PostgreSQL**: tres cuentas
+`anillo.*@mesh.com` que **se compran entre si** -- tienen que hacerlo, porque el
+backend exige compra pagada para calificar -- y despues se califican 5 estrellas
+en circulo, desde la misma casa. El ETL las arrastra al grafo como a cualquier
+otra cuenta, sin ningun paso especial. Ver `docs/PENDIENTES.md`.
 
-Pero una consulta que nunca encontro nada tampoco esta demostrada: podria estar
-mal escrita y devolver vacio por eso. Por eso existe `correr_fraude.sh`, que
-siembra un anillo de mentira, corre otra vez **las mismas consultas** y lo borra:
+Que un anillo de verdad tenga que comprarse a si mismo para poder resenar no es
+un rodeo del sembrado: **es como opera uno real**, y el costo de esas compras
+(cuatro ofertas a un cuarto del precio de la tienda) es justo lo que lo hace
+detectable.
+
+Sigue en pie el otro lado del argumento: una consulta que solo encuentra lo que
+alguien sembro a proposito tampoco esta demostrada del todo. Por eso
+`correr_fraude.sh` sigue existiendo: siembra un SEGUNDO anillo, de mentira y en
+el grafo, corre otra vez **las mismas consultas** y lo borra.
 
 ```bash
 bash neo4j/correr_fraude.sh
@@ -270,16 +281,36 @@ hace `MERGE` por id, la siguiente corrida no los toca.
 
 ### Lo que se midio
 
-Corrida contra el grafo real, sin sembrar nada:
+Corrida contra el grafo real, **sin sembrar nada** (2026-08-30, ya con el anillo
+de `anillo.*@mesh.com` en PostgreSQL):
 
 ```
-A.1  EL ANILLO ........................ 0 filas   <- correcto, no hay anillos
-A.2  PAR MUTUO SOBRE MISMO PRODUCTO ... 0 filas   <- correcto, no hay pares mutuos
-A.3  RAFAGA ........................... 0 filas   <- correcto
-A.4  COMPARTEN DIRECCION .............. 0 filas   <- correcto, y ver abajo
-A.4b MISMA CIUDAD (no es senal) ....... 2 filas
-A.5  PUNTAJE COMPUESTO ................ 10 pares, el mayor con 1 senal
+A.1  EL ANILLO ........................ 2 filas: el triangulo uno/dos/tres
+                                        y el par uno+dos
+A.2  PAR MUTUO SOBRE MISMO PRODUCTO ... 1 fila:  uno <-> dos sobre
+                                        "Cartas al puerto seco", 5 y 5, 1 hora
+A.3  RAFAGA ........................... 1 fila,  y NO es el anillo (ver abajo)
+A.4  COMPARTEN DIRECCION .............. 1 casa con las 3 cuentas del anillo
+A.4b MISMA CIUDAD (no es senal) ....... 0 filas
+A.5  PUNTAJE COMPUESTO ................ el par uno+dos con 4 senales de 4,
+                                        y los otros dos pares del anillo con 2
 ```
+
+La medicion anterior -- **todas en 0 filas** -- era de antes de que el anillo
+existiera en PostgreSQL. Se cambio el conjunto de datos, no las consultas: el
+texto de las cinco es el mismo.
+
+#### La A.3 encuentra algo que NO es el anillo, y esta bien
+
+Su unica fila es `comprador.sur@mesh.com` calificando a `tienda@mesh.com`: 3
+resenas en 16 horas, notas 5, 5 y 3. Es una cuenta normal comprando normal.
+
+**No es un falso positivo de la consulta, es el limite de la senal.** "Varias
+notas en pocos dias" describe igual de bien a un anillo que a alguien que se
+sento un domingo a calificar lo que compro; el 3 en medio lo delata. Por eso
+A.3 nunca decide sola: A.5 la suma con las otras, y ese par se queda en **1
+senal de 4** mientras el anillo llega a 4. El backend hace lo mismo -- no expone
+A.3 como un `tipo` propio, la usa como la frase de la ventana de tiempo.
 
 #### La A.4 daba dos hallazgos y los dos eran falsos
 
@@ -306,9 +337,21 @@ identifica una casa. Los nodos se siguen cargando todos -- el grafo tiene que
 poder contestar donde vive una cuenta -- y los pares que solo comparten ciudad se
 listan aparte, en A.4b, rotulados como lo que son: **no son senal**.
 
-Consecuencia: contra los datos de hoy A.4 devuelve vacio. Es la respuesta
-correcta, y `correr_fraude.sh` la demuestra sembrando una direccion con calle de
-verdad y comprobando que ahi si la encuentra.
+Consecuencia: con el arreglo, A.4 dejo de devolver las dos filas falsas. Y hoy
+devuelve **una fila verdadera**: las tres cuentas del anillo, que si tienen
+calle.
+
+Esa fila demuestra ademas por que la normalizacion existe. Las tres direcciones
+estan escritas **distinto a proposito** en la semilla:
+
+```
+Callejon del Manzano 4, Casa B      <- anillo_uno
+Callejon del Manzano 4,  casa b     <- anillo_dos   (doble espacio, minusculas)
+Callejon  del Manzano 4, Casa B     <- anillo_tres  (doble espacio)
+```
+
+Comparadas tal cual son tres casas distintas y la senal no existe. `clave_direccion()`
+las colapsa en una sola, y por eso las tres caen en el mismo nodo `:Direccion`.
 
 #### La A.3 no media una ventana
 
@@ -372,7 +415,7 @@ cero son el mismo grafo.
   alguien corra `--limpiar`. Es la contrapartida de que sea idempotente.
 - **Los votos (`likes`) no viajan.** Si agregarian un camino entre cuentas -- quien
   apoya a quien -- y son lo primero que este grafo deberia crecer si hiciera falta
-  mas senal. Hoy son 46 votos de dos cuentas: no alcanza para un patron.
+  mas senal. Hoy son 62 votos de dos cuentas: no alcanza para un patron.
 - **Las respuestas a las resenas tampoco.** Las escribe el vendedor en su propia
   resena, asi que no agregan ningun camino que `ESCRIBIO` no de ya.
 - **La consulta A.5 solo ranquea pares que ya se calificaron.** Dos cuentas que

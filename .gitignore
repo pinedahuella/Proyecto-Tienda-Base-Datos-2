@@ -9,6 +9,15 @@
 docker/pgadmin/pgpass
 docker/pgadmin/servers.json
 
+# La pagina que genera mongo/demostracion_indices.ps1.
+#
+# No se sube A PROPOSITO, aunque sea un entregable: sus cifras salen de la base
+# que tenga quien la corra, y una copia versionada envejeceria en silencio --
+# ensenaria "102 productos" el dia que haya 300, con toda la pinta de estar al
+# dia. Se regenera en dos segundos, y ahi esta la gracia: delante del profesor
+# se corre el script y las cifras nacen en ese momento.
+demostracion_indices.html
+
 # Llaves y certificados, por si alguna vez aparecen
 *.pem
 *.key

@@ -19,8 +19,24 @@ Opciones:
 
   .\arrancar.ps1 -Reiniciar        borra TODOS los datos y empieza de cero
   .\arrancar.ps1 -ReiniciarMongo   rehace solo MongoDB, sin tocar PostgreSQL
+  .\arrancar.ps1 -ReiniciarGrafo   vacia el grafo de Neo4j y lo reconstruye
+                                   desde PostgreSQL, sin tocar PostgreSQL
   .\arrancar.ps1 -Mongo            abre la consola de MongoDB
-  .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a MongoDB
+  .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a MongoDB Y el
+                                   grafo a Neo4j, los dos
+  .\arrancar.ps1 -Productos 300              genera ademas un lote de 300
+                                             productos de prueba
+  .\arrancar.ps1 -Productos 300 -Semilla 7   el mismo lote, repetible
+
+-ReiniciarGrafo va aparte de -Etl y no pegado a el porque no es "migrar de
+mas": BORRA el grafo entero antes de reconstruirlo. Hace falta porque el ETL
+del grafo solo suma, asi que una resena borrada en PostgreSQL se queda en Neo4j
+hasta que alguien lo vacie. Y va detras de su propia bandera porque un borrado
+automatico se llevaria por delante cualquier cosa sembrada a mano para una
+demostracion, en medio de la demostracion.
+
+-Productos y -Semilla estan explicadas enteras mas abajo, en GENERAR UN LOTE DE
+PRODUCTOS DE PRUEBA.
 
 Que hace:
    1. arranca Docker si esta apagado y espera al engine
@@ -49,6 +65,80 @@ El esquema corre primero, porque los datos no tienen donde entrar sin el.
 
 Para meter mas productos se agrega otro archivo en migrations/datos/ y listo:
 los anteriores no se abren. Como escribirlo esta en migrations/README.md.
+
+
+GENERAR UN LOTE DE PRODUCTOS DE PRUEBA
+--------------------------------------------------
+  .\arrancar.ps1 -Productos 300
+  .\arrancar.ps1 -Productos 300 -Semilla 7
+
+Arranca normal y ademas genera N productos inventados, cada uno con sus
+variantes, sus caracteristicas, sus imagenes, sus ofertas de varios vendedores
+y sus movimientos de apertura de inventario. No borra nada de lo que ya estaba.
+
+Lo hace migrations/lote/generar_lote.sql, que vive en una SUBCARPETA a
+proposito: los dos bucles de migraciones de arrancar.ps1 leen sin -Recurse, asi
+que ningun arranque normal lo ve. La bandera es su unica puerta.
+
+El paso corre despues de los conjuntos de datos y ANTES del ETL de MongoDB, y
+ese orden no es casual: puesto ahi, la guardia del tope de id que arrancar.ps1
+ya tenia ve que PostgreSQL se adelanto y dispara el ETL sola, asi que el lote
+llega a Mongo sin que nadie tenga que acordarse de correr nada. Generarlo
+DESPUES del ETL dejaria el verificador del catalogo en rojo acusando al ETL,
+con todo bien.
+
+  -Productos N   cuantos generar. Entre 1 y 9999. El tope no es un capricho:
+                 el generador le pega a cada nombre un marcador de cuatro
+                 digitos, y con cuatro digitos no caben mas.
+
+  -Semilla S     opcional. Un entero de cero para arriba; admite hasta un
+                 bigint, asi que un CID entero sirve. La MISMA semilla vuelve a
+                 dar EXACTAMENTE el mismo lote, producto por producto y precio
+                 por precio, en cualquier maquina. Sin ella se usa la semilla 0.
+
+Las dos se revisan antes de tocar Docker, asi que un error de tecleo se sabe en
+un segundo y no despues del arranque entero.
+
+Y se revisan mirando el TEXTO que se escribio, no el numero al que PowerShell
+lo convertiria. Eso importa mas de lo que parece: si el parametro se declara
+[int], PowerShell convierte solo y en silencio, y -Productos 2.7 termina
+escribiendo 3 productos, -Productos 0x10 escribe 16, -Productos 1e3 escribe
+1000 y -Productos 2,5 escribe 25, porque la coma es separador de miles y no
+parte el numero. Ninguno da error. Ahora se exigen digitos y nada mas:
+
+  .\arrancar.ps1 -Productos 300      si
+  .\arrancar.ps1 -Productos 300.5    no
+  .\arrancar.ps1 -Productos 3e2      no
+  .\arrancar.ps1 -Productos 0x10     no
+  .\arrancar.ps1 -Productos 0        no, porque escribir la bandera es pedir un
+                                     lote, y cero no es un lote. Quien no quiere
+                                     lote no escribe la bandera.
+
+Otras dos cosas que se rechazan de entrada:
+
+  -Semilla sin -Productos    una semilla sola no dice cuantos generar, y eso no
+                             se adivina.
+  -Productos con -Mongo      -Mongo abre la consola de MongoDB y sale del
+                             script sin llegar al paso del lote. Antes se
+                             tragaba la bandera en silencio.
+
+UNA SEMILLA NO SE REPITE EN LA MISMA BASE
+El generador lleva una guardia: si esa semilla ya genero productos aqui, se
+niega. No es celo, es que se rompe solo -- productos.nombre no tiene UNIQUE y
+el generador resuelve el id de cada producto recien insertado buscandolo por
+nombre, asi que dos lotes con los mismos nombres convierten ese JOIN en un
+producto cartesiano.
+
+Cuando se niega, el lote NO se escribe a medias: generar_lote.sql envuelve todo
+en una transaccion y la revierte entera. Y el arranque SIGUE, en amarillo, en
+vez de morirse: el ambiente estaba bien y lo unico que fallo es una peticion
+opcional, asi que Mongo, Redis y Neo4j se comprueban igual. El aviso se repite
+al final para que no se pierda entre las cuentas. Un fallo del SQL por otra
+causa si corta el arranque.
+
+Para volver a usar una semilla hay que borrar antes su lote, en el orden de las
+llaves foraneas. Se reconocen por el marcador del nombre, que es un espacio, la
+letra L, la semilla, un guion y cuatro digitos.
 
 
 ARRANCAR EL BACKEND

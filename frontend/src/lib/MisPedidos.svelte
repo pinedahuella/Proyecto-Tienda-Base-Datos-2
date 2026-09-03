@@ -1,15 +1,21 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import type { RespuestaApi } from './api';
+	import { fade, fly } from 'svelte/transition';
 	import {
 		cancelarPedido,
 		listarPedidos,
 		quetzales,
 		subtotal,
 		totalPedido,
+		traerOfertaEnFecha,
 		traerPedido,
 		traerProductoEnFecha,
+		type CaracteristicaEnFecha,
+		type LineaPedido,
+		type OfertaEnFecha,
 		type PedidoCompleto,
+		type ProductoEnFecha,
 		type ResumenPedido
 	} from './pedido';
 
@@ -21,6 +27,7 @@
 	 *   GET  /comprador/pedidos/:id          el detalle, solo al desplegar uno
 	 *   POST /comprador/pedidos/:id/cancelar cancelar
 	 *   GET  /productos/:id/historial        el producto como estaba ese dia
+	 *   GET  /productos/ofertas/:id/historial  su precio y stock ese dia
 	 *
 	 * La lista y el detalle son dos peticiones a proposito: el resumen ya trae
 	 * total y cantidad de lineas calculados, asi que pedir el detalle de los 30
@@ -255,31 +262,19 @@
 	 * en borrador ni los inactivos: un pedido tiene que poder ensenar lo que se
 	 * compro aunque hoy ya no se venda.
 	 *
-	 * Solo se guardan los dos campos que se pintan. El payload trae el producto
-	 * entero, pero cada evento aporta unicamente lo que cambio, asi que un campo
-	 * puede no venir en la fusion: por eso los dos admiten null aunque el tipo
-	 * de la ruta diga que el nombre siempre esta.
-	 */
-	interface CaracteristicaEnFecha {
-		nombre: string;
-		valor: string | number | boolean | string[];
-		unidad?: string | null;
-	}
-
-	/**
-	 * Lo que devuelve GET /productos/:id/historial?fecha=
+	 * El payload entero se guarda tal como llega. Cada evento aporta unicamente
+	 * lo que cambio, asi que un campo puede no venir en la fusion: por eso casi
+	 * todos admiten null en `ProductoEnFecha` aunque el tipo de la ruta diga
+	 * que el nombre siempre esta.
 	 *
-	 * Antes aqui solo se declaraban `nombre` y `descripcion`, y por eso la
-	 * pantalla ensenaba solo esos dos: la ruta manda ademas la categoria, las
-	 * variantes y las caracteristicas de ese dia, y se estaban tirando.
+	 * Esto estuvo mal hasta hoy, y merece quedar escrito porque no daba ningun
+	 * error: el tipo se habia ampliado con la categoria, las variantes y las
+	 * caracteristicas, y el marcado de abajo ya las pintaba, pero al guardar se
+	 * hacia `{ nombre, descripcion }` y se tiraba el resto. El resultado eran
+	 * tres bloques de pantalla que no se ejecutaban nunca -- no fallaban, no
+	 * existian. Si algun dia hace falta recortar lo que se guarda, que sea por
+	 * un motivo, y que ese motivo este aqui.
 	 */
-	interface ProductoEnFecha {
-		nombre: string | null;
-		descripcion: string | null;
-		categoria?: { nombre: string; categoria_padre: string | null } | null;
-		caracteristicas_adicionales?: CaracteristicaEnFecha[];
-		variantes?: { id_producto_variante: number; nombre_variante: string }[];
-	}
 
 	/** Un valor de caracteristica, como texto. Una lista se une con comas. */
 	function valorTexto(v: CaracteristicaEnFecha['valor']): string {
@@ -301,13 +296,43 @@
 	let historial = $state<Record<string, ProductoEnFecha>>({});
 	let cargandoHistorial = $state<Record<string, boolean>>({});
 	/**
-	 * Que panel esta abierto va por LINEA (id_pedido_producto) y no por la clave
-	 * de la reconstruccion: un pedido puede llevar dos lineas del mismo producto
-	 * (dos variantes, o la misma variante a dos vendedores), y con la clave
-	 * compartida abrir una abria tambien la otra. Lo pedido si se comparte: es
-	 * la misma peticion y no tiene por que hacerse dos veces.
+	 * La linea que tiene el modal abierto, o null.
+	 *
+	 * Se guarda la LINEA entera y no su id: el modal ensena tambien lo que se
+	 * pago (precio_unitario, cantidad, vendedor, variante), que vive en la
+	 * linea del pedido y no en la reconstruccion. Con solo el id habria que
+	 * volver a buscarla dentro de `detalles` en cada renglon del modal.
+	 *
+	 * Uno a la vez, que es lo que significa un modal. Antes era un
+	 * `Record<idLinea, boolean>` porque cada linea desplegaba su propio panel
+	 * en su sitio; ahora que hay una sola ventana, un registro de abiertos
+	 * permitiria dos "abiertos" a la vez de los que solo uno se veria.
+	 *
+	 * El dia viaja al lado por comodidad: sale de la cabecera del pedido, y
+	 * dentro del modal ya no se tiene el pedido a mano.
 	 */
-	let abiertoHistorial = $state<Record<string, boolean>>({});
+	let lineaAbierta = $state<{ linea: LineaPedido; dia: string } | null>(null);
+
+	/**
+	 * Precio y stock de la oferta ese dia, por `id_oferta@dia`.
+	 *
+	 * La clave lleva el dia por lo mismo que la del producto: la misma oferta
+	 * comprada en dos pedidos de distinto dia valia distinto.
+	 *
+	 * Van en su propio estado y no dentro de `historial` porque son OTRA
+	 * peticion a OTRA base -- el catalogo de Mongo no guarda ni precio ni
+	 * stock. Que una falle no tiene por que tumbar a la otra.
+	 */
+	let ofertaHistorial = $state<Record<string, OfertaEnFecha>>({});
+	let cargandoOferta = $state<Record<string, boolean>>({});
+	/**
+	 * Aqui no hay `grave` ni `reintentar` como en el producto, y es a proposito:
+	 * el precio es un ADORNO de esta ventana. Lo que se vino a ver es como se
+	 * veia el producto, y eso ya esta en pantalla; pintar un error rojo y un
+	 * boton de reintentar por no poder anadir el precio le daria a un extra el
+	 * peso de un fallo. Mismo criterio que PanelVendedor.reconstruirOfertas().
+	 */
+	let falloOferta = $state<Record<string, string>>({});
 	/**
 	 * `grave` decide el color (un dato en gris, un fallo en rojo) y `reintentar`
 	 * si se ofrece el boton. Son dos cosas distintas: una fecha mal armada o una
@@ -386,10 +411,9 @@
 		}
 
 		if (r.ok && r.payload) {
-			historial = {
-				...historial,
-				[clave]: { nombre: r.payload.nombre ?? null, descripcion: r.payload.descripcion ?? null }
-			};
+			// Entero, no dos campos: ver el comentario de arriba. Lo que la ruta
+			// mande de mas se pinta o se ignora, pero llega.
+			historial = { ...historial, [clave]: r.payload };
 			return;
 		}
 
@@ -428,18 +452,85 @@
 	 * fallo: lo que hay se conserva y el reintento es un boton aparte, para que
 	 * cerrar y abrir no dispare peticiones sin que nadie las pida.
 	 */
-	function alternarHistorial(idLinea: string, idProducto: string, dia: string) {
-		if (abiertoHistorial[idLinea]) {
-			abiertoHistorial = { ...abiertoHistorial, [idLinea]: false };
+	function claveOferta(idOferta: string, dia: string): string {
+		return `${idOferta}@${dia}`;
+	}
+
+	/**
+	 * El precio y el stock que tenia ESA oferta ese dia.
+	 *
+	 * Una sola peticion, porque la linea del pedido ya trae su `id_oferta`.
+	 * PanelVendedor necesita dos pasos (pedir las ofertas del producto para
+	 * sacar los ids) porque alli se parte del producto, no de una compra.
+	 */
+	async function cargarOferta(idOferta: string, dia: string) {
+		const clave = claveOferta(idOferta, dia);
+		if (ofertaHistorial[clave] || cargandoOferta[clave]) return;
+
+		cargandoOferta = { ...cargandoOferta, [clave]: true };
+		const { [clave]: _viejo, ...resto } = falloOferta;
+		falloOferta = resto;
+
+		const r = await traerOfertaEnFecha(idOferta, dia);
+		cargandoOferta = { ...cargandoOferta, [clave]: false };
+
+		// La sesion caida la atiende el producto, que se pide a la vez: si se
+		// avisara tambien desde aqui, una sesion expirada dispararia dos veces
+		// el mismo cierre de sesion.
+		if (r.ok && r.payload) {
+			ofertaHistorial = { ...ofertaHistorial, [clave]: r.payload };
 			return;
 		}
 
-		abiertoHistorial = { ...abiertoHistorial, [idLinea]: true };
+		falloOferta = {
+			...falloOferta,
+			[clave]:
+				r.estado === 404
+					? 'Esa oferta todavia no existia ese dia.'
+					: 'No se pudo recuperar el precio de ese dia.'
+		};
+	}
 
-		const clave = claveHistorial(idProducto, dia);
-		if (historial[clave] || falloHistorial[clave]) return;
+	/**
+	 * Abre el modal de una linea y pide lo que le falte.
+	 *
+	 * Las dos peticiones salen a la vez y no una detras de otra: van a bases
+	 * distintas (Mongo y PostgreSQL) y ninguna necesita el resultado de la
+	 * otra, asi que encadenarlas solo sumaria las dos esperas.
+	 */
+	function abrirHistorial(linea: LineaPedido, dia: string) {
+		lineaAbierta = { linea, dia };
 
-		cargarHistorial(idProducto, dia);
+		const clave = claveHistorial(linea.id_producto_mongo, dia);
+		if (!historial[clave] && !falloHistorial[clave]) {
+			cargarHistorial(linea.id_producto_mongo, dia);
+		}
+
+		if (REGEX_DIA.test(dia)) {
+			void cargarOferta(linea.id_oferta, dia);
+		}
+	}
+
+	function cerrarHistorial() {
+		lineaAbierta = null;
+	}
+
+	/**
+	 * Escape cierra el modal.
+	 *
+	 * En la fase normal, no en captura, y sin cortar la propagacion: Checkout
+	 * si necesita las dos cosas porque el carrito escucha Escape en esta misma
+	 * ventana y una sola tecla cerraria los dos, pero en esta pantalla nadie
+	 * mas la escucha. Copiar alli el `capture` habria dejado una precaucion
+	 * sin nada de que precaverse, y de las que se leen como si hicieran falta.
+	 *
+	 * Sale por lo alto si no hay modal abierto: sin esa guarda, un Escape con
+	 * todo cerrado igual entraria a cerrar y no haria dano, pero tampoco tiene
+	 * por que ejecutarse.
+	 */
+	function alTecla(evento: KeyboardEvent) {
+		if (!lineaAbierta || evento.key !== 'Escape') return;
+		cerrarHistorial();
 	}
 
 	// ---------------------------------------------------------------- cancelar
@@ -671,7 +762,6 @@
 										<ul class="lineas">
 											{#each d.detalles as l (l.id_pedido_producto)}
 												{@const dia = diaDe(p.fecha_creacion)}
-												{@const clave = claveHistorial(l.id_producto_mongo, dia)}
 												<li class="linea">
 													<div class="que">
 														<!-- Se enlaza al producto del catalogo, que es lo unico
@@ -684,13 +774,10 @@
 														<button
 															type="button"
 															class="ver-antes"
-															aria-expanded={abiertoHistorial[l.id_pedido_producto] === true}
-															onclick={() =>
-																alternarHistorial(l.id_pedido_producto, l.id_producto_mongo, dia)}
+															aria-haspopup="dialog"
+															onclick={() => abrirHistorial(l, dia)}
 														>
-															{abiertoHistorial[l.id_pedido_producto]
-																? 'Ocultar como se veia'
-																: 'Como se veia al comprarlo'}
+															Ver el detalle de ese dia
 														</button>
 													</div>
 													<div class="cuentas">
@@ -699,93 +786,6 @@
 														</span>
 														<strong>{quetzales(subtotal(l))}</strong>
 													</div>
-
-													{#if abiertoHistorial[l.id_pedido_producto]}
-														<div class="antes">
-															{#if cargandoHistorial[clave]}
-																<p class="menor">Reconstruyendo el producto al {dia}...</p>
-															{:else if falloHistorial[clave]}
-																{@const fallo = falloHistorial[clave]}
-																{#if fallo.grave}
-																	<p class="malo" role="alert">{fallo.texto}</p>
-																{:else}
-																	<!-- Un 404 aqui es un dato, no un fallo: se dice en gris. -->
-																	<p class="menor">{fallo.texto}</p>
-																{/if}
-																{#if fallo.reintentar}
-																	<button
-																		type="button"
-																		onclick={() => cargarHistorial(l.id_producto_mongo, dia)}
-																	>
-																		Reintentar
-																	</button>
-																{/if}
-															{:else if historial[clave]}
-																{@const antes = historial[clave]}
-																<!-- Un nombre vacio cuenta como no tenerlo: pintarlo en
-																     negrita dejaria dos comillas con nada dentro. -->
-																{@const cambio = !!antes.nombre && antes.nombre !== l.nombre_producto}
-
-																<h5>Asi se veia el {dia}</h5>
-
-																{#if cambio}
-																	<!-- El cambio es lo que esta pantalla existe para ensenar:
-																	     se pintan los dos nombres, no solo el reconstruido. -->
-																	<p class="cambio">
-																		El catalogo lo llamaba <strong>{antes.nombre}</strong>. En tu
-																		pedido quedo guardado como <strong>{l.nombre_producto}</strong>.
-																	</p>
-																{:else if antes.nombre}
-																	<p class="menor">
-																		Se llamaba <strong>{antes.nombre}</strong>, igual que en tu
-																		pedido.
-																	</p>
-																{:else}
-																	<p class="menor">Ese dia el producto no tenia nombre guardado.</p>
-																{/if}
-
-																<!-- El ?? no basta: una descripcion vacia no es nula y dejaria
-																     el renglon en blanco, que se lee como que algo fallo. -->
-																<p class="descripcion">
-																	{antes.descripcion || 'Ese dia no tenia descripcion.'}
-																</p>
-
-																{#if antes.categoria?.nombre}
-																	<!-- La categoria de ESE dia, que puede no ser la de hoy: es
-																	     justo el caso que justifica `productos_historial.id_categoria`
-																	     (el balon nacio en Fitness y se movio a Futbol). -->
-																	<p class="menor">
-																		Estaba en
-																		<strong>
-																			{#if antes.categoria.categoria_padre}{antes.categoria
-																					.categoria_padre} &rsaquo;
-																			{/if}{antes.categoria.nombre}
-																		</strong>
-																	</p>
-																{/if}
-
-																{#if antes.caracteristicas_adicionales?.length}
-																	<dl class="fichas">
-																		{#each antes.caracteristicas_adicionales as c (c.nombre)}
-																			<div class="ficha">
-																				<dt>{c.nombre}</dt>
-																				<dd>
-																					{valorTexto(c.valor)}{#if c.unidad}
-																						<span class="menor">{c.unidad}</span>
-																					{/if}
-																				</dd>
-																			</div>
-																		{/each}
-																	</dl>
-																{/if}
-
-																<p class="menor">
-																	Reconstruido con el historial del catalogo, que ensena el
-																	producto aunque hoy ya no se venda.
-																</p>
-															{/if}
-														</div>
-													{/if}
 												</li>
 											{/each}
 										</ul>
@@ -815,6 +815,269 @@
 		{/if}
 	{/if}
 </section>
+
+<svelte:window onkeydown={alTecla} />
+
+{#if lineaAbierta}
+	{@const l = lineaAbierta.linea}
+	{@const dia = lineaAbierta.dia}
+	{@const clave = claveHistorial(l.id_producto_mongo, dia)}
+	{@const claveO = claveOferta(l.id_oferta, dia)}
+	{@const antes = historial[clave]}
+	{@const oferta = ofertaHistorial[claveO]}
+
+	<!-- El velo es un <button> y no un <div> con onclick, igual que en
+	     CarritoRedis: hace falta poder cerrarlo con el teclado, y un boton ya
+	     trae Enter, Espacio y el foco sin escribir nada. -->
+	<button
+		type="button"
+		class="velo"
+		aria-label="Cerrar el detalle"
+		onclick={cerrarHistorial}
+		transition:fade={{ duration: 150 }}
+	></button>
+
+	<div
+		class="modal"
+		role="dialog"
+		aria-modal="true"
+		aria-label="Detalle de {l.nombre_producto} el {dia}"
+		transition:fly={{ y: 24, duration: 200 }}
+	>
+		<header class="modal-titulo">
+			<div>
+				<h4>{l.nombre_producto}</h4>
+				<p class="menor">Tal como estaba el {dia}, el dia de tu pedido.</p>
+			</div>
+			<button type="button" class="cerrar" onclick={cerrarHistorial} aria-label="Cerrar">
+				&times;
+			</button>
+		</header>
+
+		<div class="modal-cuerpo">
+			<!-- ------------------------------------------------ lo que se pago -->
+			<!-- Esto sale de la LINEA del pedido, no de ninguna reconstruccion: es
+			     lo que se cobro de verdad, y esta guardado. Va primero porque es
+			     lo unico de esta ventana que no puede fallar ni faltar. -->
+			<section class="bloque">
+				<h5>Lo que pagaste</h5>
+				<dl class="fichas">
+					<div class="ficha">
+						<dt>Presentacion</dt>
+						<dd>{l.nombre_variante}</dd>
+					</div>
+					<div class="ficha">
+						<dt>Vendedor</dt>
+						<dd>{l.nombre_vendedor}</dd>
+					</div>
+					<div class="ficha">
+						<dt>Precio unitario</dt>
+						<dd>{dinero(l.precio_unitario)}</dd>
+					</div>
+					<div class="ficha">
+						<dt>Cantidad</dt>
+						<dd>{l.cantidad}</dd>
+					</div>
+					<div class="ficha">
+						<dt>Subtotal</dt>
+						<dd><strong>{quetzales(subtotal(l))}</strong></dd>
+					</div>
+				</dl>
+			</section>
+
+			<!-- --------------------------------- precio y stock de la oferta -->
+			<!-- Estos dos NO salen de Mongo y no pueden: al volverse multi-vendedor
+			     dejaron de ser del producto. Vienen de precio_historial y
+			     stock_movimiento, en PostgreSQL. Que esten aqui al lado de lo
+			     pagado es justo lo que deja comparar. -->
+			<section class="bloque">
+				<h5>La oferta ese dia</h5>
+				{#if cargandoOferta[claveO]}
+					<p class="menor">Recuperando el precio y las existencias...</p>
+				{:else if falloOferta[claveO]}
+					<p class="menor">{falloOferta[claveO]}</p>
+				{:else if oferta}
+					{@const cambioPrecio = Number(oferta.precio) !== Number(l.precio_unitario)}
+					<dl class="fichas">
+						<div class="ficha">
+							<dt>Precio publicado</dt>
+							<dd>{dinero(oferta.precio)}</dd>
+						</div>
+						<div class="ficha">
+							<dt>Existencias</dt>
+							<dd>
+								{oferta.stock}
+								<span class="menor">{oferta.stock === 1 ? 'unidad' : 'unidades'}</span>
+							</dd>
+						</div>
+					</dl>
+					{#if cambioPrecio}
+						<!-- Los dos numeros salen de sitios distintos y por eso pueden
+						     diferir: el de la linea es el que se congelo al comprar, y
+						     el reconstruido es el ultimo precio del DIA. Un cambio de
+						     precio ese mismo dia, despues de la compra, los separa sin
+						     que ninguno de los dos este mal. -->
+						<p class="menor">
+							Publicado a {dinero(oferta.precio)} al cerrar el dia, y a ti se te cobro
+							{dinero(l.precio_unitario)}: el precio de tu linea se congelo al comprar.
+						</p>
+					{/if}
+				{:else}
+					<p class="menor">No hay precio guardado para ese dia.</p>
+				{/if}
+			</section>
+
+			<!-- ------------------------------------ el producto reconstruido -->
+			<section class="bloque">
+				<h5>El producto en el catalogo</h5>
+
+				{#if cargandoHistorial[clave]}
+					<p class="menor">Reconstruyendo el producto al {dia}...</p>
+				{:else if falloHistorial[clave]}
+					{@const fallo = falloHistorial[clave]}
+					{#if fallo.grave}
+						<p class="malo" role="alert">{fallo.texto}</p>
+					{:else}
+						<!-- Un 404 aqui es un dato, no un fallo: se dice en gris. -->
+						<p class="menor">{fallo.texto}</p>
+					{/if}
+					{#if fallo.reintentar}
+						<button type="button" onclick={() => cargarHistorial(l.id_producto_mongo, dia)}>
+							Reintentar
+						</button>
+					{/if}
+				{:else if antes}
+					<!-- Un nombre vacio cuenta como no tenerlo: pintarlo en negrita
+					     dejaria dos comillas con nada dentro. -->
+					{@const cambio = !!antes.nombre && antes.nombre !== l.nombre_producto}
+
+					{#if cambio}
+						<!-- El cambio es lo que esta pantalla existe para ensenar: se
+						     pintan los dos nombres, no solo el reconstruido. -->
+						<p class="cambio">
+							El catalogo lo llamaba <strong>{antes.nombre}</strong>. En tu pedido quedo
+							guardado como <strong>{l.nombre_producto}</strong>.
+						</p>
+					{:else if antes.nombre}
+						<p class="menor">
+							Se llamaba <strong>{antes.nombre}</strong>, igual que en tu pedido.
+						</p>
+					{:else}
+						<p class="menor">Ese dia el producto no tenia nombre guardado.</p>
+					{/if}
+
+					<!-- El ?? no basta: una descripcion vacia no es nula y dejaria el
+					     renglon en blanco, que se lee como que algo fallo. -->
+					<p class="descripcion">{antes.descripcion || 'Ese dia no tenia descripcion.'}</p>
+
+					{#if antes.categoria?.nombre}
+						<!-- La categoria de ESE dia, que puede no ser la de hoy: es justo
+						     el caso que justifica `productos_historial.id_categoria` (el
+						     balon nacio en Fitness y se movio a Futbol). -->
+						<p class="menor">
+							Estaba en
+							<strong>
+								{#if antes.categoria.categoria_padre}{antes.categoria.categoria_padre}
+									&rsaquo;
+								{/if}{antes.categoria.nombre}
+							</strong>
+						</p>
+					{/if}
+
+					<!-- Las dos listas van por separado y no concatenadas: las
+					     "adicionales" salen de la paleta de la categoria y las
+					     "personalizadas" las invento el vendedor, y juntarlas
+					     borraria esa diferencia justo en la pantalla que existe
+					     para ensenar de donde sale cada dato. -->
+					{#if antes.caracteristicas_adicionales?.length}
+						<h6>Caracteristicas</h6>
+						<dl class="fichas">
+							{#each antes.caracteristicas_adicionales as c (c.nombre)}
+								<div class="ficha">
+									<dt>{c.nombre}</dt>
+									<!-- El &nbsp; no es decorativo: Svelte recorta el espacio que
+									     rodea a un bloque, y sin el se leia "18meses". -->
+									<dd>
+										{valorTexto(c.valor)}{#if c.unidad}<span class="menor"
+												>&nbsp;{c.unidad}</span
+											>{/if}
+									</dd>
+								</div>
+							{/each}
+						</dl>
+					{/if}
+
+					{#if antes.caracteristicas_personalizadas?.length}
+						<h6>Caracteristicas propias del vendedor</h6>
+						<dl class="fichas">
+							{#each antes.caracteristicas_personalizadas as c (c.nombre)}
+								<div class="ficha">
+									<dt>{c.nombre}</dt>
+									<!-- El &nbsp; no es decorativo: Svelte recorta el espacio que
+									     rodea a un bloque, y sin el se leia "18meses". -->
+									<dd>
+										{valorTexto(c.valor)}{#if c.unidad}<span class="menor"
+												>&nbsp;{c.unidad}</span
+											>{/if}
+									</dd>
+								</div>
+							{/each}
+						</dl>
+					{/if}
+				{:else}
+					<p class="menor">No hay nada reconstruido todavia.</p>
+				{/if}
+			</section>
+
+			<!-- -------------------------------------------- las presentaciones -->
+			{#if antes?.variantes?.length}
+				<!-- Las variantes se traian desde que se amplio el tipo y no se
+				     pintaban en ningun sitio. Son las que llevan las
+				     caracteristicas que distinguen una presentacion de otra (la RAM
+				     de una laptop, la talla de una camisa), asi que sin ellas la
+				     ficha de un producto con variantes se veia medio vacia.
+				     La que se compro va marcada: es la que importa de las cinco. -->
+				<section class="bloque">
+					<h5>Las presentaciones de ese dia</h5>
+					<ul class="variantes">
+						{#each antes.variantes as v (v.id_producto_variante)}
+							{@const esLaTuya = String(v.id_producto_variante) === l.id_producto_variante_mongo}
+							{@const suyas = [
+								...(v.caracteristicas_adicionales ?? []),
+								...(v.caracteristicas_personalizadas ?? [])
+							]}
+							<li class:tuya={esLaTuya}>
+								<div class="cabeza-variante">
+									<strong>{v.nombre_variante}</strong>
+									{#if esLaTuya}<span class="marca">la que compraste</span>{/if}
+								</div>
+								{#if v.descripcion}
+									<p class="menor">{v.descripcion}</p>
+								{/if}
+								{#if suyas.length}
+									<ul class="rasgos">
+										{#each suyas as c (c.nombre)}
+											<li>
+												<span class="menor">{c.nombre}:</span>
+												{valorTexto(c.valor)}{#if c.unidad}&nbsp;{c.unidad}{/if}
+											</li>
+										{/each}
+									</ul>
+								{/if}
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/if}
+
+			<p class="menor pie-modal">
+				Lo del catalogo se reconstruye con su historial de eventos, que ensena el producto
+				aunque hoy ya no se venda. El precio y las existencias salen de PostgreSQL, que es
+				donde vive la oferta.
+			</p>
+		</div>
+	</div>
+{/if}
 
 <style>
 	.mis-pedidos {
@@ -1100,51 +1363,182 @@
 		border-bottom-color: var(--indigo);
 	}
 
-	/* Se abre debajo de la linea entera, no dentro de la columna del nombre. */
-	.antes {
-		flex-basis: 100%;
-		margin-top: 0.7rem;
-		padding: 0.7rem 0.9rem;
-		background: var(--panel);
-		border-left: 3px solid var(--indigo);
+	/* ------------------------------------------------------------- el modal */
+	/* El velo de atras. Cubre todo y cierra al pulsarlo. Mismo z-index que en
+	   CarritoRedis, un piso por debajo del panel. */
+	.velo {
+		position: fixed;
+		inset: 0;
+		z-index: 40;
+		border: 0;
+		padding: 0;
+		background: rgba(20, 20, 30, 0.38);
+		cursor: pointer;
+	}
+
+	/* Centrado y con tope de alto: el contenido puede ser largo (un producto
+	   con cinco variantes y sus rasgos), y sin `max-height` la ventana se
+	   saldria de la pantalla por abajo sin poder llegar al final. */
+	.modal {
+		position: fixed;
+		z-index: 41;
+		top: 50%;
+		left: 50%;
+		transform: translate(-50%, -50%);
+		width: min(46rem, calc(100vw - 2rem));
+		max-height: min(85vh, 52rem);
+		display: flex;
+		flex-direction: column;
+		background: var(--blanco);
 		border-radius: var(--r2);
+		box-shadow: 0 18px 48px rgba(20, 20, 30, 0.22);
 	}
 
-	.antes h5 {
-		font-size: 0.9rem;
-		margin-bottom: 0.3rem;
+	/* La cabecera no se va con el scroll: dice de que producto y de que dia es
+	   todo lo de abajo, y perderla a media lectura deja los numeros sin dueno. */
+	.modal-titulo {
+		position: sticky;
+		top: 0;
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 1rem;
+		padding: 1rem 1.25rem 0.75rem;
+		background: var(--blanco);
+		border-bottom: 1px solid var(--linea);
+		border-radius: var(--r2) var(--r2) 0 0;
 	}
 
-	.antes p {
+	.modal-titulo h4 {
+		font-size: 1.05rem;
+		color: var(--tinta);
+	}
+
+	.cerrar {
+		flex-shrink: 0;
+		padding: 0 0.4rem;
+		background: transparent;
+		border: none;
+		font-size: 1.5rem;
+		line-height: 1;
+		color: var(--gris);
+	}
+
+	.cerrar:hover {
+		color: var(--tinta);
+	}
+
+	.modal-cuerpo {
+		overflow-y: auto;
+		padding: 0.25rem 1.25rem 1.25rem;
+	}
+
+	/* Cada bloque es una FUENTE distinta (la linea del pedido, PostgreSQL,
+	   Mongo). La separacion es lo que deja ver de donde sale cada numero, que
+	   es medio punto de la entrega. */
+	.bloque {
+		padding-top: 0.9rem;
+	}
+
+	.bloque + .bloque {
+		margin-top: 0.4rem;
+		border-top: 1px solid var(--linea);
+	}
+
+	.bloque h5 {
+		font-size: 0.92rem;
+		color: var(--tinta);
+		margin-bottom: 0.2rem;
+	}
+
+	.bloque h6 {
+		margin-top: 0.75rem;
+		font-size: 0.8rem;
+		color: var(--gris);
+		font-weight: 600;
+	}
+
+	.bloque p {
 		font-size: 0.88rem;
 		color: var(--gris);
 	}
 
-	.antes strong {
+	.bloque strong {
 		color: var(--tinta);
 	}
 
 	/* El cambio de nombre es lo que se viene a ver: se marca en indigo para que
 	   no se lea como un renglon mas de la ficha. */
-	.antes .cambio {
+	.bloque .cambio {
 		margin-bottom: 0.35rem;
 		color: var(--indigo-os);
 	}
 
-	.antes .cambio strong {
+	.bloque .cambio strong {
 		color: var(--indigo);
 	}
 
-	.antes .descripcion {
+	.bloque .descripcion {
 		margin: 0.35rem 0;
 		color: var(--texto);
 	}
 
-	/* El color se repite porque `.antes p` es mas especifico que `.malo` y le
+	/* El color se repite porque `.bloque p` es mas especifico que `.malo` y le
 	   estaba borrando el rojo al mensaje de error. */
-	.antes .malo {
+	.bloque .malo {
 		margin-bottom: 0.6rem;
 		color: var(--rojo);
+	}
+
+	/* Una tarjeta por presentacion. */
+	.variantes {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+		gap: 0.6rem;
+		margin-top: 0.7rem;
+		list-style: none;
+	}
+
+	.variantes > li {
+		padding: 0.55rem 0.7rem;
+		background: var(--panel);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+	}
+
+	/* La comprada se marca con borde y no solo con la etiqueta: es la que se
+	   busca de un vistazo cuando hay cinco. */
+	.variantes > li.tuya {
+		border-color: var(--indigo);
+		background: var(--blanco);
+	}
+
+	.cabeza-variante {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: baseline;
+		gap: 0.4rem;
+	}
+
+	.marca {
+		padding: 0.05rem 0.4rem;
+		background: var(--indigo);
+		border-radius: 999px;
+		font-size: 0.7rem;
+		color: var(--blanco);
+	}
+
+	.rasgos {
+		margin-top: 0.35rem;
+		list-style: none;
+		font-size: 0.84rem;
+		color: var(--texto);
+	}
+
+	.pie-modal {
+		margin-top: 1rem;
+		padding-top: 0.7rem;
+		border-top: 1px solid var(--linea);
 	}
 
 	.cuentas {
@@ -1178,14 +1572,14 @@
 		color: var(--indigo);
 	}
 
-	/* Las caracteristicas de ese dia, en dos columnas. */
+	/* Las caracteristicas de ese dia, en dos columnas.
+	   Sin borde propio: dentro del modal cada bloque ya trae su separador, y
+	   los dos juntos dibujaban dos lineas pegadas. */
 	.fichas {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
 		gap: 0.5rem 1.25rem;
-		margin-top: 0.75rem;
-		padding-top: 0.75rem;
-		border-top: 1px solid var(--linea);
+		margin-top: 0.5rem;
 	}
 
 	.ficha dt {

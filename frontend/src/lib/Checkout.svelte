@@ -227,6 +227,32 @@
 	let vacio = $derived(lineas.length === 0);
 
 	/**
+	 * La clave de cada linea en el resumen.
+	 *
+	 * NO puede ser `id_pedido_producto` a secas, y esto tumbaba la pantalla:
+	 * en modo carrito ese campo llega VACIO en todas las lineas -- lo crea la
+	 * compra, y aqui todavia no hay pedido (ver `aLineasDePedido` en
+	 * CarritoRedis.svelte). Con una sola linea no se notaba; con dos, las dos
+	 * claves eran `''`, Svelte reventaba con `each_key_duplicate` y el
+	 * checkout entero dejaba de pintarse: el boton de pagar no aparecia y no
+	 * habia forma de comprar.
+	 *
+	 * `id_oferta` sirve para los dos modos: el carrito de Redis guarda UNA
+	 * linea por oferta (PUT /carrito/lineas/:idOferta fija la cantidad
+	 * absoluta), y en un pedido dos lineas del mismo producto son de ofertas
+	 * distintas -- otra variante, u otro vendedor.
+	 *
+	 * Se prefiere `id_pedido_producto` cuando existe porque es la identidad de
+	 * verdad de la fila: si algun dia un pedido llegara a tener dos lineas de
+	 * la misma oferta, ese id las sigue distinguiendo.
+	 */
+	function claveLinea(l: LineaPedido): string {
+		return l.id_pedido_producto !== '' && l.id_pedido_producto != null
+			? `linea-${l.id_pedido_producto}`
+			: `oferta-${l.id_oferta}`;
+	}
+
+	/**
 	 * Que la persona NO tiene ni una direccion, y no que no se pudieron leer:
 	 * son dos cosas distintas y solo la primera impide pagar. Si la peticion se
 	 * cayo, `listaLeida` se queda en false y el boton no se bloquea por eso.
@@ -280,6 +306,22 @@
 	 */
 	let listoElPedido = $derived(
 		modo === 'carrito' ? idElegida !== '' : idPedido != null && direccionPedido != null
+	);
+
+	/**
+	 * A donde se entrega, en los dos modos.
+	 *
+	 * En modo pedido la verdad es la del pedido, que ya la guardo el servidor.
+	 * En modo carrito el pedido no existe todavia, asi que es la que este
+	 * marcada en la lista -- la misma que viaja en POST /carrito/comprar.
+	 *
+	 * Existe para que el pie de la pantalla no tenga que preguntar por
+	 * `direccionPedido`, que en carrito es null siempre.
+	 */
+	let entregaFinal = $derived(
+		modo === 'carrito'
+			? (direcciones.find((d) => d.id_direccion === idElegida) ?? null)
+			: direccionPedido
 	);
 
 	let sePuedeConfirmar = $derived(
@@ -549,7 +591,20 @@
 		// fallo, el punto vuelve solo a donde estaba.
 		idElegida = idDireccion;
 		await ponerDireccion(idDireccion);
-		idElegida = direccionPedido?.id_direccion ?? '';
+
+		// Esa relectura es SOLO del modo pedido, y olvidarlo rompia el otro.
+		//
+		// En modo carrito no hay pedido, asi que `direccionPedido` es null
+		// SIEMPRE y esta linea dejaba `idElegida` en '': marcabas una direccion
+		// y se desmarcaba sola, sin ningun error. Y como `listoElPedido` en
+		// este modo es justo `idElegida !== ''`, quedaba sin poder pagar.
+		//
+		// `ponerDireccion` ya trae su rama para el carrito -- se acordaron de
+		// esta funcion y no de la de al lado. Por eso el candado va aqui y no
+		// dentro: la que sabe si hay pedido del que releer es esta.
+		if (modo !== 'carrito') {
+			idElegida = direccionPedido?.id_direccion ?? '';
+		}
 	}
 
 	/**
@@ -628,13 +683,27 @@
 	}
 
 	/**
-	 * Crea la direccion y ademas se la pone al pedido: crearla sola no cambia a
-	 * donde se entrega, y quien la escribe aqui la escribe para ESTE envio.
+	 * Crea la direccion y ademas la deja usada para ESTE envio: crearla sola no
+	 * cambia a donde se entrega, y quien la escribe aqui la escribe para esta
+	 * compra.
+	 *
+	 * Como se "usa" depende del modo, igual que en `cargarEntrega` y en
+	 * `listoElPedido`:
+	 *
+	 *   modo pedido   -> se le pone al pedido con un PATCH (hay fila que tocar)
+	 *   modo carrito  -> se marca en `idElegida`, que es lo que viaja despues en
+	 *                    el cuerpo de POST /carrito/comprar
+	 *
+	 * Esta rama FALTABA y era un callejon sin salida: en modo carrito no hay
+	 * `idPedido` -- lo crea la compra -- asi que el formulario contestaba "No
+	 * hay un pedido abierto al que ponersela" y no guardaba nada. A quien no
+	 * tuviera ya una direccion guardada le dejaba el checkout muerto: no podia
+	 * crearla aqui, y sin direccion el boton de pagar nunca se enciende.
 	 */
 	async function crearYUsar(evento: SubmitEvent) {
 		evento.preventDefault();
 
-		if (idPedido == null) {
+		if (modo === 'pedido' && idPedido == null) {
 			errorNueva = 'No hay un pedido abierto al que ponersela';
 			return;
 		}
@@ -689,6 +758,16 @@
 		const nueva = r.payload;
 		direcciones = [nueva, ...direcciones];
 		listaLeida = true;
+
+		// En modo carrito no hay pedido al que ponersela: basta con marcarla.
+		// Es la misma direccion que viaja en el cuerpo de la compra, asi que
+		// con esto el boton de pagar ya se enciende.
+		if (modo === 'carrito') {
+			guardandoDireccion = false;
+			idElegida = nueva.id_direccion;
+			cerrarNueva();
+			return;
+		}
 
 		const puesta = await ponerDireccion(nueva.id_direccion);
 		guardandoDireccion = false;
@@ -846,7 +925,20 @@
 			return 'El numero de tarjeta debe tener entre 13 y 19 digitos';
 		}
 		if (!pasaLuhn(digitos)) {
-			return 'El numero de tarjeta no es valido. Revisa que no falte ni sobre un digito';
+			// El mensaje de antes decia "revisa que no falte ni sobre un digito",
+			// y eso habla de la LONGITUD -- que a estas alturas ya paso. Con 19
+			// digitos, que es el maximo que acepta el campo, se leia como que la
+			// pantalla se contradecia: te deja escribir 19 y luego te dice que
+			// cuentes los digitos.
+			//
+			// Lo que falla es otra cosa y conviene decirla: el ultimo digito de
+			// una tarjeta no es libre, se calcula a partir de los demas (Luhn),
+			// asi que una tirada de numeros al azar casi nunca cuadra.
+			return (
+				'Ese numero no puede ser de una tarjeta: el ultimo digito es una cifra de ' +
+				'control que se calcula con los demas, y no cuadra. Para probar usa ' +
+				'4242 4242 4242 4242.'
+			);
 		}
 
 		const mm = /^(\d{2})\/(\d{2})$/.exec(vencimiento.trim());
@@ -1245,7 +1337,7 @@
 					</p>
 				{:else}
 					<ul class="resumen">
-						{#each lineas as l (l.id_pedido_producto)}
+						{#each lineas as l (claveLinea(l))}
 							<li class="linea">
 								<span class="datos">
 									<strong>{l.nombre_producto}</strong>
@@ -1267,11 +1359,30 @@
 					</p>
 					<!-- Se dice aqui y no solo cuando cambia: es la regla del modelo,
 					     y saberla antes evita la sorpresa de ver otro precio en la
-					     ficha del producto. -->
-					<p class="menor nota">
-						Se cobra el precio que quedo congelado al agregar cada linea, aunque el
-						vendedor lo haya cambiado despues.
-					</p>
+					     ficha del producto.
+
+					     Y el texto DEPENDE DEL MODO, porque hoy la regla no es la
+					     misma en los dos. En modo pedido el precio se congelo de
+					     verdad al agregar la linea, que es lo que decia esta nota.
+					     En modo carrito NO: el carrito de Redis guarda intencion
+					     (`id_oferta -> cantidad`) y el precio se resuelve al pagar,
+					     asi que prometer aqui un precio congelado es prometer algo
+					     que el sistema todavia no hace -- y sobre dinero. Es el
+					     pendiente #1: la migracion 013 ya deja congelarlo, pero
+					     falta que el carrito guarde el `id_precio_historial`.
+					     Cuando eso exista, las dos ramas dicen lo mismo y esto se
+					     vuelve una sola linea otra vez. -->
+					{#if modo === 'carrito'}
+						<p class="menor nota">
+							Se cobra el precio de <strong>ahora</strong>. Si el vendedor lo cambio
+							mientras el carrito esperaba, el total de arriba ya es el nuevo.
+						</p>
+					{:else}
+						<p class="menor nota">
+							Se cobra el precio que quedo congelado al agregar cada linea, aunque el
+							vendedor lo haya cambiado despues.
+						</p>
+					{/if}
 				{/if}
 			</section>
 
@@ -1456,9 +1567,16 @@
 			<!-- La direccion otra vez, pegada al boton que cobra: arriba se pudo
 			     leer hace tres pantallas de scroll, y lo que importa es que se lea
 			     en el momento de pagar. -->
-			{#if direccionPedido}
+			<!--
+				`direccionPedido` es la del PEDIDO, y en modo carrito no hay pedido:
+				es null siempre. Preguntando solo por ella, este pie enseñaba el
+				aviso rojo "no se sabe a donde se entrega" con la direccion marcada
+				ahi arriba, en la misma pantalla. Decia que faltaba algo que no
+				faltaba, justo al lado del boton de pagar.
+			-->
+			{#if entregaFinal}
 				<p class="entrega-pie">
-					Se entrega en <strong>{direccionEnUnaLinea(direccionPedido)}</strong>
+					Se entrega en <strong>{direccionEnUnaLinea(entregaFinal)}</strong>
 				</p>
 			{:else if !cargandoEntrega}
 				<p class="malo" role="alert">

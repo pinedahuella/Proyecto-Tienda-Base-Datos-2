@@ -209,34 +209,11 @@ export function guardarPedidoAbierto(idPedido: string) {
 export function olvidarPedidoAbierto() {
 	if (!browser) return;
 	localStorage.removeItem(LLAVE);
+	// LLAVE_MARCADAS ya no la escribe nadie: era del carrito viejo, que se
+	// borro con `Carrito.svelte`. Se sigue BORRANDO a proposito, porque en los
+	// navegadores que usaron aquella version la clave quedo escrita y solo se
+	// va por aqui. Es limpieza de lo que dejamos, no codigo muerto.
 	localStorage.removeItem(LLAVE_MARCADAS);
-}
-
-// ------------------------------------------------------------ que esta marcado
-/**
- * Los id de linea marcados para comprar.
- *
- * Se guarda lo DESMARCADO y no lo marcado: una linea nueva tiene que nacer
- * marcada, y con la lista de marcadas habria que acordarse de agregarla en
- * cada sitio donde se agrega una. Guardando lo desmarcado, lo que no aparece
- * esta marcado, que es justo el caso normal.
- */
-export function leerDesmarcadas(): string[] {
-	if (!browser) return [];
-	try {
-		const crudo = localStorage.getItem(LLAVE_MARCADAS);
-		const lista: unknown = crudo ? JSON.parse(crudo) : [];
-		return Array.isArray(lista) ? lista.filter((x): x is string => typeof x === 'string') : [];
-	} catch {
-		// Si alguien lo dejo corrupto, se empieza de cero: perder que estaba
-		// desmarcado es molesto, reventar la pantalla del carrito es peor.
-		return [];
-	}
-}
-
-export function guardarDesmarcadas(ids: string[]) {
-	if (!browser) return;
-	localStorage.setItem(LLAVE_MARCADAS, JSON.stringify(ids));
 }
 
 // ------------------------------------------------------------ las rutas
@@ -310,6 +287,50 @@ export function direccionEnUnaLinea(d: {
 }
 
 /**
+ * Una caracteristica reconstruida. `valor` puede ser una lista ("Contenido del
+ * paquete"), un numero con unidad ("Garantia: 18 meses") o un texto suelto.
+ */
+export interface CaracteristicaEnFecha {
+	nombre: string;
+	valor: string | number | boolean | string[];
+	unidad?: string | null;
+}
+
+/** Una presentacion del producto, tal como estaba ese dia. */
+export interface VarianteEnFecha {
+	id_producto_variante: number;
+	nombre_variante: string;
+	descripcion?: string | null;
+	caracteristicas_adicionales?: CaracteristicaEnFecha[];
+	caracteristicas_personalizadas?: CaracteristicaEnFecha[];
+}
+
+/**
+ * Lo que devuelve GET /productos/:id/historial?fecha=
+ *
+ * TODOS los campos menos `_id` son opcionales o admiten null, y no es
+ * pereza al tipar: la reconstruccion fusiona eventos, y cada evento aporta
+ * solo lo que cambio. Un producto cuya creacion es el unico evento anterior
+ * a la fecha trae lo que tuviera ese dia y nada mas.
+ *
+ * OJO -- este tipo se quedo corto una vez y costo caro: declaraba solo
+ * `nombre` y `descripcion`, asi que la pantalla de pedidos ensenaba dos
+ * campos de los cinco que la ruta manda. No daba ningun error, ni de
+ * TypeScript ni en consola: los otros tres simplemente no existian. Si esta
+ * ruta empieza a mandar un campo mas, se agrega AQUI, que es de donde
+ * cuelgan las pantallas.
+ */
+export interface ProductoEnFecha {
+	_id: number;
+	nombre: string | null;
+	descripcion: string | null;
+	categoria?: { nombre: string; id_categoria?: number; categoria_padre?: string | null } | null;
+	variantes?: VarianteEnFecha[];
+	caracteristicas_adicionales?: CaracteristicaEnFecha[];
+	caracteristicas_personalizadas?: CaracteristicaEnFecha[];
+}
+
+/**
  * Reconstruye un producto tal como estaba en una fecha.
  *
  * Publica, y a diferencia de GET /productos/:id **no oculta** los productos
@@ -319,8 +340,34 @@ export function direccionEnUnaLinea(d: {
  * La fecha va como AAAA-MM-DD.
  */
 export function traerProductoEnFecha(idProducto: string | number, fecha: string) {
-	return pedir<{ _id: number; nombre: string; descripcion: string | null }>(
+	return pedir<ProductoEnFecha>(
 		`/productos/${idProducto}/historial?fecha=${encodeURIComponent(fecha)}`
+	);
+}
+
+/** Precio y existencias de una oferta, tal como estaban ese dia. */
+export interface OfertaEnFecha {
+	id_oferta: string;
+	/** Decimal de PostgreSQL: viaja como texto para no perder centavos. */
+	precio: string;
+	stock: number;
+}
+
+/**
+ * El precio y el stock que tenia una oferta en una fecha.
+ *
+ * Va aparte del producto y no se puede unir: el catalogo de Mongo no guarda
+ * ninguno de los dos, porque al volverse multi-vendedor dejaron de ser del
+ * producto. Su historia vive en `precio_historial` y `stock_movimiento`, en
+ * PostgreSQL, y hay una por vendedor.
+ *
+ * Un 404 aqui significa "la oferta no existia en esa fecha", que es un dato
+ * y no un fallo (lo distingue el backend por que no haya ninguna fila de
+ * precio_historial anterior; ver ProductosService.reconstruirOfertaEnFecha).
+ */
+export function traerOfertaEnFecha(idOferta: string | number, fecha: string) {
+	return pedir<OfertaEnFecha>(
+		`/productos/ofertas/${idOferta}/historial?fecha=${encodeURIComponent(fecha)}`
 	);
 }
 
@@ -379,38 +426,6 @@ export function agregarLinea(
 	return pedir<LineaAgregada>(
 		`/comprador/pedidos/${idPedido}/detalles`,
 		conJson('POST', linea)
-	);
-}
-
-/** Lo que devuelve PATCH /comprador/pedidos/:id/detalles. */
-export interface LineaRestada {
-	id_pedido: number;
-	/** Ausente cuando la resta dejo la linea en 0 y se borro. */
-	id_pedido_producto?: number;
-	id_oferta: number;
-	cantidad: number;
-	/** true si la resta llego a 0 y la linea se quito del pedido. */
-	eliminada: boolean;
-}
-
-/**
- * El "-1" de agregarLinea: resta unidades en vez de sumarlas.
- *
- * Si la resta deja la cantidad en 0 o menos, **la linea se borra sola** y
- * devuelve `eliminada: true` -- no hace falta llamar despues a quitarLinea.
- * Por eso quien lo llame tiene que releer el pedido y no dar por hecho que la
- * linea sigue ahi.
- *
- * No comprueba stock, y no le hace falta: restar unidades nunca puede dejar
- * sin existencias a nadie.
- */
-export function restarLinea(
-	idPedido: string,
-	linea: { id_oferta: number; cantidad: number }
-) {
-	return pedir<LineaRestada>(
-		`/comprador/pedidos/${idPedido}/detalles`,
-		conJson('PATCH', linea)
 	);
 }
 
