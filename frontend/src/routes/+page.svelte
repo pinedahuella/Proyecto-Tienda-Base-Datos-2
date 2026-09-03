@@ -160,7 +160,11 @@
 		'stock_min',
 		'stock_max',
 		'stock_tienda_min',
-		'stock_tienda_max'
+		'stock_tienda_max',
+		'resenas_promedio_min',
+		'resenas_promedio_max',
+		'resenas_total_min',
+		'resenas_total_max'
 	]);
 
 	/** Igual al varchar(100) de caracteristica.nombre, que es lo que valida el backend. */
@@ -339,6 +343,29 @@
 	let stockMin = $state<Campo>('');
 	let stockMax = $state<Campo>('');
 
+	/**
+	 * El filtro de calificacion.
+	 *
+	 * Es una nota MINIMA y no un rango, y no por simplificar: nadie busca
+	 * "productos de entre dos y tres estrellas". Lo que se busca es "de cuatro
+	 * para arriba". La API si acepta el rango entero
+	 * (resenas_promedio_min/max y resenas_total_min/max), asi que el dia que
+	 * haga falta el maximo ya esta del otro lado.
+	 *
+	 * '' quiere decir sin filtro. Los valores son texto y no numero porque
+	 * paramsFiltros manda texto y porque el <select> devuelve texto: pasarlo a
+	 * numero aqui solo para volverlo a texto tres lineas abajo no gana nada.
+	 *
+	 * OJO CON EL CERO, que es la trampa de este campo. `resenas_promedio` vale
+	 * 0 cuando el producto NO TIENE resenas, no cuando es malo: la calificacion
+	 * va de 1 a 5 y un promedio real nunca puede dar 0. Aqui eso no muerde
+	 * porque la lista empieza en 1, pero ademas el backend lo cubre por su
+	 * cuenta: filtrar por nota le agrega resenas_total >= 1, asi que un
+	 * producto sin opiniones no se cuela por debajo de los de una estrella.
+	 * Esta escrito en construirFiltro de productos.service.ts.
+	 */
+	let notaMinima = $state('');
+
 	// Los filtros de caracteristica ya agregados
 	let filtros = $state<FiltroCarac[]>([]);
 	let secuencia = 0;
@@ -455,6 +482,13 @@
 			if (texto(stockMin)) p.set('stock_min', texto(stockMin));
 			if (texto(stockMax)) p.set('stock_max', texto(stockMax));
 		}
+
+		// La nota va sobre resenas_promedio, que vive en la RAIZ del documento y
+		// no dentro de variantes[]. Es coherente con el modelo: una resena
+		// cuelga de un producto y de un vendedor, nunca de una variante, porque
+		// nadie califica un "16 GB / 512 GB". Por eso no entra en el
+		// $elemMatch de la variante, igual que el stock total.
+		if (notaMinima) p.set('resenas_promedio_min', notaMinima);
 
 		for (const f of filtros) {
 			for (const [clave, valor] of paramsDe(f)) p.set(clave, valor);
@@ -759,6 +793,7 @@
 		disponibilidad = 'cualquiera';
 		stockMin = '';
 		stockMax = '';
+		notaMinima = '';
 		filtros = [];
 		paleta = null;
 		nuevoNombre = '';
@@ -778,6 +813,7 @@
 				texto(precioMax) ||
 				soloVariantesActivas ||
 				disponibilidad !== 'cualquiera' ||
+				notaMinima ||
 				filtros.length > 0
 		)
 	);
@@ -1042,6 +1078,32 @@
 						     nombra por lo que de verdad devuelve. -->
 						<option value="agotados">Sin unidades disponibles</option>
 						<option value="rango">Rango exacto...</option>
+					</select>
+				</div>
+
+				<!--
+					La calificacion. Es una lista y no dos cajas porque la nota va de
+					1 a 5 en pasos de media estrella: son nueve valores contados, y
+					una caja de texto solo abriria la puerta a que alguien escriba 7
+					y reciba una lista vacia sin explicacion.
+
+					Empieza en 1 y no en 0 a proposito. resenas_promedio vale 0
+					cuando el producto NO TIENE resenas, asi que "0 estrellas o mas"
+					seria "todos", que es justamente lo que ya significa dejarlo en
+					blanco. Ofrecerlo seria ofrecer dos veces la misma opcion con
+					dos nombres.
+				-->
+				<div class="campo">
+					<label for="f-nota">Calificacion</label>
+					<select id="f-nota" bind:value={notaMinima} onchange={buscar}>
+						<option value="">Cualquiera</option>
+						<option value="5">5 estrellas</option>
+						<option value="4.5">4.5 o mas</option>
+						<option value="4">4 o mas</option>
+						<option value="3.5">3.5 o mas</option>
+						<option value="3">3 o mas</option>
+						<option value="2">2 o mas</option>
+						<option value="1">1 o mas (con alguna resena)</option>
 					</select>
 				</div>
 

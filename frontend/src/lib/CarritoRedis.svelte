@@ -78,6 +78,24 @@
 		stock_disponible: number;
 		disponible: boolean;
 		motivo: string | null;
+		/**
+		 * true si TENES UNIDADES RESERVADAS de esta oferta, con un plazo.
+		 *
+		 * El nombre invita a leerlo como "esta oferta es de venta relampago", y
+		 * NO es eso. El backend lo calcula como `ticket != null` (ver
+		 * carrito.service.ts, la linea del `const esInventarioLimitado`): mira
+		 * si VOS tenes un ticket de reserva, no si la oferta esta marcada.
+		 *
+		 * La diferencia se midio y muerde: una linea de una oferta marcada como
+		 * relampago, metida al carrito sin pasar por la reserva, llega aqui con
+		 * este campo en FALSE. Correctamente, porque no hay nada apartado.
+		 *
+		 * Por eso la insignia dice lo que dice. No anuncia una promocion:
+		 * avisa de que esas unidades ya son tuyas por un rato y se sueltan
+		 * solas si tardas. Una linea normal no reserva nada al agregarse, solo
+		 * al pagar; esta es la unica excepcion a esa regla.
+		 */
+		es_inventario_limitado: boolean;
 	}
 
 	interface CarritoApi {
@@ -99,7 +117,14 @@
 		oferta_no_disponible: 'El vendedor pauso o retiro esta oferta',
 		agotado: 'Se agoto',
 		stock_insuficiente: 'No hay tantas unidades',
-		oferta_no_existe: 'Esta oferta ya no existe'
+		oferta_no_existe: 'Esta oferta ya no existe',
+		// Este motivo es distinto de todos los de arriba y conviene que la
+		// frase lo diga. Los otros cuatro hablan de la OFERTA: el vendedor la
+		// pauso, se agoto, no hay tantas. Este habla del TIEMPO: la oferta
+		// sigue ahi y puede quedar stock, lo que se acabo es el plazo de la
+		// reserva. Por eso la frase invita a volver a intentarlo en vez de dar
+		// a entender que ya no se puede comprar.
+		reserva_vencida: 'Se vencio el tiempo de tu reserva. Cambia la cantidad para intentar de nuevo'
 	};
 
 	let carrito = $state<CarritoApi | null>(null);
@@ -358,6 +383,26 @@
 						<a class="nombre" href="/producto/{l.id_producto}">{l.nombre_producto}</a>
 						<span class="variante">{l.nombre_variante}</span>
 						<span class="gris">Vendido por {l.vendedor.nombre}</span>
+
+						<!--
+							La insignia de venta relampago.
+
+							Se ensena SIEMPRE que la linea es de inventario limitado,
+							este disponible o no, y eso es a proposito: la diferencia
+							que marca no es si se puede comprar, es que estas unidades
+							YA ESTAN APARTADAS a nombre de quien mira. Esconderla en
+							cuanto algo va mal dejaria a la persona sin la unica pista
+							de por que su reserva vencio.
+
+							Va antes del motivo y no despues porque explica el motivo:
+							"reserva vencida" no significa nada si primero no se sabe
+							que habia una reserva.
+						-->
+						{#if l.es_inventario_limitado}
+							<span class="relampago" title="Estas unidades quedaron apartadas para vos por un tiempo limitado">
+								Venta por tiempo limitado
+							</span>
+						{/if}
 
 						{#if !l.disponible && l.motivo}
 							<span class="motivo">
@@ -656,6 +701,23 @@
 
 	.datos .gris {
 		font-size: 0.85rem;
+	}
+
+	/*
+	   La insignia de venta relampago. Naranja y no roja: no es un error, es una
+	   condicion de la compra. El rojo de .motivo tiene que seguir siendo el
+	   color que solo aparece cuando algo esta mal, o deja de querer decir eso.
+	*/
+	.relampago {
+		align-self: flex-start;
+		font-size: 0.78rem;
+		font-weight: 600;
+		line-height: 1.2;
+		padding: 0.15rem 0.45rem;
+		border-radius: 0.35rem;
+		color: #7c3a00;
+		background: #ffe8cc;
+		border: 1px solid #ffc98a;
 	}
 
 	.motivo {
