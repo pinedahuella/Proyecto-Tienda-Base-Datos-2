@@ -995,6 +995,55 @@ function Correr-Etl {
         if ($linea.Trim()) { Ok $linea.Trim() }
     }
 
+    # ------------------------------------------------------------
+    # TERCERA etapa: la nota del catalogo
+    # ------------------------------------------------------------
+    # Va aparte del bucle de $pasos de arriba por una razon concreta: ese bucle
+    # trata un archivo VACIO como un fallo que corta el arranque, y aqui un
+    # archivo vacio es perfectamente legitimo. Quiere decir que no hay ni una
+    # resena en toda la base, que es como nace una base recien reiniciada.
+    #
+    # Y va DESPUES de cargar.js, nunca antes: cargar.js reemplaza el documento
+    # entero con replaceOne y le pasaria por encima. La cabecera de
+    # etl/cargar_notas.js lo explica.
+    #
+    # Esto tiene que existir aqui aunque etl/correr.sh ya lo haga, porque
+    # arrancar.ps1 NO llama a correr.sh: rehace los pasos en PowerShell para no
+    # depender de Git Bash. Son dos caminos para lo mismo y los dos tienen que
+    # llevar las tres etapas, o la nota se arreglaria solo para quien corra el
+    # ETL desde bash.
+    $notasJson = Join-Path $tmp "mesh-notas.json"
+
+    docker cp "$PSScriptRoot\etl\extraer_notas.sql" "mesh-postgres:/tmp/extraer_notas.sql" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar extraer_notas.sql al contenedor"; exit 1 }
+
+    $err = docker exec mesh-postgres sh -c "psql -U $usuario -d $base -qtAX -v ON_ERROR_STOP=1 -f /tmp/extraer_notas.sql > /tmp/mesh-notas.json" 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "El ETL fallo extrayendo las notas:"
+        Write-Host $err -ForegroundColor Red
+        exit 1
+    }
+
+    docker cp "mesh-postgres:/tmp/mesh-notas.json" "$notasJson" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo traer mesh-notas.json de PostgreSQL"; exit 1 }
+
+    docker cp "$notasJson" "mesh-mongo:/tmp/mesh-notas.json" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar mesh-notas.json a Mongo"; exit 1 }
+
+    docker cp "$PSScriptRoot\etl\cargar_notas.js" "mesh-mongo:/tmp/cargar_notas.js" 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar cargar_notas.js a Mongo"; exit 1 }
+
+    $salidaNotas = docker exec mesh-mongo sh -c (Comando-Mongo "--file /tmp/cargar_notas.js") 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "El ETL fallo escribiendo la nota del catalogo:"
+        Write-Host $salidaNotas -ForegroundColor Red
+        exit 1
+    }
+
+    foreach ($linea in ($salidaNotas -split "`n")) {
+        if ($linea.Trim()) { Ok $linea.Trim() }
+    }
+
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 
@@ -2112,6 +2161,63 @@ if ($faltantes.Count -gt 0) {
     Error1 ""
     Error1 "Para ver el error completo:  .\arrancar.ps1 -Etl"
     exit 1
+}
+
+
+# ------------------------------------------------------------
+# 7c. Los dos repartidores de id no se estan pisando
+# ------------------------------------------------------------
+# Esto NO decide el pendiente 5, que es de backend: decide quien repartira los
+# id de producto. Lo unico que hace es que el choque deje de ser invisible.
+#
+# El problema, en una linea: hay dos numeradores sobre el mismo espacio de id.
+# PostgreSQL usa el bigserial de productos.id_producto, y el panel del vendedor
+# usa "el mayor _id que hay en Mongo, mas uno". Ninguno de los dos mira al otro.
+#
+# Cuando se cruzan, el ETL hace un replaceOne sobre un _id que ya era de otro
+# producto y se lo lleva por delante SIN UN SOLO ERROR. Es la peor forma de
+# fallar que tiene este proyecto: el arranque queda en verde, las cuentas
+# cuadran, y lo que se perdio es un producto entero.
+#
+# LO QUE SE COMPARA NO ES max(id_producto), y esa es la parte que costo. La
+# secuencia y el maximo real no son el mismo numero: un nextval consumido por
+# una transaccion que despues hizo ROLLBACK no vuelve. Medido el 2026-09-04 en
+# la base viva, la secuencia iba en 1126 con un maximo real de 1105, o sea 21
+# numeros de diferencia. Preguntar por el maximo diria que hay 21 de margen mas
+# de los que hay de verdad.
+#
+# No corta el arranque. Un choque futuro no rompe nada de lo que esta cargado
+# hoy, y parar aqui dejaria la maquina sin levantar por algo que todavia no ha
+# pasado. Avisa, dice cuanto margen queda, y sigue.
+
+Paso "Comprobando que los id de producto no se pisan"
+
+$proximoId = ("SELECT CASE WHEN is_called THEN last_value + 1 ELSE last_value END FROM productos_id_producto_seq;" |
+    docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+
+if ($proximoId -notmatch '^\d+$') {
+    Aviso "No se pudo leer la secuencia de productos: no se comprobo el cruce de id"
+} else {
+    # Cuantos documentos de Mongo estan parados encima de un numero que la
+    # secuencia todavia va a repartir. Con la secuencia en 1127, cualquier _id
+    # de 1127 para arriba es un choque esperando a que alguien inserte.
+    $consultaChoque = "--eval 'db.productos.countDocuments({_id:{`$gte:$proximoId}})'"
+    $enPeligro = (docker exec mesh-mongo sh -c (Comando-Mongo $consultaChoque) 2>&1 | Out-String).Trim()
+
+    $consultaTecho = "--eval 'db.productos.find({},{_id:1}).sort({_id:-1}).limit(1).toArray().map(d=>d._id)[0]||0'"
+    $mayorEnMongo = (docker exec mesh-mongo sh -c (Comando-Mongo $consultaTecho) 2>&1 | Out-String).Trim()
+
+    if ($enPeligro -notmatch '^\d+$') {
+        Aviso "No se pudo contar en MongoDB: no se comprobo el cruce de id"
+    } elseif ([int]$enPeligro -gt 0) {
+        Aviso "$enPeligro documento(s) de MongoDB ocupan un id que PostgreSQL va a repartir"
+        Aviso "  PostgreSQL entregara el $proximoId en el proximo INSERT INTO productos"
+        Aviso "  y en MongoDB ya hay documentos de ese numero para arriba."
+        Aviso "  El ETL los machacaria sin dar ningun error. Ver docs/PENDIENTES.md, punto 5."
+    } else {
+        $margen = [int]$proximoId - [int]$mayorEnMongo
+        Ok "sin cruce: PostgreSQL reparte el $proximoId y el mayor de Mongo es $mayorEnMongo ($margen de margen)"
+    }
 }
 
 

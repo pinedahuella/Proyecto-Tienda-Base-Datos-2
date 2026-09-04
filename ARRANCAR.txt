@@ -21,6 +21,9 @@ vuelve a hacer, solo comprueba que este bien:
   - corre las migraciones que falten (las corridas no se repiten)
   - comprueba que MongoDB tenga el catalogo completo, y si le falta
     algo lo vuelve a cargar
+  - refresca la nota de cada producto (las estrellas del catalogo)
+  - avisa si MongoDB y PostgreSQL estan a punto de repartir el mismo
+    numero de producto, que es un choque que no da ningun error
   - comprueba que el grafo de Neo4j este cargado
 
 Tarda ~1 minuto.

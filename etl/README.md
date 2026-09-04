@@ -9,7 +9,9 @@ A MongoDB -- el catalogo            A Neo4j -- el grafo de resenas
 -------------------------------     ---------------------------------------
 extraer.sql                         extraer_grafo.sql
 extraer_categorias.sql              cargar_grafo.sh
-cargar.js                           (el esquema vive en neo4j/001_esquema.cypher)
+extraer_notas.sql                   (el esquema vive en neo4j/001_esquema.cypher)
+cargar.js
+cargar_notas.js
 reconstruir.js
 correr.sh
 ```
@@ -70,7 +72,61 @@ lo que manda, y del otro lado el SQL y el JavaScript llegan rotos. Por eso la
 version de PowerShell mueve archivos con `docker cp`, que copia los bytes tal
 cual.
 
-Las dos formas imprimen cuantos productos, categorias y eventos escribio.
+Las dos formas imprimen cuantos productos, categorias y eventos escribio, y las
+dos corren las TRES etapas.
+
+### La tercera etapa, y por que esta en los dos sitios
+
+```
+notas       51 de 51 productos con resenas
+apagados    0 que decian tener resenas y ya no las tienen
+```
+
+`extraer_notas.sql` y `cargar_notas.js` refrescan `resenas_promedio` y
+`resenas_total`. No arman ninguna coleccion: tocan dos campos de documentos que
+ya existen.
+
+**Existe porque `extraer.sql` no puede hacerlo solo.** Esa consulta recorre
+`FROM productos p`, o sea la tabla de PostgreSQL, y hay dos clases de producto
+que no estan ahi:
+
+- **el que solo vive en Mongo**, publicado desde el panel del vendedor. Tiene
+  ofertas, se compra y se resena, y su nota se quedaba en 0 para siempre
+- **al que le borraron la ultima resena**, que conservaba la nota vieja sin nada
+  que la apagara
+
+`extraer_notas.sql` agrupa `resena` por `id_producto_mongo` **sin ningun join
+contra `productos`**, que es exactamente lo que dejaba fuera a los primeros. El
+apagado de los segundos lo hace `cargar_notas.js`, porque es el unico que sabe
+cuales NO vinieron en la lista.
+
+**Corre DESPUES de `cargar.js`, nunca antes.** `cargar.js` reemplaza el
+documento entero con `replaceOne` y le pasaria por encima.
+
+**Y esta escrita DOS veces, a proposito**: en `correr.sh` y otra vez en
+`Correr-Etl` de `arrancar.ps1`. No es un descuido, es la misma razon por la que
+todo este ETL esta duplicado -- `arrancar.ps1` no llama a `correr.sh` para no
+depender de Git Bash. Si se toca una, hay que tocar la otra, o la nota se
+arreglaria solo para quien corra el ETL desde bash.
+
+Hay una diferencia entre las dos que si importa: en `arrancar.ps1` esta etapa va
+FUERA del bucle que trata un archivo vacio como fallo mortal. Aqui un archivo
+vacio es legitimo y quiere decir que no hay ni una resena en la base, que es como
+nace una recien reiniciada.
+
+### `--notas`, lo barato de correr a menudo
+
+```bash
+bash etl/correr.sh --notas
+```
+
+Corre solo esa tercera etapa. **4 segundos contra 13**, y sirve cuando lo unico
+que se movio son resenas. Es el mismo reparto que `--cola` en el ETL del grafo.
+
+Lo que `--notas` NO hace es traer productos nuevos ni cambios del catalogo. Para
+eso hay que correr las tres.
+
+Se comprueba con `bash pruebas/notas.sh`, que da 10 OK.
 
 ## Que escribe
 

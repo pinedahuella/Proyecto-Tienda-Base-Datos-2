@@ -3,7 +3,7 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-03, noche**.
+Ultima actualizacion: **2026-09-04**.
 
 ---
 
@@ -31,10 +31,14 @@ Ultima actualizacion: **2026-09-03, noche**.
 >   SQL va en ASCII puro.
 > - Ninguna contrasena real en un archivo que se suba. Salen del `.env`.
 >
-> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene SEIS arneses:
-> `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`,
+> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene SIETE arneses:
+> `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`, `bash pruebas/notas.sh`,
 > `bash redis/prueba_carrito.sh`, `bash redis/prueba_concurrencia.sh`,
 > `bash neo4j/correr_fraude.sh`, `.\mongo\demostracion_indices.ps1`.
+>
+> Y `prueba_concurrencia.sh` mide TIEMPOS con 50 clientes a la vez: en una
+> maquina ahogada de memoria da rojo sin que nada este roto. Si sale mal,
+> correlo solo antes de creerle.
 > Y antes de creerle a un arnes, **rompe el codigo a proposito y comprueba que
 > falla**: aqui ya aparecio un arnes que validaba copias pegadas de las
 > consultas en vez de las consultas de la entrega.
@@ -109,6 +113,8 @@ por eventos, los indices y las agregaciones. El informe lo hizo el equipo.
 | **Los indices de Mongo, demostrados** | 4 pasos, 12 comprobaciones | `.\mongo\demostracion_indices.ps1` |
 | **El pedido reconstruido, completo** | modal con lo pagado + precio y stock de ese dia | entra como `compradora.norte@` a `/pedidos` |
 | **La nota en el catalogo de Mongo** | `resenas_promedio` y `resenas_total` en cada documento, con su indice | `.\arrancar.ps1 -Etl` y mirar un producto en Mongo |
+| **La nota alcanza a los de Mongo, y se apaga** | tercera etapa del ETL, con `--notas` | `bash pruebas/notas.sh` (10 OK) |
+| **El choque de los dos repartidores de id, visible** | un paso mas en el arranque | sale solo en `.\arrancar.ps1` |
 | **Generador incremental de productos** | lotes reproducibles por semilla | `.\arrancar.ps1 -Productos 300 -Semilla 7` |
 
 ### La venta relampago, ya completa de punta a punta
@@ -356,6 +362,105 @@ que el indice sirve para el rango y para el orden a la vez.
 pero ninguna ruta del backend lo consume. El contrato de lo que falta esta en
 `docs/BACKEND-PENDIENTE.md`.
 
+### Y esa nota ya alcanza a los productos que el ETL no veia
+
+**Hecho el 2026-09-04, y cierra el pendiente 6.**
+
+El calculo de arriba vive dentro de `extraer.sql`, que recorre `FROM productos p`
+en PostgreSQL. Todo lo que no tenga fila ahi le es invisible, y hay dos clases de
+producto que caen justo en ese hueco:
+
+```
+el que solo vive en Mongo    nace en el panel del vendedor, no deja fila en
+                             PostgreSQL, y su nota se quedaba en 0 para siempre
+                             aunque lo resenaran. En la base viva son CUATRO,
+                             los _id 103 a 106
+
+al que le borran la ultima   la fila se va de `resena` y el documento conserva
+resena                       la nota vieja, sin nada que la apague
+```
+
+El segundo se encontro midiendo, no leyendo: el producto 1 decia **1 resena con
+nota 4** y PostgreSQL tenia **cero** filas suyas en `resena`. Mongo sostenia 52
+productos con nota donde PostgreSQL solo respaldaba 51.
+
+La etapa nueva son dos archivos y un enganche:
+
+```
+etl/extraer_notas.sql   agrupa `resena` por id_producto_mongo, SIN join contra
+                        productos. Ese join es exactamente lo que dejaba fuera
+                        a los de Mongo
+etl/cargar_notas.js     escribe los dos campos y apaga los que dicen tener
+                        resenas y ya no salen en la lista
+etl/correr.sh           la corre como TERCERA etapa
+```
+
+**Va DESPUES de `cargar.js`, nunca antes.** `cargar.js` reemplaza el documento
+entero con `replaceOne`, asi que al reves le pasaria por encima a todo lo que
+esta etapa escribio. Esta dicho en la cabecera de los dos archivos para que a
+nadie le tiente reordenarlas.
+
+**Y estrena `--notas`**, que corre solo esa etapa, igual que `--cola` en el del
+grafo. Tarda **4 segundos contra 13**, y sirve cuando lo unico que se movio son
+resenas:
+
+```
+bash etl/correr.sh            las tres etapas
+bash etl/correr.sh --notas    solo la nota
+```
+
+Se comprueba con `bash pruebas/notas.sh`, que da **10 OK** y **rompe el problema
+antes de medirlo**: su primera parte corre `extraer.sql` de verdad y comprueba
+que el producto elegido NO sale en su resultado. Sin ese paso, el arnes podria
+estar aprobando algo que ya funcionaba antes del cambio.
+
+Medido de punta a punta sobre el producto 103:
+
+```
+resena sembrada de 5 estrellas   ->  el documento sigue en 0|0
+correr --notas                   ->  el documento dice 1|5
+resena borrada, correr --notas   ->  vuelve a 0|0
+```
+
+Y al arnes se le rompio el codigo a proposito para ver si se daba cuenta: con el
+`$gt: 0` del apagado cambiado por `$gt: 999999`, pasa de **10 OK** a **7 OK y 3
+FALLA**, en tres sitios distintos.
+
+**Lo que sigue sin hacer** es que la nota se refresque sola. Una resena nueva no
+la mueve hasta que alguien corre el ETL. Es el pendiente 4 aplicado a otro dato:
+el grafo tiene cola y worker, y la nota de Mongo no.
+
+### El choque de los dos repartidores de id ya no es invisible
+
+**Hecho el 2026-09-04.** No decide el pendiente 5 -- quien reparte el id de
+producto sigue siendo cosa de Jose David -- pero borra la frase que decia que
+**no habia nada que avisara**, que era lo peor de ese punto: el arranque quedaba
+en verde, las cuentas cuadraban, y lo que se perdia era un producto entero.
+
+`arrancar.ps1` corre ahora un paso mas despues del ETL:
+
+```
+>> Comprobando que los id de producto no se pisan
+   sin cruce: PostgreSQL reparte el 1127 y el mayor de Mongo es 1105 (22 de margen)
+```
+
+**Pregunta por la SECUENCIA, no por `max(id_producto)`**, y ahi esta todo el
+valor del aviso. No son el mismo numero: un `nextval` que se llevo una
+transaccion con `ROLLBACK` no vuelve. Ese dia la secuencia iba en 1126 con un
+maximo real de 1105, o sea que preguntar por el maximo habria prometido 21
+numeros de margen que no existen.
+
+Cuando hay cruce lo dice, y se probo bajando la secuencia a mano:
+
+```
+5 documento(s) de MongoDB ocupan un id que PostgreSQL va a repartir
+  PostgreSQL entregara el 1101 en el proximo INSERT INTO productos
+```
+
+**No corta el arranque**, a proposito: un choque futuro no rompe nada de lo que
+esta cargado hoy, y parar la maquina por algo que aun no ha pasado seria peor que
+el problema.
+
 ### El generador de lotes
 
 `migrations/lote/generar_lote.sql` agrega productos y ofertas **sobre una base ya
@@ -579,9 +684,19 @@ quede fuera de ese array, no lo esta.
 
 ## Que falta
 
-En `docs/PENDIENTES.md`, con su urgencia. Lo mas grave que queda: **el precio se
-congela al pagar y no al agregar**. Ya no se cobra en silencio, pero tampoco se
+En `docs/PENDIENTES.md`, con su urgencia. **Al 2026-09-04 no queda nada abierto
+de este lado**: los cuatro puntos vivos se deciden o se escriben en `backend/`,
+y la lista corta para Jose David esta arriba del todo en
+`docs/BACKEND-PENDIENTE.md`.
+
+Lo mas urgente de esos cuatro es el **409 en el `PATCH` de ofertas durante una
+venta relampago**, que son tres lineas y hoy deja que Redis prometa unidades que
+PostgreSQL no puede entregar. Y lo mas grave sigue siendo que **el precio se
+congela al pagar y no al agregar**: ya no se cobra en silencio, pero tampoco se
 respeta el precio que se enseno.
+
+Lo unico que queda sin comprobar es la revision a ojo en el navegador, que pide
+entrar con una cuenta.
 
 **Los 2.5 puntos de la Entrega 2 que no dependian de nadie ya estan escritos**
 (2026-09-03):

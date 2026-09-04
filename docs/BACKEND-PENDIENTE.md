@@ -12,6 +12,47 @@ tocar el frontend.
 
 ---
 
+## LO DE HOY, al 2026-09-04 -- son cuatro cosas y la primera es de tres lineas
+
+Lo de mas abajo en este archivo es el historial completo por bloques, y casi
+todo ya esta hecho. Esto de aqui es lo que queda vivo, en orden de lo que mas
+duele. El detalle largo de cada una esta en `docs/PENDIENTES.md`.
+
+**1. Cerrar el `PATCH` de ofertas durante una venta relampago** (pendiente 8, es
+lo mas urgente y es lo mas corto). Hoy `PATCH /vendedor/ofertas/:id` acepta
+`ajuste_stock` con la venta relampago abierta, y ahi Redis y PostgreSQL se
+separan. Si el vendedor BAJA el stock, Redis ya le prometio unidades a gente con
+un ticket vivo: esa persona aparta, espera, paga, y el cobro le revienta con un
+error que no explica nada. Se pide un **409 cuando venga `ajuste_stock` y la
+oferta este en venta relampago**, diciendo que cierre la venta, reponga y la
+vuelva a abrir. `precio` y `estado` NO hay que bloquearlos, y el porque esta
+escrito en el pendiente.
+
+**2. Decidir quien reparte el id de producto** (pendiente 5). Hay dos
+numeradores sobre el mismo espacio de id -- el `bigserial` de PostgreSQL y el
+"maximo de Mongo mas uno" del panel -- y cuando se crucen el ETL machaca un
+producto entero **sin dar un solo error**. Desde el 2026-09-04 el arranque ya
+avisa cuando el margen se acaba, asi que dejo de ser invisible, pero avisar no es
+arreglar. La decision es tuya: si el id sale de una sola fuente, y de cual.
+
+**3. Apagar `es_inventario_limitado` cuando la venta vence sola** (pendiente 7,
+baja). El `EXPIRE` se lleva las claves de Redis y la columna se queda en `true`
+para siempre, asi que el panel ensena "Venta relampago abierta" sobre algo que ya
+no existe. Al comprador no le pasa nada y se sale con un clic en "Cerrar la
+venta", por eso es baja. Las dos salidas posibles estan en el pendiente.
+
+**4. Resenar desde el pedido** (bloque 5, mas abajo). Son DOS campos en tu
+consulta de `pedidos.service.ts`, no una ruta nueva.
+
+Y una quinta que no es un bug, por si te sobra un rato: **la nota del catalogo no
+se refresca sola**. Ya alcanza a todos los productos y se apaga bien -- eso se
+cerro el 2026-09-04 con una etapa nueva del ETL --, pero una resena nueva no la
+mueve hasta que alguien corre el ETL. Lo barato es que tu worker del grafo, que
+ya se dispara cuando se toca una resena, corra tambien `bash etl/correr.sh
+--notas`. Los dos escuchan exactamente el mismo evento.
+
+---
+
 ## Antes de nada: como comprobar que tienes con que trabajar
 
 ```bash
