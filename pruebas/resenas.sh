@@ -71,7 +71,21 @@ if [ "$codigo" != "200" ]; then
 fi
 OK "el backend contesta en $API"
 
-if ! curl -s -o /dev/null -m 8 "$WEB"; then
+# Se mira el CODIGO HTTP y no el codigo de salida de curl, y eso no es un
+# detalle: este aviso salia SIEMPRE, con el frontend sirviendo un 200 limpio.
+#
+# La causa es el `export MSYS_NO_PATHCONV=1` de mas arriba, que hace falta para
+# los `docker exec` pero tambien deja de traducir `/dev/null` a `NUL`. curl no
+# puede escribir el destino, sale con 23 (CURLE_WRITE_ERROR) y el `if !` lo lee
+# como "no contesta" aunque la peticion haya ido perfecta. Comprobado:
+#
+#   curl -s -o /dev/null -m 8 "$WEB"                  -> 0
+#   MSYS_NO_PATHCONV=1 curl -s -o /dev/null -m 8 ...  -> 23
+#
+# Los otros tres chequeos de este archivo ya leian `%{http_code}` y por eso
+# nunca fallaron. Un aviso que sale en verde y en rojo no informa de nada.
+codigo_web=$(curl -s -o /dev/null -w "%{http_code}" -m 8 "$WEB")
+if [ "$codigo_web" = "000" ]; then
     echo "  (aviso) el frontend no contesta en $WEB. La parte 1 igual corre."
     echo "          Para la parte 2:  cd frontend  &&  npm run dev"
 fi

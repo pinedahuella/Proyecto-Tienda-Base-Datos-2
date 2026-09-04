@@ -956,7 +956,7 @@ podria sacarlo de `resena.id_usuario`, pero una respuesta no cuelga de ninguna
 resena -- cuelga de otro comentario -- y se quedaria sin forma de saber quien la
 escribio. No se podria ni pintar "Carlos respondio: ..." ni contar cuentas que se
 comentan entre si, que es una de las senales de la Entrega 2. En el conjunto de
-datos hay 28 respuestas sobre 86 raices.
+datos hay 28 respuestas sobre 90 raices, o sea 118 comentarios en total.
 
 Para la raiz queda repetido con `resena.id_usuario`. Es redundancia real y se
 acepta a sabiendas: la alternativa era dejar las respuestas sin autor. La

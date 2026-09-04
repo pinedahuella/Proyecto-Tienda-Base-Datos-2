@@ -12,11 +12,13 @@
 	 * Las rutas viejas (`/vendedor/productos/:id/inventario`) leian la tabla
 	 * `inventario`, que se borro del esquema.
 	 *
-	 * Las cuatro rutas que usa:
-	 *   GET   /vendedor/ofertas                    las mias, en cualquier estado
-	 *   GET   /vendedor/ofertas/producto/:id       un producto con sus variantes
-	 *   POST  /vendedor/ofertas                    publicar
-	 *   PATCH /vendedor/ofertas/:id                precio, estado y/o ajuste de stock
+	 * Las rutas que usa:
+	 *   GET    /vendedor/ofertas                    las mias, en cualquier estado
+	 *   GET    /vendedor/ofertas/producto/:id       un producto con sus variantes
+	 *   POST   /vendedor/ofertas                    publicar
+	 *   PATCH  /vendedor/ofertas/:id                precio, estado y/o ajuste de stock
+	 *   POST   /vendedor/ofertas/:id/venta-limitada abrir la venta relampago
+	 *   DELETE /vendedor/ofertas/:id/venta-limitada cerrarla
 	 *
 	 * Y una del catalogo publico, `GET /productos?nombre=`, para buscar sobre
 	 * que variante publicar.
@@ -104,6 +106,28 @@
 		 * responde 409.
 		 */
 		fecha_aprobacion: string | null;
+		/**
+		 * Si esta oferta tiene su VENTA RELAMPAGO abierta
+		 * (`oferta.es_inventario_limitado`, migracion 014).
+		 *
+		 * Mientras vale true su stock NO lo lleva PostgreSQL: lo lleva un
+		 * contador atomico en Redis, y agregarla al carrito aparta unidades de
+		 * verdad. Es lo unico que decide si el boton de la fila dice "Abrir
+		 * venta relampago" o "Cerrar la venta", asi que sin este campo el panel
+		 * no podria pintar ninguno de los dos.
+		 */
+		es_inventario_limitado: boolean;
+		/**
+		 * Las unidades que quedan AHORA, del contador de Redis. Solo trae numero
+		 * con la venta relampago abierta; `null` en una oferta normal, en una
+		 * cuya venta ya cerro, y cuando Redis no contesto.
+		 *
+		 * Mientras la venta esta abierta, `stock` de arriba **esta congelado** en
+		 * el valor que tenia al abrirla. Los dos numeros son utiles y por eso se
+		 * ensenan los dos: el vendedor quiere saber con cuantas abrio y cuantas
+		 * le quedan.
+		 */
+		stock_disponible: number | null;
 		fecha_creacion: string;
 		fecha_actualizacion: string;
 	}
@@ -152,6 +176,18 @@
 			 * existe para quien lo necesita.
 			 */
 			fecha_aprobacion: string | null;
+			/**
+			 * Lo mismo que en `Oferta`, y se declara aqui por la misma leccion
+			 * de arriba: la ruta lo manda desde el 2026-09-03 y sin escribirlo
+			 * el dato llegaria y el tipo lo esconderia.
+			 *
+			 * Importa mas de lo que parece: quien administra la TIENDA entra por
+			 * esta vista y no por la lista, asi que la cuenta que mas ofertas
+			 * tiene solo puede abrir una venta relampago desde aqui.
+			 */
+			es_inventario_limitado: boolean;
+			/** Lo mismo que en `Oferta`: las unidades reales de Redis, o null. */
+			stock_disponible: number | null;
 		} | null;
 	}
 
@@ -187,6 +223,19 @@
 	 * mantener sincronizadas.
 	 */
 	type OfertaEditable = Pick<Oferta, 'id_oferta' | 'precio' | 'stock' | 'estado'>;
+
+	/**
+	 * Lo minimo para abrir o cerrar una venta relampago, por lo mismo que
+	 * `OfertaEditable`: las dos vistas tienen que compartir el codigo.
+	 *
+	 * Lleva `stock` porque el boton dice cuantas unidades se van a sembrar, y
+	 * `estado` porque solo una oferta `activa` admite abrirla -- el backend
+	 * contesta 409 con cualquier otro, y decirlo antes ahorra la vuelta.
+	 */
+	type OfertaRelampago = Pick<
+		Oferta,
+		'id_oferta' | 'stock' | 'estado' | 'es_inventario_limitado'
+	>;
 
 	/**
 	 * 'lista'     todas mis ofertas de golpe. Un vendedor normal.
@@ -379,6 +428,45 @@
 	let ajusteStock = $state('');
 	let guardando = $state(false);
 	let errorFila = $state('');
+
+	// ------------------------------------------------- la venta relampago
+	/**
+	 * El id de la oferta cuyo panel de venta relampago esta desplegado, o null.
+	 *
+	 * Uno solo, igual que `editando` y `rechazosDe`: dos paneles abiertos a la
+	 * vez comparten `duracionRelampago` y quien escriba una duracion en uno la
+	 * veria aparecer en el otro.
+	 */
+	let relampagoDe = $state<string | null>(null);
+	/** Los segundos elegidos, como texto. Vacio quiere decir "sin vencimiento". */
+	let duracionRelampago = $state('');
+	let relampagoOcupado = $state(false);
+	let errorRelampago = $state('');
+
+	/**
+	 * Lo que se puede elegir en "Cuando cierra".
+	 *
+	 * Una lista cerrada y no una caja de segundos. El backend acepta cualquier
+	 * entero de 0 a 604800, pero ofrecer eso en crudo tenia dos costes: nadie
+	 * piensa en segundos, y el numero invitaba a confundir el plazo de la VENTA
+	 * con el plazo del COMPRADOR (15 minutos, fijo). Alguien que queria "quince
+	 * minutos de venta" escribia 900 y cerraba su propia venta en quince
+	 * minutos.
+	 *
+	 * El tope de la lista es el tope del backend, asi que no hace falta validar
+	 * el rango en ningun sitio: no hay forma de elegir algo fuera.
+	 *
+	 * El vacio va primero porque es lo que casi siempre se quiere: abrir la
+	 * venta y cerrarla a mano cuando toque.
+	 */
+	const DURACIONES = [
+		{ valor: '', texto: 'Sin limite, la cierro yo' },
+		{ valor: '3600', texto: 'En 1 hora' },
+		{ valor: '21600', texto: 'En 6 horas' },
+		{ valor: '86400', texto: 'En 1 dia' },
+		{ valor: '259200', texto: 'En 3 dias' },
+		{ valor: '604800', texto: 'En 7 dias' }
+	];
 
 	// publicar
 	let busqueda = $state('');
@@ -736,7 +824,19 @@
 								// tarjeta SIN ella, o sea indistinguible de una que
 								// nunca se aprobo, y el select de al lado cambiaba de
 								// opciones despues de guardar sin que nadie tocara nada.
-								fecha_aprobacion: o.fecha_aprobacion
+								fecha_aprobacion: o.fecha_aprobacion,
+								// Y por lo mismo va la marca de venta relampago. Sin
+								// copiarla, editar el precio de una oferta con la venta
+								// ABIERTA la devolvia a la tarjeta sin la marca, o sea
+								// indistinguible de una cerrada: el boton pasaba a decir
+								// "Abrir venta relampago" sobre una que ya estaba abierta,
+								// y el unico aviso habria sido el 409 del backend.
+								es_inventario_limitado: o.es_inventario_limitado,
+								// Y con ella su numero real, por lo mismo. Sin copiarlo, editar
+								// el precio durante una venta devolvia la oferta a la tarjeta
+								// con `stock_disponible` sin definir, y la tarjeta volvia a
+								// ensenar el `stock` congelado de PostgreSQL.
+								stock_disponible: o.stock_disponible
 							}
 						}
 					: v
@@ -801,6 +901,193 @@
 			if (vista === 'catalogo') errorFila = texto;
 			else error = texto;
 		}
+	}
+
+	// -------------------------------------------------------- venta relampago
+	/**
+	 * Abre o cierra el panel de la venta relampago de una fila.
+	 *
+	 * El panel existe para las dos direcciones y no solo para abrir: CERRAR una
+	 * venta descarta las reservas que haya en curso, asi que tambien pide un
+	 * paso mas antes del clic definitivo. Un boton pelado que le quita a
+	 * alguien lo que ya habia apartado no da tiempo a arrepentirse.
+	 */
+	function alternarRelampago(o: OfertaRelampago) {
+		errorRelampago = '';
+		if (relampagoDe === o.id_oferta) {
+			relampagoDe = null;
+			return;
+		}
+		relampagoDe = o.id_oferta;
+		duracionRelampago = '';
+		aviso = '';
+	}
+
+	/**
+	 * Deja la marca de venta relampago donde la pantalla la esta mirando.
+	 *
+	 * Son DOS sitios y hay que tocar los dos, igual que hacen `guardarEnLista` y
+	 * `refrescarEnProductoAbierto` juntos: la lista tiene su propia copia de la
+	 * oferta y el producto abierto del catalogo tiene otra dentro de la
+	 * variante. Escribir solo una deja la otra vista diciendo lo contrario.
+	 *
+	 * No se recarga desde el servidor porque no hace falta: las dos rutas
+	 * cambian exactamente un booleano, y volver a pedir las 976 ofertas del
+	 * vendedor para enterarse de eso seria pagar la lista entera por un bit.
+	 */
+	function marcarRelampago(idOferta: string, abierta: boolean, sembrado: number | null = null) {
+		// Al ABRIR, las unidades reales son las que el backend dice que sembro
+		// (`stock_sembrado`), que es el stock de ese instante. Al CERRAR vuelven
+		// a ser null, que es lo que significa "aqui manda PostgreSQL otra vez".
+		// Sin esto, la fila quedaba marcada como en venta pero con el numero
+		// viejo hasta la siguiente recarga completa.
+		const disponible = abierta ? sembrado : null;
+
+		const i = ofertas.findIndex((x) => x.id_oferta === idOferta);
+		if (i !== -1) {
+			ofertas[i] = {
+				...ofertas[i],
+				es_inventario_limitado: abierta,
+				stock_disponible: disponible
+			};
+			ofertas = ofertas;
+		}
+
+		if (productoElegido == null) return;
+		productoElegido = {
+			...productoElegido,
+			variantes: productoElegido.variantes.map((v) =>
+				v.mi_oferta != null && v.mi_oferta.id_oferta === idOferta
+					? {
+							...v,
+							mi_oferta: {
+								...v.mi_oferta,
+								es_inventario_limitado: abierta,
+								stock_disponible: disponible
+							}
+						}
+					: v
+			)
+		};
+	}
+
+	/**
+	 * POST /vendedor/ofertas/:id/venta-limitada
+	 *
+	 * Siembra en Redis el stock que la oferta tiene AHORA en PostgreSQL y
+	 * enciende `oferta.es_inventario_limitado`. A partir de ese momento agregar
+	 * la oferta al carrito aparta unidades de verdad.
+	 *
+	 * El cuerpo va SIEMPRE, aunque sea `{}`. No es un detalle de estilo: un
+	 * POST con `Content-Type: application/json` y cuerpo vacio lo rechaza
+	 * Fastify antes de llegar a Nest, y ese 400 no viene con la forma
+	 * `{ ok, mensaje, payload }` del resto de la API -- trae `message` en vez
+	 * de `mensaje`, asi que `mensajeUtil` se queda sin texto y la caja de error
+	 * saldria con la frase generica en vez de decir que paso.
+	 */
+	async function abrirRelampago(o: OfertaRelampago) {
+		errorRelampago = '';
+
+		// Se comprueba aqui y no solo alla porque el mensaje del backend nombra
+		// el estado en el que esta, y el de aqui puede nombrar la salida.
+		if (o.estado !== 'activa') {
+			errorRelampago = `Solo se puede abrir sobre una oferta activa, y esta esta ${o.estado}. Activala primero.`;
+			return;
+		}
+
+		// Con stock 0 el backend NO se queja: `sembrar` acepta un stock de cero
+		// y contesta 201. Y ahi esta la trampa, que aparecio pulsando el boton
+		// sobre una oferta agotada de la tienda.
+		//
+		// Lo que se siembra es una FOTO del stock en ese instante, y ya no se
+		// vuelve a mirar PostgreSQL: si el vendedor abre con cero y despues
+		// repone existencias por Editar, PostgreSQL sube y Redis se queda en
+		// cero. La oferta pasa a ser incomprable sin ningun error, sin ninguna
+		// marca y sin nada que lo explique. Se corta aqui porque abrir una
+		// venta relampago sin unidades no sirve para nada en ningun caso.
+		if (o.stock <= 0) {
+			errorRelampago =
+				'No tienes unidades que apartar. Repone primero y abre la venta despues.';
+			return;
+		}
+
+		// Sin validar el rango: `duracionRelampago` sale de un <select> con la
+		// lista DURACIONES, cuyo tope ES el tope del backend. Lo unico que puede
+		// llegar aqui es una de esas opciones o el vacio.
+		const cuerpo: { duracion_segundos?: number } = {};
+		const elegido = duracionRelampago;
+		if (elegido !== '') {
+			cuerpo.duracion_segundos = Number(elegido);
+		}
+
+		relampagoOcupado = true;
+		const r = await pedir<{ id_oferta: string; stock_sembrado: number }>(
+			`/vendedor/ofertas/${o.id_oferta}/venta-limitada`,
+			conJson('POST', cuerpo)
+		);
+		relampagoOcupado = false;
+
+		if (expiro(r)) return;
+
+		if (r.ok && r.payload) {
+			marcarRelampago(o.id_oferta, true, r.payload.stock_sembrado);
+			relampagoDe = null;
+			duracionRelampago = '';
+			// El aviso reusa el TEXTO de la opcion elegida en vez de traducir los
+			// segundos otra vez. Con dos traducciones separadas, el dia que se
+			// agregue una opcion a DURACIONES el aviso diria otra cosa que el
+			// select, y nadie sabria cual de las dos manda.
+			const cuando = DURACIONES.find((d) => d.valor === elegido)?.texto ?? '';
+			aviso =
+				`Venta abierta con ${r.payload.stock_sembrado} ` +
+				`${r.payload.stock_sembrado === 1 ? 'unidad' : 'unidades'}. ` +
+				(elegido === '' ? 'La cierras vos cuando quieras.' : `Cierra ${cuando.toLowerCase()}.`);
+		} else {
+			// Los tres que el panel tiene que saber distinguir, y el 404 es el
+			// que mas confunde: el backend contesta "No existe una oferta con
+			// ese id" tanto si de verdad no existe como si es de otra persona,
+			// y leer eso dentro de TU propio panel suena a que la pantalla se
+			// rompio. Se traduce.
+			errorRelampago = r.estado === 404 ? mensaje404(o) : mensajeUtil(r);
+		}
+	}
+
+	/**
+	 * DELETE /vendedor/ofertas/:id/venta-limitada
+	 *
+	 * Apaga la marca y borra las dos claves de Redis de esa oferta. Las
+	 * unidades vuelven al stock de PostgreSQL, asi que no se pierde ninguna,
+	 * pero quien tuviera una reserva viva se queda sin ella: cerrar NO confirma
+	 * lo que estaba apartado. Por eso el boton no cierra directo.
+	 */
+	async function cerrarRelampago(o: OfertaRelampago) {
+		errorRelampago = '';
+		relampagoOcupado = true;
+		const r = await pedir<null>(`/vendedor/ofertas/${o.id_oferta}/venta-limitada`, {
+			method: 'DELETE'
+		});
+		relampagoOcupado = false;
+
+		if (expiro(r)) return;
+
+		if (r.ok) {
+			marcarRelampago(o.id_oferta, false);
+			relampagoDe = null;
+			aviso = 'Venta relampago cerrada. Las unidades volvieron al stock normal.';
+		} else {
+			errorRelampago = r.estado === 404 ? mensaje404(o) : mensajeUtil(r);
+		}
+	}
+
+	/**
+	 * El 404 de estas dos rutas dice "No existe una oferta con ese id" y
+	 * significa DOS cosas: que no existe, o que es de otra cuenta. El backend
+	 * las junta a proposito para no confirmar que una oferta ajena existe, y
+	 * esta bien que lo haga; lo que no sirve es repetir ese texto en el panel
+	 * de quien es dueno de la fila que esta mirando.
+	 */
+	function mensaje404(o: OfertaRelampago): string {
+		return `El servidor no reconoce la oferta ${o.id_oferta} como tuya. Recarga la lista: puede que se haya borrado o que la sesion sea de otra cuenta.`;
 	}
 
 	// ---------------------------------------------------------------- publicar
@@ -1170,6 +1457,123 @@
 	}
 </script>
 
+<!--
+	El panel de la venta relampago, una sola vez.
+
+	Va como `{#snippet}` y no copiado en los dos sitios porque lo necesitan las
+	DOS vistas -- la lista de un vendedor normal y la tarjeta del catalogo, que
+	es por donde entra la tienda -- y son cuarenta lineas con dos textos de
+	advertencia dentro. Dos copias de esto es la clase de cosa que se corrige en
+	una y no en la otra, y el fallo no se ve hasta que alguien entra por la
+	vista que no se toco. Es el primer snippet del archivo; el resto del
+	proyecto todavia no usa ninguno.
+-->
+{#snippet panelRelampago(o: OfertaRelampago)}
+	<div class="relampago-panel" class:cerrando={o.es_inventario_limitado}>
+		{#if o.es_inventario_limitado}
+			<!--
+				El aviso NO es adorno. `DELETE /vendedor/ofertas/:id/venta-limitada`
+				borra las dos claves de Redis de la oferta, y eso descarta las
+				reservas que hubiera en curso: las unidades no se pierden (vuelven
+				al stock de PostgreSQL), pero quien habia apartado se queda sin lo
+				suyo, y desde este panel no hay forma de saber cuantas personas
+				son. Por eso cerrar pide un clic mas y lo dice antes.
+			-->
+			<p class="nota">
+				Tus unidades vuelven al stock normal.
+				<strong>Quien tenga algo apartado ahora mismo lo pierde.</strong>
+			</p>
+
+			{#if errorRelampago}
+				<p class="malo" role="alert">{errorRelampago}</p>
+			{/if}
+
+			<div class="acciones">
+				<button
+					type="button"
+					class="principal"
+					onclick={() => cerrarRelampago(o)}
+					disabled={relampagoOcupado}
+				>
+					{relampagoOcupado ? 'Cerrando...' : 'Si, cerrar la venta'}
+				</button>
+				<button type="button" onclick={() => (relampagoDe = null)} disabled={relampagoOcupado}>
+					Dejarla abierta
+				</button>
+			</div>
+		{:else if o.stock <= 0}
+			<!--
+				Sin unidades no hay venta que abrir, y el backend NO lo impide:
+				siembra un cero y contesta 201. Se dice aqui, y el boton ni
+				aparece, porque el dano llega despues y callado -- reponer
+				existencias mas tarde sube PostgreSQL y deja Redis en cero, o sea
+				una oferta incomprable sin ninguna senal.
+			-->
+			<p class="nota">
+				No tienes unidades que apartar. Repone con <strong>Editar</strong> y abre la venta
+				despues, porque lo que repongas ya no entra en una venta que ya esta abierta.
+			</p>
+
+			<div class="acciones">
+				<button type="button" onclick={() => (relampagoDe = null)}>Entendido</button>
+			</div>
+		{:else}
+			<p class="nota">
+				Se apartan tus <strong>{o.stock}</strong>
+				{o.stock === 1 ? 'unidad' : 'unidades'}. Quien las agregue al carrito
+				<strong>las reserva de verdad</strong> hasta que pague.
+			</p>
+
+			<!--
+				Una lista y no una caja de segundos.
+
+				Antes esto era un campo de texto que pedia "en segundos, o vacio" y
+				debajo una nota que hablaba de 604800 segundos. Nadie piensa en
+				segundos, y sobre todo: el numero invitaba a confundir los DOS
+				plazos que hay aqui. Quien queria "quince minutos de venta"
+				escribia 900 pensando en el plazo del comprador y cerraba su
+				propia venta en quince minutos.
+
+				Con una lista cerrada ese error no se puede cometer, la nota de
+				tres lineas sobra, y de paso desaparece la validacion de rango:
+				no hay forma de escribir algo fuera del tope.
+			-->
+			<div class="campos">
+				<label>
+					Cuando cierra
+					<select bind:value={duracionRelampago}>
+						{#each DURACIONES as d (d.valor)}
+							<option value={d.valor}>{d.texto}</option>
+						{/each}
+					</select>
+				</label>
+			</div>
+
+			<p class="menor nota">
+				Cada comprador tiene 15 minutos para pagar lo que aparto.
+			</p>
+
+			{#if errorRelampago}
+				<p class="malo" role="alert">{errorRelampago}</p>
+			{/if}
+
+			<div class="acciones">
+				<button
+					type="button"
+					class="principal"
+					onclick={() => abrirRelampago(o)}
+					disabled={relampagoOcupado}
+				>
+					{relampagoOcupado ? 'Abriendo...' : 'Abrir la venta'}
+				</button>
+				<button type="button" onclick={() => (relampagoDe = null)} disabled={relampagoOcupado}>
+					Cancelar
+				</button>
+			</div>
+		{/if}
+	</div>
+{/snippet}
+
 <section class="ofertas">
 	<div class="titulo">
 		<div>
@@ -1479,6 +1883,14 @@
 
 												{#if mia}
 													<span class="chip {mia.estado}">{mia.estado}</span>
+													{#if mia.es_inventario_limitado}
+														<span
+															class="relampago"
+															title="El stock de esta oferta lo lleva Redis mientras la venta este abierta"
+														>
+															Venta relampago abierta
+														</span>
+													{/if}
 													<div class="acciones">
 														{#if mia.estado === 'activa'}
 															<button
@@ -1504,6 +1916,26 @@
 														>
 															{editando === mia.id_oferta ? 'Cerrar' : 'Editar'}
 														</button>
+														<!-- El MISMO boton de la lista. Aqui es donde de verdad
+														     hace falta: la tienda y el admin entran por esta
+														     vista y no por la lista, asi que sin esto la cuenta
+														     con mas ofertas no podria abrir ni una venta. -->
+														{#if mia.estado === 'activa' || mia.es_inventario_limitado}
+															<button
+																type="button"
+																class="relampago-boton"
+																class:abierta={mia.es_inventario_limitado}
+																onclick={() => alternarRelampago(mia)}
+															>
+																{#if relampagoDe === mia.id_oferta}
+																	Cerrar el panel
+																{:else if mia.es_inventario_limitado}
+																	Cerrar la venta
+																{:else}
+																	Venta relampago
+																{/if}
+															</button>
+														{/if}
 													</div>
 												{:else}
 													<div class="acciones">
@@ -1522,6 +1954,10 @@
 													</div>
 												{/if}
 											</div>
+
+											{#if mia && relampagoDe === mia.id_oferta}
+												{@render panelRelampago(mia)}
+											{/if}
 
 											{#if mia && errorFila && editando !== mia.id_oferta}
 												<!-- Un Pausar/Activar que falla sin el formulario abierto
@@ -1748,11 +2184,37 @@
 									class:espera={o.estado === 'pendiente'}
 									class:negado={o.estado === 'rechazada'}>{o.estado}</span
 								>
+								<!-- La insignia de venta relampago. Naranja y no roja, y es la
+								     MISMA de CarritoRedis.svelte a proposito: es la misma cosa
+								     vista desde los dos lados del mostrador, y dos colores
+								     distintos la harian parecer dos cosas. No es un error, es
+								     una condicion de la venta, asi que el rojo se queda para
+								     lo que de verdad esta mal. -->
+								{#if o.es_inventario_limitado}
+									<span
+										class="relampago"
+										title="El stock de esta oferta lo lleva Redis mientras la venta este abierta"
+									>
+										Venta relampago abierta
+									</span>
+								{/if}
 							</div>
 
 							<div class="numeros">
 								<strong class="precio">{quetzales(o.precio)}</strong>
-								<span class="menor">{o.stock} unidades</span>
+								<!-- Con la venta relampago abierta se ensenan los DOS numeros, y
+								     no solo el real. El vendedor necesita los dos: con cuantas
+								     abrio la venta (el congelado de PostgreSQL) y cuantas le
+								     quedan ahora (el de Redis). Ensenar solo el segundo deja
+								     "3 unidades" sin decir de cuantas, que no dice si va bien. -->
+								{#if o.stock_disponible !== null}
+									<span class="menor">
+										<strong class="quedan">{o.stock_disponible}</strong>
+										de {o.stock} sin vender
+									</span>
+								{:else}
+									<span class="menor">{o.stock} unidades</span>
+								{/if}
 							</div>
 
 							<div class="acciones">
@@ -1773,6 +2235,26 @@
 								{#if o.estado === 'rechazada'}
 									<button type="button" class="enlace" onclick={() => verRechazos(o.id_oferta)}>
 										{rechazosDe === o.id_oferta ? 'Ocultar el motivo' : 'Ver por que'}
+									</button>
+								{/if}
+								<!-- El boton solo aparece donde tiene sentido: sobre una oferta
+								     activa (las demas dan 409) o sobre una que ya la tiene
+								     abierta, que siempre se tiene que poder cerrar aunque la
+								     oferta haya cambiado de estado por otro camino. -->
+								{#if o.estado === 'activa' || o.es_inventario_limitado}
+									<button
+										type="button"
+										class="relampago-boton"
+										class:abierta={o.es_inventario_limitado}
+										onclick={() => alternarRelampago(o)}
+									>
+										{#if relampagoDe === o.id_oferta}
+											Cerrar el panel
+										{:else if o.es_inventario_limitado}
+											Cerrar la venta
+										{:else}
+											Abrir venta relampago
+										{/if}
 									</button>
 								{/if}
 								<button
@@ -1807,6 +2289,10 @@
 										</p>
 									{/if}
 								</div>
+							{/if}
+
+							{#if relampagoDe === o.id_oferta}
+								{@render panelRelampago(o)}
 							{/if}
 
 							{#if editando === o.id_oferta}
@@ -2255,6 +2741,100 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 0.5rem;
+	}
+
+	/* ---------- la venta relampago ---------- */
+
+	/* El naranja va como variable y no clavado en cada regla porque lo usan
+	   cuatro sitios de este archivo, y porque el tema oscuro tiene que poder
+	   cambiarlo entero desde un solo lugar.
+
+	   Los valores claros son EXACTAMENTE los de la insignia de
+	   CarritoRedis.svelte: es la misma venta vista desde el otro lado del
+	   mostrador, y dos naranjas distintos la harian parecer dos cosas.
+
+	   Naranja y no rojo: el rojo de .malo tiene que seguir siendo el color que
+	   solo sale cuando algo esta mal, o deja de querer decir eso. Una venta
+	   relampago abierta no es un error, es una condicion de la venta. */
+	.ofertas {
+		--relampago-tinta: #7c3a00;
+		--relampago-fondo: #ffe8cc;
+		--relampago-linea: #ffc98a;
+	}
+
+	/* En oscuro no se puede dejar el fondo claro: la tarjeta pasa a ser oscura
+	   y una pastilla color crema encima grita mas que el precio. Se invierte,
+	   igual que hacen --indigo-cl y --rojo-cl en el layout. */
+	:global(html[data-tema='oscuro']) .ofertas {
+		--relampago-tinta: #f0b070;
+		--relampago-fondo: #3a2410;
+		--relampago-linea: #6b4520;
+	}
+
+	.relampago {
+		display: inline-block;
+		font-size: 0.75rem;
+		font-weight: 600;
+		line-height: 1.2;
+		padding: 2px 10px;
+		border-radius: 999px;
+		color: var(--relampago-tinta);
+		background: var(--relampago-fondo);
+		border: 1px solid var(--relampago-linea);
+	}
+
+	/* El boton no es `.principal`: el principal de cada fila es Editar, y dos
+	   botones indigo uno al lado del otro no dicen cual es cual. Este se
+	   distingue por el color de la venta, que es el mismo de la insignia, asi
+	   que se lee como "esto es lo del relampago" sin tener que leerlo. */
+	.relampago-boton {
+		color: var(--relampago-tinta);
+		border-color: var(--relampago-linea);
+	}
+
+	/* Cuando la venta YA esta abierta el boton cierra, y cerrar descarta
+	   reservas. Se pinta lleno para que no se confunda con el de abrir: son la
+	   misma posicion en la fila y acciones opuestas. */
+	.relampago-boton.abierta {
+		background: var(--relampago-fondo);
+	}
+
+	/* Ocupa la fila entera y se abre debajo, igual que .edicion y .motivos: son
+	   los tres el mismo patron de "un panel colgado de SU fila". */
+	.relampago-panel {
+		flex-basis: 100%;
+		width: 100%;
+		margin-top: 0.6rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid var(--relampago-linea);
+		border-radius: var(--r);
+		background: var(--relampago-fondo);
+		color: var(--relampago-tinta);
+	}
+
+	/* Cerrar es la accion destructiva de las dos, asi que su panel se marca.
+	   Sin esto los dos paneles son identicos y el unico aviso de que uno
+	   descarta reservas seria el texto, que es justo lo que nadie lee. */
+	.relampago-panel.cerrando {
+		border-width: 2px;
+	}
+
+	.relampago-panel .nota {
+		color: inherit;
+	}
+
+	/* El error del panel se pinta con el rojo del sistema, no con el naranja
+	   heredado: dentro de una caja naranja un `.malo` en naranja no se
+	   distingue del texto normal y el mensaje pasa desapercibido. */
+	.relampago-panel .malo {
+		color: var(--rojo);
+	}
+
+	/* Las unidades que quedan de una venta abierta, en el color de la venta. Es
+	   el numero que se mueve solo mientras la gente aparta, y tiene que
+	   distinguirse del `de N` que va al lado y no se mueve. */
+	.quedan {
+		color: var(--relampago-tinta);
 	}
 
 	/* ---------- editar una fila ---------- */

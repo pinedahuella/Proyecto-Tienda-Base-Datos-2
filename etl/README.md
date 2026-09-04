@@ -9,7 +9,9 @@ A MongoDB -- el catalogo            A Neo4j -- el grafo de resenas
 -------------------------------     ---------------------------------------
 extraer.sql                         extraer_grafo.sql
 extraer_categorias.sql              cargar_grafo.sh
-cargar.js                           (el esquema vive en neo4j/001_esquema.cypher)
+extraer_notas.sql                   (el esquema vive en neo4j/001_esquema.cypher)
+cargar.js
+cargar_notas.js
 reconstruir.js
 correr.sh
 ```
@@ -70,7 +72,61 @@ lo que manda, y del otro lado el SQL y el JavaScript llegan rotos. Por eso la
 version de PowerShell mueve archivos con `docker cp`, que copia los bytes tal
 cual.
 
-Las dos formas imprimen cuantos productos, categorias y eventos escribio.
+Las dos formas imprimen cuantos productos, categorias y eventos escribio, y las
+dos corren las TRES etapas.
+
+### La tercera etapa, y por que esta en los dos sitios
+
+```
+notas       51 de 51 productos con resenas
+apagados    0 que decian tener resenas y ya no las tienen
+```
+
+`extraer_notas.sql` y `cargar_notas.js` refrescan `resenas_promedio` y
+`resenas_total`. No arman ninguna coleccion: tocan dos campos de documentos que
+ya existen.
+
+**Existe porque `extraer.sql` no puede hacerlo solo.** Esa consulta recorre
+`FROM productos p`, o sea la tabla de PostgreSQL, y hay dos clases de producto
+que no estan ahi:
+
+- **el que solo vive en Mongo**, publicado desde el panel del vendedor. Tiene
+  ofertas, se compra y se resena, y su nota se quedaba en 0 para siempre
+- **al que le borraron la ultima resena**, que conservaba la nota vieja sin nada
+  que la apagara
+
+`extraer_notas.sql` agrupa `resena` por `id_producto_mongo` **sin ningun join
+contra `productos`**, que es exactamente lo que dejaba fuera a los primeros. El
+apagado de los segundos lo hace `cargar_notas.js`, porque es el unico que sabe
+cuales NO vinieron en la lista.
+
+**Corre DESPUES de `cargar.js`, nunca antes.** `cargar.js` reemplaza el
+documento entero con `replaceOne` y le pasaria por encima.
+
+**Y esta escrita DOS veces, a proposito**: en `correr.sh` y otra vez en
+`Correr-Etl` de `arrancar.ps1`. No es un descuido, es la misma razon por la que
+todo este ETL esta duplicado -- `arrancar.ps1` no llama a `correr.sh` para no
+depender de Git Bash. Si se toca una, hay que tocar la otra, o la nota se
+arreglaria solo para quien corra el ETL desde bash.
+
+Hay una diferencia entre las dos que si importa: en `arrancar.ps1` esta etapa va
+FUERA del bucle que trata un archivo vacio como fallo mortal. Aqui un archivo
+vacio es legitimo y quiere decir que no hay ni una resena en la base, que es como
+nace una recien reiniciada.
+
+### `--notas`, lo barato de correr a menudo
+
+```bash
+bash etl/correr.sh --notas
+```
+
+Corre solo esa tercera etapa. **4 segundos contra 13**, y sirve cuando lo unico
+que se movio son resenas. Es el mismo reparto que `--cola` en el ETL del grafo.
+
+Lo que `--notas` NO hace es traer productos nuevos ni cambios del catalogo. Para
+eso hay que correr las tres.
+
+Se comprueba con `bash pruebas/notas.sh`, que da 10 OK.
 
 ## Que escribe
 
@@ -436,7 +492,50 @@ Para quien trabaje en Linux, en macOS o prefiera bash:
 ```bash
 ./etl/cargar_grafo.sh                 # carga sobre lo que haya
 ./etl/cargar_grafo.sh --limpiar       # borra el grafo entero y lo reconstruye
+./etl/cargar_grafo.sh --cola          # solo lo que la cola tiene pendiente
 ./etl/cargar_grafo.sh prueba_tuyo     # extrae de otra base de PostgreSQL
+```
+
+### `--cola`, y la cola del outbox
+
+Desde la migracion **015** existe `evento_grafo`: un trigger sobre `resena`
+encola el id de cada resena que se toca, **en la misma transaccion**. Eso deja
+por escrito que falta por llevar a Neo4j, en vez de que se sepa solo corriendo
+el ETL entero y comparando.
+
+**Los tres modos vacian la cola al terminar** (paso 3b del script), y siempre
+DESPUES de cargar: si la carga falla, el pipe muere, el marcado no llega a
+correr y los eventos siguen pendientes. Un evento marcado como hecho sin
+haberse proyectado es una resena que nadie va a volver a mirar.
+
+En modo completo se marca todo lo pendiente, y es correcto por definicion: una
+proyeccion completa acaba de aplicar el estado actual de TODAS las resenas.
+Sin eso, una base recien creada quedaria con sus 90 eventos pendientes para
+siempre sobre un grafo perfectamente correcto.
+
+**Que recorta `--cola` y que NO.** Solo recorta las dos secciones que crecen con
+las resenas (los productos resenados y las resenas). Las cuentas, las
+direcciones y el "quien vive donde" se proyectan enteras en los dos modos,
+porque **el trigger no las vigila**: si alguien se cambia el nombre eso no
+genera ningun evento, y en un incremental "puro" no llegaria nunca.
+
+**Y lo que `--cola` NO hace es correr mas rapido.** Medido:
+
+```
+              extraccion   Cypher generado   script entero
+completo         1.9 s        22 055 bytes       21.8 s
+--cola           1.3 s         4 958 bytes       22.6 s
+```
+
+Baja el trabajo, no el reloj: los 22 segundos son casi todos arranques de la
+JVM de `cypher-shell`, que el script invoca cuatro veces y cuestan lo mismo en
+los dos modos. A 90 resenas el volumen no es el cuello. Hoy `--cola` sirve
+sobre todo porque es **el unico modo que sabe aplicar las BAJAS**: la seccion 6
+de `extraer_grafo.sql` emite un `DETACH DELETE` por cada resena encolada que ya
+no existe en PostgreSQL. Antes, una resena borrada se quedaba en el grafo para
+siempre y la unica salida era `--limpiar`.
+
+```
 ```
 
 ### La trampa de Git Bash, esquivada dos veces distintas

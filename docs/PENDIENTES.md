@@ -2,7 +2,7 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-09-03.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-09-04.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
@@ -10,9 +10,11 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | 1 | El precio se congela al PAGAR, no al agregar | **cubierto por otro camino** | -- | media: ya no cobra en silencio, pero el precio sigue sin congelarse |
 | ~~2~~ | ~~La semilla no respalda con compras las 86 resenas~~ | -- | -- | **CERRADO el 2026-08-30** |
 | ~~3~~ | ~~`Carrito.svelte` quedo muerto~~ | -- | -- | **CERRADO el 2026-08-30** |
-| 4 | El grafo se queda viejo y el ETL relee todo | Meme | ver su doc | baja |
-| 5 | Dos asignadores de id de producto que no se hablan | Jose David decide | ver abajo | **alta: puede machacar un producto sin dar error** |
-| 6 | La nota no llega al catalogo hasta que corre el ETL | sin dueno | ver abajo | media |
+| ~~4~~ | ~~El grafo se queda viejo y el ETL relee todo~~ | -- | -- | **CERRADO el 2026-09-04.** La cola (015) es mia, el worker y la conciliacion son de Jose David, y el aviso del panel es mio. El grafo se mantiene solo |
+| 5 | Dos asignadores de id de producto que no se hablan | Jose David decide | ver abajo | **alta, pero ya no es INVISIBLE.** El arranque avisa desde el 2026-09-04. Quien reparte el id sigue sin decidirse |
+| ~~6~~ | ~~La nota no llega al catalogo hasta que corre el ETL~~ | -- | -- | **CERRADO el 2026-09-04.** Etapa nueva del ETL, con `bash pruebas/notas.sh` (10 OK) |
+| 7 | Una venta relampago que vence sola deja `es_inventario_limitado` en true | sin dueno | ver abajo | baja: el panel miente, pero hay recuperacion |
+| 8 | Editar el stock durante una venta relampago desincroniza las dos bases | Jose David | ver abajo | **alta: Redis promete unidades que PostgreSQL no puede entregar** |
 
 ---
 
@@ -48,28 +50,277 @@ La decision de fondo le toca a Jose David y esta escrita en
 `docs/BACKEND-PENDIENTE.md`: si el id de producto debe salir de una sola fuente,
 y cual.
 
+## Y hay una TERCERA cuenta que nadie mira (medido el 2026-09-03)
+
+Los dos generadores no se pisan entre si. Eso se comprobo y esta bien: los dos
+arrancan por encima del maximo de LAS DOS bases, asi que corridos en cualquier
+orden cada uno ve el rastro del otro.
+
+Lo que no mira ninguno de los dos es **la secuencia**. Los tres sitios que
+reparten leen `max(id_producto)`, que no es lo mismo que lo que el `bigserial`
+va a entregar:
+
+```
+arrancar.ps1        SELECT coalesce(max(id_producto),0) FROM productos
+generar_lote.sql    GREATEST(max(id_producto), max_mongo_producto)
+generar_lote_mongo  Math.max(maxMongoProducto, MAX_PG_PRODUCTO) + 1
+```
+
+Medido en la base viva ese mismo dia:
+
+```
+                       last_value | max_real | hueco
+ productos             |     1126 |     1105 |    21
+ productos_variantes   |     2290 |     2246 |    44
+```
+
+Los 21 numeros del 1106 al 1126 ya los consumio la secuencia -- un `nextval` no
+vuelve con el `ROLLBACK` -- y no tienen fila. Los dos generadores creen que "el
+maximo de los dos mundos" es 1105 y empezarian en 1106.
+
+**La consecuencia concreta:** `.\arrancar.ps1 -ProductosMongo 22` o mas crearia
+documentos hasta el `_id` 1127, que es justo el numero que la secuencia entregara
+al siguiente `INSERT INTO productos` que no pase por el lote. Con
+`-ProductosMongo 300` la ventana expuesta serian 279 documentos.
+
+Y hay una vuelta mas: `setval(GREATEST(1105, 1105))` **hace retroceder** la
+secuencia de 1126 a 1105. Hoy no rompe nada porque esos 21 numeros estan vacios,
+pero significa que la defensa contra los dos repartidores esta construida sobre
+un numero distinto del que la base va a repartir.
+
+El arreglo no es cambiar `max(id_producto)` por `last_value` en tres sitios --
+eso solo mueve el parche -- sino la decision de fondo que ya esta planteada
+arriba. Se deja escrito para que quien la tome sepa que son TRES cuentas y no
+dos.
+
+## Lo que SI se cerro, el 2026-09-04: el choque ya no es invisible
+
+La decision sigue siendo de Jose David y este punto sigue abierto. Lo que se
+arreglo es la frase de mas arriba que decia **"y no hay nada que avise"**, que
+era lo peor del asunto: el arranque quedaba en verde, las cuentas cuadraban, y
+lo que se perdia era un producto entero.
+
+`arrancar.ps1` estrena un paso, **"Comprobando que los id de producto no se
+pisan"**, que corre en cada arranque despues del ETL:
+
+```
+sin cruce: PostgreSQL reparte el 1127 y el mayor de Mongo es 1105 (22 de margen)
+```
+
+**Pregunta por la SECUENCIA y no por `max(id_producto)`**, que es lo unico que
+hace util a este aviso. Los dos numeros no son el mismo: un `nextval` consumido
+por una transaccion que despues hizo `ROLLBACK` no vuelve. El dia que se midio,
+la secuencia iba en 1126 con un maximo real de 1105 -- 21 de diferencia --, asi
+que preguntar por el maximo habria prometido 21 numeros de margen que no
+existen.
+
+Y fijate en el 22 de esa linea: es exactamente el numero que este documento
+predijo mas arriba, cuando decia que `-ProductosMongo 22` o mas se meteria en el
+1127. El aviso mide lo mismo que el pendiente describe.
+
+**Cuando hay cruce lo dice y no se calla.** Probado bajando la secuencia a mano
+a 1100 y volviendo a arrancar:
+
+```
+5 documento(s) de MongoDB ocupan un id que PostgreSQL va a repartir
+  PostgreSQL entregara el 1101 en el proximo INSERT INTO productos
+  y en MongoDB ya hay documentos de ese numero para arriba.
+  El ETL los machacaria sin dar ningun error. Ver docs/PENDIENTES.md, punto 5.
+```
+
+La secuencia se devolvio a 1126 al terminar la prueba.
+
+**No corta el arranque, y es deliberado.** Un choque futuro no rompe nada de lo
+que esta cargado hoy, y parar la maquina entera por algo que todavia no ha pasado
+seria peor que el problema. Avisa, dice cuanto margen queda, y sigue.
+
 ---
 
-# 6. La nota del catalogo no se refresca sola
+# 6. La nota del catalogo no se refresca sola -- CERRADO el 2026-09-04
 
-Los documentos de MongoDB ya traen `resenas_promedio` y `resenas_total`, y salen
-del ETL. Eso deja dos huecos conocidos, los dos medidos:
+**El arreglo es el que estaba escrito aqui**: una etapa nueva del ETL que agrupa
+`resena` por `id_producto_mongo`, sin pasar por la tabla `productos`.
 
-**Una resena nueva no mueve la nota** hasta que alguien corre el ETL. Es el mismo
-problema del pendiente 4 y de `docs/PENDIENTE-OUTBOX.md`, ahora con un dato mas
-encima. Mientras tanto la ficha del producto y la lista del catalogo pueden
-ensenar dos numeros distintos: la ficha calcula en vivo contra PostgreSQL y la
-lista lee la copia de Mongo.
+## Que pasaba, y eran dos huecos
 
-**Un producto que solo vive en MongoDB nunca actualiza su nota.** `etl/extraer.sql`
-itera sobre la tabla `productos` de PostgreSQL, asi que un producto publicado
-desde el panel no pasa por ahi jamas y su nota se queda en el 0 con que lo
-rellena `mongo/002_resenas.js`. Y no es teorico: esos productos tienen ofertas y
-se pueden comprar, o sea que se pueden resenar hoy.
+**Un producto que solo vive en MongoDB nunca actualizaba su nota.**
+`etl/extraer.sql` itera sobre la tabla `productos` de PostgreSQL, asi que un
+producto publicado desde el panel no pasa por ahi jamas y su nota se quedaba en
+el 0 con que lo rellena `mongo/002_resenas.js`. No era teorico: esos productos
+tienen ofertas, se pueden comprar y se pueden resenar hoy. En la base viva son
+CUATRO, los `_id` 103, 104, 105 y 106.
 
-El arreglo de fondo es que el promedio se calcule agrupando `resena` por
-`id_producto_mongo`, con independencia de que el producto tenga fila en
-PostgreSQL. Es una etapa nueva del ETL, no un parche.
+**Y el caso simetrico, que aparecio midiendo y no estaba escrito.** Cuando se
+borra la ultima resena de un producto, la fila desaparece de `resena` y el
+documento se queda con la nota vieja. Medido el 2026-09-04, antes de tocar nada:
+
+```
+producto 1   Mongo dice resenas_total 1, promedio 4
+             PostgreSQL tiene CERO filas en resena para ese producto
+```
+
+Ese 4 llevaba ahi desde que alguien borro esa resena. Mongo tenia 52 productos
+con nota y PostgreSQL solo sostenia 51.
+
+## Como quedo
+
+Tres archivos, y ninguno toca `backend/`:
+
+```
+etl/extraer_notas.sql   agrupa resena por id_producto_mongo. SIN join contra
+                        productos, que es justo lo que dejaba fuera a los de
+                        Mongo. El redondeo es el mismo texto que el de
+                        extraer.sql, a proposito
+etl/cargar_notas.js     escribe los dos campos, y APAGA los que dicen tener
+                        resenas y ya no salen en la lista. Es el unico que
+                        puede cerrar el segundo hueco, porque es el unico que
+                        sabe cuales NO vinieron
+etl/correr.sh           la engancha como TERCERA etapa, despues de cargar.js
+```
+
+**Va despues de `cargar.js` y no antes.** `cargar.js` hace `replaceOne` con el
+documento entero, asi que al reves le pasaria por encima a todo. Se dice en la
+cabecera de los dos archivos para que nadie lo reordene.
+
+**Y estrena `--notas`**, que corre solo esa etapa, igual que `--cola` en el del
+grafo:
+
+```
+bash etl/correr.sh            las tres etapas    13 s
+bash etl/correr.sh --notas    solo la nota        4 s
+```
+
+## Como se comprueba, y el arnes se rompio a proposito
+
+`bash pruebas/notas.sh` -- **10 OK, 0 FALLA**. Son cuatro partes y la primera es
+la que sostiene a las otras tres: comprueba corriendo `extraer.sql` de verdad que
+el producto elegido NO sale en su resultado. Sin eso, el arnes podria estar
+aprobando algo que ya funcionaba antes del cambio.
+
+Medido de punta a punta sobre el producto 103, que vive solo en Mongo:
+
+```
+resena sembrada (5 estrellas)  ->  el documento sigue en 0|0
+correr --notas                 ->  el documento dice 1|5
+resena borrada                 ->  correr --notas  ->  vuelve a 0|0
+```
+
+Y se rompio el apagado a proposito para ver si el arnes se daba cuenta: con el
+`$gt: 0` del `updateMany` cambiado por un `$gt: 999999`, el arnes pasa de **10
+OK** a **7 OK y 3 FALLA**, y lo detecta en tres sitios distintos. Al restaurarlo
+la corrida siguiente dijo `apagados 1`, que es la etapa arreglando de verdad el
+documento que la version rota habia dejado sucio.
+
+## Lo que sigue faltando, y ya no es de este punto
+
+La nota **sigue sin refrescarse sola**. Una resena nueva no la mueve hasta que
+alguien corre el ETL, y eso es el pendiente 4 aplicado a otro dato: hoy el grafo
+tiene su cola (`evento_grafo`) y su worker, y la nota de Mongo no. Mientras
+tanto la ficha del producto y la lista del catalogo pueden ensenar dos numeros
+distintos, y eso **es correcto y esta decidido**: la ficha calcula en vivo contra
+PostgreSQL y la lista lee la copia de Mongo, que es la que se usa para FILTRAR y
+ORDENAR. Esta escrito en `etl/extraer.sql`.
+
+Lo barato, si alguien lo quiere cerrar, es que `--notas` corra tambien cuando el
+worker del grafo vacia la cola: los dos se disparan por lo mismo, que es que se
+toco una resena.
+
+---
+
+# 8. Editar el stock durante una venta relampago desincroniza las dos bases
+
+**Medido el 2026-09-03 leyendo el codigo, y visto en la base el 2026-09-04.**
+
+`activar()` siembra Redis con una FOTO del stock de ese instante. A partir de
+ahi son dos contadores que se mueven por caminos distintos y nadie los vuelve a
+comparar. `PATCH /vendedor/ofertas/:id` sigue aceptando `ajuste_stock` con la
+venta abierta.
+
+**Si el vendedor SUBE el stock**, las unidades nuevas quedan inertes: PostgreSQL
+dice 17, Redis sigue en 4, y nadie puede comprar esas 10 por ningun camino
+mientras la venta este abierta. Confuso, pero no rompe.
+
+**Si BAJA el stock, si rompe, y del lado del comprador.** Redis ya le prometio
+unidades a gente que tiene un ticket vivo. Al pagar, `comprar_pedido` hace esto
+(`migrations/007_flujo_pedido.sql:481`):
+
+```sql
+IF v_oferta.stock < v_linea.cantidad THEN
+    RAISE EXCEPTION 'No hay suficiente stock de "%" (%): quedan % y se pidieron %'
+```
+
+O sea: **Redis promete lo que PostgreSQL no puede entregar.** La persona aparto
+sus unidades, espero, pago, y el cobro le revienta con un error que no explica
+nada, porque desde su lado no cambio nada. Su reserva se queda colgada hasta el
+TTL.
+
+**Y no es teorico.** El 2026-09-04 la oferta 52615 aparecio con stock 15 y una
+`reposicion` de +8 en el kardex hecha con la venta relampago abierta.
+
+## Lo que se pide, y es chico
+
+Un **409 en `PATCH /vendedor/ofertas/:id` solo cuando venga `ajuste_stock` y la
+oferta este en venta relampago**, con un mensaje que diga que cierre la venta,
+reponga y la vuelva a abrir. Tres lineas.
+
+**Los otros dos campos NO hay que bloquearlos:**
+
+- `precio` ya esta cubierto por `lineas_precio_visto`, que compara y avisa
+  dentro de la misma peticion que cobra. Bloquearlo seria resolver dos veces lo
+  mismo.
+- `estado` no, porque un vendedor tiene que poder dejar de vender algo. Lo
+  razonable es que **pausar cierre la venta relampago primero**, o que lo avise.
+
+---
+
+# 7. Una venta relampago que vence sola deja la columna marcada
+
+**Encontrado el 2026-09-03 midiendo, y no estaba escrito en ningun sitio.**
+
+`duracion_segundos` pone un `EXPIRE` sobre las dos claves de Redis de la oferta.
+Cuando ese plazo se cumple, las claves desaparecen solas y
+`oferta.es_inventario_limitado` **se queda en `true` para siempre**, porque Redis
+no puede escribir en PostgreSQL y nadie mas la apaga.
+
+Medido:
+
+```
+POST .../venta-limitada {"duracion_segundos":5}
+   PG es_inventario_limitado = true    Redis TTL = 2
+esperar
+   claves de Redis = 0
+   PG es_inventario_limitado = TRUE       <-- sigue marcada
+   GET /vendedor/ofertas dice es_inventario_limitado = True
+```
+
+## Por que es baja y no alta
+
+**Al comprador no le pasa nada.** `CarritoService` decide el camino con
+`existeVentaLimitada()`, que es un `EXISTS` contra **Redis**, no contra la
+columna. Sin claves, la oferta se compra por el flujo normal de PostgreSQL. La
+columna no manda sobre nada del checkout.
+
+**Y hay recuperacion, con un clic.** Pulsar "Cerrar la venta" sobre una oferta en
+ese estado contesta 200 y la deja en `false`. Medido. No hace falta tocar la base
+a mano.
+
+Lo que queda mal es el panel del vendedor: ensena "Venta relampago abierta" y
+ofrece "Cerrar la venta" sobre algo que ya no existe.
+
+## Las dos salidas, y ninguna es del frontend
+
+1. **Que la columna se deduzca de Redis** en vez de guardarse. Es la mas honesta
+   -- la verdad sobre si hay una venta abierta ya vive en Redis -- y el precio es
+   una llamada a Redis por cada oferta que se lista, o sea un `EXISTS` masivo en
+   `GET /vendedor/ofertas`, que devuelve 976 filas para un vendedor normal.
+2. **Que alguien la apague al vencer.** Redis publica eventos de expiracion de
+   claves, pero esos avisos se pierden si nadie esta suscrito en ese momento, que
+   es justo el argumento por el que `inventario_limitado.lua` NO los usa para
+   cosechar reservas (ver `redis/README.md`). La alternativa seria un barrido
+   periodico, que es otra pieza que mantener.
+
+**No se decide aqui.** Es del backend, y hasta que se decida el estado es
+alcanzable, invisible y recuperable con un clic.
 
 ---
 
@@ -77,13 +328,18 @@ Y de la **Entrega 2** falta trabajo que no es un bug:
 
 | Que | Puntos | De quien |
 |---|---|---|
-| Oferta de inventario limitado enchufada al backend | 3 | **casi**: Jose David la conecto al carrito el 2026-09-03. Falta su paso 2, que son las DOS RUTAS para abrir y cerrar la venta: sin ellas no hay boton posible y el contrato exacto esta en el BLOQUE 9 de `docs/BACKEND-PENDIENTE.md`. Falta tambien su paso 4. La migracion 014 y el resto del frontend YA estan |
+| ~~Oferta de inventario limitado enchufada~~ | ~~3~~ | **CERRADA el 2026-09-03 por la noche.** Jose David escribio las dos rutas del paso 2 (`POST` y `DELETE /vendedor/ofertas/:id/venta-limitada`) y agrego `es_inventario_limitado` a los tres GET; el boton del panel del vendedor ya las llama, en las dos vistas. Medido en el navegador y contra las dos bases: ver `docs/TRASPASO.md`, "La venta relampago". Solo queda fuera de alcance la activacion automatica por calor |
 | ~~`GET /admin/fraude/anillos`~~ | ~~parte de 3~~ | **HECHA el 2026-08-30, y el panel ya la consume** |
 | Resenar desde el pedido (bloque 5 de BACKEND-PENDIENTE) | -- | Jose David |
-| **Comparativa grafos vs columnar**, con la defensa de la NO elegida | 1.5 | **nadie todavia** |
-| **Diagrama de arquitectura** (el ER no lo es) | parte de 1 | **nadie todavia** |
+| ~~**Comparativa grafos vs columnar**, con la defensa de la NO elegida~~ | ~~1.5~~ | **ESCRITA el 2026-09-03**: `docs/DECISION-GRAFOS-VS-COLUMNAR.md` |
+| ~~**Diagrama de arquitectura** (el ER no lo es)~~ | ~~parte de 1~~ | **HECHO el 2026-09-03**: `docs/ARQUITECTURA.md` y `docs/diagrama-arquitectura.drawio` |
 
-Los dos ultimos **no dependen de nadie mas** y son 2.5 puntos.
+**Los 2.5 puntos que no dependian de nadie ya estan.** La comparativa sigue la
+estructura de registro de decision que pide el enunciado (contexto, alternativas,
+decision, justificacion, consecuencias) y cierra con las cinco condiciones
+medibles bajo las cuales SI habria que incorporar la base columnar, que es la
+parte que se olvida. Todos sus numeros salen de una corrida contra la base viva y
+los comandos para repetirla estan en el propio documento.
 
 Jose David agrego ademas **dos reportes de admin** que nadie habia pedido y que
 suman: `GET /admin/reportes/ventas` y `GET /admin/reportes/reservaciones`. Su
@@ -274,11 +530,18 @@ algo distinto de lo que el sistema exige es peor que no tenerlo.
 
 ## Lo que cambio de numeros, y donde estaba escrito
 
-`115 comentarios / 46 votos / 29 respuestas` pasaron a **114 / 62 / 28**: los
+`115 comentarios / 46 votos / 29 respuestas` pasaron a **118 / 62 / 28**: los
 pares elegidos cambian (ahora se filtran por stock y por precio quieto) y
 `azarSocial` reparte distinto. Se actualizaron `docs/base-de-datos.md`,
 `docs/BACKEND-PENDIENTE.md`, `migrations/README.md`, `neo4j/README.md`,
 `etl/README.md` y `etl/extraer_grafo.sql`.
+
+**Este parrafo decia 114 y estaba mal**, corregido el 2026-09-03. El 114 era
+correcto el dia que se escribio (86 resenas + 28 respuestas) y caduco esa misma
+tarde, cuando el anillo de fraude subio las resenas a 90 sin que nadie volviera
+aqui. Contado contra la base: 118 comentarios, de los cuales 90 son la raiz de
+una resena y 28 son respuestas. `migrations/README.md` y
+`docs/BACKEND-PENDIENTE.md` ya decian 118.
 
 ## Y una afirmacion que hay que dejar de repetir
 
@@ -330,12 +593,93 @@ por nombre cuesta un minuto y aqui evito romper cinco archivos.
 
 # 4. El grafo se queda viejo y el ETL relee todo
 
-Esta escrito aparte porque es largo: **`docs/PENDIENTE-OUTBOX.md`**.
+## AL DIA 2026-09-03, noche: la mitad de abajo ya esta
 
-- Una resena nueva no llega a Neo4j hasta que alguien corre el ETL, y el panel de
-  fraude no avisa de que mira datos viejos.
-- El ETL relee las 86 resenas cada vez (14 s medidos).
-- La salida es un outbox: un trigger encola el evento en la misma transaccion.
+El diseno largo sigue en **`docs/PENDIENTE-OUTBOX.md`**, pero **la cola ya
+existe** y el ETL ya la usa. Y el pendiente cambio de dueno: Jose David escribio
+`backend/elementos Generales/plan pendiente/outbox-grafo.md` y su equipo se queda
+con el worker, la conciliacion y el aviso de "ultima sincronizacion".
+
+**Lo que YA esta hecho, y es mio:**
+
+| Pieza | Donde | Estado |
+|---|---|---|
+| La tabla `evento_grafo` y su trigger sobre `resena` | `migrations/015_outbox_grafo.sql` | HECHO |
+| Vaciar la cola al cargar el grafo | `etl/cargar_grafo.sh`, paso 3b | HECHO |
+| Modo incremental del ETL | `bash etl/cargar_grafo.sh --cola` | HECHO |
+| Quitar del grafo las resenas borradas | `etl/extraer_grafo.sql`, seccion 6 | HECHO |
+
+Medido de punta a punta contra las dos bases:
+
+```
+resena creada    -> 1 evento pendiente, y el grafo sigue en 90
+--cola           -> el nodo :Resena 111 aparece con sus 3 relaciones
+                    1 evento marcado como proyectado
+resena borrada   -> 1 evento pendiente, y el grafo sigue en 91
+--cola           -> el nodo desaparece; el grafo vuelve a 90
+```
+
+Y el evento respeta la transaccion, que es el punto entero del outbox: dentro de
+un `BEGIN`, crear una resena deja 1 pendiente y borrarla deja 2; tras el
+`ROLLBACK` quedan **0**.
+
+**Ojo con lo que el modo `--cola` NO ahorra**, porque es facil venderlo mal. Se
+midio, y no baja el tiempo:
+
+```
+              extraccion   Cypher generado   script entero
+completo         1.9 s        22 055 bytes       21.8 s
+--cola           1.3 s         4 958 bytes       22.6 s
+```
+
+Lo que baja es el TRABAJO (el Cypher pasa de 22 KB a 5 KB), no el reloj: los 22
+segundos son casi todos arranques de la JVM de `cypher-shell`, que el script
+invoca cuatro veces y son los mismos en los dos modos. A 90 resenas el volumen
+no es el cuello. El modo incremental paga el dia que lo sea, y hoy sirve sobre
+todo porque es el unico que sabe aplicar las BAJAS.
+
+**Y una cifra que hay que corregir:** aqui decia "14 s medidos". Hoy, con 90
+resenas, el script completo tarda **21.8 s**.
+
+## Y el resto se cerro esa misma noche
+
+Jose David escribio **el worker** (`GrafoSyncService.vaciarCola()`, un
+`@Interval` cada 10 s) y **la conciliacion**
+(`GET /admin/grafo/conciliacion`), y yo puse el aviso en el panel de fraude.
+
+Medido de punta a punta, sin que nadie corriera nada a mano:
+
+```
+resena creada en PostgreSQL
+  -> el trigger la encola
+  -> ~10 s despues el log dice "worker del grafo: 3 evento(s) aplicados"
+  -> el nodo :Resena 114 esta en Neo4j con sus 3 relaciones
+resena borrada
+  -> el worker hace DETACH DELETE y el nodo desaparece
+```
+
+Y la conciliacion detecta una deriva sembrada a mano. Borrando UN nodo
+`:Resena` del grafo:
+
+```
+cuadra: false
+sugerencia: "Al grafo le faltan datos: 1 en resenas, 1 en relacion ESCRIBIO,
+             1 en relacion CALIFICA_A, 1 en relacion SOBRE.
+             Corre `etl/cargar_grafo.sh --limpiar` ..."
+```
+
+**El panel de fraude ya no calla.** `PanelFraude.svelte` pide la conciliacion
+despues de pintar los anillos y ensena una linea debajo de la introduccion:
+gris cuando cuadra ("Grafo al dia con PostgreSQL, sincronizado hace 9
+minutos") y **roja cuando no** ("Este analisis puede estar incompleto"), con
+la sugerencia del backend. Los eventos apartados se dicen siempre, cuadre o
+no: un evento que fallo cinco veces no se reintenta solo y es lo unico de este
+mecanismo que necesita a una persona.
+
+Va en una peticion aparte y **sin `await`**: es informacion SOBRE el analisis,
+no parte de el. Si esa ruta falla, el panel ensena sus anillos igual y no
+pinta nada, porque "no se pudo comprobar si esta al dia" al lado de un
+analisis correcto asusta mas de lo que informa.
 
 **Lo mas barato de ese documento es la conciliacion** -- cuatro `count` que
 comparan PostgreSQL contra Neo4j y avisan. Se puede hacer hoy y ya seria util.

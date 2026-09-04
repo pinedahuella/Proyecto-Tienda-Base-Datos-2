@@ -119,6 +119,56 @@ $$ LANGUAGE sql IMMUTABLE;
 
 
 -- ============================================================
+-- El alcance: todo, o solo lo que la cola tiene pendiente
+-- ============================================================
+-- Desde la migracion 015 existe `evento_grafo`, la cola de outbox: un trigger
+-- sobre `resena` encola el id de cada resena que se toca, en la misma
+-- transaccion. Este archivo puede proyectar TODO (lo de siempre) o solo lo que
+-- esa cola tiene pendiente, y lo decide la variable `solo_cola`:
+--
+--   psql -f extraer_grafo.sql                    todo, como siempre
+--   psql -v solo_cola=1 -f extraer_grafo.sql     solo lo pendiente
+--
+-- Lo que se recorta NO son las cinco secciones, son DOS. Las cuentas, las
+-- direcciones y el "quien vive donde" se proyectan enteras en los dos modos, y
+-- eso es a proposito por dos razones:
+--
+--   Son baratas. Estan acotadas por el numero de cuentas (12 hoy), no por el
+--   de resenas, asi que recortarlas no ahorra nada medible.
+--
+--   Y sobre todo: el trigger NO las vigila. Solo encola resenas. Si alguien se
+--   cambia el nombre o corrige su direccion, eso no genera ningun evento y en
+--   un modo incremental "puro" no llegaria al grafo NUNCA. Dejandolas enteras,
+--   cada corrida las pone al dia gratis. El modo incremental ahorra donde
+--   crece el trabajo y no donde no crece.
+--
+-- La cola se lee UNA vez, aqui, a una tabla temporal. Asi el resto del archivo
+-- no vuelve a nombrar `evento_grafo`, y de paso esto sigue corriendo contra una
+-- base que todavia no aplico la 015: si la tabla no existe, la temporal se crea
+-- vacia y `solo_cola` se fuerza a 0.
+
+-- ¿Existe la cola? Sin esto, un ETL contra una base sin la 015 falla con
+-- "relation evento_grafo does not exist", que no dice nada de lo que pasa.
+SELECT (to_regclass('public.evento_grafo') IS NOT NULL) AS hay_cola \gset
+
+-- El valor por defecto va DESPUES de mirar si la variable ya vino, porque un
+-- `\set solo_cola 0` a secas pisaria el `-v solo_cola=1` de quien llama: psql
+-- lee el archivo de arriba abajo y la ultima asignacion gana.
+\if :{?solo_cola}
+\else
+    \set solo_cola 0
+\endif
+
+\if :hay_cola
+CREATE TEMP TABLE cola_pendiente AS
+    SELECT DISTINCT id_resena FROM evento_grafo WHERE procesado_en IS NULL;
+\else
+CREATE TEMP TABLE cola_pendiente (id_resena bigint);
+\set solo_cola 0
+\endif
+
+
+-- ============================================================
 -- La salida: cinco sentencias de Cypher, en este orden
 -- ============================================================
 -- El orden NO es decorativo. Las relaciones se crean con MATCH sobre los dos
@@ -218,6 +268,10 @@ FROM (
                     'Producto ' || r.id_producto_mongo || ' (solo en MongoDB)') AS nombre
     FROM resena r
     LEFT JOIN productos pr ON pr.id_producto = r.id_producto_mongo
+    -- El recorte del modo incremental. Con solo_cola=0 esto es siempre cierto y
+    -- la consulta queda exactamente como estaba.
+    WHERE :solo_cola = 0
+       OR r.id_resena IN (SELECT id_resena FROM cola_pendiente)
 ) p
 
 UNION ALL
@@ -369,6 +423,47 @@ MERGE (r)-[:CALIFICA_A]->(v)
 MERGE (r)-[:SOBRE]->(p);' AS sentencia
 FROM resena r
 JOIN comentario c ON c.id_comentario = r.id_comentario
+WHERE :solo_cola = 0
+   OR r.id_resena IN (SELECT id_resena FROM cola_pendiente)
+
+UNION ALL
+
+-- ------------------------------------------------------------
+-- 6. Las resenas BORRADAS, que hay que quitar del grafo
+-- ------------------------------------------------------------
+-- Esta seccion no tiene gemela en las otras cinco: las otras cinco AGREGAN, y
+-- esta resta. Existe porque el trigger encola igual un alta que una baja -- las
+-- dos escriben el mismo id_resena -- y quien vacia la cola distingue una de la
+-- otra mirando si la fila todavia existe. Si ya no existe, es una baja.
+--
+-- Va SIEMPRE, en los dos modos, y no detras de solo_cola. Es una mejora sobre
+-- lo que habia: hasta ahora el ETL solo sumaba, asi que una resena borrada en
+-- PostgreSQL se quedaba para siempre en Neo4j y la unica salida era --limpiar,
+-- que borra el grafo entero. Ahora las bajas que pasaron por la cola se
+-- deshacen solas.
+--
+-- Lo que NO arregla, y hay que saberlo: una resena borrada ANTES de que
+-- existiera la 015 no dejo evento, asi que sigue en el grafo. Para esas sigue
+-- haciendo falta --limpiar.
+--
+-- Los nodos de usuario, producto y direccion se dejan en pie: pueden estar en
+-- otros caminos, y un nodo suelto no ensucia ninguna de las cinco consultas de
+-- fraude. DETACH DELETE porque la resena tiene tres relaciones y un DELETE a
+-- secas sobre un nodo con relaciones falla.
+--
+-- El HAVING no es adorno. Un agregado sin GROUP BY devuelve UNA fila aunque no
+-- haya nada que agregar, asi que sin el, cada corrida sin bajas pendientes
+-- emitia una linea vacia de mas. cypher-shell se la salta sin quejarse, pero
+-- entonces la salida de este archivo dejaba de ser byte a byte la de antes y
+-- comparar dos corridas para ver si algo cambio pasaba a dar siempre una
+-- diferencia. Con el HAVING, sin bajas no sale ninguna fila.
+SELECT 6 AS orden,
+       string_agg(
+           format('MATCH (r:Resena {id: %s}) DETACH DELETE r;', e.id_resena),
+           E'\n' ORDER BY e.id_resena) AS sentencia
+FROM cola_pendiente e
+WHERE NOT EXISTS (SELECT 1 FROM resena r WHERE r.id_resena = e.id_resena)
+HAVING count(*) > 0
 
 
 ) salida

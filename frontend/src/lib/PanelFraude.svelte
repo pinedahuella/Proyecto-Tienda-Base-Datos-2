@@ -129,8 +129,36 @@
 			'Cuentas distintas registradas en la misma direccion normalizada. Por si solo no prueba nada -- una familia comparte casa -- pero junto con calificaciones cruzadas deja de ser coincidencia.'
 	};
 
+	/**
+	 * Lo que devuelve `GET /admin/grafo/conciliacion`, del que aqui solo se usa
+	 * lo justo para poder decir si este analisis mira datos frescos.
+	 *
+	 * `cuadra` sale de CUATRO recursos, no de los seis: los conteos de
+	 * productos y usuarios NO cuentan para el veredicto, porque el ETL completo
+	 * carga todas las cuentas y no solo las que aparecen en una resena, y el
+	 * worker incremental puede dejar nodos sueltos. Una diferencia ahi es
+	 * normal y no significa que falte nada.
+	 */
+	interface Conciliacion {
+		cuadra: boolean;
+		ultima_sincronizacion: string | null;
+		cola: { pendientes: number; apartados: number } | null;
+		sugerencia: string | null;
+	}
+
 	let anillos = $state<Anillo[]>([]);
 	let analizado = $state<RespuestaFraude['analizado'] | null>(null);
+
+	/**
+	 * El estado de la sincronizacion del grafo. `null` mientras no llega o si
+	 * la ruta fallo.
+	 *
+	 * Existe por una razon concreta que este documento repitio durante dias:
+	 * el grafo se actualiza por una cola y el panel **enseñaba un analisis
+	 * correcto sobre datos incompletos sin decirlo**. Un panel que falla se
+	 * arregla; uno que calla se cree. Ahora lo dice.
+	 */
+	let conciliacion = $state<Conciliacion | null>(null);
 
 	let cargando = $state(true);
 	let error = $state('');
@@ -178,6 +206,47 @@
 
 		anillos = respuesta.payload.anillos ?? [];
 		analizado = respuesta.payload.analizado ?? null;
+
+		void cargarConciliacion();
+	}
+
+	/**
+	 * Si el grafo que se acaba de analizar esta al dia con PostgreSQL.
+	 *
+	 * Va en una peticion APARTE y despues, no antes, y no se espera con await:
+	 * es informacion SOBRE el analisis, no parte de el. Si esta ruta falla o
+	 * tarda, el panel tiene que ensenar sus anillos igual -- bloquear el
+	 * analisis por no poder decir si esta fresco seria cambiar un problema
+	 * chico por uno grande.
+	 *
+	 * Y por eso un fallo aqui deja `conciliacion` en null y no pinta nada, en
+	 * vez de pintar un aviso de error: "no se pudo comprobar si esta al dia" al
+	 * lado de un analisis correcto asusta mas de lo que informa.
+	 */
+	async function cargarConciliacion() {
+		conciliacion = null;
+		const r = await pedir<Conciliacion>('/admin/grafo/conciliacion');
+		if (r.ok && r.payload) conciliacion = r.payload;
+	}
+
+	/**
+	 * "hace 3 minutos", para la ultima sincronizacion.
+	 *
+	 * Un reloj absoluto no contesta la pregunta que se hace aqui, que es "esto
+	 * que estoy viendo, de cuando es". Nadie resta horas de cabeza mirando un
+	 * panel de fraude.
+	 */
+	function hace(iso: string | null): string {
+		if (!iso) return 'nunca';
+		const ms = Date.now() - new Date(iso).getTime();
+		if (Number.isNaN(ms)) return 'nunca';
+		const min = Math.floor(ms / 60000);
+		if (min < 1) return 'hace menos de un minuto';
+		if (min < 60) return `hace ${min} ${min === 1 ? 'minuto' : 'minutos'}`;
+		const h = Math.floor(min / 60);
+		if (h < 24) return `hace ${h} ${h === 1 ? 'hora' : 'horas'}`;
+		const d = Math.floor(h / 24);
+		return `hace ${d} ${d === 1 ? 'dia' : 'dias'}`;
 	}
 
 	function alternar(id: string) {
@@ -231,6 +300,54 @@
 		tienda. Se calcula recorriendo el grafo de relaciones entre cuentas, resenas y productos,
 		no consultando una tabla.
 	</p>
+
+	<!--
+		De cuando son los datos que se acaban de analizar.
+
+		Este renglon es la respuesta a algo que este proyecto tuvo escrito como
+		pendiente durante dias: el grafo se llena por una cola, y hasta ahora el
+		panel ensenaba un analisis correcto sobre datos que podian estar
+		incompletos SIN DECIRLO. Un panel que falla se arregla; uno que calla se
+		cree.
+
+		Solo aparece con el analisis ya pintado. Antes de eso no hay nada de que
+		decir la antiguedad, y ponerlo arriba de un "Analizando..." solo agrega
+		ruido.
+	-->
+	{#if conciliacion && !cargando && !error}
+		<p class="sincro" class:atrasado={!conciliacion.cuadra}>
+			{#if conciliacion.cuadra}
+				Grafo al dia con PostgreSQL, sincronizado {hace(conciliacion.ultima_sincronizacion)}.
+			{:else}
+				<!-- La frase se escribe ENTERA en cada rama en vez de armarla con un
+				     {#if} en medio. Con el {#if} intercalado, Svelte deja el salto de
+				     linea como espacio y el punto quedaba separado: "con PostgreSQL ."
+				     Se vio en pantalla, no leyendo el codigo. Repetir seis palabras es
+				     mas barato que pelearse con los espacios de la plantilla. -->
+				<strong>Este analisis puede estar incompleto.</strong>
+				{#if conciliacion.cola && conciliacion.cola.pendientes > 0}
+					El grafo no cuadra con PostgreSQL y hay {conciliacion.cola.pendientes}
+					{conciliacion.cola.pendientes === 1 ? 'cambio' : 'cambios'} sin aplicar.
+				{:else}
+					El grafo no cuadra con PostgreSQL.
+				{/if}
+				{#if conciliacion.sugerencia}
+					{conciliacion.sugerencia}
+				{/if}
+			{/if}
+			<!-- Los apartados se dicen SIEMPRE, cuadre o no. Un evento que fallo
+			     cinco veces no se va a reintentar solo, asi que si nadie lo mira
+			     se queda ahi para siempre: es la unica parte de este mecanismo
+			     que necesita una persona. -->
+			{#if conciliacion.cola && conciliacion.cola.apartados > 0}
+				<strong>
+					Hay {conciliacion.cola.apartados}
+					{conciliacion.cola.apartados === 1 ? 'cambio' : 'cambios'} que fallaron y ya no se
+					reintentan.
+				</strong>
+			{/if}
+		</p>
+	{/if}
 
 	{#if cargando}
 		<p class="gris">Analizando el grafo de resenas...</p>
@@ -453,6 +570,27 @@
 		margin-bottom: 20px;
 		color: var(--gris);
 		font-size: 0.94rem;
+	}
+
+	/* De cuando son los datos analizados.
+
+	   Al dia va en gris, del tamano de un pie de foto: es lo normal y no tiene
+	   que competir con los anillos, que son lo que se viene a ver. Solo cuando
+	   NO cuadra se pone rojo y con fondo, porque ahi deja de ser un dato y pasa
+	   a ser una advertencia sobre lo que se esta leyendo justo debajo. */
+	.sincro {
+		max-width: 620px;
+		margin: -12px 0 20px;
+		font-size: 0.86rem;
+		color: var(--gris-2);
+	}
+
+	.sincro.atrasado {
+		padding: 10px 12px;
+		border-radius: var(--r);
+		background: var(--rojo-cl);
+		color: var(--rojo);
+		font-size: 0.92rem;
 	}
 
 	.gris {

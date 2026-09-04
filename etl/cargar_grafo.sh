@@ -10,7 +10,15 @@
 # Uso:
 #   ./etl/cargar_grafo.sh                 carga sobre lo que haya
 #   ./etl/cargar_grafo.sh --limpiar       borra el grafo entero y lo reconstruye
+#   ./etl/cargar_grafo.sh --cola          solo lo que la cola tiene pendiente
 #   ./etl/cargar_grafo.sh otra_base       extrae de otra base de PostgreSQL
+#
+# Los tres modos VACIAN la cola del outbox al terminar (ver el paso 3b).
+#
+# --cola es lo barato de correr a menudo: proyecta solo las resenas que el
+# trigger de la 015 encolo desde la ultima vez, en vez de releer las 90 cada
+# corrida. Las cuentas y las direcciones se proyectan enteras igual en los dos
+# modos, porque el trigger no las vigila y si no fuera asi no llegarian nunca.
 #
 #
 # Nada se instala y nada toca el disco
@@ -52,13 +60,26 @@ set +a
 LIMPIAR=no
 BASE="$DB_NAME"
 
+SOLO_COLA=0
+
 for ARG in "$@"; do
     case "$ARG" in
         --limpiar) LIMPIAR=si ;;
+        --cola)    SOLO_COLA=1 ;;
         -*)        echo "Opcion desconocida: $ARG" >&2; exit 2 ;;
         *)         BASE="$ARG" ;;
     esac
 done
+
+# --limpiar y --cola juntos no tienen sentido y se rechazan en vez de hacer algo
+# a medias: --limpiar borra el grafo entero, y despues proyectar SOLO lo que la
+# cola tiene pendiente lo dejaria practicamente vacio. Quien lo teclee esta
+# pidiendo dos cosas contrarias, y adivinar cual queria seria peor que pararse.
+if [ "$LIMPIAR" = "si" ] && [ "$SOLO_COLA" = "1" ]; then
+    echo "--limpiar y --cola no se pueden usar juntos: --limpiar borra el grafo" >&2
+    echo "y --cola solo proyectaria lo pendiente, dejandolo casi vacio." >&2
+    exit 2
+fi
 
 # cypher-shell se llama tantas veces que la lista de argumentos va aqui una vez.
 # --format plain porque la salida la lee una persona o un pipe, no una tabla
@@ -114,11 +135,55 @@ fi
 # cypher-shell lo cargaria contento, y el grafo quedaria con la mitad de las
 # relaciones sin que nadie se entere. Es el peor final posible, porque parece
 # que funciono.
-echo "==> extrayendo de PostgreSQL ($BASE) y cargando en Neo4j"
+if [ "$SOLO_COLA" = "1" ]; then
+    echo "==> extrayendo SOLO lo pendiente en la cola ($BASE) y cargando en Neo4j"
+else
+    echo "==> extrayendo de PostgreSQL ($BASE) y cargando en Neo4j"
+fi
+
 docker exec -i mesh-postgres \
-    psql -U "$DB_USER" -d "$BASE" -qtAX -v ON_ERROR_STOP=1 -f - \
+    psql -U "$DB_USER" -d "$BASE" -qtAX -v ON_ERROR_STOP=1 -v solo_cola="$SOLO_COLA" -f - \
     < "$RAIZ/etl/extraer_grafo.sql" \
     | cypher
+
+
+# ============================================================
+# 3b. Vaciar la cola del outbox
+# ============================================================
+# La cola es `evento_grafo`, de la migracion 015: un trigger sobre `resena`
+# encola el id de cada resena que se toca, en la misma transaccion.
+#
+# Se marca DESPUES de cargar y nunca antes. Si el paso de arriba falla, el pipe
+# muere, este bloque no llega a correr y los eventos siguen pendientes, que es
+# exactamente lo que tiene que pasar: un evento que se marca procesado sin
+# haberse proyectado es una resena que nadie va a volver a mirar nunca.
+#
+# En modo completo se marca TODO lo pendiente, y eso es correcto por definicion:
+# una proyeccion completa acaba de aplicar el estado actual de todas las
+# resenas, asi que no queda nada de la cola por hacer. Sin esto, una base recien
+# creada quedaria con sus 90 eventos pendientes para siempre sobre un grafo
+# perfectamente correcto, y la conciliacion los reportaria como si faltara algo.
+#
+# El `procesado_en IS NULL` del WHERE no es de adorno: sin el, cada corrida
+# reescribiria la fecha de todo el historico y se perderia cuando se proyecto
+# cada cosa.
+#
+# Si la tabla no existe (una base que todavia no aplico la 015) esto no es un
+# error: se dice y se sigue.
+echo "==> vaciando la cola del outbox"
+docker exec -i mesh-postgres \
+    psql -U "$DB_USER" -d "$BASE" -qtAX -v ON_ERROR_STOP=1 <<'FIN'
+SELECT (to_regclass('public.evento_grafo') IS NOT NULL) AS hay_cola \gset
+\if :hay_cola
+    WITH marcados AS (
+        UPDATE evento_grafo SET procesado_en = now()
+         WHERE procesado_en IS NULL
+        RETURNING 1)
+    SELECT count(*) || ' evento(s) marcados como proyectados' FROM marcados;
+\else
+    SELECT 'la tabla evento_grafo no existe todavia (falta la migracion 015): nada que vaciar';
+\endif
+FIN
 
 
 # ============================================================

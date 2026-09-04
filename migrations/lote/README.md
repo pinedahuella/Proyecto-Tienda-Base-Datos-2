@@ -402,7 +402,25 @@ producto, de una sola fuente o de dos) queda planteada en
 
 ## Como se deshace un lote
 
-No hay bandera para esto. Se hace a mano, y el orden importa: todas las llaves
+**Con `-Borrar`, que es lo que hay que usar.** Esta seccion decia "no hay
+bandera para esto" y era falso desde que se escribio la bandera; corregido el
+2026-09-03.
+
+```powershell
+.\arrancar.ps1 -Borrar 500                 los 500 generados MAS NUEVOS
+.\arrancar.ps1 -Borrar todos               todos los generados
+.\arrancar.ps1 -Borrar todos -Semilla 7    solo el lote de esa semilla
+```
+
+La bandera hace **las dos mitades**: corre `borrar_lote.sql` contra PostgreSQL y
+despues reconcilia MongoDB, que es justo la mitad que se olvida al hacerlo a
+mano. Un producto generado que alguien ya compro se SALTA y lo dice, en vez de
+abortar el lote entero. El detalle esta en `comandos.txt`, en BORRAR UN LOTE.
+
+### Y a mano, que sigue haciendo falta saber
+
+Se documenta igualmente porque es lo que la bandera hace por dentro, y porque el
+orden es lo que hay que entender si algun dia falla a la mitad: todas las llaves
 foraneas de este tramo son `ON DELETE RESTRICT`, asi que una borrada fuera de
 orden falla en vez de arrastrar.
 

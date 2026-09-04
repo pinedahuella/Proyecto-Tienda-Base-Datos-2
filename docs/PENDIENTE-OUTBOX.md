@@ -1,7 +1,31 @@
 # PENDIENTE: el outbox para el grafo
 
-**Nada de esto esta implementado.** Es el diseno, escrito para que quien lo tome
--- cualquiera de los tres -- no tenga que volver a pensarlo.
+> ## OJO ANTES DE LEER: la cola YA EXISTE, y NO tiene la forma de este documento
+>
+> **Al 2026-09-03 por la noche.** Este documento era el diseno y decia "nada de
+> esto esta implementado". Eso ya no es cierto:
+>
+> - La tabla y el trigger estan en **`migrations/015_outbox_grafo.sql`**, aplicados.
+> - `etl/cargar_grafo.sh` vacia la cola al terminar, y tiene un modo
+>   **`--cola`** que proyecta solo lo pendiente.
+> - Falta el worker, la conciliacion y el aviso de "ultima sincronizacion", y
+>   **los lleva Jose David** (su plan esta en
+>   `backend/elementos Generales/plan pendiente/outbox-grafo.md`).
+>
+> **Y el esquema que se construyo NO es el de aqui abajo.** Se le quitaron dos
+> columnas a proposito, asi que quien lea la seccion del esquema de este
+> documento va a ver dos campos que en la base no existen:
+>
+> | Lo que este documento proponia | Que paso |
+> |---|---|
+> | `entidad varchar(30)` | **quitada.** El trigger siempre escribiria `'resena'`. Una columna con un solo valor posible no informa de nada |
+> | `operacion varchar(10)` | **quitada.** El alta y la baja se INFIEREN releyendo la resena: si la fila existe es alta, si no existe es baja. Guardarla congela un "que paso" que puede contradecir a la base |
+> | `id_entidad` | se llama **`id_resena`**, que es lo que de verdad guarda |
+>
+> **La fuente de verdad del esquema es `migrations/015_outbox_grafo.sql`**, y su
+> cabecera explica cada decision. Lo de aqui abajo se conserva porque el
+> RAZONAMIENTO sigue valiendo entero -- el porque de un outbox, las cinco
+> trampas del worker, la conciliacion -- pero el DDL concreto ya caduco.
 
 **No es de la Entrega 2.** No da un solo punto ahi. Da 5 en la Entrega 3, y eso
 esta explicado al final.
@@ -18,7 +42,8 @@ ultima corrida no esta en Neo4j. El panel de fraude la ignora sin ninguna senal:
 ensena un analisis correcto sobre datos incompletos, que es peor que fallar.
 
 **2. El ETL relee TODO cada vez.** Es idempotente (`MERGE`), pero no incremental:
-con 86 resenas tarda 14 segundos, y ese numero crece con el catalogo aunque no
+con 90 resenas tarda 14 segundos (medidos con 86, que era el numero de
+entonces), y ese numero crece con el catalogo aunque no
 haya cambiado nada. Medido el 2026-08-29.
 
 ---
@@ -207,7 +232,7 @@ viejo es uno que ya fallo varias veces.
 
 ### 5. El dia que se enciende, lo viejo no tiene eventos
 
-Las 86 resenas que ya existen nunca dispararon el trigger. Hay dos salidas:
+Las 90 resenas que ya existen nunca dispararon el trigger. Hay dos salidas:
 
 - `./etl/cargar_grafo.sh --limpiar` una vez, y de ahi en adelante la cola. Es lo
   mas simple y funciona porque el grafo es una proyeccion.

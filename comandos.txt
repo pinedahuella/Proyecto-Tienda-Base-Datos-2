@@ -239,6 +239,20 @@ O directo desde Git Bash, no desde PowerShell:
 Correrlo dos veces no duplica nada: cada documento se escribe con su mismo
 identificador. Lo explicado esta en etl/README.md.
 
+Son TRES etapas. La tercera refresca la nota de cada producto, que son las
+estrellas del catalogo, y se puede correr sola:
+
+  bash etl/correr.sh --notas
+
+Tarda 4 segundos en vez de 13, y es lo que hay que correr cuando lo unico que
+cambio son resenas. No trae productos nuevos: para eso van las tres.
+
+Esa etapa existe porque la nota de los productos publicados desde el panel del
+vendedor no la puede calcular el ETL normal: esos productos no tienen fila en
+PostgreSQL y la consulta grande no pasa por ellos nunca. Se comprueba con:
+
+  bash pruebas/notas.sh
+
 
 VER MONGO EN EL NAVEGADOR
 --------------------------------------------------
