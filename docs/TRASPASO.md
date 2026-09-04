@@ -321,6 +321,20 @@ Un cast de las lineas del carrito a `LineaPedido` compilaba limpio y ensenaba
 
 ---
 
+### El precio del carrito ya avisa antes de cobrar
+
+`POST /carrito/comprar` acepta `lineas_precio_visto`: el frontend manda el
+precio que ENSENO y el backend lo compara contra el de hoy **dentro de la misma
+peticion que cobra**. Si no cuadra, no cobra nada y contesta `comprado: false`
+con los avisos; reenviar con `confirmar_cambios: true` acepta el nuevo.
+
+Que la comparacion viaje en la misma peticion es lo que la hace valer: entre
+mirar y cobrar no queda ninguna ventana. Comprobarlo desde el frontend antes de
+llamar dejaba milisegundos abiertos, y se probo asi antes de cambiarlo.
+
+El precio todavia NO se congela -- si se confirma, se cobra el de hoy -- pero ya
+no se cobra en silencio, que era el dano. Ver el pendiente 1.
+
 ## Que falta
 
 En `docs/PENDIENTES.md`, con su urgencia. Lo mas grave: **el precio se congela al

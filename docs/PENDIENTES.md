@@ -7,7 +7,7 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 
 | # | Que | De quien | Cuanto | Urgencia |
 |---|---|---|---|---|
-| 1 | El precio se congela al PAGAR, no al agregar | **falta la mitad de Jose David** | ~1 h | **alta: es un cobro incorrecto**. El frontend ya avisa si el precio se mueve mientras el checkout esta abierto, pero eso es un parche: no cierra la carrera |
+| 1 | El precio se congela al PAGAR, no al agregar | **cubierto por otro camino** | -- | media: ya no cobra en silencio, pero el precio sigue sin congelarse |
 | ~~2~~ | ~~La semilla no respalda con compras las 86 resenas~~ | -- | -- | **CERRADO el 2026-08-30** |
 | ~~3~~ | ~~`Carrito.svelte` quedo muerto~~ | -- | -- | **CERRADO el 2026-08-30** |
 | 4 | El grafo se queda viejo y el ETL relee todo | Meme | ver su doc | baja |
@@ -93,8 +93,49 @@ pantalla es `frontend/src/lib/PanelReportes.svelte`, hecha el 2026-08-30.
 
 # 1. El precio se congela al PAGAR, no al agregar
 
-**Es lo mas urgente de esta lista porque es un cobro incorrecto**, no un detalle
-de presentacion.
+## AL DIA 2026-09-03: el dano ya esta cubierto, por un camino distinto
+
+Lo que hacia grave a este pendiente era el SILENCIO: la pantalla ensenaba un
+total, la persona decidia con ese numero, y si el vendedor lo movia antes del
+clic se le cobraba otro sin que nada lo dijera. **Eso ya no pasa.**
+
+Jose David no siguio el camino que esta seccion proponia -- guardar el
+`id_precio_historial` en el carrito de Redis -- y eligio otro que resuelve el
+mismo dano sin tocar la forma del carrito:
+
+`POST /carrito/comprar` acepta `lineas_precio_visto`, una lista de
+`{ id_oferta, precio_visto }`. El frontend manda el precio que ENSENO, y el
+backend lo compara contra el de hoy **dentro de la misma peticion que cobra**.
+Si no cuadra, no cobra nada -- ni Redis, ni PostgreSQL, ni Mongo -- y contesta
+`comprado: false` con la lista de `avisos`. Reenviar con
+`confirmar_cambios: true` acepta el precio de hoy.
+
+Que la comparacion pase dentro del mismo viaje es lo que la hace valer: entre
+mirar y cobrar no queda ninguna ventana. Una comprobacion hecha desde el
+frontend antes de llamar dejaba milisegundos abiertos.
+
+**La mitad del frontend YA esta** (`Checkout.svelte` manda el campo y pinta los
+avisos, con el texto distinto segun el modo porque en el carrito se cobra el de
+hoy y en el pedido el congelado). Probado en el navegador: con el checkout
+abierto en Q1,103.62 se sube el precio a Q2,500 y al pagar no cobra, avisa.
+
+### Lo que sigue faltando, y por que ya no es urgente
+
+El precio **sigue sin congelarse**. Si la persona confirma, se le cobra el de
+hoy, no el que vio. La migracion 013 deja hacerlo desde la base y lo comprueba
+`redis/prueba_carrito.sh`, pero el carrito de Redis todavia no manda el
+`id_precio_historial`.
+
+La diferencia entre lo que hay y lo que falta es la diferencia entre **avisar**
+y **respetar**: hoy se le dice a la persona que el precio cambio y se le deja
+decidir; con la 013 conectada se le podria cobrar el que se le prometio.
+
+Lo de abajo se deja escrito entero porque es el camino que cierra eso.
+
+---
+
+**Era lo mas urgente de esta lista porque era un cobro incorrecto**, no un
+detalle de presentacion.
 
 ## Que pasa
 
