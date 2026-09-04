@@ -1109,6 +1109,54 @@ function Correr-EtlGrafo($limpiar) {
     }
     Ok "grafo cargado desde PostgreSQL"
 
+    # --- 5. Vaciar la cola del outbox ---
+    # `evento_grafo` es la cola de la migracion 015: un trigger sobre `resena`
+    # encola el id de cada resena que se toca, en la misma transaccion.
+    #
+    # Esto hace falta AQUI y no solo en etl/cargar_grafo.sh porque esta funcion
+    # NO llama a ese script -- repite sus pasos en linea, por las razones que
+    # explica su cabecera. Sin este bloque, un arranque normal dejaria la base
+    # recien creada con sus 90 eventos pendientes para siempre sobre un grafo
+    # perfectamente correcto: la semilla los encola (el trigger ya existe
+    # cuando migrations/datos/ corre) y nadie los marcaria nunca.
+    #
+    # Va DESPUES de cargar, nunca antes: si la carga falla el script ya salio
+    # con exit 1 mas arriba y los eventos siguen pendientes, que es lo correcto.
+    # Un evento marcado como hecho sin haberse proyectado es una resena que
+    # nadie va a volver a mirar.
+    #
+    # Y se marca TODO lo pendiente porque esta carga fue COMPLETA: acaba de
+    # aplicar el estado actual de todas las resenas, asi que no queda nada de la
+    # cola por hacer.
+    #
+    # Si la tabla no existe (una base que todavia no aplico la 015) no es un
+    # error: se calla y sigue. Por eso el to_regclass en vez de un try/catch.
+    $sqlCola = @"
+SELECT (to_regclass('public.evento_grafo') IS NOT NULL) AS hay_cola \gset
+\if :hay_cola
+    WITH marcados AS (
+        UPDATE evento_grafo SET procesado_en = now()
+         WHERE procesado_en IS NULL
+        RETURNING 1)
+    SELECT count(*) FROM marcados;
+\else
+    SELECT 0;
+\endif
+"@
+    $archivoCola = Join-Path $tmp "vaciar_cola.sql"
+    Set-Content -Path $archivoCola -Value $sqlCola -Encoding utf8
+    docker cp "$archivoCola" "mesh-postgres:/tmp/vaciar_cola.sql" 2>&1 | Out-Null
+
+    $marcados = (docker exec mesh-postgres psql -U $usuario -d $base -qtAX -f /tmp/vaciar_cola.sql 2>&1 | Out-String).Trim()
+    if ($LASTEXITCODE -eq 0 -and $marcados -match '^\d+$') {
+        Ok "cola del outbox vaciada ($marcados evento(s) marcados como proyectados)"
+    } else {
+        # No se aborta el arranque por esto. El grafo esta cargado y correcto;
+        # lo unico que queda mal es que la cola diga que falta algo que no
+        # falta, y eso se arregla con la proxima corrida del ETL.
+        Aviso "   No se pudo vaciar la cola del outbox. El grafo esta cargado igual."
+    }
+
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
 }
 

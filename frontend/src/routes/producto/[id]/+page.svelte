@@ -75,7 +75,27 @@
 		/** La oferta de la cuenta de la tienda: es la que se ensena por defecto. */
 		es_tienda: boolean;
 		precio: string;
+		/**
+		 * Las unidades segun PostgreSQL.
+		 *
+		 * OJO: en una oferta con la venta relampago ABIERTA este numero **queda
+		 * congelado** desde que se abrio. El real es `stock_disponible`. Usar
+		 * este a secas es lo que hacia que la ficha dijera "7 unidades" y al
+		 * pulsar Agregar contestara que hay 0.
+		 */
 		stock: number;
+		/** Si esta oferta esta en venta relampago (migracion 014). */
+		es_inventario_limitado: boolean;
+		/**
+		 * Las unidades que quedan AHORA, leidas del contador de Redis.
+		 *
+		 * Solo viene con numero cuando `es_inventario_limitado` es true. Es
+		 * `null` en una oferta normal, en una cuya venta ya cerro, y tambien
+		 * **cuando Redis no contesto**: los tres casos se ven igual a proposito,
+		 * y en los tres el numero que hay que ensenar es `stock`. Por eso se lee
+		 * siempre por `unidades()` y nunca directo.
+		 */
+		stock_disponible: number | null;
 	}
 
 	interface Producto {
@@ -257,6 +277,62 @@
 		if (producto.stock_total > 0) return 'hay';
 		return producto.total_ofertas === 0 ? 'sin-oferta' : 'agotado';
 	});
+
+	/**
+	 * Cuantas unidades tiene DE VERDAD una oferta, ahora mismo.
+	 *
+	 * Es la unica forma de leer el stock en esta pantalla, y existe porque hay
+	 * DOS numeros y el que se ve primero es el equivocado. Con la venta
+	 * relampago abierta, `oferta.stock` de PostgreSQL queda congelado en el
+	 * valor que tenia al abrirla, y quien manda es el contador de Redis, que
+	 * llega en `stock_disponible`.
+	 *
+	 * Esto no es teorico y por eso esta escrito asi. Medido: una oferta con la
+	 * venta abierta y las 7 unidades ya apartadas por otra persona seguia
+	 * diciendo "7 unidades" con el boton Agregar habilitado, y al pulsarlo
+	 * contestaba "pediste 1 y hay 0 disponibles". La persona no hizo nada mal:
+	 * la pantalla le enseno un numero que no era.
+	 *
+	 * `stock_disponible` es `null` en tres casos que se tratan igual a
+	 * proposito -- oferta normal, venta ya cerrada, y Redis sin contestar --
+	 * porque en los tres el numero bueno es el de PostgreSQL. Un `??` los cubre
+	 * los tres sin tener que distinguirlos.
+	 */
+	function unidades(o: Oferta): number {
+		return o.stock_disponible ?? o.stock;
+	}
+
+	/**
+	 * Si el numero que se esta ensenando sale de Redis y no de PostgreSQL.
+	 *
+	 * Sirve para poner la insignia de venta relampago SOLO cuando el dato es de
+	 * verdad el vivo. Una oferta marcada en PostgreSQL cuya venta ya vencio
+	 * llega con `es_inventario_limitado: true` y `stock_disponible: null` (es
+	 * el pendiente 7), y ahi la insignia mentiria: no hay ninguna venta
+	 * abierta. Se mira el dato, no la marca.
+	 */
+	function enVentaRelampago(o: Oferta): boolean {
+		return o.es_inventario_limitado && o.stock_disponible !== null;
+	}
+
+	// ------------------------------------------------------ las tres partes
+	/**
+	 * Que pestana se esta mirando. Arranca en 'comprar' a proposito: es a lo
+	 * que se entra a un producto, y esconderlo detras de un clic seria cambiar
+	 * un problema por otro peor.
+	 */
+	let parte = $state<'comprar' | 'detalles' | 'resenas'>('comprar');
+
+	/**
+	 * Cuantas resenas tiene, para el numero de la pestana. Lo reporta la propia
+	 * seccion de resenas, que lo cuenta contra PostgreSQL.
+	 *
+	 * `null` mientras no ha llegado, y eso NO es lo mismo que cero: un cero
+	 * dicho antes de tiempo afirma "no tiene ninguna" sobre un producto que
+	 * puede tener cuatro. Mientras es null no se pinta nada.
+	 */
+	let totalResenas = $state<number | null>(null);
+
 
 	// ------------------------------------------------------------- al pedido
 	/**
@@ -488,6 +564,18 @@
 	let indiceVisible = $derived(fotos.length === 0 ? 0 : Math.min(elegida, fotos.length - 1));
 	let deProducto = $derived(agrupadas(producto?.caracteristicas_adicionales));
 	let propias = $derived(agrupadas(producto?.caracteristicas_personalizadas));
+
+	/**
+	 * Si hay algo que ensenar en la pestana de detalles. Sin esto, un producto
+	 * sin caracteristicas dejaria una pestana que al pulsarla no ensena nada,
+	 * que es peor que no tenerla.
+	 *
+	 * Va DEBAJO de `deProducto` y `propias` y no arriba con el resto del estado
+	 * de las pestanas: son `$derived` y en TypeScript un `let` no se puede leer
+	 * antes de su declaracion. Puesto arriba compila el .svelte y falla el
+	 * chequeo de tipos con "used before its declaration".
+	 */
+	let hayDetalles = $derived(deProducto.length > 0 || propias.length > 0);
 </script>
 
 <svelte:head>
@@ -600,30 +688,80 @@
 				</div>
 			</div>
 
-			{#if deProducto.length > 0}
-				<section>
-					<h2>Detalles</h2>
-					<dl class="ficha">
-						{#each deProducto as c (c.nombre)}
-							<div><dt>{c.nombre}</dt><dd>{c.valor}</dd></div>
-						{/each}
-					</dl>
-				</section>
-			{/if}
+			<!--
+				Las tres partes de la ficha, en pestanas.
 
-			{#if propias.length > 0}
-				<section>
-					<h2>Otros datos</h2>
-					<dl class="ficha">
-						{#each propias as c (c.nombre)}
-							<div><dt>{c.nombre}</dt><dd>{c.valor}</dd></div>
-						{/each}
-					</dl>
-				</section>
-			{/if}
+				Antes era una sola columna larguisima: foto, precio, detalles,
+				presentaciones y las resenas hasta el fondo. El sintoma de que
+				estaba mal es que alguien del propio equipo abrio la pagina y no
+				encontro las resenas: si el que hizo el producto no las ve, quien
+				entra por primera vez tampoco.
 
-			<section>
-				<h2>Presentaciones</h2>
+				"Comprar" es la primera y la que sale por defecto a proposito. Es a
+				lo que se viene, y meterla detras de un clic seria arreglar un
+				problema creando otro peor.
+			-->
+			<div class="pestanas" role="tablist" aria-label="Secciones del producto">
+				<button
+					type="button"
+					role="tab"
+					id="tab-comprar"
+					aria-controls="panel-comprar"
+					aria-selected={parte === 'comprar'}
+					class="pestana"
+					class:elegida={parte === 'comprar'}
+					onclick={() => (parte = 'comprar')}
+				>
+					Comprar
+					<span class="cuenta">{producto.variantes.length}</span>
+				</button>
+
+				{#if hayDetalles}
+					<button
+						type="button"
+						role="tab"
+						id="tab-detalles"
+						aria-controls="panel-detalles"
+						aria-selected={parte === 'detalles'}
+						class="pestana"
+						class:elegida={parte === 'detalles'}
+						onclick={() => (parte = 'detalles')}
+					>
+						Detalles
+					</button>
+				{/if}
+
+				<button
+					type="button"
+					role="tab"
+					id="tab-resenas"
+					aria-controls="panel-resenas"
+					aria-selected={parte === 'resenas'}
+					class="pestana"
+					class:elegida={parte === 'resenas'}
+					onclick={() => (parte = 'resenas')}
+				>
+					Resenas
+					<!-- El numero sale de la propia seccion de resenas, que lo cuenta
+					     contra PostgreSQL. NO de `resenas_total` del documento de
+					     Mongo, que es la copia del ETL y esta vieja hasta la proxima
+					     corrida (pendiente 6). Mientras no ha llegado no se pinta
+					     nada, que es distinto de pintar un cero. -->
+					{#if totalResenas !== null}
+						<span class="cuenta">{totalResenas}</span>
+					{/if}
+				</button>
+			</div>
+
+			<div
+				class="panel"
+				id="panel-comprar"
+				role="tabpanel"
+				tabindex="0"
+				aria-labelledby="tab-comprar"
+				hidden={parte !== 'comprar'}
+			>
+				<h2 class="oculto">Presentaciones</h2>
 
 				{#each producto.variantes as v (v.id_producto_variante)}
 					<!-- Las ofertas de esta presentacion, de la mas barata a la mas
@@ -682,10 +820,27 @@
 
 										<div class="cuanto">
 											<strong class="precio-v">{quetzales(Number(o.precio))}</strong>
-											{#if o.stock === 0}
+											<!-- El numero sale de unidades(), NUNCA de o.stock. Ver su
+											     comentario: con la venta relampago abierta o.stock esta
+											     congelado y ensenarlo es prometer unidades que no hay. -->
+											{#if unidades(o) === 0}
 												<span class="stock-v agotado">Agotada</span>
 											{:else}
-												<span class="stock-v">{o.stock} {o.stock === 1 ? 'unidad' : 'unidades'}</span>
+												<span class="stock-v">
+													{unidades(o)}
+													{unidades(o) === 1 ? 'unidad' : 'unidades'}
+												</span>
+											{/if}
+											<!-- Y se dice POR QUE ese numero se mueve solo. Sin esto, una
+											     oferta que pasa de 7 a 3 mientras se mira parece un fallo
+											     de la pantalla. -->
+											{#if enVentaRelampago(o)}
+												<span
+													class="relampago"
+													title="Venta por tiempo limitado: estas unidades se apartan al agregarlas al carrito"
+												>
+													Venta relampago
+												</span>
 											{/if}
 										</div>
 
@@ -701,12 +856,12 @@
 													step="1"
 													bind:value={cantidades[Number(o.id_oferta)]}
 													placeholder="1"
-													disabled={o.stock === 0}
+													disabled={unidades(o) === 0}
 												/>
 												<button
 													type="button"
 													onclick={() => alPedido(v, o)}
-													disabled={agregando !== '' || o.stock === 0}
+													disabled={agregando !== '' || unidades(o) === 0}
 												>
 													{agregando === o.id_oferta ? 'Agregando...' : 'Agregar'}
 												</button>
@@ -756,15 +911,74 @@
 						{/if}
 					</article>
 				{/each}
-			</section>
+			</div>
+
+			{#if hayDetalles}
+				<div
+					class="panel"
+					id="panel-detalles"
+					role="tabpanel"
+					tabindex="0"
+					aria-labelledby="tab-detalles"
+					hidden={parte !== 'detalles'}
+				>
+					{#if deProducto.length > 0}
+						<h2>Detalles</h2>
+						<dl class="ficha">
+							{#each deProducto as c (c.nombre)}
+								<div><dt>{c.nombre}</dt><dd>{c.valor}</dd></div>
+							{/each}
+						</dl>
+					{/if}
+
+					{#if propias.length > 0}
+						<h2>Otros datos</h2>
+						<dl class="ficha">
+							{#each propias as c (c.nombre)}
+								<div><dt>{c.nombre}</dt><dd>{c.valor}</dd></div>
+							{/each}
+						</dl>
+					{/if}
+				</div>
+			{/if}
 		{/if}
-		<!-- Las resenas van al final de la ficha y no arriba: quien entra a un
-		     producto viene a ver que es y a que precio, y eso es lo de arriba. La
-		     opinion se busca despues, cuando ya se decidio que interesa.
-		     Se pintan solo con el producto cargado -- sin id no hay a que pedirle
-		     resenas, y montarlo antes dispararia una peticion a /productos/NaN. -->
+		<!--
+			Las resenas ya no van "al final de la ficha": ahora son una pestana,
+			porque al final del todo no las encontraba nadie.
+
+			Se MONTAN siempre, aunque su pestana no este elegida, y se esconden con
+			`hidden` en vez de con un `{#if}`. Son dos razones y las dos importan:
+
+			  1. Es lo que hace posible el numero de la pestana. Con un `{#if}` la
+			     seccion no existiria hasta el primer clic, o sea que el contador
+			     solo aparecia DESPUES de entrar -- justo cuando ya no sirve para
+			     invitarte a entrar.
+			  2. Cambiar de pestana no vuelve a pedir nada. Con `{#if}` cada ida y
+			     vuelta desmonta el componente y repite las peticiones de resenas.
+
+			El coste es el que ya habia: la peticion de resenas sale al cargar la
+			ficha, igual que cuando esto vivia abajo del todo. No es un pedido de
+			mas.
+
+			Se pintan solo con el producto cargado -- sin id no hay a que pedirle
+			resenas, y montarlo antes dispararia una peticion a /productos/NaN.
+		-->
 		{#if producto}
-			<Resenas idProducto={id} {haySesion} {correoSesion} />
+			<div
+				class="panel"
+				id="panel-resenas"
+				role="tabpanel"
+				tabindex="0"
+				aria-labelledby="tab-resenas"
+				hidden={parte !== 'resenas'}
+			>
+				<Resenas
+					idProducto={id}
+					{haySesion}
+					{correoSesion}
+					alContar={(n) => (totalResenas = n)}
+				/>
+			</div>
 		{/if}
 	</div>
 </main>
@@ -979,8 +1193,73 @@
 
 	/* ---------- ficha de caracteristicas ---------- */
 
-	section {
+	/* ---------- las tres pestanas de la ficha ---------- */
+
+	/* Mismas clases y mismo aspecto que las pestanas de estado del panel del
+	   vendedor (`OfertasVendedor.svelte`). No es por ahorrar CSS: es que una
+	   pestana se aprende una vez y despues se reconoce, y dos formas distintas
+	   de lo mismo en la misma aplicacion obligan a aprenderla dos veces. */
+	.pestanas {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.4rem;
+		margin: 0 0 1.4rem;
+		padding-bottom: 0.9rem;
+		border-bottom: 1px solid var(--linea);
+	}
+
+	.pestana {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.4rem;
+		padding: 0.35rem 0.9rem;
+		font-size: 0.95rem;
+		background: transparent;
+		border: 1px solid var(--linea);
+		border-radius: 999px;
+		cursor: pointer;
+		color: var(--texto);
+	}
+
+	.pestana.elegida {
+		background: var(--indigo-cl);
+		border-color: var(--indigo);
+		color: var(--indigo);
+	}
+
+	.cuenta {
+		font-size: 0.78rem;
+		color: var(--gris);
+	}
+
+	.pestana.elegida .cuenta {
+		color: var(--indigo);
+	}
+
+	/* El panel escondido se apaga aqui y no se deja al `[hidden]` del
+	   navegador a secas. La regla `section { margin-bottom }` de arriba no pone
+	   `display`, asi que hoy el `hidden` funcionaria solo -- pero el dia que
+	   alguien le ponga `display: block` a `section`, los tres paneles se verian
+	   a la vez y nadie relacionaria una cosa con la otra. Se deja explicito. */
+	.panel[hidden] {
+		display: none;
+	}
+
+	/* El aire de abajo lo tenia la regla `section`, que quedo sin uso cuando los
+	   tres paneles pasaron de <section> a <div> (Svelte avisa de que `tabpanel`
+	   es un rol interactivo y no va sobre un <section>). Se mueve aqui para no
+	   perderlo. */
+	.panel {
 		margin-bottom: 2.5rem;
+	}
+
+	/* Un panel es el destino de su pestana, asi que puede recibir el foco. Sin
+	   esto, quien navega con el teclado pulsa "Detalles" y el foco se va al
+	   siguiente boton sin pasar por el contenido que acaba de abrir. El contorno
+	   se quita porque el panel ocupa la pantalla entera y un recuadro alrededor
+	   de todo no senala nada. */
+	.panel:focus {
+		outline: none;
 	}
 
 	h2 {
@@ -1061,6 +1340,43 @@
 
 	.stock-v.sin-dato {
 		color: var(--gris-2);
+	}
+
+	/* ---------- la venta relampago ---------- */
+
+	/* El mismo naranja de CarritoRedis.svelte y del panel del vendedor, y por
+	   la misma razon: es la misma venta vista desde los tres sitios, y tres
+	   naranjas distintos la harian parecer tres cosas.
+
+	   Naranja y no rojo: el rojo de .agotado tiene que seguir siendo el color
+	   que solo sale cuando no se puede comprar. Una venta relampago abierta no
+	   es un problema, es una condicion de la compra. */
+	/* Van en `main`, que es la raiz de esta pantalla. NO en `.ficha`, que aqui
+	   es la lista de caracteristicas (`<dl class="ficha">`) y dejaria la
+	   insignia sin colores fuera de esa lista. */
+	main {
+		--relampago-tinta: #7c3a00;
+		--relampago-fondo: #ffe8cc;
+		--relampago-linea: #ffc98a;
+	}
+
+	:global(html[data-tema='oscuro']) main {
+		--relampago-tinta: #f0b070;
+		--relampago-fondo: #3a2410;
+		--relampago-linea: #6b4520;
+	}
+
+	.relampago {
+		display: inline-block;
+		font-size: 0.72rem;
+		font-weight: 600;
+		line-height: 1.2;
+		padding: 1px 7px;
+		border-radius: 999px;
+		white-space: nowrap;
+		color: var(--relampago-tinta);
+		background: var(--relampago-fondo);
+		border: 1px solid var(--relampago-linea);
 	}
 
 	/* ---------- agregar al pedido ---------- */

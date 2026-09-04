@@ -77,12 +77,15 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `012_comprar_carrito.sql` | `comprar_carrito()`: crear el pedido, meterle todas sus lineas y comprarlo en una sola llamada |
 | `013_precio_del_carrito.sql` | `agregar_linea()` acepta un `id_precio_historial` y lo usa en vez de buscar el vigente, validando que sea de esa oferta |
 | `014_inventario_limitado.sql` | `oferta.es_inventario_limitado`: que ofertas se venden con el mecanismo de Redis en vez del stock con `FOR UPDATE` |
+| `015_outbox_grafo.sql` | `evento_grafo` y su trigger sobre `resena`: la cola que mantiene el grafo de Neo4j al dia |
 
-Las cuatro ultimas son de la Entrega 2 y merecen una linea mas de la que caben
+Las cinco ultimas son de la Entrega 2 y merecen una linea mas de la que caben
 en la tabla.
 
 **La 011 cierra el diagrama.** Con `comentario`, `resena` y `likes` las 42 cajas
-del ER estan construidas; antes eran 39. Y trae un cambio de modelo que hay que
+del ER estan construidas; antes eran 39. (La base tiene 43 tablas desde la 015,
+pero `evento_grafo` NO es del ER: no modela nada del negocio, es la cola de
+sincronizacion con Neo4j.) Y trae un cambio de modelo que hay que
 leer en `docs/base-de-datos.md`: la resena cuelga del **producto y del
 vendedor**, no de la oferta como se habia escrito en la Entrega 1.
 
@@ -107,6 +110,33 @@ ocupa una entrada por oferta y el planificador lo descarta.
 
 Que valga true NO significa que haya una venta abierta ahora mismo. Eso solo lo
 sabe Redis, y confundir las dos preguntas es el error caro.
+
+**La 015 es una cola, y su valor esta en DONDE se escribe.** `evento_grafo`
+guarda que resenas faltan por llevar a Neo4j, y la llena un trigger sobre
+`resena` que corre **en la misma transaccion** que la resena. Esa palabra es
+todo el diseno: la alternativa obvia -- que el backend le escriba a Neo4j
+despues de commitear -- tiene un hueco que no se puede cerrar, porque si el
+proceso se cae entre el `COMMIT` y esa escritura la resena existe, no esta en el
+grafo, y no queda constancia de que falte.
+
+Tres cosas suyas que parecen errores y no lo son, y estan escritas enteras en la
+cabecera del archivo:
+
+- **No tiene llave foranea a `resena`**, y no puede tenerla: el trigger dispara
+  tambien en el `DELETE`, o sea que insertaria una fila que apunta a un id
+  recien borrado. Con FK, borrar una resena seria imposible. La migracion lo
+  comprueba: falla si alguien le agrega una FK.
+- **No guarda `entidad` ni `operacion`**, que es lo que proponia
+  `docs/PENDIENTE-OUTBOX.md`. `entidad` tendria un solo valor posible; y el alta
+  o la baja se INFIEREN releyendo la resena, que es mas robusto que guardar un
+  'alta' viejo que puede contradecir a la base.
+- **Su indice es PARCIAL** (`WHERE procesado_en IS NULL`), porque lo procesado
+  se acumula para siempre y la cola no lo mira nunca.
+
+La cola no se siembra en ningun sitio y no hace falta: esta migracion corre
+antes que `migrations/datos/`, asi que cuando la semilla inserta sus resenas el
+trigger ya existe y la cola se llena sola. Se vacia con `bash etl/cargar_grafo.sh`,
+que al terminar marca como proyectado todo lo que hubiera pendiente.
 
 **La 012 no reemplaza a la 007: la COMPONE.** `comprar_carrito()` llama por
 dentro a las mismas `crear_pedido`, `agregar_linea` y `comprar_pedido`, en vez
@@ -142,10 +172,15 @@ Aqui hay una diferencia de fondo con el esquema, y es un hecho medido, no una
 sospecha: **`datos/001_catalogo.sql` NO es idempotente.** Correrlo por segunda
 vez sobre una base que ya lo tiene FALLA.
 
-De sus **20 `INSERT` de primer nivel, 17 no llevan ninguna guardia** -- ni
-`ON CONFLICT` ni `WHERE NOT EXISTS`. Los tres guardados son los primeros
+De sus **26 `INSERT` de primer nivel, 17 no llevan ninguna guardia** -- ni
+`ON CONFLICT` ni `WHERE NOT EXISTS`. Se recuentan mirando cada `INSERT` entero
+y no con un `grep -c "NOT EXISTS"`, que cuenta de mas porque los hay tambien
+dentro de los bloques `DO`; el total sale de
+`grep -c "^INSERT INTO" migrations/datos/001_catalogo.sql`, que es lo unico que
+no caduca. De los 9 guardados, tres son los primeros
 (`usuarios`, `direcciones` y `direccion_historial`), y lo estan por otro motivo:
-son las tablas que tambien escribe la aplicacion. El bloque social del final
+son las tablas que tambien escribe la aplicacion. Los otros seis son los del
+tramo del anillo de fraude del final. El bloque social del final
 (`DO $social$`) tambien esta guardado, con `NOT EXISTS` y un `ON CONFLICT DO
 NOTHING`, y el de las compras que lo precede (`DO $compras$`) reconoce sus
 pedidos por la fecha. Todo lo demas -- categorias, caracteristicas, productos,

@@ -1167,10 +1167,55 @@ que era la situacion antes de este bloque.
 
 ---
 
-# BLOQUE 9 -- Las dos rutas que faltan para abrir la venta relampago (agregado el 2026-09-03)
+# BLOQUE 10 -- Un 409 al editar el stock durante una venta relampago (2026-09-04)
 
-**Esto es lo unico que bloquea el frontend del inventario limitado.** Todo lo
-demas ya funciona y esta probado en el navegador: reservar al agregar,
+**Es lo mas grave que queda del inventario limitado, y son tres lineas.**
+
+`PATCH /vendedor/ofertas/:id` sigue aceptando `ajuste_stock` con la venta
+relampago abierta. `activar()` siembra Redis con una FOTO del stock, asi que
+desde ese momento son dos contadores que nadie vuelve a comparar.
+
+Subir el stock deja unidades inertes, que es feo pero no rompe. **Bajarlo si
+rompe, y del lado del comprador:** Redis ya le prometio unidades a alguien con
+un ticket vivo, y al pagar `comprar_pedido` levanta
+
+```
+No hay suficiente stock de "%" (%): quedan % y se pidieron %
+```
+
+La persona aparto, espero, pago, y el cobro le revienta con un error que no
+explica nada porque desde su lado no cambio nada.
+
+**Lo que pido:** rechazar con **409** un `PATCH` que traiga `ajuste_stock`
+cuando `oferta.es_inventario_limitado` sea true, con un mensaje del estilo
+"cierra la venta relampago, repone y vuelve a abrirla". El frontend lo pinta
+como aviso en la fila, igual que los otros 409.
+
+**Los otros dos campos NO los bloquees:**
+
+- `precio` ya esta cubierto por `lineas_precio_visto`.
+- `estado` no, porque un vendedor tiene que poder pausar. Si acaso, que pausar
+  cierre la venta relampago primero.
+
+Detalle entero en el pendiente 8 de `docs/PENDIENTES.md`.
+
+---
+
+# BLOQUE 9 -- Las dos rutas para abrir la venta relampago -- CERRADO el 2026-09-03
+
+> **HECHO, y el boton ya las llama.** Jose David escribio las dos rutas esa misma
+> noche, con los nombres exactos que pedia este bloque, y de paso resolvio un
+> hueco que este texto no habia visto (ver "Lo que hizo de mas", al final). El
+> boton esta en `frontend/src/lib/OfertasVendedor.svelte`, en las DOS vistas del
+> panel. Todo el ciclo esta medido en `docs/TRASPASO.md`, seccion "La venta
+> relampago, ya completa de punta a punta".
+>
+> Lo de abajo se deja escrito entero porque es el contrato que se pidio y sirve
+> para comparar lo pedido con lo entregado, que es la unica forma de saber si
+> una peticion se cumplio.
+
+**Esto era lo unico que bloqueaba el frontend del inventario limitado.** Todo lo
+demas ya funcionaba y estaba probado en el navegador: reservar al agregar,
 redimensionar, soltar al quitar, el 409 cuando no alcanza, la etiqueta naranja
 en la linea del carrito y el aviso de reserva vencida.
 
@@ -1251,3 +1296,42 @@ Sin problema, decime cuales y ajusto. Lo unico que pido es que **no cambien
 despues de que yo escriba el boton**, porque el boton llama por nombre y un
 cambio silencioso da un 404 que en la pantalla se ve como "no pasa nada al
 hacer clic".
+
+---
+
+## Lo que se entrego, comparado con lo que se pidio
+
+Medido contra el servidor vivo el 2026-09-03 por la noche.
+
+| Lo que pedia este bloque | Lo que llego |
+|---|---|
+| Los dos nombres de ruta | **Los mismos.** El boton no tuvo que cambiar nada |
+| 201 con `{ stock_sembrado }` | `{ id_oferta, stock_sembrado }`. Un campo de mas |
+| Los dos 409 tal cual | Estan, con el mismo texto. Y agrego un tercero para el `DELETE` |
+| 403 **o** el 404 disfrazado | Eligio el **404 generico**, que era una de las dos opciones |
+| Un campo para la duracion | `duracion_segundos`, 0 por defecto, tope 7 dias |
+
+### Lo que hizo de mas, y hacia falta
+
+Este bloque pedia un boton que dijera "Abrir" cuando la oferta no estuviera
+marcada, y **no existia ningun campo que dijera si lo estaba**. El contrato
+estaba incompleto y no se noto al escribirlo. Jose David agrego
+`es_inventario_limitado` a los tres GET (`/vendedor/ofertas`,
+`/vendedor/ofertas/producto/:id` dentro de `mi_oferta`, y `/productos/:id`
+publico), que es lo que hace posible el boton.
+
+### Tres cosas que aparecieron al escribir el boton
+
+1. **Un `POST` con `Content-Type: application/json` y cuerpo vacio da un 400 de
+   Fastify**, no el sobre `{ ok, mensaje, payload }` del resto de la API: trae
+   `message` y no `mensaje`, asi que `mensajeUtil` se queda sin texto. El boton
+   manda `{}` siempre.
+2. **El 404 dice "No existe una oferta con ese id" tambien cuando la oferta es
+   de otra cuenta**, y esta bien que lo haga. Lo que no sirve es repetir ese
+   texto dentro del panel de quien es dueno de la fila, asi que el frontend lo
+   traduce.
+3. **`sembrar` acepta un stock de cero y contesta 201.** Abrir una venta sin
+   unidades no falla hoy: falla despues y en silencio, porque lo sembrado es una
+   foto y reponer existencias mas tarde sube PostgreSQL y deja Redis en cero. El
+   boton lo corta antes de llamar. Si algun dia se quiere cerrar por el lado
+   correcto, el sitio es `activar()`.

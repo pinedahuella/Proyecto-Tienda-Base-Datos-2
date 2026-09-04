@@ -436,7 +436,50 @@ Para quien trabaje en Linux, en macOS o prefiera bash:
 ```bash
 ./etl/cargar_grafo.sh                 # carga sobre lo que haya
 ./etl/cargar_grafo.sh --limpiar       # borra el grafo entero y lo reconstruye
+./etl/cargar_grafo.sh --cola          # solo lo que la cola tiene pendiente
 ./etl/cargar_grafo.sh prueba_tuyo     # extrae de otra base de PostgreSQL
+```
+
+### `--cola`, y la cola del outbox
+
+Desde la migracion **015** existe `evento_grafo`: un trigger sobre `resena`
+encola el id de cada resena que se toca, **en la misma transaccion**. Eso deja
+por escrito que falta por llevar a Neo4j, en vez de que se sepa solo corriendo
+el ETL entero y comparando.
+
+**Los tres modos vacian la cola al terminar** (paso 3b del script), y siempre
+DESPUES de cargar: si la carga falla, el pipe muere, el marcado no llega a
+correr y los eventos siguen pendientes. Un evento marcado como hecho sin
+haberse proyectado es una resena que nadie va a volver a mirar.
+
+En modo completo se marca todo lo pendiente, y es correcto por definicion: una
+proyeccion completa acaba de aplicar el estado actual de TODAS las resenas.
+Sin eso, una base recien creada quedaria con sus 90 eventos pendientes para
+siempre sobre un grafo perfectamente correcto.
+
+**Que recorta `--cola` y que NO.** Solo recorta las dos secciones que crecen con
+las resenas (los productos resenados y las resenas). Las cuentas, las
+direcciones y el "quien vive donde" se proyectan enteras en los dos modos,
+porque **el trigger no las vigila**: si alguien se cambia el nombre eso no
+genera ningun evento, y en un incremental "puro" no llegaria nunca.
+
+**Y lo que `--cola` NO hace es correr mas rapido.** Medido:
+
+```
+              extraccion   Cypher generado   script entero
+completo         1.9 s        22 055 bytes       21.8 s
+--cola           1.3 s         4 958 bytes       22.6 s
+```
+
+Baja el trabajo, no el reloj: los 22 segundos son casi todos arranques de la
+JVM de `cypher-shell`, que el script invoca cuatro veces y cuestan lo mismo en
+los dos modos. A 90 resenas el volumen no es el cuello. Hoy `--cola` sirve
+sobre todo porque es **el unico modo que sabe aplicar las BAJAS**: la seccion 6
+de `extraer_grafo.sql` emite un `DETACH DELETE` por cada resena encolada que ya
+no existe en PostgreSQL. Antes, una resena borrada se quedaba en el grafo para
+siempre y la unica salida era `--limpiar`.
+
+```
 ```
 
 ### La trampa de Git Bash, esquivada dos veces distintas

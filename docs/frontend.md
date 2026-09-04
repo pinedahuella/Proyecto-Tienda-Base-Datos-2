@@ -69,12 +69,16 @@ es el backend, que responde 403 o 404.
 | `src/routes/registro/+page.svelte` | crear cuenta |
 | `src/routes/panel/+page.svelte` | panel |
 | `src/lib/PanelAdmin.svelte` | gestion de usuarios, dentro del panel |
+| `src/lib/PanelFraude.svelte` | los anillos de manipulacion de resenas, y si el grafo esta al dia |
+| `src/lib/PanelReportes.svelte` | los dos reportes de admin, ventas y reservaciones |
+| `src/lib/CarritoRedis.svelte` | el carrito lateral sobre Redis, con la insignia de venta relampago |
+| `src/lib/Resenas.svelte` | las resenas de un producto, con su promedio, votos y respuestas |
 | `src/routes/pedidos/+page.svelte` | el pedido abierto y el historial, en su propia pagina |
 | `src/lib/Carrito.svelte` | el carrito lateral, con casilla por linea |
 | `src/lib/Checkout.svelte` | pagar: forma de pago, direccion de entrega y tarjeta simulada |
 | `src/lib/MisPedidos.svelte` | los pedidos anteriores, con detalle, cancelar e historial del producto |
 | `src/lib/estadoCarrito.svelte.ts` | si el carrito esta abierto y cuantas lineas lleva, compartido |
-| `src/lib/OfertasVendedor.svelte` | las ofertas: verlas, editar precio/estado/stock y publicar. Con `administraLaTienda` entra por el catalogo paginado en vez de traerlas todas |
+| `src/lib/OfertasVendedor.svelte` | las ofertas: verlas, editar precio/estado/stock, publicar y abrir o cerrar la venta relampago. Con `administraLaTienda` entra por el catalogo paginado en vez de traerlas todas |
 | `src/lib/PanelVendedor.svelte` | el catalogo compartido (alta, edicion e historial por fecha), solo para la tienda o un admin |
 | `src/lib/Direcciones.svelte` | direcciones, dentro del panel |
 | `src/lib/Pedido.svelte` | el pedido abierto y sus lineas, dentro del panel |
@@ -279,6 +283,87 @@ contrario seria inventar -- aqui llego a estar escrito "1.7 s", que era una
 medida en frio presentada como si fuera la normal. Son dos cosas: los bytes de
 la primera pantalla (40 contra 84 KB, y 20 filas con imagen contra 202), y que
 el coste de la lista completa crece con el catalogo mientras el de una tanda no.
+
+### El boton de la venta relampago
+
+Agregado el **2026-09-03**, en cuanto existieron
+`POST` y `DELETE /vendedor/ofertas/:id/venta-limitada`. Aparece en cada oferta
+`activa`, y tambien en una que ya la tenga abierta aunque haya cambiado de
+estado por otro camino, porque cerrar siempre se tiene que poder.
+
+**Esta en las DOS vistas, y eso no es simetria por gusto.** Un vendedor normal
+entra por la lista; la tienda y el admin entran por el catalogo, que es otra rama
+del marcado. Ponerlo solo en la lista habria dejado a la cuenta con MAS ofertas
+sin poder abrir ni una. Las dos usan el mismo `{#snippet panelRelampago}` --
+el primer snippet del proyecto -- para que no haya dos copias del panel que
+corregir, que es la clase de cosa que se arregla en una vista y no en la otra.
+
+El color naranja sale de tres variables (`--relampago-tinta`, `--relampago-fondo`
+y `--relampago-linea`) declaradas en `.ofertas`, con su version para el tema
+oscuro. Los valores claros son **exactamente** los de la insignia de
+`CarritoRedis.svelte`: es la misma venta vista desde los dos lados del mostrador
+y dos naranjas distintos la harian parecer dos cosas. Naranja y no rojo porque
+el rojo tiene que seguir siendo el color que solo sale cuando algo esta mal.
+
+Tres cosas que hace el panel y que no son adorno:
+
+**Cerrar pide un clic mas.** El `DELETE` borra las claves de Redis de la oferta y
+eso descarta las reservas en curso: las unidades vuelven al stock, pero quien
+tenia algo apartado lo pierde, y cerrar no confirma ninguna compra. El panel lo
+dice antes y el borde se pone mas grueso, porque los dos paneles ocupan el mismo
+sitio y acciones opuestas que se ven iguales son una trampa.
+
+**Separa los dos plazos.** `duracion_segundos` es cuando cierra la venta entera;
+lo que cada persona tiene apartado antes de pagar son 15 minutos y es fijo. Se
+confunden solos, y quien quiere "quince minutos" escribe 900 pensando en lo
+segundo y cierra su propia venta en quince minutos.
+
+**Con stock 0 no deja abrir.** El backend no lo impide: `sembrar` acepta cero y
+contesta 201. Lo sembrado es una FOTO del stock de ese instante y ya no vuelve a
+mirar PostgreSQL, asi que reponer existencias despues sube PostgreSQL y deja
+Redis en cero, y la oferta queda incomprable sin ningun error ni ninguna marca.
+Salio pulsando el boton sobre una oferta agotada de la tienda, no leyendo.
+
+## El panel de fraude dice de cuando son sus datos
+
+`PanelFraude.svelte`, agregado el **2026-09-04**.
+
+El grafo de Neo4j se llena por una cola, no en vivo. Hasta ahora el panel
+enseñaba **un analisis correcto sobre datos que podian estar incompletos y no
+lo decia**. Un panel que falla se arregla; uno que calla se cree.
+
+Ahora, debajo de la introduccion, sale una linea con el estado de la
+sincronizacion, que sale de `GET /admin/grafo/conciliacion`:
+
+```
+al dia      gris, del tamano de un pie de foto
+            "Grafo al dia con PostgreSQL, sincronizado hace 9 minutos"
+atrasado    rojo, con fondo
+            "Este analisis puede estar incompleto. El grafo no cuadra con
+             PostgreSQL. Al grafo le faltan datos: 1 en resenas, ...
+             Corre etl/cargar_grafo.sh --limpiar"
+```
+
+Tres decisiones que no son obvias:
+
+**Va en una peticion aparte y sin `await`.** Es informacion SOBRE el analisis,
+no parte de el. Si esa ruta tarda o falla, el panel tiene que ensenar sus
+anillos igual: bloquear un analisis correcto por no poder decir si esta fresco
+seria cambiar un problema chico por uno grande.
+
+**Un fallo ahi no pinta nada**, en vez de pintar un aviso de error. "No se pudo
+comprobar si esta al dia" al lado de un analisis correcto asusta mas de lo que
+informa.
+
+**Los eventos apartados se dicen SIEMPRE**, cuadre o no. Un evento que fallo
+cinco veces no se reintenta solo, asi que si nadie lo mira se queda ahi para
+siempre. Es la unica parte de todo el mecanismo que necesita a una persona.
+
+Y una que se vio en pantalla y no leyendo el codigo: la frase se escribe entera
+en cada rama del `{#if}` en vez de armarla con un `{#if}` en medio. Con el
+condicional intercalado, Svelte deja el salto de linea como espacio y el punto
+final quedaba separado, "con PostgreSQL ." Repetir seis palabras sale mas barato
+que pelearse con los espacios de la plantilla.
 
 ## El catalogo compartido, tambien paginado
 

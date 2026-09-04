@@ -59,8 +59,25 @@
 	let {
 		idProducto,
 		haySesion,
-		correoSesion = null
-	}: { idProducto: number; haySesion: boolean; correoSesion?: string | null } = $props();
+		correoSesion = null,
+		alContar = undefined
+	}: {
+		idProducto: number;
+		haySesion: boolean;
+		correoSesion?: string | null;
+		/**
+		 * Se llama con cuantas resenas tiene el producto, cada vez que se
+		 * recargan. Lo usa la pestana "Resenas" de la ficha para poner el numero
+		 * sin tener que pedir lo mismo dos veces.
+		 *
+		 * Va el total del RESUMEN y no `resenas.length`, que es solo la pagina
+		 * que se esta ensenando. Con paginacion las dos cifras dejan de coincidir
+		 * y la pestana diria "10" sobre un producto con 40.
+		 *
+		 * Es opcional: quien no lo pase no paga nada.
+		 */
+		alContar?: (total: number) => void;
+	} = $props();
 
 	interface Voto {
 		/** Lo que voto ESTA cuenta: 1, -1, o null si no voto. */
@@ -201,6 +218,16 @@
 		resenas = respuesta.payload.resenas ?? [];
 		resumen = respuesta.payload.resumen ?? null;
 		puedeCalificar = respuesta.payload.puede_calificar ?? [];
+
+		// El total, para quien lo haya pedido. Va aqui y no en un $effect para
+		// que se avise UNA vez por carga: un $effect sobre `resumen` se
+		// dispararia tambien al escribir o borrar una resena, que es justo
+		// cuando esta funcion se vuelve a llamar de todos modos.
+		//
+		// Un cero SI se reporta: "cero resenas" es un dato tan bueno como
+		// cuatro, y quien lo pide ya distingue el cero del "todavia no llego"
+		// porque su variable arranca en null.
+		alContar?.(resumen?.total ?? 0);
 
 		// Si solo hay un vendedor calificable, se elige solo: un select de una
 		// sola opcion es un paso que no decide nada.
