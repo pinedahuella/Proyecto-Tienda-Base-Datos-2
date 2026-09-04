@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { ScheduleModule } from '@nestjs/schedule';
 import { InicioController } from './controllers/inicio.controller';
 import { InicioService } from './services/inicio.service';
 import { BaseDatosController } from './controllers/base-datos.controller';
@@ -42,6 +43,8 @@ import { FraudeService } from './services/fraude/fraude.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
 import { AdminReportesService } from './services/admin/admin-reportes.service';
 import { InventarioLimitadoService } from './services/inventario-limitado/inventario-limitado.service';
+import { GrafoController } from './controllers/grafo/grafo.controller';
+import { GrafoSyncService } from './services/grafo/grafo-sync.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -50,7 +53,10 @@ import { InventarioLimitadoService } from './services/inventario-limitado/invent
  * "providers". Si una clase no esta aqui, Nest no la conoce y su ruta no existe.
  */
 @Module({
-  imports: [],
+  imports: [
+    // Habilita @Interval/@Cron -- lo usa GrafoSyncService (worker del outbox).
+    ScheduleModule.forRoot(),
+  ],
   controllers: [
     InicioController,
     BaseDatosController,
@@ -73,6 +79,7 @@ import { InventarioLimitadoService } from './services/inventario-limitado/invent
     CarritoController,
     FraudeController,
     AdminReportesController,
+    GrafoController,
   ],
   providers: [
     InicioService,
@@ -97,6 +104,7 @@ import { InventarioLimitadoService } from './services/inventario-limitado/invent
     FraudeService,
     AdminReportesService,
     InventarioLimitadoService,
+    GrafoSyncService,
   ],
 })
 export class AppModule {}

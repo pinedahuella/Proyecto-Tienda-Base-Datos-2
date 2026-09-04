@@ -10,7 +10,12 @@ const logger = new Logger('Neo4j');
  * src/database/mongo.ts, pero para la base de grafos.
  *
  * El grafo es una PROYECCION de PostgreSQL: se carga con el ETL
- * (`etl/cargar_grafo.sh`) y el backend solo lo CONSULTA, nunca le escribe.
+ * (`etl/cargar_grafo.sh`). El backend lo CONSULTA (`consultarGrafo`, modo
+ * READ) para el panel de fraude, y desde el worker del outbox
+ * (`GrafoSyncService`) tambien lo ESCRIBE (`ejecutarGrafo`, modo WRITE):
+ * ese worker es el unico escritor en vivo, y todas sus escrituras son
+ * idempotentes (`MERGE` / `DETACH DELETE`), asi que reaplicar un evento no
+ * duplica nada.
  *
  * Las credenciales salen de backend/.env. El usuario es siempre "neo4j" en
  * la edicion community. Se conecta por Bolt (puerto 7687), no por el HTTP
@@ -55,6 +60,30 @@ export async function consultarGrafo<T = Record<string, unknown>>(
   try {
     const resultado = await sesion.run(cypher, parametros);
     return resultado.records.map((registro) => registro.toObject() as T);
+  } finally {
+    await sesion.close();
+  }
+}
+
+/**
+ * Corre una consulta que ESCRIBE en el grafo. Hasta el worker del outbox
+ * (`GrafoSyncService`) nada del backend escribia aca -- el grafo se cargaba
+ * solo con el ETL. El worker es el primer y unico escritor en vivo.
+ *
+ * Los ids de nodo (`:Usuario.id`, `:Resena.id`, `:Producto.id`) son
+ * `Integer` de Neo4j: los parametros de id **tienen que** pasarse con
+ * `neo4j.int(...)`, no como number de JS -- un number crudo se guarda como
+ * `Float` y `MERGE` crea un nodo duplicado que ninguna consulta encuentra.
+ */
+export async function ejecutarGrafo(
+  cypher: string,
+  parametros: Record<string, unknown> = {},
+): Promise<void> {
+  const sesion = neo4jDriver.session({
+    defaultAccessMode: neo4j.session.WRITE,
+  });
+  try {
+    await sesion.run(cypher, parametros);
   } finally {
     await sesion.close();
   }

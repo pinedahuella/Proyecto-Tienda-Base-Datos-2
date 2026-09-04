@@ -1,9 +1,15 @@
-# Endpoint del panel de fraude
+# Endpoints del grafo de fraude
 
-El **panel de manipulación de reseñas** de la Entrega 2 (Bloque 4 de
-`BACKEND-PENDIENTE.md`). Una sola ruta, de **solo lectura**, que recorre el
-grafo de **Neo4j** y devuelve los grupos de cuentas cuyo patrón de
-calificaciones no se explica por el uso normal de la tienda.
+Dos rutas de admin sobre el grafo de **Neo4j**, las dos de **solo lectura**:
+
+- **`GET /admin/fraude/anillos`** — el **panel de manipulación de reseñas**
+  de la Entrega 2 (Bloque 4 de `BACKEND-PENDIENTE.md`): los grupos de
+  cuentas cuyo patrón de calificaciones no se explica por el uso normal de
+  la tienda.
+- **`GET /admin/grafo/conciliacion`** — la **red de seguridad** de la
+  sincronización del grafo: compara los conteos de PostgreSQL (la verdad)
+  contra Neo4j (la proyección) y avisa de la deriva. Ver la sección al
+  final.
 
 > **Estado (2026-08-30): ruta implementada y PROBADA en vivo.** Contra
 > `mesh-neo4j` cargado (150 nodos): autorización 401/403/403/403/200,
@@ -13,17 +19,24 @@ calificaciones no se explica por el uso normal de la tienda.
 
 Código: `src/controllers/fraude/fraude.controller.ts` +
 `src/services/fraude/fraude.service.ts`. Cliente Neo4j:
-`src/database/neo4j.ts` (helper `consultarGrafo`, sesión en modo **READ** —
-el backend **nunca** le escribe al grafo). Pantalla que la consume:
-`frontend/src/lib/PanelFraude.svelte`.
+`src/database/neo4j.ts` (helpers `consultarGrafo` en modo **READ** para el
+panel, y `ejecutarGrafo` en modo **WRITE** para el worker del outbox — ver
+abajo). Pantalla que la consume: `frontend/src/lib/PanelFraude.svelte`.
 
 ---
 
 ## De dónde salen los datos
 
 El grafo **no es una fuente de verdad**: es una **proyección** de la tabla
-`resena` de PostgreSQL, que carga el ETL `etl/cargar_grafo.sh` (lo lleva el
-compañero, está fuera de `backend/`). Modelo:
+`resena` de PostgreSQL. La carga inicial la hace el ETL
+`etl/cargar_grafo.sh` (lo lleva el compañero, fuera de `backend/`), y a
+partir de ahí el **worker del outbox** (`GrafoSyncService`, un `@Interval`
+cada 10 s) lo mantiene al día: cada reseña que se crea, edita o borra deja
+un evento en la cola `evento_grafo` y el worker lo proyecta a Neo4j segundos
+después. Ver `cambio_propuestas/2026-09-04_0030-worker-outbox-grafo.md` y
+`plan pendiente/outbox-grafo.md`. La **conciliación**
+(`GET /admin/grafo/conciliacion`, abajo) es la red de seguridad que
+comprueba que el worker no dejó nada atrás. Modelo:
 
 ```
 (:Usuario)-[:ESCRIBIO]->(:Resena)-[:CALIFICA_A]->(:Usuario)
@@ -266,3 +279,116 @@ Neo4j" en **0.3 s**, no se cuelga.
 Borrada la siembra (`MATCH (n:Prueba) DETACH DELETE n`), el grafo vuelve a
 150 nodos y la ruta a `anillos: []`. Nada quedó tocado en PostgreSQL (la
 siembra vive solo en Neo4j).
+
+---
+
+# GET /admin/grafo/conciliacion
+
+La **red de seguridad** de la sincronización del grafo. El grafo de Neo4j
+es una **proyección** de la tabla `resena`: hoy lo carga el ETL
+(`etl/cargar_grafo.sh`), y cuando esté el worker del outbox se mantendrá al
+día solo. Esta ruta **compara** los conteos de las dos bases y **avisa** si
+hay deriva — **no repara** (para eso está `etl/cargar_grafo.sh --limpiar`,
+que reconstruye el grafo desde cero). Es lo que el profesor pidió como "un
+job que lo reconcilie de ser necesario".
+
+> **Estado (2026-09-03): implementada y PROBADA en vivo.** Ver "Pruebas" al
+> final de esta sección.
+
+Código: `src/controllers/grafo/grafo.controller.ts` +
+`src/services/grafo/grafo-sync.service.ts` (el worker del outbox se
+agregará a esta misma clase). **Solo admin** — no la tienda, es información
+de operación de todo el sistema, mismo criterio que `/admin/fraude/anillos`.
+
+## Qué compara
+
+Seis filas. Lo que de verdad importa es que **cada reseña de PostgreSQL
+tenga su nodo completo en el grafo**:
+
+| Recurso | PostgreSQL | Neo4j | ¿cuenta para el veredicto? |
+|---|---|---|---|
+| `resenas` | `count(*) FROM resena` | nodos `:Resena` | **sí** |
+| `relacion ESCRIBIO` | `count(*) FROM resena` | relaciones `ESCRIBIO` | **sí** |
+| `relacion CALIFICA_A` | `count(*) FROM resena` | relaciones `CALIFICA_A` | **sí** |
+| `relacion SOBRE` | `count(*) FROM resena` | relaciones `SOBRE` | **sí** |
+| `productos resenados` | `count(DISTINCT id_producto_mongo)` | nodos `:Producto` | no |
+| `usuarios con resena` | autores ∪ vendedores distintos | nodos `:Usuario` | no |
+
+**Por qué productos y usuarios no cuentan para el veredicto:** el worker
+incremental puede dejar nodos huérfanos (una reseña borrada se lleva su
+`:Resena` con `DETACH DELETE` pero deja el `:Producto`), y el ETL completo
+carga **todos** los usuarios, no solo los que aparecen en una reseña. Un
+exceso ahí (`diferencia > 0`) es normal. Se informan igual, para tener el
+panorama.
+
+`cuadra` es `true` solo si las cuatro filas de arriba tienen
+`diferencia = 0` (`diferencia = neo4j - postgres`).
+
+## 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "El grafo tiene deriva respecto a PostgreSQL",
+  "payload": {
+    "cuadra": false,
+    "verificado_en": "2026-09-04T05:43:26.080Z",
+    "ultima_sincronizacion": null,
+    "cola": { "pendientes": 1, "apartados": 0 },
+    "comparacion": [
+      { "recurso": "resenas",             "postgres": 87, "neo4j": 86, "diferencia": -1, "cuenta_para_veredicto": true },
+      { "recurso": "relacion ESCRIBIO",   "postgres": 87, "neo4j": 86, "diferencia": -1, "cuenta_para_veredicto": true },
+      { "recurso": "relacion CALIFICA_A", "postgres": 87, "neo4j": 86, "diferencia": -1, "cuenta_para_veredicto": true },
+      { "recurso": "relacion SOBRE",      "postgres": 87, "neo4j": 86, "diferencia": -1, "cuenta_para_veredicto": true },
+      { "recurso": "productos resenados", "postgres": 55, "neo4j": 54, "diferencia": -1, "cuenta_para_veredicto": false },
+      { "recurso": "usuarios con resena", "postgres": 7,  "neo4j": 8,  "diferencia": 1,  "cuenta_para_veredicto": false }
+    ],
+    "eventos_apartados": [],
+    "sugerencia": "Al grafo le faltan datos: 1 en resenas, 1 en relacion ESCRIBIO, 1 en relacion CALIFICA_A, 1 en relacion SOBRE. Hay 1 evento(s) pendiente(s) en la cola: si el numero no baja solo en unos minutos, corre `etl/cargar_grafo.sh --limpiar`."
+  }
+}
+```
+
+Cuando todo cuadra: `"cuadra": true`, `"sugerencia": null`, mensaje "El
+grafo esta al dia con PostgreSQL".
+
+| Campo | Qué es |
+|---|---|
+| `cuadra` | `true` si las reseñas y sus tres relaciones están todas al día |
+| `verificado_en` | Cuándo se corrió esta comprobación (ISO 8601) |
+| `ultima_sincronizacion` | `max(procesado_en)` de la cola del outbox — el evento aplicado más reciente. `null` si ninguno se ha procesado, o si la tabla aún no existe |
+| `cola` | `{ pendientes, apartados }` del outbox (`evento_grafo`). **`null` si la tabla `evento_grafo` todavía no existe** (la migración `015` la hace el compañero) — la conciliación sigue siendo útil sin la cola |
+| `cola.pendientes` | eventos sin aplicar (`procesado_en IS NULL`, `intentos < 5`) |
+| `cola.apartados` | eventos que fallaron 5 veces y no se reintentan más (`intentos >= 5`) |
+| `comparacion[]` | Una fila por recurso (ver la tabla de arriba) |
+| `eventos_apartados[]` | Los apartados en detalle (`id_evento`, `id_resena`, `intentos`, `ultimo_error`, `fecha`), hasta 100. Para que un humano los mire |
+| `sugerencia` | Frase lista para la pantalla: qué falta y qué hacer. `null` solo cuando `cuadra` es `true` **y** no hay apartados |
+
+## 401 / 403
+
+Sin sesión → `401`. Con sesión pero rol comprador o vendedor (**incluida la
+tienda**) → `403`.
+
+## 503
+
+PostgreSQL o Neo4j caídos → `503` "No se pudo conectar con PostgreSQL" /
+"...con Neo4j", sin colgarse (límite de 15 s sobre las dos consultas).
+
+## Pruebas — hechas el 2026-09-03
+
+Contra el servidor y las bases reales. En ese momento el grafo estaba
+**atrasado por 1 reseña** (la reseña de demostración 112, creada en
+PostgreSQL y nunca cargada al grafo) — un caso de deriva real, no sembrado.
+
+| Caso | Resultado |
+|---|---|
+| Sin sesión | `401` |
+| Rol comprador | `403` |
+| Rol vendedor / tienda | `403` |
+| Admin, grafo atrasado | `cuadra: false`; las 4 filas de veredicto en `diferencia: -1`; `cola.pendientes: 1`; `sugerencia` con la lista de faltantes y el consejo de `--limpiar` |
+| Admin, tras `etl/cargar_grafo.sh --limpiar` | `cuadra: true`, `sugerencia: null`; `usuarios con resena` queda en `+1` (Neo4j carga todos los usuarios) sin tumbar el veredicto |
+| Evento envenenado (`id_resena` inexistente, `intentos = 5`) | aparece en `cola.apartados` y en `eventos_apartados[]` con su `ultimo_error`; si los conteos cuadran, `sugerencia` lo menciona igual ("Los conteos cuadran. Hay 1 evento apartado...") |
+| Tabla `evento_grafo` ausente | `cola: null`, `ultima_sincronizacion: null`, `eventos_apartados: []`; la comparación PG↔Neo4j sigue funcionando |
+| Neo4j caído | `503` "No se pudo conectar con Neo4j"; se recupera solo al volver |
+
+`npx tsc --noEmit` y `eslint` limpios. `cambio_propuestas/2026-09-03_2359-conciliacion-grafo.md`.

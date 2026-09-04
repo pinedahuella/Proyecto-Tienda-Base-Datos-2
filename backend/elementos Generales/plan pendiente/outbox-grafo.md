@@ -1,10 +1,20 @@
 # Plan pendiente — Outbox para mantener el grafo Neo4j al día
 
-> **Estado (2026-09-03): recién arrancado.** En la base local están ya la
-> tabla `evento_grafo` y el trigger sobre `resena` (`outbox-grafo.sql` en
-> este folder, aplicado en local). Falta **todo el backend** (el worker, la
-> conciliación, el "última sincronización" del panel) y **la migración
-> real** más el cambio del ETL (los dos los lleva el compañero).
+> **Estado (2026-09-04).**
+>
+> HECHO:
+> - Tabla `evento_grafo` + trigger sobre `resena` — `outbox-grafo.sql`
+>   (este folder), aplicado en local.
+> - **Conciliación** — `GET /admin/grafo/conciliacion`.
+>   `cambio_propuestas/2026-09-03_2359-conciliacion-grafo.md`.
+> - **El worker** — `@Interval` en `GrafoSyncService`, probado a fondo en
+>   vivo. `cambio_propuestas/2026-09-04_0030-worker-outbox-grafo.md`.
+>
+> FALTA:
+> - `ultima_sincronizacion` en `GET /admin/fraude/anillos` (chico — ya está
+>   en la conciliación).
+> - Del compañero: la migración real `015` + el cambio del ETL
+>   (`etl/cargar_grafo.sh` etapa A).
 
 ## De dónde viene esto
 
@@ -147,38 +157,60 @@ AFTER INSERT OR UPDATE OR DELETE ON resena  FOR EACH ROW
 
 ---
 
-## Pieza 3 — el worker (BACKEND, nuestro, PENDIENTE)
+## Pieza 3 — el worker (HECHO, 2026-09-04)
 
-Una tarea programada de **NestJS** (`@nestjs/schedule`, un `@Interval` cada
-N segundos — arranca en `10s`, se ajusta). **NO** un script suelto en
-`etl/`: como tarea de Nest tiene el mismo ciclo de vida que la API (si el
-server está arriba, el worker está arriba), lo que resuelve la objeción de
+Una tarea programada de **NestJS** (`@nestjs/schedule` v12, `@Interval('grafo-outbox', 10000)`
+en `GrafoSyncService.vaciarCola`). **NO** un script suelto en `etl/`: como
+tarea de Nest tiene el mismo ciclo de vida que la API (si el server está
+arriba, el worker está arriba), lo que resuelve la objeción de
 `docs/PENDIENTE-OUTBOX.md` sobre "un proceso de fondo frágil que no vuelve
 tras reiniciar".
 
-Cada vuelta:
+Cada corrida procesa los eventos **de a uno, en su propia transacción
+corta**:
 
 ```
-1. SELECT id_evento, id_resena FROM evento_grafo
-   WHERE procesado_en IS NULL AND intentos < 5
-   ORDER BY id_evento
-   LIMIT 100
-   FOR UPDATE SKIP LOCKED;
+por evento (hasta vaciar la cola o llegar a 500):
+  BEGIN
+    SELECT id_evento, id_resena FROM evento_grafo
+    WHERE procesado_en IS NULL AND intentos < 5
+    ORDER BY id_evento LIMIT 1
+    FOR UPDATE SKIP LOCKED
+    -- (cola vacía -> ROLLBACK, fin de la corrida)
 
-2. por cada evento:
-     - SELECT ... FROM resena WHERE id_resena = <id_resena>   (el JOIN de reconstrucción)
-     - devuelve fila  -> proyectar (alta / upsert): ver "La unidad incremental" abajo
-     - devuelve 0 filas -> MATCH (r:Resena {id: <id_resena>}) DETACH DELETE r  (baja)
+    SELECT ... FROM resena WHERE id_resena = <id>   (el JOIN de reconstrucción)
+      devuelve fila   -> ejecutarGrafo(CYPHER_PROYECTAR_RESENA)   (alta / upsert)
+      devuelve 0 filas -> ejecutarGrafo('MATCH (r:Resena {id}) DETACH DELETE r')  (baja)
 
-3. éxito -> UPDATE evento_grafo SET procesado_en = now() WHERE id_evento = ...
-   fallo  -> UPDATE evento_grafo SET intentos = intentos + 1,
-                                     ultimo_error = <msg> WHERE id_evento = ...
+    UPDATE evento_grafo SET procesado_en = now() WHERE id_evento = <id>
+  COMMIT
+
+  -- si falla:
+  --   fallo de CONEXIÓN (Neo4j/PostgreSQL caídos)  -> ROLLBACK, se corta la corrida
+  --                                                    SIN gastar intento; se reintenta luego
+  --   fallo de DATOS (Cypher/parámetro inválido)    -> ROLLBACK, luego en otra tx:
+  --                                                    intentos+1, ultimo_error; sigue con la cola
 ```
 
-Varios eventos seguidos de la misma reseña (editada dos veces antes de que
-el worker llegue) se pueden colapsar: procesar solo el último `id_evento`
-por `id_resena` y marcar los anteriores como procesados. No es obligatorio
-—reaplicar es idempotente— pero ahorra trabajo.
+**Transacción por evento, no por lote:** el `FOR UPDATE SKIP LOCKED`
+mantiene el candado sólo mientras se aplica ESE evento a Neo4j (~decenas de
+ms), no todos. La cola normalmente está casi vacía; no hace falta lotear.
+
+**Distinguir "conexión" de "datos" es la clave** (`esFalloDeConexionGrafo`):
+un `Neo.ClientError.Statement.*` es culpa del evento y gasta intento; un
+`ServiceUnavailable` / `08*` de Postgres / `42P01` es transitorio y **no**
+gasta intento — si no, una caída de Neo4j de 1 minuto envenenaría toda la
+cola a `intentos = 5`. Probado en vivo (ver el `cambio_propuestas`).
+
+**Sin colapsar eventos de la misma reseña:** si hay 3 eventos para la
+reseña 5, se procesan los 3 (`MERGE` no-op los redundantes). Se probó que
+no genera duplicados; colapsar era una optimización opcional y se descartó
+por simplicidad.
+
+`INTERVALO_MS`, `MAX_POR_CORRIDA` (500), `MAX_INTENTOS` (5), `PODA_CADA`
+(360 corridas ≈ 1 h), `RETENCION_DIAS` (7) son constantes de la clase. Un
+flag `procesando` hace que una corrida que tarde más que el intervalo no se
+pise con la siguiente.
 
 ### Las trampas (de `PENDIENTE-OUTBOX.md`, siguen aplicando)
 
@@ -228,11 +260,27 @@ usuario/producto/dirección se dejan (pueden estar en otros caminos); la
 conciliación no cuenta nodos huérfanos como error.
 
 **La normalización de la clave de dirección** (`translate` de las 14 letras
-acentuadas, minúsculas, espacios colapsados) tiene que quedar **idéntica** a
-`pg_temp.clave_direccion` de `etl/extraer_grafo.sql`, o el mismo domicilio
-cae en dos nodos distintos según quién lo cargó. Conviene que el worker
-mande esa misma expresión a PostgreSQL (un `SELECT` que arme el Cypher, como
-hace el ETL) en vez de reimplementar la normalización en TypeScript.
+acentuadas, minúsculas, espacios colapsados) quedó **copiada verbatim** de
+`pg_temp.clave_direccion` de `etl/extraer_grafo.sql` dentro de la consulta
+del worker (`SQL_DIRECCIONES`, en `grafo-sync.service.ts`), no
+reimplementada en TypeScript. Verificado: produce la misma clave que el ETL
+en las 2 direcciones del conjunto de datos. **Si esa función del ETL
+cambia, hay que cambiar `SQL_DIRECCIONES` a la par** (comentado en el
+código).
+
+**Los ids van con `neo4j.int()`, obligatorio.** Se comprobó en vivo: un
+`number` de JS crudo se guarda como `Float` y `MERGE (:Usuario {id: 3.0})`
+crea un nodo duplicado que ninguna consulta encuentra. Todos los params de
+id/calificación pasan por `neo4j.int(...)`. Las fechas salen de PostgreSQL
+con `to_char(... AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')` (no
+como `Date` de JS, que perdería los microsegundos) para que `datetime()` de
+Cypher las tome igual que el ETL.
+
+**Qué NO sincroniza el worker** (sale del alcance incremental, lo cubre el
+`--limpiar` periódico): usuarios y direcciones que no participan de ninguna
+reseña. El ETL completo carga TODOS los usuarios; el worker sólo toca los 2
+de cada reseña. Por eso la conciliación no cuenta `:Usuario`/`:Producto`
+para su veredicto.
 
 ## Pieza 4 — la conciliación (BACKEND, nuestro, PENDIENTE — hacer PRIMERO)
 

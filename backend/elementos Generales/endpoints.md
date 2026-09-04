@@ -120,8 +120,9 @@ correr `etl/cargar_grafo.sh`). Timeout de 6 s -> 503.
 ```
 
 > El **panel de fraude** que consume este grafo
-> (`GET /admin/fraude/anillos`, solo admin) está documentado aparte, en
-> `endpoints-fraude.md`.
+> (`GET /admin/fraude/anillos`, solo admin) y la **conciliación** del grafo
+> con PostgreSQL (`GET /admin/grafo/conciliacion`, solo admin) están
+> documentados aparte, en `endpoints-fraude.md`.
 
 ---
 
