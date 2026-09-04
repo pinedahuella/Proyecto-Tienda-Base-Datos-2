@@ -254,6 +254,42 @@ PostgreSQL y la consulta grande no pasa por ellos nunca. Se comprueba con:
   bash pruebas/notas.sh
 
 
+EL BUSCADOR (Elasticsearch, Entrega 3)
+--------------------------------------------------
+El motor sube solo con arrancar.ps1, y el indice se rehace tambien solo cuando
+no cuadra con el catalogo. Para forzarlo:
+
+  .\arrancar.ps1 -Etl
+
+O directo desde Git Bash:
+
+  bash etl/cargar_busqueda.sh
+
+Tira el indice entero y lo vuelve a hacer, en cada corrida. Es una proyeccion y
+no guarda nada que no este en MongoDB, asi que reconstruir siempre deja lo
+mismo. Tarda unos 8 segundos con el catalogo de hoy.
+
+SALE DE MONGO Y NO DE POSTGRESQL, y esa es la parte que hay que respetar. Los
+productos que publica un vendedor desde el panel solo existen en MongoDB; un
+indice armado desde la tabla productos no los tendria y el buscador diria que
+no existen. El porque largo esta en elastic/README.md.
+
+Se comprueba con:
+
+  bash pruebas/busqueda.sh
+
+Y para mirarlo a mano, sin pasar por la aplicacion:
+
+  curl "http://localhost:9200/mesh_productos/_count"
+
+  curl -X GET "http://localhost:9200/mesh_productos/_search" ^
+    -H "Content-Type: application/json" ^
+    -d "{\"query\":{\"match\":{\"nombre\":{\"query\":\"labtop\",\"fuzziness\":\"AUTO\"}}}}"
+
+Ese ultimo es el que ensena de que va todo esto: se escribe labtop, mal, y
+contesta con las laptops.
+
+
 VER MONGO EN EL NAVEGADOR
 --------------------------------------------------
 DbGate: http://localhost:3001

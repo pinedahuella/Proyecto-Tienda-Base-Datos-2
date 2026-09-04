@@ -1049,6 +1049,104 @@ function Correr-Etl {
 
 
 # ------------------------------------------------------------
+# El ETL del buscador, tambien en PowerShell nativo
+# ------------------------------------------------------------
+# Donde vive el motor y como se llama su indice. Los mismos valores por defecto
+# que etl/cargar_busqueda.sh y pruebas/busqueda.sh; si un dia cambian, cambian
+# en los tres.
+$ES_URL    = 'http://localhost:9200'
+$ES_INDICE = 'mesh_productos'
+
+# Hace lo mismo que etl/cargar_busqueda.sh sin depender de Git Bash, por la
+# misma razon que los otros dos: cuando esto llamaba a un .sh y no lo
+# encontraba, se saltaba el paso y el script terminaba EN VERDE con la base
+# derivada vacia.
+#
+# SALE DE MONGO Y NO DE POSTGRESQL. Es la decision del ETL entero y esta
+# contada en elastic/README.md: hay productos que existen solo en el catalogo
+# de Mongo, se venden, y un indice armado desde `productos` de PostgreSQL no
+# los tendria. El sintoma seria un producto que el buscador jura que no existe.
+#
+# Aqui SI se usa docker cp, al reves que en el .sh. No es incoherencia: el .sh
+# lo evita porque Git Bash le destroza las rutas, y PowerShell no tiene ese
+# problema.
+function Correr-EtlBusqueda {
+    $tmp = Join-Path $env:TEMP "mesh-busqueda"
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    $ndjson = Join-Path $tmp "busqueda.ndjson"
+
+    try {
+        docker cp "$PSScriptRoot\etl\extraer_busqueda.js" "mesh-mongo:/tmp/extraer_busqueda.js" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Aviso "No se pudo copiar extraer_busqueda.js a Mongo"; return $false }
+
+        $salida = docker exec mesh-mongo sh -c (Comando-Mongo "/tmp/extraer_busqueda.js") 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Aviso "El extractor del buscador fallo:"
+            Write-Host $salida -ForegroundColor Yellow
+            return $false
+        }
+        foreach ($linea in ($salida -split "`n")) { if ($linea.Trim()) { Ok $linea.Trim() } }
+
+        docker cp "mesh-mongo:/tmp/mesh-busqueda.ndjson" "$ndjson" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Aviso "No se pudo traer el ndjson de Mongo"; return $false }
+
+        # Un archivo vacio aqui deja el indice vacio sin un solo error, que es
+        # justo el fallo que esta comprobacion existe para evitar.
+        if (-not (Test-Path $ndjson) -or (Get-Item $ndjson).Length -eq 0) {
+            Aviso "El extractor no devolvio ni un producto: no se toca el indice"
+            return $false
+        }
+
+        # El indice se tira entero y se rehace. Es una proyeccion: no guarda
+        # nada que no este en Mongo, y reconstruir es la unica forma de que
+        # DESAPAREZCA lo que dejo de ser publico.
+        #
+        # El 404 del DELETE se traga a proposito: la primera vez no existe.
+        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE" -TimeoutSec 30 | Out-Null } catch { }
+
+        try {
+            Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE" `
+                -ContentType 'application/json' `
+                -InFile "$PSScriptRoot\elastic\001_indice.json" -TimeoutSec 60 | Out-Null
+        } catch {
+            Aviso "No se pudo crear el indice: $($_.Exception.Message)"
+            return $false
+        }
+        Ok "indice creado con el mapeo de elastic/001_indice.json"
+
+        # -InFile y no -Body: el ndjson viaja tal cual, sin que PowerShell le
+        # cambie la codificacion ni le meta un BOM por el camino. Un BOM al
+        # principio del bulk lo rechaza entero.
+        #
+        # refresh=true para que lo cargado se pueda buscar en cuanto termine,
+        # y para que el conteo de aqui abajo no cuente cero sobre un indice
+        # que si tiene datos.
+        try {
+            $r = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_bulk?refresh=true" `
+                -ContentType 'application/x-ndjson' -InFile $ndjson -TimeoutSec 300
+        } catch {
+            Aviso "El bulk fallo: $($_.Exception.Message)"
+            return $false
+        }
+
+        # _bulk contesta 200 aunque documentos sueltos hayan fallado. El unico
+        # sitio donde eso se ve es `errors`.
+        if ($r.errors) {
+            Aviso "El bulk acepto la peticion pero algun documento fallo"
+            return $false
+        }
+
+        $cuenta = (Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_count" -TimeoutSec 30).count
+        Ok "documentos en el indice: $cuenta"
+        return $true
+    }
+    finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+}
+
+
+# ------------------------------------------------------------
 # El ETL del grafo, tambien en PowerShell nativo
 # ------------------------------------------------------------
 # Hace lo mismo que etl/cargar_grafo.sh -- aplica el esquema, extrae de
@@ -2258,6 +2356,47 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
     Aviso "   Mira el log:  docker logs mesh-elastic --tail 30"
 } else {
     Ok "Elasticsearch respondiendo"
+
+    # ------------------------------------------------------------
+    # El indice del buscador
+    # ------------------------------------------------------------
+    # Se decide igual que el catalogo de Mongo: si lo que hay no cuadra con lo
+    # que deberia haber, se reconstruye. Y -Etl lo fuerza.
+    #
+    # Se compara contra los productos ACTIVOS de Mongo, que es exactamente lo
+    # que el extractor mete. Comparar contra el total dejaria el indice
+    # reconstruyendose en cada arranque, porque el rechazado nunca va a entrar.
+    Paso "Indice del buscador"
+
+    # La condicion va con una EXPRESION REGULAR y no con la cadena "activo",
+    # y no es por gusto. PowerShell 5.1 se come las comillas dobles al armar la
+    # linea del programa externo, asi que {estado:"activo"} le llega a mongosh
+    # como {estado:activo} y contesta "ReferenceError: activo is not defined".
+    # Medido. Es la misma regla que este archivo ya avisa mas arriba para
+    # mongosh y para cypher-shell, y la regex la esquiva sin comillas de
+    # ninguna clase.
+    #
+    # Con anclas a los dos lados para que sea igualdad exacta y no un "empieza
+    # por": un estado "activo_pendiente" que alguien invente manana no debe
+    # colarse en esta cuenta.
+    $activos = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.countDocuments({estado:/^activo`$/})'") 2>&1 | Out-String).Trim()
+
+    $enIndice = '-1'
+    try {
+        $enIndice = [string](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_count" -TimeoutSec 20).count
+    } catch {
+        # 404 la primera vez, que no es un fallo: es que todavia no existe.
+        $enIndice = '0'
+    }
+
+    if ($Etl -or ($activos -notmatch '^\d+$') -or ($enIndice -ne $activos)) {
+        if (-not (Correr-EtlBusqueda)) {
+            Aviso "El indice del buscador no se pudo rehacer. El resto sigue."
+            Aviso "   A mano:  bash etl/cargar_busqueda.sh"
+        }
+    } else {
+        Ok "Ya cargado ($enIndice de $activos productos activos). Para rehacerlo: .\arrancar.ps1 -Etl"
+    }
 }
 
 

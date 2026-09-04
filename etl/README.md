@@ -1,8 +1,21 @@
 # Los ETL de Mesh
 
-Son **dos**, uno por cada base derivada. Los dos salen de PostgreSQL, que es la
-unica fuente de verdad, y los dos son proyecciones: se pueden tirar enteras y
-reconstruir sin perder un dato.
+Son **tres**, uno por cada base derivada, y los tres son proyecciones: se pueden
+tirar enteras y reconstruir sin perder un dato.
+
+Dos salen de PostgreSQL, que es la fuente de verdad del negocio. **El tercero
+no**, y esa excepcion es deliberada: el del buscador sale de MongoDB, porque el
+catalogo vive ahi y hay productos que NO tienen fila en PostgreSQL. Esta
+explicado en `elastic/README.md` y es el error mas facil de cometer en este
+proyecto.
+
+```
+A Elasticsearch -- el buscador
+---------------------------------------
+extraer_busqueda.js   (lee de MongoDB)
+cargar_busqueda.sh
+(el mapeo vive en elastic/001_indice.json)
+```
 
 ```
 A MongoDB -- el catalogo            A Neo4j -- el grafo de resenas

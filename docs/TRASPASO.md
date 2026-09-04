@@ -31,10 +31,11 @@ Ultima actualizacion: **2026-09-04**.
 >   SQL va en ASCII puro.
 > - Ninguna contrasena real en un archivo que se suba. Salen del `.env`.
 >
-> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene SIETE arneses:
+> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene OCHO arneses:
 > `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`, `bash pruebas/notas.sh`,
-> `bash redis/prueba_carrito.sh`, `bash redis/prueba_concurrencia.sh`,
-> `bash neo4j/correr_fraude.sh`, `.\mongo\demostracion_indices.ps1`.
+> `bash pruebas/busqueda.sh`, `bash redis/prueba_carrito.sh`,
+> `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`,
+> `.\mongo\demostracion_indices.ps1`.
 >
 > Y `prueba_concurrencia.sh` mide TIEMPOS con 50 clientes a la vez: en una
 > maquina ahogada de memoria da rojo sin que nada este roto. Si sale mal,
@@ -60,7 +61,7 @@ de nadie**; quien lo vende, a que precio y con cuanto stock es una fila de
 ## Como se levanta
 
 ```powershell
-.\arrancar.ps1              # los 7 contenedores, migraciones, semilla y ETL
+.\arrancar.ps1              # los 8 contenedores, migraciones, semilla y ETL
 .\arrancar.ps1 -Reiniciar   # desde cero (borra los volumenes)
 ```
 
@@ -83,6 +84,7 @@ viene en el pull: copia de `.env.example` las que falten. Y ojo, **son DOS
 | MongoDB | **27018** | dbgate en **3001** |
 | Redis | 6379 | RedisInsight en **5540** |
 | Neo4j | 7687 (bolt) | Browser en **7474** |
+| Elasticsearch | **9200** | sin contrasena, solo en local |
 | backend / frontend | 3000 / 5173 | |
 
 Mongo es 27018 por fuera a proposito: Windows puede tener un MongoDB de servicio
@@ -115,6 +117,7 @@ por eventos, los indices y las agregaciones. El informe lo hizo el equipo.
 | **La nota en el catalogo de Mongo** | `resenas_promedio` y `resenas_total` en cada documento, con su indice | `.\arrancar.ps1 -Etl` y mirar un producto en Mongo |
 | **La nota alcanza a los de Mongo, y se apaga** | tercera etapa del ETL, con `--notas` | `bash pruebas/notas.sh` (10 OK) |
 | **Resenar desde el pedido** | boton en `/pedidos`, lleva a la ficha con el formulario abierto | entra como `compradora.norte@` a `/pedidos` y abre un pedido pagado |
+| **El buscador de la Entrega 3** | Elasticsearch, indice y ETL. Falta su ruta | `bash pruebas/busqueda.sh` (11 OK) |
 | **El choque de los dos repartidores de id, visible** | un paso mas en el arranque | sale solo en `.\arrancar.ps1` |
 | **Generador incremental de productos** | lotes reproducibles por semilla | `.\arrancar.ps1 -Productos 300 -Semilla 7` |
 
@@ -479,6 +482,69 @@ lado bueno: ofrecerlo y que el `POST` conteste 403 seria peor que no ofrecerlo.
 **`ya_reseno` mira el trio completo** (comprador, vendedor, producto), el mismo
 que protege el `UNIQUE` de `resena`. Mirando solo el producto, resenar a un
 vendedor apagaria el boton del otro sobre el mismo producto comprado dos veces.
+
+### El buscador de la Entrega 3, ya montado y cargado
+
+**Hecho el 2026-09-04.** Elasticsearch 8.15.3 es la QUINTA base, contenedor
+`mesh-elastic`, y sube sola con `.\arrancar.ps1`. El detalle largo esta en
+`elastic/README.md`.
+
+```
+localhost:9200          la API, sin contrasena y solo en local
+mesh_productos          el indice, 1104 documentos
+elastic/001_indice.json el mapeo y el analizador
+etl/extraer_busqueda.js + etl/cargar_busqueda.sh   el ETL
+bash pruebas/busqueda.sh                           11 OK
+```
+
+**Por que Elasticsearch y no OpenSearch.** Cuando el equipo se atore en los
+analizadores, lo que decide es cuanto hay escrito, y ahi Elasticsearch gana. La
+objeción de la licencia ademas vencio: volvio a ofrecer AGPL 3.0 desde la 8.16,
+en 2024. Y si algun dia se cambia, OpenSearch es un fork de la 7.10 y las
+consultas se escriben casi igual, asi que la apuesta es barata.
+
+**SE ALIMENTA DE MONGO Y NO DE POSTGRESQL, y es LA decision del ETL.** El
+catalogo vive en MongoDB, y hay productos que existen solo ahi: los que publica
+un vendedor desde el panel no dejan fila en PostgreSQL. Hoy son cuatro. Un
+indice armado con `FROM productos` no los tendria, y el sintoma seria **un
+producto que se vende y que el buscador jura que no existe**, sin ningun error.
+
+Es el mismo agujero que tenia la nota del catalogo esa misma manana. Aparecio
+dos veces en un dia, asi que conviene desconfiar de cualquier consulta nueva
+que empiece por `FROM productos`.
+
+Por eso la parte 3 de `pruebas/busqueda.sh` comprueba, uno por uno, que los
+`_id` 103, 104 y 106 estan en el indice **y que no tienen fila en PostgreSQL**.
+Es la unica prueba que se rompe si alguien reescribe el extractor contra el
+relacional.
+
+**Medido, con el catalogo real:**
+
+```
+buscando "labtop"    79 de 1104, y salen Laptops     (difusa)
+buscando "ambár"     15 resultados sobre "Ambar"     (sin tildes)
+escribiendo "lap"    79 resultados con la palabra a medias
+el 105, rechazado    404, no se puede buscar
+```
+
+Se rompio a proposito para ver si el arnes se enteraba: borrando del indice los
+tres que solo viven en Mongo y metiendo el rechazado a mano, pasa de **11 OK** a
+**6 OK y 5 FALLA**, y el mensaje apunta al extractor.
+
+**Dos cosas de las que hay que acordarse.**
+
+El heap se fija a mano en 512 MB, con `Xms` y `Xmx` iguales. Sin eso la JVM se
+queda con la mitad de la RAM que ve, y esta maquina se quedo sin memoria tres
+veces ese mismo dia. Neo4j ya es otra JVM al lado. El dia que entre el millon de
+productos, ese numero es el primero que hay que subir.
+
+Y si Elasticsearch no sube, **el arranque no se corta**. Avisa y sigue. Es la
+unica base de la que hoy no cuelga ninguna pantalla, y tumbar la maquina entera
+por ella dejaria sin trabajar a quien venia a tocar el catalogo.
+
+**Lo que falta es la ruta**, que es de `backend/`. Hasta que exista, el indice se
+prueba con el arnes y con `curl` contra el 9200, que es como se documenta en la
+entrega.
 
 ### El choque de los dos repartidores de id ya no es invisible
 

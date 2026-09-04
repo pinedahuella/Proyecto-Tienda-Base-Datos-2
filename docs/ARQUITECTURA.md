@@ -148,5 +148,5 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 |---|---|
 | Entrega 1 | PostgreSQL y MongoDB, con el ETL del catalogo |
 | **Entrega 2 (2026-09-03)** | Se suman **Redis** (carrito, venta relampago y candado de checkout) y **Neo4j** (grafo de fraude, con su ETL). Se decide **no** incorporar una base columnar |
-| Entrega 3 | entrara el motor de busqueda, y el documento de consistencia del checkout |
+| Entrega 3 | el motor de busqueda YA ESTA (Elasticsearch, ver `elastic/README.md`); falta su ruta y el documento de consistencia del checkout |
 | Entrega final | entrara el componente vectorial y el control de acceso |
