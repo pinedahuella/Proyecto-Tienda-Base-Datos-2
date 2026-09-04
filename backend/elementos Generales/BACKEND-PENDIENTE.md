@@ -292,15 +292,15 @@ tiene el diseno de claves, el TTL y la explicacion que va al informe.
 > al agregar, solo al pintar el carrito y de forma bloqueante al pagar; no
 > hay carrito de invitado (pide sesion).
 >
-> **Fase 2 pendiente (te toca a vos, en `migrations/007`):** el carrito no
-> guarda `precio_visto` ni `id_precio_historial`, asi que `comprar_carrito`
-> congela el precio del momento de PAGAR (el mismo que muestra
-> `GET /carrito`). Para cerrar la ventana de carrera entre ver y pagar,
-> `agregar_linea` tiene que aceptar un `id_precio_historial` en la linea y
-> usarlo (validando que sea de esa oferta) -- ver `redis/README.md`
-> seccion 5.6 y la cabecera de `012_comprar_carrito.sql`. Cuando eso este,
-> el carrito de Redis guardara ese id por linea y `POST /carrito/comprar`
-> lo pasara.
+> **Precio congelado -- RESUELTO (2026-09-03), solo backend, NO te toca
+> nada:** la "Fase 2" (abrir `agregar_linea` a un `id_precio_historial`)
+> quedo descartada. En su lugar `POST /carrito/comprar` acepta
+> `lineas_precio_visto: [{id_oferta, precio_visto}]`; el backend relee los
+> precios vivos antes de cobrar y, si alguno se movio, responde
+> `comprado:false` + `avisos` sin cobrar, y el cliente reenvia con
+> `confirmar_cambios:true`. No hay cambio en `migrations/007` ni en
+> `comprar_carrito`. Ver `cambio_propuestas/2026-09-03_1600-carrito-precio-stock.md`
+> y `endpoints-carrito.md`.
 
 Lo que falta es cambiar de donde sale el carrito.
 
@@ -348,6 +348,11 @@ Ya esta resuelto y te ahorra trabajo: **agregar al carrito NUNCA reservo stock**
 que liberar nada**. Eso es la respuesta completa a lo que pide el enunciado.
 
 ## LA TRAMPA, y hay que decidirla antes de escribir la ruta
+
+> **RESUELTA (2026-09-03) por el lado del backend.** Ver el recuadro
+> "Precio congelado -- RESUELTO" al inicio del bloque 2: `POST /carrito/comprar`
+> revalida los precios vistos y avisa antes de cobrar. Lo de abajo es el
+> planteo original del problema, se deja como contexto.
 
 `agregar_linea()` **congela el precio en el momento de agregar al carrito**. La
 migracion 007 lo dice textual: *"si el vendedor lo sube despues, este pedido

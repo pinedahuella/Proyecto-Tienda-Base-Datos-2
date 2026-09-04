@@ -38,6 +38,7 @@ import {
   ProductoVarianteConMiOferta,
 } from '../../dto/producto-con-mis-ofertas';
 import { ProductosService } from '../productos/productos.service';
+import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
 import { CORREO_TIENDA } from '../../helpers/constantes';
 
 const REGEX_ID = /^\d+$/;
@@ -91,7 +92,28 @@ interface ProductoLigero {
 export class OfertasVendedorService {
   private readonly logger = new Logger(OfertasVendedorService.name);
 
-  constructor(private readonly productosService: ProductosService) {}
+  constructor(
+    private readonly productosService: ProductosService,
+    private readonly inventarioLimitado: InventarioLimitadoService,
+  ) {}
+
+  /**
+   * El stock real de una oferta en venta relampago -- el contador de Redis,
+   * que es la verdad mientras la venta esta abierta (el `stock` de
+   * PostgreSQL queda congelado). `null` si la oferta no esta en venta
+   * relampago o si Redis no respondio: en los dos casos el numero real es
+   * el `stock` de PostgreSQL. Ver `InventarioLimitadoService.estado`.
+   */
+  private async stockDisponibleLimitado(
+    idOferta: string,
+    esInventarioLimitado: boolean,
+  ): Promise<number | null> {
+    if (!esInventarioLimitado) {
+      return null;
+    }
+    const estado = await this.inventarioLimitado.estado(Number(idOferta));
+    return estado?.stock ?? null;
+  }
 
   /**
    * El id_usuario que de verdad hay que usar para el resto de la
@@ -309,6 +331,9 @@ export class OfertasVendedorService {
       imagen: variante.imagenes[0] ?? null,
       precio: filaOferta.precio,
       stock: stockFinal,
+      // Recien creada nunca esta en venta relampago: no hay contador de
+      // Redis, el numero real es `stock`.
+      stock_disponible: null,
       estado: estadoInicial,
       // Recien creada nunca hay aprobador: la tienda/admin nace `activa` sin
       // revisor (fecha puesta, aprobado_por null), y cualquier otro vendedor
@@ -614,6 +639,10 @@ export class OfertasVendedorService {
       imagen: variante?.imagenes[0] ?? null,
       precio: fila.precio,
       stock: fila.stock,
+      stock_disponible: await this.stockDisponibleLimitado(
+        fila.id_oferta,
+        fila.es_inventario_limitado,
+      ),
       estado: fila.estado_oferta_nombre,
       fecha_aprobacion: fila.fecha_aprobacion,
       aprobado_por: this.armarAprobador(fila),
@@ -676,33 +705,41 @@ export class OfertasVendedorService {
     const productos = await this.consultarProductosLigeros(idsProducto);
     const productoPorId = new Map(productos.map((p) => [p._id, p]));
 
-    return ofertas.map((fila) => {
-      const producto = productoPorId.get(Number(fila.id_producto_mongo));
-      const variante = producto?.variantes.find(
-        (v) => v.id_producto_variante === Number(fila.id_producto_variante_mongo),
-      );
+    return Promise.all(
+      ofertas.map(async (fila) => {
+        const producto = productoPorId.get(Number(fila.id_producto_mongo));
+        const variante = producto?.variantes.find(
+          (v) =>
+            v.id_producto_variante === Number(fila.id_producto_variante_mongo),
+        );
 
-      return {
-        id_oferta: fila.id_oferta,
-        id_producto: Number(fila.id_producto_mongo),
-        id_producto_variante: Number(fila.id_producto_variante_mongo),
-        // Si el producto no aparecio en Mongo (no deberia pasar nunca: el
-        // catalogo no borra productos ni variantes, solo los desactiva),
-        // se avisa en el nombre en vez de reventar la lista entera por una
-        // sola oferta huerfana.
-        nombre_producto: producto?.nombre ?? '(producto no encontrado)',
-        nombre_variante: variante?.nombre_variante ?? '(variante no encontrada)',
-        imagen: variante?.imagenes[0] ?? null,
-        precio: fila.precio,
-        stock: fila.stock,
-        estado: fila.estado_oferta_nombre,
-        fecha_aprobacion: fila.fecha_aprobacion,
-        aprobado_por: this.armarAprobador(fila),
-        es_inventario_limitado: fila.es_inventario_limitado,
-        fecha_creacion: fila.fecha_creacion,
-        fecha_actualizacion: fila.fecha_actualizacion,
-      };
-    });
+        return {
+          id_oferta: fila.id_oferta,
+          id_producto: Number(fila.id_producto_mongo),
+          id_producto_variante: Number(fila.id_producto_variante_mongo),
+          // Si el producto no aparecio en Mongo (no deberia pasar nunca: el
+          // catalogo no borra productos ni variantes, solo los desactiva),
+          // se avisa en el nombre en vez de reventar la lista entera por una
+          // sola oferta huerfana.
+          nombre_producto: producto?.nombre ?? '(producto no encontrado)',
+          nombre_variante:
+            variante?.nombre_variante ?? '(variante no encontrada)',
+          imagen: variante?.imagenes[0] ?? null,
+          precio: fila.precio,
+          stock: fila.stock,
+          stock_disponible: await this.stockDisponibleLimitado(
+            fila.id_oferta,
+            fila.es_inventario_limitado,
+          ),
+          estado: fila.estado_oferta_nombre,
+          fecha_aprobacion: fila.fecha_aprobacion,
+          aprobado_por: this.armarAprobador(fila),
+          es_inventario_limitado: fila.es_inventario_limitado,
+          fecha_creacion: fila.fecha_creacion,
+          fecha_actualizacion: fila.fecha_actualizacion,
+        };
+      }),
+    );
   }
 
   /**
@@ -755,6 +792,19 @@ export class OfertasVendedorService {
       misOfertas.map((fila) => [Number(fila.id_producto_variante_mongo), fila]),
     );
 
+    // El stock real (Redis) de mis ofertas en venta relampago, pedido de una
+    // sola vez para todas antes de armar las variantes -- asi el map de abajo
+    // sigue siendo sincrono. `null` cuando Redis no respondio.
+    const idsLimitadas = misOfertas
+      .filter((fila) => fila.es_inventario_limitado)
+      .map((fila) => fila.id_oferta);
+    const stocksLimitados = await Promise.all(
+      idsLimitadas.map((id) => this.stockDisponibleLimitado(id, true)),
+    );
+    const stockLimitadoPorOferta = new Map<string, number | null>(
+      idsLimitadas.map((id, i) => [id, stocksLimitados[i]]),
+    );
+
     const variantes: ProductoVarianteConMiOferta[] = producto.variantes.map(
       (variante) => {
         const fila = ofertaPorVariante.get(variante.id_producto_variante);
@@ -763,6 +813,9 @@ export class OfertasVendedorService {
               id_oferta: fila.id_oferta,
               precio: fila.precio,
               stock: fila.stock,
+              stock_disponible: fila.es_inventario_limitado
+                ? (stockLimitadoPorOferta.get(fila.id_oferta) ?? null)
+                : null,
               estado: fila.estado_oferta_nombre,
               fecha_aprobacion: fila.fecha_aprobacion,
               aprobado_por: this.armarAprobador(fila),

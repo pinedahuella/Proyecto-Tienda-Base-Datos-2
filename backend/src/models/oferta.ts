@@ -34,6 +34,15 @@ export interface OfertaVendedor {
   /** numeric(12,2) de Postgres: string, para no perder centavos por el redondeo binario. */
   precio: string;
   stock: number;
+  /**
+   * Unidades que quedan AHORA, leidas del contador de Redis (operacion
+   * `estado` de `redis/inventario_limitado.lua`). Solo se llena cuando
+   * `es_inventario_limitado` es `true`; `null` en el resto. Tambien `null`
+   * si la venta relampago ya cerro o si Redis no respondio -- ahi el unico
+   * stock que hay es `stock`, el de PostgreSQL (que en una oferta en venta
+   * relampago queda congelado desde que se abrio).
+   */
+  stock_disponible: number | null;
   fecha_actualizacion: Date;
 }
 
@@ -65,6 +74,14 @@ export interface OfertaPropiaResumen {
   /** numeric(12,2) de Postgres: string. */
   precio: string;
   stock: number;
+  /**
+   * Unidades que quedan AHORA segun el contador de Redis (operacion
+   * `estado` de `redis/inventario_limitado.lua`). Solo se llena cuando
+   * `es_inventario_limitado` es `true`; `null` en el resto, si la venta
+   * relampago ya cerro, o si Redis no respondio. Con `null`, el numero real
+   * es `stock` (PostgreSQL).
+   */
+  stock_disponible: number | null;
   estado: string;
   /**
    * Cuando la tienda aprobo esta oferta. `null` = nunca aprobada: esta

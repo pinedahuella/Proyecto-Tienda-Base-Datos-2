@@ -29,6 +29,7 @@ import {
 import { Producto, ProductoConOfertas } from '../../models/producto';
 import { OfertaVendedor, OfertaHistorial } from '../../models/oferta';
 import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
+import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
 
 /** Fila cruda que devuelve la consulta de ofertas, antes de agrupar el vendedor. */
 interface FilaOferta {
@@ -93,6 +94,8 @@ type FiltrosProductosQuery = Record<string, string | undefined>;
 @Injectable()
 export class ProductosService {
   private readonly logger = new Logger(ProductosService.name);
+
+  constructor(private readonly inventarioLimitado: InventarioLimitadoService) {}
 
   /**
    * Lista productos paginados por cursor (por _id, que es el mismo
@@ -483,7 +486,7 @@ export class ProductosService {
         [idProducto, CORREO_TIENDA],
       );
 
-      return resultado.rows.map((fila) => ({
+      const ofertas: OfertaVendedor[] = resultado.rows.map((fila) => ({
         id_oferta: fila.id_oferta,
         id_producto_variante_mongo: fila.id_producto_variante_mongo,
         vendedor: {
@@ -496,8 +499,28 @@ export class ProductosService {
         es_inventario_limitado: fila.es_inventario_limitado,
         precio: fila.precio,
         stock: fila.stock,
+        stock_disponible: null,
         fecha_actualizacion: fila.fecha_actualizacion,
       }));
+
+      // En una oferta en venta relampago el `stock` de arriba es el de
+      // PostgreSQL, que queda congelado desde que se abrio la venta. Las
+      // unidades de verdad las lleva Redis: se piden con la operacion
+      // `estado` del `.lua`, una por oferta limitada (suelen ser pocas por
+      // producto). Si Redis no responde, `estado` devuelve null y la ficha
+      // se pinta igual con el stock de PostgreSQL.
+      await Promise.all(
+        ofertas
+          .filter((oferta) => oferta.es_inventario_limitado)
+          .map(async (oferta) => {
+            const estado = await this.inventarioLimitado.estado(
+              Number(oferta.id_oferta),
+            );
+            oferta.stock_disponible = estado?.stock ?? null;
+          }),
+      );
+
+      return ofertas;
     } catch (error) {
       manejarErrorConexion(this.logger, error);
     }

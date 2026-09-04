@@ -376,7 +376,8 @@ cada variante, de la más barata a la más cara.
 | `es_tienda` | `true` solo en la oferta de la cuenta de la tienda (`tienda@mesh.com`) — es la que se enseña como `precio_tienda` en el resto del documento |
 | `es_inventario_limitado` | `true` si esta oferta está en **venta relámpago** (`oferta.es_inventario_limitado`, migración `014`): su stock lo lleva un contador atómico en Redis con un plazo, no el flujo normal. Lo enciende el vendedor con `POST /vendedor/ofertas/:id/venta-limitada` (ver `endpoints-vendedores.md`). Agregar una oferta así al carrito **reserva** unidades de verdad (ver `endpoints-carrito.md`) |
 | `precio` | Precio de esta oferta en particular, como texto (`"4100.00"`) |
-| `stock` | Unidades disponibles de esta oferta |
+| `stock` | Unidades de esta oferta según PostgreSQL. Para una oferta en venta relámpago este número **queda congelado** desde que se abrió la venta — el real es `stock_disponible` |
+| `stock_disponible` | Unidades que quedan **ahora mismo**, leídas del contador de Redis (operación `estado` de `redis/inventario_limitado.lua`). Solo se llena cuando `es_inventario_limitado` es `true`; en el resto de ofertas es `null`. También `null` si la venta relámpago ya cerró o si Redis no respondió — en ese caso el número que hay que mostrar es `stock`. La ficha se pinta igual aunque Redis esté caído |
 | `fecha_actualizacion` | Último cambio de precio, stock o estado de esta oferta |
 
 ### 200
@@ -411,6 +412,7 @@ Ejemplo real (`GET /productos/1`):
         "es_inventario_limitado": false,
         "precio": "3856.00",
         "stock": 7,
+        "stock_disponible": null,
         "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
       },
       {
@@ -421,6 +423,7 @@ Ejemplo real (`GET /productos/1`):
         "es_inventario_limitado": true,
         "precio": "4029.00",
         "stock": 14,
+        "stock_disponible": 3,
         "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
       },
       {
@@ -431,6 +434,7 @@ Ejemplo real (`GET /productos/1`):
         "es_inventario_limitado": false,
         "precio": "4100.00",
         "stock": 22,
+        "stock_disponible": null,
         "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
       }
     ]

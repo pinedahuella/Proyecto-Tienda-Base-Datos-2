@@ -1436,6 +1436,7 @@ GET /vendedor/ofertas
       "imagen": null,
       "precio": "13803.00",
       "stock": 15,
+      "stock_disponible": null,
       "estado": "pausada",
       "fecha_aprobacion": "2026-08-25T15:54:00.258Z",
       "aprobado_por": {
@@ -1457,6 +1458,7 @@ GET /vendedor/ofertas
       "imagen": "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1e/Laptop-hard-drive-exposed.jpg/960px-Laptop-hard-drive-exposed.jpg",
       "precio": "6343.00",
       "stock": 4,
+      "stock_disponible": 1,
       "estado": "activa",
       "fecha_aprobacion": null,
       "aprobado_por": null,
@@ -1496,6 +1498,17 @@ oferta (flujo de aprobación, migración `010_aprobacion_ofertas.sql`):
 que decide si el botón dice "Abrir venta relámpago" o "Cerrar la venta".
 Cuando es `true`, el stock de esa oferta lo lleva un contador atómico en
 Redis, no el flujo normal de PostgreSQL.
+
+`stock_disponible` — las unidades que quedan **ahora mismo** de una oferta
+en venta relámpago, leídas de ese contador de Redis (operación `estado` de
+`redis/inventario_limitado.lua`). Solo se llena cuando
+`es_inventario_limitado` es `true`; en el resto de ofertas es `null`.
+También `null` si la venta ya cerró o si Redis no respondió — ahí el número
+que hay que mostrar es `stock`, y el panel se pinta igual. `stock` en una
+oferta en venta relámpago **queda congelado** desde que se abrió: no es el
+número real mientras la venta esté abierta. Mismo campo, mismo significado,
+en `GET /vendedor/ofertas/producto/:id` (dentro de `mi_oferta`) y en
+`GET /productos/:id` (público, en `ofertas[]`).
 
 Un vendedor sin ninguna oferta recibe `[]`, no un error.
 
@@ -1739,6 +1752,7 @@ GET /vendedor/ofertas/producto/2
           "id_oferta": "5",
           "precio": "13803.00",
           "stock": 15,
+          "stock_disponible": null,
           "estado": "pausada",
           "fecha_aprobacion": "2026-08-25T15:54:00.258Z",
           "aprobado_por": {
@@ -1767,12 +1781,13 @@ Un producto donde no tengo ninguna oferta todavía sale igual, con
 `mi_oferta: null` en todas sus variantes — no es un error, es la señal de
 "todavía no publicaste nada aquí".
 
-`mi_oferta` trae `fecha_aprobacion`, `aprobado_por` y
-`es_inventario_limitado` con el mismo significado que en
-`GET /vendedor/ofertas` (quién y cuándo aprobó la tienda esa oferta; los
+`mi_oferta` trae `fecha_aprobacion`, `aprobado_por`,
+`es_inventario_limitado` y `stock_disponible` con el mismo significado que
+en `GET /vendedor/ofertas` (quién y cuándo aprobó la tienda esa oferta; los
 dos `null` mientras no circule, `aprobado_por` también `null` en las
 ofertas de la propia tienda/admin; `es_inventario_limitado` = si su venta
-relámpago está abierta).
+relámpago está abierta; `stock_disponible` = unidades reales en Redis
+cuando lo está, `null` si no).
 
 ### 400
 
@@ -1900,6 +1915,7 @@ POST /vendedor/ofertas
     "imagen": null,
     "precio": "3950.00",
     "stock": 7,
+    "stock_disponible": null,
     "estado": "pendiente",
     "fecha_aprobacion": null,
     "aprobado_por": null,
@@ -1911,7 +1927,8 @@ POST /vendedor/ofertas
 ```
 
 (Una oferta recién creada nunca está en venta relámpago:
-`es_inventario_limitado` es siempre `false` aquí — se abre aparte, con
+`es_inventario_limitado` es siempre `false` aquí y `stock_disponible`
+siempre `null` — la venta se abre aparte, con
 `POST /vendedor/ofertas/:id/venta-limitada`.)
 
 (`estado` es `"activa"` si quien la crea es la tienda o un admin, y en ese
@@ -2065,6 +2082,7 @@ Al menos uno de los tres tiene que venir.
     "imagen": null,
     "precio": "550.00",
     "stock": 6,
+    "stock_disponible": null,
     "estado": "activa",
     "fecha_aprobacion": "2026-08-28T22:11:03.512Z",
     "aprobado_por": {
@@ -2215,6 +2233,7 @@ PATCH /vendedor/ofertas/174/revision
     "imagen": null,
     "precio": "550.00",
     "stock": 6,
+    "stock_disponible": null,
     "estado": "activa",
     "fecha_aprobacion": "2026-08-28T22:11:03.512Z",
     "aprobado_por": {
@@ -2473,3 +2492,25 @@ intactos. **45 comprobaciones, 0 fallos.**
 | D | `POST` con body `{}` | 201, la venta no vence (TTL `-1`). Cuerpo totalmente vacío → 400 de Fastify |
 | E | `DELETE` (cerrar) | 200; PG desmarcada; las dos claves de Redis borradas; cerrar de nuevo → 409; cerrar una ajena → 404 y la venta ajena no se toca |
 | F | Un admin | abre y cierra la venta relámpago de una oferta de la **tienda** (actúa como `tienda@mesh.com`) |
+
+---
+
+## Pruebas — `stock_disponible` en los GET de ofertas (2026-09-03)
+
+Contra el servidor y las bases reales, con la oferta 11 en venta relámpago
+(PG `stock` 26, contador de Redis en 2). El campo `stock_disponible` se
+agregó a `GET /productos/:id` (`ofertas[]`), `GET /vendedor/ofertas` y
+`GET /vendedor/ofertas/producto/:id` (`mi_oferta`), y se calcula con la
+operación `estado` de `redis/inventario_limitado.lua` (solo lectura, no
+cosecha).
+
+| Caso | Resultado |
+|---|---|
+| Oferta en venta relámpago | Los tres endpoints devuelven `stock_disponible: 2` (el contador de Redis), mientras `stock` sigue en 26 (PG, congelado) |
+| Oferta normal (no relámpago) | `stock_disponible: null` en los tres |
+| Se reserva 1 unidad (Redis 2 → 1) | La ficha pasa a `stock_disponible: 1` en el acto; al `devolver`, vuelve a 2 |
+| Oferta marcada `es_inventario_limitado` en PG **sin** clave en Redis (venta cerrada pero columna aún `true`) | `stock_disponible: null`, sin error y sin warning en el log — el `estado` del `.lua` devuelve `-1` y se traduce a `null` |
+| Redis caído | `estado()` no lanza: deja un warning y devuelve `null`; el catálogo y el panel se pintan igual con el `stock` de PostgreSQL |
+
+Sin migración: es lectura de Redis desde el backend.
+`cambio_propuestas/2026-09-03_2359-stock-disponible-ofertas.md`.

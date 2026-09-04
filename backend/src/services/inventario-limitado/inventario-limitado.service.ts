@@ -109,6 +109,30 @@ export interface RespuestaDevolver {
 }
 
 /**
+ * Lo que devuelve la operacion `estado` de `redis/inventario_limitado.lua`:
+ * los cinco contadores del hash `mesh:oferta:<id>` mas cuantas reservas
+ * vivas hay (`pendientes`, el `ZCARD` del ZSET) y el TTL de la clave. Es
+ * SOLO LECTURA -- `estado` no cosecha reservas vencidas a proposito, para
+ * que una pantalla que se refresca sola no mueva el stock de nadie.
+ */
+export interface EstadoVentaLimitada {
+  /** Unidades que todavia se pueden tomar AHORA. */
+  stock: number;
+  /** Unidades tomadas y sin confirmar todavia. */
+  reservado: number;
+  /** Unidades confirmadas (el pago paso en PostgreSQL). */
+  vendidas: number;
+  /** Intentos que se fueron sin unidad (llegaron tarde). */
+  rechazos: number;
+  /** Ultimo numero de ticket entregado. */
+  ticket: number;
+  /** Reservas vivas en el ZSET -- comprobacion independiente de `reservado`. */
+  pendientes: number;
+  /** TTL de la clave en segundos: -1 si no vence, -2 si ya no existe. */
+  ttl_segundos: number;
+}
+
+/**
  * Paso 2 de `elementos Generales/plan pendiente/inventario-limitado.md`:
  * prender y apagar el modo de venta relampago de UNA oferta puntual.
  *
@@ -412,6 +436,55 @@ export class InventarioLimitadoService {
       return valor != null;
     } catch (error) {
       manejarErrorRedis(this.logger, error);
+    }
+  }
+
+  /**
+   * El estado real de la venta relampago de una oferta -- operacion `estado`
+   * del `.lua`, de solo lectura (no cosecha reservas vencidas). `null` si esa
+   * oferta no tiene una venta relampago viva en Redis: el hash no existe
+   * porque nunca se abrio, o ya cerro y vencio.
+   *
+   * NO lanza si Redis falla: sus unicos consumidores son pantallas de solo
+   * lectura (la ficha del producto, el panel del vendedor) que tienen que
+   * poder pintarse igual con el stock de PostgreSQL si el contador de Redis
+   * no responde. Un blip de Redis no puede tumbar una lectura del catalogo.
+   * En ese caso devuelve `null` y deja un warning.
+   */
+  async estado(idOferta: number): Promise<EstadoVentaLimitada | null> {
+    try {
+      const redisExtendido = redis as unknown as {
+        inventarioLimitado: ComandoInventarioLimitado;
+      };
+      // ['ESTADO', stock, reservado, vendidas, rechazos, ticket, ZCARD, TTL]
+      const r = await redisExtendido.inventarioLimitado(
+        this.clave(idOferta),
+        this.claveReservas(idOferta),
+        'estado',
+      );
+
+      const stock = Number(r[1]);
+      // El `.lua` devuelve -1 en cada contador cuando el hash no existe.
+      if (stock === -1) {
+        return null;
+      }
+
+      return {
+        stock,
+        reservado: Number(r[2]),
+        vendidas: Number(r[3]),
+        rechazos: Number(r[4]),
+        ticket: Number(r[5]),
+        pendientes: Number(r[6]),
+        ttl_segundos: Number(r[7]),
+      };
+    } catch (error) {
+      const detalle = error instanceof Error ? error.message : String(error);
+      this.logger.warn(
+        `No se pudo leer el estado de la venta relampago de la oferta ` +
+          `${idOferta}: ${detalle}`,
+      );
+      return null;
     }
   }
 
