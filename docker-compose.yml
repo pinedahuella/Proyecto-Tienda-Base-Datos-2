@@ -217,6 +217,80 @@ services:
       retries: 10
       start_period: 40s
 
+  # ------------------------------------------------------------------
+  # Elasticsearch -- el motor de busqueda de la Entrega 3
+  # ------------------------------------------------------------------
+  # Es la QUINTA base y, como Neo4j, es una PROYECCION: la verdad sigue en
+  # PostgreSQL y en el catalogo de Mongo. Se puede borrar entera y reconstruir
+  # sin perder un dato, y por eso su volumen no es sagrado.
+  #
+  # Existe por lo que ninguna de las otras cuatro hace bien: escribir "labtop"
+  # y que encuentre "laptop". El $text de Mongo Community no tiene difusa, y
+  # aunque PostgreSQL si la hace con pg_trgm, el enunciado de la Entrega 3 pide
+  # el motor dedicado.
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: mesh-elastic
+    restart: unless-stopped
+    environment:
+      # Un solo nodo. Sin esto arranca esperando companeros de cluster y se
+      # queda sin elegir maestro, en amarillo, para siempre.
+      discovery.type: single-node
+
+      # Seguridad apagada, y es una decision de ENTORNO DE CLASE, no un olvido.
+      # Con la 8.x la seguridad viene encendida y el contenedor genera
+      # certificados y una contrasena al vuelo: cada `-Reiniciar` daria
+      # credenciales nuevas y habria que ir a leerlas al log. Esta base no
+      # guarda nada que no este ya en PostgreSQL y solo escucha en localhost.
+      #
+      # Si esto algun dia sale de una maquina de desarrollo, esta linea es la
+      # primera que hay que quitar.
+      xpack.security.enabled: "false"
+
+      # EL HEAP SE FIJA A MANO, y aqui esta la razon de verdad.
+      #
+      # Sin esto la JVM se queda con la mitad de la RAM que ve, que en esta
+      # maquina son varios GB para una base que va a guardar mil productos. Y
+      # esta maquina ya se quedo sin memoria TRES veces el 2026-09-04, matando
+      # el backend a media sesion. Neo4j ya es otra JVM corriendo al lado.
+      #
+      # Xms y Xmx iguales a proposito: una JVM que puede crecer, crece, y lo
+      # hace justo cuando hay carga, que es el peor momento.
+      #
+      # 512m sobra para este catalogo. El dia que de verdad entre el millon de
+      # productos de la prueba, este numero es el primero que hay que subir.
+      ES_JAVA_OPTS: "-Xms512m -Xmx512m"
+
+      # El swap le hace mas dano que bien a un motor de busqueda, pero pedir
+      # que se bloquee en memoria necesita limites del sistema que Docker
+      # Desktop en Windows no siempre da. Se deja en false y se dice, en vez de
+      # ponerlo en true y que el contenedor no arranque con un error de ulimit.
+      bootstrap.memory_lock: "false"
+    ports:
+      # 9200 la API, 9300 el transporte entre nodos. El 9300 se publica solo
+      # para poder mirarlo si algo raro pasa; con un nodo no se usa.
+      - "9200:9200"
+    volumes:
+      - elastic-data:/usr/share/elasticsearch/data
+    healthcheck:
+      # Se pregunta por el ESTADO del cluster y no por "contesta el 9200". El
+      # 9200 responde antes de que los indices esten listos, o sea que un curl
+      # a secas daria sano con la base todavia arrancando -- la misma trampa
+      # que ya mordio con el 7474 de Neo4j, aqui arriba.
+      #
+      # Se acepta yellow ademas de green: con UN solo nodo las replicas no se
+      # pueden asignar a ningun lado, asi que un indice con replicas se queda
+      # en amarillo para siempre y eso es lo normal, no un fallo.
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null || exit 1"
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
+
 volumes:
   postgres-data:
   pgadmin-data:
@@ -226,3 +300,4 @@ volumes:
   redisinsight-data:
   neo4j-data:
   neo4j-logs:
+  elastic-data:

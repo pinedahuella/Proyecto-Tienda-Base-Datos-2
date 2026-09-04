@@ -2238,6 +2238,29 @@ if ($proximoId -notmatch '^\d+$') {
 # healthcheck del compose hace un "redis-cli -a $REDIS_PASSWORD ping" con la
 # contrasena de adentro, asi que sano quiere decir tambien que la contrasena
 # del .env es la que la base acepta. No hace falta comprobarlo aparte.
+Paso "Esperando a Elasticsearch"
+
+# El motor de busqueda de la Entrega 3. Todavia no lo alimenta ningun ETL, asi
+# que hoy nada mas depende de el; se espera igual para que el script no termine
+# en verde con el contenedor a medio arrancar, que es como se dejan de ver los
+# fallos.
+#
+# 120 y no 60: arranca mas lento que los demas porque es una JVM que ademas
+# instala sus plantillas la primera vez.
+#
+# NO corta el arranque si no sube. Es la unica base de la que hoy no cuelga
+# ninguna pantalla, y tumbar la maquina entera por ella dejaria sin trabajar a
+# quien venia a tocar el catalogo. Se avisa y se sigue.
+if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
+    Aviso "Elasticsearch no respondio. El resto sigue funcionando."
+    Aviso "   Es la JVM mas pesada de las dos que hay; si la maquina anda"
+    Aviso "   corta de memoria es lo primero que se cae."
+    Aviso "   Mira el log:  docker logs mesh-elastic --tail 30"
+} else {
+    Ok "Elasticsearch respondiendo"
+}
+
+
 Paso "Esperando a Redis"
 
 if (-not (Esperar-Contenedor "mesh-redis" 60)) {
@@ -2469,6 +2492,7 @@ Write-Host "   PostgreSQL     localhost:5432   base $($env_['DB_NAME'])   usuari
 Write-Host "   MongoDB        localhost:27018  base $($env_['MONGO_DB'])   usuario $($env_['MONGO_USER'])" -ForegroundColor White
 Write-Host "   Redis          localhost:6379   con contrasena (requirepass)" -ForegroundColor White
 Write-Host "   Neo4j          localhost:7687   bolt   usuario neo4j" -ForegroundColor White
+Write-Host "   Elasticsearch  localhost:9200   sin contrasena, solo en local" -ForegroundColor White
 Write-Host ""
 Write-Host "   Falta arrancar a mano:" -ForegroundColor DarkGray
 Write-Host "     cd backend  ; npm run start:dev" -ForegroundColor DarkGray
