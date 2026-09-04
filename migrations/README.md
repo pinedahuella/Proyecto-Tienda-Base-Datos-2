@@ -49,7 +49,15 @@ ese archivo y volviendo a correrlo.
 
 Cada archivo hace una sola cosa y se puede leer solo.
 
-## Los doce archivos de esquema
+## Los catorce archivos de esquema
+
+Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Es la misma
+trampa que este documento avisa mas abajo para las comprobaciones: una lista
+escrita a mano caduca sin avisar. Antes de creerle a esta, cuentalos:
+
+```bash
+ls migrations/*.sql | wc -l
+```
 
 Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 
@@ -67,14 +75,38 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `010_aprobacion_ofertas.sql` | una oferta nace `pendiente`: `fecha_aprobacion`, `id_usuario_aprobo` y `rechazo_oferta` |
 | `011_resenas.sql` | la parte social: `comentario`, `resena` y `likes`, mas el trigger que recuenta los votos |
 | `012_comprar_carrito.sql` | `comprar_carrito()`: crear el pedido, meterle todas sus lineas y comprarlo en una sola llamada |
+| `013_precio_del_carrito.sql` | `agregar_linea()` acepta un `id_precio_historial` y lo usa en vez de buscar el vigente, validando que sea de esa oferta |
+| `014_inventario_limitado.sql` | `oferta.es_inventario_limitado`: que ofertas se venden con el mecanismo de Redis en vez del stock con `FOR UPDATE` |
 
-Las dos ultimas son de la Entrega 2 y merecen una linea mas de la que caben en
-la tabla.
+Las cuatro ultimas son de la Entrega 2 y merecen una linea mas de la que caben
+en la tabla.
 
 **La 011 cierra el diagrama.** Con `comentario`, `resena` y `likes` las 42 cajas
 del ER estan construidas; antes eran 39. Y trae un cambio de modelo que hay que
 leer en `docs/base-de-datos.md`: la resena cuelga del **producto y del
 vendedor**, no de la oferta como se habia escrito en la Entrega 1.
+
+**La 013 habilita el arreglo del precio congelado, y no lo termina.**
+`agregar_linea()` ya acepta un `id_precio_historial` dentro de `p_linea` y lo
+usa en vez de buscar el vigente, exigiendo que sea de **esa misma oferta**: sin
+ese filtro, mandar el id de una fila de otra oferta seria elegir el precio a
+voluntad. La firma no cambio, asi que la 012 no se toco y el campo viaja solo.
+
+No bloquea la compra cuando el precio ya no es el vigente: **cobra el congelado
+y lo dice**, con `precio_cambio`, `precio_congelado` y `precio_actual`. La base
+informa; la politica la decide la aplicacion. Lo comprueba
+`redis/prueba_carrito.sh`, y por las dos mitades: que un id inexistente se
+rechace, y que uno valido se respete.
+
+**La 014 es una sola columna con una decision grande detras.**
+`oferta.es_inventario_limitado` marca que ofertas se venden con el mecanismo de
+venta relampago de Redis en vez del flujo normal de stock. Lleva un indice
+PARCIAL porque las consultas preguntan siempre cuales SI lo son, nunca cuales
+no: un indice normal sobre un booleano donde casi todas las filas valen false
+ocupa una entrada por oferta y el planificador lo descarta.
+
+Que valga true NO significa que haya una venta abierta ahora mismo. Eso solo lo
+sabe Redis, y confundir las dos preguntas es el error caro.
 
 **La 012 no reemplaza a la 007: la COMPONE.** `comprar_carrito()` llama por
 dentro a las mismas `crear_pedido`, `agregar_linea` y `comprar_pedido`, en vez

@@ -165,6 +165,35 @@ en MongoDB**, porque correr el ETL no los quita.
 Y lo que destapo construirlo esta en el pendiente 5, que es lo mas grave que
 salio hoy: **hay dos asignadores de id de producto que no se hablan.**
 
+### Y hay un SEGUNDO generador, por el otro extremo
+
+```powershell
+.\arrancar.ps1 -ProductosMongo 200
+.\arrancar.ps1 -BorrarMongo 7
+```
+
+Crea productos que viven **solo en MongoDB**, sin fila en `productos`. La
+diferencia con el otro no es de tamano, es de ORIGEN:
+
+| | `-Productos` (marcador `L`) | `-ProductosMongo` (marcador `M`) |
+|---|---|---|
+| Nace en | PostgreSQL | MongoDB |
+| Fila en `productos` | si | **no** |
+| El ETL lo reescribe | en cada corrida | **nunca** |
+
+**El de Mongo es como nacen hoy los productos de verdad.** El backend lo dice
+por escrito: *"los productos ya no se registran en PostgreSQL"*. Un vendedor que
+publica desde el panel crea exactamente eso, y hasta ahora no habia forma de
+tener muchos para probarlo.
+
+Son dos escrituras en dos bases: el documento en Mongo y sus ofertas en
+PostgreSQL, porque el descuento de stock tiene que ser atomico (ADR-2). El
+precio lo sortea el generador de Mongo y **viaja en un csv** hasta el SQL que
+crea las ofertas, en vez de sortearse dos veces con la misma semilla: un dato
+compartido no se puede desincronizar, dos implementaciones del mismo azar si.
+
+Todo esta en `mongo/lote/README.md`.
+
 **El carrito ya compra de verdad.** Verificado contra la base: pedido creado,
 pago `pagado`, kardex con el motivo `venta`, stock descontado, y la clave de
 Redis borrada. Una compra fallida no deja ni un pedido a medias **y no borra el
@@ -291,6 +320,20 @@ Un cast de las lineas del carrito a `LineaPedido` compilaba limpio y ensenaba
 "Pagar QNaN": sumaba un campo que no existia.
 
 ---
+
+### El precio del carrito ya avisa antes de cobrar
+
+`POST /carrito/comprar` acepta `lineas_precio_visto`: el frontend manda el
+precio que ENSENO y el backend lo compara contra el de hoy **dentro de la misma
+peticion que cobra**. Si no cuadra, no cobra nada y contesta `comprado: false`
+con los avisos; reenviar con `confirmar_cambios: true` acepta el nuevo.
+
+Que la comparacion viaje en la misma peticion es lo que la hace valer: entre
+mirar y cobrar no queda ninguna ventana. Comprobarlo desde el frontend antes de
+llamar dejaba milisegundos abiertos, y se probo asi antes de cambiarlo.
+
+El precio todavia NO se congela -- si se confirma, se cobra el de hoy -- pero ya
+no se cobra en silencio, que era el dano. Ver el pendiente 1.
 
 ## Que falta
 

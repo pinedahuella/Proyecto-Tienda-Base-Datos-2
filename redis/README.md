@@ -164,29 +164,46 @@ se cobra.
 
 **La salida, y es lo que este diseno hace:** el carrito de Redis guarda tambien
 el `id_precio_historial` de cada linea, junto con el `precio_visto`. Es el campo
-que se ve en el JSON de arriba, y `prueba_carrito.sh` comprueba que este --
-y ademas mide que PostgreSQL todavia lo descarta, que es la otra mitad de la
-verdad.
+que se ve en el JSON de arriba.
 
-Guardarlo es la mitad barata. La otra mitad **no esta hecha y no se puede hacer
-desde aqui**, porque vive en `backend/` y en `migrations/`:
+### AL DIA: la mitad de PostgreSQL YA ESTA, y esta medida
 
-1. `agregar_linea()` tiene que aceptar un `id_precio_historial` en `p_linea` y
-   usarlo en vez de buscar el vigente. Es un cambio en la 007.
-2. Y tiene que **validar** que ese id sea de esa oferta. Sin eso, el backend
-   podria mandar el id de un precio viejo -- o de otra oferta -- y comprarse la
-   laptop al precio de un cable. Confiar en un id que llega del cliente es un
-   agujero de autorizacion, no una comodidad.
-3. Falta decidir que pasa cuando el precio cambio: cobrar el viejo, o avisar
-   ("este producto subio de precio, confirmas?"). Las dos son defendibles; lo
-   que no es defendible es cobrar el nuevo sin decirlo, que es lo que pasa hoy.
+Los puntos 1 y 2 de esta lista estaban pendientes y los cerro
+`migrations/013_precio_del_carrito.sql`:
 
-Mientras eso no exista, el `id_precio_historial` viaja en el carrito y nadie lo
-mira. Esta guardado desde ya para que el dia que se conecte no haya que migrar
-carritos vivos, y `prueba_carrito.sh` lo comprueba **midiendo el resultado**:
-manda un id inexistente, la compra sale igual, y lo que queda en
-`pedido_producto` es el vigente. Cuando eso deje de ser cierto, el arnes se pone
-rojo y obliga a actualizar esta seccion.
+1. HECHO. `agregar_linea()` acepta un `id_precio_historial` dentro de `p_linea`
+   y lo usa en vez de buscar el vigente. La firma no cambio, asi que la 012 no
+   se toco y el campo viaja solo.
+2. HECHO. Y **valida** que ese id sea de esa misma oferta. Sin ese filtro,
+   mandar el id de una fila de otra oferta seria elegir el precio a voluntad:
+   comprarse la laptop al precio de un cable. Confiar en un id que llega del
+   cliente es un agujero de autorizacion, no una comodidad.
+3. DECIDIDO, y a proposito no se decide en la base: la 013 **cobra el congelado
+   y lo dice**, devolviendo `precio_cambio`, `precio_congelado` y
+   `precio_actual`. Cuanto vale la palabra que se le dio a un cliente es una
+   decision comercial, y le toca a quien escriba la aplicacion.
+
+`prueba_carrito.sh` mide las dos mitades y no una sola, que es lo que hace que
+signifiquen algo:
+
+  - un id que NO existe se **rechaza** (antes se descartaba en silencio)
+  - un id VALIDO y viejo de esa oferta se **respeta**: lo que queda en
+    `pedido_producto` es ese, no el vigente
+
+La segunda hace falta porque la primera sola no prueba nada: un
+`agregar_linea()` que rechazara cualquier id tambien pasaria.
+
+### Lo que sigue faltando, y vive en `backend/`
+
+Que el carrito de Redis mande ese id al comprar. Hoy el hash es
+`id_oferta -> cantidad` y el id no llega a `comprar_carrito()`, asi que el
+precio se sigue congelando en el momento de pagar.
+
+Mientras tanto el backend cubre el hueco por otro camino, y esta bien que sea
+otro: `POST /carrito/comprar` acepta `lineas_precio_visto` con el precio que el
+frontend enseno, compara contra el de hoy DENTRO de la misma peticion que cobra,
+y si no cuadra no cobra nada y contesta con los avisos. Eso no congela el
+precio, pero cierra la ventana entre ver y pagar, que era el dano real.
 
 ## De regalo: el carrito de invitado
 
@@ -297,10 +314,60 @@ nadie, y el sintoma seria "Redis se congela cada tanto sin motivo".
 ```
   reservar  -> VENDIDO + ticket     el stock baja YA
       |
-      +-- confirmar   el pago paso: reservado -> vendidas. El stock NO se toca.
-      +-- devolver    el pago fallo: las unidades vuelven al stock.
-      +-- (nada)      vence solo, y la reserva siguiente lo cosecha.
+      +-- redimensionar  cambio la cantidad: suelta lo viejo y pide lo nuevo,
+      |                  en UN solo paso. Devuelve un ticket nuevo.
+      +-- confirmar      el pago paso: reservado -> vendidas. El stock NO se toca.
+      +-- devolver       el pago fallo: las unidades vuelven al stock.
+      +-- (nada)         vence solo, y la reserva siguiente lo cosecha.
 ```
+
+### `redimensionar`, y por que no son dos llamadas
+
+Existe porque `PUT /carrito/lineas/:idOferta` fija la cantidad **absoluta** de
+la linea: se manda "quiero 5" y esa pasa a ser la cantidad. Sobre una oferta de
+inventario limitado eso significa cambiar cuantas unidades tengo apartadas.
+
+Con `devolver` y `reservar` se podria hacer en dos llamadas, y las dos formas de
+encadenarlas estan rotas. No es una cuestion de estilo:
+
+  - **devolver y luego reservar.** Entre las dos, las unidades viejas ya
+    volvieron al stock y otro comprador puede llevarselas. Quien solo queria
+    bajar de 3 a 2 se puede quedar con **cero**, habiendo tenido tres un
+    instante antes.
+
+  - **reservar y luego devolver.** Evita ese hueco y crea uno peor: como lo
+    viejo sigue reservado mientras se pide lo nuevo, se exige que haya tantas
+    unidades libres **ajenas** como la cantidad nueva entera. Quien tiene 2 y
+    quiere 3 necesitaria que aparecieran 3 libres, cuando con 1 le alcanza.
+
+La operacion hace las dos cosas en un solo paso atomico, y compara contra lo que
+hay libre **mas** lo que esta reserva va a soltar, que es el numero honesto.
+
+```
+ARGV[1]  redimensionar
+ARGV[2]  id_usuario
+ARGV[3]  ticket_viejo    o cadena vacia si no tenia ninguno
+ARGV[4]  cantidad_nueva  la cantidad ABSOLUTA que quiere ahora
+ARGV[5]  ttl_reserva_segundos
+```
+
+Medido sobre una venta de 10 unidades:
+
+```
+  reservar A 3        VENDIDO 1 7           stock 7  reservado 3
+  redimensionar 3->5  REDIMENSIONADO 2 5    stock 5  reservado 5
+  redimensionar 5->2  REDIMENSIONADO 3 8    stock 8  reservado 2
+  con el ticket de A, pidiendo B   TICKET_AJENO   nada se movio
+  pidiendo 999                     AGOTADO 0 10   nada se movio
+```
+
+Ese `10` del AGOTADO es el punto entero: son las 8 libres **mas** las 2 que la
+persona ya tenia. Comparar contra 8 le negaria una compra que si se puede hacer.
+
+Dos casos que NO son error y se comportan como una reserva nueva: mandar la
+cadena vacia como ticket, y mandar un ticket que ya vencio. El segundo es
+justo lo que pasa cuando la pantalla dice "se vencio tu reserva, cambia la
+cantidad para intentar de nuevo".
 
 `confirmar` se llama **despues** de que `comprar_carrito()` devolvio bien, nunca
 antes. Si se llamara antes y el pago fallara, la unidad quedaria vendida sin
@@ -675,19 +742,25 @@ Nada de esto se puede hacer desde esta carpeta: vive en `backend/` o en
    Hoy esa comprobacion la hacia `agregar_linea` en cada toque.
 5. Fusionar el carrito de invitado con el de la cuenta al iniciar sesion.
 
-**De `migrations/`, para el precio congelado** (seccion 1, y es lo que de verdad
-falta):
+**De `migrations/`, para el precio congelado: YA NO FALTA NADA.** Lo que aqui
+figuraba como los puntos 6 y 7 lo cerro `013_precio_del_carrito.sql`, y esta
+medido en `prueba_carrito.sh`:
 
-6. Que `agregar_linea()` acepte un `id_precio_historial` en `p_linea` y lo use
-   en vez de buscar el vigente -- **validando** que sea de esa oferta.
-7. Decidir que se hace cuando el precio cambio entre agregar y pagar: cobrar el
-   viejo, o avisar y pedir confirmacion.
+6. HECHO. `agregar_linea()` acepta el `id_precio_historial` de `p_linea` y lo
+   usa, validando que sea de esa oferta.
+7. DECIDIDO. Cobra el congelado y lo dice con `precio_cambio`. La base informa;
+   la politica la decide la aplicacion.
 
 **Del backend, para el inventario limitado:**
 
-8. Decidir **que ofertas** son de inventario limitado. Hoy `oferta` no tiene
-   como decirlo: haria falta una columna o una tabla aparte. Mientras no exista,
-   esta capa se aplica a la oferta que se siembre a mano.
+8. HECHO del lado de la base. `oferta.es_inventario_limitado` existe desde
+   `migrations/014_inventario_limitado.sql`, con su indice parcial. La pone el
+   vendedor al abrir la venta y no se marca sola.
+
+   Lo que SIGUE faltando es la ruta HTTP para que el vendedor la abra: hoy
+   `InventarioLimitadoService.activar()` esta escrito y **no lo llama nadie**.
+   Sin esa ruta no hay boton posible en el panel. El contrato de las dos rutas
+   que hacen falta esta en el BLOQUE 9 de `docs/BACKEND-PENDIENTE.md`.
 9. Sembrar el contador de Redis desde `oferta.stock` cuando la venta se abre, y
    llamar a `confirmar` despues de `comprar_carrito()` y a `devolver` si fallo.
    Las dos reciben el `id_usuario` como `ARGV[2]` y el ticket como `ARGV[3]`: el

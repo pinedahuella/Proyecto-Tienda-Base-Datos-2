@@ -25,8 +25,16 @@ Opciones:
   .\arrancar.ps1 -Etl              vuelve a migrar el catalogo a MongoDB Y el
                                    grafo a Neo4j, los dos
   .\arrancar.ps1 -Productos 300              genera ademas un lote de 300
-                                             productos de prueba
+                                             productos de prueba. Sin -Semilla
+                                             elige una libre y te dice cual
   .\arrancar.ps1 -Productos 300 -Semilla 7   el mismo lote, repetible
+  .\arrancar.ps1 -Borrar 500                 borra los 500 generados mas nuevos
+  .\arrancar.ps1 -Borrar todos               borra todos los generados
+  .\arrancar.ps1 -Borrar todos -Semilla 7    borra solo el lote de esa semilla
+  .\arrancar.ps1 -ProductosMongo 200          crea 200 productos que viven SOLO en
+                                             MongoDB, como los del panel de vendedor
+  .\arrancar.ps1 -ProductosMongo 200 -Semilla 7   el mismo lote, repetible
+  .\arrancar.ps1 -BorrarMongo 7                borra el lote M7 de las dos bases
 
 -ReiniciarGrafo va aparte de -Etl y no pegado a el porque no es "migrar de
 mas": BORRA el grafo entero antes de reconstruirlo. Hace falta porque el ETL
@@ -35,8 +43,13 @@ hasta que alguien lo vacie. Y va detras de su propia bandera porque un borrado
 automatico se llevaria por delante cualquier cosa sembrada a mano para una
 demostracion, en medio de la demostracion.
 
--Productos y -Semilla estan explicadas enteras mas abajo, en GENERAR UN LOTE DE
-PRODUCTOS DE PRUEBA.
+-Productos, -Semilla y -Borrar estan explicadas enteras mas abajo, en GENERAR UN
+LOTE DE PRODUCTOS DE PRUEBA y en BORRAR UN LOTE.
+
+-Productos y -Borrar NO se pueden usar en la misma corrida, y se rechazan
+juntas. El paso que genera corre ANTES del que borra, asi que las dos a la vez
+generarian el lote y acto seguido lo borrarian: dos minutos de trabajo para
+dejar la base igual que estaba.
 
 Que hace:
    1. arranca Docker si esta apagado y espera al engine
@@ -94,7 +107,24 @@ con todo bien.
   -Semilla S     opcional. Un entero de cero para arriba; admite hasta un
                  bigint, asi que un CID entero sirve. La MISMA semilla vuelve a
                  dar EXACTAMENTE el mismo lote, producto por producto y precio
-                 por precio, en cualquier maquina. Sin ella se usa la semilla 0.
+                 por precio, en cualquier maquina.
+
+                 SIN ella, el script busca una semilla LIBRE y la imprime:
+
+                   Sin -Semilla: se usa la 3, que esta libre
+                   Para volver a generar ESTE mismo lote:
+                     .\arrancar.ps1 -Productos 300 -Semilla 3
+
+                 Antes usaba siempre la 0, y eso hacia que la segunda corrida
+                 de -Productos muriera contra la guardia diciendo que el lote
+                 ya existia. Quien teclea solo -Productos no esta pidiendo un
+                 lote reproducible, esta pidiendo mas productos, asi que ahora
+                 puede correrlo las veces que quiera.
+
+                 La semilla elegida se IMPRIME a proposito: sin ese aviso,
+                 "aleatorio" querria decir "irrepetible", y se perderia la
+                 mitad de para que existe la bandera. Toma el numero de la
+                 pantalla y ese lote lo vuelves a crear cuando quieras.
 
 Las dos se revisan antes de tocar Docker, asi que un error de tecleo se sabe en
 un segundo y no despues del arranque entero.
@@ -281,3 +311,90 @@ Si no tienes el .env todavia:
 Y pidele los valores a tu equipo, o ponganse de acuerdo en unos nuevos.
 
 Desde pgAdmin el host es "postgres", no "localhost".
+
+
+BORRAR UN LOTE
+==================================================
+
+  .\arrancar.ps1 -Borrar 500                 los 500 generados MAS NUEVOS
+  .\arrancar.ps1 -Borrar todos               todos los generados
+  .\arrancar.ps1 -Borrar todos -Semilla 7    solo el lote de esa semilla
+
+Lo hace migrations/lote/borrar_lote.sql, y la bandera ademas limpia MongoDB,
+que es la mitad que se olvida al hacerlo a mano.
+
+  -Borrar N        cuantos borrar, empezando por los MAS NUEVOS. Empieza por
+                   ahi porque "borrame 500" casi siempre quiere decir
+                   "deshazme lo ultimo que hice".
+
+  -Borrar todos    la palabra, no un numero. Existe porque "todos" no tiene un
+                   numero que teclear, y un cero para decir "todos" ya
+                   significa "ninguno" en -Productos: dos banderas del mismo
+                   script no pueden darle sentidos opuestos al mismo cero.
+
+Si pides mas de los que hay, borra los que hay y lo dice. Pedir de mas no es un
+error, es no saber cuantos habia.
+
+
+LO QUE NO BORRA, Y POR QUE
+
+Los productos de la semilla original NO se tocan. No es prudencia: varios
+tienen ventas detras y pedido_producto los sujeta con ON DELETE RESTRICT, asi
+que borrarlos exigiria borrar los pedidos que los compraron, y un pedido sin
+lineas miente sobre lo que se vendio. Para dejar la base como recien instalada
+esta -Reiniciar, que la reconstruye entera desde el repositorio.
+
+Un producto GENERADO que alguien haya comprado tampoco se puede borrar, por lo
+mismo. Ese SE SALTA y se borran todos los demas, diciendo cuantos se salto y
+por que. Antes abortaba el lote entero en cuanto encontraba uno, y estaba mal:
+un solo producto vendido dejaba sin borrar los otros mil novecientos noventa y
+nueve.
+
+
+LA MITAD DE MONGODB, QUE ES LA QUE SE OLVIDA
+
+Correr el ETL NO quita de MongoDB lo que se borro en PostgreSQL, y esto se
+midio: etl/cargar.js escribe con replaceOne y upsert, o sea que agrega y
+actualiza pero nunca borra, y su unico barrido de sobrantes cubre categorias y
+productos_eventos. Para db.productos no hay ninguno.
+
+La bandera lo hace por RECONCILIACION: le pasa a Mongo la lista de los
+generados que siguen vivos en PostgreSQL, y Mongo borra todo documento con
+marcador de lote que no este en ella. Eso limpia de paso los fantasmas de
+borrados anteriores hechos a mano y dejados a medias.
+
+Si lo corres a mano con psql, la parte de MongoDB queda pendiente. El
+procedimiento completo esta en migrations/lote/README.md.
+
+
+LOS DOS GENERADORES, Y EN QUE SE DIFERENCIAN
+==================================================
+
+  .\arrancar.ps1 -Productos 300        marcador L
+  .\arrancar.ps1 -ProductosMongo 300   marcador M
+
+La diferencia no es el tamano ni la velocidad. Es el ORIGEN, y decide como se
+comporta el producto despues:
+
+  -Productos       nace en PostgreSQL y el ETL lo lleva a Mongo. Tiene fila en
+                   `productos`, historial completo, y cada corrida del ETL le
+                   reescribe el documento. Es como nacio el catalogo curado.
+
+  -ProductosMongo  nace en MongoDB y NO tiene fila en `productos`. El ETL no lo
+                   mira nunca. Es como nacen HOY los productos de verdad: el
+                   backend dice por escrito que "los productos ya no se
+                   registran en PostgreSQL", asi que un vendedor que publica
+                   desde el panel crea exactamente esto.
+
+El de Mongo sirve para dos cosas que el otro no puede: llenar el catalogo sin
+pasar por el ETL (para medir consultas e indices, el viaje es tiempo perdido), y
+probar que un catalogo con los dos origenes mezclados se comporta -- que es
+justo donde aparecio el fallo de los ids.
+
+Se borra con su propia bandera, -BorrarMongo, y esa lleva la SEMILLA del lote,
+no cuantos borrar. No hay un borra-todos: en MongoDB un producto de lote y uno
+que publico una persona son indistinguibles salvo por el marcador del nombre,
+asi que borrar "todo lo que parezca generado" seria una suposicion sobre el
+trabajo de otro.
+
+Detalle completo en mongo/lote/README.md.

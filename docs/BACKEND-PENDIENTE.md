@@ -634,7 +634,21 @@ ser el que se cobre. Es un cobro incorrecto, no un detalle de presentacion.
 
 ---
 
-# BLOQUE 7 -- El filtro por calificacion en el catalogo (agregado el 2026-09-02)
+# BLOQUE 7 -- El filtro por calificacion en el catalogo -- CERRADO el 2026-09-03
+
+> **YA NO FALTA NADA.** Jose David lo implemento, y con una API mas completa
+> que la que este bloque pedia: en vez de un solo `resenas_min` quedaron cuatro
+> parametros, `resenas_promedio_min`, `resenas_promedio_max`,
+> `resenas_total_min` y `resenas_total_max`, con la guardia de
+> `resenas_total >= 1` incluida.
+>
+> El frontend ya lo consume: el catalogo tiene el selector "Calificacion", y
+> los cuatro nombres estan en la copia de `CLAVES_RESERVADAS` de
+> `+page.svelte`. Medido contra la API viva: sin filtro 1104 productos, con
+> nota >= 4 salen 44 en 4 paginas, y los mismos numeros se ven en la pantalla.
+>
+> Se deja escrito entero porque explica POR QUE cada decision es la que es, y
+> eso sigue valiendo el dia que alguien toque ese filtro.
 
 ## Por que
 

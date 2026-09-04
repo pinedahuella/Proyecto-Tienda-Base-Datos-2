@@ -322,7 +322,7 @@ else
 fi
 
 
-titulo "5b. Y hoy PostgreSQL ignora ese id_precio_historial -- medido, no supuesto"
+titulo "5b. Y PostgreSQL ya RESPETA ese id_precio_historial -- medido, no supuesto"
 # Esta seccion existe porque la de arriba, sola, no prueba lo que prometia.
 #
 # Antes esa segunda linea decia "cada linea lleva su id_precio_historial (la
@@ -332,21 +332,31 @@ titulo "5b. Y hoy PostgreSQL ignora ese id_precio_historial -- medido, no supues
 # mide nada -- es la misma trampa del instrumento que la cabecera de este
 # archivo nombra para el TTL.
 #
-# Lo que de verdad pasa esta en migrations/007_flujo_pedido.sql:165:
-# agregar_linea() hace su PROPIO "SELECT id_precio_historial ... ORDER BY
-# fecha_creacion DESC LIMIT 1" e inserta ese, nunca el del JSON. O sea que el
-# campo VIAJA y no SIRVE, todavia. redis/README.md ya lo tiene en la lista de
-# pendientes.
+# ESTE BLOQUE YA SE PUSO ROJO UNA VEZ, Y ESA ERA SU RAZON DE EXISTIR.
 #
-# Asi que se comprueba el estado REAL de hoy: se manda un id_precio_historial
-# que no existe en toda la base, la compra igual sale bien, y lo que queda
-# guardado en pedido_producto es el id VIGENTE. Las dos cosas juntas prueban que
-# el parametro se descarta.
+# Hasta la migracion 013, agregar_linea() hacia su PROPIO "SELECT
+# id_precio_historial ... ORDER BY fecha_creacion DESC LIMIT 1" e insertaba ese,
+# nunca el del JSON: el campo VIAJABA y no SERVIA. Este bloque comprobaba
+# justamente eso, mandando un id que no existe en toda la base y verificando que
+# la compra saliera bien igual y guardara el vigente.
 #
-# Y esto es un MECANISMO, no un aviso: el dia que alguien haga que
-# agregar_linea() respete el parametro, este bloque se pone rojo -- la compra
-# fallara por llave foranea o el id guardado dejara de ser el vigente -- y
-# obligara a actualizar el arnes y el README en vez de dejarlos mintiendo.
+# Y decia, textual, que el dia que alguien hiciera que agregar_linea() respetara
+# el parametro se pondria rojo y obligaria a actualizar el arnes en vez de
+# dejarlo mintiendo. Ese dia llego con la 013 y el mecanismo funciono: fallo,
+# senalando su propio texto. Esto es lo que quedo despues de hacerle caso.
+#
+# Ahora se comprueban las DOS mitades de la 013, que son las que importan:
+#
+#   1. Un id INEXISTENTE se RECHAZA. Antes se descartaba en silencio y se
+#      cobraba el precio de hoy; ahora levanta excepcion y no compra nada. Es
+#      lo correcto: un id que no existe no es "usa el vigente", es una peticion
+#      mal formada, y tragarsela es como se cuelan los cobros equivocados.
+#
+#   2. Un id VALIDO y de ESA oferta se USA. Esta es la mitad que de verdad
+#      arregla el problema, y sin ella la primera sola no prueba nada: un
+#      agregar_linea() que rechazara TODO tambien pasaria la comprobacion 1.
+#      Se congela un precio viejo a proposito y se comprueba que pedido_producto
+#      guarde ESE y no el de hoy.
 
 ID_IMPOSIBLE=999999999
 LINEAS_FALSAS=$(echo "$LINEAS" | sed "s/\"id_precio_historial\":[0-9]*/\"id_precio_historial\":$ID_IMPOSIBLE/g")
@@ -384,22 +394,82 @@ ROLLBACK;" 2>&1)
 echo "$COMPARACION" | sed 's/^/    /'
 
 if echo "$COMPARACION" | grep -q '"id_pedido"'; then
-    ok "comprar_carrito() acepto un id_precio_historial inexistente: el parametro se descarta"
+    mal "comprar_carrito() acepto un id_precio_historial inexistente. La 013 tenia que rechazarlo"
 else
-    mal "comprar_carrito() rechazo el id inexistente. Si 007 ya respeta el parametro, hay que actualizar este bloque y redis/README.md"
+    ok "comprar_carrito() RECHAZA un id_precio_historial que no existe"
 fi
 
-DESCARTADOS=$(echo "$COMPARACION" | grep -c "guardado=.* enviado=$ID_IMPOSIBLE" || true)
-IGNORADOS=$(echo "$COMPARACION" | grep -c "guardado=$ID_IMPOSIBLE" || true)
-if [ "$DESCARTADOS" -ge 1 ] && [ "$IGNORADOS" = "0" ]; then
-    ok "el id guardado en pedido_producto es el VIGENTE, no el que mando el carrito ($DESCARTADOS linea/s)"
+# La otra mitad, y es la que prueba que el arreglo sirve. Un agregar_linea()
+# que rechazara cualquier id tambien pasaria la comprobacion de arriba, asi que
+# sola no demuestra nada.
+#
+# Se congela un precio VIEJO a proposito: se busca la fila mas antigua del
+# historial de esa oferta, se manda ESA, y se comprueba que pedido_producto
+# guarde esa y no la vigente. Si la 013 no estuviera, agregar_linea() volveria a
+# poner la vigente y esta comprobacion se pondria roja.
+echo
+echo "  y ahora al reves: un id VALIDO y viejo de esa misma oferta"
+
+RESPETADO=$(PSQL -c "
+BEGIN;
+-- El id mas VIEJO del historial de la primera oferta del carrito, que casi
+-- nunca es el vigente: es el que se manda para ver si se respeta.
+CREATE TEMP TABLE elegida ON COMMIT DROP AS
+SELECT o.id_oferta,
+       (SELECT ph.id_precio_historial FROM precio_historial ph
+         WHERE ph.id_oferta = o.id_oferta
+         ORDER BY ph.fecha_creacion ASC, ph.id_precio_historial ASC LIMIT 1) AS viejo,
+       (SELECT ph.id_precio_historial FROM precio_historial ph
+         WHERE ph.id_oferta = o.id_oferta
+         ORDER BY ph.fecha_creacion DESC, ph.id_precio_historial DESC LIMIT 1) AS vigente
+FROM oferta o
+JOIN estado_oferta e ON e.id_estado_oferta = o.id_estado_oferta
+WHERE e.estado_oferta_nombre = 'activa' AND o.stock > 2
+ORDER BY o.id_oferta LIMIT 1;
+
+SELECT comprar_carrito(
+    (SELECT id_usuario FROM usuarios WHERE correo_electronico = '$CORREO_COMPRADOR'),
+    (SELECT dh.id_direccion_historial
+     FROM direccion_historial dh
+     JOIN direcciones d ON d.id_direccion = dh.id_direccion
+     JOIN usuarios u ON u.id_usuario = d.id_usuario
+     WHERE u.correo_electronico = '$CORREO_COMPRADOR'
+     ORDER BY dh.id_direccion_historial DESC LIMIT 1),
+    (SELECT jsonb_build_array(jsonb_build_object(
+        'id_oferta', el.id_oferta,
+        'cantidad', 1,
+        'id_precio_historial', el.viejo,
+        'id_producto', pv.id_producto,
+        'id_producto_variante', pv.id_producto_variante,
+        'nombre_producto', p.nombre,
+        'nombre_variante', pv.nombre_variante))
+     FROM elegida el
+     JOIN oferta o ON o.id_oferta = el.id_oferta
+     JOIN productos_variantes pv ON pv.id_producto_variante = o.id_producto_variante_mongo
+     JOIN productos p ON p.id_producto = pv.id_producto),
+    'tarjeta') AS compra;
+
+SELECT CASE WHEN pp.id_precio_historial = el.viejo THEN 'RESPETADO'
+            WHEN pp.id_precio_historial = el.vigente THEN 'PUSO_EL_VIGENTE'
+            ELSE 'OTRO' END
+FROM pedido_producto pp, elegida el
+WHERE pp.id_pedido = (SELECT max(id_pedido) FROM pedido);
+ROLLBACK;" 2>&1)
+
+echo "$RESPETADO" | sed 's/^/    /'
+
+if echo "$RESPETADO" | grep -q "RESPETADO"; then
+    ok "pedido_producto guardo el id_precio_historial que mando el carrito, no el vigente"
+elif echo "$RESPETADO" | grep -q "PUSO_EL_VIGENTE"; then
+    mal "agregar_linea() volvio a poner el vigente: la 013 no esta aplicada en esta base"
 else
-    mal "pedido_producto guardo el id que mando el carrito. Si 007 ya respeta el parametro, actualiza este bloque y saca el pendiente del README"
+    mal "no se pudo comprobar que se respete el id valido"
 fi
 
-echo "  PENDIENTE, y esta escrito asi en redis/README.md: el precio congelado no"
-echo "  esta resuelto. El id viaja en el carrito y agregar_linea() todavia lo"
-echo "  descarta; falta que 007 lo acepte en p_linea."
+echo
+echo "  La 013 esta aplicada y hace su mitad. Lo que sigue PENDIENTE, y esta"
+echo "  escrito asi en redis/README.md, es la mitad del backend: que el carrito"
+echo "  de Redis guarde el id y que POST /carrito/comprar lo mande."
 
 
 titulo "6. Sin actividad, vence solo"
