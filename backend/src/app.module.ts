@@ -29,6 +29,8 @@ import { ProductosVendedorController } from './controllers/vendedores/productos.
 import { ProductosVendedorService } from './services/vendedores/productos.service';
 import { OfertasVendedorController } from './controllers/vendedores/ofertas.controller';
 import { OfertasVendedorService } from './services/vendedores/ofertas.service';
+import { VentasLimitadasController } from './controllers/vendedores/ventas-limitadas.controller';
+import { VentasLimitadasService } from './services/vendedores/ventas-limitadas.service';
 import { PedidosCompradorController } from './controllers/compradores/pedidos.controller';
 import { PedidosCompradorService } from './services/compradores/pedidos.service';
 import { ResenasController } from './controllers/resenas/resenas.controller';
@@ -65,6 +67,7 @@ import { InventarioLimitadoService } from './services/inventario-limitado/invent
     CategoriasController,
     ProductosVendedorController,
     OfertasVendedorController,
+    VentasLimitadasController,
     PedidosCompradorController,
     ResenasController,
     CarritoController,
@@ -87,6 +90,7 @@ import { InventarioLimitadoService } from './services/inventario-limitado/invent
     CategoriasService,
     ProductosVendedorService,
     OfertasVendedorService,
+    VentasLimitadasService,
     PedidosCompradorService,
     ResenasService,
     CarritoService,

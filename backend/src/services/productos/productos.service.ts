@@ -39,6 +39,7 @@ interface FilaOferta {
   nombre: string;
   apellido: string | null;
   es_tienda: boolean;
+  es_inventario_limitado: boolean;
   precio: string;
   stock: number;
   fecha_actualizacion: Date;
@@ -471,6 +472,7 @@ export class ProductosService {
         `SELECT o.id_oferta, o.id_producto_variante_mongo, o.id_usuario,
                 u.usuario, u.nombre, u.apellido,
                 (u.correo_electronico = $2) AS es_tienda,
+                o.es_inventario_limitado,
                 o.precio, o.stock, o.fecha_actualizacion
          FROM oferta o
          JOIN usuarios u ON u.id_usuario = o.id_usuario
@@ -491,6 +493,7 @@ export class ProductosService {
           apellido: fila.apellido,
         },
         es_tienda: fila.es_tienda,
+        es_inventario_limitado: fila.es_inventario_limitado,
         precio: fila.precio,
         stock: fila.stock,
         fecha_actualizacion: fila.fecha_actualizacion,

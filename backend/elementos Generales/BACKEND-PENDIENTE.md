@@ -372,13 +372,16 @@ Es lo que mas pesa de la entrega, y es donde el enunciado es mas exigente:
 mecanismo se sostiene bajo solicitudes concurrentes simuladas y **sin recurrir a
 bloqueos a nivel de aplicacion**"*.
 
-> **Avance (2026-09-03): casi todo hecho.** El carrito ya reserva/redimensiona
-> en `PUT`, suelta en `DELETE`, y `POST /carrito/comprar` conecta
-> `confirmar`/`devolver` (paso 4). `InventarioLimitadoService` tiene
-> `activar`/`revertir`/`reservar`/`redimensionar`/`confirmar`/`devolver`.
-> Falta **solo** la ruta HTTP para que el vendedor abra la venta (paso 2) --
-> necesita decidir quien puede llamarla y con que parametros. Detalle y
-> evidencia en `plan pendiente/inventario-limitado.md` y `endpoints-carrito.md`.
+> **HECHO (2026-09-03).** El carrito reserva/redimensiona en `PUT`, suelta
+> en `DELETE`, y `POST /carrito/comprar` conecta `confirmar`/`devolver`
+> (paso 4). El vendedor abre/cierra la venta con
+> `POST` / `DELETE /vendedor/ofertas/:id/venta-limitada` (paso 2, controlador
+> `VentasLimitadasController` aparte). `GET /vendedor/ofertas`,
+> `.../producto/:id` y `GET /productos/:id` traen `es_inventario_limitado`.
+> Migracion 014 real (columna + indice parcial). Solo queda fuera de alcance
+> la "activacion automatica por calor". Detalle y evidencia en
+> `plan pendiente/inventario-limitado.md`, `endpoints-carrito.md` y
+> `endpoints-vendedores.md`.
 
 ## Por que no sirve lo que hay
 

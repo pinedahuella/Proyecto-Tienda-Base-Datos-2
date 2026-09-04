@@ -1,12 +1,12 @@
 # Plan pendiente — Venta de inventario limitado (Redis)
 
-> **Estado (2026-09-03, noche): pasos 1, 3, 4 y 5 cerrados y probados en
-> vivo. Falta solo el 2 (ruta para que el vendedor abra la venta), que
-> necesita decisiones de autorización antes de construirse.** Ver el
-> detalle de cada uno más abajo, y la evidencia completa en
-> `endpoints-carrito.md` (secciones "Inventario limitado en PUT / DELETE /
-> GET del carrito" y "Paso 4 — `confirmar` / `devolver` conectados al
-> checkout").
+> **Estado (2026-09-03, noche): los pasos 1, 2, 3, 4 y 5 estan CERRADOS y
+> probados en vivo. El bloque de inventario limitado esta completo salvo
+> la "fase futura" (activacion automatica por calor, mas abajo), que no
+> era del alcance.** Evidencia: `endpoints-carrito.md` (secciones
+> "Inventario limitado en PUT / DELETE / GET del carrito", "Paso 4" y
+> "Bateria de estres...") y `endpoints-vendedores.md` (seccion "venta
+> relampago del vendedor").
 
 ## El problema
 
@@ -48,8 +48,8 @@ ALTER TABLE oferta
 
 - `false` por default: ninguna oferta existente cambia de comportamiento
   al aplicar esto.
-- Es el vendedor quien la prende (paso 2, todavía sin construir) — nunca
-  se marca sola.
+- Es el vendedor quien la prende (paso 2,
+  `POST /vendedor/ofertas/:id/venta-limitada`) — nunca se marca sola.
 - No hace falta guardar en Postgres cuántas unidades se sembraron, ni
   cuándo cierra la venta: eso vive en Redis mientras la venta está
   abierta (el propio HASH `mesh:oferta:<id_oferta>` y su `EXPIRE`). La
@@ -64,13 +64,14 @@ ALTER TABLE oferta
 
 ## Pieza base: `InventarioLimitadoService`
 
-`src/services/inventario-limitado/inventario-limitado.service.ts`. Sin
-controlador ni ruta HTTP propia todavía (algunos de sus métodos ya los
-usa `CarritoService`, ver el paso 3 abajo; `activar`/`revertir` se siguen
-disparando a mano, ver el paso 2). Métodos, todos probados en vivo:
+`src/services/inventario-limitado/inventario-limitado.service.ts`. Es la
+capa de mecanismo (Redis + el `.lua`); no tiene controlador propio. La usan
+`CarritoService` (paso 3/4) y `VentasLimitadasService` (paso 2). Métodos,
+todos probados en vivo:
 
-- `activar(idOferta, ttlSegundos)` / `revertir(idOferta)` — paso 2, sin
-  ruta HTTP todavía (se dispara a mano).
+- `activar(idOferta, ttlSegundos)` / `revertir(idOferta)` — el trabajo real
+  del paso 2; la ruta HTTP y la autorización viven en
+  `VentasLimitadasService`.
 - `existeVentaLimitada(idOferta)` — `EXISTS` en Redis, sin tocar
   Postgres. Es lo que usa `CarritoService` para decidir si una línea del
   carrito pasa por el camino especial o el normal.
@@ -104,16 +105,41 @@ completo y evidencia de prueba en
 provisional: el día que el compañero la revise y decida sumarla a su
 archivo real, este `.lua` se borra y el backend apunta al de él.
 
-## Paso 2 — el vendedor abre la venta relámpago de una oferta suya (PENDIENTE)
+## Paso 2 — el vendedor abre la venta relámpago de una oferta suya (CERRADO, 2026-09-03)
 
-`activar`/`revertir` del servicio ya hacen el trabajo, pero **no hay ruta
-HTTP** todavía — no está decidido:
-- Quién puede llamarla (¿el dueño de la oferta? ¿solo tienda/admin, como
-  la aprobación de ofertas?).
-- Si el vendedor puede elegir CUÁNTAS unidades sembrar (hoy `activar`
-  siempre usa el `stock` completo de Postgres en ese instante) o solo un
-  subconjunto.
-- Si puede elegir la duración de la venta (`ttlSegundos`) o queda fija.
+Dos rutas, en su propio controlador/servicio
+(`VentasLimitadasController` / `VentasLimitadasService`, bajo el prefijo
+`/vendedor/ofertas`), siguiendo el contrato que dejó el compañero en el
+BLOQUE 9 de `docs/BACKEND-PENDIENTE.md`:
+
+- **`POST /vendedor/ofertas/:id/venta-limitada`** — abre la venta. Cuerpo
+  `{ "duracion_segundos": N }` opcional (0 = sin vencimiento; tope 7 días).
+  201 con `{ id_oferta, stock_sembrado }`. Por dentro: `activar()`.
+- **`DELETE /vendedor/ofertas/:id/venta-limitada`** — la cierra
+  (`revertir()`). 200 sin cuerpo.
+
+Decisiones cerradas (de las tres preguntas que estaban abiertas):
+
+- **Quién**: el dueño de la oferta. Una oferta ajena o inexistente → el
+  404 genérico de siempre. Un admin actúa como la cuenta de la tienda
+  (igual que el resto de `/vendedor/ofertas`).
+- **Cuántas unidades**: siempre el `stock` completo de la oferta en ese
+  instante — no se sembró un subconjunto. Sembrar menos que el stock real
+  dejaría unidades "invisibles" en PostgreSQL que nadie podría comprar por
+  ningún camino mientras la venta esté abierta; y el caso de uso
+  ("liquido estas 100 unidades ya") es justo poner todo.
+- **Duración**: la elige el vendedor (`duracion_segundos`), con `0` = sin
+  vencimiento por defecto y un tope de 7 días.
+
+`activar()` sigue lanzando los dos 409 que el panel distingue (la oferta
+no está `activa`; ya está en venta relámpago). `cerrar()` añade un tercer
+409: la oferta no estaba en venta relámpago.
+
+Evidencia: `test-ventas-limitadas.sh`, 45/45; detalle en
+`endpoints-vendedores.md`, sección "Pruebas — venta relámpago del
+vendedor". `GET /vendedor/ofertas`, `GET /vendedor/ofertas/producto/:id`
+(`mi_oferta`) y `GET /productos/:id` (`ofertas[]`, público) ahora traen
+`es_inventario_limitado`.
 
 ## Paso 3 — el comprador reserva antes de pagar (CERRADO, integrado al carrito)
 
@@ -178,8 +204,29 @@ confirmadas). Y `quitarLineasDelCarrito` (rama del interruptor
 `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR`) también suelta la reserva de una
 línea limitada que quede bloqueante antes de quitarla.
 
-Evidencia: `endpoints-carrito.md`, sección "Paso 4" — 74 comprobaciones,
-0 fallos, base local intacta.
+**Bug encontrado en la batería de estrés y corregido:** si la venta
+relámpago se cerraba (`revertir`) con la línea todavía en el carrito y el
+comprador luego cambiaba la cantidad de esa línea, el `PUT` por la vía
+normal **no limpiaba el campo `t:<id_oferta>` huérfano**. Resultado: la
+línea seguía saliendo como `es_inventario_limitado` en `GET /carrito` y el
+checkout intentaba `confirmar` un ticket que ya no existía. Arreglo: la
+rama normal de `definirCantidad` hace `HDEL` del campo `t:` siempre (es un
+no-op si no está).
+
+**Candado de checkout (mismo día, salió de la batería de estrés):** la
+prueba destapó que dos `POST /carrito/comprar` idénticos y concurrentes
+creaban **dos pedidos** (cobrando dos veces) — no es de inventario
+limitado, afecta a cualquier carrito. Corregido con
+`CarritoService.conCandadoCheckout`: candado corto en Redis
+`mesh:checkout:<id_usuario>` (`SET EX 30 NX`), 409 para el segundo. El otro
+camino de compra (`POST /comprador/pedidos/:id/comprar`) ya era seguro.
+Detalle en `endpoints-carrito.md` § "Candado de checkout".
+
+Evidencia: `endpoints-carrito.md`, secciones "Paso 4", "Batería de estrés
+del ciclo de vida de la reserva" y `test-candado-checkout.sh` — 74 + 62 +
+22 comprobaciones + concurrencia, 0 fallos de regresión, base local
+intacta. Un hallazgo **pre-existente** anotado y sin tocar (500 en vez de
+503 con PostgreSQL caído, es del `SesionGuard`).
 
 **Fuera de nuestro alcance, o de otra persona:**
 - El frontend tiene que tratar `AGOTADO` como respuesta normal, no error

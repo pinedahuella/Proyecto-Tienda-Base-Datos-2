@@ -23,6 +23,14 @@ export interface OfertaVendedor {
   };
   /** true solo en la oferta de la cuenta de la tienda (ver CORREO_TIENDA). */
   es_tienda: boolean;
+  /**
+   * true si esta oferta esta operando bajo el mecanismo de venta relampago
+   * de Redis (`oferta.es_inventario_limitado`, migrations/014). Para quien
+   * compra: el stock de esta oferta lo decide una reserva atomica en Redis
+   * con un plazo, no el flujo normal de PostgreSQL. Lo enciende el vendedor
+   * con `POST /vendedor/ofertas/:id/venta-limitada`.
+   */
+  es_inventario_limitado: boolean;
   /** numeric(12,2) de Postgres: string, para no perder centavos por el redondeo binario. */
   precio: string;
   stock: number;
@@ -71,6 +79,13 @@ export interface OfertaPropiaResumen {
    * anteriores al flujo de aprobacion.
    */
   aprobado_por: AprobadorOferta | null;
+  /**
+   * true si el vendedor abrio la venta relampago de esta oferta
+   * (`oferta.es_inventario_limitado`, migrations/014). En el panel es lo
+   * que decide si el boton dice "Abrir venta relampago" o "Cerrar la
+   * venta". Ver `POST/DELETE /vendedor/ofertas/:id/venta-limitada`.
+   */
+  es_inventario_limitado: boolean;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -154,6 +169,7 @@ export interface FilaOfertaPropia {
   aprobo_usuario: string | null;
   aprobo_nombre: string | null;
   aprobo_apellido: string | null;
+  es_inventario_limitado: boolean;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -175,6 +191,17 @@ export interface FilaOfertaPendiente {
   usuario: string;
   nombre: string;
   apellido: string | null;
+}
+
+/**
+ * Lo que devuelve `POST /vendedor/ofertas/:id/venta-limitada`: cuantas
+ * unidades quedaron sembradas en el contador de Redis -- el `stock` que la
+ * oferta tenia en PostgreSQL en el instante de abrir la venta. Ver
+ * VentasLimitadasService.
+ */
+export interface VentaLimitadaAbierta {
+  id_oferta: string;
+  stock_sembrado: number;
 }
 
 /**

@@ -49,6 +49,8 @@ de restricción, y no son lo mismo:
 | `POST /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
 | `PATCH /vendedor/ofertas/:id` | vendedor **o** admin (2 o 3) | cualquier vendedor, pero solo sobre **su propia** oferta; un admin, sobre cualquier oferta **de la tienda** |
 | `PATCH /vendedor/ofertas/:id/revision` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `POST /vendedor/ofertas/:id/venta-limitada` | vendedor **o** admin (2 o 3) | solo sobre **su propia** oferta; un admin, sobre cualquier oferta **de la tienda** |
+| `DELETE /vendedor/ofertas/:id/venta-limitada` | vendedor **o** admin (2 o 3) | igual que el `POST` |
 
 **`/vendedor/productos` es el panel de administración del catálogo
 completo, no "mis productos".** Con el giro a multi-vendedor, un producto
@@ -1442,6 +1444,7 @@ GET /vendedor/ofertas
         "nombre": "Mesh",
         "apellido": "Tienda"
       },
+      "es_inventario_limitado": false,
       "fecha_creacion": "2026-01-09T16:22:00.000Z",
       "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
     },
@@ -1457,6 +1460,7 @@ GET /vendedor/ofertas
       "estado": "activa",
       "fecha_aprobacion": null,
       "aprobado_por": null,
+      "es_inventario_limitado": true,
       "fecha_creacion": "2026-01-04T16:52:00.000Z",
       "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
     }
@@ -1485,6 +1489,13 @@ oferta (flujo de aprobación, migración `010_aprobacion_ofertas.sql`):
   (nacen aprobadas sin revisor — `fecha_aprobacion` puesta, `aprobado_por`
   `null`); o es anterior al flujo de aprobación. El **dueño** de la oferta
   no sale de aquí, sale de que es tu panel.
+
+`es_inventario_limitado` (`oferta.es_inventario_limitado`, migración `014`):
+`true` si el vendedor abrió la **venta relámpago** de esta oferta —
+`POST /vendedor/ofertas/:id/venta-limitada`, más abajo. En el panel es lo
+que decide si el botón dice "Abrir venta relámpago" o "Cerrar la venta".
+Cuando es `true`, el stock de esa oferta lo lleva un contador atómico en
+Redis, no el flujo normal de PostgreSQL.
 
 Un vendedor sin ninguna oferta recibe `[]`, no un error.
 
@@ -1736,6 +1747,7 @@ GET /vendedor/ofertas/producto/2
             "nombre": "Mesh",
             "apellido": "Tienda"
           },
+          "es_inventario_limitado": false,
           "fecha_creacion": "2026-01-09T16:22:00.000Z",
           "fecha_actualizacion": "2026-08-25T15:54:00.258Z"
         }
@@ -1755,10 +1767,12 @@ Un producto donde no tengo ninguna oferta todavía sale igual, con
 `mi_oferta: null` en todas sus variantes — no es un error, es la señal de
 "todavía no publicaste nada aquí".
 
-`mi_oferta` trae `fecha_aprobacion` y `aprobado_por` con el mismo
-significado que en `GET /vendedor/ofertas` (quién y cuándo aprobó la
-tienda esa oferta; los dos `null` mientras no circule, `aprobado_por`
-también `null` en las ofertas de la propia tienda/admin).
+`mi_oferta` trae `fecha_aprobacion`, `aprobado_por` y
+`es_inventario_limitado` con el mismo significado que en
+`GET /vendedor/ofertas` (quién y cuándo aprobó la tienda esa oferta; los
+dos `null` mientras no circule, `aprobado_por` también `null` en las
+ofertas de la propia tienda/admin; `es_inventario_limitado` = si su venta
+relámpago está abierta).
 
 ### 400
 
@@ -1889,11 +1903,16 @@ POST /vendedor/ofertas
     "estado": "pendiente",
     "fecha_aprobacion": null,
     "aprobado_por": null,
+    "es_inventario_limitado": false,
     "fecha_creacion": "2026-08-25T17:10:24.348Z",
     "fecha_actualizacion": "2026-08-25T17:10:24.348Z"
   }
 }
 ```
+
+(Una oferta recién creada nunca está en venta relámpago:
+`es_inventario_limitado` es siempre `false` aquí — se abre aparte, con
+`POST /vendedor/ofertas/:id/venta-limitada`.)
 
 (`estado` es `"activa"` si quien la crea es la tienda o un admin, y en ese
 caso `fecha_aprobacion` viene puesta — pero `aprobado_por` sigue `null`:
@@ -2054,6 +2073,7 @@ Al menos uno de los tres tiene que venir.
       "nombre": "Mesh",
       "apellido": "Tienda"
     },
+    "es_inventario_limitado": false,
     "fecha_creacion": "2026-08-25T17:10:44.377Z",
     "fecha_actualizacion": "2026-08-25T17:18:46.987Z"
   }
@@ -2203,6 +2223,7 @@ PATCH /vendedor/ofertas/174/revision
       "nombre": "Mesh",
       "apellido": "Tienda"
     },
+    "es_inventario_limitado": false,
     "fecha_creacion": "2026-08-25T17:10:44.377Z",
     "fecha_actualizacion": "2026-08-28T22:11:03.512Z"
   }
@@ -2283,3 +2304,172 @@ la base; la oferta aprobada aparece con su `aprobado_por` en
 `fecha_aprobacion` puesta y `aprobado_por` `null`; y las 350 ofertas de
 vendedor de la semilla salen con `aprobado_por` = `mesh_tienda`. Teardown
 sin drift en los campos calculados de Mongo.
+
+---
+
+## POST /vendedor/ofertas/:id/venta-limitada
+
+**Abre la venta relámpago** (inventario limitado en Redis) de una oferta
+propia. Es el paso 2 del inventario limitado — ver
+`plan pendiente/inventario-limitado.md` y `endpoints-carrito.md`. `:id` es
+`id_oferta`.
+
+Vive en su propio controlador/servicio (`VentasLimitadasController` /
+`VentasLimitadasService`), aparte del CRUD de ofertas: el mecanismo no
+toca el flujo de `oferta` de PostgreSQL, solo enciende la columna
+`es_inventario_limitado` y siembra el contador de Redis. Comparte el
+prefijo `/vendedor/ofertas`, el guard y los roles (`vendedor` o `admin`).
+
+**Autorización:** la oferta tiene que ser **tuya**. Una oferta ajena o
+inexistente da el **404 genérico** de siempre (`"No existe una oferta con
+ese id"`) — no se confirma que exista. Un **admin** actúa como la cuenta
+de la tienda (igual que el resto de `/vendedor/ofertas`): abre ventas
+sobre ofertas de `tienda@mesh.com`.
+
+Qué hace por dentro: siembra el contador de Redis
+(`mesh:oferta:<id_oferta>`) con el `stock` que la oferta tiene en ese
+instante en PostgreSQL, y marca `oferta.es_inventario_limitado = true`. A
+partir de ahí, agregar esa oferta al carrito **reserva de verdad**
+unidades (ver `endpoints-carrito.md`).
+
+### Cuerpo
+
+```json
+{ "duracion_segundos": 3600 }
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `duracion_segundos` | No (por defecto `0`) | Entero entre `0` y `604800` (7 días). Es **cuándo cierra la venta entera**: pasado ese tiempo las claves de Redis de la oferta desaparecen solas y la venta vuelve al flujo normal. `0` = sin vencimiento (hay que cerrarla a mano con el `DELETE`). No confundir con el plazo de una reserva individual del comprador (15 min, fijo). |
+
+El cuerpo tiene que ser JSON válido: mandar `{}` para usar el valor por
+defecto. Un `POST` con `Content-Type: application/json` y cuerpo
+**totalmente vacío** da `400` de Fastify (igual que el resto de los `POST`
+del backend).
+
+### 201
+
+```json
+{
+  "ok": true,
+  "mensaje": "Venta relampago abierta",
+  "payload": { "id_oferta": "3", "stock_sembrado": 24 }
+}
+```
+
+`stock_sembrado` es cuántas unidades quedaron en el contador de Redis — el
+`stock` de la oferta en PostgreSQL en el instante de abrir.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "La duracion_segundos debe ser un entero entre 0 y 604800 (7 dias); 0 = sin vencimiento", "payload": null }
+```
+
+### 401 / 403
+
+Sin sesión → `401`. Con rol distinto de `vendedor`/`admin` (un comprador) →
+`403`.
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
+```
+
+La oferta no existe **o no es tuya** (mismo mensaje para las dos cosas).
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "La oferta 3 no esta activa (esta pausada), no se puede abrir una venta limitada", "payload": null }
+{ "ok": false, "mensaje": "La oferta 3 ya esta en modo venta limitada -- sembrar de nuevo borraria sus reservas vivas", "payload": null }
+```
+
+Dos casos que el panel distingue: la oferta no está `activa` (está
+`pausada`/`retirada`/`pendiente`/`rechazada`), o **ya** está en venta
+relámpago — este último es lo que impide que un segundo clic vuelva a
+sembrar y borre las reservas que ya tomaron los compradores.
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
+{ "ok": false, "mensaje": "No se pudo abrir la venta relampago", "payload": null }
+```
+
+Si Redis falla **después** de haber marcado la columna en PostgreSQL, el
+servicio deshace la marca (`es_inventario_limitado = false`) para no dejar
+la oferta marcada como limitada sin nada sembrado en Redis.
+
+---
+
+## DELETE /vendedor/ofertas/:id/venta-limitada
+
+**Cierra la venta relámpago** de una oferta propia: apaga
+`oferta.es_inventario_limitado` y borra las dos claves de Redis de esa
+oferta (`mesh:oferta:<id>` y `mesh:oferta:<id>:reservas`). `:id` es
+`id_oferta`. Misma autorización que el `POST` (tuya, o de la tienda si
+sos admin; 404 genérico si no).
+
+**OJO:** cerrar **no confirma** las reservas que hubiera en curso — lo que
+de verdad quedó vendido solo se sabe con `confirmar` por ticket, y eso es
+el flujo del checkout. Por ahora cerrar una venta con reservas vivas las
+descarta (sus unidades vuelven al `stock` de PostgreSQL vía el `DEL`, no
+se pierden, pero el comprador que había apartado se queda sin su
+reserva). Sirve para cerrar una venta tranquila o deshacer una prueba, no
+para cortar en seco una que está caliente.
+
+### 200
+
+```json
+{ "ok": true, "mensaje": "Venta relampago cerrada", "payload": null }
+```
+
+### 400 / 401 / 403
+
+`400` id inválido; `401` sin sesión; `403` rol comprador.
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
+```
+
+La oferta no existe o no es tuya.
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "La oferta 3 no esta en una venta relampago", "payload": null }
+```
+
+La oferta no estaba en modo venta relámpago (`es_inventario_limitado` era
+`false`). El panel no debería ofrecer el botón "Cerrar" en ese caso, pero
+se comprueba igual.
+
+### 503 / 500
+
+Igual que el `POST` (`No se pudo cerrar la venta relampago` como mensaje
+por defecto).
+
+---
+
+## Pruebas — venta relámpago del vendedor (2026-09-03)
+
+`test-ventas-limitadas.sh`, contra el servidor y las bases reales (no va al
+repo). Ofertas de `ventas_norte` (3, 6) y de la tienda (7); teardown por
+oferta (`es_inventario_limitado = false` + `DEL` de las claves de Redis) y
+verificación de que los carritos de validación sembrados a mano quedan
+intactos. **45 comprobaciones, 0 fallos.**
+
+| Grupo | Qué | Resultado |
+|---|---|---|
+| A | `POST` con `duracion_segundos: 3600` | 201 `{ id_oferta, stock_sembrado }`; PG marcada; Redis sembrado con el stock; TTL de la clave ≈ 3600 s |
+| B | Los tres GET de ofertas | `GET /vendedor/ofertas`, `GET /vendedor/ofertas/producto/:id` (en `mi_oferta`) y `GET /productos/:id` (público, en `ofertas[]`) traen `es_inventario_limitado` con el valor correcto |
+| C | Errores de `abrir` | abrir de nuevo → 409 "ya está en modo venta limitada"; oferta ajena → 404; inexistente → 404; sin sesión → 401; rol comprador → 403; oferta pausada → 409 "no está activa"; `duracion_segundos` negativa / > 7 días / no numérica → 400; ningún intento fallido sembró nada en Redis |
+| D | `POST` con body `{}` | 201, la venta no vence (TTL `-1`). Cuerpo totalmente vacío → 400 de Fastify |
+| E | `DELETE` (cerrar) | 200; PG desmarcada; las dos claves de Redis borradas; cerrar de nuevo → 409; cerrar una ajena → 404 y la venta ajena no se toca |
+| F | Un admin | abre y cierra la venta relámpago de una oferta de la **tienda** (actúa como `tienda@mesh.com`) |

@@ -339,6 +339,14 @@ export class CarritoService {
     try {
       const clave = this.clave(idUsuario);
       await redis.hset(clave, String(idOferta), String(cantidad));
+      // Si esta linea arrastraba un ticket de una venta relampago que ya
+      // cerro (`existeVentaLimitada` dio false porque la clave Redis de la
+      // oferta ya no existe -> no hay ninguna reserva viva que soltar), se
+      // limpia el campo companero. Sin esto la linea seguiria saliendo como
+      // `es_inventario_limitado` en `GET /carrito` y el checkout intentaria
+      // `confirmar` un ticket muerto. `HDEL` de un campo que no esta es un
+      // no-op, asi que va siempre sin comprobar antes.
+      await redis.hdel(clave, this.campoTicket(idOferta));
       await redis.expire(clave, CarritoService.TTL_SEGUNDOS);
     } catch (error) {
       manejarErrorRedis(this.logger, error);
@@ -461,6 +469,18 @@ export class CarritoService {
     idUsuario: string,
     datos: ComprarCarritoPeticion,
   ): Promise<ComprarCarritoRespuesta> {
+    // Un candado corto por cuenta cierra el hueco del doble submit (dos
+    // POST /carrito/comprar identicos y concurrentes creaban dos pedidos,
+    // cobrando dos veces). Ver conCandadoCheckout.
+    return this.conCandadoCheckout(idUsuario, () =>
+      this.ejecutarCompraCarrito(idUsuario, datos),
+    );
+  }
+
+  private async ejecutarCompraCarrito(
+    idUsuario: string,
+    datos: ComprarCarritoPeticion,
+  ): Promise<ComprarCarritoRespuesta> {
     if (!esTextoNoVacio(datos.metodo_pago)) {
       throw new ErrorValidacion('El metodo_pago es obligatorio');
     }
@@ -577,6 +597,56 @@ export class CarritoService {
   // ---------------------------------------------------------------------
   // Privados
   // ---------------------------------------------------------------------
+
+  /**
+   * Corre `fn` bajo un candado corto en Redis exclusivo del checkout de
+   * esta cuenta (`mesh:checkout:<id_usuario>`). Si ya hay una compra en
+   * curso para la misma cuenta, corta con 409 sin tocar nada.
+   *
+   * Cierra el hueco del doble submit: dos `POST /carrito/comprar`
+   * identicos y concurrentes leian los dos el carrito lleno ANTES de que
+   * ninguno lo vaciara, y cada uno creaba su propio pedido -- cobrando dos
+   * veces. `SET ... NX` es atomico (Redis atiende un comando a la vez),
+   * asi que de dos peticiones que llegan juntas solo una consigue el
+   * candado; la otra ni siquiera llega a leer el carrito.
+   *
+   * El candado vence solo a los 30 s (`EX`) por si el proceso muere a
+   * mitad del checkout -- un `comprar_carrito()` normal tarda muucho menos.
+   * El `finally` lo suelta en el camino feliz y en el de error; si ese
+   * `DEL` fallara, el `EX` lo limpia igual.
+   */
+  private async conCandadoCheckout<T>(
+    idUsuario: string,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const clave = `mesh:checkout:${idUsuario}`;
+
+    let obtenido: string | null = null;
+    try {
+      obtenido = await redis.set(clave, '1', 'EX', 30, 'NX');
+    } catch (error) {
+      manejarErrorRedis(this.logger, error);
+    }
+
+    if (obtenido == null) {
+      throw new ErrorConflicto(
+        'Ya tienes una compra en curso, espera un momento antes de reintentar',
+      );
+    }
+
+    try {
+      return await fn();
+    } finally {
+      try {
+        await redis.del(clave);
+      } catch (error) {
+        this.logger.warn(
+          `No se pudo soltar el candado de checkout de ${idUsuario} (vence solo en 30 s): ` +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
+  }
 
   private validarIdOferta(valor: string): number {
     if (!REGEX_ID.test(valor)) {

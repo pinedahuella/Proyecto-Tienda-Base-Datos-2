@@ -374,6 +374,7 @@ cada variante, de la más barata a la más cara.
 | `id_producto_variante_mongo` | A qué variante de `variantes[]` pertenece esta oferta |
 | `vendedor` | `{ id_usuario, usuario, nombre, apellido }` de quien la vende |
 | `es_tienda` | `true` solo en la oferta de la cuenta de la tienda (`tienda@mesh.com`) — es la que se enseña como `precio_tienda` en el resto del documento |
+| `es_inventario_limitado` | `true` si esta oferta está en **venta relámpago** (`oferta.es_inventario_limitado`, migración `014`): su stock lo lleva un contador atómico en Redis con un plazo, no el flujo normal. Lo enciende el vendedor con `POST /vendedor/ofertas/:id/venta-limitada` (ver `endpoints-vendedores.md`). Agregar una oferta así al carrito **reserva** unidades de verdad (ver `endpoints-carrito.md`) |
 | `precio` | Precio de esta oferta en particular, como texto (`"4100.00"`) |
 | `stock` | Unidades disponibles de esta oferta |
 | `fecha_actualizacion` | Último cambio de precio, stock o estado de esta oferta |
@@ -407,6 +408,7 @@ Ejemplo real (`GET /productos/1`):
         "id_producto_variante_mongo": "1",
         "vendedor": { "id_usuario": "1", "usuario": "ventas_poniente", "nombre": "Paola", "apellido": "Guzman" },
         "es_tienda": false,
+        "es_inventario_limitado": false,
         "precio": "3856.00",
         "stock": 7,
         "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
@@ -416,6 +418,7 @@ Ejemplo real (`GET /productos/1`):
         "id_producto_variante_mongo": "1",
         "vendedor": { "id_usuario": "6", "usuario": "ventas_sur", "nombre": "Lucia", "apellido": "Morales" },
         "es_tienda": false,
+        "es_inventario_limitado": true,
         "precio": "4029.00",
         "stock": 14,
         "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
@@ -425,6 +428,7 @@ Ejemplo real (`GET /productos/1`):
         "id_producto_variante_mongo": "1",
         "vendedor": { "id_usuario": "2", "usuario": "mesh_tienda", "nombre": "Mesh", "apellido": "Tienda" },
         "es_tienda": true,
+        "es_inventario_limitado": false,
         "precio": "4100.00",
         "stock": 22,
         "fecha_actualizacion": "2026-08-25T13:38:51.071Z"

@@ -315,6 +315,9 @@ export class OfertasVendedorService {
       // nace `pendiente` (las dos cosas null).
       fecha_aprobacion: filaOferta.fecha_aprobacion,
       aprobado_por: null,
+      // Una oferta recien creada nunca esta en venta relampago -- se abre
+      // aparte, con POST /vendedor/ofertas/:id/venta-limitada.
+      es_inventario_limitado: false,
       fecha_creacion: filaOferta.fecha_creacion,
       fecha_actualizacion: filaOferta.fecha_actualizacion,
     };
@@ -614,6 +617,7 @@ export class OfertasVendedorService {
       estado: fila.estado_oferta_nombre,
       fecha_aprobacion: fila.fecha_aprobacion,
       aprobado_por: this.armarAprobador(fila),
+      es_inventario_limitado: fila.es_inventario_limitado,
       fecha_creacion: fila.fecha_creacion,
       fecha_actualizacion: fila.fecha_actualizacion,
     };
@@ -694,6 +698,7 @@ export class OfertasVendedorService {
         estado: fila.estado_oferta_nombre,
         fecha_aprobacion: fila.fecha_aprobacion,
         aprobado_por: this.armarAprobador(fila),
+        es_inventario_limitado: fila.es_inventario_limitado,
         fecha_creacion: fila.fecha_creacion,
         fecha_actualizacion: fila.fecha_actualizacion,
       };
@@ -761,6 +766,7 @@ export class OfertasVendedorService {
               estado: fila.estado_oferta_nombre,
               fecha_aprobacion: fila.fecha_aprobacion,
               aprobado_por: this.armarAprobador(fila),
+              es_inventario_limitado: fila.es_inventario_limitado,
               fecha_creacion: fila.fecha_creacion,
               fecha_actualizacion: fila.fecha_actualizacion,
             }
@@ -896,7 +902,7 @@ export class OfertasVendedorService {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
-                o.id_usuario_aprobo,
+                o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,
                 o.fecha_creacion, o.fecha_actualizacion
@@ -921,7 +927,7 @@ export class OfertasVendedorService {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
-                o.id_usuario_aprobo,
+                o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,
                 o.fecha_creacion, o.fecha_actualizacion
@@ -985,7 +991,7 @@ export class OfertasVendedorService {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
-                o.id_usuario_aprobo,
+                o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,
                 o.fecha_creacion, o.fecha_actualizacion
@@ -1020,7 +1026,7 @@ export class OfertasVendedorService {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
-                o.id_usuario_aprobo,
+                o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,
                 o.fecha_creacion, o.fecha_actualizacion

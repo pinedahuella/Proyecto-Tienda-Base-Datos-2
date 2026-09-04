@@ -7,6 +7,11 @@ Redis (los scripts `.lua`) ni ninguna migración: es lógica del backend
 sobre piezas que ya existían (`InventarioLimitadoService.confirmar` /
 `devolver`, que ya estaban escritas y probadas por separado).
 
+Cubre tres cosas: (1) el **paso 4** — conectar `confirmar`/`devolver` al
+checkout; (2) un bug del `t:` huérfano encontrado al probar; (3) el
+**candado de checkout** contra el doble submit, que salió de la misma
+batería de estrés.
+
 ## Qué es esto
 
 Es el **paso 4** de `elementos Generales/plan pendiente/inventario-limitado.md`.
@@ -57,10 +62,41 @@ anotada en `DELETE /carrito`.
 74 comprobaciones contra el servidor y las bases reales (grupos A–G:
 compra con confirmación, redimensionar + confirmar, fallo → devolver +
 reintento, `DELETE /carrito`, `DELETE /carrito/lineas`, regresión de
-carrito normal, e interruptor en `true`), 0 fallos. `npx tsc --noEmit`
-limpio, log del servidor sin warnings de `confirmar`/`devolver`. Base
-local devuelta a su estado inicial. Detalle en `endpoints-carrito.md`,
-sección "Paso 4 — `confirmar` / `devolver` conectados al checkout".
+carrito normal, e interruptor en `true`), 0 fallos.
+
+**Batería de estrés extra** del ciclo de vida de la reserva (a raíz de la
+observación de que la liberación tiene muchos puntos de fallo):
+`test-reserva-stress.sh` (62/62) + `test-reserva-concurrencia.sh` +
+`test-m2-postgres-down.sh` — idempotencia de cada liberación, rechazo de
+PostgreSQL, best-effort de `confirmar`/`devolver`, venta cerrada con ticket
+colgado, caídas de Redis y PostgreSQL, y concurrencia (`DELETE` línea ‖
+checkout, doble `PUT`). El ciclo aguanta: toda liberación es idempotente,
+ningún camino sobre-libera, los fallos se registran, y `comprar_carrito()`
+(el libro real) nunca queda a medias.
+
+- **Bug corregido en el camino:** el `PUT` normal no limpiaba un campo
+  `t:<id_oferta>` huérfano cuando la venta relámpago ya había cerrado, así
+  que la línea seguía reportándose como limitada. Ahora hace `HDEL` de ese
+  campo siempre.
+- **Doble compra por doble submit — CORREGIDO** (`test-candado-checkout.sh`,
+  0/22 dobles tras el cambio). `comprarCarrito` toma un candado corto en
+  Redis, `mesh:checkout:<id_usuario>` (`SET EX 30 NX`); si la cuenta ya
+  tiene una compra en curso, corta con 409 sin leer el carrito. Es por
+  cuenta (dos personas distintas no se estorban) y se auto-libera a los
+  30 s si el proceso muere. El otro camino de compra,
+  `POST /comprador/pedidos/:id/comprar`, se comprobó y ya era seguro (el
+  `pedido` ya existe y `comprar_pedido()` revalida su estado bajo
+  `FOR UPDATE`).
+- **Hallazgo pre-existente, sin tocar** (para el equipo): PostgreSQL caído
+  → 500 en vez de 503 en rutas con sesión (el `SesionGuard.estaActivo` no
+  traduce el error de conexión a `ErrorConexion`). Afecta a toda ruta
+  autenticada, no solo al carrito.
+
+`npx tsc --noEmit` limpio, log del servidor sin warnings de
+`confirmar`/`devolver`. Base local devuelta a su estado inicial. Detalle en
+`endpoints-carrito.md`, secciones "Paso 4 — `confirmar` / `devolver`
+conectados al checkout" y "Batería de estrés del ciclo de vida de la
+reserva".
 
 ## Lo que sigue del bloque de inventario limitado
 

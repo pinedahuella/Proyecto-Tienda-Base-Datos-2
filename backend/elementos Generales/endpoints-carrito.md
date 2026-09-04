@@ -510,7 +510,19 @@ nada del pedido.
 ```json
 { "ok": false, "mensaje": "El carrito esta vacio", "payload": null }
 { "ok": false, "mensaje": "\"64 GB / 2 TB\" ya no esta disponible; \"Cable 3 m\" no tiene stock suficiente", "payload": null }
+{ "ok": false, "mensaje": "Ya tienes una compra en curso, espera un momento antes de reintentar", "payload": null }
 ```
+
+**Candado de checkout (2026-09-03).** Al entrar, `comprarCarrito` toma un
+candado corto en Redis, `mesh:checkout:<id_usuario>` (`SET ... EX 30 NX`).
+Si la misma cuenta ya tiene una compra en curso, corta con el 409 de
+arriba **sin leer el carrito ni tocar nada**. Cierra el hueco del doble
+submit: dos `POST /carrito/comprar` idénticos y concurrentes leían los dos
+el carrito lleno antes de que ninguno lo vaciara y creaban **dos pedidos**
+(cobrando dos veces). `SET NX` es atómico, así que solo una petición entra;
+el candado se suelta al terminar (éxito o error) y, si el proceso muere a
+mitad, el `EX 30` lo limpia. Es **por cuenta** — dos personas distintas
+compran a la vez sin estorbarse.
 
 El carrito está vacío, o alguna línea no se puede comprar. El chequeo
 previo (con `GET /carrito`) arma la **lista** de todos los problemas; si
@@ -674,3 +686,55 @@ devuelta a su estado inicial (2 pedidos, stock original).
 del servidor sin warnings ni errores de `confirmar`/`devolver`. Interruptor
 `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR` probado en `true` (grupo G) y
 devuelto a `false` al terminar.
+
+### Batería de estrés del ciclo de vida de la reserva (2026-09-03)
+
+A raíz de la observación de que la liberación de la reserva tiene muchos
+puntos posibles de fallo (por tiempo, por rechazo de PostgreSQL, por caída
+de infraestructura, best-effort de `confirmar`/`devolver`, concurrencia),
+se corrió una batería extra: `test-reserva-stress.sh` (62/62) +
+`test-reserva-concurrencia.sh` (L1/L3 limpios) + `test-m2-postgres-down.sh`.
+
+| Grupo | Qué prueba | Resultado |
+|---|---|---|
+| **I — idempotencia** | `DELETE /carrito/lineas` dos veces; `DELETE /carrito` con reserva ya cosechada; `DELETE` de línea con reserva vencida; `DELETE /carrito` tras compra ya confirmada | Ninguna liberación se aplica dos veces: `devolver` sobre un ticket muerto contesta `SIN_TICKET` sin efecto. El `stock` de Redis nunca "sube de más". |
+| **J — PostgreSQL rechaza** | `comprar_carrito()` falla por `metodo_pago` inválido; oferta retirada por el vendedor (bloqueante) | Fallo dentro de `comprar_carrito()` → `devolver` + carrito intacto + `reserva_vencida` en el siguiente `GET` + reintento OK. Bloqueante en la precomprobación (con el interruptor en `false`) → 409 y la reserva queda hasta su TTL o hasta un `DELETE` manual (esperado). |
+| **K — `confirmar` best-effort** | reserva muerta antes de pagar; `confirmar` rechazado (`TICKET_AJENO`) con la compra en curso | Una reserva muerta se detecta en `verCarrito` (no se vende en silencio). Si `confirmar` falla *después* de que `comprar_carrito()` ya cerró la venta: **la compra se mantiene** (PG es el libro), el fallo **se registra en el log** (no es silencioso), y queda un desajuste acotado en el contador de Redis que se corrige al cerrar la venta. |
+| **N — venta cerrada con ticket colgado** | `revertir` mientras la línea sigue en el carrito, luego el comprador cambia la cantidad | **Bug encontrado y corregido:** el `PUT` normal no limpiaba el campo `t:<id>` huérfano, así que la línea seguía saliendo como `es_inventario_limitado` y el checkout intentaba `confirmar` un ticket muerto. Ahora el `PUT` normal hace `HDEL` de ese campo siempre. |
+| **O — línea agregada antes de abrir la venta** | añadir al carrito, luego abrir la venta relámpago | La línea sin ticket se compra por la vía PG normal, sin pasar por la reserva. PG (libro real) queda bien; el contador de Redis sobrestima esa cantidad hasta el cierre. Aceptable por el diseño de dos contadores — anotarlo en el informe. |
+| **M — caídas de infra** | Redis caído durante `GET` / `DELETE` / `POST /carrito/comprar`; PostgreSQL caído (`docker stop`) durante el checkout | Redis caído → **503 limpio** (no cuelga, no 500), sin pedido, reserva intacta al volver. PostgreSQL caído → la petición muere en el `SesionGuard` (ver hallazgo abajo), **sin medio-commit** (0 pedidos, nada vendido); la reserva se libera sola por su TTL. |
+| **L — concurrencia** | `DELETE /carrito/lineas` \|\| `POST /carrito/comprar` (×12); dos `PUT` concurrentes sobre la misma línea (×12) | **Limpio**: nunca un pedido a medias, nunca un contador negativo, el carrito y la reserva viva siempre coinciden. La atomicidad del `.lua` sostiene la concurrencia. |
+| **doble submit** (`test-candado-checkout.sh`) | dos `POST /carrito/comprar` idénticos a la vez — carrito normal (×12) y carrito de inventario limitado (×10); dos cuentas distintas a la vez; segunda compra inmediata; doble submit sobre `POST /comprador/pedidos/:id/comprar` | Con el candado de checkout: **0/22 dobles**, el perdedor recibe 409 "Ya tienes una compra en curso". Dos cuentas distintas no se estorban (candado por cuenta). El candado se suelta tras cada compra. `POST /comprador/pedidos/:id/comprar` **ya era seguro** sin candado (revalida el estado del `pedido` bajo `FOR UPDATE`). |
+
+**Conclusión sobre "el eslabón débil":** el ciclo de reserva ↔ liberación
+aguanta. Todas las liberaciones son idempotentes, ningún camino
+sobre-libera, los fallos de `confirmar`/`devolver` se registran y la
+compra en PostgreSQL (el libro real, con `FOR UPDATE`) nunca queda a
+medias. El "coste" del diseño no-bloqueante es un posible **desajuste
+temporal entre el contador de Redis y PostgreSQL** (grupos K, O) — nunca
+una sobreventa del producto, y se corrige al cerrar la venta (`revertir`
+borra las claves / el `EXPIRE` las vence).
+
+La batería sí destapó un problema **fuera** de ese eslabón — la doble
+compra por doble submit del checkout — que se corrigió con el candado de
+Redis (ver `POST /carrito/comprar`). El resumen de los dos hallazgos y qué
+se hizo con cada uno está justo abajo.
+
+### Hallazgos de la batería, y qué se hizo con cada uno
+
+1. **Doble compra por doble submit del checkout** — dos `POST /carrito/comprar`
+   idénticos y concurrentes creaban **dos pedidos** y cobraban dos veces
+   (5/10 en la prueba). **CORREGIDO (2026-09-03)** con el candado de
+   checkout (`mesh:checkout:<id_usuario>`, `SET EX 30 NX`) — ver
+   `POST /carrito/comprar` § "Candado de checkout" y la prueba
+   `test-candado-checkout.sh` (0/22 dobles tras el cambio). El otro camino
+   de compra, `POST /comprador/pedidos/:id/comprar`, se comprobó y **ya
+   era seguro**: opera sobre un `pedido` que ya existe y `comprar_pedido()`
+   revalida su estado bajo `FOR UPDATE`, así que la segunda petición recibe
+   "El pedido N ya esta comprado" (1 solo `pago`, verificado).
+2. **PostgreSQL caído → 500 en vez de 503 en rutas con sesión** (pre-existente,
+   **fuera de alcance, sin tocar**). El `SesionGuard` consulta `usuarios`
+   para ver si la cuenta sigue activa; con la BD caída (`docker stop`), ese
+   error no se traduce a `ErrorConexion` y sale como 500 ("No se pudo
+   verificar la sesion"). Afecta a **toda ruta autenticada**, no solo al
+   carrito — es del guard, no del checkout.
