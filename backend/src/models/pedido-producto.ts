@@ -42,4 +42,19 @@ export interface DetallePedido extends PedidoProducto {
   precio_unitario: string;
   id_oferta: string;
   id_usuario_vendedor: string;
+  /**
+   * `true` si esta linea cumple la regla de `POST /resenas` (haber
+   * comprado y pagado ESE producto a ESE vendedor, pedido no cancelado) --
+   * la misma condicion que `ResenasService.exigirCompraPagada`, calculada
+   * aca para que el frontend muestre el boton "Resenar" directo desde el
+   * pedido sin pegarle aparte a /resenas/comprobar-compra.
+   */
+  puede_resenar: boolean;
+  /**
+   * `true` si esta cuenta ya reseno ESTE producto a ESTE vendedor (el trio
+   * id_usuario/id_usuario_vendedor/id_producto_mongo, el mismo que protege
+   * el UNIQUE de `resena`). Misma idea que `ResenasService.resenoProducto`,
+   * pero acotada al vendedor de esta linea, no a "cualquier vendedor".
+   */
+  ya_reseno: boolean;
 }

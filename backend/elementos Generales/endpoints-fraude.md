@@ -11,11 +11,13 @@ Dos rutas de admin sobre el grafo de **Neo4j**, las dos de **solo lectura**:
   contra Neo4j (la proyección) y avisa de la deriva. Ver la sección al
   final.
 
-> **Estado (2026-08-30): ruta implementada y PROBADA en vivo.** Contra
-> `mesh-neo4j` cargado (150 nodos): autorización 401/403/403/403/200,
-> `anillos: []` con el grafo real, y los 4 grupos correctos con un anillo
-> sembrado (`neo4j/consultas/siembra.cypher`). Neo4j caído → 503 en 0.3 s.
-> Ver "Pruebas".
+> **Estado (2026-08-30, sincronización agregada 2026-09-04): ruta
+> implementada y PROBADA en vivo.** Contra `mesh-neo4j` cargado (150 nodos):
+> autorización 401/403/403/403/200, `anillos: []` con el grafo real, y los 4
+> grupos correctos con un anillo sembrado
+> (`neo4j/consultas/siembra.cypher`). Neo4j caído → 503 en 0.3 s. Desde
+> 2026-09-04 la respuesta también trae `sincronizacion` (qué tan al día está
+> el grafo respecto a PostgreSQL) — ver "Pruebas".
 
 Código: `src/controllers/fraude/fraude.controller.ts` +
 `src/services/fraude/fraude.service.ts`. Cliente Neo4j:
@@ -141,7 +143,12 @@ devuelve el grafo, sin volver a consultarlo:
         ]
       }
     ],
-    "analizado": { "cuentas": 10, "resenas": 86, "relaciones": 272 }
+    "analizado": { "cuentas": 10, "resenas": 86, "relaciones": 272 },
+    "sincronizacion": {
+      "ultima_sincronizacion": "2026-09-04T06:21:57.459Z",
+      "pendientes": 0,
+      "apartados": 0
+    }
   }
 }
 ```
@@ -157,6 +164,21 @@ uno con `neo4j/correr_fraude.sh` (lo del compañero).
 - `resenas[].fecha` es lo que devuelve `toString(datetime)` del grafo (ISO
   8601, normalmente con `Z`). El frontend hace `new Date(...)`.
 - `productos` se deduce de `resenas` (los productos distintos que aparecen).
+- **`sincronizacion`** — que tan al día está el grafo respecto a
+  PostgreSQL, para que el panel no enseñe un análisis sobre datos
+  incompletos sin decirlo (mismos números que `cola` y
+  `ultima_sincronizacion` de `GET /admin/grafo/conciliacion`, calculados con
+  la misma consulta a `evento_grafo`):
+  - `ultima_sincronizacion`: `max(procesado_en)` del outbox, o `null` si
+    nada se ha procesado todavía.
+  - `pendientes`: eventos sin aplicar (`procesado_en IS NULL`,
+    `intentos < 5`).
+  - `apartados`: eventos que fallaron 5 veces y no se reintentan más.
+  - **`sincronizacion` completo puede salir `null`** — si PostgreSQL no
+    respondió a tiempo (3 s) o si `evento_grafo` todavía no existe (falta la
+    migración `015`). Es un dato auxiliar: cuando falla, el resto de la
+    respuesta (`anillos`, `analizado`) sigue igual, no se cae el endpoint.
+    Ver `GrafoSyncService.estadoSincronizacion()`.
 
 ### 401
 
@@ -273,6 +295,23 @@ Verificado: el par `anillo_a`↔`anillo_b` sale **una sola vez** como
 
 `docker stop mesh-neo4j` → la ruta responde `503` "No se pudo conectar con
 Neo4j" en **0.3 s**, no se cuelga.
+
+### `sincronizacion` — probado el 2026-09-04
+
+Contra la cola `evento_grafo` real (misma consulta que usa la conciliación).
+
+| Caso | `sincronizacion` |
+|---|---|
+| Cola al día (sin pendientes ni apartados) | igual a `ultima_sincronizacion`/`cola` de `GET /admin/grafo/conciliacion` en el mismo instante |
+| Evento insertado a mano, leído antes de que el worker lo aplique (10 s) | `pendientes: 1` |
+| El mismo evento, tras el siguiente tick del worker | `pendientes: 0`, `ultima_sincronizacion` avanza a la hora del tick |
+| Evento con `intentos = 5` (simulando uno apartado) | `apartados: 1`; el worker nunca lo toca (`WHERE intentos < 5`) |
+| Tabla `evento_grafo` renombrada (simulando la migración `015` sin aplicar) | `sincronizacion: null`; `anillos` y `analizado` siguen presentes, la ruta sigue en `200` |
+| Neo4j caído (con la cola normal) | sigue en `503` antes de llegar a leer `sincronizacion` — mismo comportamiento que antes de este cambio |
+
+`npx tsc --noEmit` y `eslint` limpios sobre los cuatro archivos tocados
+(`models/grafo.ts`, `models/fraude.ts`, `services/grafo/grafo-sync.service.ts`,
+`services/fraude/fraude.service.ts`).
 
 ### Limpieza
 

@@ -372,7 +372,12 @@ export class OfertasVendedorService {
    *     'ajuste' y la magnitud (`Math.abs`) -- los mismos dos motivos que
    *     ya admite esa funcion fuera del flujo del pedido. Es la misma
    *     correccion manual (sube o baja) que ya existia en el modelo viejo
-   *     de inventario, ahora sobre la oferta.
+   *     de inventario, ahora sobre la oferta. **Rechazado con 409 si la
+   *     oferta esta en venta relampago** (`es_inventario_limitado`): ahi
+   *     el stock real lo lleva Redis, y tocar `oferta.stock` por este
+   *     camino las desincroniza -- Redis seguiria prometiendo unidades que
+   *     PostgreSQL ya no tiene, y el checkout revienta con un error que no
+   *     explica nada. `precio` y `estado` no se ven afectados por esto.
    *
    * Solo el dueno de la oferta -- una ajena da el mismo 404 generico que
    * una que no existe, mismo criterio de siempre. Si quien edita es
@@ -416,6 +421,17 @@ export class OfertasVendedorService {
     // la oferta es ajena.
     const filaActual = await this.obtenerFilaPropia(idOferta, idUsuario);
     const nuncaAprobada = filaActual.fecha_aprobacion == null;
+
+    // Con la venta relampago abierta, el stock real lo lleva Redis (las
+    // unidades reservadas se descuentan ahi, no en `oferta.stock`); dejar
+    // que `ajuste_stock` toque la columna de PostgreSQL mientras tanto
+    // desincroniza las dos y Redis puede terminar prometiendo unidades que
+    // PostgreSQL ya no tiene. precio y estado no se ven afectados.
+    if (ajusteStock != null && filaActual.es_inventario_limitado) {
+      throw new ErrorConflicto(
+        'La oferta esta en una venta relampago: cierra la venta relampago antes de ajustar su existencia',
+      );
+    }
 
     // Que estado va a quedar escrito. Para una oferta aprobada, lo que pida
     // el vendedor tal cual (comportamiento de siempre). Para una que nunca

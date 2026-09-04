@@ -1,10 +1,13 @@
+import { SincronizacionGrafo } from './grafo';
+
 /**
  * Los tipos de la respuesta de `GET /admin/fraude/anillos` -- el panel de
  * deteccion de manipulacion de resenas de la Entrega 2.
  *
  * Los datos NO salen de PostgreSQL: salen del grafo de Neo4j (`neo4j/`),
  * que es una PROYECCION de la tabla `resena` cargada por el ETL
- * `etl/cargar_grafo.sh`. El backend solo CONSULTA el grafo, nunca le
+ * `etl/cargar_grafo.sh` o, ya al dia, por el worker del outbox
+ * (`GrafoSyncService`). El backend solo CONSULTA el grafo, nunca le
  * escribe.
  *
  * La forma la fija el frontend, que ya esta escrito contra ella
@@ -81,4 +84,12 @@ export interface AnalisisFraude {
 export interface RespuestaFraude {
   anillos: Anillo[];
   analizado: AnalisisFraude;
+  /**
+   * Que tan al dia esta el grafo respecto a PostgreSQL, para que el panel no
+   * enseñe un analisis sobre datos incompletos sin decirlo. `null` si no se
+   * pudo leer (Postgres caido, o `evento_grafo` todavia no existe porque
+   * falta la migracion `015`) -- eso NO tumba el resto de la respuesta, ver
+   * `GrafoSyncService.estadoSincronizacion()`.
+   */
+  sincronizacion: SincronizacionGrafo | null;
 }

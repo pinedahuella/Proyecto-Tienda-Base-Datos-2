@@ -407,6 +407,11 @@ export class PedidosCompradorService {
    * rapida, sin tocar Mongo: nombre_producto, nombre_variante y
    * nombre_vendedor ya estan copiados en la linea.
    *
+   * Cada linea trae ademas `puede_resenar` y `ya_reseno` (misma regla que
+   * `ResenasService.exigirCompraPagada`/`resenoProducto`, calculada aca con
+   * un par de EXISTS) para que la pantalla del pedido pueda ofrecer el
+   * boton "Resenar" directo, sin una ruta aparte por producto.
+   *
    * Solo si es propio: el WHERE exige ese id_usuario, asi que un pedido
    * ajeno da el mismo ErrorNoEncontrado que uno que no existe.
    */
@@ -456,13 +461,29 @@ export class PedidosCompradorService {
                 pp.id_producto_mongo, pp.id_producto_variante_mongo, pp.cantidad,
                 pp.nombre_producto, pp.nombre_variante, pp.nombre_vendedor,
                 ph.precio AS precio_unitario, ph.id_oferta,
-                o.id_usuario AS id_usuario_vendedor
+                o.id_usuario AS id_usuario_vendedor,
+                (
+                  epe.estado_pedido_nombre <> 'cancelado'
+                  AND EXISTS (
+                    SELECT 1 FROM pago pg
+                    JOIN estado_pago epa ON epa.id_estado_pago = pg.id_estado_pago
+                    WHERE pg.id_pedido = pp.id_pedido AND epa.estado_pago_nombre = 'pagado'
+                  )
+                ) AS puede_resenar,
+                EXISTS (
+                  SELECT 1 FROM resena r
+                  WHERE r.id_usuario = $2
+                    AND r.id_usuario_vendedor = o.id_usuario
+                    AND r.id_producto_mongo = pp.id_producto_mongo
+                ) AS ya_reseno
          FROM pedido_producto pp
          JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
          JOIN oferta o ON o.id_oferta = ph.id_oferta
+         JOIN pedido pe ON pe.id_pedido = pp.id_pedido
+         JOIN estado_pedido epe ON epe.id_estado_pedido = pe.id_estado_pedido
          WHERE pp.id_pedido = $1
          ORDER BY pp.id_pedido_producto`,
-        [idPedidoParametro],
+        [idPedidoParametro, idUsuario],
       );
 
       return {

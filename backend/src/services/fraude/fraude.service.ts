@@ -12,6 +12,7 @@ import {
   RespuestaFraude,
   TipoAnillo,
 } from '../../models/fraude';
+import { GrafoSyncService } from '../grafo/grafo-sync.service';
 
 /**
  * El panel de manipulacion de resenas de la Entrega 2 (`GET
@@ -42,6 +43,12 @@ import {
  *   - CONTEO         cuantas cuentas / resenas / relaciones tiene el grafo,
  *                    para el campo `analizado`.
  *
+ * Ademas devuelve `sincronizacion` -- que tan al dia esta el grafo respecto
+ * a PostgreSQL (`GrafoSyncService.estadoSincronizacion()`), para que el
+ * panel no muestre un analisis sobre datos incompletos sin avisarlo. Es un
+ * dato auxiliar: si no se puede leer, sale `null` y el resto de la
+ * respuesta sigue igual (no tumba el endpoint).
+ *
  * La consulta de rafagas (A.3) y el puntaje compuesto (A.5) todavia no se
  * usan aqui -- ver `elementos Generales/endpoints-fraude.md`.
  *
@@ -61,6 +68,8 @@ export class FraudeService {
   /** Ventana para llamar "rafaga" a un grupo de resenas: 72 horas. */
   private static readonly VENTANA_RAFAGA_MS = 72 * 60 * 60 * 1000;
 
+  constructor(private readonly grafoSyncService: GrafoSyncService) {}
+
   async analizar(): Promise<RespuestaFraude> {
     try {
       const [ciclicos, reiterados, direcciones, conteo] =
@@ -75,9 +84,14 @@ export class FraudeService {
           'Neo4j',
         );
 
+      // Auxiliar y nunca lanza (ver estadoSincronizacion): si Postgres esta
+      // caido, el analisis del grafo se sigue devolviendo igual.
+      const sincronizacion = await this.grafoSyncService.estadoSincronizacion();
+
       return {
         anillos: this.armarAnillos(ciclicos, reiterados, direcciones),
         analizado: this.aAnalisis(conteo[0]),
+        sincronizacion,
       };
     } catch (error) {
       manejarErrorGrafo(this.logger, error);

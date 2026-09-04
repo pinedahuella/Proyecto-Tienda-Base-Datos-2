@@ -280,7 +280,9 @@ GET /comprador/pedidos/3
         "nombre_vendedor": "Lucia Morales",
         "precio_unitario": "4029.00",
         "id_oferta": "2",
-        "id_usuario_vendedor": "6"
+        "id_usuario_vendedor": "6",
+        "puede_resenar": true,
+        "ya_reseno": false
       }
     ]
   }
@@ -297,6 +299,26 @@ de un JOIN contra `precio_historial` y `oferta`
 `nombre_vendedor` sí sigue copiado en la línea (como `nombre_producto` y
 `nombre_variante`): esos tres cambian con el tiempo y no se pueden deducir
 del estado de hoy, a diferencia del precio.
+
+**`puede_resenar` / `ya_reseno` (agregados el 4 de septiembre de 2026)** —
+para que la pantalla del pedido pueda ofrecer el botón "Reseñar" por línea
+sin pegarle aparte a `GET /resenas/productos/:id/comprado` y
+`.../resenado`:
+
+- `puede_resenar`: `true` si esta línea cumple la regla de
+  `POST /resenas` — el pedido está pagado (`pago.estado_pago = 'pagado'`) y
+  no está `cancelado`. Es la misma condición que ya exige
+  `ResenasService.exigirCompraPagada` al publicar la reseña; se calcula acá
+  con los mismos JOINs, no una versión distinta.
+- `ya_reseno`: `true` si esta cuenta ya reseñó **este producto a este
+  vendedor** — el trío `(id_usuario, id_usuario_vendedor,
+  id_producto_mongo)`, el mismo que protege el `UNIQUE` de `resena`. Es más
+  preciso que `GET /resenas/productos/:id/resenado` (que solo mira el
+  producto, sin importar el vendedor): un mismo producto comprado a dos
+  vendedores distintos puede tener `ya_reseno: true` en una línea y `false`
+  en la otra.
+
+El frontend muestra "Reseñar" cuando `puede_resenar && !ya_reseno`.
 
 ### 400
 
@@ -328,6 +350,16 @@ del estado de hoy, a diferencia del precio.
 ```json
 { "ok": false, "mensaje": "No se pudo obtener el pedido", "payload": null }
 ```
+
+**`puede_resenar`/`ya_reseno` probado en vivo el 4 de septiembre de 2026**
+contra un pedido pagado real (dos líneas del mismo producto, vendido por
+dos vendedores distintos): las dos líneas nacen `puede_resenar: true,
+ya_reseno: false`; tras publicar una reseña para una de las dos, esa línea
+pasa a `ya_reseno: true` y la otra (mismo producto, otro vendedor) se
+queda en `false` — confirma que compara el trío completo, no solo el
+producto. Simulando el pedido `cancelado` y, aparte, el pago en
+`pendiente`, las dos líneas caen a `puede_resenar: false`. Sin regresión
+en el resto del payload.
 
 ---
 

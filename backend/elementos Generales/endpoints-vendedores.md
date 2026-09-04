@@ -2041,7 +2041,16 @@ mano desde esta ruta:
   con `'ajuste'` y la magnitud (resta). Son los mismos dos motivos que
   `reponer_stock()` ya admitía fuera del flujo del pedido — la misma
   corrección manual (sube o baja) que existía en el modelo viejo de
-  inventario, ahora sobre la oferta.
+  inventario, ahora sobre la oferta. **Rechazado con 409 si la oferta está
+  en una venta relámpago** (`es_inventario_limitado`): ahí el stock real lo
+  lleva Redis (las unidades reservadas se descuentan ahí, no en
+  `oferta.stock`), y tocar la columna de PostgreSQL por este camino
+  desincroniza las dos — Redis seguiría prometiendo unidades que PostgreSQL
+  ya no tiene, y el checkout revienta con un error que no explica nada. Se
+  comprueba antes de tocar nada: si el cuerpo trae `ajuste_stock` junto con
+  `precio` y/o `estado`, el 409 corta los tres, no se aplica ninguno.
+  `precio` y `estado` siguen editables normalmente con la venta relámpago
+  abierta — solo se restringe `ajuste_stock`.
 
 **Solo el dueño de la oferta** — una ajena da el mismo 404 genérico que
 una que no existe, mismo criterio de siempre. **Con sesión de admin,
@@ -2122,6 +2131,14 @@ Probado en vivo el 25 de agosto de 2026 (aprobadas) y el 28 de agosto de
   `estado: "pendiente"`/`"rechazada"` en el cuerpo → 400. Sin regresión en
   las aprobadas (mismo script).
 
+**Probado en vivo el 4 de septiembre de 2026 (409 de `ajuste_stock` en
+venta relámpago):** con la venta relámpago abierta sobre una oferta activa,
+`ajuste_stock` solo → 409; `ajuste_stock` junto con `precio` → 409 y el
+precio **no** se tocó (verificado en la fila); `precio` solo → 200 (sigue
+editable); `estado` solo → 200 (sigue editable); cerrada la venta relámpago
+(`DELETE .../venta-limitada`), el mismo `ajuste_stock` que antes daba 409 →
+200 normal.
+
 ### 400
 
 ```json
@@ -2159,11 +2176,13 @@ no hay nada que confirmar por esta vía.
 ```json
 { "ok": false, "mensaje": "El ajuste dejaria la oferta 174 en -993 unidades", "payload": null }
 { "ok": false, "mensaje": "Esta oferta todavia no fue aprobada por la tienda: no puedes activarla ni pausarla. Editala (precio o stock) y queda pendiente de revision otra vez.", "payload": null }
+{ "ok": false, "mensaje": "La oferta esta en una venta relampago: cierra la venta relampago antes de ajustar su existencia", "payload": null }
 ```
 
 El primero es de `reponer_stock()` tal cual, cuando el ajuste negativo deja
 el stock por debajo de 0. El segundo, cuando se intenta poner `activa` o
-`pausada` una oferta que nunca fue aprobada.
+`pausada` una oferta que nunca fue aprobada. El tercero, cuando el cuerpo
+trae `ajuste_stock` y la oferta está en venta relámpago.
 
 ### 503
 
@@ -2476,6 +2495,50 @@ por defecto).
 
 ---
 
+## El worker que apaga solas las ventas relámpago vencidas (agregado 2026-09-04)
+
+No es una ruta HTTP: es un `@Interval` (`InventarioLimitadoService.revisarVencidas()`,
+cada 60 s, mismo mecanismo que el worker del outbox del grafo).
+
+**El problema que corrige.** Cuando `POST .../venta-limitada` abre la venta
+con `duracion_segundos`, Redis le pone `EXPIRE` a `mesh:oferta:<id>` (y
+`redis/inventario_limitado.lua` sincroniza el de su ZSET de reservas con
+el mismo TTL). Al vencer, las dos claves **desaparecen solas** en Redis —
+pero `oferta.es_inventario_limitado` en PostgreSQL solo se apagaba antes
+con `DELETE .../venta-limitada` manual. Una venta que vencía sola dejaba
+esa columna en `true` para siempre: el panel del vendedor seguía diciendo
+"en venta relámpago" de una oferta que ya volvió a comportarse normal. Al
+comprador no le afectaba (Redis ya no tenía nada que reservar); lo único
+que mentía era el panel.
+
+**Qué hace.** Cada minuto: `SELECT id_oferta FROM oferta WHERE
+es_inventario_limitado = true`, y para cada una un `EXISTS` en Redis
+(reusa `existeVentaLimitada()`, ya existía). Si la clave ya no existe,
+`UPDATE oferta SET es_inventario_limitado = false`. Nunca toca Redis —si
+venció sola, las dos claves ya se fueron solas; si la cerraron con
+`DELETE`, también. Nunca relanza: es mantenimiento cosmético, un fallo de
+Postgres o Redis en una corrida se loguea como warning y se reintenta en
+la próxima.
+
+**No afecta** una venta sin vencimiento (`duracion_segundos: 0` o
+ausente): su clave nunca expira, así que el `EXISTS` sigue en `1` para
+siempre y el worker no la toca.
+
+### Probado en vivo el 4 de septiembre de 2026
+
+| Caso | Resultado |
+|---|---|
+| Venta con `duracion_segundos: 5` | a los 5 s las dos claves de Redis desaparecen solas; `es_inventario_limitado` queda en `true` hasta el siguiente tick del worker (≤ 60 s) y ahí pasa a `false` — confirmado en el log (`"1 oferta(s) apagada(s) (vencieron solas)"`) y en la fila de PostgreSQL |
+| Venta con `duracion_segundos: 0` (sin vencer) | dos ticks completos del worker (2 min) sin tocarla: `es_inventario_limitado` se queda en `true`, sin log |
+| `DELETE .../venta-limitada` manual, antes de que el worker corriera | sigue funcionando igual que siempre — el worker no interfiere |
+
+Sin migración: es lectura del mismo `es_inventario_limitado` que ya
+existía (`014_inventario_limitado.sql`). `stock` de PostgreSQL no se toca
+en ningún caso, solo la columna booleana.
+`cambio_propuestas/2026-09-04_0900-apagar-venta-relampago-vencida.md`.
+
+---
+
 ## Pruebas — venta relámpago del vendedor (2026-09-03)
 
 `test-ventas-limitadas.sh`, contra el servidor y las bases reales (no va al
@@ -2510,6 +2573,7 @@ cosecha).
 | Oferta normal (no relámpago) | `stock_disponible: null` en los tres |
 | Se reserva 1 unidad (Redis 2 → 1) | La ficha pasa a `stock_disponible: 1` en el acto; al `devolver`, vuelve a 2 |
 | Oferta marcada `es_inventario_limitado` en PG **sin** clave en Redis (venta cerrada pero columna aún `true`) | `stock_disponible: null`, sin error y sin warning en el log — el `estado` del `.lua` devuelve `-1` y se traduce a `null` |
+| _(agregado el 4 de septiembre de 2026)_ ese mismo estado — columna `true` sin clave en Redis — ya no queda permanente: el worker de más abajo lo corrige solo dentro de 1 minuto |
 | Redis caído | `estado()` no lanza: deja un warning y devuelve `null`; el catálogo y el panel se pintan igual con el `stock` de PostgreSQL |
 
 Sin migración: es lectura de Redis desde el backend.

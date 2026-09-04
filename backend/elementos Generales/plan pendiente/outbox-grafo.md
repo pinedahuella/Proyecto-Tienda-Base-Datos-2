@@ -1,6 +1,7 @@
 # Plan pendiente — Outbox para mantener el grafo Neo4j al día
 
-> **Estado (2026-09-04).**
+> **Estado (2026-09-04). Las cinco piezas del backend quedaron HECHAS —
+> cierra la parte de Entrega 2 de este outbox.**
 >
 > HECHO:
 > - Tabla `evento_grafo` + trigger sobre `resena` — `outbox-grafo.sql`
@@ -9,12 +10,15 @@
 >   `cambio_propuestas/2026-09-03_2359-conciliacion-grafo.md`.
 > - **El worker** — `@Interval` en `GrafoSyncService`, probado a fondo en
 >   vivo. `cambio_propuestas/2026-09-04_0030-worker-outbox-grafo.md`.
+> - **`sincronizacion` en `GET /admin/fraude/anillos`** —
+>   `GrafoSyncService.estadoSincronizacion()`, un envoltorio de
+>   `estadoCola()` que nunca lanza (degrada a `null` si Postgres falla o
+>   `evento_grafo` no existe). Probado en vivo (pendientes, apartados, tabla
+>   ausente, Neo4j caído). Ver `endpoints-fraude.md`.
 >
-> FALTA:
-> - `ultima_sincronizacion` en `GET /admin/fraude/anillos` (chico — ya está
->   en la conciliación).
-> - Del compañero: la migración real `015` + el cambio del ETL
->   (`etl/cargar_grafo.sh` etapa A).
+> FALTA (fuera de `backend/`, le toca al compañero):
+> - La migración real `015` + el cambio del ETL (`etl/cargar_grafo.sh`
+>   etapa A).
 
 ## De dónde viene esto
 
@@ -282,7 +286,7 @@ reseña. El ETL completo carga TODOS los usuarios; el worker sólo toca los 2
 de cada reseña. Por eso la conciliación no cuenta `:Usuario`/`:Producto`
 para su veredicto.
 
-## Pieza 4 — la conciliación (BACKEND, nuestro, PENDIENTE — hacer PRIMERO)
+## Pieza 4 — la conciliación (BACKEND, nuestro, HECHA)
 
 Un endpoint de solo lectura para admin (no la tienda), p. ej.
 `GET /admin/grafo/conciliacion`. Cuatro `count` que comparan:
@@ -299,13 +303,18 @@ repara: avisa.** Es lo más barato de todo el diseño, sirve solo (aunque no
 exista el worker), y es literalmente el "job que reconcilie" que pidió el
 profesor. Devuelve también los eventos apartados (`intentos >= 5`).
 
-## Pieza 5 — "última sincronización" en el panel de fraude
+## Pieza 5 — "última sincronización" en el panel de fraude (BACKEND, nuestro, HECHA)
 
-`GET /admin/fraude/anillos` (y/o la conciliación) devuelve un
-`ultima_sincronizacion` = `max(procesado_en)` de `evento_grafo`, y/o el
-`count` de pendientes. Hoy, si el grafo está viejo, el panel enseña un
-análisis incompleto sin ninguna señal. Un dato visible lo arregla y es
-trivial.
+`GET /admin/fraude/anillos` devuelve `sincronizacion: { ultima_sincronizacion,
+pendientes, apartados } | null` — `GrafoSyncService.estadoSincronizacion()`,
+un envoltorio de `estadoCola()` (la misma consulta que usa la conciliación)
+con dos diferencias a propósito: **nunca lanza** (Postgres caído o
+`evento_grafo` ausente devuelven `null`, no tumban el resto de la
+respuesta) y usa un límite de tiempo más corto (3 s, aparte del de 15 s del
+análisis del grafo) porque es un dato auxiliar de otra ruta. Antes de esto,
+si el grafo estaba viejo, el panel enseñaba un análisis incompleto sin
+ninguna señal. Probado en vivo el 2026-09-04 (pendientes, apartados, tabla
+ausente, Neo4j caído) — ver `endpoints-fraude.md`.
 
 ---
 
@@ -334,15 +343,14 @@ trivial.
 4. **`docs/base-de-datos.md`** — la tabla nueva, si el equipo documenta el
    esquema ahí.
 
-## Orden de trabajo (backend)
+## Orden de trabajo (backend) — las cuatro HECHAS
 
 1. **La conciliación** (Pieza 4). Barata, útil sola, y hace visible el
    problema que el worker resuelve.
 2. **El worker** (Pieza 3) — el `@Interval`, la unidad incremental, las
    cinco trampas.
 3. **"Última sincronización"** en el panel (Pieza 5).
-4. Documentar en `endpoints-fraude.md` (o un `endpoints-grafo.md` nuevo) y
-   en `cambio_propuestas/`.
+4. Documentado en `endpoints-fraude.md` y en `cambio_propuestas/`.
 
 ## Pruebas a hacer (contra la base real, con teardown)
 
