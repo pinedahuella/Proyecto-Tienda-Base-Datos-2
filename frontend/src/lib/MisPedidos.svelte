@@ -779,6 +779,41 @@
 														>
 															Ver el detalle de ese dia
 														</button>
+
+														<!--
+															Resenar lo que ya se compro.
+
+															Los dos campos los manda el backend por linea, y son
+															los que deciden que se ensena. No se calcula nada
+															aqui: la regla de quien puede resenar vive en el
+															backend y preguntarla dos veces es tener dos reglas
+															que se pueden separar.
+
+															Es un ENLACE y no un formulario. El POST de una resena
+															pide el CORREO del vendedor y la linea del pedido
+															solo trae su nombre y su id, asi que aqui no se puede
+															publicar directamente. La ficha del producto si tiene
+															esa lista, y ademas ya tiene el formulario entero
+															escrito y probado. Duplicarlo seria mantener dos.
+
+															El nombre del vendedor viaja en la direccion para que
+															la ficha preseleccione al correcto. Un producto se le
+															puede comprar a varios, y en el pedido 17 de la
+															semilla son TRES los calificables: sin esa pista, la
+															persona podria calificar sin querer a otro.
+														-->
+														{#if l.ya_reseno}
+															<span class="ya-resenado">Ya la resenaste</span>
+														{:else if l.puede_resenar}
+															<a
+																class="resenar"
+																href="/producto/{l.id_producto_mongo}?resenar=1&vendedor={encodeURIComponent(
+																	l.nombre_vendedor
+																)}"
+															>
+																Resenar esta compra
+															</a>
+														{/if}
 													</div>
 													<div class="cuentas">
 														<span class="menor">
@@ -1361,6 +1396,35 @@
 	.ver-antes:hover:not(:disabled) {
 		color: var(--indigo);
 		border-bottom-color: var(--indigo);
+	}
+
+	/* Resenar esta compra. Se pinta como accion y no como el enlace gris de
+	   arriba: es lo unico de este renglon que le pide algo a la persona, y
+	   compite con "Ver el detalle de ese dia", que es solo mirar. */
+	.resenar {
+		align-self: flex-start;
+		margin-top: 0.35rem;
+		padding: 0.2rem 0.55rem;
+		border: 1px solid var(--indigo);
+		border-radius: 999px;
+		font-size: 0.82rem;
+		color: var(--indigo);
+		text-decoration: none;
+		line-height: 1.4;
+	}
+
+	.resenar:hover {
+		background: var(--indigo);
+		color: #fff;
+	}
+
+	/* Y cuando ya se reseno no queda un hueco. Un renglon que pierde su boton
+	   sin decir nada se lee como que algo fallo. */
+	.ya-resenado {
+		align-self: flex-start;
+		margin-top: 0.35rem;
+		font-size: 0.82rem;
+		color: var(--gris);
 	}
 
 	/* ------------------------------------------------------------- el modal */

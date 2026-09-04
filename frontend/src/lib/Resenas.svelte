@@ -60,11 +60,38 @@
 		idProducto,
 		haySesion,
 		correoSesion = null,
+		abrirAlLlegar = false,
+		vendedorSugerido = null,
 		alContar = undefined
 	}: {
 		idProducto: number;
 		haySesion: boolean;
 		correoSesion?: string | null;
+		/**
+		 * Abrir el formulario solo, sin que nadie pulse "Escribir una resena".
+		 * Lo pone la ficha cuando se llega desde "Resenar esta compra" en
+		 * /pedidos: esa persona ya dijo lo que venia a hacer.
+		 *
+		 * Solo se OBEDECE si el backend dice que puede escribir. Abrir el
+		 * formulario a quien no compro el producto le pondria delante un
+		 * formulario que al enviarlo contesta 403, y eso es peor que no
+		 * abrirlo.
+		 *
+		 * Se llama asi y no `abrirFormulario` porque ese nombre ya es de la
+		 * funcion que lo abre, unas lineas mas abajo.
+		 */
+		abrirAlLlegar?: boolean;
+		/**
+		 * A que vendedor viene a calificar, por nombre. Solo es una PISTA: si
+		 * no coincide con ninguno de los calificables no se elige a nadie y el
+		 * select se queda como estaba.
+		 *
+		 * Va por nombre porque es lo unico que comparten la linea del pedido y
+		 * esta lista. La linea guarda el nombre copiado del dia de la compra,
+		 * asi que un vendedor que se haya cambiado el nombre desde entonces no
+		 * va a coincidir, y entonces elige la persona.
+		 */
+		vendedorSugerido?: string | null;
 		/**
 		 * Se llama con cuantas resenas tiene el producto, cada vez que se
 		 * recargan. Lo usa la pestana "Resenas" de la ficha para poner el numero
@@ -232,6 +259,33 @@
 		// Si solo hay un vendedor calificable, se elige solo: un select de una
 		// sola opcion es un paso que no decide nada.
 		if (puedeCalificar.length === 1) vendedorElegido = puedeCalificar[0].correo;
+
+		// Se viene desde "Resenar esta compra", en /pedidos.
+		//
+		// Se reusa abrirFormulario() en vez de poner `escribiendo = true` a
+		// mano: esa funcion ademas limpia el error, la confirmacion y el texto
+		// de una vez anterior. Abrirlo a mano dejaria a la vista el "Tu resena
+		// se publico" de la resena de antes.
+		//
+		// Solo si de verdad se puede escribir. La lista de calificables es la
+		// fuente: vacia quiere decir que el backend ya dijo que no.
+		if (abrirAlLlegar && puedeCalificar.length > 0) abrirFormulario();
+
+		// Y el vendedor sale del pedido. Va DESPUES de abrirFormulario() a
+		// proposito, porque esa funcion tambien toca `vendedorElegido` cuando
+		// hay uno solo y este de aqui es mas especifico.
+		//
+		// La comparacion es por nombre, sin distinguir mayusculas ni espacios
+		// de los bordes. Si no encuentra a nadie NO toca lo que ya hubiera:
+		// preseleccionar al vendedor equivocado hace que alguien califique a
+		// quien no era, y eso desde la pantalla no se deshace.
+		if (vendedorSugerido) {
+			const buscado = vendedorSugerido.trim().toLowerCase();
+			const encontrado = puedeCalificar.find(
+				(v) => v.nombre.trim().toLowerCase() === buscado
+			);
+			if (encontrado) vendedorElegido = encontrado.correo;
+		}
 
 		await cargarPorQue();
 	}

@@ -12,6 +12,28 @@ tocar el frontend.
 
 ---
 
+## AL DIA 2026-09-04, tarde: de las cuatro de abajo ya cerraste TRES
+
+Probadas contra el backend vivo, no leidas de tu documento:
+
+```
+409 en el PATCH con la venta relampago abierta   contesta 409 con su mensaje
+apagar es_inventario_limitado al vencer          la columna pasa a false sola
+resenar desde el pedido                          los dos campos llegan por linea
+```
+
+Y el frontend de esa ultima **ya esta enchufado** (boton "Resenar esta compra"
+en `/pedidos`). Estuvo unas horas sin consumir, que es la tercera vez que pasa
+en este proyecto.
+
+**Lo unico que queda de la lista de abajo es el punto 2**, el del id de
+producto. Tu propuesta del contador global es la buena, y ojo que ahora corre
+prisa por otra razon: para la Entrega 3 se quiere probar el buscador con un
+millon de productos, y generar en masa es exactamente lo que hace chocar los dos
+repartidores. Hoy quedan 22 numeros de margen.
+
+---
+
 ## LO DE HOY, al 2026-09-04 -- son cuatro cosas y la primera es de tres lineas
 
 Lo de mas abajo en este archivo es el historial completo por bloques, y casi

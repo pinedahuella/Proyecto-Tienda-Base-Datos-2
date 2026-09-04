@@ -324,6 +324,34 @@
 	let parte = $state<'comprar' | 'detalles' | 'resenas'>('comprar');
 
 	/**
+	 * Se llega aqui desde "Resenar esta compra", en /pedidos.
+	 *
+	 *   ?resenar=1&vendedor=Carlos%20Ramirez
+	 *
+	 * Cuando viene asi se abre la pestana de resenas con el formulario ya
+	 * desplegado, en vez de dejar a la persona en "Comprar" buscando donde se
+	 * escribe. Venia a hacer una cosa concreta.
+	 *
+	 * Se lee UNA vez, al construir, y no en un $effect. Si se recalculara con
+	 * la direccion, cambiar de pestana a mano y que la url siguiera diciendo
+	 * `resenar=1` devolveria a resenas sola, y la pantalla dejaria de obedecer
+	 * los clics.
+	 */
+	const vieneAResenar = page.url.searchParams.get('resenar') === '1';
+
+	/**
+	 * A que vendedor venia a calificar, por NOMBRE, que es lo unico que la
+	 * linea del pedido y la lista de calificables comparten. La linea guarda el
+	 * nombre copiado del dia de la compra, asi que si ese vendedor se cambio el
+	 * nombre desde entonces no va a coincidir. Cuando no coincide no se
+	 * preselecciona a nadie, que es lo correcto: preseleccionar al que no es
+	 * seria peor que no preseleccionar.
+	 */
+	const vendedorSugerido = page.url.searchParams.get('vendedor');
+
+	if (vieneAResenar) parte = 'resenas';
+
+	/**
 	 * Cuantas resenas tiene, para el numero de la pestana. Lo reporta la propia
 	 * seccion de resenas, que lo cuenta contra PostgreSQL.
 	 *
@@ -976,6 +1004,8 @@
 					idProducto={id}
 					{haySesion}
 					{correoSesion}
+					abrirAlLlegar={vieneAResenar}
+					{vendedorSugerido}
 					alContar={(n) => (totalResenas = n)}
 				/>
 			</div>

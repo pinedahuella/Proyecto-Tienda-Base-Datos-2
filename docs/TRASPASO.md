@@ -114,6 +114,7 @@ por eventos, los indices y las agregaciones. El informe lo hizo el equipo.
 | **El pedido reconstruido, completo** | modal con lo pagado + precio y stock de ese dia | entra como `compradora.norte@` a `/pedidos` |
 | **La nota en el catalogo de Mongo** | `resenas_promedio` y `resenas_total` en cada documento, con su indice | `.\arrancar.ps1 -Etl` y mirar un producto en Mongo |
 | **La nota alcanza a los de Mongo, y se apaga** | tercera etapa del ETL, con `--notas` | `bash pruebas/notas.sh` (10 OK) |
+| **Resenar desde el pedido** | boton en `/pedidos`, lleva a la ficha con el formulario abierto | entra como `compradora.norte@` a `/pedidos` y abre un pedido pagado |
 | **El choque de los dos repartidores de id, visible** | un paso mas en el arranque | sale solo en `.\arrancar.ps1` |
 | **Generador incremental de productos** | lotes reproducibles por semilla | `.\arrancar.ps1 -Productos 300 -Semilla 7` |
 
@@ -429,6 +430,55 @@ FALLA**, en tres sitios distintos.
 **Lo que sigue sin hacer** es que la nota se refresque sola. Una resena nueva no
 la mueve hasta que alguien corre el ETL. Es el pendiente 4 aplicado a otro dato:
 el grafo tiene cola y worker, y la nota de Mongo no.
+
+### Resenar desde el pedido, ya de punta a punta
+
+**Hecho el 2026-09-04.** Jose David sumo `puede_resenar` y `ya_reseno` por linea
+a `GET /comprador/pedidos/:id`, y esos dos campos estuvieron unas horas **sin
+que nada los consumiera**: se buscaron en todo `frontend/src` y salian en CERO
+archivos. Es la tercera vez en este proyecto que el backend arma bien una pieza
+y la pantalla no se entera, asi que conviene buscarlo a proposito.
+
+En `/pedidos`, cada linea de un pedido pagado tiene ahora "Resenar esta compra",
+y las que ya se resenaron dicen "Ya la resenaste" en gris en vez de quedarse sin
+nada, que se lee como que algo fallo.
+
+**Es un ENLACE y no un formulario, y esa es la decision.** `POST /resenas` pide
+el **correo** del vendedor, y la linea del pedido solo trae su nombre y su id.
+Desde ahi no se puede publicar. La ficha del producto si tiene la lista de
+calificables con sus correos, y ademas ya tiene el formulario entero escrito y
+probado. El boton lleva alli:
+
+```
+/producto/1?resenar=1&vendedor=Carlos%20Ramirez
+```
+
+La ficha abre la pestana de resenas con el formulario desplegado y preselecciona
+al vendedor.
+
+**Por que viaja el nombre del vendedor, y no es un adorno.** Un producto se le
+puede comprar a varios. En el pedido 17 de la semilla, el producto 1 tiene
+**TRES** vendedores calificables (Andres Castillo, Carlos Ramirez y Lucia
+Morales) y la compra fue a uno solo. Sin esa pista, la persona entra al
+formulario y puede calificar sin querer a otro. Medido, la pista resuelve
+`Carlos Ramirez` a `ventas.norte@mesh.com`.
+
+Se compara por NOMBRE porque es lo unico que comparten la linea del pedido y la
+lista de calificables. La linea guarda el nombre copiado del dia de la compra
+(esta dicho en `LineaPedido`), asi que un vendedor que se haya cambiado el
+nombre desde entonces no va a coincidir. Cuando no coincide **no se
+preselecciona a nadie**, que es lo correcto: elegir al equivocado es peor que no
+elegir, porque desde la pantalla no se deshace.
+
+Dos cosas mas que no son obvias:
+
+**`puede_resenar` y `ya_reseno` son opcionales en el tipo.** Un backend anterior
+a hoy no los manda, y sin ellos el boton simplemente no sale. Falla hacia el
+lado bueno: ofrecerlo y que el `POST` conteste 403 seria peor que no ofrecerlo.
+
+**`ya_reseno` mira el trio completo** (comprador, vendedor, producto), el mismo
+que protege el `UNIQUE` de `resena`. Mirando solo el producto, resenar a un
+vendedor apagaria el boton del otro sobre el mismo producto comprado dos veces.
 
 ### El choque de los dos repartidores de id ya no es invisible
 

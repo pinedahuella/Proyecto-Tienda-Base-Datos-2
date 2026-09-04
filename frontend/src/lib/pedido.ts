@@ -66,6 +66,29 @@ export interface LineaPedido {
 	cantidad: number;
 	/** El id de la fila de precio_historial que congelo el precio de esta linea. */
 	id_precio_historial?: string;
+
+	/**
+	 * Si esta compra da derecho a resenar. La regla es la misma que exige el
+	 * backend al publicar: el pedido esta pagado y no esta cancelado.
+	 *
+	 * Los dos son OPCIONALES a proposito. Solo los manda
+	 * `GET /comprador/pedidos/:id`, y un backend anterior al 2026-09-04 no los
+	 * manda en absoluto. Sin ellos el boton simplemente no sale, que es como
+	 * tiene que fallar: ofrecerlo y que el POST conteste 403 seria peor que no
+	 * ofrecerlo.
+	 */
+	puede_resenar?: boolean;
+	/**
+	 * Si ya se reseno ESTA compra. Mira el trio completo
+	 * (comprador, vendedor, producto), que es el mismo que protege el UNIQUE de
+	 * `resena`, y no solo el producto.
+	 *
+	 * La diferencia importa y se ve en el pedido 17 de la semilla: el mismo
+	 * producto comprado a dos vendedores distintos se resena DOS veces, una por
+	 * vendedor. Mirando solo el producto, resenar a uno apagaria el boton del
+	 * otro.
+	 */
+	ya_reseno?: boolean;
 }
 
 export interface CabeceraPedido {
