@@ -27,6 +27,31 @@ ES="${ES:-http://localhost:9200}"
 INDICE="${INDICE:-mesh_productos}"
 MONGO="${MONGO:-mesh-mongo}"
 
+# El backend, que desde el 2026-09-04 es quien aplica el filtro de "solo lo
+# activo". Ver la parte 4.
+#
+# La contrasena es la de la semilla, la misma que esta escrita en ARRANCAR.txt:
+# esto corre contra la base local de desarrollo, no contra nada de nadie.
+API="${API:-http://localhost:3000}"
+ADMIN_USUARIO="${ADMIN_USUARIO:-admin@mesh.com}"
+ADMIN_CLAVE="${ADMIN_CLAVE:-Admin123}"
+
+# Los dos archivos de trabajo van con nombre RELATIVO, no en /tmp.
+#
+# Este script exporta MSYS_NO_PATHCONV=1 (lo necesitan las urls de
+# Elasticsearch, que si no se convierten en rutas de Windows). El efecto
+# colateral es que `curl.exe`, que es un binario de Windows, tampoco recibe
+# convertidas las rutas de archivo: con `-c /tmp/algo` no escribe nada y no se
+# queja. El login contestaba 200, el tarro de cookies quedaba vacio y la
+# peticion siguiente iba sin sesion. Un nombre relativo lo entienden los dos
+# mundos. Se borran al terminar.
+GALLETAS="${GALLETAS:-.mesh-busqueda-cookies.txt}"
+# Donde tirar un cuerpo que no interesa. Ver backend_vivo.
+VACIO="${VACIO:-.mesh-busqueda-nada}"
+
+limpiar() { rm -f "$GALLETAS" "$VACIO"; }
+trap limpiar EXIT
+
 export MSYS_NO_PATHCONV=1
 
 ok=0; fallo=0
@@ -66,6 +91,68 @@ mongo_cuenta() {
         --eval '$1'" 2>/dev/null | tr -d '\r \n'
 }
 
+# Igual que mongo_cuenta pero para texto: NO se le quitan los espacios, que en
+# el nombre de un producto son parte del dato ("Laptop Nimbo 13").
+mongo_texto() {
+    docker exec "$MONGO" sh -c "mongosh --quiet \
+        -u \"\$MONGO_INITDB_ROOT_USERNAME\" -p \"\$MONGO_INITDB_ROOT_PASSWORD\" \
+        --authenticationDatabase admin \"\$MONGO_INITDB_DATABASE\" \
+        --eval '$1'" 2>/dev/null | tr -d '\r' | head -1
+}
+
+# ---------- el backend, para la parte 4 ----------
+#
+# Desde el cambio del 2026-09-04 el filtro de "solo lo activo" ya no vive en el
+# indice sino en la ruta publica del backend, asi que esa regla SOLO se puede
+# medir preguntandole al backend. Las partes 1, 2, 3 y 5 siguen midiendo contra
+# Elasticsearch directo, que es donde viven las suyas.
+
+# Se mira el CODIGO HTTP y no el codigo de salida de curl.
+#
+# `curl -s -o /dev/null` sale con 23 ("failed writing body") en el Git Bash de
+# Windows aunque la peticion vaya perfecta, asi que preguntarle a `$?` daba
+# siempre "el backend no responde" con el backend contestando 200. Medido.
+backend_vivo() {
+    _codigo=$(curl -s --max-time 4 -w '%{http_code}' -o "$VACIO" "$API/buscador" 2>/dev/null)
+    [ "$_codigo" = "200" ]
+}
+
+# Los id_producto que devuelve una ruta del buscador, uno por linea.
+#   $1  la ruta
+#   $2  lo que se busca
+#   $3  no vacio para mandar la cookie de sesion
+busca_backend() {
+    _galleta=''
+    [ -n "$3" ] && _galleta="-b $GALLETAS"
+    # shellcheck disable=SC2086
+    curl -s --max-time 8 $_galleta \
+        --get --data-urlencode "nombre=$2" --data 'limite=50' \
+        "$API$1" 2>/dev/null | python -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    sys.exit(0)
+for r in (d.get('payload') or []):
+    print(r.get('id_producto'))
+"
+}
+
+# Deja la cookie de admin en \$GALLETAS. Devuelve distinto de 0 si no pudo.
+#
+# Aqui tambien va `-o "$VACIO"` y no `-o /dev/null`, y no es cosmetico: con
+# /dev/null, curl en el Git Bash de Windows falla al escribir el cuerpo, ABORTA
+# y NO llega a guardar el tarro de cookies. El login contestaba 200, la funcion
+# decia que si, y la peticion siguiente iba sin sesion -- "No hay sesion
+# activa" con un login que acababa de salir bien.
+iniciar_sesion_admin() {
+    rm -f "$GALLETAS"
+    _codigo=$(curl -s -o "$VACIO" -w '%{http_code}' --max-time 8 -c "$GALLETAS" \
+        -X POST "$API/usuario/login" -H 'Content-Type: application/json' \
+        -d "{\"identificador\":\"$ADMIN_USUARIO\",\"contrasena\":\"$ADMIN_CLAVE\"}" 2>/dev/null)
+    { [ "$_codigo" = "200" ] || [ "$_codigo" = "201" ]; } && [ -s "$GALLETAS" ]
+}
+
 # ============================================================
 # 0. Que haya algo con que trabajar
 # ============================================================
@@ -90,11 +177,22 @@ else
     exit 1
 fi
 
-ACTIVOS=$(mongo_cuenta 'db.productos.countDocuments({estado:"activo"})')
-if [ "$EN_INDICE" = "$ACTIVOS" ]; then
-    OK "cuadra con los productos activos de MongoDB (= $ACTIVOS)"
+# Contra el catalogo ENTERO, no contra los activos.
+#
+# Hasta el 2026-09-04 el indice guardaba solo lo activo y esta linea comparaba
+# contra `countDocuments({estado:"activo"})`. Ahora guarda todos los estados --
+# el filtro se mudo a la ruta publica del backend, ver la parte 4 -- asi que
+# comparar contra los activos daba FALLA con el indice perfectamente al dia:
+# 1105 contra 1104, y el que sobraba era justo el rechazado que ahora tiene que
+# estar. Una prueba que se pone roja cuando el sistema hace lo correcto es peor
+# que no tenerla, porque ensena a ignorar el rojo.
+TODOS=$(mongo_cuenta 'db.productos.countDocuments({})')
+if [ "$EN_INDICE" = "$TODOS" ]; then
+    OK "cuadra con el catalogo entero de MongoDB (= $TODOS, en cualquier estado)"
 else
-    FALLA "el indice tiene $EN_INDICE y MongoDB tiene $ACTIVOS activos"
+    FALLA "el indice tiene $EN_INDICE y MongoDB tiene $TODOS productos"
+    echo "        El indice guarda TODOS los estados desde el 2026-09-04."
+    echo "        Si falta alguno, corre 'bash etl/cargar_busqueda.sh'."
 fi
 
 # ============================================================
@@ -166,24 +264,99 @@ for par in "103:tecnokid" "104:barbuchin" "106:crepas"; do
 done
 
 # ============================================================
-# 4. Lo rechazado no se busca
+# 4. Lo rechazado se indexa, pero no se le ensena a un comprador
 # ============================================================
-titulo "4. UN PRODUCTO RECHAZADO NO APARECE"
+titulo "4. UN PRODUCTO RECHAZADO NO LO VE UN COMPRADOR"
 
-# Primero que EXISTE en Mongo. Sin esto, la comprobacion de abajo pasaria
-# igual sobre un id inventado y no estaria midiendo nada.
+# ESTA PARTE CAMBIO DE REGLA, y por eso cambio de forma.
+#
+# Antes se comprobaba que el 105 NO estuviera en el indice (404), porque el
+# extractor filtraba `estado: activo` y lo rechazado no llegaba a entrar.
+#
+# Ahora el indice guarda TODOS los estados, a proposito: un admin necesita
+# poder buscar justo lo que no circula, que es lo que va a revisar. El filtro
+# se mudo al backend, donde `GET /buscador/productos` lo lleva FIJO en el
+# codigo y `GET /buscador/productos/admin` no lo lleva pero exige rol de admin.
+#
+# Entonces la ausencia en el indice ya no prueba nada -- de hecho ahora seria
+# un fallo. Lo que hay que medir es la regla de verdad: que el documento SI
+# este, y que la RUTA PUBLICA no lo devuelva. Medir contra Elasticsearch a
+# secas dejaria de medir la regla que protege al comprador.
+
+# Primero que EXISTE en Mongo. Sin esto, todo lo de abajo pasaria igual sobre
+# un id inventado y no estaria midiendo nada.
 EXISTE=$(mongo_cuenta 'db.productos.countDocuments({_id:105})')
 if [ "$EXISTE" = "1" ]; then
-    OK "el 105 existe en MongoDB, asi que su ausencia abajo significa algo"
+    OK "el 105 existe en MongoDB, asi que lo de abajo significa algo"
 else
     FALLA "el 105 no esta en MongoDB: esta prueba no puede medir nada"
 fi
 
-ESTA_105=$(curl -s -o /dev/null -w '%{http_code}' "$ES/$INDICE/_doc/105")
-if [ "$ESTA_105" = "404" ]; then
-    OK "y no esta en el indice (HTTP 404), que es lo que se pidio"
+# Y que sigue rechazado. Si alguien lo activo, esta prueba dejaria de probar
+# lo suyo y lo diria en verde, que es peor que fallar.
+ES_RECHAZADO=$(mongo_cuenta 'db.productos.countDocuments({_id:105,estado:"rechazado"})')
+if [ "$ES_RECHAZADO" != "1" ]; then
+    FALLA "el 105 ya no esta rechazado en MongoDB: esta prueba dejo de medir lo suyo"
+fi
+
+NOMBRE_105=$(mongo_texto 'db.productos.findOne({_id:105},{nombre:1}).nombre')
+
+# 4.1 En el indice SI esta, y con su estado
+DOC_105=$(curl -s "$ES/$INDICE/_doc/105")
+ESTADO_105=$(printf '%s' "$DOC_105" | python -c "
+import sys, json
+try:
+    d = json.load(sys.stdin)
+    print(d.get('_source', {}).get('estado', '') if d.get('found') else 'no-esta')
+except Exception:
+    print('no-esta')
+")
+
+if [ "$ESTADO_105" = "rechazado" ]; then
+    OK "el 105 esta en el indice con estado 'rechazado', que es lo que se pidio"
+elif [ "$ESTADO_105" = "no-esta" ]; then
+    FALLA "el 105 no esta en el indice"
+    echo "        Con el cambio de 2026-09-04 tiene que estar: el filtro vive en el backend."
+    echo "        Corre 'bash etl/cargar_busqueda.sh' -- si sigue faltando, mira si"
+    echo "        etl/extraer_busqueda.js volvio a filtrar por estado."
 else
-    FALLA "el 105 esta rechazado y SI esta en el indice (HTTP $ESTA_105)"
+    FALLA "el 105 esta en el indice pero con estado '$ESTADO_105', no 'rechazado'"
+fi
+
+# 4.2 Y la ruta PUBLICA del backend no lo devuelve. Esta es la que protege al
+#     comprador, y es la unica que sigue midiendo algo real.
+if [ -z "$NOMBRE_105" ]; then
+    FALLA "no se pudo leer el nombre del 105 en MongoDB: no hay con que buscarlo"
+elif ! backend_vivo; then
+    echo "  (el backend no responde en $API, las partes 4.2 y 4.3 no se corrieron)"
+    echo "        Levantalo con 'cd backend ; npm run start:dev' y vuelve a probar."
+else
+    PUBLICA=$(busca_backend '/buscador/productos' "$NOMBRE_105" '')
+    if printf '%s' "$PUBLICA" | grep -q '^105$'; then
+        FALLA "la ruta publica devuelve el 105, que esta rechazado"
+        echo "        Es el fallo que esta prueba existe para atrapar: un comprador"
+        echo "        viendo algo que no circula. Mira el filter fijo de"
+        echo "        backend/src/services/buscador/productos.service.ts"
+    else
+        OK "la ruta publica NO devuelve el 105 buscando su propio nombre"
+    fi
+
+    # 4.3 El otro lado del filtro. Sin esto, la prueba de arriba pasaria
+    #     tambien si la busqueda estuviera rota del todo y no devolviera nada:
+    #     un negativo se prueba comprobando que el positivo SI ocurre.
+    if iniciar_sesion_admin; then
+        ADMIN=$(busca_backend '/buscador/productos/admin' "$NOMBRE_105" 'si')
+        if printf '%s' "$ADMIN" | grep -q '^105$'; then
+            OK "y la de admin SI lo devuelve, asi que lo de arriba es el filtro y no una busqueda rota"
+        else
+            FALLA "la ruta de admin tampoco devuelve el 105"
+            echo "        Entonces lo de arriba no probo el filtro: probo que la"
+            echo "        busqueda no encuentra ese producto por ningun lado."
+        fi
+    else
+        echo "  (no se pudo iniciar sesion como admin, la parte 4.3 no se corrio)"
+        echo "        Sin ella, la 4.2 no distingue 'filtrado' de 'no lo encuentra nadie'."
+    fi
 fi
 
 # ============================================================

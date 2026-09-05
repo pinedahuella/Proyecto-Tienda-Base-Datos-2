@@ -23,12 +23,31 @@
 
 const SALIDA = '/tmp/mesh-busqueda.ndjson';
 
-// Solo lo ACTIVO. Se filtra aqui y no al consultar: si el filtro viviera en la
-// consulta, una ruta que se olvide de ponerlo ensenaria productos rechazados a
-// un comprador. Filtrando al extraer, aunque se olvide, no hay nada que
-// ensenar. El precio es que un administrador no los puede buscar; el dia que
-// haga falta, se cambia esta linea.
-const FILTRO = { estado: 'activo' };
+// Se indexa TODO el catalogo, en cualquier estado.
+//
+// Antes esto era `{ estado: 'activo' }`, y el razonamiento era bueno: filtrando
+// al extraer, una ruta que se olvidara del filtro no podia ensenarle un
+// producto rechazado a un comprador, porque no habia nada que ensenar. El
+// precio era que un administrador tampoco los podia buscar.
+//
+// Ese precio dejo de ser aceptable: el admin necesita encontrar lo que NO
+// circula, que es justo lo que va a revisar. Asi que el filtro se mudo al
+// backend, y ahi no vive en un parametro que se pueda pedir del otro lado --
+// `GET /buscador/productos` arma su consulta con `filter: [{ term: { estado:
+// "activo" } }]` FIJO en el codigo, y la unica ruta sin ese filtro,
+// `/buscador/productos/admin`, exige sesion y rol de admin. Un olvido ahora es
+// un cambio a proposito en una linea que se ve, no una omision silenciosa.
+//
+// `estado: p.estado` ya se proyecta en cada documento mas abajo, asi que no
+// hace falta agregar ningun campo: solo dejar de excluir por el.
+//
+// Detalle: el worker `BuscadorSyncService` del backend ya indexa todos los
+// estados producto por producto a medida que se editan. Mientras esta linea
+// dijera `activo`, una reconstruccion completa del indice DESHACIA ese trabajo
+// y dejaba fuera todo lo que no estuviera activo -- sin dar ningun error.
+//
+// Ver backend/cambio_propuestas/2026-09-04_2208-elastic-indexar-todos-los-estados.md
+const FILTRO = {};
 
 /**
  * Los decimales de Mongo llegan como { $numberDecimal: "4269.00" } y

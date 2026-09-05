@@ -175,6 +175,35 @@ db.categorias.createIndex(
     { name: 'categorias_por_nombre' }
 );
 
+// La cola del buscador de la Entrega 3.
+//
+// `BuscadorSyncService` del backend corre cada 10 segundos y pregunta
+// `find({ pendiente_busqueda: true })` para saber que productos hay que volver
+// a mandar a Elasticsearch. Sin indice, esa consulta recorre el catalogo
+// ENTERO seis veces por minuto para encontrar, casi siempre, cero documentos.
+// Con 1105 productos no se nota; con los miles que pide la prueba de carga, si.
+//
+// Es PARCIAL a proposito, y esa es toda la gracia. Un indice normal sobre este
+// campo pagaria mantenimiento en CADA escritura a CUALQUIER producto, aunque
+// casi ninguno vaya a estar pendiente nunca. Con partialFilterExpression el
+// indice solo guarda una entrada por cada documento que este pendiente AHORA
+// MISMO, y eso es siempre un punado sin importar cuanto crezca el catalogo.
+//
+// Funciona porque el campo nunca vale `false`: o existe y es `true`, o el
+// backend se lo quita con $unset al terminar. Asi la consulta del worker y el
+// filtro del indice piden exactamente lo mismo, que es la condicion que Mongo
+// necesita para poder usar un indice parcial. Si algun dia alguien escribe
+// `pendiente_busqueda: false` en vez de quitar el campo, ese documento deja de
+// entrar en el indice y el worker sigue encontrandolo igual -- no se rompe
+// nada, pero se pierde la ventaja, asi que conviene no hacerlo.
+db.productos.createIndex(
+    { pendiente_busqueda: 1 },
+    {
+        name: 'productos_pendientes_de_busqueda',
+        partialFilterExpression: { pendiente_busqueda: true }
+    }
+);
+
 // Si quedo de una version anterior, se va: las ofertas viven en PostgreSQL y
 // una copia vieja aqui es peor que no tenerla, porque parece al dia.
 if (db.getCollectionNames().indexOf('ofertas') !== -1) {

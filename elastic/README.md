@@ -116,3 +116,41 @@ exista, este indice se prueba con `curl` contra el 9200 y con
 antes es de donde salen esos ids sin pisar los que reparte PostgreSQL (ver
 `docs/PENDIENTES.md`, punto 5). Generar en masa con el margen de hoy machaca
 productos.
+
+## El indice guarda TODOS los estados (desde el 2026-09-04)
+
+Antes `etl/extraer_busqueda.js` filtraba `{ estado: 'activo' }` al extraer, y
+el razonamiento era bueno: si el filtro vive en el extractor, una ruta que se
+olvide de ponerlo no puede ensenarle un producto rechazado a un comprador,
+porque no hay nada que ensenar. El precio era que un administrador tampoco los
+podia buscar.
+
+Ese precio dejo de ser aceptable: el admin necesita encontrar justo lo que NO
+circula, que es lo que va a revisar. Asi que el filtro se mudo al backend:
+
+| Ruta | Filtro de estado | Quien entra |
+|---|---|---|
+| `GET /buscador/productos` | `activo`, FIJO en el codigo | cualquiera, sin sesion |
+| `GET /buscador/productos/admin` | ninguno | solo rol admin, 403 al resto |
+
+El filtro fijo no es un query param: no se le puede pedir lo contrario desde
+fuera. Un olvido ahora seria un cambio a proposito en una linea que se ve, no
+una omision silenciosa.
+
+**Ojo con reconstruir el indice.** El worker del backend
+(`BuscadorSyncService`) indexa todos los estados producto por producto a
+medida que se editan. Mientras `extraer_busqueda.js` filtrara por estado, una
+reconstruccion completa DESHACIA ese trabajo y dejaba fuera todo lo que no
+estuviera activo, sin dar ningun error. Por eso las dos piezas tienen que
+mirar el mismo catalogo.
+
+Comprobado despues del cambio, con `bash etl/cargar_busqueda.sh`:
+
+```
+total 1105
+  activo     1104
+  rechazado     1
+```
+
+Y el rechazado (`_id` 105) responde 200 en `GET /mesh_productos/_doc/105` con
+`"estado": "rechazado"` adentro.

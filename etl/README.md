@@ -729,3 +729,37 @@ donde salen los datos.
 
 Es el precio de que el grafo sea una proyeccion y no una fuente de verdad, y
 conviene decirlo antes de que alguien lo descubra por su cuenta.
+
+## La cola del buscador, y por que hay dos caminos al indice
+
+Desde el 2026-09-04 el indice de busqueda se llena por DOS vias, y las dos
+tienen que estar de acuerdo:
+
+1. **Este ETL**, `cargar_busqueda.sh`, que lo reconstruye ENTERO. Es la via
+   del arranque y la de "quedo inconsistente, rehazlo".
+2. **El worker del backend**, `BuscadorSyncService`, que cada 10 segundos
+   busca en MongoDB los productos con la bandera `pendiente_busqueda: true`,
+   los manda a Elasticsearch de uno en uno y le quita la bandera al que sale
+   bien. Es la via del dia a dia: se edita un producto y el buscador se entera
+   solo, sin volver a construir nada.
+
+**Las dos arman el MISMO documento.** `aDocumentoIndice()` del worker y la
+proyeccion de `extraer_busqueda.js` tienen que producir los mismos campos, con
+el mismo trato de `Decimal128` y de las variantes. Si un dia cambia esa forma,
+se cambian las dos a la par o el catalogo queda con documentos de dos epocas
+distintas conviviendo, sin ningun error que lo delate.
+
+**Y las dos miran el mismo catalogo.** Este ETL ya no filtra por estado: ver
+`elastic/README.md`. Mientras filtraba, cada reconstruccion completa deshacia
+en silencio lo que el worker habia indexado.
+
+La consulta del worker se apoya en un indice PARCIAL de MongoDB,
+`productos_pendientes_de_busqueda`, creado en `mongo/001_productos.js`. Sin el,
+esa consulta recorria el catalogo entero seis veces por minuto para encontrar
+casi siempre cero documentos. Medido con `explain` sobre 1105 productos:
+
+```
+IXSCAN (usa indice)
+indice: productos_pendientes_de_busqueda
+documentos examinados: 0 de 1105
+```
