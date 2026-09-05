@@ -123,6 +123,18 @@ export interface Producto {
   resenas_promedio: number;
   /** Cuantas resenas tiene el producto en total. `0` si ninguna. Copia calculada, misma fuente y reglas que `resenas_promedio`. */
   resenas_total: number;
+  /**
+   * Bandera de sincronizacion con el buscador (Elasticsearch, Entrega 3).
+   * Patron "cola sin cola": solo EXISTE (y solo puede valer `true`, nunca
+   * `false`) cuando el documento cambio despues de la ultima vez que el
+   * indice de busqueda lo reflejo. El worker que la consuma la borra
+   * (`$unset`) al terminar de reindexar, en vez de ponerla en `false` --
+   * "existe y es true" y "no existe" son la misma pregunta, y asi el campo
+   * nunca aparece en la inmensa mayoria de los documentos (los ya
+   * sincronizados), lo que deja un indice parcial minusculo si el dia de
+   * manana se indexa este campo en Mongo.
+   */
+  pendiente_busqueda?: true;
   variantes: ProductoVariante[];
   /** Opcional: caracteristicas del producto, del catalogo de la app. */
   caracteristicas_adicionales?: EntradaCaracteristica[];

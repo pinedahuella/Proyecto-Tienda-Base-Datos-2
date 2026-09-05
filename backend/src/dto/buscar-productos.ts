@@ -15,6 +15,13 @@ export interface BuscarProductosQuery {
 export interface ResultadoBusquedaProducto {
   id_producto: number;
   nombre: string;
+  /**
+   * En GET /buscador/productos SIEMPRE es "activo" (esa ruta filtra por
+   * codigo, no por lo que pida la peticion). En GET /buscador/productos/admin
+   * puede ser cualquiera -- es lo que le permite a un admin distinguir un
+   * producto rechazado de uno activo en la misma lista.
+   */
+  estado: string;
   categoria: string | null;
   /** El precio mas barato entre todos los vendedores. */
   precio_desde: number | null;

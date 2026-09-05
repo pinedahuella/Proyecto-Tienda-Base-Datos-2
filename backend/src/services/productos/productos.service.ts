@@ -608,9 +608,10 @@ export class ProductosService {
       // pero los de resenas si -- un producto puede recibir su primera
       // resena sin que nada cambie del lado de las ofertas.
       if (porVariante.rows.length === 0) {
-        const soloResenas = {
+        const soloResenas: Record<string, unknown> = {
           resenas_promedio: resenasPromedio,
           resenas_total: resenasTotal,
+          pendiente_busqueda: true,
         };
         await mongoDb
           .collection<Producto>('productos')
@@ -658,6 +659,7 @@ export class ProductosService {
         total_ofertas: totalEnRaiz.rows[0]?.total_ofertas ?? 0,
         resenas_promedio: resenasPromedio,
         resenas_total: resenasTotal,
+        pendiente_busqueda: true,
       };
       const arrayFilters: Record<string, unknown>[] = [];
 

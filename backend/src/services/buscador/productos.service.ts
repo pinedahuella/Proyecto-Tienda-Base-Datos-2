@@ -12,6 +12,7 @@ const LIMITE_MAXIMO = 50;
 interface DocumentoIndice {
   nombre: string;
   descripcion: string | null;
+  estado: string;
   categoria_nombre: string | null;
   precio_desde: number | null;
   precio_tienda: number | null;
@@ -38,31 +39,70 @@ interface DocumentoIndice {
  * tildes (el indice usa el analizador `espanol_llano`, que hace
  * asciifolding), sobre tres campos: `nombre` (con mas peso), `descripcion` y
  * `variantes` (los nombres de las presentaciones).
+ *
+ * El indice guarda TODOS los estados (activo, inactivo, borrador,
+ * en_revision, rechazado) -- ver
+ * `cambio_propuestas/2026-09-04_2208-elastic-indexar-todos-los-estados.md`.
+ * Lo que separa lo publico de lo que ve un admin no es el indice, es esta
+ * clase: `buscar()` SIEMPRE agrega `estado: activo` como `filter`, fijo en
+ * el codigo y no condicionado a ningun parametro de la peticion (misma
+ * "lista blanca, no lista negra" que ya usa `ProductosService` sobre
+ * Mongo). `buscarAdmin()` es la unica que puede saltarselo.
  */
 @Injectable()
 export class BuscadorProductosService {
   private readonly logger = new Logger(BuscadorProductosService.name);
 
+  /** GET /buscador/productos -- publica. Nunca ve nada que no sea `activo`. */
   async buscar(
     nombre: string | undefined,
     limite: string | undefined,
+  ): Promise<ResultadoBusquedaProducto[]> {
+    return this.ejecutar(nombre, limite, true);
+  }
+
+  /**
+   * GET /buscador/productos/admin -- protegida (solo admin, en el
+   * controller). Mismo texto, misma difusa, pero sin el filtro de estado:
+   * trae cualquier producto en cualquier estado.
+   */
+  async buscarAdmin(
+    nombre: string | undefined,
+    limite: string | undefined,
+  ): Promise<ResultadoBusquedaProducto[]> {
+    return this.ejecutar(nombre, limite, false);
+  }
+
+  private async ejecutar(
+    nombre: string | undefined,
+    limite: string | undefined,
+    soloActivos: boolean,
   ): Promise<ResultadoBusquedaProducto[]> {
     const texto = (nombre ?? '').trim();
     if (!texto) {
       throw new ErrorValidacion('Escribe el nombre del producto que buscas');
     }
 
+    const textoQuery = {
+      multi_match: {
+        query: texto,
+        fields: ['nombre^3', 'descripcion', 'variantes'],
+        fuzziness: 'AUTO',
+      },
+    };
+
     try {
       const respuesta = await elasticClient.search<DocumentoIndice>({
         index: INDICE,
         size: this.aLimite(limite),
-        query: {
-          multi_match: {
-            query: texto,
-            fields: ['nombre^3', 'descripcion', 'variantes'],
-            fuzziness: 'AUTO',
-          },
-        },
+        query: soloActivos
+          ? {
+              bool: {
+                must: [textoQuery],
+                filter: [{ term: { estado: 'activo' } }],
+              },
+            }
+          : textoQuery,
       });
 
       return respuesta.hits.hits.map((hit) => this.aResultado(hit));
@@ -88,6 +128,7 @@ export class BuscadorProductosService {
     return {
       id_producto: Number(hit._id),
       nombre: fuente?.nombre ?? '',
+      estado: fuente?.estado ?? '',
       categoria: fuente?.categoria_nombre ?? null,
       precio_desde: fuente?.precio_desde ?? null,
       precio_tienda: fuente?.precio_tienda ?? null,

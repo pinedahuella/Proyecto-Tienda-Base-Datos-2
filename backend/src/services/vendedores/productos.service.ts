@@ -183,6 +183,9 @@ export class ProductosVendedorService {
         total_ofertas: 0,
         resenas_promedio: 0,
         resenas_total: 0,
+        // Nace pendiente de sincronizar con el buscador: el indice de
+        // Elasticsearch todavia no sabe que este producto existe.
+        pendiente_busqueda: true,
         variantes,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
@@ -290,6 +293,10 @@ export class ProductosVendedorService {
         total_ofertas: 0,
         resenas_promedio: 0,
         resenas_total: 0,
+        // Nace pendiente de sincronizar con el buscador, igual que en
+        // crear(): aunque en_revision no circula todavia, el worker es
+        // quien decide eso -- esta ruta solo avisa que el documento cambio.
+        pendiente_busqueda: true,
         variantes,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
@@ -582,7 +589,7 @@ export class ProductosVendedorService {
 
       await coleccionProductos.updateOne(
         { _id: idProducto },
-        { $set: { estado: nuevoEstado } },
+        { $set: { estado: nuevoEstado, pendiente_busqueda: true } },
       );
       estadoARevertir = 'en_revision';
       eventoABorrar = await this.crearEventoModificacion(idProducto, {
@@ -680,7 +687,7 @@ export class ProductosVendedorService {
 
       await coleccionProductos.updateOne(
         { _id: idProducto },
-        { $set: { estado: 'en_revision' } },
+        { $set: { estado: 'en_revision', pendiente_busqueda: true } },
       );
       estadoARevertir = 'rechazado';
       eventoABorrar = await this.crearEventoModificacion(idProducto, {
@@ -1213,7 +1220,11 @@ export class ProductosVendedorService {
         );
       }
 
-      const conjuntoSet: Record<string, unknown> = {};
+      // pendiente_busqueda va desde el inicio, no condicionado a que campo
+      // cambie: cualquier edicion por esta ruta (nombre, categoria, estado,
+      // caracteristicas, variantes) puede tocar algo que el buscador
+      // indexa, y decidir cual es tarea del futuro worker, no de aca.
+      const conjuntoSet: Record<string, unknown> = { pendiente_busqueda: true };
       const conjuntoUnset: Record<string, ''> = {};
       const cambiosEvento: ProductoEventoCambios = {};
 

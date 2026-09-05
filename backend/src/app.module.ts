@@ -49,6 +49,7 @@ import { BaseDatosBuscadorController } from './controllers/base-datos-buscador.c
 import { BaseDatosBuscadorService } from './services/base-datos-buscador.service';
 import { BuscadorProductosController } from './controllers/buscador/productos.controller';
 import { BuscadorProductosService } from './services/buscador/productos.service';
+import { BuscadorSyncService } from './services/buscador/buscador-sync.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -113,6 +114,7 @@ import { BuscadorProductosService } from './services/buscador/productos.service'
     GrafoSyncService,
     BaseDatosBuscadorService,
     BuscadorProductosService,
+    BuscadorSyncService,
   ],
 })
 export class AppModule {}
