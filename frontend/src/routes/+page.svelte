@@ -951,8 +951,13 @@
 	}
 
 	/**
-	 * Tres caracteristicas para la tarjeta. Se saltan los nombres repetidos:
-	 * ensenar "Etiquetas" tres veces no dice nada.
+	 * DOS caracteristicas para la tarjeta. Se saltan los nombres repetidos:
+	 * ensenar "Etiquetas" dos veces no dice nada.
+	 *
+	 * Eran tres y no cabian en una linea, asi que o la tarjeta crecia un
+	 * renglon --y la fila entera quedaba despareja-- o se cortaban las tres a
+	 * la vez y no se leia ninguna: "Material princip...", "Pais de...", "Ma...".
+	 * Dos completas informan; tres a medias, no. El resto esta en la ficha.
 	 */
 	function resumen(p: Producto): Caracteristica[] {
 		const vistas = new Set<string>();
@@ -961,7 +966,7 @@
 			if (vistas.has(c.nombre)) continue;
 			vistas.add(c.nombre);
 			salida.push(c);
-			if (salida.length === 3) break;
+			if (salida.length === 2) break;
 		}
 		return salida;
 	}
@@ -1395,45 +1400,61 @@
 								</ul>
 							{/if}
 
-							<div class="pie-tarjeta">
-								<strong class="precio">{precio(p)}</strong>
-								<span class="variantes">
-									{p.variantes.length}
-									{p.variantes.length === 1 ? 'variante' : 'variantes'}
-								</span>
-							</div>
+							<!-- La base de la tarjeta: precio arriba, y DEBAJO una sola
+							     linea con lo demas.
 
-							<!-- El segundo precio solo aparece cuando alguien lo tiene mas
-							     barato que la tienda. Si no, no se pintan dos numeros
-							     iguales. -->
-							{#if precioDesde(p)}
-								<p class="desde">
-									desde <strong>{precioDesde(p)}</strong> con otro vendedor
-								</p>
-							{/if}
+							     Antes esto eran cuatro bloques sueltos --el precio, el
+							     "desde", los vendedores y el stock-- y cada uno aparecia o
+							     no segun el producto. El resultado era que el precio, que
+							     es lo que la gente busca con la vista, quedaba a distinta
+							     altura en cada tarjeta de la misma fila. Medido en la
+							     portada: 705, 725, 705 y 753 pixeles. Se lee como algo mal
+							     montado aunque cada tarjeta por separado este bien.
 
-							{#if p.total_ofertas > 1}
-								<p class="ofertas">{p.total_ofertas} vendedores lo tienen</p>
-							{/if}
+							     Ahora todo lo de abajo va en un bloque con `margin-top:
+							     auto` y el pie SIEMPRE ocupa una linea, tenga uno o tres
+							     datos. Los precios quedan alineados en la fila entera. -->
+							<div class="base">
+								<div class="pie-tarjeta">
+									<strong class="precio">{precio(p)}</strong>
+									<span class="variantes">
+										{p.variantes.length}
+										{p.variantes.length === 1 ? 'variante' : 'variantes'}
+									</span>
+								</div>
 
-							<!-- stock_total viene siempre, no hay que pedirlo con nada.
-							     Pero 0 no siempre quiere decir "agotado": ver estadoStock(). -->
-							{#if p.stock_total !== undefined}
-								{@const estado = estadoStock(p)}
-								<span
-									class="stock"
-									class:agotado={estado === 'agotado'}
-									class:sin-dato={estado === 'sin-oferta'}
-								>
-									{#if estado === 'hay'}
-										{p.stock_total} en existencia
-									{:else if estado === 'sin-oferta'}
-										Nadie lo vende todavia
-									{:else}
-										Agotado
+								<p class="meta">
+									<!-- El segundo precio solo aparece cuando alguien lo tiene
+									     mas barato que la tienda. Si no, no se pintan dos
+									     numeros iguales. -->
+									{#if precioDesde(p)}
+										<span class="desde">desde <strong>{precioDesde(p)}</strong></span>
 									{/if}
-								</span>
-							{/if}
+
+									{#if p.total_ofertas > 1}
+										<span>{p.total_ofertas} vendedores</span>
+									{/if}
+
+									<!-- El stock SOLO cuando es un problema.
+
+									     Antes cada tarjeta decia "63 en existencia", y ese
+									     numero no le sirve a nadie que este eligiendo: da
+									     igual si hay 63 o 200, lo que importa es si HAY. En
+									     doce tarjetas eran doce lineas repitiendo que si.
+									     Ahora se calla cuando hay, y habla cuando no --que
+									     es cuando cambia la decision.
+
+									     0 no siempre quiere decir "agotado": ver estadoStock(). -->
+									{#if p.stock_total !== undefined}
+										{@const estado = estadoStock(p)}
+										{#if estado === 'agotado'}
+											<span class="stock agotado">Agotado</span>
+										{:else if estado === 'sin-oferta'}
+											<span class="stock sin-dato">Nadie lo vende</span>
+										{/if}
+									{/if}
+								</p>
+							</div>
 						</div>
 					</a>
 				</article>
@@ -1910,24 +1931,57 @@
 		overflow: hidden;
 	}
 
+	/* UNA sola fila de rasgos, sin envolver.
+
+	   Con `flex-wrap: wrap` una caracteristica larga --"Material principal
+	   Policarbonato reforzado"-- se partia en dos lineas y esa tarjeta crecia
+	   un renglon mas que sus vecinas. Multiplicado por la rejilla, ninguna fila
+	   quedaba pareja. Son datos de apoyo: si no caben, se cortan. El detalle
+	   completo esta a un clic, en la ficha. */
 	.rasgos {
 		list-style: none;
 		display: flex;
-		flex-wrap: wrap;
 		gap: 0.35rem;
 		margin-top: 0.15rem;
+		overflow: hidden;
 	}
 
+	/* Se encogen solo cuando de verdad no caben, y entonces con puntos
+	   suspensivos.
+
+	   Con tres rasgos esto salia mal --se repartian el ancho y los tres
+	   quedaban cortados a la mitad, ilegibles-- pero con dos el reparto casi
+	   nunca hace falta, y cuando hace falta un "Material principal
+	   Policarbon..." se lee. Sin `text-overflow`, el recorte lo hacia el
+	   `overflow` del padre y la palabra quedaba cortada a ras del borde de la
+	   tarjeta, que parece un fallo de pintado y no un recorte a proposito. */
 	.rasgos li {
+		/* No se encogen (`0 0 auto`): con `0 1 auto` el reparto los recorta a
+		   los DOS aunque quepan, y salen "Material principal Poli..." junto a
+		   "Pais de ori..." sin ninguna necesidad. El tope de ancho es para el
+		   caso contrario, un solo rasgo larguisimo: ahi si se corta, y con
+		   puntos suspensivos en vez de a ras del borde de la tarjeta. */
+		flex: 0 0 auto;
+		max-width: 100%;
+		overflow: hidden;
+		text-overflow: ellipsis;
 		padding: 3px 8px;
 		font-size: 0.78rem;
 		color: var(--texto);
 		background: var(--panel);
 		border-radius: var(--r);
+		white-space: nowrap;
 	}
 
 	.rasgos span {
 		color: var(--gris-2);
+	}
+
+	/* Todo lo de abajo, junto y pegado al fondo de la tarjeta. Es lo que
+	   alinea los precios de una fila entre si. */
+	.base {
+		margin-top: auto;
+		padding-top: 0.7rem;
 	}
 
 	.pie-tarjeta {
@@ -1935,13 +1989,11 @@
 		align-items: baseline;
 		justify-content: space-between;
 		gap: 0.5rem;
-		margin-top: auto;
-		padding-top: 0.6rem;
 	}
 
 	.precio {
-		font-size: 1.02rem;
-		font-weight: 500;
+		font-size: 1.15rem;
+		font-weight: 600;
 		color: var(--tinta);
 	}
 
@@ -1950,40 +2002,44 @@
 		color: var(--gris);
 	}
 
-	.stock {
-		margin-top: 0.3rem;
+	/* El pie: una linea, con punto medio entre los datos que haya.
+
+	   El separador lo pone el CSS y no el marcado, asi que da igual cuales de
+	   los tres aparezcan -- nunca sale un punto suelto al principio ni dos
+	   seguidos, que es el fallo tipico de escribirlos a mano. */
+	.meta {
+		display: flex;
+		align-items: baseline;
+		gap: 0.4rem;
+		margin: 0.25rem 0 0;
 		font-size: 0.8rem;
+		line-height: 1.4;
 		color: var(--gris);
+		/* Que no crezca a dos lineas y descuadre la fila. */
+		white-space: nowrap;
+		overflow: hidden;
+	}
+
+	.meta span + span::before {
+		content: '·';
+		margin-right: 0.4rem;
+		color: var(--linea);
+	}
+
+	.desde strong {
+		font-weight: 600;
+		color: var(--indigo);
 	}
 
 	.stock.agotado {
 		color: var(--rojo);
 	}
 
-	/* "Sin existencias registradas" no es una alarma como "Agotado": es un dato
-	   que falta. Por eso va en gris y no en rojo. */
+	/* "Nadie lo vende todavia" no es una alarma como "Agotado": es un dato que
+	   falta. Por eso va en gris y no en rojo. */
 	.stock.sin-dato {
 		color: var(--gris-2);
 		font-style: italic;
-	}
-
-	.desde {
-		margin: 0;
-		padding: 0 1rem 2px;
-		font-size: 0.8rem;
-		color: var(--gris);
-	}
-
-	.desde strong {
-		font-weight: 500;
-		color: var(--indigo);
-	}
-
-	.ofertas {
-		margin: 0;
-		padding: 0 1rem 4px;
-		font-size: 0.75rem;
-		color: var(--gris);
 	}
 
 	/* ---------- estados ---------- */

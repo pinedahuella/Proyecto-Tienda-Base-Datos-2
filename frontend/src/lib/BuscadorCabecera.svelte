@@ -390,9 +390,20 @@
 			background var(--t);
 	}
 
+	/* El foco se marca en la CAJA, que es lo que la persona ve como el control.
+	   El halo va aqui y no en el input, para que sea un solo objeto que se
+	   ilumina y no dos rectangulos, uno dentro del otro. */
 	.campo:focus-within {
 		border-color: var(--indigo);
 		background: var(--blanco);
+		box-shadow: 0 0 0 3px var(--indigo-cl);
+	}
+
+	/* Con la lista abierta el halo se quita: ahi el campo ya no es un control
+	   suelto sino la tapa del panel, y un anillo alrededor de la tapa la
+	   volveria a separar de la lista. */
+	.campo.abierta:focus-within {
+		box-shadow: none;
 	}
 
 	/* Con la lista abierta, el campo es la TAPA de la lista: pierde las
@@ -414,11 +425,30 @@
 		color: var(--gris);
 	}
 
-	.campo input {
+	/* El input renuncia a TODA la caja que el layout le da a los campos.
+	   ESTE ES EL RECUADRO DENTRO DEL RECUADRO.
+
+	   `+layout.svelte` le pone a cada `input` del proyecto borde, esquinas,
+	   relleno de 8px 11px y, al enfocar, `box-shadow: 0 0 0 3px` -- un halo
+	   redondeado. Eso esta bien en un formulario, donde el input ES la caja.
+	   Aqui la caja es `.campo`, y el input va dentro: al hacer clic aparecia
+	   un segundo rectangulo redondeado flotando dentro del primero, que es
+	   exactamente lo que se veia mal.
+
+	   Antes solo se quitaba el borde. Habia que quitar tambien el relleno, las
+	   esquinas y sobre todo la sombra del foco, en el estado normal y en el
+	   enfocado -- si no, la regla global gana cuando el campo tiene el foco,
+	   que es justo el momento en el que se mira. */
+	.campo input,
+	.campo input:hover,
+	.campo input:focus {
 		flex: 1;
 		min-width: 0;
+		padding: 0;
 		border: 0;
+		border-radius: 0;
 		background: none;
+		box-shadow: none;
 		outline: none;
 		font-family: inherit;
 		font-size: 0.93rem;
@@ -631,7 +661,13 @@
 			padding: 0 0.55rem;
 		}
 
-		.campo input {
+		/* Los tres estados, como arriba: con solo `.campo input` la regla del
+		   bloque de arriba para `:focus` (mas especifica) le devolvia el
+		   tamano de escritorio en cuanto se tocaba el campo, y la letra
+		   pegaba un salto justo al empezar a escribir. */
+		.campo input,
+		.campo input:hover,
+		.campo input:focus {
 			font-size: 0.88rem;
 		}
 	}

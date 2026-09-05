@@ -858,3 +858,51 @@ rechazado y la pagina entera no lo traiga.
   un usuario normal: LA MISMA busqueda daba resultados distintos en el panel y
   en el catalogo. La cabecera acepta ahora `esAdmin` por la misma via que
   `sesion` -- la prop manda si viene, y si no la averigua ella.
+
+## El recuadro dentro del recuadro del buscador
+
+Al hacer clic en la barra de busqueda de la cabecera aparecia un segundo
+rectangulo redondeado FLOTANDO DENTRO del primero. No era el desplegable: salia
+sin escribir nada.
+
+La causa esta en `+layout.svelte`, en las reglas globales de los campos. A todo
+`input` del proyecto se le da borde, esquinas, relleno de 8px 11px y, al
+enfocar, `box-shadow: 0 0 0 3px` -- un halo. Eso esta bien en un formulario,
+donde el input ES la caja. En el buscador la caja es `.campo` y el input va
+dentro, asi que el halo del input dibujaba una segunda caja.
+
+`BuscadorCabecera` solo le quitaba el borde. Ahora le quita tambien el relleno,
+las esquinas y la sombra, y lo hace en los TRES estados (`normal`, `:hover`,
+`:focus`) -- si no, la regla global vuelve a ganar justo cuando el campo tiene
+el foco, que es el momento en el que se mira. El halo se movio a `.campo`, que
+es lo que la persona ve como el control, y desaparece cuando la lista esta
+abierta, porque ahi el campo es la tapa del panel y no un control suelto.
+
+**Regla general para este proyecto:** un `input` metido dentro de otra caja
+tiene que renunciar a la caja global entera, no solo al borde.
+
+## Las tarjetas del catalogo
+
+Tres cosas que se veian mal y por que:
+
+**Los precios flotaban.** Medido en la portada, el precio de las cuatro
+tarjetas de la primera fila caia a 705, 725, 705 y 753 pixeles. Pasaba porque
+debajo del precio habia tres bloques sueltos --el "desde", los vendedores y el
+stock-- y cada uno aparecia o no segun el producto. Ahora todo lo de abajo va
+en un bloque con `margin-top: auto` y el pie SIEMPRE ocupa una linea, tenga uno
+o tres datos. Los precios de una fila quedan alineados.
+
+**Tres rasgos no caben en una linea.** "Material principal Policarbonato
+reforzado" se partia en dos y esa tarjeta crecia un renglon mas que sus
+vecinas. Bajaron a dos, que caben enteros. Cortarlos a los tres para que
+quepan no sirve: quedaban "Material princip...", "Pais de...", "Ma...", tres
+etiquetas que no dicen nada. Dos completas informan.
+
+**"63 en existencia" en cada tarjeta.** Ese numero no le sirve a nadie que este
+eligiendo: da igual si hay 63 o 200, lo que importa es si HAY. Eran doce lineas
+repitiendo que si. Ahora el stock se calla cuando hay y habla cuando no
+--"Agotado", "Nadie lo vende"-- que es cuando cambia la decision.
+
+El separador del pie lo pone el CSS (`span + span::before`) y no el marcado,
+asi que da igual cuales de los tres datos aparezcan: nunca sale un punto suelto
+al principio ni dos seguidos.
