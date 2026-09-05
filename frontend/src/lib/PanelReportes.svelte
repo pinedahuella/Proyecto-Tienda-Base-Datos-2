@@ -422,32 +422,32 @@
 	.titulo {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 		margin-bottom: 8px;
 	}
 
 	.titulo h2 {
-		font-size: 1.3rem;
+		font-size: var(--f-xl);
 		margin-right: 4px;
 	}
 
 	.sello {
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
 	.acciones {
 		margin-left: auto;
 		display: flex;
-		gap: 10px;
+		gap: var(--e2);
 	}
 
 	.acciones button,
 	.fallo button {
 		padding: 8px 16px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -467,12 +467,12 @@
 		max-width: 640px;
 		margin-bottom: 20px;
 		color: var(--gris);
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 	}
 
 	.intro.chica {
 		margin-bottom: 14px;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 
 	.gris {
@@ -480,7 +480,7 @@
 	}
 
 	.chico {
-		font-size: 0.84rem;
+		font-size: var(--f-sm);
 	}
 
 	.fuerte {
@@ -498,9 +498,9 @@
 	.seccion {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--e2);
 		margin: 28px 0 6px;
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 	}
 
 	.seccion:first-of-type {
@@ -509,7 +509,7 @@
 
 	.etiqueta {
 		padding: 2px 10px;
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		font-weight: 400;
 		color: var(--indigo);
 		background: var(--indigo-cl);
@@ -527,7 +527,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		padding: 14px 18px;
 		color: var(--rojo);
@@ -541,7 +541,7 @@
 	.tarjetas {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-		gap: 12px;
+		gap: var(--e3);
 		margin: 14px 0 22px;
 	}
 
@@ -553,7 +553,7 @@
 	.tarjeta {
 		display: flex;
 		flex-direction: column;
-		gap: 3px;
+		gap: var(--e1);
 		padding: 16px 18px;
 		background: var(--panel);
 		border: 1px solid var(--linea);
@@ -565,7 +565,7 @@
 	}
 
 	.cifra {
-		font-size: 1.45rem;
+		font-size: var(--f-xl);
 		font-weight: 500;
 		color: var(--tinta);
 		/* Las cifras se leen en columna: con ancho fijo por digito no bailan. */
@@ -573,12 +573,12 @@
 	}
 
 	.rotulo {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--tinta);
 	}
 
 	.pie {
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 
@@ -587,24 +587,24 @@
 	.rejilla {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-		gap: 22px 24px;
+		gap: var(--e5) var(--e5);
 	}
 
 	.bloque h4 {
 		margin-bottom: 8px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 	}
 
 	.nota {
 		margin-top: 8px;
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
 	.nota.aviso {
 		margin-top: 12px;
 		padding: 10px 14px;
-		font-size: 0.86rem;
+		font-size: var(--f-ms);
 		color: var(--tinta);
 		background: var(--panel);
 		border: 1px solid var(--linea);
@@ -622,14 +622,14 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 
 	th {
 		padding: 9px 12px;
 		text-align: left;
 		font-weight: 500;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 		background: var(--panel);
 		white-space: nowrap;
@@ -671,12 +671,12 @@
 
 	.limpio-caja h4 {
 		margin-bottom: 6px;
-		font-size: 1rem;
+		font-size: var(--f-md);
 	}
 
 	.limpio-caja p {
 		max-width: 640px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 	}
 
 	@media (max-width: 620px) {

@@ -1336,22 +1336,22 @@
 		display: flex;
 		align-items: flex-end;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		margin-bottom: 1.25rem;
 	}
 
 	h2 {
-		font-size: 1.5rem;
+		font-size: var(--f-xl);
 	}
 
 	h3 {
-		font-size: 1.08rem;
+		font-size: var(--f-md);
 		margin-bottom: 0.5rem;
 	}
 
 	.sub,
 	.menor {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -1368,14 +1368,14 @@
 	.tabla {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--e3);
 	}
 
 	.fila {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		padding: 1rem 1.1rem;
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -1384,7 +1384,7 @@
 
 	.fila h3 {
 		margin: 0.2rem 0 0.15rem;
-		font-size: 1.02rem;
+		font-size: var(--f-md);
 	}
 
 	/* Que el nombre ocupe el hueco sobrante. Sin esto el numero de existencias
@@ -1397,7 +1397,7 @@
 	.chip {
 		display: inline-block;
 		padding: 2px 10px;
-		font-size: 0.75rem;
+		font-size: var(--f-xs);
 		letter-spacing: 0.03em;
 		text-transform: uppercase;
 		border-radius: 999px;
@@ -1413,7 +1413,7 @@
 	.acciones {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: var(--e2);
 	}
 
 	/* Ocupa el lugar de los botones que no van, para que la fila no quede
@@ -1442,14 +1442,14 @@
 	.rejilla {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
-		gap: 0.9rem;
+		gap: var(--e4);
 		margin-top: 0.9rem;
 	}
 
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		gap: var(--e1);
 		margin-bottom: 0.9rem;
 	}
 
@@ -1462,12 +1462,12 @@
 	}
 
 	label {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
 	small {
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris-2);
 	}
 
@@ -1477,7 +1477,7 @@
 		width: 100%;
 		padding: 9px 11px;
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -1495,7 +1495,7 @@
 
 	.par {
 		display: flex;
-		gap: 0.6rem;
+		gap: var(--e2);
 		margin-bottom: 0.6rem;
 	}
 
@@ -1515,7 +1515,7 @@
 
 	.final {
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--e3);
 		margin-top: 0.5rem;
 	}
 
@@ -1524,7 +1524,7 @@
 	button {
 		padding: 9px 18px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		border-radius: 999px;
 		cursor: pointer;
 		transition:
@@ -1564,7 +1564,7 @@
 
 	.quitar {
 		padding: 6px 12px;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--rojo);
 		background: none;
 		border: 1px solid var(--linea);
@@ -1626,7 +1626,7 @@
 		align-items: center;
 		justify-content: center;
 		flex-wrap: wrap;
-		gap: 1rem;
+		gap: var(--e4);
 		margin-top: 1.25rem;
 	}
 
@@ -1655,7 +1655,7 @@
 
 	.resultado ul {
 		margin: 0.5rem 0 0 1.1rem;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 	}
 
 	/* Las presentaciones con su precio y sus existencias de ese dia. Sin
@@ -1671,7 +1671,7 @@
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		padding: 0.45rem 0;
 		border-bottom: 1px solid var(--linea);
 	}
@@ -1686,13 +1686,13 @@
 	   rojo. Que la tienda no vendiera algo en marzo es informacion correcta. */
 	.presentaciones .dato.vacio {
 		color: var(--gris);
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 	}
 
 	@media (max-width: 620px) {
 		.presentaciones li {
 			flex-direction: column;
-			gap: 0.15rem;
+			gap: var(--e1);
 		}
 	}
 

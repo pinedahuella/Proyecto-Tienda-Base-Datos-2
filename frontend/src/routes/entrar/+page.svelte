@@ -202,17 +202,17 @@
 	form {
 		display: flex;
 		flex-direction: column;
-		gap: 18px;
+		gap: var(--e4);
 	}
 
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 7px;
+		gap: var(--e2);
 	}
 
 	label {
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		font-weight: 500;
 		color: var(--tinta);
 	}
@@ -221,7 +221,7 @@
 		width: 100%;
 		padding: 11px 13px;
 		font-family: inherit;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -283,7 +283,7 @@
 	}
 
 	.error {
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--rojo);
 	}
 
@@ -292,7 +292,7 @@
 	.aviso {
 		margin-bottom: 20px;
 		padding: 11px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--rojo);
 		background: var(--off);
 		border: 1px solid var(--rojo);
@@ -303,7 +303,7 @@
 	.creada {
 		margin-bottom: 20px;
 		padding: 11px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--indigo-cl);
 		border: 1px solid var(--indigo);
@@ -312,7 +312,7 @@
 
 	.pie-form {
 		margin-top: 22px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--gris);
 	}
 
@@ -327,7 +327,7 @@
 		margin-top: 4px;
 		padding: 12px 20px;
 		font-family: inherit;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		font-weight: 500;
 		color: var(--blanco);
 		background: var(--indigo);

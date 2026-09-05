@@ -906,3 +906,74 @@ repitiendo que si. Ahora el stock se calla cuando hay y habla cuando no
 El separador del pie lo pone el CSS (`span + span::before`) y no el marcado,
 asi que da igual cuales de los tres datos aparezcan: nunca sale un punto suelto
 al principio ni dos seguidos.
+
+## Las dos escalas, y por que existen
+
+La pagina se veia como muchas paginas pegadas. La causa no era ningun
+componente en particular: era que cada uno inventaba sus medidas. Contado antes
+de arreglarlo, sobre `frontend/src`:
+
+| | Valores distintos |
+|---|---|
+| `font-size` | **34** |
+| `gap` | **39** |
+| `border-radius` | 9 (esta bien, casi todos ya eran tokens) |
+
+Treinta y cuatro tamanos de letra, con cinco de ellos --0.90, 0.92, 0.93, 0.94
+y 0.95-- dentro de medio pixel unos de otros. Nadie ve la diferencia entre 0.92
+y 0.93 mirando un componente; lo que si se nota es el conjunto, porque cada
+pieza queda ligeramente distinta de su vecina.
+
+Y los huecos convivian en dos unidades para el MISMO valor: `0.5rem` y `8px`,
+`0.75rem` y `12px`, `1rem` y `16px`, segun quien lo hubiera escrito. Asi no hay
+forma de cambiar el ritmo de la pagina despues.
+
+### La escala de letra, nueve pasos
+
+```
+--f-xs    0.75rem   etiquetas, contadores, letra al pie
+--f-sm    0.82rem   datos secundarios dentro de una fila
+--f-ms    0.88rem   texto de apoyo, ayudas de formulario
+--f-base  0.94rem   el cuerpo y los controles
+--f-md    1.05rem   titulo de una tarjeta
+--f-lg    1.2rem    titulo de una seccion
+--f-xl    1.4rem    titulo de un panel
+--f-2xl   1.75rem   titulo de pagina
+--f-3xl   2.2rem    el titular de la portada
+```
+
+### La escala de espacio, siete pasos
+
+```
+--e1  4px    --e2  8px    --e3 12px    --e4 16px
+--e5 24px    --e6 32px    --e7 48px
+```
+
+Va en pixeles y no en rem a proposito: el espacio no tiene que crecer con la
+letra del sistema operativo. Una tarjeta con el doble de relleno no se lee
+mejor.
+
+### Como se aplico
+
+No se eligio paso por paso a ojo: se tomo cada valor escrito y se le busco el
+**mas cercano** de la escala, asi que ningun texto se movio mas de un par de
+decimas de rem ni ningun hueco mas de 3px. 209 declaraciones de `font-size` y
+156 de `gap`, en 19 archivos.
+
+`padding` se dejo como estaba, y es una decision: el relleno de un control suele
+estar medido a mano --un boton de 38px de alto necesita SU relleno, no el del
+vecino-- mientras que el hueco entre cosas es puro ritmo, que es donde se notaba
+que cada componente iba por su cuenta.
+
+### La regla, de aqui en adelante
+
+**Un `rem` suelto en un componente es volver a empezar.** Si hace falta un
+tamano que no esta, se agrega a la escala en `+layout.svelte` y se usa desde el
+componente. Para comprobar que no se ha colado ninguno:
+
+```
+grep -rho "font-size: *[0-9.]*rem" --include=*.svelte frontend/src
+grep -rho "gap: *[0-9][^;]*"       --include=*.svelte frontend/src
+```
+
+Las dos tienen que salir vacias.

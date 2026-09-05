@@ -511,19 +511,19 @@
 	.titulo {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 		margin-bottom: 8px;
 	}
 
 	.titulo h2 {
-		font-size: 1.3rem;
+		font-size: var(--f-xl);
 		margin-right: 4px;
 	}
 
 	.etiqueta {
 		padding: 3px 11px;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--rojo);
 		background: var(--off);
 		border: 1px solid var(--rojo);
@@ -540,7 +540,7 @@
 	.acciones {
 		margin-left: auto;
 		display: flex;
-		gap: 10px;
+		gap: var(--e2);
 	}
 
 	.acciones button,
@@ -548,7 +548,7 @@
 	.fallo button {
 		padding: 8px 16px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -569,7 +569,7 @@
 		max-width: 620px;
 		margin-bottom: 20px;
 		color: var(--gris);
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 	}
 
 	/* De cuando son los datos analizados.
@@ -581,7 +581,7 @@
 	.sincro {
 		max-width: 620px;
 		margin: -12px 0 20px;
-		font-size: 0.86rem;
+		font-size: var(--f-ms);
 		color: var(--gris-2);
 	}
 
@@ -590,7 +590,7 @@
 		border-radius: var(--r);
 		background: var(--rojo-cl);
 		color: var(--rojo);
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 	}
 
 	.gris {
@@ -621,7 +621,7 @@
 
 	.pendiente h3,
 	.limpio-caja h3 {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		margin-bottom: 8px;
 	}
 
@@ -629,7 +629,7 @@
 	.limpio-caja p {
 		max-width: 620px;
 		margin-bottom: 10px;
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 	}
 
 	.pendiente button {
@@ -640,7 +640,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		padding: 14px 18px;
 		color: var(--rojo);
@@ -655,7 +655,7 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 12px;
+		gap: var(--e3);
 	}
 
 	.anillo {
@@ -674,12 +674,12 @@
 	.cabeza {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: var(--e3);
 		flex-wrap: wrap;
 		width: 100%;
 		padding: 14px 18px;
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		text-align: left;
 		color: var(--tinta);
 		background: none;
@@ -693,7 +693,7 @@
 
 	.tipo {
 		padding: 3px 10px;
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		border-radius: 999px;
 		white-space: nowrap;
 	}
@@ -715,7 +715,7 @@
 	.cuentas-resumen {
 		display: flex;
 		align-items: center;
-		gap: 6px;
+		gap: var(--e1);
 		flex-wrap: wrap;
 	}
 
@@ -735,7 +735,7 @@
 
 	.saltos {
 		margin-left: auto;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 		white-space: nowrap;
 	}
@@ -756,12 +756,12 @@
 	.porque {
 		max-width: 680px;
 		margin: 16px 0 20px;
-		font-size: 0.93rem;
+		font-size: var(--f-base);
 		color: var(--gris);
 	}
 
 	.detalle h4 {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		margin: 18px 0 8px;
 		color: var(--tinta);
 	}
@@ -769,7 +769,7 @@
 	.columnas {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-		gap: 20px 28px;
+		gap: var(--e4) var(--e5);
 	}
 
 	.columnas h4 {
@@ -780,18 +780,18 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
-		font-size: 0.92rem;
+		gap: var(--e2);
+		font-size: var(--f-base);
 	}
 
 	ul.simple li {
 		display: flex;
 		flex-direction: column;
-		gap: 1px;
+		gap: var(--e1);
 	}
 
 	.correo {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		overflow-wrap: anywhere;
 	}
 
@@ -803,8 +803,8 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 6px;
-		font-size: 0.92rem;
+		gap: var(--e1);
+		font-size: var(--f-base);
 	}
 
 	ul.senales li {
@@ -831,14 +831,14 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 
 	th {
 		padding: 9px 12px;
 		text-align: left;
 		font-weight: 500;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 		background: var(--panel);
 		white-space: nowrap;

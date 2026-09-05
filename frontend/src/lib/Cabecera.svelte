@@ -301,7 +301,7 @@
 	.barra {
 		display: flex;
 		align-items: center;
-		gap: 1.5rem;
+		gap: var(--e5);
 		/* Alto minimo y no alto fijo: en pantalla chica el buscador se pasa a
 		   una segunda fila y la barra tiene que poder crecer. Con `height` la
 		   fila de abajo se salia de la cabecera y quedaba encima de la pagina. */
@@ -322,13 +322,13 @@
 		margin-left: auto;
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: var(--e4);
 	}
 
 	.fila {
 		display: flex;
 		align-items: center;
-		gap: 0.35rem;
+		gap: var(--e1);
 	}
 
 	/* Navegacion en texto. El area pulsable sigue siendo la de un boton --el
@@ -344,7 +344,7 @@
 		padding: 8px 10px;
 		text-decoration: none;
 		font-family: inherit;
-		font-size: 0.93rem;
+		font-size: var(--f-base);
 		color: var(--texto);
 		background: none;
 		border: 0;
@@ -365,7 +365,7 @@
 		text-decoration: none;
 		padding: 8px 16px;
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -411,7 +411,7 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 0.72rem;
+		font-size: var(--f-xs);
 		line-height: 1;
 		color: var(--blanco);
 		background: var(--indigo);
@@ -495,7 +495,7 @@
 		text-align: left;
 		text-decoration: none;
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 0;
@@ -524,7 +524,7 @@
 
 		.barra {
 			min-height: 60px;
-			gap: 0.75rem;
+			gap: var(--e3);
 			/* Lo que separa la fila del buscador del borde de abajo. Arriba no
 			   hace falta: la primera fila ya tiene su propio alto minimo. */
 			padding-bottom: 0.6rem;
@@ -544,12 +544,12 @@
 		}
 
 		.cuenta {
-			gap: 0.6rem;
+			gap: var(--e2);
 		}
 
 		.salir {
 			padding: 7px 12px;
-			font-size: 0.9rem;
+			font-size: var(--f-ms);
 		}
 	}
 </style>

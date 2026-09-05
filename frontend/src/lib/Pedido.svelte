@@ -390,19 +390,19 @@
 		flex-wrap: wrap;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 0.75rem;
+		gap: var(--e3);
 		margin-bottom: 1rem;
 	}
 
 	h2 {
-		font-size: 1.1rem;
+		font-size: var(--f-md);
 		font-weight: 600;
 		color: var(--tinta);
 	}
 
 	.sub,
 	.menor {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -410,20 +410,20 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: flex-end;
-		gap: 0.75rem;
+		gap: var(--e3);
 		margin-bottom: 0.6rem;
 	}
 
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		gap: var(--e1);
 		min-width: 15rem;
 		flex: 1;
 	}
 
 	label {
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -452,7 +452,7 @@
 	.tabla {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--e2);
 	}
 
 	.fila {
@@ -460,7 +460,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.75rem;
+		gap: var(--e3);
 		padding: 0.75rem 0.9rem;
 		background: var(--off);
 		border: 1px solid var(--linea);
@@ -468,7 +468,7 @@
 	}
 
 	.fila h3 {
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		font-weight: 600;
 		color: var(--tinta);
 	}
@@ -477,17 +477,17 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 0.1rem;
+		gap: var(--e1);
 	}
 
 	.grande {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 	}
 
 	.acciones {
 		display: flex;
-		gap: 0.4rem;
+		gap: var(--e2);
 	}
 
 	button {
@@ -497,7 +497,7 @@
 		border: 1px solid var(--linea);
 		border-radius: var(--r);
 		font: inherit;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		cursor: pointer;
 		transition: border-color var(--t);
 	}
@@ -527,21 +527,21 @@
 		flex-wrap: wrap;
 		align-items: baseline;
 		justify-content: space-between;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 0.9rem;
 		padding-top: 0.75rem;
 		border-top: 1px solid var(--linea);
 	}
 
 	.total strong {
-		font-size: 1.1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 	}
 
 	.quieto {
 		padding: 1.25rem 0;
 		color: var(--gris);
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 
 	.ok,
@@ -549,7 +549,7 @@
 		padding: 0.6rem 0.8rem;
 		margin-bottom: 0.9rem;
 		border-radius: var(--r);
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 	}
 
 	.ok {

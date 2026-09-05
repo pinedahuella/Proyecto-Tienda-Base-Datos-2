@@ -2522,22 +2522,22 @@
 		display: flex;
 		align-items: flex-end;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		margin-bottom: 1.25rem;
 	}
 
 	h2 {
-		font-size: 1.5rem;
+		font-size: var(--f-xl);
 	}
 
 	h3 {
-		font-size: 1.08rem;
+		font-size: var(--f-md);
 		margin-bottom: 0.5rem;
 	}
 
 	.sub,
 	.menor {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -2568,16 +2568,16 @@
 	.pestanas {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.4rem;
+		gap: var(--e2);
 		margin-bottom: 1rem;
 	}
 
 	.pestana {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.4rem;
+		gap: var(--e2);
 		padding: 0.35rem 0.85rem;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		background: transparent;
 		border: 1px solid var(--linea);
 		border-radius: 999px;
@@ -2590,7 +2590,7 @@
 	}
 
 	.cuenta {
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 
@@ -2603,7 +2603,7 @@
 	.tabla {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--e3);
 	}
 
 	/* La cola de revision reusa `.fila`, que es la misma tarjeta de la lista de
@@ -2612,7 +2612,7 @@
 	.cola {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--e3);
 		margin: 0;
 		padding: 0;
 		list-style: none;
@@ -2626,7 +2626,7 @@
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
-		gap: 1rem;
+		gap: var(--e4);
 		padding: 1rem 1.1rem;
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -2654,24 +2654,24 @@
 
 	.fila h3 {
 		margin: 0 0 0.15rem;
-		font-size: 1.02rem;
+		font-size: var(--f-md);
 	}
 
 	.numeros {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 0.15rem;
+		gap: var(--e1);
 	}
 
 	.precio {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 	}
 
 	.chip {
 		display: inline-block;
 		padding: 2px 10px;
-		font-size: 0.75rem;
+		font-size: var(--f-xs);
 		letter-spacing: 0.03em;
 		text-transform: uppercase;
 		border-radius: 999px;
@@ -2706,7 +2706,7 @@
 		padding: 0;
 		list-style: none;
 		display: grid;
-		gap: 8px;
+		gap: var(--e2);
 	}
 
 	.motivos li p {
@@ -2723,7 +2723,7 @@
 	.nota-estado {
 		grid-column: 1 / -1;
 		margin: -4px 0 0;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -2740,7 +2740,7 @@
 	.acciones {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: var(--e2);
 	}
 
 	/* ---------- la venta relampago ---------- */
@@ -2773,7 +2773,7 @@
 
 	.relampago {
 		display: inline-block;
-		font-size: 0.75rem;
+		font-size: var(--f-xs);
 		font-weight: 600;
 		line-height: 1.2;
 		padding: 2px 10px;
@@ -2849,15 +2849,15 @@
 	.campos {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.75rem;
+		gap: var(--e3);
 	}
 
 	.campos label,
 	.ancho {
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
-		font-size: 0.9rem;
+		gap: var(--e1);
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -2891,7 +2891,7 @@
 	.buscador {
 		display: flex;
 		align-items: flex-end;
-		gap: 0.75rem;
+		gap: var(--e3);
 		margin-bottom: 1rem;
 	}
 
@@ -2902,7 +2902,7 @@
 	.resultados {
 		display: flex;
 		flex-direction: column;
-		gap: 0.4rem;
+		gap: var(--e2);
 		margin-bottom: 1.25rem;
 	}
 
@@ -2910,7 +2910,7 @@
 		display: flex;
 		justify-content: space-between;
 		align-items: center;
-		gap: 1rem;
+		gap: var(--e4);
 		padding: 0.7rem 0.9rem;
 		text-align: left;
 		background: var(--blanco);
@@ -2944,7 +2944,7 @@
 	.variante {
 		display: flex;
 		align-items: center;
-		gap: 0.75rem;
+		gap: var(--e3);
 		padding: 0.65rem 0.2rem;
 		border-bottom: 1px solid var(--linea);
 	}
@@ -2975,7 +2975,7 @@
 		display: flex;
 		align-items: flex-end;
 		flex-wrap: wrap;
-		gap: 1rem;
+		gap: var(--e4);
 		margin-bottom: 1rem;
 		padding: 1rem 1.1rem;
 		background: var(--blanco);
@@ -2986,10 +2986,10 @@
 	.campo-filtro {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		gap: var(--e1);
 		flex: 1 1 15rem;
 		min-width: 0;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -3004,7 +3004,7 @@
 		align-items: center;
 		justify-content: space-between;
 		flex-wrap: wrap;
-		gap: 0.75rem;
+		gap: var(--e3);
 		margin-bottom: 1rem;
 	}
 
@@ -3041,7 +3041,7 @@
 	.acciones-titulo {
 		display: flex;
 		align-items: center;
-		gap: 0.9rem;
+		gap: var(--e4);
 		flex-shrink: 0;
 	}
 
@@ -3105,7 +3105,7 @@
 	.cabecera-producto {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: var(--e4);
 		width: 100%;
 		padding: 0.6rem 1rem;
 		text-align: left;
@@ -3189,7 +3189,7 @@
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
-		gap: 0.75rem;
+		gap: var(--e3);
 	}
 
 	.resumen .que {
@@ -3250,7 +3250,7 @@
 		   nombre: bajan, y los botones quedan a la izquierda alineados con
 		   todo lo demas. */
 		.resumen {
-			gap: 0.5rem;
+			gap: var(--e2);
 		}
 
 		.resumen .que {

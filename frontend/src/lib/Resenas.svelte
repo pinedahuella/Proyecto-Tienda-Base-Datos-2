@@ -740,19 +740,19 @@
 	.titulo {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 		margin-bottom: 8px;
 	}
 
 	.titulo h2 {
-		font-size: 1.3rem;
+		font-size: var(--f-xl);
 		margin-right: 4px;
 	}
 
 	.etiqueta {
 		padding: 3px 11px;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 		background: var(--panel);
 		border-radius: 999px;
@@ -766,7 +766,7 @@
 		max-width: 620px;
 		margin-bottom: 20px;
 		color: var(--gris);
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 	}
 
 	/* El motivo por el que no se puede escribir. Va en la caja del panel y no
@@ -776,7 +776,7 @@
 		max-width: 620px;
 		margin-bottom: 20px;
 		padding: 10px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--gris);
 		background: var(--panel);
 		border-radius: var(--r);
@@ -812,7 +812,7 @@
 	.filtro-activo button,
 	.contestar {
 		padding: 8px 16px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -843,7 +843,7 @@
 	.hecho {
 		margin-bottom: 18px;
 		padding: 10px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--indigo-cl);
 		border: 1px solid var(--indigo);
@@ -853,7 +853,7 @@
 	.malo {
 		margin-bottom: 14px;
 		padding: 10px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--rojo);
 		background: var(--off);
 		border: 1px solid var(--rojo);
@@ -868,21 +868,21 @@
 	}
 
 	.pendiente h3 {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		margin-bottom: 8px;
 	}
 
 	.pendiente p {
 		max-width: 620px;
 		margin-bottom: 8px;
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 	}
 
 	.fallo {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		padding: 14px 18px;
 		color: var(--rojo);
@@ -897,7 +897,7 @@
 		display: grid;
 		grid-template-columns: auto 1fr;
 		align-items: center;
-		gap: 28px;
+		gap: var(--e5);
 		padding: 18px 20px;
 		margin-bottom: 22px;
 		background: var(--panel);
@@ -908,18 +908,18 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		gap: 2px;
+		gap: var(--e1);
 	}
 
 	.promedio .numero {
-		font-size: 2.2rem;
+		font-size: var(--f-3xl);
 		font-weight: 500;
 		line-height: 1;
 		color: var(--tinta);
 	}
 
 	.promedio .de {
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -934,7 +934,7 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 4px;
+		gap: var(--e1);
 	}
 
 	/* La fila entera es el boton del filtro: el area pulsable es toda la
@@ -942,13 +942,13 @@
 	.fila-nota {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--e2);
 		width: 100%;
 		padding: 3px 6px;
 		background: none;
 		border: 1px solid transparent;
 		border-radius: var(--r);
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -988,10 +988,10 @@
 	.filtro-activo {
 		display: flex;
 		align-items: center;
-		gap: 12px;
+		gap: var(--e3);
 		flex-wrap: wrap;
 		margin-bottom: 16px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--gris);
 	}
 
@@ -1000,7 +1000,7 @@
 	.formulario {
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: var(--e4);
 		padding: 20px 22px;
 		margin-bottom: 24px;
 		border: 1px solid var(--indigo);
@@ -1008,18 +1008,18 @@
 	}
 
 	.formulario h3 {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 	}
 
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 7px;
+		gap: var(--e2);
 	}
 
 	label,
 	.etiqueta-campo {
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		font-weight: 500;
 		color: var(--tinta);
 	}
@@ -1029,7 +1029,7 @@
 		width: 100%;
 		padding: 11px 13px;
 		font-family: inherit;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -1045,19 +1045,19 @@
 	}
 
 	.ayuda {
-		font-size: 0.86rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
 	.notas {
 		display: flex;
-		gap: 8px;
+		gap: var(--e2);
 	}
 
 	.nota-boton {
 		width: 42px;
 		height: 42px;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -1072,7 +1072,7 @@
 
 	.botones {
 		display: flex;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 	}
 
@@ -1082,7 +1082,7 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 20px;
+		gap: var(--e4);
 	}
 
 	.resena {
@@ -1099,10 +1099,10 @@
 	.cabeza-respuesta {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 		margin-bottom: 8px;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 
 	.autor {
@@ -1117,7 +1117,7 @@
 
 	.tuya {
 		padding: 2px 9px;
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border-radius: 999px;
@@ -1125,7 +1125,7 @@
 
 	.fecha {
 		margin-left: auto;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 	}
 
 	.texto {
@@ -1137,13 +1137,13 @@
 
 	.pie-resena {
 		display: flex;
-		gap: 8px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 	}
 
 	.voto {
 		padding: 5px 12px;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 		background: none;
 		border: 1px solid var(--linea);
@@ -1164,12 +1164,12 @@
 	.contestar {
 		margin-left: auto;
 		padding: 5px 12px;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 	}
 
 	.responder {
 		display: flex;
-		gap: 10px;
+		gap: var(--e2);
 		align-items: flex-start;
 		margin-top: 12px;
 	}
@@ -1180,7 +1180,7 @@
 
 	.responder button {
 		padding: 10px 16px;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		border: 1px solid var(--indigo);
 		border-radius: var(--r);
 		white-space: nowrap;
@@ -1192,7 +1192,7 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 14px;
+		gap: var(--e3);
 		margin: 14px 0 0 16px;
 		padding-left: 16px;
 		border-left: 2px solid var(--linea);
@@ -1208,7 +1208,7 @@
 		}
 		.resumen {
 			grid-template-columns: 1fr;
-			gap: 16px;
+			gap: var(--e4);
 		}
 		.fecha {
 			margin-left: 0;

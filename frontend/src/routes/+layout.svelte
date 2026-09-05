@@ -187,6 +187,47 @@
 		--r2: 10px;
 		--t: 0.18s ease;
 
+		/* ── LA ESCALA DE LETRA ──────────────────────────────────
+		   Nueve pasos, y ninguno mas.
+
+		   Contados antes de esto, el proyecto usaba 34 tamanos distintos, con
+		   cinco de ellos --0.90, 0.92, 0.93, 0.94 y 0.95-- dentro de medio
+		   pixel unos de otros. Nadie ve la diferencia entre 0.92 y 0.93, pero
+		   si se nota el efecto de conjunto: cada componente queda ligeramente
+		   distinto de su vecino y la pagina se lee como muchas paginas pegadas
+		   en vez de como una.
+
+		   Los pasos suben lo justo para que un tamano se distinga del
+		   siguiente. Si hace falta uno nuevo, se agrega AQUI y se usa desde los
+		   componentes; escribir un rem suelto en un componente es volver a
+		   empezar. */
+		--f-xs: 0.75rem; /* etiquetas, contadores, letra al pie */
+		--f-sm: 0.82rem; /* datos secundarios dentro de una fila */
+		--f-ms: 0.88rem; /* texto de apoyo, ayudas de formulario */
+		--f-base: 0.94rem; /* el cuerpo y los controles */
+		--f-md: 1.05rem; /* titulo de una tarjeta */
+		--f-lg: 1.2rem; /* titulo de una seccion */
+		--f-xl: 1.4rem; /* titulo de un panel */
+		--f-2xl: 1.75rem; /* titulo de pagina */
+		--f-3xl: 2.2rem; /* el titular de la portada */
+
+		/* ── LA ESCALA DE ESPACIO ────────────────────────────────
+		   Siete pasos, en pixeles, porque el espacio no tiene que crecer con la
+		   letra del sistema operativo -- una tarjeta con el doble de relleno no
+		   se lee mejor.
+
+		   Se cuenta de 4 en 4. Antes convivian `0.5rem` y `8px`, `1rem` y
+		   `16px`, `0.75rem` y `12px`: EL MISMO hueco escrito de dos maneras en
+		   componentes distintos, que es lo que hace imposible cambiarlo de
+		   sitio despues. */
+		--e1: 4px;
+		--e2: 8px;
+		--e3: 12px;
+		--e4: 16px;
+		--e5: 24px;
+		--e6: 32px;
+		--e7: 48px;
+
 		/* La sombra de lo que FLOTA por encima de la pagina: la lista del
 		   buscador y los menus.
 		   Hacia falta una de verdad. Lo que habia era `box-shadow` con --panel,
@@ -284,7 +325,7 @@
 		line-height: 1.2;
 	}
 	:global(h3) {
-		font-size: 1.15rem;
+		font-size: var(--f-lg);
 		line-height: 1.4;
 		font-weight: 500;
 	}
@@ -326,10 +367,10 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		gap: 0.45rem;
+		gap: var(--e2);
 		padding: 8px 16px;
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		line-height: 1.2;
 		color: var(--tinta);
 		background: var(--blanco);
@@ -435,7 +476,7 @@
 	:global(select),
 	:global(textarea) {
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		line-height: 1.4;
 		color: var(--tinta);
 		background: var(--blanco);

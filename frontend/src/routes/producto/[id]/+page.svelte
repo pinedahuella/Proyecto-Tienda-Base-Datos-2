@@ -1025,10 +1025,10 @@
 	.volver {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--e2);
 		padding: 8px 16px 8px 13px;
 		margin-bottom: 1.5rem;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--texto);
 		text-decoration: none;
 		background: var(--blanco);
@@ -1048,7 +1048,7 @@
 
 	.flecha {
 		display: inline-block;
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		line-height: 1;
 		transition: transform var(--t);
 	}
@@ -1069,7 +1069,7 @@
 	.arriba {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-		gap: 2rem;
+		gap: var(--e6);
 		padding: 1.5rem;
 		margin-bottom: 2.5rem;
 		background: var(--blanco);
@@ -1101,13 +1101,13 @@
 
 	.sin-foto {
 		color: var(--gris-2);
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 
 	.tiras {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 0.6rem;
 	}
 
@@ -1135,7 +1135,7 @@
 	}
 
 	.ruta {
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
 		color: var(--indigo);
@@ -1148,7 +1148,7 @@
 
 	.precio {
 		margin-top: 0.7rem;
-		font-size: 1.4rem;
+		font-size: var(--f-xl);
 		color: var(--tinta);
 	}
 
@@ -1163,7 +1163,7 @@
 		display: flex;
 		align-items: baseline;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 1.25rem;
 		padding: 0.9rem 1.1rem;
 		background: var(--indigo-cl);
@@ -1171,14 +1171,14 @@
 	}
 
 	.existencias strong {
-		font-size: 1.9rem;
+		font-size: var(--f-2xl);
 		font-weight: 500;
 		line-height: 1;
 		color: var(--indigo);
 	}
 
 	.existencias span {
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		color: var(--texto);
 	}
 
@@ -1187,7 +1187,7 @@
 	}
 
 	.existencias.agotado strong {
-		font-size: 1.4rem;
+		font-size: var(--f-xl);
 		color: var(--rojo);
 	}
 
@@ -1196,28 +1196,28 @@
 	}
 
 	.existencias.sin-dato strong {
-		font-size: 1.4rem;
+		font-size: var(--f-xl);
 		color: var(--gris);
 	}
 
 	.datos {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 1.75rem;
+		gap: var(--e5);
 		margin-top: 1.5rem;
 		padding-top: 1.1rem;
 		border-top: 1px solid var(--linea);
 	}
 
 	.datos dt {
-		font-size: 0.76rem;
+		font-size: var(--f-xs);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--gris-2);
 	}
 
 	.datos dd {
-		font-size: 0.96rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 	}
 
@@ -1232,7 +1232,7 @@
 	.pestanas {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.4rem;
+		gap: var(--e2);
 		margin: 0 0 1.4rem;
 		padding-bottom: 0.9rem;
 		border-bottom: 1px solid var(--linea);
@@ -1241,9 +1241,9 @@
 	.pestana {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.4rem;
+		gap: var(--e2);
 		padding: 0.35rem 0.9rem;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		background: transparent;
 		border: 1px solid var(--linea);
 		border-radius: 999px;
@@ -1258,7 +1258,7 @@
 	}
 
 	.cuenta {
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 
@@ -1293,12 +1293,12 @@
 	}
 
 	h2 {
-		font-size: 1.3rem;
+		font-size: var(--f-xl);
 		margin-bottom: 0.9rem;
 	}
 
 	h3 {
-		font-size: 1.02rem;
+		font-size: var(--f-md);
 	}
 
 	.ficha {
@@ -1313,19 +1313,19 @@
 
 	.ficha > div {
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--e3);
 		padding: 10px 14px;
 		border-bottom: 1px solid var(--linea);
 	}
 
 	.ficha dt {
 		flex: 0 0 45%;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
 	.ficha dd {
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 	}
 
@@ -1341,7 +1341,7 @@
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		margin-bottom: 0.8rem;
 	}
 
@@ -1349,17 +1349,17 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 0.25rem;
+		gap: var(--e1);
 	}
 
 	.precio-v {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 		white-space: nowrap;
 	}
 
 	.stock-v {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--indigo);
 		white-space: nowrap;
 	}
@@ -1398,7 +1398,7 @@
 
 	.relampago {
 		display: inline-block;
-		font-size: 0.72rem;
+		font-size: var(--f-xs);
 		font-weight: 600;
 		line-height: 1.2;
 		padding: 1px 7px;
@@ -1418,14 +1418,14 @@
 		padding: 0;
 		list-style: none;
 		display: grid;
-		gap: 6px;
+		gap: var(--e1);
 	}
 
 	.ofertas li {
 		display: grid;
 		grid-template-columns: 1fr auto;
 		align-items: center;
-		gap: 4px 1rem;
+		gap: var(--e1) var(--e4);
 		padding: 10px 12px;
 		background: var(--off);
 		border: 1px solid var(--linea);
@@ -1442,18 +1442,18 @@
 		display: flex;
 		align-items: baseline;
 		flex-wrap: wrap;
-		gap: 6px;
-		font-size: 0.9rem;
+		gap: var(--e1);
+		font-size: var(--f-ms);
 	}
 
 	.quien .usuario {
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
 	.sello {
 		padding: 1px 7px;
-		font-size: 0.7rem;
+		font-size: var(--f-xs);
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 		color: var(--blanco);
@@ -1464,7 +1464,7 @@
 	.cuanto {
 		display: flex;
 		align-items: baseline;
-		gap: 10px;
+		gap: var(--e2);
 		white-space: nowrap;
 	}
 
@@ -1484,7 +1484,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 0.9rem;
 		padding-top: 0.8rem;
 		border-top: 1px solid var(--linea);
@@ -1507,7 +1507,7 @@
 		border: 1px solid var(--indigo);
 		border-radius: var(--r);
 		font: inherit;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		cursor: pointer;
 	}
 
@@ -1518,7 +1518,7 @@
 
 	.nota {
 		flex: 1 1 14rem;
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -1527,7 +1527,7 @@
 	.entrar-aviso {
 		margin-top: 0.85rem;
 		padding: 0.7rem 0.9rem;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--indigo-os);
 		background: var(--indigo-cl);
 		border-radius: var(--r2);
@@ -1557,7 +1557,7 @@
 		padding: 0.6rem 0.8rem;
 		margin-top: 0.2rem;
 		border-radius: var(--r);
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 	}
 
 	.aviso-pedido.ok {
@@ -1607,7 +1607,7 @@
 	@media (max-width: 820px) {
 		.arriba {
 			grid-template-columns: 1fr;
-			gap: 1.5rem;
+			gap: var(--e5);
 		}
 	}
 </style>

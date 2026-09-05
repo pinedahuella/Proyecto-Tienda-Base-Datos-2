@@ -372,7 +372,7 @@
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		margin-bottom: 1rem;
 	}
@@ -389,14 +389,14 @@
 
 	.acciones-titulo {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--e2);
 		align-items: center;
 	}
 
 	.lista {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--e3);
 		margin: 0;
 		padding: 0;
 		list-style: none;
@@ -406,7 +406,7 @@
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
-		gap: 1rem;
+		gap: var(--e4);
 		padding: 1rem 1.1rem;
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -419,18 +419,18 @@
 
 	.datos h3 {
 		margin: 0 0 2px;
-		font-size: 1rem;
+		font-size: var(--f-md);
 	}
 
 	.menor {
 		margin: 0;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
 	.acciones {
 		display: flex;
-		gap: 0.5rem;
+		gap: var(--e2);
 		align-items: center;
 		flex-wrap: wrap;
 	}
@@ -439,7 +439,7 @@
 		display: inline-block;
 		padding: 2px 10px;
 		border-radius: 999px;
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		background: var(--panel);
 		color: var(--gris);
 	}
@@ -476,7 +476,7 @@
 	.edicion {
 		background: var(--panel);
 		display: flex;
-		gap: 0.75rem;
+		gap: var(--e3);
 		align-items: flex-end;
 		flex-wrap: wrap;
 	}
@@ -484,7 +484,7 @@
 	.edicion label {
 		flex: 1 1 22rem;
 		display: grid;
-		gap: 4px;
+		gap: var(--e1);
 	}
 
 	.motivos ul {
@@ -492,7 +492,7 @@
 		padding: 0;
 		list-style: none;
 		display: grid;
-		gap: 8px;
+		gap: var(--e2);
 	}
 
 	.motivos li p {

@@ -1123,27 +1123,27 @@
 		display: flex;
 		align-items: flex-end;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		margin-bottom: 1.25rem;
 	}
 
 	h2 {
-		font-size: 1.5rem;
+		font-size: var(--f-xl);
 	}
 
 	h3 {
-		font-size: 1.02rem;
+		font-size: var(--f-md);
 		margin: 0 0 0.15rem;
 	}
 
 	h4 {
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		margin-bottom: 0.2rem;
 	}
 
 	.sub,
 	.menor {
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -1157,7 +1157,7 @@
 		padding: 0.6rem 0.9rem;
 		margin-bottom: 0.9rem;
 		border-radius: var(--r);
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 
 	.ok {
@@ -1180,7 +1180,7 @@
 		border: 1px solid var(--linea);
 		border-radius: var(--r);
 		font: inherit;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		cursor: pointer;
 		transition: border-color var(--t);
 	}
@@ -1210,16 +1210,16 @@
 	.pestanas {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.4rem;
+		gap: var(--e2);
 		margin-bottom: 1rem;
 	}
 
 	.pestana {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.4rem;
+		gap: var(--e2);
 		padding: 0.35rem 0.85rem;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		background: transparent;
 		border-radius: 999px;
 	}
@@ -1231,7 +1231,7 @@
 	}
 
 	.cuenta {
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 
@@ -1244,14 +1244,14 @@
 	.tabla {
 		display: flex;
 		flex-direction: column;
-		gap: 0.75rem;
+		gap: var(--e3);
 	}
 
 	.fila {
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
-		gap: 1rem;
+		gap: var(--e4);
 		padding: 1rem 1.1rem;
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -1268,32 +1268,32 @@
 	.pago {
 		display: flex;
 		flex-direction: column;
-		gap: 0.1rem;
+		gap: var(--e1);
 	}
 
 	.numeros {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 0.15rem;
+		gap: var(--e1);
 	}
 
 	.grande {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 	}
 
 	.acciones {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: var(--e2);
 	}
 
 	.chip {
 		display: inline-block;
 		margin-top: 0.25rem;
 		padding: 2px 10px;
-		font-size: 0.75rem;
+		font-size: var(--f-xs);
 		letter-spacing: 0.03em;
 		text-transform: uppercase;
 		border-radius: 999px;
@@ -1326,7 +1326,7 @@
 
 	.confirmar p {
 		margin-bottom: 0.7rem;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--rojo);
 	}
 
@@ -1343,7 +1343,7 @@
 	.lineas {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--e2);
 		list-style: none;
 	}
 
@@ -1352,7 +1352,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.75rem;
+		gap: var(--e3);
 		padding: 0.7rem 0.9rem;
 		background: var(--off);
 		border: 1px solid var(--linea);
@@ -1389,7 +1389,7 @@
 		border: none;
 		border-bottom: 1px dashed var(--linea);
 		border-radius: 0;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -1407,7 +1407,7 @@
 		padding: 0.2rem 0.55rem;
 		border: 1px solid var(--indigo);
 		border-radius: 999px;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--indigo);
 		text-decoration: none;
 		line-height: 1.4;
@@ -1423,7 +1423,7 @@
 	.ya-resenado {
 		align-self: flex-start;
 		margin-top: 0.35rem;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -1466,7 +1466,7 @@
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		padding: 1rem 1.25rem 0.75rem;
 		background: var(--blanco);
 		border-bottom: 1px solid var(--linea);
@@ -1474,7 +1474,7 @@
 	}
 
 	.modal-titulo h4 {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 	}
 
@@ -1483,7 +1483,7 @@
 		padding: 0 0.4rem;
 		background: transparent;
 		border: none;
-		font-size: 1.5rem;
+		font-size: var(--f-xl);
 		line-height: 1;
 		color: var(--gris);
 	}
@@ -1510,20 +1510,20 @@
 	}
 
 	.bloque h5 {
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		margin-bottom: 0.2rem;
 	}
 
 	.bloque h6 {
 		margin-top: 0.75rem;
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 		font-weight: 600;
 	}
 
 	.bloque p {
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -1558,7 +1558,7 @@
 	.variantes {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-		gap: 0.6rem;
+		gap: var(--e2);
 		margin-top: 0.7rem;
 		list-style: none;
 	}
@@ -1581,21 +1581,21 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: baseline;
-		gap: 0.4rem;
+		gap: var(--e2);
 	}
 
 	.marca {
 		padding: 0.05rem 0.4rem;
 		background: var(--indigo);
 		border-radius: 999px;
-		font-size: 0.7rem;
+		font-size: var(--f-xs);
 		color: var(--blanco);
 	}
 
 	.rasgos {
 		margin-top: 0.35rem;
 		list-style: none;
-		font-size: 0.84rem;
+		font-size: var(--f-sm);
 		color: var(--texto);
 	}
 
@@ -1609,7 +1609,7 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 0.1rem;
+		gap: var(--e1);
 	}
 
 	.cuentas strong {
@@ -1621,14 +1621,14 @@
 		flex-wrap: wrap;
 		align-items: baseline;
 		justify-content: space-between;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 0.9rem;
 		padding-top: 0.75rem;
 		border-top: 1px solid var(--linea);
 	}
 
 	.total strong {
-		font-size: 1.1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 	}
 
@@ -1642,17 +1642,17 @@
 	.fichas {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
-		gap: 0.5rem 1.25rem;
+		gap: var(--e2) var(--e4);
 		margin-top: 0.5rem;
 	}
 
 	.ficha dt {
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 
 	.ficha dd {
 		color: var(--tinta);
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 </style>

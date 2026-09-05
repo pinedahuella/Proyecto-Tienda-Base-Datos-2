@@ -1750,17 +1750,17 @@
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		padding-bottom: 0.9rem;
 		border-bottom: 1px solid var(--linea);
 	}
 
 	h2 {
-		font-size: 1.35rem;
+		font-size: var(--f-xl);
 	}
 
 	h3 {
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		font-weight: 600;
 		color: var(--tinta);
 		margin-bottom: 0.6rem;
@@ -1776,7 +1776,7 @@
 	}
 
 	.menor {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -1793,7 +1793,7 @@
 	.quieto {
 		padding: 0.75rem 0;
 		color: var(--gris);
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 	}
 
 	/* ---------------- a donde se entrega ---------------- */
@@ -1816,14 +1816,14 @@
 	.opciones {
 		display: flex;
 		flex-direction: column;
-		gap: 0.4rem;
+		gap: var(--e2);
 		margin-top: 0.4rem;
 	}
 
 	.opcion {
 		display: flex;
 		align-items: flex-start;
-		gap: 0.6rem;
+		gap: var(--e2);
 		padding: 0.6rem 0.75rem;
 		background: var(--off);
 		border: 1px solid var(--linea);
@@ -1849,7 +1849,7 @@
 		background: none;
 		border: 0;
 		color: var(--indigo);
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		text-decoration: underline;
 	}
 
@@ -1872,7 +1872,7 @@
 	.acciones {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 0.8rem;
 	}
 
@@ -1883,7 +1883,7 @@
 	/* La repeticion de la direccion junto al boton de pagar. */
 	.entrega-pie {
 		margin-top: 1.2rem;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -1897,7 +1897,7 @@
 	.resumen {
 		display: flex;
 		flex-direction: column;
-		gap: 0.5rem;
+		gap: var(--e2);
 		list-style: none;
 	}
 
@@ -1905,7 +1905,7 @@
 		display: flex;
 		align-items: flex-start;
 		justify-content: space-between;
-		gap: 0.75rem;
+		gap: var(--e3);
 		padding: 0.6rem 0.75rem;
 		background: var(--off);
 		border: 1px solid var(--linea);
@@ -1915,7 +1915,7 @@
 	.datos {
 		display: flex;
 		flex-direction: column;
-		gap: 0.1rem;
+		gap: var(--e1);
 		min-width: 0;
 	}
 
@@ -1932,14 +1932,14 @@
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 0.8rem;
 		padding-top: 0.7rem;
 		border-top: 1px solid var(--linea);
 	}
 
 	.total strong {
-		font-size: 1.15rem;
+		font-size: var(--f-lg);
 	}
 
 	/* ---------------- formas de pago ---------------- */
@@ -1947,13 +1947,13 @@
 	.metodos {
 		display: flex;
 		flex-direction: column;
-		gap: 0.4rem;
+		gap: var(--e2);
 	}
 
 	.metodo {
 		display: flex;
 		align-items: flex-start;
-		gap: 0.6rem;
+		gap: var(--e2);
 		padding: 0.6rem 0.75rem;
 		background: var(--off);
 		border: 1px solid var(--linea);
@@ -1976,16 +1976,16 @@
 	.campos {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.7rem;
+		gap: var(--e3);
 	}
 
 	.campos label {
 		display: flex;
 		flex-direction: column;
-		gap: 0.25rem;
+		gap: var(--e1);
 		flex: 1;
 		min-width: 7rem;
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -2000,7 +2000,7 @@
 		border: 1px solid var(--linea);
 		border-radius: var(--r);
 		font: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 	}
 
 	.campos input:disabled {
@@ -2028,7 +2028,7 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 	}
 
 	th,
@@ -2069,7 +2069,7 @@
 		color: var(--rojo);
 		border: 1px solid var(--rojo);
 		border-radius: var(--r);
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 	}
 
 	.malo .menor {
@@ -2080,7 +2080,7 @@
 	.pie {
 		display: flex;
 		justify-content: flex-end;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 1.35rem;
 		padding-top: 1rem;
 		border-top: 1px solid var(--linea);
@@ -2093,7 +2093,7 @@
 		border: 1px solid var(--linea);
 		border-radius: var(--r);
 		font: inherit;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		cursor: pointer;
 		transition: border-color var(--t);
 	}
@@ -2108,7 +2108,7 @@
 	}
 
 	.cerrar {
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 

@@ -514,18 +514,18 @@
 	.titulo {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 		margin-bottom: 8px;
 	}
 
 	.titulo h2 {
-		font-size: 1.3rem;
+		font-size: var(--f-xl);
 	}
 
 	.etiqueta {
 		padding: 3px 11px;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border-radius: 999px;
@@ -534,14 +534,14 @@
 	.acciones {
 		margin-left: auto;
 		display: flex;
-		gap: 10px;
+		gap: var(--e2);
 	}
 
 	.intro,
 	.nota-precio {
 		max-width: 640px;
 		color: var(--gris);
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 	}
 
 	.intro {
@@ -550,7 +550,7 @@
 
 	.nota-precio {
 		margin-bottom: 20px;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 	}
 
 	.gris {
@@ -573,7 +573,7 @@
 	.fallo button,
 	.quitar {
 		padding: 7px 14px;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -598,20 +598,20 @@
 	}
 
 	.caja h3 {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		margin-bottom: 8px;
 	}
 
 	.caja p {
 		max-width: 600px;
 		margin-bottom: 14px;
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 	}
 
 	.ir {
 		display: inline-block;
 		padding: 9px 18px;
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 		color: var(--blanco);
 		background: var(--indigo);
 		border-radius: var(--r);
@@ -622,7 +622,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		padding: 14px 18px;
 		color: var(--rojo);
@@ -634,7 +634,7 @@
 	.aviso {
 		margin-bottom: 16px;
 		padding: 10px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--rojo);
 		background: var(--off);
 		border: 1px solid var(--rojo);
@@ -651,7 +651,7 @@
 		display: grid;
 		grid-template-columns: 64px 1fr auto auto;
 		align-items: center;
-		gap: 16px;
+		gap: var(--e4);
 		padding: 16px 0;
 		border-bottom: 1px solid var(--linea);
 	}
@@ -679,7 +679,7 @@
 	.datos {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: var(--e1);
 		min-width: 0;
 	}
 
@@ -695,12 +695,12 @@
 	}
 
 	.variante {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--texto);
 	}
 
 	.datos .gris {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 	}
 
 	/*
@@ -710,7 +710,7 @@
 	*/
 	.relampago {
 		align-self: flex-start;
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		font-weight: 600;
 		line-height: 1.2;
 		padding: 0.15rem 0.45rem;
@@ -722,20 +722,20 @@
 
 	.motivo {
 		margin-top: 4px;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--rojo);
 	}
 
 	.cantidad {
 		display: flex;
 		align-items: center;
-		gap: 4px;
+		gap: var(--e1);
 	}
 
 	.cantidad button {
 		width: 30px;
 		height: 30px;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -756,7 +756,7 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 3px;
+		gap: var(--e1);
 	}
 
 	.subtotal {
@@ -764,13 +764,13 @@
 	}
 
 	.unitario {
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 	}
 
 	.quitar {
 		margin-top: 4px;
 		padding: 4px 10px;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 	}
 
 	/* -- el total -- */
@@ -779,7 +779,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		margin-top: 22px;
 		padding-top: 20px;
@@ -789,23 +789,23 @@
 	.total > div:first-child {
 		display: flex;
 		flex-direction: column;
-		gap: 3px;
+		gap: var(--e1);
 	}
 
 	.total strong {
-		font-size: 1.5rem;
+		font-size: var(--f-xl);
 	}
 
 	.pagar {
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 6px;
+		gap: var(--e1);
 	}
 
 	.pagar button {
 		padding: 12px 26px;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--blanco);
 		background: var(--indigo);
 		border: 0;
@@ -815,7 +815,7 @@
 	.pendiente-nota {
 		max-width: 320px;
 		text-align: right;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 	}
 
 
@@ -838,7 +838,7 @@
 		}
 		.linea {
 			grid-template-columns: 52px 1fr;
-			row-gap: 10px;
+			row-gap: var(--e2);
 		}
 		.linea img,
 		.sin-foto {
@@ -853,7 +853,7 @@
 		.precios {
 			flex-direction: row;
 			align-items: center;
-			gap: 12px;
+			gap: var(--e3);
 		}
 		.pagar {
 			align-items: flex-start;

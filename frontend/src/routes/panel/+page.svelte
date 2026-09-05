@@ -777,7 +777,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		padding: 18px 20px;
 		color: var(--rojo);
@@ -789,7 +789,7 @@
 	.aviso button {
 		padding: 9px 18px;
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		color: var(--blanco);
 		background: var(--indigo);
 		border: 0;
@@ -822,7 +822,7 @@
 		z-index: 20;
 		display: flex;
 		flex-wrap: wrap;
-		gap: 2px;
+		gap: var(--e1);
 		margin-bottom: 6px;
 		padding: 4px;
 		background: var(--blanco);
@@ -833,7 +833,7 @@
 	.paso {
 		padding: 9px 15px;
 		font-family: inherit;
-		font-size: 0.93rem;
+		font-size: var(--f-base);
 		color: var(--texto);
 		background: none;
 		border: 0;
@@ -865,7 +865,7 @@
 	.que-es {
 		margin-bottom: 22px;
 		padding-left: 4px;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -889,20 +889,20 @@
 	.titulo {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 		margin-bottom: 22px;
 	}
 
 	.titulo h2 {
-		font-size: 1.3rem;
+		font-size: var(--f-xl);
 		margin-right: 4px;
 	}
 
 	/* El rol y el estado vienen con nombre desde /perfil, no con el id */
 	.etiqueta {
 		padding: 3px 11px;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border-radius: 999px;
@@ -916,7 +916,7 @@
 	.acciones {
 		margin-left: auto;
 		display: flex;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 	}
 
@@ -924,7 +924,7 @@
 	.botones button {
 		padding: 8px 16px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -960,7 +960,7 @@
 	.hecho {
 		margin-bottom: 18px;
 		padding: 10px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--indigo-cl);
 		border: 1px solid var(--indigo);
@@ -970,7 +970,7 @@
 	.malo {
 		margin-bottom: 18px;
 		padding: 10px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--rojo);
 		background: var(--off);
 		border: 1px solid var(--rojo);
@@ -980,11 +980,11 @@
 	dl {
 		display: grid;
 		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-		gap: 20px 28px;
+		gap: var(--e4) var(--e5);
 	}
 
 	dt {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 		margin-bottom: 3px;
 	}
@@ -999,23 +999,23 @@
 	form {
 		display: flex;
 		flex-direction: column;
-		gap: 16px;
+		gap: var(--e4);
 	}
 
 	.pareja {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 16px;
+		gap: var(--e4);
 	}
 
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 7px;
+		gap: var(--e2);
 	}
 
 	label {
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		font-weight: 500;
 		color: var(--tinta);
 	}
@@ -1030,7 +1030,7 @@
 		width: 100%;
 		padding: 11px 13px;
 		font-family: inherit;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -1048,20 +1048,20 @@
 	.mostrar {
 		display: flex;
 		align-items: center;
-		gap: 8px;
+		gap: var(--e2);
 		font-weight: 400;
 		color: var(--gris);
 		cursor: pointer;
 	}
 
 	.ayuda {
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
 	.botones {
 		display: flex;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 		margin-top: 2px;
 	}
@@ -1076,7 +1076,7 @@
 	}
 
 	.invitacion h2 {
-		font-size: 1.3rem;
+		font-size: var(--f-xl);
 		margin-bottom: 6px;
 	}
 
@@ -1100,7 +1100,7 @@
 		   leian como parte de ella. Las secciones de esta pagina van a 28px,
 		   asi que estas siguen esa medida y no una suya. */
 		margin-top: 28px;
-		gap: 28px;
+		gap: var(--e5);
 	}
 
 	/* La tarjeta es una columna para que el boton se pegue abajo con
@@ -1120,7 +1120,7 @@
 		display: inline-block;
 		margin-top: 16px;
 		padding: 10px 20px;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		color: var(--blanco);
 		background: var(--indigo);
 		border-radius: var(--r);

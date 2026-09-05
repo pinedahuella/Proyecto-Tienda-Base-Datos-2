@@ -277,11 +277,11 @@
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 7px;
+		gap: var(--e2);
 	}
 
 	label {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		font-weight: 500;
 		color: var(--tinta);
 	}
@@ -299,7 +299,7 @@
 		width: 100%;
 		padding: 11px 13px;
 		font-family: inherit;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -345,7 +345,7 @@
 		width: 100%;
 		padding: 8px 10px;
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		text-align: left;
 		color: var(--tinta);
 		background: none;
@@ -363,18 +363,18 @@
 	/* ---------- talla chica, para la barra de filtros ---------- */
 
 	.compacto {
-		gap: 0.3rem;
+		gap: var(--e1);
 	}
 
 	.compacto label {
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		font-weight: 400;
 		color: var(--gris);
 	}
 
 	.compacto input {
 		padding: 9px 11px;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 	}
 
 	.compacto input:focus {
@@ -383,7 +383,7 @@
 
 	.aviso {
 		margin: 0;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--rojo);
 	}
 </style>

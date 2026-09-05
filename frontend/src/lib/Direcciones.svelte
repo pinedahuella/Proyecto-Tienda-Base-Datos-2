@@ -571,7 +571,7 @@
 	.titulo {
 		display: flex;
 		align-items: center;
-		gap: 14px;
+		gap: var(--e3);
 		flex-wrap: wrap;
 		margin-bottom: 20px;
 	}
@@ -579,14 +579,14 @@
 	h2 {
 		margin: 0;
 		margin-right: auto;
-		font-size: 1.25rem;
+		font-size: var(--f-lg);
 		font-weight: 400;
 	}
 
 	.titulo button {
 		padding: 8px 16px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -605,7 +605,7 @@
 	.vacio,
 	.suave {
 		margin: 0 0 16px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--gris);
 	}
 
@@ -619,14 +619,14 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
+		gap: var(--e2);
 	}
 
 	.fichas li {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 16px;
+		gap: var(--e4);
 		padding: 14px 16px;
 		background: var(--off);
 		border: 1px solid var(--linea);
@@ -638,13 +638,13 @@
 	}
 
 	.linea {
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 	}
 
 	.detalle {
 		margin-top: 3px;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -652,7 +652,7 @@
 		flex-shrink: 0;
 		padding: 7px 14px;
 		font-family: inherit;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -671,7 +671,7 @@
 	.pareja {
 		display: grid;
 		grid-template-columns: 1fr 1fr;
-		gap: 16px;
+		gap: var(--e4);
 		margin-bottom: 16px;
 	}
 
@@ -692,11 +692,11 @@
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 7px;
+		gap: var(--e2);
 	}
 
 	label {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		font-weight: 500;
 		color: var(--tinta);
 	}
@@ -710,7 +710,7 @@
 		width: 100%;
 		padding: 11px 13px;
 		font-family: inherit;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -726,14 +726,14 @@
 
 	.botones {
 		display: flex;
-		gap: 10px;
+		gap: var(--e2);
 		flex-wrap: wrap;
 	}
 
 	.botones button {
 		padding: 8px 16px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -773,7 +773,7 @@
 		flex-shrink: 0;
 		padding: 6px 12px;
 		font-family: inherit;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--rojo);
 		background: var(--blanco);
 		border: 1px solid var(--rojo);
@@ -785,11 +785,11 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 16px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		margin: 0 0 18px;
 		padding: 10px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--rojo);
 		background: var(--off);
 		border: 1px solid var(--rojo);
@@ -799,7 +799,7 @@
 	.hecho {
 		margin: 0 0 18px;
 		padding: 10px 14px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--indigo-cl);
 		border: 1px solid var(--indigo);
@@ -814,7 +814,7 @@
 
 	.versiones h3 {
 		margin: 0 0 12px;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		font-weight: 500;
 		color: var(--tinta);
 	}
@@ -825,14 +825,14 @@
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: var(--e2);
 	}
 
 	.versiones li {
 		display: flex;
-		gap: 14px;
+		gap: var(--e3);
 		flex-wrap: wrap;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 	}
 
 	.cuando {

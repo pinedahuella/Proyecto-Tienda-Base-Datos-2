@@ -1530,7 +1530,7 @@
 		flex-wrap: wrap;
 		align-items: flex-end;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		margin-bottom: 1.75rem;
 	}
 
@@ -1551,7 +1551,7 @@
 	.modos button {
 		padding: 7px 16px;
 		font-family: inherit;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 		background: var(--blanco);
 		border: none;
@@ -1600,9 +1600,9 @@
 	.tirador.tirador {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--e2);
 		padding: 0.55rem 0.85rem;
-		font-size: 0.93rem;
+		font-size: var(--f-base);
 		color: var(--texto);
 		background: var(--off);
 		border: 1px solid var(--linea);
@@ -1635,7 +1635,7 @@
 		display: inline-flex;
 		align-items: center;
 		justify-content: center;
-		font-size: 0.74rem;
+		font-size: var(--f-xs);
 		line-height: 1;
 		color: var(--sobre-indigo);
 		background: var(--indigo);
@@ -1667,7 +1667,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: flex-end;
-		gap: 0.9rem;
+		gap: var(--e4);
 	}
 
 	.dinamicos {
@@ -1679,7 +1679,7 @@
 	.campo {
 		display: flex;
 		flex-direction: column;
-		gap: 0.3rem;
+		gap: var(--e1);
 		min-width: 150px;
 	}
 
@@ -1707,7 +1707,7 @@
 	}
 
 	.campo label {
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -1716,7 +1716,7 @@
 		width: 100%;
 		padding: 9px 11px;
 		font-family: inherit;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -1739,9 +1739,9 @@
 	.casilla {
 		display: flex;
 		align-items: center;
-		gap: 0.45rem;
+		gap: var(--e2);
 		padding-bottom: 10px;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--texto);
 		cursor: pointer;
 	}
@@ -1755,7 +1755,7 @@
 	.agregar {
 		padding: 9px 18px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: none;
 		border: 1px solid var(--linea);
@@ -1787,7 +1787,7 @@
 
 	.aviso {
 		margin-top: 0.7rem;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--rojo);
 	}
 
@@ -1795,7 +1795,7 @@
 		margin-top: -1.5rem;
 		padding-bottom: 2.5rem;
 		text-align: center;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--gris);
 	}
 
@@ -1808,16 +1808,16 @@
 		list-style: none;
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-top: 0.9rem;
 	}
 
 	.etiquetas li {
 		display: flex;
 		align-items: center;
-		gap: 0.4rem;
+		gap: var(--e2);
 		padding: 5px 6px 5px 11px;
-		font-size: 0.86rem;
+		font-size: var(--f-ms);
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border-radius: 999px;
@@ -1830,7 +1830,7 @@
 		width: 19px;
 		height: 19px;
 		font-family: inherit;
-		font-size: 1rem;
+		font-size: var(--f-md);
 		line-height: 1;
 		color: var(--indigo);
 		background: none;
@@ -1848,7 +1848,7 @@
 	.rejilla {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
-		gap: 1.25rem;
+		gap: var(--e4);
 	}
 
 	.tarjeta {
@@ -1896,7 +1896,7 @@
 	}
 
 	.sin-foto {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris-2);
 	}
 
@@ -1904,24 +1904,24 @@
 		display: flex;
 		flex-direction: column;
 		flex: 1;
-		gap: 0.45rem;
+		gap: var(--e2);
 		padding: 1rem;
 	}
 
 	.categoria {
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		letter-spacing: 0.04em;
 		text-transform: uppercase;
 		color: var(--indigo);
 	}
 
 	.cuerpo h2 {
-		font-size: 1.05rem;
+		font-size: var(--f-md);
 		line-height: 1.35;
 	}
 
 	.desc {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 		/* Dos lineas y corta: si no, una descripcion larga descuadra la rejilla */
 		display: -webkit-box;
@@ -1941,7 +1941,7 @@
 	.rasgos {
 		list-style: none;
 		display: flex;
-		gap: 0.35rem;
+		gap: var(--e1);
 		margin-top: 0.15rem;
 		overflow: hidden;
 	}
@@ -1966,7 +1966,7 @@
 		overflow: hidden;
 		text-overflow: ellipsis;
 		padding: 3px 8px;
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--texto);
 		background: var(--panel);
 		border-radius: var(--r);
@@ -1988,17 +1988,17 @@
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
-		gap: 0.5rem;
+		gap: var(--e2);
 	}
 
 	.precio {
-		font-size: 1.15rem;
+		font-size: var(--f-lg);
 		font-weight: 600;
 		color: var(--tinta);
 	}
 
 	.variantes {
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -2010,9 +2010,9 @@
 	.meta {
 		display: flex;
 		align-items: baseline;
-		gap: 0.4rem;
+		gap: var(--e2);
 		margin: 0.25rem 0 0;
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		line-height: 1.4;
 		color: var(--gris);
 		/* Que no crezca a dos lineas y descuadre la fila. */
@@ -2075,7 +2075,7 @@
 	.mas button {
 		padding: 11px 28px;
 		font-family: inherit;
-		font-size: 0.98rem;
+		font-size: var(--f-base);
 		color: var(--blanco);
 		background: var(--indigo);
 		border: none;
@@ -2100,7 +2100,7 @@
 		flex-wrap: wrap;
 		align-items: center;
 		justify-content: center;
-		gap: 0.7rem;
+		gap: var(--e3);
 		margin-top: 2.25rem;
 	}
 
@@ -2108,7 +2108,7 @@
 	.paginacion > button {
 		padding: 9px 18px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -2137,21 +2137,21 @@
 	.cuenta {
 		min-width: 125px;
 		text-align: center;
-		font-size: 0.94rem;
+		font-size: var(--f-base);
 		color: var(--texto);
 	}
 
 	.salto {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--e2);
 		margin-left: 0.6rem;
 		padding-left: 1.1rem;
 		border-left: 1px solid var(--linea);
 	}
 
 	.salto label {
-		font-size: 0.86rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -2159,7 +2159,7 @@
 		width: 74px;
 		padding: 8px 10px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -2175,7 +2175,7 @@
 	.salto button {
 		padding: 8px 15px;
 		font-family: inherit;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--blanco);
 		background: var(--indigo);
 		border: 1px solid var(--indigo);
@@ -2199,7 +2199,7 @@
 	.aviso-salto {
 		margin-top: 0.6rem;
 		text-align: center;
-		font-size: 0.86rem;
+		font-size: var(--f-ms);
 		color: var(--rojo);
 	}
 
@@ -2210,7 +2210,7 @@
 		}
 		.rejilla {
 			grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-			gap: 0.9rem;
+			gap: var(--e4);
 		}
 		/* En una fila propia, la raya vertical y el sangrado separan de nada. */
 		.salto {

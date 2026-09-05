@@ -258,17 +258,17 @@
 	.titulo {
 		display: flex;
 		align-items: center;
-		gap: 10px;
+		gap: var(--e2);
 		margin-bottom: 20px;
 	}
 
 	.titulo h2 {
-		font-size: 1.3rem;
+		font-size: var(--f-xl);
 	}
 
 	.cuantas {
 		padding: 3px 11px;
-		font-size: 0.82rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 		background: var(--panel);
 		border-radius: 999px;
@@ -282,7 +282,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 20px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 		padding: 16px 18px;
 		color: var(--rojo);
@@ -293,7 +293,7 @@
 	.fallo button {
 		padding: 8px 16px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--blanco);
 		background: var(--indigo);
 		border: 0;
@@ -310,13 +310,13 @@
 	table {
 		width: 100%;
 		border-collapse: collapse;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 	}
 
 	th {
 		padding: 0 12px 10px;
 		text-align: left;
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		font-weight: 500;
 		color: var(--gris);
 		border-bottom: 1px solid var(--linea);
@@ -338,7 +338,7 @@
 	select {
 		padding: 7px 10px;
 		font-family: inherit;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 		background: var(--blanco);
 		border: 1px solid var(--linea);
@@ -361,7 +361,7 @@
 	.mensaje td {
 		padding-top: 0;
 		padding-bottom: 12px;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--indigo);
 		border-bottom: 1px solid var(--linea);
 		white-space: normal;
@@ -373,7 +373,7 @@
 
 	.nota {
 		margin-top: 16px;
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -389,7 +389,7 @@
 
 	.nota-tienda {
 		display: block;
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 </style>

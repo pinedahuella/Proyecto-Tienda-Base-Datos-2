@@ -379,7 +379,7 @@
 		z-index: 101;
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
+		gap: var(--e2);
 		height: 38px;
 		padding: 0 0.7rem;
 		background: var(--off);
@@ -451,7 +451,7 @@
 		box-shadow: none;
 		outline: none;
 		font-family: inherit;
-		font-size: 0.93rem;
+		font-size: var(--f-base);
 		color: var(--tinta);
 	}
 
@@ -513,7 +513,7 @@
 	.aviso {
 		margin: 0;
 		padding: 0.85rem 0.85rem 1rem;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -530,7 +530,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 0.9rem;
+		gap: var(--e4);
 		padding: 0.5rem 0.85rem;
 		text-align: left;
 		font-family: inherit;
@@ -564,12 +564,12 @@
 	.texto {
 		display: flex;
 		flex-direction: column;
-		gap: 2px;
+		gap: var(--e1);
 		min-width: 0;
 	}
 
 	.nombre {
-		font-size: 0.93rem;
+		font-size: var(--f-base);
 		line-height: 1.3;
 		/* Un nombre largo se corta en una linea: dos filas de distinta altura
 		   hacen que la lista salte al bajar con las flechas. */
@@ -581,8 +581,8 @@
 	.bajo {
 		display: flex;
 		align-items: center;
-		gap: 0.5rem;
-		font-size: 0.78rem;
+		gap: var(--e2);
+		font-size: var(--f-xs);
 		color: var(--gris);
 		overflow: hidden;
 		white-space: nowrap;
@@ -601,7 +601,7 @@
 	   categoria y la nota, se lee como una palabra mas de la fila. */
 	.estado {
 		padding: 1px 7px;
-		font-size: 0.72rem;
+		font-size: var(--f-xs);
 		color: var(--rojo);
 		border: 1px solid var(--rojo);
 		border-radius: 999px;
@@ -612,16 +612,16 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 1px;
+		gap: var(--e1);
 	}
 
 	.precio {
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		font-weight: 600;
 	}
 
 	.segundo {
-		font-size: 0.74rem;
+		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 
@@ -633,7 +633,7 @@
 		padding: 0.62rem 0.85rem;
 		text-align: left;
 		font-family: inherit;
-		font-size: 0.86rem;
+		font-size: var(--f-ms);
 		font-weight: 500;
 		color: var(--indigo);
 		background: var(--off);
@@ -668,7 +668,7 @@
 		.campo input,
 		.campo input:hover,
 		.campo input:focus {
-			font-size: 0.88rem;
+			font-size: var(--f-ms);
 		}
 	}
 </style>

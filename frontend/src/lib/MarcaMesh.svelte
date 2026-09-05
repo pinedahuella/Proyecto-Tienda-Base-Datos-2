@@ -37,14 +37,14 @@
 	.marca {
 		display: inline-flex;
 		align-items: center;
-		gap: 0.55rem;
+		gap: var(--e2);
 		text-decoration: none;
 		flex-shrink: 0;
 		color: var(--indigo);
 	}
 
 	.nombre {
-		font-size: 1.4rem;
+		font-size: var(--f-xl);
 		font-weight: 600;
 		letter-spacing: -0.02em;
 		color: var(--tinta);

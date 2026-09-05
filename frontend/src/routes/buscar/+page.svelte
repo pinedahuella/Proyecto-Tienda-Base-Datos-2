@@ -205,7 +205,7 @@
 
 	h1 {
 		margin: 0;
-		font-size: 1.5rem;
+		font-size: var(--f-xl);
 		font-weight: 600;
 		color: var(--tinta);
 		/* Lo que se busco puede ser larguisimo si alguien pega un parrafo. */
@@ -214,13 +214,13 @@
 
 	.cuenta {
 		margin: 0.35rem 0 0;
-		font-size: 0.9rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
 	.vacio {
 		padding: 2rem 0;
-		font-size: 0.95rem;
+		font-size: var(--f-base);
 		color: var(--gris);
 	}
 
@@ -243,7 +243,7 @@
 	}
 
 	.letra-chica {
-		font-size: 0.87rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -252,7 +252,7 @@
 		margin-top: 0.6rem;
 		padding: 8px 16px;
 		text-decoration: none;
-		font-size: 0.92rem;
+		font-size: var(--f-base);
 		color: var(--sobre-indigo);
 		background: var(--indigo);
 		border-radius: var(--r);
@@ -280,7 +280,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 1.2rem;
+		gap: var(--e4);
 		padding: 0.9rem 1.1rem;
 		text-decoration: none;
 		color: var(--tinta);
@@ -295,12 +295,12 @@
 	.texto {
 		display: flex;
 		flex-direction: column;
-		gap: 3px;
+		gap: var(--e1);
 		min-width: 0;
 	}
 
 	.nombre {
-		font-size: 1rem;
+		font-size: var(--f-md);
 		line-height: 1.35;
 	}
 
@@ -308,8 +308,8 @@
 		display: flex;
 		flex-wrap: wrap;
 		align-items: center;
-		gap: 0.15rem 0.8rem;
-		font-size: 0.82rem;
+		gap: var(--e1) var(--e3);
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -325,7 +325,7 @@
 	   trae productos que no estan activos. */
 	.estado {
 		padding: 1px 7px;
-		font-size: 0.74rem;
+		font-size: var(--f-xs);
 		color: var(--rojo);
 		border: 1px solid var(--rojo);
 		border-radius: 999px;
@@ -336,28 +336,28 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-end;
-		gap: 2px;
+		gap: var(--e1);
 		text-align: right;
 	}
 
 	.precio {
-		font-size: 1.02rem;
+		font-size: var(--f-md);
 		font-weight: 600;
 	}
 
 	.sin-precio {
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
 	.segundo {
-		font-size: 0.78rem;
+		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 
 	.nota-pie {
 		margin-top: 1.2rem;
-		font-size: 0.87rem;
+		font-size: var(--f-ms);
 		color: var(--gris);
 	}
 
@@ -375,7 +375,7 @@
 		.fila {
 			flex-direction: column;
 			align-items: flex-start;
-			gap: 0.5rem;
+			gap: var(--e2);
 		}
 
 		.cifras {

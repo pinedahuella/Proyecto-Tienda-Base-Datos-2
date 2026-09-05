@@ -31,7 +31,7 @@
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
-		gap: 28px;
+		gap: var(--e5);
 		flex-wrap: wrap;
 		padding-top: 30px;
 		padding-bottom: 30px;
@@ -40,17 +40,17 @@
 	.izquierda {
 		display: flex;
 		align-items: center;
-		gap: 20px;
+		gap: var(--e4);
 		flex-wrap: wrap;
 	}
 
 	.lema {
-		font-size: 1rem;
+		font-size: var(--f-md);
 		color: var(--gris);
 	}
 
 	.legal {
-		font-size: 0.88rem;
+		font-size: var(--f-ms);
 		color: var(--gris-2);
 	}
 
@@ -60,16 +60,16 @@
 		}
 		.fila {
 			align-items: flex-start;
-			gap: 16px;
+			gap: var(--e4);
 			padding-top: 24px;
 			padding-bottom: 24px;
 		}
 		.izquierda {
-			gap: 12px;
+			gap: var(--e3);
 		}
 		.lema,
 		.legal {
-			font-size: 0.85rem;
+			font-size: var(--f-sm);
 		}
 	}
 </style>

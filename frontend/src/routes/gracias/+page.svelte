@@ -224,14 +224,14 @@
 	.cabeza {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 2rem;
+		gap: var(--e6);
 		padding-bottom: 1.25rem;
 		border-bottom: 1px solid var(--linea);
 	}
 
 	.rotulo {
 		display: block;
-		font-size: 0.8rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -248,7 +248,7 @@
 		display: flex;
 		align-items: baseline;
 		justify-content: space-between;
-		gap: 1rem;
+		gap: var(--e4);
 		padding: 0.75rem 0;
 		border-bottom: 1px solid var(--linea);
 	}
@@ -259,7 +259,7 @@
 	}
 
 	.menor {
-		font-size: 0.85rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 
@@ -272,7 +272,7 @@
 		display: flex;
 		justify-content: space-between;
 		padding-top: 1rem;
-		font-size: 1.1rem;
+		font-size: var(--f-md);
 		color: var(--tinta);
 	}
 
@@ -285,7 +285,7 @@
 	.salidas {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 0.75rem;
+		gap: var(--e3);
 		justify-content: center;
 		margin-top: 2.5rem;
 	}
@@ -295,7 +295,7 @@
 			padding: 2.5rem 0 3rem;
 		}
 		.cabeza {
-			gap: 1.25rem;
+			gap: var(--e4);
 		}
 	}
 </style>
