@@ -32,6 +32,7 @@ SvelteKit.
 |---|---|---|
 | `/` | el catalogo | no |
 | `/producto/[id]` | la ficha de un producto | no |
+| `/buscar` | los resultados del buscador, `?q=` | no |
 | `/entrar` | iniciar sesion | no |
 | `/registro` | crear cuenta | no |
 | `/pedidos` | el pedido abierto y todos los anteriores | si |
@@ -64,6 +65,9 @@ es el backend, que responde 403 o 404.
 | `src/routes/+layout.svelte` | la paleta, los estilos globales y el armazon de la pagina |
 | `src/routes/+page.svelte` | el catalogo, con sus filtros |
 | — | la tarjeta ensena `precio_tienda`, y `precio_desde` debajo cuando otro vendedor lo tiene mas barato |
+| `src/routes/buscar/+page.svelte` | los resultados del buscador, hasta 50 |
+| `src/lib/BuscadorCabecera.svelte` | el campo de la cabecera con su lista colgando |
+| `src/lib/buscador.ts` | la llamada a `/buscador/productos` y como se lee un resultado |
 | `src/routes/producto/[id]/+page.svelte` | la ficha: la foto arriba y el detalle debajo |
 | `src/routes/entrar/+page.svelte` | inicio de sesion |
 | `src/routes/registro/+page.svelte` | crear cuenta |
@@ -667,3 +671,79 @@ recorte, un pedido de las 8:52 p. m. caia en el dia UTC siguiente y la pantalla
 se contradecia sola: la cabecera decia "25 ago" y dos renglones mas abajo "Asi
 se veia el 2026-08-26". El resultado no era incorrecto (el backend cuenta hasta
 el final del dia), pero se leia como un error.
+
+## El buscador de la cabecera
+
+El campo va en el centro de la cabecera, o sea en TODAS las pantallas, y no
+dentro del catalogo. Buscar es la accion principal de una tienda y tenerlo solo
+en el catalogo obligaria a volver antes de poder buscar desde una ficha o desde
+los pedidos.
+
+Se escribe y va saliendo una lista debajo, hasta ocho productos. Pulsar uno abre
+su ficha. Pulsar Enter sin haber elegido ninguno lleva a `/buscar?q=`, que ensena
+la lista entera hasta el tope de 50 que pone el backend.
+
+### No es el filtro `nombre` del catalogo
+
+Son dos cosas distintas y por eso conviven:
+
+| | de donde sale | como compara |
+|---|---|---|
+| el filtro `nombre` del catalogo | MongoDB | subcadena, sin distinguir mayusculas |
+| el buscador de la cabecera | Elasticsearch, `GET /buscador/productos` | difuso y sin tildes |
+
+Medido: `labtop` no encuentra nada en el filtro del catalogo y en el buscador
+devuelve las laptops; `ambar` encuentra los productos que se escriben con
+tilde. Por eso el buscador NO filtra por categoria ni por precio -- eso sigue
+viviendo en el catalogo, que es donde hay sitio para ensenar los filtros, y
+desde `/buscar` se llega con un enlace.
+
+### Lo que trae un resultado, y lo que no
+
+El indice de Elasticsearch guarda un RESUMEN, no el producto entero: nombre,
+categoria, los dos precios, el stock y la nota. No trae imagenes ni
+caracteristicas, asi que la lista no las ensena. Para el detalle esta
+`/producto/:id`, que lee de MongoDB, que sigue siendo la fuente de verdad del
+catalogo.
+
+La nota solo se escribe cuando hay resenas. El indice guarda 0 tanto para "le
+pusieron cero" como para "nadie lo ha calificado", y esas dos cosas se leen muy
+distinto cuando estas eligiendo que comprar; se distinguen con
+`resenas_total`.
+
+### Detalles que costaron y no se deben deshacer
+
+- **La peticion vieja puede llegar despues que la nueva.** Se escribe `lam` y
+  luego `lampara`: son dos consultas y no tardan lo mismo. Cada una lleva
+  numero y solo se pinta la ultima. Sin eso la lista ensena resultados que no
+  son de lo que hay escrito.
+- **El tope de alto de la lista esta medido, no elegido.** Cada fila mide 54px
+  y la lista llena mide 481px. Con un tope de 30rem (480px) se pasaba por UN
+  pixel y salia una barra de desplazamiento para nada, en el caso mas normal
+  de todos. Esta en 34rem.
+- **En telefono el buscador baja a su propia fila.** Compartiendola no cabe:
+  medido a 320px, la marca, el carrito, la hamburguesa y el tema ya se comen el
+  ancho. Esconderlo tras la hamburguesa no era opcion.
+- **Menos de dos letras no sale a la red.** Con una sola letra la busqueda
+  difusa engancha medio catalogo y esa lista no ayuda a elegir.
+- **El hover y el teclado marcan con la MISMA clase.** Con dos marcas a la vez
+  no se sabe cual abre el Enter.
+
+## Sin sesion, el catalogo ya no te saca a /entrar
+
+`CarritoRedis` vive en el layout y pide el carrito al montarse, o sea en todas
+las paginas. Sin sesion esa ruta contesta 401, y el layout trataba ese 401
+siempre como "se vencio la sesion": limpiaba y mandaba a `/entrar`.
+
+El resultado era que abrir la portada te sacaba a `/entrar` antes de poder ver
+un solo producto, con la tienda entera inservible para quien todavia no ha
+entrado. Comprobado en el navegador: se abre `/` y la direccion termina en
+`/entrar` sin haber pulsado nada.
+
+Ahora `sesionExpirada()` mira primero si HABIA sesion. Si la habia, se vencio y
+se manda a entrar, como siempre. Si no la habia, ese 401 solo dice "no has
+entrado", que para el catalogo es lo normal porque es publico.
+
+No se arreglo dentro de `CarritoRedis` a proposito: el que sabe si habia sesion
+es el sitio, no el panel del carrito, y el panel ya deja dicho que el no navega
+por su cuenta.

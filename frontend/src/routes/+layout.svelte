@@ -4,7 +4,7 @@
 	import CarritoRedis from '$lib/CarritoRedis.svelte';
 	import Checkout from '$lib/Checkout.svelte';
 	import { carrito } from '$lib/estadoCarrito.svelte';
-	import { cerrarSesion } from '$lib/sesion';
+	import { cerrarSesion, leerSesion } from '$lib/sesion';
 	import { olvidarPedidoAbierto, type LineaPedido, type ResultadoCompra } from '$lib/pedido';
 
 	let { children } = $props();
@@ -70,11 +70,33 @@
 		goto(id ? `/gracias?pedido=${encodeURIComponent(id)}` : '/gracias');
 	}
 
+	/**
+	 * El carrito contesto 401. Hay que distinguir DOS casos que llegan aqui
+	 * por el mismo camino y no son lo mismo.
+	 *
+	 * Si habia sesion, se vencio: se limpia y se manda a entrar, que es lo que
+	 * esta funcion hacia siempre.
+	 *
+	 * Si NO habia sesion, ese 401 solo dice "no has entrado", que para el
+	 * catalogo es lo normal: es publico. Y mandar a /entrar ahi rompia la
+	 * tienda entera para cualquiera que no hubiera entrado todavia.
+	 * `CarritoRedis` vive en este layout y pide el carrito al montarse, o sea
+	 * en TODAS las paginas, asi que abrir la portada te sacaba a /entrar antes
+	 * de poder ver un solo producto. Comprobado en el navegador: se abre / y
+	 * la direccion termina en /entrar sin haber pulsado nada.
+	 *
+	 * No se arregla en CarritoRedis a proposito: el que sabe si habia sesion
+	 * es el sitio, no el panel del carrito, y el panel ya deja dicho que no
+	 * navega por su cuenta.
+	 */
 	function sesionExpirada() {
+		const habiaSesion = leerSesion() !== null;
+
 		cerrarSesion();
 		carrito.olvidar();
 		checkoutAbierto = false;
-		goto('/entrar');
+
+		if (habiaSesion) goto('/entrar');
 	}
 </script>
 

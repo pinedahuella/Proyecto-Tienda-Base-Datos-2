@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import MarcaMesh from './MarcaMesh.svelte';
 	import BotonTema from './BotonTema.svelte';
+	import BuscadorCabecera from './BuscadorCabecera.svelte';
 	import { pedir } from './api';
 	import { cerrarSesion, leerSesion, verificarSesion } from './sesion';
 	import { carrito } from './estadoCarrito.svelte';
@@ -165,6 +166,18 @@
 	<div class="env barra">
 		<MarcaMesh href="/" />
 
+		<!-- El buscador va en el centro y no dentro del catalogo: se usa desde
+		     cualquier pantalla, tambien desde una ficha o desde los pedidos, y
+		     tenerlo solo en el catalogo obligaria a volver antes de poder
+		     buscar. Va contra Elasticsearch, no contra el filtro `nombre` del
+		     catalogo; la diferencia esta explicada en el propio componente.
+
+		     Va envuelto porque cuanto sitio le toca es cosa de la barra: aqui
+		     se sabe con quien lo comparte, y dentro del componente no. -->
+		<div class="busca">
+			<BuscadorCabecera />
+		</div>
+
 		<div class="cuenta">
 			{#if correo}
 				<!-- El carrito se abre desde cualquier pagina: el panel es uno solo
@@ -249,7 +262,20 @@
 		display: flex;
 		align-items: center;
 		gap: 1.5rem;
-		height: 68px;
+		/* Alto minimo y no alto fijo: en pantalla chica el buscador se pasa a
+		   una segunda fila y la barra tiene que poder crecer. Con `height` la
+		   fila de abajo se salia de la cabecera y quedaba encima de la pagina. */
+		min-height: 68px;
+		flex-wrap: wrap;
+	}
+
+	/* Se lleva el hueco que sobra, hasta un tope: mas ancho que eso el campo se
+	   vuelve una franja incomoda de leer, y la marca queda perdida en la
+	   esquina. El minimo es lo que necesita el marcador para verse entero. */
+	.busca {
+		flex: 1 1 auto;
+		min-width: 12rem;
+		max-width: 30rem;
 	}
 
 	.cuenta {
@@ -411,8 +437,24 @@
 		}
 
 		.barra {
-			height: 60px;
+			min-height: 60px;
 			gap: 0.75rem;
+			/* Lo que separa la fila del buscador del borde de abajo. Arriba no
+			   hace falta: la primera fila ya tiene su propio alto minimo. */
+			padding-bottom: 0.6rem;
+		}
+
+		/* El buscador baja a su propia fila y la ocupa entera.
+
+		   Compartiendo fila no cabia: medido a 320px, que es la pantalla mas
+		   angosta que se sigue usando, la marca, el carrito, la hamburguesa y
+		   el tema ya se comen el ancho, y al campo le quedaban menos de dos
+		   centimetros -- ni el marcador entraba. Esconderlo tras la hamburguesa
+		   no era opcion: en una tienda buscar es la accion principal. */
+		.busca {
+			order: 3;
+			flex-basis: 100%;
+			max-width: none;
 		}
 
 		.cuenta {
