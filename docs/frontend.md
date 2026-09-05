@@ -990,3 +990,18 @@ tarjetas ilegibles no son mejores que una que se lee.
 
 Se quito la regla. Con el minimo general de 250px, un telefono da una columna
 de 358px --todo entra en su linea-- y una tablet de 620 sigue dando dos de 286.
+
+## Las estrellas eran asteriscos
+
+`Resenas.svelte` pintaba la calificacion con `'*'.repeat(n) + '.'.repeat(5 - n)`
+en tipografia monoespaciada, o sea `***..`. A tamano de lectura eso no parece
+una calificacion, parece una cadena de depuracion, y desentonaba con el resto
+de la pagina, donde todos los iconos son SVG dibujados a mano: la lupa del
+buscador, la hamburguesa, el sol y la luna del tema.
+
+Ahora son cinco estrellas de verdad, las que cuentan rellenas de indigo y las
+demas con el contorno en gris. **Se dibujan las cinco siempre**: con solo las
+llenas hay que contarlas para saber si son 3 de 5 o 3 de 4.
+
+No hizo falta ninguna libreria, que es lo que decia el comentario anterior para
+justificar el texto. Es un poligono de cinco puntas.

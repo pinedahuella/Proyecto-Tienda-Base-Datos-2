@@ -444,10 +444,18 @@
 		});
 	}
 
-	/** Las estrellas como texto. Sin iconos: no hay libreria y no hace falta. */
-	function estrellas(n: number): string {
-		return '*'.repeat(n) + '.'.repeat(5 - n);
-	}
+	/**
+	 * Las cinco posiciones de la calificacion, marcando cuales van llenas.
+	 *
+	 * Antes esto devolvia texto -- `'*'.repeat(n) + '.'.repeat(5 - n)` -- y en
+	 * pantalla se leia "***..", asteriscos y puntos en monoespaciada. A tamano
+	 * de lectura no parecen estrellas, parecen una cadena de depuracion, y
+	 * desentonaba con el resto de la pagina, donde todos los iconos son SVG
+	 * dibujados a mano (la lupa del buscador, la hamburguesa, el sol y la luna
+	 * del tema). No hace falta ninguna libreria: es un poligono de cinco
+	 * puntas.
+	 */
+	const POSICIONES = [1, 2, 3, 4, 5];
 
 	function cuantasDe(nota: number): number {
 		return Number(resumen?.reparto?.[String(nota)] ?? 0);
@@ -528,7 +536,15 @@
 				<div class="promedio">
 					<span class="numero">{resumen.promedio.toFixed(1)}</span>
 					<span class="de">de 5</span>
-					<span class="barras-estrellas">{estrellas(Math.round(resumen.promedio))}</span>
+					<span class="estrellas" aria-hidden="true">
+						{#each POSICIONES as posicion (posicion)}
+							<svg viewBox="0 0 24 24" class:llena={posicion <= Math.round(resumen.promedio)}>
+								<path
+									d="M12 3.2l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.6l-5.2 2.7 1-5.8L3.5 9.4l5.9-.9z"
+								/>
+							</svg>
+						{/each}
+					</span>
 				</div>
 
 				<!-- Las barras son tambien el filtro. Pulsar una nota deja solo
@@ -630,7 +646,19 @@
 				{#each visibles as resena (resena.id_resena)}
 					<li class="resena">
 						<div class="cabeza">
-							<span class="estrellas">{estrellas(resena.calificacion)}</span>
+							<span
+								class="estrellas"
+								title="{resena.calificacion} de 5"
+								aria-label="{resena.calificacion} de 5"
+							>
+								{#each POSICIONES as posicion (posicion)}
+									<svg viewBox="0 0 24 24" aria-hidden="true" class:llena={posicion <= resena.calificacion}>
+										<path
+											d="M12 3.2l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.6l-5.2 2.7 1-5.8L3.5 9.4l5.9-.9z"
+										/>
+									</svg>
+								{/each}
+							</span>
 							<span class="autor">{resena.autor_usuario}</span>
 							<!-- Marcar la propia no es decoracion: cuando ya calificaste a
 							     todos los vendedores del producto, `puede_calificar` viene
@@ -923,11 +951,27 @@
 		color: var(--gris);
 	}
 
-	.barras-estrellas,
+	/* Cinco estrellas siempre, las que no cuentan en hueco.
+	   Dibujar solo las llenas obligaria a contarlas para saber si son 3 de 5 o
+	   3 de 4; con las cinco puestas, la nota se ve de un vistazo. */
 	.estrellas {
-		font-family: ui-monospace, monospace;
-		letter-spacing: 2px;
-		color: var(--indigo);
+		display: inline-flex;
+		gap: 1px;
+		vertical-align: -2px;
+	}
+
+	.estrellas svg {
+		width: 15px;
+		height: 15px;
+		fill: none;
+		stroke: var(--gris-2);
+		stroke-width: 1.6;
+		stroke-linejoin: round;
+	}
+
+	.estrellas svg.llena {
+		fill: var(--indigo);
+		stroke: var(--indigo);
 	}
 
 	.reparto {
