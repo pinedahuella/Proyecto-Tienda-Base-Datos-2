@@ -303,7 +303,8 @@ corriendo detras en vez de un texto que describe algo que no existe.
 3. **Etapa A**: `cargar_grafo.sh` vacia la cola en vez de releer todo.
 4. **Etapa B**: el worker que corre solo. Aqui, y no antes, aparece el costo de
    tener un proceso vivo.
-5. **El documento de la Entrega 3**, escrito sobre lo que ya funciona.
+5. ~~**El documento de la Entrega 3**, escrito sobre lo que ya funciona.~~
+   **ESCRITO el 2026-09-04**: `docs/CONSISTENCIA-CHECKOUT.md`.
 
 Los pasos 1 a 3 son `migrations/` y `etl/`: territorio nuestro, sin depender de
 nadie. El 4 conviene hablarlo con Jose David aunque no toque `backend/`, porque

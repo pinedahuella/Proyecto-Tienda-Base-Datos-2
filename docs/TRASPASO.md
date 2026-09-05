@@ -18,6 +18,7 @@ Ultima actualizacion: **2026-09-04**.
 > 3. `docs/BACKEND-PENDIENTE.md` -- lo que le toca a Jose David
 > 4. `docs/base-de-datos.md` -- por que el modelo es como es
 > 5. `migrations/README.md` -- las reglas de las migraciones
+> 6. `docs/CONSISTENCIA-CHECKOUT.md` -- que pasa si algo falla al cobrar
 >
 > **REGLAS QUE NO SE ROMPEN:**
 > - Yo (Meme) hago `frontend/`, `migrations/`, `etl/`, `mongo/`, `neo4j/`,
@@ -118,6 +119,7 @@ por eventos, los indices y las agregaciones. El informe lo hizo el equipo.
 | **La nota alcanza a los de Mongo, y se apaga** | tercera etapa del ETL, con `--notas` | `bash pruebas/notas.sh` (10 OK) |
 | **Resenar desde el pedido** | boton en `/pedidos`, lleva a la ficha con el formulario abierto | entra como `compradora.norte@` a `/pedidos` y abre un pedido pagado |
 | **El buscador de la Entrega 3** | Elasticsearch, indice y ETL. Falta su ruta | `bash pruebas/busqueda.sh` (11 OK) |
+| **Documento de consistencia del checkout** | los 5 puntos de la Entrega 3, escritos | `docs/CONSISTENCIA-CHECKOUT.md` |
 | **El choque de los dos repartidores de id, visible** | un paso mas en el arranque | sale solo en `.\arrancar.ps1` |
 | **Generador incremental de productos** | lotes reproducibles por semilla | `.\arrancar.ps1 -Productos 300 -Semilla 7` |
 
