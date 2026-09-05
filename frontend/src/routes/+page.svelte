@@ -2208,10 +2208,17 @@
 			max-width: none;
 			flex: 1 1 120px;
 		}
-		.rejilla {
-			grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
-			gap: var(--e4);
-		}
+		/* La rejilla NO cambia en telefono: se quito el `minmax(160px, 1fr)` que
+		   habia aqui.
+
+		   Ese minimo metia DOS columnas en una pantalla de 390px, o sea tarjetas
+		   de 171 pixeles de ancho. Medido ahi: el titulo se partia en dos
+		   lineas, "2 variantes" tambien, el pie salia cortado en "4 ve..." y los
+		   rasgos en "Material principal Pol...". Dos tarjetas ilegibles no son
+		   mejores que una que se lee.
+
+		   Con la regla de arriba (minimo 250px) un telefono da UNA columna de
+		   358px y una tablet de 620 da dos de 286, que es lo que se queria. */
 		/* En una fila propia, la raya vertical y el sangrado separan de nada. */
 		.salto {
 			margin-left: 0;

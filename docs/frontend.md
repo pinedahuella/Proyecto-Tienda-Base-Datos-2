@@ -977,3 +977,16 @@ grep -rho "gap: *[0-9][^;]*"       --include=*.svelte frontend/src
 ```
 
 Las dos tienen que salir vacias.
+
+## En telefono el catalogo va a UNA columna
+
+Habia una regla que en pantallas de 620px para abajo bajaba el minimo de la
+rejilla a `minmax(160px, 1fr)`. Con eso, un telefono de 390px metia DOS
+columnas: tarjetas de 171 pixeles de ancho.
+
+Medido ahi: el titulo se partia en dos lineas, "2 variantes" tambien, el pie
+salia cortado en "4 ve..." y los rasgos en "Material principal Pol...". Dos
+tarjetas ilegibles no son mejores que una que se lee.
+
+Se quito la regla. Con el minimo general de 250px, un telefono da una columna
+de 358px --todo entra en su linea-- y una tablet de 620 sigue dando dos de 286.
