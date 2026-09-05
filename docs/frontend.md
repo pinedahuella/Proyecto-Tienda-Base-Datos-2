@@ -747,3 +747,75 @@ entrado", que para el catalogo es lo normal porque es publico.
 No se arreglo dentro de `CarritoRedis` a proposito: el que sabe si habia sesion
 es el sitio, no el panel del carrito, y el panel ya deja dicho que el no navega
 por su cuenta.
+
+## El panel se ve de una seccion a la vez
+
+Antes era UNA COLUMNA con todo apilado. Medido en el navegador, con el catalogo
+de 1105 productos:
+
+| Cuenta | Antes | Ahora |
+|---|---|---|
+| admin | 7732 px de alto | 1460 px |
+| la tienda | 5531 px | 1938 px |
+
+Para llegar a la manipulacion de resenas, que era lo ultimo de todo, habia que
+pasar por el perfil, las direcciones, las cuentas, los reportes, veinte ofertas
+y una pagina del catalogo. Con un catalogo de verdad no se acaba nunca.
+
+Ahora hay una barra de secciones y solo se pinta la elegida. **No es un indice
+de anclas**: un indice que solo hace scroll no reduce nada, se siguen viendo las
+demas por el rabillo del ojo.
+
+### Tres decisiones que no se deben deshacer
+
+- **El orden es por USO, no por construccion.** Un vendedor abre el panel para
+  mirar sus ofertas mil veces mas que para cambiarse el apellido, asi que las
+  ofertas van primeras y la cuenta al final. Al admin le pasa lo mismo con los
+  reportes.
+- **Montaje perezoso, y despues se queda montada.** Entrar al panel ya no
+  dispara las consultas de las siete secciones: solo las de la que se abre.
+  Volver a una ya visitada no pide nada. Comprobado midiendo las peticiones:
+  abrir Ofertas dispara `/productos` y `/vendedor/categorias`, y VOLVER a
+  Ofertas dispara CERO.
+- **La seccion viaja en la direccion**, `/panel?s=fraude`. Asi recargar te deja
+  donde estabas, el boton de atras hace lo que se espera y se puede mandar un
+  enlace directo a Resenas en vez de decirle a alguien que baje hasta el final.
+  Si la url pide una seccion que esta cuenta no tiene, se cae a la primera en
+  vez de dejar la pantalla en blanco.
+
+## Cosas que se veian como cajas dentro de cajas
+
+- **El buscador y su lista eran dos rectangulos sueltos.** La lista colgaba a
+  8px del campo, con su propio borde y sus propias esquinas. Ahora, con la
+  lista abierta, el campo pierde el borde de abajo y las esquinas de abajo, y
+  la lista se pega a `top: 100%`: medido, el hueco entre los dos es 0 y tienen
+  el mismo ancho. Al cerrarse, el campo recupera sus 6px de esquina.
+- **La sombra no era una sombra.** Era `box-shadow` con `--panel`, que es un
+  color OPACO del tema: en claro casi no se distinguia del fondo y en oscuro
+  quedaba mas claro que la pagina, o sea un halo al reves. Ahora hay un token
+  `--sombra` en la paleta, distinto en cada tema, y lo usan la lista del
+  buscador y el menu de la cabecera.
+- **La cabecera eran cuatro recuadros en fila.** Carrito, Mis pedidos, Mi
+  perfil y Salir, todos con borde: ninguno destacaba, ni siquiera el carrito,
+  que es LA accion de una tienda. Ahora la navegacion es texto y solo el
+  carrito lleva caja. Sin sesion, "Iniciar sesion" va rellena.
+- **Los filtros del catalogo ocupaban media pantalla antes del primer
+  producto.** Ahora estan en un cajon que arranca cerrado, con el numero de
+  filtros puestos en el tirador: un cajon cerrado que no diga cuantos lleva
+  esconde justo lo que explica por que la lista trae 3 productos y no 1105.
+- **Las ofertas del vendedor eran veinte tarjetas sueltas.** Ahora son una
+  lista con lineas finas: cada fila baja de ~72px a ~46px.
+
+### Dos fallos que salieron al hacer esto
+
+- **`.enlace` ya estaba tomado.** En `+layout.svelte` significa "un boton que se
+  lee como enlace", subrayado e indigo, y va con la clase DOBLADA
+  (`button.enlace.enlace`) justo para ganarle a las reglas de los componentes.
+  Al usar ese nombre para la navegacion de la cabecera, los dos `<a>` salian
+  bien y el `<button>` de Salir salia subrayado y de otro color en la misma
+  fila. Se llama `.navegar`.
+- **El icono de la hamburguesa salia como un PUNTO.** El relleno global de los
+  botones (8px 16px) le deja 6 pixeles al svg, que pide 20. `BotonTema.svelte`
+  ya tenia ese mismo fallo documentado y arreglado con `padding: 0`, y a la
+  hamburguesa le faltaba. Solo se ve en telefono, que es donde sale, y por eso
+  llevaba tiempo asi sin que nadie lo notara.

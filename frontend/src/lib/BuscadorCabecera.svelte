@@ -234,7 +234,10 @@
 
 <!-- role="search" para que un lector de pantalla pueda saltar aqui directo. -->
 <div class="buscador" bind:this={caja} onfocusout={alSalirElFoco} role="search">
-	<div class="campo">
+	<!-- `abierta` le quita las esquinas de abajo y el borde inferior al campo:
+	     con la lista desplegada los dos son UNA pieza, no un recuadro flotando
+	     debajo de otro recuadro. -->
+	<div class="campo" class:abierta={hayPanel}>
 		<svg class="lupa" viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
 			<circle cx="11" cy="11" r="7" />
 			<path d="m20 20-3.6-3.6" stroke-linecap="round" />
@@ -333,6 +336,10 @@
 	}
 
 	.campo {
+		position: relative;
+		/* Por encima de la lista, para que su borde de abajo tape la union y
+		   los dos se lean como una sola pieza. */
+		z-index: 101;
 		display: flex;
 		align-items: center;
 		gap: 0.5rem;
@@ -349,6 +356,17 @@
 	.campo:focus-within {
 		border-color: var(--indigo);
 		background: var(--blanco);
+	}
+
+	/* Con la lista abierta, el campo es la TAPA de la lista: pierde las
+	   esquinas de abajo, se queda sin borde inferior y pasa a fondo blanco.
+	   Sin esto se veian dos rectangulos sueltos, uno encima del otro. */
+	.campo.abierta {
+		background: var(--blanco);
+		border-color: var(--indigo);
+		border-bottom-color: transparent;
+		border-bottom-left-radius: 0;
+		border-bottom-right-radius: 0;
 	}
 
 	.lupa {
@@ -399,33 +417,35 @@
 		stroke-width: 2;
 	}
 
+	/* Cuelga PEGADA al campo, sin hueco: `top: 100%` y no `100% + 8px`. El
+	   hueco de antes es lo que la convertia en un segundo cuadro suelto. */
 	.lista {
 		position: absolute;
-		top: calc(100% + 8px);
+		top: 100%;
 		left: 0;
 		right: 0;
 		z-index: 100;
-		padding: 0.3rem;
+		padding: 0.25rem 0 0;
 		background: var(--blanco);
-		border: 1px solid var(--linea);
-		border-radius: var(--r2);
-		/* Igual que el menu de cuenta: quien separa es el borde, esto solo
-		   suaviza el corte, y va con una variable del tema porque un negro
-		   translucido no se ve sobre el fondo oscuro. */
-		box-shadow: 0 8px 20px var(--panel);
+		border: 1px solid var(--indigo);
+		border-top: 0;
+		border-radius: 0 0 var(--r) var(--r);
+		/* Una sombra de verdad, del tema. Es lo que dice "esto esta ENCIMA de
+		   la pagina"; sin ella el panel se leia como un recuadro mas. */
+		box-shadow: var(--sombra);
 		/* En un portatil bajo, ocho filas se salen de la pantalla, asi que hay
-		   tope. El numero esta MEDIDO, no elegido: cada fila mide 54px y con el
-		   boton de "ver todos" la lista llena mide 481px. Con los 30rem (480px)
-		   que habia antes se pasaba por UN pixel y salia una barra de
-		   desplazamiento para nada, en el caso mas normal de todos. 34rem deja
-		   holgura sin llegar a tapar la pagina. */
-		max-height: min(70vh, 34rem);
+		   tope. El numero esta MEDIDO, no elegido: con las filas de ahora la
+		   lista llena mide algo menos de 30rem, y 32rem deja holgura sin
+		   llegar a tapar la pagina. */
+		max-height: min(70vh, 32rem);
 		overflow-y: auto;
+		/* Para que las esquinas de abajo recorten de verdad la ultima fila. */
+		overscroll-behavior: contain;
 	}
 
 	.aviso {
 		margin: 0;
-		padding: 0.85rem 0.7rem;
+		padding: 0.85rem 0.85rem 1rem;
 		font-size: 0.9rem;
 		color: var(--gris);
 	}
@@ -434,18 +454,21 @@
 		color: var(--rojo);
 	}
 
+	/* Sin esquinas redondeadas y de borde a borde: una fila con su propio
+	   recuadro dentro del panel es otra caja dentro de otra caja. La marca de
+	   seleccion es una banda, no una tarjeta. */
 	.fila {
+		position: relative;
 		width: 100%;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
 		gap: 0.9rem;
-		padding: 0.55rem 0.65rem;
+		padding: 0.5rem 0.85rem;
 		text-align: left;
 		font-family: inherit;
 		background: none;
 		border: 0;
-		border-radius: var(--r);
 		color: var(--tinta);
 		cursor: pointer;
 		transition: background var(--t);
@@ -456,6 +479,19 @@
 	   ninguna de las dos seria la que abre el Enter. */
 	.fila.marcada {
 		background: var(--indigo-cl);
+	}
+
+	/* Una barra en el canto izquierdo de la marcada. Con solo el fondo, en
+	   tema oscuro el --indigo-cl es muy cercano al panel y desde lejos no se
+	   sabia cual iba a abrir el Enter. */
+	.fila.marcada::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: 3px;
+		background: var(--indigo);
 	}
 
 	.texto {
@@ -511,17 +547,20 @@
 		color: var(--gris);
 	}
 
+	/* El pie del panel, no un enlace suelto: banda propia, pegado abajo y del
+	   ancho entero. Asi se lee como parte de la misma pieza. */
 	.todos {
 		width: 100%;
 		margin-top: 0.25rem;
-		padding: 0.6rem;
+		padding: 0.62rem 0.85rem;
+		text-align: left;
 		font-family: inherit;
 		font-size: 0.86rem;
+		font-weight: 500;
 		color: var(--indigo);
-		background: none;
+		background: var(--off);
 		border: 0;
 		border-top: 1px solid var(--linea);
-		border-radius: 0 0 var(--r) var(--r);
 		cursor: pointer;
 		transition: background var(--t);
 		/* Lo que se escribio puede ser largo; el boton no crece por eso. */

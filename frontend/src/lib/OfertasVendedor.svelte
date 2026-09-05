@@ -3045,14 +3045,17 @@
 		flex-shrink: 0;
 	}
 
+	/* UNA lista con lineas finas, no veinte tarjetas sueltas.
+
+	   Antes cada producto era su propia tarjeta con borde, esquinas y 0.6rem
+	   de hueco: veinte cajas iguales, una debajo de otra, que a la vista son
+	   ruido y no informacion. Medido con la cuenta de la tienda, la pantalla
+	   entera pasaba de 5531 pixeles. Juntandolas cada fila baja de ~72px a
+	   ~46px y las veinte caben en un tercio menos de alto. */
 	.catalogo {
 		list-style: none;
 		display: flex;
 		flex-direction: column;
-		gap: 0.6rem;
-	}
-
-	.producto {
 		background: var(--blanco);
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
@@ -3062,15 +3065,39 @@
 		   cabecera -- el `outline-offset: 3px` global caia fuera y no se veia
 		   nada al tabular. Con `clip` el recorte queda igual y el foco sale. */
 		overflow: clip;
-		transition: border-color var(--t);
+	}
+
+	.producto {
+		position: relative;
+		transition: background var(--t);
+	}
+
+	/* La raya va ENTRE filas: `+` y no `border-bottom`, para que la ultima no
+	   deje una linea suelta pegada al borde de abajo del contenedor. */
+	.producto + .producto {
+		border-top: 1px solid var(--linea);
 	}
 
 	.producto:hover {
-		border-color: var(--gris-2);
+		background: var(--off);
 	}
 
+	/* La abierta se marca con fondo y con una barra en el canto, no con el
+	   borde: dentro de una lista continua ya no hay borde propio que tenir, y
+	   una barra se encuentra de un vistazo aunque la fila este a media
+	   pantalla. */
 	.producto.abierto {
-		border-color: var(--indigo);
+		background: var(--indigo-cl);
+	}
+
+	.producto.abierto::before {
+		content: '';
+		position: absolute;
+		left: 0;
+		top: 0;
+		bottom: 0;
+		width: 3px;
+		background: var(--indigo);
 	}
 
 	/* La cabecera es un boton de ancho completo, no una caja con un boton
@@ -3080,7 +3107,7 @@
 		align-items: center;
 		gap: 1rem;
 		width: 100%;
-		padding: 0.9rem 1.1rem;
+		padding: 0.6rem 1rem;
 		text-align: left;
 		background: none;
 		border: none;

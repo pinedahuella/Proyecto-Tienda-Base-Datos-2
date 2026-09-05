@@ -368,6 +368,41 @@
 
 	// Los filtros de caracteristica ya agregados
 	let filtros = $state<FiltroCarac[]>([]);
+
+	/**
+	 * Si el cajon de filtros esta abierto.
+	 *
+	 * Arranca CERRADO. Abierto ocupaba media pantalla antes del primer
+	 * producto: siete campos y una caja de buscar, todo dentro de un recuadro
+	 * que a su vez esta dentro de la pagina, y lo que la persona viene a ver
+	 * --los productos-- empezaba por debajo del pliegue. Filtrar es lo que se
+	 * hace de vez en cuando; mirar el catalogo es lo que se hace siempre.
+	 *
+	 * Empezar cerrado es seguro porque el catalogo NO lee filtros de la
+	 * direccion: al entrar nunca hay ninguno puesto, asi que no se esconde
+	 * nada que este recortando la lista. El dia que los filtros viajen en la
+	 * url, esto tiene que arrancar abierto cuando vengan con alguno -- si no,
+	 * la lista sale recortada y no se ve por que.
+	 */
+	let filtrosAbiertos = $state(false);
+
+	/**
+	 * Cuantos filtros hay puestos ahora mismo.
+	 *
+	 * Va en el boton del cajon cerrado. Un cajon cerrado que no diga cuantos
+	 * lleva esconde justo lo que explica por que la lista trae 3 productos y no
+	 * 1105 -- que es como se pierde media tarde buscando un fallo que no existe.
+	 */
+	let cuantosFiltros = $derived(
+		(nombre.trim() !== '' ? 1 : 0) +
+			(idCategoria !== '' ? 1 : 0) +
+			(String(precioMin) !== '' ? 1 : 0) +
+			(String(precioMax) !== '' ? 1 : 0) +
+			(disponibilidad !== 'cualquiera' ? 1 : 0) +
+			(notaMinima !== '' ? 1 : 0) +
+			(soloVariantesActivas ? 1 : 0) +
+			filtros.length
+	);
 	let secuencia = 0;
 
 	// La fila de "agregar un filtro"
@@ -1002,8 +1037,32 @@
 			</div>
 		</div>
 
-		<!-- Los filtros. Cada cambio vuelve a preguntarle al backend -->
-		<section class="filtros" aria-label="Filtros">
+		<!-- Los filtros. Cada cambio vuelve a preguntarle al backend.
+
+		     Van en un cajon que arranca cerrado: ver `filtrosAbiertos`. -->
+		<section class="filtros" class:plegada={!filtrosAbiertos} aria-label="Filtros">
+			<button
+				type="button"
+				class="tirador"
+				aria-expanded={filtrosAbiertos}
+				aria-controls="cuerpo-filtros"
+				onclick={() => (filtrosAbiertos = !filtrosAbiertos)}
+			>
+				<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+					<path d="M4 6h16M7 12h10M10 18h4" stroke-linecap="round" />
+				</svg>
+				<span>Filtros</span>
+				{#if cuantosFiltros > 0}
+					<span class="cuantos">{cuantosFiltros}</span>
+				{/if}
+				<span class="flecha-filtros" aria-hidden="true">
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+						<path d="m6 9 6 6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+					</svg>
+				</span>
+			</button>
+
+			<div id="cuerpo-filtros" class="cuerpo-filtros">
 			<div class="fijos">
 				<div class="campo ancho">
 					<label for="f-nombre">Buscar</label>
@@ -1258,6 +1317,7 @@
 					</ul>
 				{/if}
 			</div>
+			</div>
 		</section>
 
 		{#if error}
@@ -1497,11 +1557,88 @@
 	/* ---------- filtros ---------- */
 
 	.filtros {
-		padding: 1.1rem;
 		margin-bottom: 2rem;
 		background: var(--blanco);
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
+		overflow: clip;
+	}
+
+	/* Cerrada no es una caja, es una barra: sin fondo propio ni recuadro, para
+	   que no quede un rectangulo vacio ocupando sitio entre el titulo y los
+	   productos. */
+	.filtros.plegada {
+		background: none;
+		border-color: transparent;
+		margin-bottom: 1.2rem;
+	}
+
+	/* El tirador. Lleva caja PROPIA aunque la seccion cerrada no la tenga: un
+	   boton que abre y cierra algo grande no puede ser texto pelado, porque no
+	   se ve que se pueda pulsar. */
+	.tirador.tirador {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.55rem 0.85rem;
+		font-size: 0.93rem;
+		color: var(--texto);
+		background: var(--off);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		cursor: pointer;
+	}
+
+	.filtros:not(.plegada) .tirador.tirador {
+		/* Abierta, el tirador es la cabecera del cajon y comparte su caja. */
+		width: 100%;
+		background: none;
+		border: 0;
+		border-bottom: 1px solid var(--linea);
+		border-radius: 0;
+	}
+
+	.tirador svg {
+		width: 17px;
+		height: 17px;
+		stroke-width: 1.8;
+		flex-shrink: 0;
+	}
+
+	/* Cuantos filtros hay puestos, cuando hay. Es lo unico que explica, con el
+	   cajon cerrado, por que la lista trae tres productos y no mil. */
+	.cuantos {
+		min-width: 19px;
+		height: 19px;
+		padding: 0 6px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		font-size: 0.74rem;
+		line-height: 1;
+		color: var(--sobre-indigo);
+		background: var(--indigo);
+		border-radius: 999px;
+	}
+
+	.flecha-filtros {
+		display: grid;
+		place-items: center;
+		margin-left: auto;
+		color: var(--gris);
+		transition: transform var(--t);
+	}
+
+	.filtros:not(.plegada) .flecha-filtros {
+		transform: rotate(180deg);
+	}
+
+	.cuerpo-filtros {
+		padding: 1.1rem;
+	}
+
+	.filtros.plegada .cuerpo-filtros {
+		display: none;
 	}
 
 	.fijos,

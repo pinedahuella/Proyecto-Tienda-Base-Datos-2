@@ -72,6 +72,116 @@
 		perfil?.correo_electronico === CORREO_TIENDA || perfil?.id_rol_usuario === ID_ROL_ADMIN
 	);
 
+	// ══════════════════════════════════════════════════════════
+	// Las secciones del panel
+	//
+	// El panel era UNA COLUMNA con todo apilado. Medido en el navegador con la
+	// cuenta de admin: 7732 pixeles de alto. El de la tienda, 5531. Para llegar
+	// a la manipulacion de resenas, que es lo ultimo, habia que pasar por el
+	// perfil, las direcciones, las cuentas, los reportes, veinte ofertas y una
+	// pagina del catalogo. Y eso con 1105 productos; con un catalogo de verdad
+	// no se acaba nunca.
+	//
+	// Ahora se ensena UNA a la vez. No es un indice de anclas: un indice que
+	// solo hace scroll no reduce nada, se siguen viendo las demas por el rabillo
+	// del ojo. La elegida es la unica que se pinta.
+	//
+	// Se montan PEREZOSAMENTE y despues se quedan montadas: la primera vez que
+	// entras a una seccion pide sus datos, y volver a ella ya no pide nada. Con
+	// un `{#if}` a secas, cada ida y vuelta repetiria la consulta y perderia lo
+	// que hubiera escrito a medias en un formulario.
+	// ══════════════════════════════════════════════════════════
+
+	interface Seccion {
+		id: string;
+		nombre: string;
+		/** Una linea de que se hace aqui, para la cabecera de la seccion. */
+		pie: string;
+	}
+
+	/**
+	 * Que secciones tiene esta cuenta, EN ORDEN DE USO, no de construccion.
+	 *
+	 * Un vendedor abre el panel para mirar sus ofertas mil veces mas que para
+	 * cambiarse el apellido, asi que las ofertas van primeras y la cuenta al
+	 * final. Al admin le pasa lo mismo con los reportes.
+	 */
+	let secciones = $derived.by<Seccion[]>(() => {
+		if (!perfil) return [];
+
+		if (esAdmin) {
+			return [
+				{ id: 'reportes', nombre: 'Reportes', pie: 'Como van las ventas y los pedidos' },
+				{ id: 'ofertas', nombre: 'Ofertas', pie: 'Precio, existencias y estado de lo que vende la tienda' },
+				{ id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' },
+				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Lo que otros vendedores quieren meter al catalogo' },
+				{ id: 'cuentas', nombre: 'Cuentas', pie: 'Los usuarios del sistema, su rol y su estado' },
+				{ id: 'fraude', nombre: 'Resenas', pie: 'Anillos de calificaciones sospechosas' },
+				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
+			];
+		}
+
+		if (esVendedor) {
+			return [
+				{ id: 'ofertas', nombre: 'Ofertas', pie: 'A que precio vendes cada variante y cuantas te quedan' },
+				administraLaTienda
+					? { id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' }
+					: { id: 'catalogo', nombre: 'Proponer', pie: 'Mandale al catalogo un producto que falte' },
+				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Como van las que mandaste' },
+				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
+			];
+		}
+
+		// Un comprador tiene poco que gestionar: su cuenta y por donde seguir.
+		return [{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }];
+	});
+
+	/** Cual se esta mirando. Vacio quiere decir "todavia no se ha decidido". */
+	let seccion = $state('');
+
+	/**
+	 * La elegida de verdad.
+	 *
+	 * Si lo guardado no existe para esta cuenta se cae a la primera. Pasa al
+	 * recargar con `?s=cuentas` siendo vendedor, o al cambiar de cuenta en la
+	 * misma pestana: sin esto quedaba una pantalla en blanco sin decir por que.
+	 */
+	let seccionViva = $derived(
+		secciones.some((s) => s.id === seccion) ? seccion : (secciones[0]?.id ?? '')
+	);
+
+	let seccionActual = $derived(secciones.find((s) => s.id === seccionViva) ?? null);
+
+	/**
+	 * Las que ya se abrieron alguna vez. Es lo que hace el montaje perezoso.
+	 *
+	 * Se guarda tambien la que esta viva ahora aunque nadie la haya pulsado:
+	 * la primera seccion se abre sola al entrar.
+	 */
+	let visitadas = $state(new Set<string>());
+
+	$effect(() => {
+		const id = seccionViva;
+		if (!id || visitadas.has(id)) return;
+		// Un Set nuevo y no `.add`: Svelte 5 no vigila lo de dentro de un Set.
+		visitadas = new Set([...visitadas, id]);
+	});
+
+	/**
+	 * Cambiar de seccion se guarda en la direccion (`?s=`).
+	 *
+	 * Asi recargar te deja donde estabas, el boton de atras del navegador hace
+	 * lo que se espera, y se puede mandar un enlace directo a "Resenas" en vez
+	 * de decirle a alguien que baje hasta el final. Es la misma decision que ya
+	 * toman el catalogo con sus filtros y el buscador con su `?q=`.
+	 */
+	function irA(id: string) {
+		seccion = id;
+		const url = new URL(window.location.href);
+		url.searchParams.set('s', id);
+		history.replaceState(history.state, '', url);
+	}
+
 	/**
 	 * La linea de bienvenida, segun el rol.
 	 *
@@ -110,7 +220,14 @@
 	// el mismo instante), y como abajo todo cuelga de {#if cargando}, cada
 	// vuelta desmontaba y volvia a montar el arbol entero: el formulario de
 	// vendedor que estuviera abierto se perdia a media escritura.
-	onMount(cargar);
+	onMount(() => {
+		// La seccion que pida la direccion, si pide alguna. Se lee ANTES de
+		// cargar el perfil: `seccionViva` la ignora mientras no exista para
+		// esta cuenta, asi que ponerla pronto no rompe nada y evita el
+		// parpadeo de abrir la primera y saltar luego a la buena.
+		seccion = new URL(window.location.href).searchParams.get('s') ?? '';
+		cargar();
+	});
 
 	async function cargar() {
 		cargando = true;
@@ -359,6 +476,30 @@
 				<p>{saludo}</p>
 			</div>
 
+			<!-- Una seccion a la vez. Ver el bloque de "Las secciones del panel"
+			     arriba: esto no es un indice de anclas, la que no esta elegida no
+			     se pinta. Con una sola seccion la barra sobra, asi que no sale. -->
+			{#if secciones.length > 1}
+				<nav class="mapa" aria-label="Secciones del panel">
+					{#each secciones as s (s.id)}
+						<button
+							type="button"
+							class="paso"
+							class:viva={s.id === seccionViva}
+							aria-current={s.id === seccionViva ? 'page' : undefined}
+							onclick={() => irA(s.id)}
+						>
+							{s.nombre}
+						</button>
+					{/each}
+				</nav>
+
+				{#if seccionActual}
+					<p class="que-es">{seccionActual.pie}</p>
+				{/if}
+			{/if}
+
+			<div class="hoja" class:oculta={seccionViva !== 'cuenta'}>
 			<section class="perfil">
 				<div class="titulo">
 					<h2>Tu perfil</h2>
@@ -488,70 +629,14 @@
 
 			<Direcciones alExpirarSesion={expiro} />
 
-			{#if esAdmin}
-				<!-- El admin gestiona cuentas Y administra el catalogo: desde el
-				     commit `bd12cd4` el backend le abre las mismas rutas que a la
-				     tienda, asi que se le pintan las mismas pantallas. Sin esto,
-				     tenia el permiso y ninguna forma de usarlo. -->
-				<PanelAdmin alExpirarSesion={expiro} />
-				<!-- Los dos reportes de admin: ventas y reservaciones. Van
-				     ARRIBA de las pantallas de catalogo porque son de lectura y
-				     de un vistazo -- se abre el panel para ver como va el
-				     dinero mas veces de las que se entra a editar una oferta.
-				     Como el panel de fraude, son SOLO de admin y no de la
-				     tienda: el backend le contesta 403 a la tienda. -->
-				<PanelReportes alExpirarSesion={expiro} />
-				<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
-				<PanelVendedor alExpirarSesion={expiro} />
-				<!-- La cola de productos propuestos por otros vendedores. Va al final
-				     porque es lo que menos se toca: se revisa cuando hay algo, no en
-				     cada visita. -->
-				<PropuestasProducto alExpirarSesion={expiro} {administraLaTienda} />
-				<!-- El panel de manipulacion de resenas. Es SOLO del admin y no de
-				     la tienda: el enunciado lo pide "visible para el equipo
-				     administrativo", y la tienda es un vendedor mas -- el mas
-				     grande, pero vendedor. Ensenarle a un vendedor quien lo esta
-				     calificando de forma sospechosa le entrega justo la lista de
-				     cuentas que no deberia poder mirar.
-				     Va al final porque no es una tarea diaria: se abre cuando hay
-				     una sospecha, no en cada visita al panel. -->
-				<PanelFraude alExpirarSesion={expiro} />
-			{:else if esVendedor}
-				<!-- Las ofertas van PRIMERO y aparte de los productos: en el modelo
-				     multi-vendedor el producto es del catalogo compartido y no es de
-				     nadie, mientras que la oferta -- precio, existencias y estado --
-				     si es del vendedor. Es lo suyo, asi que va arriba. -->
-				<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
-				{#if administraLaTienda}
-					<!-- Solo la tienda (o un admin). Las cinco rutas de
-					     /vendedor/productos exigen esa cuenta o ese rol, no el rol
-					     de vendedor a secas: a los demas vendedores el backend les
-					     contesta 404 y el panel salia con ese error. -->
-					<PanelVendedor alExpirarSesion={expiro} />
-				{:else}
-					<!-- El mismo panel, en modo propuesta: solo el formulario, mandado a
-					     /vendedor/productos/propuestas. Un vendedor normal no puede
-					     administrar el catalogo, pero si proponerle entradas. -->
-					<PanelVendedor alExpirarSesion={expiro} modo="propuesta" />
-				{/if}
-				<!-- Las propuestas SI son de todos los vendedores, y el componente
-				     cambia de cara solo: la tienda ve la cola de lo que le mandaron y
-				     un vendedor normal ve las suyas con el motivo del rechazo. -->
-				<PropuestasProducto alExpirarSesion={expiro} {administraLaTienda} />
-			{:else}
-				<!-- Lo que ve un comprador.
+			{#if !esAdmin && !esVendedor}
+				<!-- Lo que ve un comprador, dentro de su misma hoja: son dos
+				     enlaces, no una seccion, y darles pestana propia seria una
+				     pestana para dos frases.
 
-				     Aqui habia dos tarjetas -- "Productos 0" e "Inventario 0" --
-				     con las cifras escritas a mano, y debajo "Tu tienda esta vacia
-				     por ahora / cuando publiques tu primer producto...". Todo eso
-				     es de vendedor y se le enseñaba a un comprador: le hablaba de
-				     su tienda, le pedia publicar, y le enseñaba dos ceros que no
-				     salian de ninguna consulta. Ademas nombraba el inventario, que
-				     ya no existe ni como tabla. -->
-				<!-- Las dos, del mismo tamano y una al lado de la otra. Antes el
-				     enlace a los pedidos iba suelto, sin tarjeta, y el del catalogo
-				     dentro de una con borde: se leian como cosas de distinto peso
-				     cuando son las dos salidas de esta pagina. -->
+				     Aqui hubo antes dos tarjetas -- "Productos 0" e "Inventario 0" --
+				     con las cifras escritas a mano: cosas de vendedor ensenadas a un
+				     comprador, y dos ceros que no salian de ninguna consulta. -->
 				<div class="salidas">
 					<section class="invitacion">
 						<h2>Tus pedidos</h2>
@@ -566,10 +651,109 @@
 						<h2>Que quieres comprar hoy</h2>
 						<p>
 							Recorre el catalogo y agrega al carrito. Antes de pagar hace falta una
-							direccion de entrega: se agrega arriba, en "Tus direcciones".
+							direccion de entrega: se agrega aqui arriba, en "Tus direcciones".
 						</p>
 						<a class="ir" href="/">Ver el catalogo</a>
 					</section>
+				</div>
+			{/if}
+			</div>
+
+			<!-- De aqui para abajo, una hoja por seccion.
+
+			     El `{#if visitadas.has(...)}` es el montaje perezoso: entrar al
+			     panel ya no dispara las consultas de las SIETE secciones a la vez,
+			     solo las de la que se abre. Y una vez montada se queda, escondida
+			     con `oculta`, asi que volver a ella no vuelve a pedir nada ni
+			     pierde lo que hubiera escrito a medias. -->
+			{#if esAdmin}
+				<div class="hoja" class:oculta={seccionViva !== 'reportes'}>
+					<!-- Los dos reportes de admin: ventas y reservaciones. Van
+					     PRIMEROS porque son de lectura y de un vistazo: se abre el
+					     panel para ver como va el dinero mas veces de las que se
+					     entra a editar una oferta. Son SOLO de admin y no de la
+					     tienda, que recibe 403. -->
+					{#if visitadas.has('reportes')}
+						<PanelReportes alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'ofertas'}>
+					{#if visitadas.has('ofertas')}
+						<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'catalogo'}>
+					<!-- El admin administra el catalogo Y gestiona cuentas: desde el
+					     commit `bd12cd4` el backend le abre las mismas rutas que a la
+					     tienda, asi que se le pintan las mismas pantallas. -->
+					{#if visitadas.has('catalogo')}
+						<PanelVendedor alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'propuestas'}>
+					{#if visitadas.has('propuestas')}
+						<PropuestasProducto alExpirarSesion={expiro} {administraLaTienda} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'cuentas'}>
+					{#if visitadas.has('cuentas')}
+						<PanelAdmin alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'fraude'}>
+					<!-- La manipulacion de resenas es SOLO del admin y no de la
+					     tienda: el enunciado la pide "visible para el equipo
+					     administrativo", y la tienda es un vendedor mas. Ensenarle a
+					     un vendedor quien lo esta calificando de forma sospechosa le
+					     entrega justo la lista de cuentas que no deberia poder mirar.
+
+					     Antes vivia al FINAL de la columna, a 7000 pixeles de la
+					     cabecera. Ahora es una pestana como las demas y se llega
+					     tambien por enlace directo, /panel?s=fraude. -->
+					{#if visitadas.has('fraude')}
+						<PanelFraude alExpirarSesion={expiro} />
+					{/if}
+				</div>
+			{:else if esVendedor}
+				<div class="hoja" class:oculta={seccionViva !== 'ofertas'}>
+					<!-- Las ofertas van PRIMERO y aparte de los productos: en el modelo
+					     multi-vendedor el producto es del catalogo compartido y no es de
+					     nadie, mientras que la oferta -- precio, existencias y estado --
+					     si es del vendedor. Es lo suyo, asi que va arriba. -->
+					{#if visitadas.has('ofertas')}
+						<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'catalogo'}>
+					{#if visitadas.has('catalogo')}
+						{#if administraLaTienda}
+							<!-- Solo la tienda (o un admin). Las cinco rutas de
+							     /vendedor/productos exigen esa cuenta o ese rol, no el rol
+							     de vendedor a secas: a los demas vendedores el backend les
+							     contesta 404 y el panel salia con ese error. -->
+							<PanelVendedor alExpirarSesion={expiro} />
+						{:else}
+							<!-- El mismo panel, en modo propuesta: solo el formulario, mandado a
+							     /vendedor/productos/propuestas. Un vendedor normal no puede
+							     administrar el catalogo, pero si proponerle entradas. -->
+							<PanelVendedor alExpirarSesion={expiro} modo="propuesta" />
+						{/if}
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'propuestas'}>
+					<!-- Las propuestas SI son de todos los vendedores, y el componente
+					     cambia de cara solo: la tienda ve la cola de lo que le mandaron y
+					     un vendedor normal ve las suyas con el motivo del rechazo. -->
+					{#if visitadas.has('propuestas')}
+						<PropuestasProducto alExpirarSesion={expiro} {administraLaTienda} />
+					{/if}
 				</div>
 			{/if}
 		{/if}
@@ -615,7 +799,7 @@
 
 	.saludo {
 		max-width: 560px;
-		margin-bottom: 36px;
+		margin-bottom: 22px;
 	}
 
 	.saludo h1 {
@@ -624,6 +808,72 @@
 
 	.saludo p {
 		color: var(--gris);
+	}
+
+	/* ── la barra de secciones ── */
+
+	/* Se queda pegada arriba, debajo de la cabecera: dentro de una seccion
+	   larga --el catalogo son veinte filas-- si la barra se va con el scroll
+	   hay que volver hasta arriba solo para cambiar de pestana. El 68 es el
+	   alto de la cabecera, que tambien es pegajosa. */
+	.mapa {
+		position: sticky;
+		top: 68px;
+		z-index: 20;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 2px;
+		margin-bottom: 6px;
+		padding: 4px;
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+	}
+
+	.paso {
+		padding: 9px 15px;
+		font-family: inherit;
+		font-size: 0.93rem;
+		color: var(--texto);
+		background: none;
+		border: 0;
+		border-radius: var(--r);
+		cursor: pointer;
+		white-space: nowrap;
+		transition:
+			background var(--t),
+			color var(--t);
+	}
+
+	.paso:hover {
+		color: var(--indigo);
+		background: var(--indigo-cl);
+	}
+
+	/* La activa RELLENA, no solo con el borde. Con el borde a secas hay que
+	   buscar cual esta elegida, y en una barra de siete no se encuentra. */
+	.paso.viva {
+		color: var(--sobre-indigo);
+		background: var(--indigo);
+		font-weight: 500;
+	}
+
+	.paso.viva:hover {
+		background: var(--indigo-os);
+	}
+
+	.que-es {
+		margin-bottom: 22px;
+		padding-left: 4px;
+		font-size: 0.88rem;
+		color: var(--gris);
+	}
+
+	/* Escondida, no desmontada: ver el comentario del marcado. El !important
+	   es porque lo de dentro trae su propio display (las hojas llevan grid y
+	   flex) y sin el la regla la pierde. */
+	.hoja.oculta {
+		display: none !important;
 	}
 
 	/* ── perfil ── */

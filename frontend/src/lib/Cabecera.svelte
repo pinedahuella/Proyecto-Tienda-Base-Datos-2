@@ -199,13 +199,19 @@
 				     El correo NO va aqui: ocupaba el sitio de una accion y no es una.
 				     Quien quiera saber con que cuenta esta dentro lo mira en su
 				     perfil, que es donde vive esa informacion. -->
-				<div class="fila">
-					<a class="salir" href="/pedidos">Mis pedidos</a>
+				<!-- Navegacion, no acciones: van como texto y no como cuatro
+				     recuadros seguidos. Con todo encajonado la barra se leia como
+				     una hilera de cajas y ninguna destacaba, ni siquiera el
+				     carrito, que es LA accion de una tienda. -->
+				<nav class="fila">
+					<a class="navegar" href="/pedidos">Mis pedidos</a>
 					<!-- Sin esto, desde el catalogo no habia forma de volver al panel
 					     mas que escribiendo la direccion a mano. -->
-					<a class="salir" href="/panel">Mi perfil</a>
-					<button type="button" class="salir" onclick={alSalir ?? salirPorMiCuenta}>Salir</button>
-				</div>
+					<a class="navegar" href="/panel">Mi perfil</a>
+					<button type="button" class="navegar" onclick={alSalir ?? salirPorMiCuenta}>
+						Salir
+					</button>
+				</nav>
 
 				<!-- Y en pantalla chica, lo mismo detras de la hamburguesa. El menu
 				     se pinta siempre y se ensena con una clase, no con un {#if}: asi
@@ -242,7 +248,7 @@
 			{:else}
 				<!-- Sin sesion no hay nada que agrupar: dos cosas caben en cualquier
 				     pantalla, y un menu para una sola opcion seria un clic de mas. -->
-				<a class="salir" href="/entrar">Iniciar sesion</a>
+				<a class="salir principal" href="/entrar">Iniciar sesion</a>
 			{/if}
 			<BotonTema />
 		</div>
@@ -285,12 +291,39 @@
 		gap: 1rem;
 	}
 
-	/* Mismo gap que .cuenta: envolver los tres no debe mover ni un pixel de lo
-	   que ya se veia en pantalla grande. */
 	.fila {
 		display: flex;
 		align-items: center;
-		gap: 1rem;
+		gap: 0.35rem;
+	}
+
+	/* Navegacion en texto. El area pulsable sigue siendo la de un boton --el
+	   padding no se quita, solo el borde-- para que no cueste acertarle.
+
+	   NO se llama `.enlace`: esa clase ya existe en el layout y significa otra
+	   cosa, "un boton que se lee como enlace", subrayado e indigo. Y ademas
+	   gana, porque alli va doblada (`button.enlace.enlace`) justo para ganarle
+	   a las reglas de los componentes. Con ese nombre, los dos <a> salian bien
+	   y el <button> de Salir salia subrayado y de otro color en la misma fila. */
+	.navegar {
+		display: inline-block;
+		padding: 8px 10px;
+		text-decoration: none;
+		font-family: inherit;
+		font-size: 0.93rem;
+		color: var(--texto);
+		background: none;
+		border: 0;
+		border-radius: var(--r);
+		cursor: pointer;
+		transition:
+			background var(--t),
+			color var(--t);
+	}
+
+	.navegar:hover {
+		color: var(--indigo);
+		background: var(--indigo-cl);
 	}
 
 	.salir {
@@ -312,6 +345,20 @@
 	.salir:hover {
 		border-color: var(--indigo);
 		color: var(--indigo);
+	}
+
+	/* La unica accion de la barra sin sesion. Rellena, no perfilada: es a lo
+	   que se viene, y con todo perfilado no habia forma de saber cual era. */
+	.principal {
+		color: var(--sobre-indigo);
+		background: var(--indigo);
+		border-color: var(--indigo);
+	}
+
+	.principal:hover {
+		color: var(--sobre-indigo);
+		background: var(--indigo-os);
+		border-color: var(--indigo-os);
 	}
 
 	/* El boton del carrito lleva la burbuja pegada arriba a la derecha, asi
@@ -349,6 +396,13 @@
 	.hamburguesa {
 		width: 38px;
 		height: 38px;
+		/* Sin esto el icono sale como un PUNTO. Es el mismo fallo que
+		   BotonTema.svelte ya tenia documentado y arreglado, y aqui faltaba:
+		   el relleno global de los botones (8px 16px) le deja 6 pixeles al svg,
+		   que pide 20. Un boton de icono con medida fija no lleva relleno, lo
+		   centra `place-items`. Solo se ve en telefono, que es donde sale la
+		   hamburguesa, y por eso llevaba tiempo asi sin que nadie lo notara. */
+		padding: 0;
 		display: grid;
 		place-items: center;
 		background: none;
@@ -389,12 +443,10 @@
 		background: var(--blanco);
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
-		/* Quien separa el menu de lo que tapa es el borde; esto es solo un halo
-		   que suaviza el corte. Va con una variable del tema y no con un negro
-		   translucido porque un negro sobre el fondo oscuro no se ve. Ojo con
-		   leerlo como una sombra de verdad: --panel es opaco, asi que en el
-		   tema oscuro queda mas claro que el fondo, no mas oscuro. */
-		box-shadow: 0 8px 20px var(--panel);
+		/* La sombra del tema, que YA distingue claro de oscuro. Antes esto era
+		   --panel, un color opaco: en oscuro pintaba un halo mas claro que el
+		   fondo, o sea una sombra al reves. */
+		box-shadow: var(--sombra);
 	}
 
 	.menu.abierto {

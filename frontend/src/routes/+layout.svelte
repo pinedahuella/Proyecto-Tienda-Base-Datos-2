@@ -186,6 +186,16 @@
 		--r: 6px;
 		--r2: 10px;
 		--t: 0.18s ease;
+
+		/* La sombra de lo que FLOTA por encima de la pagina: la lista del
+		   buscador y los menus.
+		   Hacia falta una de verdad. Lo que habia era `box-shadow` con --panel,
+		   que es un color OPACO del tema y no una sombra: en claro casi no se
+		   distinguia del fondo y en oscuro quedaba mas claro que la pagina, o
+		   sea un halo al reves. Sin elevacion, un panel flotante se lee como un
+		   segundo recuadro pegado debajo del primero en vez de como algo que
+		   esta encima -- que es justo lo que se veia mal en el buscador. */
+		--sombra: 0 16px 36px rgba(22, 24, 31, 0.16), 0 2px 6px rgba(22, 24, 31, 0.07);
 	}
 
 	/* Tema oscuro. Los nombres significan lo mismo: --tinta es siempre el texto
@@ -213,6 +223,11 @@
 		/* Se invierten: aqui el indigo y el rojo son claros. */
 		--sobre-indigo: #10142a;
 		--sobre-rojo: #2a1210;
+
+		/* Mas negra y mas cerrada que en claro: sobre un fondo oscuro una
+		   sombra suave no se ve, y lo que separa al panel flotante de la
+		   pagina deja de existir. */
+		--sombra: 0 18px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45);
 
 		--hilo: #191f3a;
 	}
