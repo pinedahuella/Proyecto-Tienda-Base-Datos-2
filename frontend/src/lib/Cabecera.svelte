@@ -5,7 +5,7 @@
 	import BotonTema from './BotonTema.svelte';
 	import BuscadorCabecera from './BuscadorCabecera.svelte';
 	import { pedir } from './api';
-	import { cerrarSesion, leerSesion, verificarSesion } from './sesion';
+	import { cerrarSesion, ID_ROL_ADMIN, leerSesion, verificarSesion } from './sesion';
 	import { carrito } from './estadoCarrito.svelte';
 
 	/**
@@ -34,11 +34,43 @@
 	 */
 	let {
 		sesion = undefined,
+		esAdmin = undefined,
 		alSalir
-	}: { sesion?: string | null | undefined; alSalir?: () => void } = $props();
+	}: {
+		sesion?: string | null | undefined;
+		/**
+		 * Si quien monta la cabecera YA sabe que es admin, que lo diga.
+		 *
+		 * Hace falta porque quien pasa `sesion` corta la consulta de abajo, y
+		 * con ella se iba tambien el rol. El panel pasaba solo el correo, asi
+		 * que ahi el buscador se creia de un usuario normal y buscaba por la
+		 * ruta publica: la MISMA busqueda daba resultados distintos en el panel
+		 * y en el catalogo, sin ninguna pista de por que.
+		 */
+		esAdmin?: boolean | undefined;
+		alSalir?: () => void;
+	} = $props();
 
 	/** Lo que averiguo por mi cuenta, cuando nadie me pasa la sesion. */
 	let propia = $state<string | null>(null);
+
+	/**
+	 * Si quien esta dentro es admin.
+	 *
+	 * Solo sirve para una cosa: elegir con que ruta busca el buscador. Un admin
+	 * va contra `/buscador/productos/admin`, que no filtra por estado y por eso
+	 * encuentra tambien lo rechazado y lo pausado -- que es justo lo que un
+	 * admin necesita encontrar cuando revisa el catalogo.
+	 *
+	 * NO es un permiso: es una preferencia de pantalla. Quien decide sigue
+	 * siendo el backend, que a esa ruta le exige sesion y rol y contesta 403 a
+	 * cualquier otro, la tienda incluida. Mentir aqui no abre ninguna puerta,
+	 * solo hace que la busqueda falle.
+	 */
+	let propioAdmin = $state(false);
+
+	/** La prop manda si viene; si no, lo que averigüe yo. Igual que `correo`. */
+	let soyAdmin = $derived(esAdmin !== undefined ? esAdmin : propioAdmin);
 
 	/** La prop manda si viene; si no, lo que averigüe yo. */
 	let correo = $derived(sesion !== undefined ? sesion : propia);
@@ -54,6 +86,7 @@
 		try {
 			const usuario = await verificarSesion();
 			propia = usuario?.correo_electronico ?? null;
+			propioAdmin = usuario?.id_rol_usuario === ID_ROL_ADMIN;
 			// La burbuja del carrito solo se cuenta si hay alguien dentro: sin
 			// sesion, /comprador/pedidos contesta 401 y no hay nada que contar.
 			if (usuario) await carrito.recontar();
@@ -73,6 +106,7 @@
 		await pedir('/usuario/logout', { method: 'POST' });
 		cerrarSesion();
 		propia = null;
+		propioAdmin = false;
 		// La cuenta del carrito era de quien se fue. Dejarla puesta le ensena
 		// a la siguiente persona una burbuja con cosas que no son suyas.
 		carrito.olvidar();
@@ -175,7 +209,7 @@
 		     Va envuelto porque cuanto sitio le toca es cosa de la barra: aqui
 		     se sabe con quien lo comparte, y dentro del componente no. -->
 		<div class="busca">
-			<BuscadorCabecera />
+			<BuscadorCabecera verTodo={soyAdmin} />
 		</div>
 
 		<div class="cuenta">

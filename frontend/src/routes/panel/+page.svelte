@@ -450,7 +450,7 @@
 	<title>Mesh · Panel</title>
 </svelte:head>
 
-<Cabecera sesion={perfil?.correo_electronico ?? null} alSalir={salir} />
+<Cabecera sesion={perfil?.correo_electronico ?? null} {esAdmin} alSalir={salir} />
 
 <main>
 	<div class="env">

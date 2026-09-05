@@ -1,13 +1,22 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { goto } from '$app/navigation';
 	import {
 		buscarProductos,
 		precioVisible,
 		precioSegundo,
 		nota,
+		marcaDeEstado,
 		MINIMO_LETRAS,
 		type ResultadoBusqueda
 	} from './buscador';
+
+	/**
+	 * Buscar tambien lo que no esta activo. Solo tiene sentido para un admin:
+	 * la ruta que lo permite le contesta 403 a cualquier otro, la tienda
+	 * incluida. Quien lo decide es la cabecera, que es quien sabe el rol.
+	 */
+	let { verTodo = false }: { verTodo?: boolean } = $props();
 
 	/**
 	 * El buscador de la cabecera, con su lista de resultados colgando.
@@ -88,11 +97,11 @@
 			(cargando || error !== '' || buscado)
 	);
 
-	async function lanzar(consulta: string) {
+	async function lanzar(consulta: string, todo = verTodo) {
 		const mia = ++ultimaConsulta;
 		cargando = true;
 
-		const salida = await buscarProductos(consulta, MAXIMO_EN_LISTA);
+		const salida = await buscarProductos(consulta, MAXIMO_EN_LISTA, todo);
 
 		// Llego una vieja: se tira. Ver ultimaConsulta.
 		if (mia !== ultimaConsulta) return;
@@ -123,6 +132,31 @@
 
 		retardo = setTimeout(() => lanzar(consulta), ESPERA);
 	}
+
+	/**
+	 * El rol llega TARDE, y eso cambia con que ruta hay que buscar.
+	 *
+	 * La cabecera pregunta quien esta dentro con una peticion, asi que durante
+	 * los primeros instantes de la pagina `verTodo` todavia es false aunque
+	 * quien mire sea admin. Si en ese hueco ya se escribio algo, la busqueda
+	 * salio por la ruta publica y devolvio solo lo activo: un admin que teclea
+	 * rapido veia una lista distinta de la que vera un segundo despues, sin
+	 * ninguna pista de por que.
+	 *
+	 * Cuando el rol llega, se repite la busqueda que hay en pantalla. Solo
+	 * depende de `verTodo`: lo demas se lee con untrack para que escribir no
+	 * dispare esto ademas del retardo normal, que serian dos peticiones por
+	 * tecla.
+	 */
+	$effect(() => {
+		const todo = verTodo;
+		untrack(() => {
+			if (!buscado && !cargando) return;
+			const consulta = texto.trim();
+			if (consulta.length < MINIMO_LETRAS) return;
+			lanzar(consulta, todo);
+		});
+	});
 
 	function alEnfocar() {
 		if (texto.trim().length >= MINIMO_LETRAS) abierto = true;
@@ -158,7 +192,7 @@
 		const consulta = texto.trim();
 		if (consulta.length < MINIMO_LETRAS) return;
 		cerrar();
-		await goto(`/buscar?q=${encodeURIComponent(consulta)}`);
+		await goto(`/buscar?q=${encodeURIComponent(consulta)}${verTodo ? '&todo=1' : ''}`);
 	}
 
 	/**
@@ -297,6 +331,9 @@
 							<span class="nombre">{r.nombre}</span>
 							<span class="bajo">
 								{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
+								{#if marcaDeEstado(r)}
+									<span class="estado">{marcaDeEstado(r)}</span>
+								{/if}
 								{#if nota(r)}<span class="dato">{nota(r)}</span>{/if}
 								{#if r.stock_total <= 0}<span class="dato agotado">Sin existencias</span>{/if}
 							</span>
@@ -527,6 +564,17 @@
 
 	.dato.agotado {
 		color: var(--rojo);
+	}
+
+	/* Solo sale en la busqueda de admin, que es la unica que trae productos que
+	   no estan activos. Va con caja porque "rechazado" en texto plano, entre la
+	   categoria y la nota, se lee como una palabra mas de la fila. */
+	.estado {
+		padding: 1px 7px;
+		font-size: 0.72rem;
+		color: var(--rojo);
+		border: 1px solid var(--rojo);
+		border-radius: 999px;
 	}
 
 	.cifras {

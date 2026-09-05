@@ -819,3 +819,42 @@ demas por el rabillo del ojo.
   ya tenia ese mismo fallo documentado y arreglado con `padding: 0`, y a la
   hamburguesa le faltaba. Solo se ve en telefono, que es donde sale, y por eso
   llevaba tiempo asi sin que nadie lo notara.
+
+## El buscador de admin
+
+David agrego una segunda ruta, `GET /buscador/productos/admin`, que no filtra
+por estado: trae tambien lo que no circula (en revision, rechazado, pausado).
+Pide sesion y rol de admin, y le contesta 403 a cualquier otro, la tienda
+incluida.
+
+El frontend elige la ruta segun quien mire. No es un permiso, es una
+preferencia de pantalla: mentir del lado del navegador no abre nada, solo hace
+que la busqueda falle con el 403 del backend. Comprobado midiendo que ruta usa
+cada cuenta:
+
+| Quien mira | Ruta que usa | La de admin a pelo |
+|---|---|---|
+| admin | `/buscador/productos/admin` | 200 |
+| comprador | `/buscador/productos` | 403 |
+| sin sesion | `/buscador/productos` | 403 |
+
+Los resultados que no estan activos salen con su estado en una etiqueta. En la
+busqueda publica esa etiqueta NO aparece nunca, porque ahi todos llegan
+"activo" y una etiqueta igual en todas las filas no informa de nada.
+
+Desde la lista, "ver todos los resultados" arrastra el criterio en la url
+(`/buscar?q=...&todo=1`): seria raro que la lista de arriba enseñe un producto
+rechazado y la pagina entera no lo traiga.
+
+### Dos carreras que hubo que cerrar
+
+- **El rol llega despues que la pagina.** La cabecera pregunta quien esta dentro
+  con una peticion, asi que durante los primeros instantes `verTodo` es false
+  aunque quien mire sea admin. Quien tecleara rapido veia una lista y otra
+  distinta un segundo despues, sin ninguna pista. Ahora, cuando el rol llega,
+  se repite la busqueda que hay en pantalla.
+- **Quien le pasa `sesion` a la cabecera le cortaba la consulta, y con ella el
+  rol.** El panel le pasaba solo el correo, asi que ahi el buscador se creia de
+  un usuario normal: LA MISMA busqueda daba resultados distintos en el panel y
+  en el catalogo. La cabecera acepta ahora `esAdmin` por la misma via que
+  `sesion` -- la prop manda si viene, y si no la averigua ella.

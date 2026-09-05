@@ -28,6 +28,13 @@ import { pedir, mensajeUtil } from './api';
 export interface ResultadoBusqueda {
 	id_producto: number;
 	nombre: string;
+	/**
+	 * En la ruta publica SIEMPRE llega "activo": ese filtro esta fijo del lado
+	 * del backend y no se puede pedir otra cosa. En la de admin puede ser
+	 * cualquiera, y es justo lo que deja distinguir un producto rechazado de
+	 * uno vivo en la misma lista.
+	 */
+	estado: string;
 	categoria: string | null;
 	/** El mas barato entre todos los vendedores. */
 	precio_desde: number | null;
@@ -66,14 +73,26 @@ export const MINIMO_LETRAS = 2;
  * Un texto mas corto que MINIMO_LETRAS no llega a salir. No es un capricho de
  * rendimiento: con una sola letra la busqueda difusa (`fuzziness: AUTO`)
  * engancha medio catalogo y la lista que sale no ayuda a nadie a elegir.
+ *
+ * `verTodo` cambia de ruta, no de parametro: son DOS rutas distintas en el
+ * backend, `/buscador/productos` y `/buscador/productos/admin`. La segunda
+ * pide sesion de admin y no filtra por estado, asi que trae tambien lo que no
+ * circula -- propuestas en revision, rechazadas, pausadas. Al backend no se le
+ * puede pedir "sin filtro" desde la ruta publica: ese filtro esta fijo en su
+ * codigo, y esta bien que lo este.
  */
-export async function buscarProductos(texto: string, limite = 20): Promise<Busqueda> {
+export async function buscarProductos(
+	texto: string,
+	limite = 20,
+	verTodo = false
+): Promise<Busqueda> {
 	const consulta = texto.trim();
 	if (consulta.length < MINIMO_LETRAS) {
 		return { resultados: [], error: '' };
 	}
 
-	const ruta = `/buscador/productos?nombre=${encodeURIComponent(consulta)}&limite=${limite}`;
+	const base = verTodo ? '/buscador/productos/admin' : '/buscador/productos';
+	const ruta = `${base}?nombre=${encodeURIComponent(consulta)}&limite=${limite}`;
 	const respuesta = await pedir<ResultadoBusqueda[]>(ruta);
 
 	if (!respuesta.ok) {
@@ -133,4 +152,16 @@ export function nota(r: ResultadoBusqueda): string | null {
 	const puntos = r.resenas_promedio.toFixed(1);
 	const cuantas = r.resenas_total === 1 ? '1 resena' : `${r.resenas_total} resenas`;
 	return `${puntos} de 5 con ${cuantas}`;
+}
+
+/**
+ * Si un resultado hay que marcarlo por su estado.
+ *
+ * Solo aparece con la busqueda de admin, que es la unica que trae productos
+ * que no estan activos. En la publica todos llegan "activo" y una etiqueta
+ * que dice lo mismo en todas las filas no informa de nada, asi que no sale.
+ */
+export function marcaDeEstado(r: ResultadoBusqueda): string | null {
+	if (!r.estado || r.estado === 'activo') return null;
+	return r.estado;
 }

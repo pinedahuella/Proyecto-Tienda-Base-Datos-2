@@ -8,6 +8,7 @@
 		precioVisible,
 		precioSegundo,
 		nota,
+		marcaDeEstado,
 		MINIMO_LETRAS,
 		type ResultadoBusqueda
 	} from '$lib/buscador';
@@ -34,6 +35,20 @@
 	/** Lo que pide la direccion. */
 	let consulta = $derived(page.url.searchParams.get('q')?.trim() ?? '');
 
+	/**
+	 * Si la direccion pide ver tambien lo que no esta activo (`&todo=1`).
+	 *
+	 * Lo pone el buscador de la cabecera cuando quien busca es admin, para que
+	 * "ver todos los resultados" no cambie de criterio a mitad de camino: seria
+	 * raro que la lista de arriba enseñe un producto rechazado y la pagina
+	 * entera no lo traiga.
+	 *
+	 * Que este en la url NO da permiso: la ruta de admin pide sesion y rol, y
+	 * al que no lo tenga le contesta 403 -- que aqui se pinta como el error que
+	 * es. Poner `&todo=1` a mano no abre nada, solo rompe tu propia busqueda.
+	 */
+	let verTodo = $derived(page.url.searchParams.get('todo') === '1');
+
 	let resultados = $state<ResultadoBusqueda[]>([]);
 	let error = $state('');
 	let cargando = $state(false);
@@ -56,6 +71,10 @@
 	 */
 	$effect(() => {
 		const texto = consulta;
+		// Se lee aqui dentro a proposito: es lo que hace que cambiar `&todo=1`
+		// en la direccion vuelva a buscar. Leerlo solo dentro del `.then` lo
+		// dejaria fuera de las dependencias del efecto.
+		const todo = verTodo;
 		const mia = ++ultimaConsulta;
 
 		if (texto.length < MINIMO_LETRAS) {
@@ -68,7 +87,7 @@
 
 		cargando = true;
 
-		buscarProductos(texto, TOPE).then((salida) => {
+		buscarProductos(texto, TOPE, todo).then((salida) => {
 			if (mia !== ultimaConsulta) return;
 			resultados = salida.resultados;
 			error = salida.error;
@@ -139,6 +158,9 @@
 							<span class="nombre">{r.nombre}</span>
 							<span class="bajo">
 								{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
+								{#if marcaDeEstado(r)}
+									<span class="estado">{marcaDeEstado(r)}</span>
+								{/if}
 								{#if nota(r)}<span class="dato">{nota(r)}</span>{/if}
 								<span class="dato" class:agotado={r.stock_total <= 0}>
 									{r.stock_total > 0 ? `${r.stock_total} disponibles` : 'Sin existencias'}
@@ -297,6 +319,16 @@
 
 	.dato.agotado {
 		color: var(--rojo);
+	}
+
+	/* Solo con `&todo=1`, o sea solo para un admin: es la unica busqueda que
+	   trae productos que no estan activos. */
+	.estado {
+		padding: 1px 7px;
+		font-size: 0.74rem;
+		color: var(--rojo);
+		border: 1px solid var(--rojo);
+		border-radius: 999px;
 	}
 
 	.cifras {
