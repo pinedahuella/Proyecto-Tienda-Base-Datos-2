@@ -732,9 +732,23 @@ se hizo con cada uno está justo abajo.
    era seguro**: opera sobre un `pedido` que ya existe y `comprar_pedido()`
    revalida su estado bajo `FOR UPDATE`, así que la segunda petición recibe
    "El pedido N ya esta comprado" (1 solo `pago`, verificado).
-2. **PostgreSQL caído → 500 en vez de 503 en rutas con sesión** (pre-existente,
-   **fuera de alcance, sin tocar**). El `SesionGuard` consulta `usuarios`
-   para ver si la cuenta sigue activa; con la BD caída (`docker stop`), ese
-   error no se traduce a `ErrorConexion` y sale como 500 ("No se pudo
-   verificar la sesion"). Afecta a **toda ruta autenticada**, no solo al
-   carrito — es del guard, no del checkout.
+2. **PostgreSQL caído → 500 en vez de 503 en rutas con sesión.**
+   **CORREGIDO (2026-09-04).** Se había anotado como "el `SesionGuard` no
+   traduce el error a `ErrorConexion`", pero al reproducirlo de nuevo en
+   vivo (`docker stop mesh-postgres` con el server ya corriendo, el
+   escenario más común de probar esto a mano) la causa real es más
+   precisa: `SesionGuard` **sí** pasa el error por el clasificador
+   compartido (`manejarErrorConexion`), pero ese clasificador
+   (`esFalloDeConexion()` en `helpers/manejar-error-db.ts` — lo usa casi
+   todo el backend, no solo el guard) solo reconocía el fallo por su
+   `.code` (`08*`, `ECONNREFUSED`, etc.). Cuando Postgres se cae con
+   conexiones del pool ya abiertas, `pg` no tira un error con código: tira
+   un `Error` a secas con el mensaje `"Connection terminated
+   unexpectedly"`, que se colaba sin clasificar y terminaba en 500. El fix
+   agrega ese mensaje (y `ECONNRESET`, mismo patrón, que tampoco estaba en
+   la lista de códigos) al clasificador. Como es el helper compartido,
+   corrige **toda ruta autenticada** de un solo cambio, no solo el
+   carrito. Probado en vivo: `GET /comprador/pedidos/:id` con Postgres
+   apagado a mitad de sesión → `503` "No se pudo conectar con PostgreSQL"
+   (antes: `500`); recuperación automática al volver Postgres, sin
+   reiniciar el server.

@@ -281,8 +281,8 @@ GET /comprador/pedidos/3
         "precio_unitario": "4029.00",
         "id_oferta": "2",
         "id_usuario_vendedor": "6",
-        "puede_resenar": true,
-        "ya_reseno": false
+        "id_resena": null,
+        "puede_resenar": true
       }
     ]
   }
@@ -300,25 +300,31 @@ de un JOIN contra `precio_historial` y `oferta`
 `nombre_variante`): esos tres cambian con el tiempo y no se pueden deducir
 del estado de hoy, a diferencia del precio.
 
-**`puede_resenar` / `ya_reseno` (agregados el 4 de septiembre de 2026)** —
+**`id_resena` / `puede_resenar` (agregados el 4 de septiembre de 2026)** —
 para que la pantalla del pedido pueda ofrecer el botón "Reseñar" por línea
 sin pegarle aparte a `GET /resenas/productos/:id/comprado` y
-`.../resenado`:
+`.../resenado`. Nombre y forma exactos los fija
+`docs/BACKEND-PENDIENTE.md` (bloque 5) — el frontend ya está escrito
+contra estos dos campos:
 
-- `puede_resenar`: `true` si esta línea cumple la regla de
-  `POST /resenas` — el pedido está pagado (`pago.estado_pago = 'pagado'`) y
-  no está `cancelado`. Es la misma condición que ya exige
-  `ResenasService.exigirCompraPagada` al publicar la reseña; se calcula acá
-  con los mismos JOINs, no una versión distinta.
-- `ya_reseno`: `true` si esta cuenta ya reseñó **este producto a este
-  vendedor** — el trío `(id_usuario, id_usuario_vendedor,
-  id_producto_mongo)`, el mismo que protege el `UNIQUE` de `resena`. Es más
-  preciso que `GET /resenas/productos/:id/resenado` (que solo mira el
-  producto, sin importar el vendedor): un mismo producto comprado a dos
-  vendedores distintos puede tener `ya_reseno: true` en una línea y `false`
-  en la otra.
+- `id_resena`: el id de la reseña si esta cuenta ya reseñó **este producto
+  a este vendedor** — el trío `(id_usuario, id_usuario_vendedor,
+  id_producto_mongo)`, el mismo que protege el `UNIQUE` de `resena` — o
+  `null` si todavía no. Es más preciso que
+  `GET /resenas/productos/:id/resenado` (que solo mira el producto, sin
+  importar el vendedor): un mismo producto comprado a dos vendedores
+  distintos puede tener `id_resena` en una línea y `null` en la otra.
+- `puede_resenar`: `true` solo si se cumplen las **cuatro** condiciones a
+  la vez — el pedido está pagado (`pago.estado_pago = 'pagado'`) y no está
+  `cancelado` (misma condición que `ResenasService.exigirCompraPagada`,
+  calculada acá con los mismos JOINs, no una versión distinta), esta línea
+  todavía no tiene `id_resena`, y **el vendedor de la línea no sos vos
+  mismo** — la tabla `resena` tiene `CHECK (id_usuario <>
+  id_usuario_vendedor)`, así que sin esta última condición el botón
+  aparecería para una compra a uno mismo y el `POST /resenas` reventaría.
 
-El frontend muestra "Reseñar" cuando `puede_resenar && !ya_reseno`.
+El frontend muestra "Reseñar" cuando `puede_resenar` es `true` (ya
+descarta por su cuenta el caso de `id_resena` no nulo).
 
 ### 400
 
@@ -351,15 +357,25 @@ El frontend muestra "Reseñar" cuando `puede_resenar && !ya_reseno`.
 { "ok": false, "mensaje": "No se pudo obtener el pedido", "payload": null }
 ```
 
-**`puede_resenar`/`ya_reseno` probado en vivo el 4 de septiembre de 2026**
+**`id_resena`/`puede_resenar` probado en vivo el 4 de septiembre de 2026**
 contra un pedido pagado real (dos líneas del mismo producto, vendido por
-dos vendedores distintos): las dos líneas nacen `puede_resenar: true,
-ya_reseno: false`; tras publicar una reseña para una de las dos, esa línea
-pasa a `ya_reseno: true` y la otra (mismo producto, otro vendedor) se
-queda en `false` — confirma que compara el trío completo, no solo el
-producto. Simulando el pedido `cancelado` y, aparte, el pago en
-`pendiente`, las dos líneas caen a `puede_resenar: false`. Sin regresión
-en el resto del payload.
+dos vendedores distintos): las dos líneas nacen `id_resena: null,
+puede_resenar: true`; tras publicar una reseña real para una de las dos
+(`POST /resenas`), esa línea pasa a `id_resena: 117` (el id real que
+devolvió el `POST`) y `puede_resenar: false`, mientras la otra línea
+(mismo producto, otro vendedor) se queda en `id_resena: null,
+puede_resenar: true` — confirma que compara el trío completo, no solo el
+producto, y que el id que se guarda es el real, no un booleano inventado.
+Simulando el pedido `cancelado` y, aparte, el pago en `pendiente`, las dos
+líneas caen a `puede_resenar: false` (con `id_resena` sin cambiar). Sin
+regresión en el resto del payload.
+
+**Corrección del 4 de septiembre de 2026, mismo día:** la primera versión
+de este campo usaba `ya_reseno` (booleano) en vez de `id_resena`, y
+`puede_resenar` no descartaba el caso de reseñarse a uno mismo — no
+coincidía con el contrato ya fijado en `docs/BACKEND-PENDIENTE.md`, contra
+el que el frontend ya está escrito. Se corrigió antes de que nadie lo
+consumiera; ver `cambio_propuestas/2026-09-04_0810-...md`.
 
 ---
 

@@ -24,9 +24,17 @@ export function manejarErrorConexion(logger: Logger, error: unknown): never {
 /**
  * 08*: clase de error de conexion de Postgres. 28P01: contrasena
  * incorrecta. 3D000: la base no existe. Los demas (ECONNREFUSED,
- * ETIMEDOUT, ENOTFOUND) los tira el driver, no Postgres, cuando ni
- * siquiera logra abrir el socket. AggregateError aparece cuando el driver
- * intenta varias direcciones y todas fallan.
+ * ETIMEDOUT, ENOTFOUND, ECONNRESET) los tira el driver, no Postgres,
+ * cuando ni siquiera logra abrir el socket o este se corta a la mitad.
+ * AggregateError aparece cuando el driver intenta varias direcciones y
+ * todas fallan.
+ *
+ * Hay un caso mas que NO trae `.code`: cuando Postgres se cae con
+ * conexiones del pool ya abiertas (`docker stop` con el server corriendo,
+ * el caso mas comun al probar esto a mano), `pg` lanza un Error a secas
+ * con el mensaje `"Connection terminated unexpectedly"` -- verificado en
+ * vivo el 2026-09-04, este caso se colaba como 500 en vez de 503 porque
+ * no tenia codigo que revisar.
  */
 function esFalloDeConexion(error: unknown): boolean {
   if (error instanceof AggregateError) {
@@ -34,18 +42,20 @@ function esFalloDeConexion(error: unknown): boolean {
   }
 
   const codigo = (error as NodeJS.ErrnoException | undefined)?.code;
-  if (!codigo) {
-    return false;
+  if (
+    codigo != null &&
+    (codigo.startsWith('08') ||
+      codigo === '28P01' ||
+      codigo === '3D000' ||
+      codigo === 'ECONNREFUSED' ||
+      codigo === 'ETIMEDOUT' ||
+      codigo === 'ENOTFOUND' ||
+      codigo === 'ECONNRESET')
+  ) {
+    return true;
   }
 
-  return (
-    codigo.startsWith('08') ||
-    codigo === '28P01' ||
-    codigo === '3D000' ||
-    codigo === 'ECONNREFUSED' ||
-    codigo === 'ETIMEDOUT' ||
-    codigo === 'ENOTFOUND'
-  );
+  return error instanceof Error && /connection terminated/i.test(error.message);
 }
 
 function describirError(error: unknown): string {

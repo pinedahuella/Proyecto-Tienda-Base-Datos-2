@@ -45,6 +45,10 @@ import { AdminReportesService } from './services/admin/admin-reportes.service';
 import { InventarioLimitadoService } from './services/inventario-limitado/inventario-limitado.service';
 import { GrafoController } from './controllers/grafo/grafo.controller';
 import { GrafoSyncService } from './services/grafo/grafo-sync.service';
+import { BaseDatosBuscadorController } from './controllers/base-datos-buscador.controller';
+import { BaseDatosBuscadorService } from './services/base-datos-buscador.service';
+import { BuscadorProductosController } from './controllers/buscador/productos.controller';
+import { BuscadorProductosService } from './services/buscador/productos.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -80,6 +84,8 @@ import { GrafoSyncService } from './services/grafo/grafo-sync.service';
     FraudeController,
     AdminReportesController,
     GrafoController,
+    BaseDatosBuscadorController,
+    BuscadorProductosController,
   ],
   providers: [
     InicioService,
@@ -105,6 +111,8 @@ import { GrafoSyncService } from './services/grafo/grafo-sync.service';
     AdminReportesService,
     InventarioLimitadoService,
     GrafoSyncService,
+    BaseDatosBuscadorService,
+    BuscadorProductosService,
   ],
 })
 export class AppModule {}

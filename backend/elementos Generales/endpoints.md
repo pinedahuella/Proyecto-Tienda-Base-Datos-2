@@ -126,6 +126,40 @@ correr `etl/cargar_grafo.sh`). Timeout de 6 s -> 503.
 
 ---
 
+## GET /buscador
+
+Comprueba la conexion con **Elasticsearch** (el motor de busqueda de la
+Entrega 3). Mismo patron que `GET /documental`, `GET /clave-valor` y
+`GET /grafo`. De paso cuenta los documentos del indice `mesh_productos`:
+`documentos: 0` significa que conecta pero el indice esta vacio o no existe
+todavia (falta correr `etl/cargar_busqueda.sh`) -- eso NO se trata como una
+caida, solo como "no hay nada que buscar". Timeout de 6 s -> 503.
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Conexion establecida con Elasticsearch",
+  "payload": {
+    "version": "8.15.3",
+    "estado_cluster": "green",
+    "documentos": 102
+  }
+}
+```
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con Elasticsearch", "payload": null }
+```
+
+> La ruta que de verdad **busca productos**, `GET /buscador/productos`, esta
+> documentada aparte, en `endpoints-buscador.md`.
+
+---
+
 ## POST /usuario/registro
 
 Cuerpo:

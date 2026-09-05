@@ -407,10 +407,13 @@ export class PedidosCompradorService {
    * rapida, sin tocar Mongo: nombre_producto, nombre_variante y
    * nombre_vendedor ya estan copiados en la linea.
    *
-   * Cada linea trae ademas `puede_resenar` y `ya_reseno` (misma regla que
-   * `ResenasService.exigirCompraPagada`/`resenoProducto`, calculada aca con
-   * un par de EXISTS) para que la pantalla del pedido pueda ofrecer el
-   * boton "Resenar" directo, sin una ruta aparte por producto.
+   * Cada linea trae ademas `id_resena` y `puede_resenar`
+   * (`docs/BACKEND-PENDIENTE.md`, bloque 5 -- el frontend ya esta escrito
+   * contra estos dos nombres, no contra un booleano de "ya reseno"), misma
+   * regla que `ResenasService.exigirCompraPagada` mas los dos casos que el
+   * bloque marca como trampas: no ofrecer el boton si ya existe la resena,
+   * y no ofrecerlo si el vendedor de la linea sos vos mismo (la tabla
+   * `resena` tiene `CHECK (id_usuario <> id_usuario_vendedor)`).
    *
    * Solo si es propio: el WHERE exige ese id_usuario, asi que un pedido
    * ajeno da el mismo ErrorNoEncontrado que uno que no existe.
@@ -463,19 +466,26 @@ export class PedidosCompradorService {
                 ph.precio AS precio_unitario, ph.id_oferta,
                 o.id_usuario AS id_usuario_vendedor,
                 (
+                  SELECT r.id_resena FROM resena r
+                  WHERE r.id_usuario = $2
+                    AND r.id_usuario_vendedor = o.id_usuario
+                    AND r.id_producto_mongo = pp.id_producto_mongo
+                ) AS id_resena,
+                (
                   epe.estado_pedido_nombre <> 'cancelado'
+                  AND o.id_usuario <> $2
+                  AND NOT EXISTS (
+                    SELECT 1 FROM resena r
+                    WHERE r.id_usuario = $2
+                      AND r.id_usuario_vendedor = o.id_usuario
+                      AND r.id_producto_mongo = pp.id_producto_mongo
+                  )
                   AND EXISTS (
                     SELECT 1 FROM pago pg
                     JOIN estado_pago epa ON epa.id_estado_pago = pg.id_estado_pago
                     WHERE pg.id_pedido = pp.id_pedido AND epa.estado_pago_nombre = 'pagado'
                   )
-                ) AS puede_resenar,
-                EXISTS (
-                  SELECT 1 FROM resena r
-                  WHERE r.id_usuario = $2
-                    AND r.id_usuario_vendedor = o.id_usuario
-                    AND r.id_producto_mongo = pp.id_producto_mongo
-                ) AS ya_reseno
+                ) AS puede_resenar
          FROM pedido_producto pp
          JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
          JOIN oferta o ON o.id_oferta = ph.id_oferta
