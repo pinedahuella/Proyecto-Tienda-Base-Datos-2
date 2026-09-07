@@ -4,21 +4,33 @@
 > agregar al carrito, elegir a donde se entrega y pagar -- esta construido y
 > probado contra el backend real.
 >
-> 🔴 **Pero el frontend se quedo atras del backend.** Entraron tres cosas nuevas
-> -- la calle en las direcciones, la aprobacion de ofertas y la propuesta de
-> productos -- con su backend y su esquema terminados y probados, y **ninguna
-> tiene pantalla todavia**. Lo urgente es la calle: `Direcciones.svelte` y
-> `Checkout.svelte` no mandan `direccion_exacta`, que el backend exige al crear,
-> asi que **hoy no se puede dar de alta una direccion desde la interfaz**.
+> **Al dia con el backend, al 2026-09-06.** Este bloque tenia un aviso rojo que
+> decia que a tres cosas -- la calle en las direcciones, la aprobacion de ofertas
+> y la propuesta de productos -- les faltaba pantalla. **Las tres llevan dias
+> construidas** y el aviso se quedo aqui. Comprobado archivo por archivo antes de
+> borrarlo: `direccion_exacta` viaja desde `Direcciones.svelte` y desde
+> `Checkout.svelte`, `PropuestasProducto.svelte` existe con su cola de revision, y
+> `OfertasVendedor.svelte` consume `/vendedor/ofertas/pendientes` con aprobar y
+> rechazar.
+>
+> Lo dejo escrito porque el error es el mismo que este proyecto ya se ha hecho
+> tres veces al reves, con el backend construyendo una pieza que la pantalla no
+> consume. **Un aviso rojo que ya no es cierto cuesta mas que no tener aviso**,
+> porque manda a trabajar en algo que esta hecho.
+>
+> Lo que SI falta hoy es la columna de filtros facetados del buscador, que es un
+> requisito de la Entrega 3. Esta en `docs/PENDIENTES.md`, punto 10.
 >
 > | Pantalla | Estado |
 > |---|---|
 > | `/` catalogo | al dia. Dos formas de paginar: cursor y por numero de pagina |
-> | `/producto/[id]` ficha | al dia, lista las ofertas de cada vendedor |
-> | `/pedidos` | el pedido abierto y el historial, con su detalle |
-> | `/panel` perfil, direcciones, admin | perfil y admin al dia. **Direcciones no**: le falta el campo de la calle, y sin el, crear una direccion devuelve 400 |
-> | `/panel` vendedor | ofertas propias, publicar, precio, estado y stock. **Le falta** ensenar el estado `pendiente` y sus rechazos, y proponer productos |
-> | `/panel` tienda y admin | el catalogo paginado y las ofertas de cada producto al abrirlo. **Le faltan** las dos colas de revision: ofertas pendientes y productos propuestos |
+> | `/producto/[id]` ficha | al dia, con pestanas, lista las ofertas de cada vendedor |
+> | `/buscar` | al dia. **Le falta** la columna de facetas con sus numeros |
+> | `/pedidos` | el pedido abierto y el historial, con su detalle y el boton de resenar |
+> | `/panel` perfil, direcciones, admin | al dia, la calle incluida |
+> | `/panel` vendedor | ofertas, publicar, precio, estado, stock, la venta relampago y las propuestas |
+> | `/panel` tienda y admin | el catalogo, las dos colas de revision, fraude y reportes |
+> | `/panel` tendencias | escrita contra un contrato que el backend todavia no publica. Ver `docs/BACKEND-PENDIENTE.md` |
 > | `/gracias` | al dia: el comprobante despues de comprar |
 > | filtros | catalogo y ofertas filtran en el servidor; la lista del vendedor, en memoria |
 > | `Carrito.svelte` | panel lateral, con seleccion por linea |
@@ -972,11 +984,24 @@ tamano que no esta, se agrega a la escala en `+layout.svelte` y se usa desde el
 componente. Para comprobar que no se ha colado ninguno:
 
 ```
-grep -rho "font-size: *[0-9.]*rem" --include=*.svelte frontend/src
-grep -rho "gap: *[0-9][^;]*"       --include=*.svelte frontend/src
+grep -rho "font-size: *[0-9.]*rem"  --include=*.svelte frontend/src
+grep -rho "gap: *[0-9.]*rem"        --include=*.svelte frontend/src
 ```
 
 Las dos tienen que salir vacias.
+
+**La segunda pregunta por `rem` y no por cualquier numero, y se cambio el
+2026-09-06 por un motivo que no es cosmetico.** Como estaba antes
+(`gap: *[0-9][^;]*`) cazaba tambien `gap: 1px` de `Resenas.svelte` y `gap: 0` de
+la ficha, que son los dos legitimos: un filo de un pixel no sale de una escala de
+ritmo, y un cero es un cero. O sea que la comprobacion **no podia salir vacia
+nunca**, y una comprobacion que siempre tiene ruido deja de leerse a las dos
+semanas. Se ignora, y el dia que se cuele un `gap: 1.5rem` de verdad nadie lo va
+a ver entre las otras dos lineas.
+
+La escala manda sobre los `rem`, que son los que tienen que ser todos iguales
+entre componentes. Los pixeles sueltos de un filo o de un cero no son de la
+escala.
 
 ## En telefono el catalogo va a UNA columna
 

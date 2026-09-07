@@ -10,6 +10,7 @@
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
 	import PanelFraude from '$lib/PanelFraude.svelte';
+	import PanelTendencias from '$lib/PanelTendencias.svelte';
 	import PanelReportes from '$lib/PanelReportes.svelte';
 	import {
 		cerrarSesion,
@@ -117,6 +118,7 @@
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Lo que otros vendedores quieren meter al catalogo' },
 				{ id: 'cuentas', nombre: 'Cuentas', pie: 'Los usuarios del sistema, su rol y su estado' },
 				{ id: 'fraude', nombre: 'Resenas', pie: 'Anillos de calificaciones sospechosas' },
+				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Que se esta calentando y desde que IP entran varias cuentas' },
 				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 			];
 		}
@@ -717,6 +719,21 @@
 					     tambien por enlace directo, /panel?s=fraude. -->
 					{#if visitadas.has('fraude')}
 						<PanelFraude alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'tendencias'}>
+					<!-- Va PEGADA a la de resenas y no al final, porque las dos
+					     contestan la misma pregunta por caminos distintos y se leen
+					     mejor juntas. El grafo sabe que dos cuentas se califican
+					     entre si; no sabe que las dos entran desde la misma casa a
+					     la misma hora. Esa segunda mitad es esta.
+
+					     Y como la de resenas, es SOLO del admin: dice desde que IP
+					     entra cada cuenta, que es justo lo que un vendedor no tiene
+					     por que poder mirar. -->
+					{#if visitadas.has('tendencias')}
+						<PanelTendencias alExpirarSesion={expiro} />
 					{/if}
 				</div>
 			{:else if esVendedor}

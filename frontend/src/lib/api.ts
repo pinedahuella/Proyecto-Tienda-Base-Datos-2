@@ -89,14 +89,44 @@ export async function pedir<T>(ruta: string, opciones: RequestInit = {}): Promis
  * que si le sirve, y el original queda en la consola para quien lo tenga que
  * depurar -- porque esconderselo a la persona no es motivo para perderlo.
  */
-export function mensajeUtil(respuesta: { mensaje?: string; estado: number }): string {
+export function mensajeUtil(respuesta: {
+	mensaje?: string;
+	/**
+	 * El nombre que usa Nest cuando contesta EL, y no un controlador de Mesh.
+	 * Un 404 de ruta inexistente llega asi:
+	 *
+	 *   { "message": "Cannot GET /admin/eventos/tendencias",
+	 *     "error": "Not Found", "statusCode": 404 }
+	 *
+	 * Hay que leerlo, y hasta el 2026-09-06 no se leia. Ver abajo.
+	 */
+	message?: string;
+	estado: number;
+}): string {
 	const generico = 'No se pudo completar la operacion. Intenta de nuevo.';
 
 	if (respuesta.estado === 0) {
 		return 'No se pudo conectar con el servidor. Revisa que el backend este corriendo.';
 	}
 
-	const texto = String(respuesta.mensaje ?? '').trim();
+	// SE MIRAN LOS DOS NOMBRES, Y ESA LINEA ES LA QUE HACIA FALTA.
+	//
+	// Aqui se leia solo `mensaje`. El comentario de arriba ya decia que el caso
+	// a cubrir era "un 404 de Nest, que usa `message` y no `mensaje`", pero el
+	// codigo nunca miraba ese campo: `pedir()` devuelve el cuerpo tal cual, asi
+	// que en un 404 de Nest `mensaje` viene undefined, `texto` quedaba vacio, y
+	// la funcion se iba por el `return generico` de la linea siguiente.
+	//
+	// O sea que la deteccion de mensajes de maquina y la frase especial del 404
+	// -- las dos cosas que esta funcion existe para hacer -- eran CODIGO MUERTO
+	// justo en el caso para el que se escribieron. Nunca se ejecutaron ni una
+	// vez. Se encontro el 2026-09-06 mirando la pantalla de Tendencias, que
+	// pedia una ruta que el backend todavia no publica: en vez de "esa opcion
+	// todavia no esta disponible", salia el generico.
+	//
+	// `mensaje` va primero a proposito: cuando un controlador de Mesh contesta,
+	// el suyo es el bueno y esta escrito para leerse.
+	const texto = String(respuesta.mensaje ?? respuesta.message ?? '').trim();
 	if (texto === '') return generico;
 
 	// Lo que delata a un mensaje de maquina. Se mira el verbo HTTP solo cuando
