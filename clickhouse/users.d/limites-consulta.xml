@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<!--
+  El tope de memoria POR CONSULTA.
+
+  Vive en users.d y no en config.d, y esa carpeta es todo el asunto de este
+  archivo. ClickHouse lee dos arboles de configuracion distintos:
+
+      config.d/   ajustes del SERVIDOR      caches, topes del proceso, puertos
+      users.d/    usuarios, PERFILES y cuotas
+
+  Un <profiles> escrito dentro de config.d no da error y no aparece en el log.
+  Simplemente no se aplica.
+
+  ASI SE COMPROBO, y conviene repetirlo igual la proxima vez. El contenedor
+  arrancaba sano y tres de los cuatro topes salian bien, asi que todo parecia
+  correcto. Preguntandole a la base por el cuarto:
+
+      SELECT name, value FROM system.settings WHERE name = 'max_memory_usage'
+      -> 0.00 B
+
+  Cero es "sin limite". El ajuste estaba escrito, el arranque no se quejaba, y
+  no estaba puesto. Un contenedor sano no es un ajuste aplicado, y la unica
+  forma de saberlo es preguntarle a la base por el valor.
+
+  El resto de los topes, y el incidente que los motivo, estan en
+  clickhouse/config.d/limites.xml.
+-->
+<clickhouse>
+    <profiles>
+        <default>
+            <!--
+              Media giga por consulta, la mitad del techo del servidor.
+
+              Sin esto una sola consulta puede gastarse el presupuesto entero y
+              tumbar de paso al worker que copia los eventos, que corre en el
+              mismo servidor y no tiene la culpa de nada.
+
+              Con este tope, la consulta que se pasa recibe un error que dice
+              cuanta memoria pidio y cuanta habia, y todo lo demas sigue en pie.
+            -->
+            <max_memory_usage>536870912</max_memory_usage>
+        </default>
+    </profiles>
+</clickhouse>

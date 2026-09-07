@@ -1,0 +1,94 @@
+<?xml version="1.0"?>
+<!--
+  Los topes de memoria de ClickHouse.
+
+  ESTE ARCHIVO EXISTE POR UN INCIDENTE, no por prudencia. El 2026-09-06, con la
+  base recien montada, Windows se quedo sin memoria y mato el backend, el
+  servidor del frontend y un arnes a medias. Medido en ese momento:
+
+      mesh-elastic       1.112 GiB      heap fijado a mano en 512m
+      mesh-clickhouse    799.9 MiB      SIN NINGUN TOPE
+      mesh-neo4j         689.7 MiB
+      ... y otros seis contenedores
+
+      Docker tiene 7.6 GiB de los 15.7 GiB de la maquina.
+
+  ClickHouse no era el que mas gastaba. Lo que lo hacia peligroso es que era el
+  UNICO sin techo: `max_server_memory_usage` por defecto es una fraccion de lo
+  que el proceso ve, o sea que una consulta pesada podia llevarse casi los
+  7.6 GiB enteros y dejar sin nada a las otras cinco bases.
+
+  Es el mismo problema que ya habia mordido tres veces con la JVM de
+  Elasticsearch, que se queda con la mitad de la RAM que ve si nadie se lo
+  impide. La solucion aqui es la misma idea escrita en otro idioma.
+
+  POR QUE NO SE USA EL mem_limit DE DOCKER, que seria mas corto de escribir.
+  Docker mata el proceso cuando se pasa, sin decir por que, y el sintoma es un
+  contenedor que se reinicia solo cada cierto tiempo. Con el tope puesto DENTRO,
+  ClickHouse rechaza la consulta que se pasa con un error que dice exactamente
+  cuanta memoria pidio y cuanta habia, y el servidor sigue en pie.
+
+
+  LA TRAMPA QUE COSTO DOCE REINICIOS, y esta escrita aqui para que no vuelva.
+  ============================================================================
+  La primera version de este archivo llevaba `max_memory_usage` aqui, al nivel
+  de <clickhouse>. El contenedor entraba en bucle de reinicio con codigo 137 y
+  SIN UN SOLO MENSAJE DE ERROR en el log: se veia el "Merging configuration
+  file limites.xml" y despues nada.
+
+  El motivo es que hay DOS clases de ajuste y no se escriben en el mismo sitio.
+
+    ajuste de SERVIDOR   va suelto bajo <clickhouse>. Son los caches y los
+                         topes del proceso entero.
+    ajuste de CONSULTA   va dentro de <profiles><default>. Son los que se
+                         aplican a cada consulta que llega.
+
+  `max_memory_usage` es de los segundos. Puesto arriba no es que se ignore, es
+  que tumba el arranque.
+
+  Y ojo con como se diagnostica esto, porque el sintoma enganaba: la maquina
+  tenia 0.9 GiB libres en ese momento, asi que lo primero que uno piensa es que
+  el contenedor lo mata la falta de memoria. Lo que lo separo fue quitar el
+  montaje de este archivo y volver a levantar: sin el arrancaba sano con la
+  misma memoria libre. La diferencia era el archivo, no la maquina.
+
+
+  EL DIA QUE ENTREN EL MILLON DE PRODUCTOS estos numeros son los primeros que
+  hay que subir, igual que el heap de Elasticsearch. Estan juntos y comentados
+  para que se encuentren.
+-->
+<clickhouse>
+
+    <!--
+      El techo duro del servidor entero, 1 GiB. Ajuste de SERVIDOR.
+
+      Con el catalogo de hoy sobra de largo: la tabla de eventos mas grande
+      tiene unos pocos miles de filas y las consultas del panel contestan en
+      17 milisegundos. El numero esta puesto para el dia malo, no para el
+      normal.
+    -->
+    <max_server_memory_usage>1073741824</max_server_memory_usage>
+
+    <!--
+      El cache de marcas reserva varios GiB por defecto, y esa sola linea
+      explica casi todo el riesgo. Es memoria que el servidor aparta para si
+      mismo sin que ninguna consulta la pida.
+
+      256 MiB es mucho mas de lo que hace falta para cuatro tablas pequenas.
+    -->
+    <mark_cache_size>268435456</mark_cache_size>
+
+    <!--
+      El cache de bloques sin comprimir viene apagado para las consultas
+      normales, pero reserva su hueco igual. Se deja pequeno en vez de en cero
+      porque cero desactiva una comprobacion interna y el arranque se queja.
+    -->
+    <uncompressed_cache_size>67108864</uncompressed_cache_size>
+
+    <!--
+      El tope por CONSULTA no esta en este archivo, y no es un olvido. Vive en
+      clickhouse/users.d/limites-consulta.xml, porque los perfiles se leen de
+      users.d y no de config.d. El porque completo esta alla.
+    -->
+
+</clickhouse>

@@ -70,3 +70,17 @@ desktop.ini
 
 # Los respaldos que deja draw.io al guardar
 .$*.drawio.bkp
+
+# ============================================================
+# Lo que dejan los arneses de pruebas/
+# ============================================================
+# Los arneses escriben sus archivos de trabajo con nombre RELATIVO y con punto
+# delante, y no en /tmp. Y hay un motivo: curl.exe es un binario de Windows y con
+# MSYS_NO_PATHCONV activo no recibe traducidas las rutas de archivo, asi que con
+# `-c /tmp/algo` no escribe el tarro de cookies Y NO SE QUEJA. El login contesta
+# 200, el tarro queda vacio y la sesion se pierde en silencio.
+#
+# Un nombre relativo lo entienden los dos mundos. El precio es que aparecen en
+# la raiz del repositorio, y de ahi estas lineas.
+.mesh-*
+

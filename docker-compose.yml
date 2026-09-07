@@ -291,6 +291,122 @@ services:
       retries: 10
       start_period: 60s
 
+  # ------------------------------------------------------------------
+  # ClickHouse -- la base columnar de los eventos
+  # ------------------------------------------------------------------
+  # Es la SEXTA base y la tercera PROYECCION: la verdad de los logueos y los
+  # registros sigue siendo PostgreSQL, igual que pasa con Neo4j y con
+  # Elasticsearch. Se puede borrar entera y reconstruir sin perder un dato de
+  # negocio, y por eso su volumen no es sagrado.
+  #
+  # Lo unico que NACE aqui son las vistas de producto: hoy nadie las guarda en
+  # ninguna parte, y sin ellas no hay forma de saber que producto se esta
+  # calentando antes de venderse.
+  #
+  # POR QUE ClickHouse Y NO CASSANDRA, que es la opcion de referencia del
+  # enunciado. Cassandra es wide-column: guarda agrupado por clave de particion
+  # y esta hecha para leer por clave conocida. Obliga a saber la pregunta ANTES
+  # de guardar el dato, y cada pregunta nueva es una tabla nueva mas recargar
+  # todo el historico. Detectar fraude es justamente buscar lo que no sabias que
+  # ibas a buscar. ClickHouse guarda por COLUMNA y contesta con SQL lo que se le
+  # ocurra a quien pregunte, sin tocar el esquema. El enunciado lo permite en
+  # 5.2, "alternativas equivalentes", y en 5.5 dice que lo que se califica es la
+  # calidad del analisis.
+  clickhouse:
+    image: clickhouse/clickhouse-server:25.3
+    container_name: mesh-clickhouse
+    restart: unless-stopped
+    environment:
+      # La base y el usuario se crean en el PRIMER arranque, cuando el volumen
+      # esta vacio. Si ya existe, estas tres variables no hacen nada: cambiar la
+      # contrasena aqui sobre un volumen ya creado NO la cambia en la base, y es
+      # la trampa que se lleva media tarde. Para eso, .\arrancar.ps1 -Reiniciar.
+      CLICKHOUSE_DB: ${CLICKHOUSE_DB:?falta CLICKHOUSE_DB en el .env}
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:?falta CLICKHOUSE_USER en el .env}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:?falta CLICKHOUSE_PASSWORD en el .env}
+
+      # El usuario que se crea arriba nace pudiendo repartir permisos. Se deja
+      # encendido A PROPOSITO y no por comodidad: la Entrega final pide control
+      # de acceso configurado explicitamente sobre al menos un componente NoSQL,
+      # con roles acotados segun el servicio. Sin esto no se puede ni empezar a
+      # crear esos roles desde adentro.
+      CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
+
+      # LA ZONA HORARIA NO ES UN DETALLE AQUI, y esto se midio antes de que
+      # rompiera nada: el contenedor nace en UTC y Guatemala es UTC-6, asi que
+      # today() dentro de la base ya era 2026-09-07 cuando el reloj de Windows
+      # decia 2026-09-06 20:34.
+      #
+      # En una base de eventos eso no es un desfase de seis horas, es un dia
+      # entero mal contado: un panel de "ventas por dia" partiria el dia a las
+      # 6 de la tarde, y todo lo que pase de ahi en adelante se sumaria al dia
+      # siguiente. Nadie lo notaria, porque los numeros salen y cuadran entre
+      # ellos. Solo estan corridos.
+      #
+      # Se comprobo: con UTC la consulta de tendencia daba 500 contra 900, y
+      # con la zona puesta da 1000 contra 400, que es lo que se sembro.
+      TZ: America/Guatemala
+    ports:
+      # 8123 es HTTP, y es por donde entra TODO: el driver de Node y la consola
+      # web que la propia imagen trae en http://localhost:8123/play. No hace
+      # falta un contenedor de visor como pgAdmin o DbGate.
+      - "8123:8123"
+
+      # 9000 es el protocolo nativo, el de clickhouse-client. Se publica en el
+      # 9010 por fuera por la misma razon por la que Mongo salio al 27018: el
+      # 9000 es de los puertos mas peleados de Windows -- Portainer, MinIO,
+      # php-fpm -- y aqui no hace falta ganar esa pelea.
+      - "9010:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+
+      # LOS TOPES DE MEMORIA, y no son opcionales en esta maquina.
+      #
+      # Sin este archivo ClickHouse arranca con max_server_memory_usage al 90
+      # por ciento de lo que ve y con 5 GiB reservados solo para el cache de
+      # marcas. El 2026-09-06 la maquina se quedo sin memoria y mato el backend
+      # y el servidor del frontend a media sesion, con ClickHouse en 800 MiB y
+      # sin ningun techo puesto.
+      #
+      # Es el mismo cuidado que ya se le tuvo al heap de Elasticsearch aqui
+      # arriba. El porque de cada numero esta dentro del propio archivo.
+      #
+      # Va de solo lectura porque el contenedor no tiene por que reescribir su
+      # propia configuracion, y si un dia lo intenta conviene que falle en vez
+      # de cambiar el repositorio por debajo.
+      - ./clickhouse/config.d/limites.xml:/etc/clickhouse-server/config.d/limites.xml:ro
+
+      # Y el tope POR CONSULTA va aparte, en users.d, porque ClickHouse lee dos
+      # arboles distintos: config.d para el servidor y users.d para los
+      # perfiles. Un <profiles> metido en config.d no da error y no se aplica.
+      - ./clickhouse/users.d/limites-consulta.xml:/etc/clickhouse-server/users.d/limites-consulta.xml:ro
+    ulimits:
+      # ClickHouse abre un archivo por parte de tabla y son muchas. Con el
+      # limite por defecto de Docker arranca, pero deja un aviso en el log en
+      # cada inicio y se degrada cuando la tabla crece. Es el numero que la
+      # propia documentacion pide.
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      # Se pregunta con una CONSULTA de verdad y con las credenciales, no con el
+      # /ping. El /ping contesta sin autenticarse y sin mirar si la base existe,
+      # o sea que daria sano con la contrasena equivocada -- la misma trampa del
+      # 9200 de Elasticsearch y del 7474 de Neo4j, que ya mordio dos veces.
+      #
+      # Asi, sano quiere decir tambien que la contrasena del .env es la que la
+      # base acepta, igual que hace el healthcheck de Redis.
+      test:
+        [
+          "CMD-SHELL",
+          "clickhouse-client --user \"$$CLICKHOUSE_USER\" --password \"$$CLICKHOUSE_PASSWORD\" --database \"$$CLICKHOUSE_DB\" --query 'SELECT 1' > /dev/null || exit 1"
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
 volumes:
   postgres-data:
   pgadmin-data:
@@ -301,3 +417,5 @@ volumes:
   neo4j-data:
   neo4j-logs:
   elastic-data:
+  clickhouse-data:
+  clickhouse-logs:

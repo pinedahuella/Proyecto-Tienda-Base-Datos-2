@@ -160,7 +160,9 @@ param(
     [string]$Semilla   = '',
     [string]$Borrar    = '',
     [string]$ProductosMongo = '',
-    [string]$BorrarMongo    = ''
+    [string]$BorrarMongo    = '',
+    [string]$Vistas         = '',
+    [string]$BorrarVistas   = ''
 )
 
 Set-Location -LiteralPath $PSScriptRoot
@@ -262,10 +264,29 @@ if ($Mongo -and ($pidioLote -or $pidioSemilla)) {
     exit 1
 }
 
-if ($pidioSemilla -and -not $pidioLote) {
-    Error1 "-Semilla no dice nada sin -Productos, y cuantos generar no se adivina."
-    Error1 "Si lo que querias era un lote repetible:"
+# AQUI HABIA UN FALLO VIVO, y se arregla al agregar el tercer generador porque es
+# la tercera vez que muerde la misma linea.
+#
+# Esta guardia miraba solo $pidioLote, que es -Productos. O sea que
+# `-ProductosMongo 200 -Semilla 7` moria diciendo "-Semilla no dice nada sin
+# -Productos" sobre una linea que SI decia cuantos generar y con que semilla. El
+# generador de Mongo acepta semilla desde el dia que se escribio; lo que no la
+# aceptaba era la puerta.
+#
+# Ahora se pregunta por CUALQUIERA de los tres generadores. La regla de verdad,
+# que es la que habia que escribir desde el principio, es que -Semilla necesita
+# que alguien le diga CUANTOS generar, y eso lo dice cualquiera de las tres
+# banderas, no una en concreto.
+$pidioLoteMongo = $PSBoundParameters.ContainsKey('ProductosMongo')
+$pidioVistas    = $PSBoundParameters.ContainsKey('Vistas')
+$pidioAlgunLote = $pidioLote -or $pidioLoteMongo -or $pidioVistas
+
+if ($pidioSemilla -and -not $pidioAlgunLote) {
+    Error1 "-Semilla no dice nada sola, porque cuantos generar no se adivina."
+    Error1 "Va con la bandera que dice cuantos, y son tres:"
     Error1 "   .\arrancar.ps1 -Productos 300 -Semilla $Semilla"
+    Error1 "   .\arrancar.ps1 -ProductosMongo 200 -Semilla $Semilla"
+    Error1 "   .\arrancar.ps1 -Vistas 5000 -Semilla $Semilla"
     exit 1
 }
 
@@ -290,6 +311,35 @@ if ($pidioLote) {
 if ($pidioSemilla) {
     $SemillaPedida = Leer-Entero $Semilla '-Semilla' 0 ([long]::MaxValue)
     if ($null -eq $SemillaPedida) { exit 1 }
+}
+
+# -Vistas siembra el lote de eventos de ClickHouse, y -BorrarVistas lo deshace.
+#
+# El tope de abajo no es un numero redondo elegido a ojo: es el mismo que exige
+# la guardia de clickhouse/lote/generar_vistas.sql, copiado aqui a proposito para
+# que el error llegue en un segundo y no despues del arranque entero. Por debajo
+# de 840 el fondo no llega a una vista por producto y por dia, y el panel sale
+# con las dos senales solas y nada contra que compararlas, que es un panel que
+# no ensena nada.
+$VistasPedidas  = -1
+$VistasBorrar   = -1
+
+if ($pidioVistas) {
+    $VistasPedidas = Leer-Entero $Vistas '-Vistas' 840 5000000
+    if ($null -eq $VistasPedidas) { exit 1 }
+
+    # Misma regla que las otras cuatro banderas de lote: generar y borrar en la
+    # misma corrida deja la base como estaba despues de hacer todo el trabajo.
+    if ($BorrarVistas -ne '') {
+        Error1 "-Vistas y -BorrarVistas no se pueden usar en la misma corrida."
+        Aviso  "   Una siembra y la otra deshace. Juntas dejan la base igual que estaba."
+        exit 1
+    }
+}
+
+if ($PSBoundParameters.ContainsKey('BorrarVistas')) {
+    $VistasBorrar = Leer-Entero $BorrarVistas '-BorrarVistas' 0 ([long]::MaxValue)
+    if ($null -eq $VistasBorrar) { exit 1 }
 }
 
 
@@ -530,6 +580,36 @@ function Comando-Cypher($resto) {
 }
 
 
+# Una consulta a ClickHouse. Devuelve el texto de la respuesta, o $null si no se
+# pudo preguntar. La regla es la misma que la de Contar-Nodos, aqui abajo: no se
+# inventa un valor cuando la consulta falla, porque quien llama necesita poder
+# distinguir "contesto cero" de "no contesto".
+#
+# En la marca de agua de los eventos esa diferencia cuesta caro. Un cero
+# inventado significa "no he copiado nada todavia" y manda a recopiar la tabla
+# entera; peor todavia, tapa el motivo real, que es que la base no contesta.
+#
+# LAS CREDENCIALES VAN COMO ARGUMENTOS Y NO DENTRO DE UN sh -c, y no es por
+# gusto. El truco de Comando-Mongo y Comando-Cypher -- leerlas de las variables
+# del propio contenedor -- aqui no se puede: obliga a armar una linea con
+# comillas dobles, y PowerShell 5.1 se las come. Medido el 2026-09-06, la
+# consulta llegaba cortada y ClickHouse contestaba
+# "Syntax error: failed at position 7 (end of query)".
+#
+# El precio es que la contrasena queda a la vista de un `ps` mientras dura la
+# llamada. Es el mismo precio que ya se paga en redis/prueba_carrito.sh con su
+# `-a $REDIS_PASSWORD`, y en una maquina de clase se acepta. El dia que esto
+# salga de local, la salida es mandar la consulta por la entrada estandar.
+function Consultar-ClickHouse($sql) {
+    $salida = docker exec -i mesh-clickhouse clickhouse-client `
+        --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
+        --database $env_['CLICKHOUSE_DB'] --query $sql 2>&1 | Out-String
+
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return $salida.Trim()
+}
+
+
 # Cuenta los nodos de una etiqueta del grafo. Devuelve $null si no se pudo
 # contar, y quien llame decide que hacer: aqui no se inventa un cero, porque un
 # cero inventado hace creer que el grafo esta vacio y dispara un ETL de mas (o
@@ -707,7 +787,7 @@ foreach ($linea in Get-Content "$PSScriptRoot\.env") {
 # La regla: agregar un servicio al compose con una variable obligatoria incluye
 # agregarla AQUI y a .env.example, en la misma pasada.
 $faltantes = @()
-# Son las DIEZ que docker-compose.yml marca con ":?". Se comprueba con:
+# Son las TRECE que docker-compose.yml marca con ":?". Se comprueba con:
 #   las de   grep -o '\${[A-Z0-9_]*:?' docker-compose.yml
 #   tienen que estar todas en esta lista.
 # PGADMIN_EMAIL y PGADMIN_PASSWORD llevaban aqui desde siempre y faltaban: el
@@ -715,7 +795,8 @@ $faltantes = @()
 foreach ($obligatoria in @("DB_USER", "DB_PASSWORD", "DB_NAME",
                           "MONGO_USER", "MONGO_PASSWORD", "MONGO_DB",
                           "PGADMIN_EMAIL", "PGADMIN_PASSWORD",
-                          "REDIS_PASSWORD", "NEO4J_PASSWORD")) {
+                          "REDIS_PASSWORD", "NEO4J_PASSWORD",
+                          "CLICKHOUSE_DB", "CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD")) {
     if (-not $env_[$obligatoria] -or $env_[$obligatoria] -eq "cambiame") {
         $faltantes += $obligatoria
     }
@@ -2336,6 +2417,216 @@ if ($proximoId -notmatch '^\d+$') {
 # healthcheck del compose hace un "redis-cli -a $REDIS_PASSWORD ping" con la
 # contrasena de adentro, asi que sano quiere decir tambien que la contrasena
 # del .env es la que la base acepta. No hace falta comprobarlo aparte.
+Paso "Esperando a ClickHouse"
+
+# La base columnar de los eventos. Igual que Elasticsearch, NO corta el arranque
+# si no sube: hoy no cuelga ninguna pantalla de ella, y tumbar la maquina entera
+# por la base mas nueva dejaria sin trabajar a todos los demas.
+#
+# 90 y no 120: no es una JVM, arranca bastante mas rapido que Elasticsearch y
+# que Neo4j.
+if (-not (Esperar-Contenedor "mesh-clickhouse" 90)) {
+    Aviso "ClickHouse no respondio. El resto sigue funcionando."
+    Aviso "   Mira el log:  docker logs mesh-clickhouse --tail 30"
+} else {
+    Ok "ClickHouse respondiendo"
+
+    # El esquema es idempotente: todo va con IF NOT EXISTS, asi que se corre en
+    # cada arranque sin preguntar y sin borrar nada. No hace falta la logica de
+    # "si no cuadra lo reconstruyo" que si necesitan el catalogo de Mongo y el
+    # indice del buscador, porque aqui no hay ningun dato que reconstruir: los
+    # eventos no se derivan de PostgreSQL, se acumulan.
+    $sql = Get-Content "$PSScriptRoot\clickhouse\001_esquema.sql" -Raw
+    $sql | docker exec -i mesh-clickhouse clickhouse-client `
+        --user $env_['CLICKHOUSE_USER'] `
+        --password $env_['CLICKHOUSE_PASSWORD'] `
+        --database $env_['CLICKHOUSE_DB'] `
+        --multiquery 2>&1 | Out-Null
+
+    if ($LASTEXITCODE -ne 0) {
+        Aviso "El esquema de ClickHouse no se pudo aplicar. Mira clickhouse/001_esquema.sql"
+    } else {
+        Ok "esquema de eventos aplicado (clickhouse/001_esquema.sql)"
+
+        # ------------------------------------------------------------
+        # La copia de los logueos y los registros
+        # ------------------------------------------------------------
+        # Es el gemelo en PowerShell de etl/cargar_eventos.sh, igual que el resto
+        # de este script es el gemelo del ETL de Mongo. Se repite en vez de
+        # llamar al .sh por lo mismo de siempre: PowerShell 5.1 le pega un BOM a
+        # lo que manda por tuberia y el otro lado recibe basura.
+        #
+        # Y NO tiene rama de "aviso y sigo". Eso ya paso una vez con el ETL de
+        # Mongo: cuando no encontraba el bash de Git se saltaba la carga, avisaba,
+        # y el arranque terminaba EN VERDE con el catalogo vacio. Aqui seria peor,
+        # porque una base de eventos vacia no se nota nunca y el dia de la entrega
+        # contesta "no hay cuentas anomalas", que es creible y falso.
+        #
+        # Corre en cada arranque y es barata: en un arranque normal no copia nada
+        # y tarda un parpadeo, porque solo pide lo que esta por encima de la marca.
+        function Copiar-Eventos($etiqueta, $tabla, $colId, $tablaCh, $seleccion) {
+            # LA MARCA DE AGUA SALE SOLO DE LAS FILAS QUE ESTA COPIA ESCRIBIO.
+            # El filtro por lote = 'real' no es cosmetico: el generador de
+            # clickhouse/lote siembra en ESTA MISMA TABLA con ids inventados del
+            # orden de los mil millones. Sin el filtro, la marca se iria hasta
+            # alla y la copia se saltaria logueos REALES para siempre, diciendo
+            # "nada nuevo" y dando las cuentas por cuadradas.
+            #
+            # Es el pendiente 5 otra vez, con otro par de numeros: dos cosas
+            # repartiendo ids sobre el mismo espacio sin hablarse. Medido el
+            # 2026-09-06, la marca sin filtrar daba 1887513295.
+            $marca = Consultar-ClickHouse "SELECT max($colId) FROM $tablaCh WHERE lote = 'real'"
+
+            # $null quiere decir que la base NO contesto, y eso no es un cero.
+            # Un cero aqui mandaria a recopiar la tabla entera y, sobre todo,
+            # taparia el motivo de verdad. Se devuelve el fallo hacia arriba.
+            if ($null -eq $marca) { return -1 }
+
+            # Vacio SI es un cero legitimo: max() sobre una tabla sin filas de
+            # lote real devuelve la cadena vacia, y eso significa "no he copiado
+            # nada todavia, empieza por el principio".
+            if ($marca -eq '') { $marca = "0" }
+
+            $sql = $seleccion -replace '@MARCA@', $marca
+            $crudo = docker exec -i mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] `
+                -qtA -F "`t" -v ON_ERROR_STOP=1 -c $sql
+
+            # EL FIN DE LINEA DE WINDOWS, QUE AQUI MUERDE DOS VECES Y POR DOS
+            # SITIOS DISTINTOS.
+            #
+            # Primero al LEER. psql dentro del contenedor devuelve fin de linea
+            # de Unix, pero PowerShell lo parte con el de Windows al recogerlo,
+            # y cada elemento del arreglo se queda con un \r pegado al final.
+            # Sin quitarlo, ClickHouse rechaza el TabSeparated entero con
+            # "You have carriage return at end of first row" y sale con 117.
+            $lineas = @($crudo | ForEach-Object { $_ -replace "`r", "" } | Where-Object { $_ -ne '' })
+
+            if ($lineas.Count -eq 0) { return 0 }
+
+            # Y despues al ESCRIBIR, que es la mitad que se escapo la primera
+            # vez. Aunque el texto se una con "`n" a mano, PowerShell 5.1
+            # escribe a la entrada de un programa externo con el fin de linea de
+            # la plataforma, o sea CRLF. Vuelve a meter el \r que se acababa de
+            # quitar, y ClickHouse contesta
+            #
+            #   Code: 27. Cannot parse input: expected '\n' before: '\r\n'
+            #   ERROR: garbage after UInt64: "<CARRIAGE RETURN><LINE FEED>"
+            #
+            # Se arregla con el ajuste que el propio ClickHouse nombra en su
+            # mensaje de error, y no peleando con PowerShell. El bash de
+            # etl/cargar_eventos.sh no lo necesita porque ahi la tuberia es
+            # directa entre dos procesos y nadie toca los bytes por el camino.
+            #
+            # SE ENCONTRO CORRIENDO EL ARRANQUE ENTERO, no antes. La prueba
+            # suelta de este mismo camino habia dado verde un rato antes, y dio
+            # verde porque en ese momento no habia ni una fila pendiente que
+            # copiar: el INSERT no llego a ejecutarse. Un verde sobre una linea
+            # que no se ejecuta no es un verde.
+            ($lineas -join "`n") | docker exec -i mesh-clickhouse clickhouse-client `
+                --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
+                --database $env_['CLICKHOUSE_DB'] `
+                --input_format_tsv_crlf_end_of_line 1 `
+                --query $tabla | Out-Null
+
+            if ($LASTEXITCODE -ne 0) {
+                Aviso "$etiqueta no se pudo copiar a ClickHouse."
+                return -1
+            }
+            return $lineas.Count
+        }
+
+        $selLogueos = @"
+SELECT to_char(l.fecha_login AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),
+       l.id_usuario, host(l.ip_origen), t.tipo_login_nombre, 'real', l.id_log_login
+  FROM log_login l JOIN tipo_login t USING (id_tipo_login)
+ WHERE l.id_log_login > @MARCA@ ORDER BY l.id_log_login
+"@
+        $selRegistros = @"
+SELECT to_char(r.fecha_registro AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),
+       r.id_usuario, host(r.ip_origen), r.id_log_registro, 'real'
+  FROM log_registro r
+ WHERE r.id_log_registro > @MARCA@ ORDER BY r.id_log_registro
+"@
+
+        $nL = Copiar-Eventos "Los logueos" `
+            "INSERT INTO evento_login (fecha, id_usuario, ip, tipo, lote, id_log_login) FORMAT TabSeparated" `
+            "id_log_login" "evento_login" $selLogueos
+        $nR = Copiar-Eventos "Los registros" `
+            "INSERT INTO evento_registro (fecha, id_usuario, ip, id_log_registro, lote) FORMAT TabSeparated" `
+            "id_log_registro" "evento_registro" $selRegistros
+
+        if ($nL -lt 0 -or $nR -lt 0) {
+            Error1 "Los eventos no se copiaron a ClickHouse."
+            Error1 "El panel de tendencias y el de fraude por IP van a salir vacios,"
+            Error1 "y vacio ahi no se distingue de 'no hay nada sospechoso'."
+            exit 1
+        }
+
+        if ($nL -eq 0 -and $nR -eq 0) {
+            Ok "eventos ya copiados, nada nuevo"
+        } else {
+            Ok "eventos copiados: $nL logueo(s) y $nR registro(s)"
+        }
+
+        # ------------------------------------------------------------
+        # El lote de eventos de mentira, solo si se pidio
+        # ------------------------------------------------------------
+        # Va DESPUES de la copia, y ese orden se puede razonar en una linea: el
+        # generador escribe con lote 'generado-N' y la copia lee su marca de agua
+        # filtrando por lote 'real', asi que no se pisan en ningun orden. Se pone
+        # despues porque leerlo asi es mas facil que confiar en esa propiedad.
+        #
+        # La semilla por defecto es 42 y no una al azar. Un lote reproducible es
+        # lo unico que permite que dos personas del equipo miren el mismo panel y
+        # vean los mismos numeros.
+        if ($pidioVistas) {
+            $semillaVistas = if ($pidioSemilla) { $SemillaPedida } else { 42 }
+
+            Paso "Sembrando el lote de eventos (semilla $semillaVistas)"
+
+            $sqlLote = Get-Content "$PSScriptRoot\clickhouse\lote\generar_vistas.sql" -Raw
+            $sqlLote | docker exec -i mesh-clickhouse clickhouse-client `
+                --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
+                --database $env_['CLICKHOUSE_DB'] `
+                --param_semilla=$semillaVistas --param_vistas=$VistasPedidas `
+                --multiquery 2>&1 | Out-Null
+
+            if ($LASTEXITCODE -ne 0) {
+                # La guardia del propio SQL rechaza una semilla ya sembrada, y ese
+                # rechazo NO es un fallo del arranque: es el generador haciendo su
+                # trabajo. Se dice y se sigue, igual que hace el lote de Mongo.
+                Aviso "La semilla $semillaVistas ya estaba sembrada, o el lote fallo."
+                Aviso "   Para rehacerlo:  .\arrancar.ps1 -BorrarVistas $semillaVistas"
+                Aviso "   Y despues:       .\arrancar.ps1 -Vistas $VistasPedidas -Semilla $semillaVistas"
+            } else {
+                $cuantas = Consultar-ClickHouse "SELECT count() FROM vista_producto WHERE lote = 'generado-$semillaVistas'"
+                Ok "lote sembrado: $cuantas vista(s) con lote generado-$semillaVistas"
+            }
+        }
+
+        if ($VistasBorrar -ge 0) {
+            Paso "Borrando el lote de eventos de la semilla $VistasBorrar"
+
+            # LAS DOS MITADES. El resumen vistas_por_producto_dia se llena por una
+            # vista materializada, y una vista materializada solo mira lo que
+            # ENTRA: borrar de vista_producto no le quita ni una fila. El SQL de
+            # borrar_lote.sql borra de las dos, y por eso se llama a el en vez de
+            # lanzar un DELETE desde aqui.
+            $sqlBorrar = Get-Content "$PSScriptRoot\clickhouse\lote\borrar_lote.sql" -Raw
+            $sqlBorrar | docker exec -i mesh-clickhouse clickhouse-client `
+                --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
+                --database $env_['CLICKHOUSE_DB'] `
+                --param_semilla=$VistasBorrar --multiquery 2>&1 | Out-Null
+
+            if ($LASTEXITCODE -ne 0) {
+                Aviso "No se pudo borrar el lote $VistasBorrar."
+            } else {
+                Ok "lote generado-$VistasBorrar borrado de las dos tablas"
+            }
+        }
+    }
+}
+
 Paso "Esperando a Elasticsearch"
 
 # El motor de busqueda de la Entrega 3. Todavia no lo alimenta ningun ETL, asi
@@ -2626,12 +2917,16 @@ Write-Host "   RedisInsight   http://localhost:5540    ventana de Redis, con el 
 # cuentas que se califican entre si solo se ve dibujado. En una tabla de filas
 # es una lista de pares que no dice nada.
 Write-Host "   Neo4j          http://localhost:7474    ventana del grafo, lo dibuja" -ForegroundColor White
+# ClickHouse trae su propia consola dentro de la imagen, asi que no lleva un
+# contenedor de visor al lado como PostgreSQL, MongoDB y Redis.
+Write-Host "   ClickHouse     http://localhost:8123/play   consola de los eventos" -ForegroundColor White
 Write-Host ""
 Write-Host "   PostgreSQL     localhost:5432   base $($env_['DB_NAME'])   usuario $($env_['DB_USER'])" -ForegroundColor White
 Write-Host "   MongoDB        localhost:27018  base $($env_['MONGO_DB'])   usuario $($env_['MONGO_USER'])" -ForegroundColor White
 Write-Host "   Redis          localhost:6379   con contrasena (requirepass)" -ForegroundColor White
 Write-Host "   Neo4j          localhost:7687   bolt   usuario neo4j" -ForegroundColor White
 Write-Host "   Elasticsearch  localhost:9200   sin contrasena, solo en local" -ForegroundColor White
+Write-Host "   ClickHouse     localhost:8123   base $($env_['CLICKHOUSE_DB'])   usuario $($env_['CLICKHOUSE_USER'])" -ForegroundColor White
 Write-Host ""
 Write-Host "   Falta arrancar a mano:" -ForegroundColor DarkGray
 Write-Host "     cd backend  ; npm run start:dev" -ForegroundColor DarkGray

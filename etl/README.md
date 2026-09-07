@@ -1,13 +1,20 @@
 # Los ETL de Mesh
 
-Son **tres**, uno por cada base derivada, y los tres son proyecciones: se pueden
-tirar enteras y reconstruir sin perder un dato.
+Son **cuatro**, uno por cada base derivada, y los cuatro son proyecciones: se
+pueden tirar enteras y reconstruir sin perder un dato del negocio.
 
-Dos salen de PostgreSQL, que es la fuente de verdad del negocio. **El tercero
-no**, y esa excepcion es deliberada: el del buscador sale de MongoDB, porque el
-catalogo vive ahi y hay productos que NO tienen fila en PostgreSQL. Esta
-explicado en `elastic/README.md` y es el error mas facil de cometer en este
-proyecto.
+Tres salen de PostgreSQL, que es la fuente de verdad. **El del buscador no**, y
+esa excepcion es deliberada: sale de MongoDB, porque el catalogo vive ahi y hay
+productos que NO tienen fila en PostgreSQL. Esta explicado en
+`elastic/README.md` y es el error mas facil de cometer en este proyecto.
+
+```
+A ClickHouse -- los eventos
+---------------------------------------
+extraer_eventos.sql
+cargar_eventos.sh
+(el esquema vive en clickhouse/001_esquema.sql)
+```
 
 ```
 A Elasticsearch -- el buscador
@@ -41,8 +48,78 @@ detecta que la base derivada esta desfasada, y `.\arrancar.ps1 -Etl` fuerza
 
 - [ETL de productos: PostgreSQL a MongoDB](#etl-de-productos-postgresql-a-mongodb)
 - [ETL del grafo: PostgreSQL a Neo4j](#etl-del-grafo-postgresql-a-neo4j)
+- [ETL de eventos: PostgreSQL a ClickHouse](#etl-de-eventos-postgresql-a-clickhouse)
 
 ---
+
+# ETL de eventos: PostgreSQL a ClickHouse
+
+Copia `log_login` y `log_registro` a `evento_login` y `evento_registro`.
+
+**Es una COPIA, no una mudanza.** Las dos tablas se quedan en PostgreSQL, donde
+tienen llave foranea contra `usuarios` con `ON DELETE RESTRICT`. Sacarlas de ahi
+seria perder esa integridad y quedarse con ids sueltos apuntando a cuentas que
+ya no existen.
+
+```bash
+bash etl/cargar_eventos.sh                  los dos
+bash etl/cargar_eventos.sh --solo-logueos   solo log_login
+bash etl/cargar_eventos.sh --solo-registros solo log_registro
+```
+
+## Este es el unico que va por MARCA DE AGUA, y el porque importa
+
+Los otros tres se refrescan de tres maneras distintas y ninguna es capricho:
+
+```
+el grafo       cola (evento_grafo) porque una resena se EDITA y se BORRA
+el buscador    bandera en el documento, por lo mismo
+el catalogo    reconstruccion completa por lotes
+los eventos    marca de agua, y basta
+```
+
+Un logueo **no se edita y no se borra nunca**. Solo se agregan mas, siempre con
+un id mayor. Contra un origen asi, preguntar al destino por el mayor id que ya
+copio es una marca de agua completa: todo lo que falta esta por encima, sin
+excepcion. Una cola aqui seria una tabla mas que mantener para responder una
+pregunta que un `max()` ya contesta.
+
+La forma la decide **si el origen puede cambiar por debajo**, no el tamano.
+
+## La trampa que casi se cuela, y que es el pendiente 5 otra vez
+
+La marca de agua se lee **filtrando por `lote = 'real'`**, y ese filtro no es
+cosmetico.
+
+`clickhouse/lote/generar_vistas.sql` siembra en LAS MISMAS tablas, con
+`lote = 'generado-<semilla>'` y con ids inventados. Medido el 2026-09-06 sobre
+la base viva:
+
+```
+lote          filas   id minimo     id maximo
+generado-42     848   1000563506    1887513295
+real            324            1           330
+```
+
+Sin el filtro, la marca de agua seria **1887513295** y la copia se saltaria
+todos los logueos reales para siempre, contestando "nada nuevo que copiar" y
+dando las dos puntas por cuadradas. Un ETL que se apaga solo y sigue diciendo
+que todo esta bien.
+
+Es exactamente la forma del pendiente 5 -- dos cosas repartiendo ids sobre el
+mismo espacio sin hablarse -- con otro par de numeros.
+
+## Como se comprueba
+
+```bash
+bash pruebas/eventos.sh
+```
+
+Y una consecuencia de ser una copia hacia adelante, dicha para que no asuste:
+si una fila se borra de `log_login`, **su copia se queda en ClickHouse**. La
+marca de agua solo mira hacia adelante. Eso esta bien para un registro de
+eventos, que es historia y no estado, pero significa que las dos cuentas pueden
+separarse y que la de ClickHouse es la que puede quedar mas alta.
 
 # ETL de productos: PostgreSQL a MongoDB
 
