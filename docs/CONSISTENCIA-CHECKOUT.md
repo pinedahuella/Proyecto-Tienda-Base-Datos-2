@@ -303,15 +303,85 @@ retomar el proyecto.
 **El precio no se congela al agregar.** Cubierto por el aviso del punto 2, pero
 la garantia fuerte sigue sin existir. `docs/PENDIENTES.md`, punto 1.
 
-**El indice de busqueda y la nota no tienen cola.** El grafo si la tiene
-(`evento_grafo`) y las otras dos proyecciones no: se refrescan cuando alguien
-corre el ETL. El camino esta claro y es el mismo patron, pero no esta hecho.
+**La nota del catalogo no tiene cola.** Se refresca cuando alguien corre el ETL.
+El camino esta claro y es el mismo patron del grafo, pero no esta hecho.
+
+Aqui decia tambien que el indice de busqueda no la tenia, y **eso dejo de ser
+cierto la misma noche en que se escribio este documento**: Jose David monto la
+bandera `pendiente_busqueda` en Mongo con su `BuscadorSyncService`, un
+`@Interval` cada 10 s, unas horas despues. El documento se quedo con la frase
+vieja hasta el 2026-09-06. Queda escrito porque es el mismo fallo que este
+proyecto persigue en el codigo, un dato derivado que envejece sin que nadie
+avise, solo que aqui el dato derivado era una frase.
+
+**Los eventos de la base columnar tampoco tienen cola, y es a proposito.** La
+copia de `log_login` y `log_registro` a ClickHouse es incremental por marca de
+agua, no por outbox, y la diferencia importa: un logueo no se edita ni se borra
+nunca, asi que basta con preguntar por el mayor id ya copiado. Una cola hace
+falta cuando el origen puede CAMBIAR debajo, que es el caso de una resena y no
+el de un evento. Ver `etl/cargar_eventos.sh`.
 
 **Dos repartidores de id de producto.** PostgreSQL con su `bigserial` y el panel
 del vendedor con el maximo de Mongo mas uno. Cuando se crucen, el `replaceOne`
 del ETL machaca un producto **sin dar ningun error**. Desde el 2026-09-04 el
 arranque avisa cuando el margen se acaba, pero avisar no es arreglar.
 `docs/PENDIENTES.md`, punto 5.
+
+---
+
+## 4 bis. La prueba de falla simulada, con su evidencia
+
+**Hecha el 2026-09-06, y cierra el requisito de la Entrega 3** que pide
+"evidencia de al menos una prueba de falla simulada sobre el flujo de checkout y
+el comportamiento resultante del sistema". Hasta esa fecha este documento
+enumeraba diez puntos de falla y **ninguno estaba provocado**.
+
+```bash
+bash pruebas/falla_checkout.sh
+```
+
+Se corre el mismo checkout cinco veces cambiando solo lo que hay debajo. La
+linea base con todo vivo no es adorno: sin ella, un escenario que no compra no
+prueba nada, porque podria ser que la falla lo impidiera o que el arnes nunca
+supiera comprar.
+
+**Resultado: 31 OK, 0 FALLA, y un hallazgo para declarar.**
+
+| Escenario | HTTP | Que quedo en PostgreSQL | El carrito |
+|---|---|---|---|
+| todo vivo | 201, `comprado: true` | pedido, pago, kardex, stock de 7 a 6 | se vacia, como debe |
+| Redis parado | no compro | intacto | entero |
+| MongoDB parado | no compro | intacto | entero |
+| PostgreSQL parado | **503** "No se pudo conectar con PostgreSQL" | intacto | entero |
+| todo vivo otra vez | 201, `comprado: true` | vuelve a vender, stock de 7 a 6 | se vacia |
+
+**Ninguna caida cobro a medias.** En los tres escenarios PostgreSQL quedo con
+los mismos pedidos, los mismos pagos, el mismo kardex y el mismo stock que
+antes de intentarlo. Y en los tres el candado de Redis quedo suelto, o sea que
+la cuenta puede reintentar de inmediato sin esperar a que venza.
+
+### El hallazgo, que este documento no decia
+
+> **MongoDB parado impide comprar, y esa base NO participa del COMMIT.**
+
+La seccion 2 de aqui arriba dice que lo atomico son las tres escrituras de
+PostgreSQL, y que Mongo solo aporta nombres para la pantalla. De ahi se seguiria
+que con Mongo caido la compra deberia salir igual, quiza sin algun nombre. **No
+sale.**
+
+No es un fallo de consistencia -- no se cobro nada y no quedo nada a medias, que
+es lo importante -- pero **es una dependencia que no estaba escrita**, y una
+dependencia no escrita es la que tumba un sistema el dia que esa base se cae de
+verdad. Queda anotada aqui y en `docs/PENDIENTES.md`.
+
+`docker stop` es una parada ORDENADA, con SIGTERM y cierre limpio de archivos.
+Un corte de luz es mas bruto y puede dejar cosas que esto no toca. Lo que si
+cubre, que es lo que pide la entrega, es la vista desde el checkout: la base no
+esta, y que hace el sistema con eso.
+
+**Esta prueba compra de verdad** y deja pedidos, pagos y movimientos de stock
+que no se deshacen. Borrarlos a mano dejaria el kardex mintiendo, que es peor
+que un pedido de mas. El arnes imprime al terminar los `id_pedido` que creo.
 
 ---
 
@@ -323,11 +393,18 @@ tocan este flujo:
 ```
 bash pruebas/carrito.sh            el carrito de punta a punta, y que
                                    PostgreSQL quede igual tras las pruebas
+bash pruebas/falla_checkout.sh     LA PRUEBA DE FALLA: para Redis, MongoDB y
+                                   PostgreSQL a la hora de pagar, una por una
 bash redis/prueba_carrito.sh       que el carrito venza sin dejar nada colgando
 bash redis/prueba_concurrencia.sh  1000 solicitudes, 50 clientes a la vez,
                                    100 unidades, y el contador no baja de 0
 bash neo4j/correr_fraude.sh        las cinco consultas del grafo
 ```
+
+`falla_checkout.sh` **para contenedores**, asi que no se corre a la vez que
+ningun otro. Su `trap` los devuelve aunque se corte con Ctrl+C, y ese `trap` se
+registra antes del primer `docker stop` justamente porque el que no se registra
+a tiempo es el que no corre cuando hace falta.
 
 El de concurrencia es el que sostiene la seccion 3: **sin sobreventa, sin
 candados, sin reintentos y sin compensar**, porque el `.lua` de la reserva es
