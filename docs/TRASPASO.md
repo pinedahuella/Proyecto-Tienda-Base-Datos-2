@@ -3,7 +3,16 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-04**.
+Ultima actualizacion: **2026-09-06**.
+
+**Lo de hoy, en cuatro lineas.** Entro **ClickHouse**, la sexta base, que es la
+columnar que el profesor pidio para tendencias y fraude. Todo lo que no es
+`backend/` esta hecho y medido: el contenedor, el esquema, el ETL incremental de
+los logueos, el generador de datos de prueba, el arnes y la pantalla. **Faltan
+tres rutas**, y estan escritas al detalle en `docs/BACKEND-PENDIENTE.md`.
+
+Y se reviso la lista de pendientes contra el codigo, que llevaba dos dias dando
+por abiertos dos puntos ya cerrados.
 
 ---
 
@@ -32,11 +41,21 @@ Ultima actualizacion: **2026-09-04**.
 >   SQL va en ASCII puro.
 > - Ninguna contrasena real en un archivo que se suba. Salen del `.env`.
 >
-> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene OCHO arneses:
+> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene DIEZ arneses:
 > `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`, `bash pruebas/notas.sh`,
-> `bash pruebas/busqueda.sh`, `bash redis/prueba_carrito.sh`,
+> `bash pruebas/busqueda.sh`, `bash pruebas/eventos.sh`,
+> `bash pruebas/falla_checkout.sh`, `bash redis/prueba_carrito.sh`,
 > `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`,
 > `.\mongo\demostracion_indices.ps1`.
+>
+> **`falla_checkout.sh` PARA CONTENEDORES a proposito**, asi que no se corre a la
+> vez que ningun otro. Y compra de verdad: deja pedidos, pagos y movimientos de
+> stock que no se deshacen. Su cabecera lo dice y los imprime al terminar.
+>
+> Y ojo con correr dos arneses A LA VEZ. Paso el 2026-09-06 sin querer, con dos
+> sesiones tocando `pruebas/eventos.sh` al mismo tiempo: dio 8 FALLA, todos por
+> pares (una fila donde se esperaba una, dos donde se esperaba una), y ninguno
+> era del codigo. Un rojo de un arnes solo vale si era el unico corriendo.
 >
 > Y `prueba_concurrencia.sh` mide TIEMPOS con 50 clientes a la vez: en una
 > maquina ahogada de memoria da rojo sin que nada este roto. Si sale mal,
@@ -81,6 +100,7 @@ viene en el pull: copia de `.env.example` las que falten. Y ojo, **son DOS
 
 | | Puerto | |
 |---|---|---|
+| ClickHouse | **8123** HTTP, 9010 nativo | consola en **8123/play**, sin instalar nada |
 | PostgreSQL | 5432 | pgAdmin en **5050** |
 | MongoDB | **27018** | dbgate en **3001** |
 | Redis | 6379 | RedisInsight en **5540** |
@@ -544,9 +564,20 @@ Y si Elasticsearch no sube, **el arranque no se corta**. Avisa y sigue. Es la
 unica base de la que hoy no cuelga ninguna pantalla, y tumbar la maquina entera
 por ella dejaria sin trabajar a quien venia a tocar el catalogo.
 
-**Lo que falta es la ruta**, que es de `backend/`. Hasta que exista, el indice se
-prueba con el arnes y con `curl` contra el 9200, que es como se documenta en la
-entrega.
+**Y las rutas ya existen desde esa misma noche.** Aqui decia "lo que falta es la
+ruta" y llevaba dos dias sin ser cierto. Jose David publico
+`GET /buscador/productos`, que filtra a `estado: activo` fijo en el codigo, y
+`GET /buscador/productos/admin`, que es la misma consulta sin ese filtro y
+protegida con `SesionGuard` mas `@Roles(ID_ROL_ADMIN)`. Ademas monto la cola:
+la bandera `pendiente_busqueda` en Mongo y un `BuscadorSyncService` con
+`@Interval` cada 10 s, o sea que **el indice se mantiene al dia solo**.
+
+El frontend las consume desde el 2026-09-04: el buscador de la cabecera, la
+pagina `/buscar` y el buscador del panel.
+
+**Lo que SI falta del buscador son las facetas**, que es un requisito literal de
+la Entrega 3 y hoy no tiene ni una linea escrita. Ver `docs/PENDIENTES.md`,
+punto 10.
 
 ### El choque de los dos repartidores de id ya no es invisible
 
@@ -709,6 +740,71 @@ Si esa ruta empieza a mandar un campo mas, se agrega en `ProductoEnFecha`
 
 ---
 
+### La base columnar, entera menos las rutas
+
+**Hecho el 2026-09-06.** ClickHouse es la SEXTA base y es lo que el profesor
+pidio para tendencias y para deteccion de fraude. El detalle largo esta en
+`clickhouse/README.md`; aqui va lo que hay que saber para retomarlo.
+
+```
+docker-compose.yml            el contenedor mesh-clickhouse, sube con el resto
+clickhouse/001_esquema.sql    cuatro tablas, idempotente, se aplica en cada arranque
+clickhouse/lote/              el generador de eventos de prueba y su borrado
+etl/extraer_eventos.sql       la copia de log_login y log_registro
+etl/cargar_eventos.sh         incremental por marca de agua
+pruebas/eventos.sh            el arnes
+frontend PanelTendencias.svelte   la pantalla, en /panel?s=tendencias
+```
+
+**Por que ClickHouse y no Cassandra**, que es la opcion de referencia del
+enunciado, en una linea: con Cassandra hay que saber la pregunta ANTES de
+guardar el dato, y detectar fraude es por definicion encontrar lo que no sabias
+que buscabas. El argumento entero, y por que esto NO contradice al ADR-3 sino
+que cumple su condicion 6.2, esta en `docs/ARQUITECTURA.md`.
+
+**Tres cosas medidas que no son obvias.**
+
+**1. Los 317 logueos reales comparten UNA sola IP.** Es `127.0.0.1`, porque todo
+el desarrollo es local, y `log_registro` tiene UNA fila. Contra eso el analisis
+de fraude por IP no se puede calibrar: diria que las doce cuentas del sistema
+son un anillo. Se ve en vivo, la consulta devuelve las dos filas juntas:
+
+```
+::ffff:10.66.221.180    8 cuentas    48 entradas   <- el anillo sembrado
+::ffff:127.0.0.1        7 cuentas   323 entradas   <- el equipo, falso positivo
+```
+
+Por eso el generador siembra tambien logueos con IP variadas, y por eso las
+cuatro tablas llevan la columna `lote`.
+
+**2. La marca de agua se lee filtrando por `lote = 'real'`, y sin ese filtro el
+ETL se apaga solo.** El generador siembra ids inventados del orden de los mil
+millones en las mismas tablas. Sin filtrar, la marca se iria a **1887513295** y
+la copia se saltaria los logueos reales para siempre diciendo "nada nuevo que
+copiar" y dando las cuentas por cuadradas. Es el pendiente 5 con otro par de
+numeros. Esta explicado en `etl/README.md`.
+
+**3. El borrado de un lote son DOS mitades.** `vistas_por_producto_dia` se llena
+por una vista materializada, y una vista materializada solo mira lo que ENTRA.
+Borrar de `vista_producto` no quita nada del resumen. Medido: 3882 filas crudas
+y 832 del resumen, y hay que borrar las dos.
+
+**Lo medido, con el lote de la semilla 42 sembrado:**
+
+```
+tendencia       el producto 73 sube 7.87 veces contra su propio tramo anterior
+inflado         el producto 100 va a 45 vistas por persona, con un fondo de 1.1
+las dos consultas contestan en 17 ms
+la copia de logueos no duplica: tres corridas seguidas, 325 filas y 325 ids
+```
+
+**Lo que falta son TRES rutas**, y la que de verdad urge es
+`POST /eventos/vista`: sin ella `vista_producto` no se llena nunca y todo lo
+demas queda de adorno. El contrato completo esta en `docs/BACKEND-PENDIENTE.md`
+y la pantalla ya esta escrita contra el, asi que se enciende sola.
+
+---
+
 ## Las cinco cosas que hay que saber, y no son obvias
 
 **1. La resena es de un VENDEDOR sobre un PRODUCTO.** No del producto solo.
@@ -772,6 +868,40 @@ no arrastrarse con eso.
 Un cast de las lineas del carrito a `LineaPedido` compilaba limpio y ensenaba
 "Pagar QNaN": sumaba un campo que no existia.
 
+**El fin de linea de Windows muerde por los DOS lados, no solo al leer.** Que
+`psql` devuelva Unix y PowerShell lo parta con CRLF ya estaba sabido. Lo que
+faltaba es que PowerShell 5.1 tambien lo mete AL ESCRIBIR a la entrada de un
+programa externo, aunque el texto se una con `` `n `` a mano. ClickHouse contesta
+`Code: 27 ... garbage after UInt64: "<CARRIAGE RETURN><LINE FEED>"`. Se arregla
+con `--input_format_tsv_crlf_end_of_line 1`, que es el ajuste que el propio
+mensaje de error nombra, y no peleando con PowerShell. El `.sh` no lo necesita
+porque ahi la tuberia es directa entre dos procesos.
+
+**Un verde sobre una linea que no se ejecuta no es un verde.** El 2026-09-06 se
+probo ese camino de PowerShell suelto y dio verde, y dio verde porque en ese
+momento no habia ni una fila pendiente que copiar: el `INSERT` no llego a correr.
+El fallo salio despues, con el arranque entero. Para probar una copia
+incremental hay que BORRAR algo del destino primero, para que tenga trabajo que
+hacer. Es el mismo error que el arnes que aprobaba mirando otra cosa.
+
+**A la base nueva hay que ponerle tope de memoria, y hay que comprobar que se
+aplico.** Es la sexta base en una maquina que ya se quedaba corta, y ClickHouse
+por defecto no tiene techo. Sin topes gastaba 800 MB y podia crecer; con ellos se
+queda en 290 MB. Dos trampas al ponerlos, las dos escritas en
+`clickhouse/README.md`: un `max_memory_usage` fuera de sitio deja el contenedor en
+bucle de reinicio con codigo 137 y SIN ninguna linea de error, y un `<profiles>`
+puesto en `config.d` en vez de `users.d` no da error y no se aplica. **Un
+contenedor sano no quiere decir que el ajuste este puesto**: hay que preguntarle a
+`system.settings` por el valor.
+
+**Un `docker exec -i` deja la entrada estandar abierta, y eso cuelga a
+`clickhouse-client`.** Con un `--query` que sea un `INSERT ... VALUES` se queda
+esperando mas filas por ahi para siempre. A mano en una terminal no falla nunca,
+porque la entrada da EOF enseguida; solo se cuelga cuando se corre en segundo
+plano o desde otro guion, que es justo como lo va a correr una persona con prisa.
+Medido: una corrida clavada con 459 segundos de `elapsed` en
+`system.processes`, sin error y sin mensaje. Se cierra con `< /dev/null`.
+
 ---
 
 ### El precio del carrito ya avisa antes de cobrar
@@ -802,16 +932,29 @@ quede fuera de ese array, no lo esta.
 
 ## Que falta
 
-En `docs/PENDIENTES.md`, con su urgencia. **Al 2026-09-04 no queda nada abierto
-de este lado**: los cuatro puntos vivos se deciden o se escriben en `backend/`,
-y la lista corta para Jose David esta arriba del todo en
-`docs/BACKEND-PENDIENTE.md`.
+En `docs/PENDIENTES.md`, con su urgencia.
 
-Lo mas urgente de esos cuatro es el **409 en el `PATCH` de ofertas durante una
-venta relampago**, que son tres lineas y hoy deja que Redis prometa unidades que
-PostgreSQL no puede entregar. Y lo mas grave sigue siendo que **el precio se
-congela al pagar y no al agregar**: ya no se cobra en silencio, pero tampoco se
-respeta el precio que se enseno.
+**Al 2026-09-06 la lista quedo revisada contra el codigo**, y de paso se cerraron
+dos puntos que llevaban dos dias hechos sin que nadie los tachara: el 409 del
+`PATCH` (punto 8) y el apagado de la venta relampago vencida (punto 7). El 409 lo
+decia este mismo documento como "lo mas urgente" cuando ya estaba resuelto.
+
+Lo que queda vivo, en orden de lo que mas duele:
+
+| # | Que | De quien |
+|---|---|---|
+| 9 | Las tres rutas de la base columnar, y sobre todo `POST /eventos/vista` | Jose David |
+| 10 | Los filtros facetados del buscador, con agregaciones. Requisito de la Entrega 3 | los dos |
+| 11 | La prueba de falla simulada del checkout. Requisito de la Entrega 3 | mia |
+| 5 | Decidir quien reparte el id de producto | Jose David |
+| 1 | El precio se congela al pagar y no al agregar | cubierto a medias |
+
+Del 9, lo urgente es `POST /eventos/vista`: **sin esa ruta la tabla que sostiene
+el panel de tendencias no se llena nunca**, y todo lo demas de la base columnar
+queda de adorno.
+
+Y lo mas grave de fondo sigue siendo el punto 1: ya no se cobra en silencio, pero
+tampoco se respeta el precio que se enseno.
 
 Lo unico que queda sin comprobar es la revision a ojo en el navegador, que pide
 entrar con una cuenta.
@@ -838,12 +981,33 @@ medido.
 ## Donde esta cada cosa
 
 ```
+El informe de la Entrega 2 se genera, no se escribe a mano:
+
+```
+contenido-entrega2.json        el TEXTO, separado del formato a proposito
+generar-reporte-entrega2.py    lo maqueta clonando la caratula de la Entrega 1
+medir-paginas-entrega2.ps1     abre el .docx con Word y apunta las paginas
+```
+
+**Son DOS pasadas y el orden importa.** `python-docx` no sabe paginar, asi que la
+primera pasada deja el indice con guiones, el `.ps1` mide con Word de verdad y la
+segunda pasada escribe los numeros. Medido: 43 paginas y 16693 palabras, y las
+dos mediciones dieron la misma paginacion, asi que el indice no se corre al
+rellenarse.
+
+Es lo que le falta al informe de la Entrega 1, cuyo indice tiene los numeros casi
+todos vacios y los tres que hay no corresponden.
+
+```
 migrations/          el esquema (la 015 es la ultima, 016 sera la siguiente)
                      y el generador de datos
-etl/                 PostgreSQL -> MongoDB, y PostgreSQL -> Neo4j
+etl/                 las cuatro copias hacia las bases derivadas
 neo4j/               el modelo del grafo y las 5 consultas de fraude
 redis/               el carrito, el Lua del inventario limitado y sus arneses
-pruebas/             arneses de las rutas: resenas.sh y carrito.sh
+elastic/             el mapeo del indice del buscador
+clickhouse/          el esquema de eventos y el generador de lotes.
+                     La puerta es clickhouse/README.md
+pruebas/             los seis arneses de rutas y de bases
 docs/                base-de-datos.md manda sobre el modelo;
                      ARQUITECTURA.md es el diagrama de arquitectura (no el ER);
                      DECISION-GRAFOS-VS-COLUMNAR.md es el ADR-3 de la Entrega 2;

@@ -2,7 +2,7 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-09-04.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-09-06.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
@@ -13,8 +13,99 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~4~~ | ~~El grafo se queda viejo y el ETL relee todo~~ | -- | -- | **CERRADO el 2026-09-04.** La cola (015) es mia, el worker y la conciliacion son de Jose David, y el aviso del panel es mio. El grafo se mantiene solo |
 | 5 | Dos asignadores de id de producto que no se hablan | Jose David decide | ver abajo | **alta, pero ya no es INVISIBLE.** El arranque avisa desde el 2026-09-04. Quien reparte el id sigue sin decidirse |
 | ~~6~~ | ~~La nota no llega al catalogo hasta que corre el ETL~~ | -- | -- | **CERRADO el 2026-09-04.** Etapa nueva del ETL, con `bash pruebas/notas.sh` (10 OK) |
-| 7 | Una venta relampago que vence sola deja `es_inventario_limitado` en true | sin dueno | ver abajo | baja: el panel miente, pero hay recuperacion |
-| 8 | Editar el stock durante una venta relampago desincroniza las dos bases | Jose David | ver abajo | **alta: Redis promete unidades que PostgreSQL no puede entregar** |
+| ~~7~~ | ~~Una venta relampago que vence sola deja `es_inventario_limitado` en true~~ | -- | -- | **CERRADO el 2026-09-04.** `revisarVencidas()`, un `@Interval` en `inventario-limitado.service.ts`, apaga la columna solo |
+| ~~8~~ | ~~Editar el stock durante una venta relampago desincroniza las dos bases~~ | -- | -- | **CERRADO el 2026-09-04.** El `PATCH` contesta 409 cuando viene `ajuste_stock` con la venta abierta |
+| 9 | Las tres rutas de la base columnar | Jose David | ver `BACKEND-PENDIENTE.md` | **alta: sin `POST /eventos/vista` la tabla que sostiene el panel de tendencias no se llena NUNCA** |
+| 10 | Los filtros facetados del buscador, con agregaciones | Jose David la consulta, yo la pantalla | ver abajo | **alta: es un requisito literal de la Entrega 3 y hoy no hay ni un `aggs` en todo el repo** |
+| ~~11~~ | ~~La prueba de falla simulada del checkout~~ | -- | -- | **CERRADO el 2026-09-06.** `bash pruebas/falla_checkout.sh`, 31 OK y 0 FALLA, con su evidencia en `CONSISTENCIA-CHECKOUT.md` |
+| 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | Jose David decide | ver abajo | media: no rompe la consistencia, pero es una dependencia que no estaba escrita |
+| 13 | `GET /vendedor/ofertas` manda 2243 ofertas y 1.2 MB en una sola respuesta | Jose David la ruta, yo la pantalla | ver abajo | media: hoy se aguanta, con el millon de productos no |
+
+---
+
+# 13. La respuesta de ofertas viene entera, sin paginar
+
+Medido el 2026-09-06 con la sesion de `admin@mesh.com`:
+
+```
+GET /vendedor/ofertas    200    1243494 bytes    1.36 s    2243 ofertas
+```
+
+Pasa porque `resolverIdEfectivo()` cambia el id de un admin por el de la tienda, y
+`tienda@mesh.com` oferta TODO el catalogo. Las demas rutas del panel se portan
+bien, y estan medidas al lado para que se vea la diferencia:
+
+```
+/admin/reportes/ventas           948 bytes    0.36 s
+/admin/reportes/reservaciones    179 bytes    0.22 s
+/admin/grafo/conciliacion        875 bytes    0.77 s
+/admin/fraude/anillos           3915 bytes    8.40 s   <-- lento, pero pequeno
+```
+
+**Hoy no rompe nada** y por eso no es alta. Se abre la seccion, tarda un momento y
+funciona. Lo que la pone en esta lista es que el catalogo va a crecer: la prueba
+del buscador con un millon de productos que se quiere para la Entrega 3 llevaria
+esta misma ruta a cientos de megabytes.
+
+Son dos mitades. La ruta tiene que aceptar paginacion, que es de `backend/`, y la
+pantalla tiene que pedirla por paginas, que es mia. El catalogo de `/` ya lo hace
+de las dos formas, por cursor y por numero de pagina, asi que el patron ya existe
+en la casa y no hay que inventarlo.
+
+**Y de paso, los 8.4 s de `/admin/fraude/anillos`** merecen una mirada. Son cinco
+consultas de varios saltos contra Neo4j y el panel las espera todas, asi que esa
+pantalla tarda ocho segundos en pintar aunque devuelva menos de 4 KB.
+
+**Los dos cierres de arriba llevaban dos dias hechos y esta tabla seguia
+dandolos por abiertos.** Salio releyendo el codigo el 2026-09-06, no porque
+alguien se acordara. Comprobado antes de tacharlos: el `@Interval`
+`revisarVencidas()` hace `UPDATE oferta SET es_inventario_limitado = false`, y
+`ofertas.service.ts` lanza `ErrorConflicto`. Una lista de pendientes que se
+queda vieja es peor que no tenerla, porque manda a trabajar en algo que ya esta
+hecho.
+
+---
+
+# 10. Los filtros facetados del buscador -- ABIERTO, y es de la Entrega 3
+
+El enunciado lo pide DOS veces, y con estas palabras:
+
+> Filtros facetados sobre los resultados de busqueda, calculados mediante las
+> capacidades de agregacion del motor de busqueda.
+
+> Al menos una agregacion empleada para los filtros facetados.
+
+**Hoy no existe.** Medido el 2026-09-06 con un `grep` de `aggs` y de
+`aggregation` sobre el repo entero, `backend/` incluido: **cero resultados**. La
+consulta del buscador es un `multi_match` dentro de un `bool` y devuelve solo
+`hits`.
+
+Lo bueno es que el terreno ya esta puesto y no hay que reindexar nada.
+`elastic/001_indice.json` mapea `categoria_nombre.exacto` y `categoria_padre`
+como `keyword` y `precio_desde` como `double`, que es exactamente lo que una
+faceta necesita. Eso se hizo bien el dia que se escribio el mapeo.
+
+Falta la agregacion en la consulta, que es de `backend/`, y la columna de
+filtros con su numero al lado, que es mia.
+
+---
+
+# 11. La prueba de falla simulada del checkout -- ABIERTO, y es de la Entrega 3
+
+El enunciado lo pide asi:
+
+> Evidencia de al menos una prueba de falla simulada sobre el flujo de checkout
+> y el comportamiento resultante del sistema.
+
+`docs/CONSISTENCIA-CHECKOUT.md` enumera diez puntos de falla, pero **ninguno
+esta provocado ni medido**. Su seccion 5 lista cuatro arneses y ninguno de los
+cuatro tumba nada: `carrito.sh` mide el camino feliz, y los de Redis miden
+concurrencia y vencimiento, no caidas.
+
+Medido el 2026-09-06: `grep` de `docker stop`, `docker pause` y `docker kill`
+sobre `pruebas/`, `redis/`, `neo4j/` y `etl/` da **cero**.
+
+Es de las pocas cosas de esta lista que no dependen de nadie mas.
 
 ---
 

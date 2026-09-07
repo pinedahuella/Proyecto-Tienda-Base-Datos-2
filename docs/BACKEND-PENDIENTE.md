@@ -2,6 +2,135 @@
 
 Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
+---
+
+## LO NUEVO DEL 2026-09-06: la base columnar ya existe y le faltan TRES rutas
+
+Entro **ClickHouse**, la sexta base, y es lo que el profesor pidio para tendencias
+y para fraude. Todo lo que no es `backend/` ya esta hecho y medido: el contenedor,
+el esquema, el ETL que copia los logueos, el generador de datos de prueba, el arnes
+y la pantalla. La pantalla **ya esta escrita contra las firmas de abajo**, asi que
+el dia que existan se enciende sola sin tocar el frontend.
+
+Mira `clickhouse/README.md` antes de escribir nada. Y para consultar la base a mano
+hay consola web en **http://localhost:8123/play**, sin instalar nada.
+
+Las tablas que te esperan, todas vivas y con datos:
+
+```
+vista_producto            el clic en la ficha       fecha, id_producto, id_usuario,
+                                                    sesion, ip, origen, lote
+evento_login              copia de log_login        fecha, id_usuario, ip, tipo,
+                                                    lote, id_log_login
+evento_registro           copia de log_registro     fecha, id_usuario, ip,
+                                                    id_log_registro, lote
+vistas_por_producto_dia   el resumen por dia        se mantiene SOLO, no hay ETL
+```
+
+**La columna `lote` no es un adorno y hay que respetarla.** Vale `real` o
+`generado-<semilla>`. Hoy casi todas las vistas estan generadas, porque el portal
+todavia no manda ninguna. Un panel de fraude que acusa a cuentas de la semilla por
+un patron que dibujo un script es peor que no tener panel, asi que **las tres rutas
+reciben el lote y lo devuelven**, para que la pantalla pueda decir de donde salen
+los numeros.
+
+### Ruta 1 -- `POST /eventos/vista` (publica, sin sesion)
+
+Es la mas importante de las tres, porque sin ella la tabla que sostiene todo lo
+demas **no se llena nunca**. La ficha del producto la llama al abrirse.
+
+```
+body  { id_producto: number, sesion: string, origen: string }
+      origen es uno de: catalogo, buscador, directo
+      la sesion la genera el navegador, no tiene que ser una cuenta
+      si hay cookie de sesion, saca el id_usuario de ahi; si no, va null
+
+202   no devuelve cuerpo
+```
+
+Tres cosas que conviene decidir bien porque no se ven hasta que duelen:
+
+**No la pongas detras de la sesion.** La ficha es publica y la mitad de las visitas
+interesantes son de gente sin cuenta. Exigir sesion deja fuera justo el trafico que
+mas dice sobre si un producto se esta calentando.
+
+**Contesta 202 y no 200, y no esperes a escribir.** Es un evento, no un dato de
+negocio. Si ClickHouse no contesta, que se pierda esa vista y siga la pagina. Una
+ficha de producto que tarda mas porque hay que anotar la visita es un mal negocio.
+
+**Escribe por lotes si te da tiempo, pero no es lo primero.** ClickHouse prefiere
+un INSERT de mil filas antes que mil INSERT de una fila. Con el trafico de una
+clase da igual, pero esta anotado para el dia del millon de productos.
+
+### Ruta 2 -- `GET /admin/eventos/tendencias` (solo admin)
+
+```
+query   dias   por defecto 7
+        lote   real | generado | todo     por defecto real
+
+200 ->  {
+          desde: string, hasta: string, lote: string,
+          productos: [ { id_producto: number, nombre: string | null,
+                         ahora: number, antes: number, veces: number,
+                         personas: number } ]
+        }
+```
+
+`ahora` son las vistas de los ultimos `dias`, `antes` las del tramo anterior del
+mismo largo, y `veces` es cuanto subio. `personas` son sesiones distintas, que es
+lo que separa un producto de moda de uno inflado.
+
+**Leelo de `vistas_por_producto_dia` y no de `vista_producto`.** El resumen ya esta
+agregado por la vista materializada y contesta en milisegundos. Los contadores se
+leen con `countMerge` y `uniqMerge`, que es la parte que sorprende a quien nunca ha
+tocado un `AggregatingMergeTree`. La consulta ya escrita y medida esta en
+`clickhouse/README.md`.
+
+El `nombre` sale del catalogo de Mongo, no de ClickHouse. Si no lo encuentras, manda
+`null` y la pantalla ensena el id.
+
+### Ruta 3 -- `GET /admin/eventos/fraude/ip` (solo admin)
+
+```
+query   dias   por defecto 30
+
+200 ->  {
+          ips: [ { ip: string, cuentas: number, entradas: number,
+                   registros: number, primera: string, ultima: string,
+                   usuarios: string[] } ]
+        }
+```
+
+Cuentas distintas que entran desde la misma IP, y cuantas nacieron ahi.
+
+**Esta es la senal que el grafo no puede ver, y ahi esta su gracia.** Neo4j sabe que
+dos cuentas se califican entre si; no sabe que las dos entran desde la misma casa a
+la misma hora. Las dos senales juntas son mucho mas fuertes que cualquiera sola, y
+eso es lo que hay que contar el dia de la presentacion.
+
+**Un aviso medido, para que no te pille:** los 317 logueos REALES de `log_login`
+comparten **una sola IP**, `127.0.0.1`, porque todo es desarrollo local. Filtrando
+por `lote = 'real'` esta ruta va a decir que las doce cuentas del sistema son un
+anillo de fraude. No esta rota, es que el dato de verdad no tiene variacion. Para
+verla funcionar hace falta el lote generado, que si trae IP variadas.
+
+### Protegelas como ya proteges el panel de fraude
+
+Las dos de admin llevan `SesionGuard` mas `@Roles(ID_ROL_ADMIN)`, igual que
+`GET /admin/fraude/anillos`. Ni la tienda: es un vendedor mas. La de la vista es
+publica y no lleva guarda.
+
+### Como comprobar que te quedo bien
+
+```bash
+bash pruebas/eventos.sh          el ETL y las tablas
+bash pruebas/falla_checkout.sh   la prueba de falla de la Entrega 3
+```
+
+Y la pantalla: entra como `admin@mesh.com` a `/panel` y abre Tendencias. Hoy dice
+"Esa opcion todavia no esta disponible en el servidor", que es el 404 de tus tres
+rutas traducido. El dia que existan, se llena sola.
+
 Lo que YA esta hecho y te espera: las tablas, los datos, los scripts de Redis,
 el grafo de Neo4j y las pantallas. Nada de eso hay que escribirlo otra vez.
 Lo unico que falta son las rutas HTTP que las unen.
