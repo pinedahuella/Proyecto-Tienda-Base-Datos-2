@@ -15,5 +15,20 @@ const nombreBase = obligatoria('MONGO_DB');
 
 const uri = `mongodb://${encodeURIComponent(usuario)}:${encodeURIComponent(contrasena)}@${host}:${port}/?authSource=admin`;
 
-export const mongoClient = new MongoClient(uri);
+/**
+ * `serverSelectionTimeoutMS` / `connectTimeoutMS` en 3 s (el driver trae 30 s
+ * por defecto). Sin esto, con Mongo caido cualquier consulta se queda
+ * colgada 30 s antes de rendirse -- y como el checkout consulta Mongo antes
+ * de cerrar la venta (nombre de producto y estado de variante no viven en
+ * PostgreSQL), un `POST /carrito/comprar` o `POST /comprador/pedidos/:id/comprar`
+ * tardaba ~32 s en devolver el 503, con la request HTTP y una conexion del
+ * pool tomadas todo ese rato. Con 3 s falla rapido y libera. No cambia la
+ * consistencia: la venta ya era atomica en PostgreSQL y Mongo nunca estuvo
+ * en el COMMIT (ver `elementos Generales/prueba-falla-mongo-checkout.md`).
+ * Mismo criterio que el limite de 3 s del health-check del grafo.
+ */
+export const mongoClient = new MongoClient(uri, {
+  serverSelectionTimeoutMS: 3000,
+  connectTimeoutMS: 3000,
+});
 export const mongoDb = mongoClient.db(nombreBase);

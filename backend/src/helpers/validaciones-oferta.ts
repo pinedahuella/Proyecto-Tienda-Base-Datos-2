@@ -31,6 +31,23 @@ export function validarAjusteStock(valor: unknown): number {
 }
 
 /**
+ * El filtro `activo` de GET /vendedor/ofertas/paginado: un booleano de
+ * texto, opcional. `"true"` recorta a las ofertas en estado `activa`;
+ * `"false"` a las que NO lo estan (pendiente, pausada, retirada o
+ * rechazada); ausente (o vacio) devuelve `null` -- sin filtrar por estado,
+ * igual que la ruta sin paginar. Cualquier otro valor es un 400.
+ */
+export function validarFiltroActivo(valor: string | undefined): boolean | null {
+  if (valor == null || valor === '') {
+    return null;
+  }
+  if (valor !== 'true' && valor !== 'false') {
+    throw new ErrorValidacion('El filtro activo debe ser "true" o "false"');
+  }
+  return valor === 'true';
+}
+
+/**
  * Reglas de PATCH /vendedor/ofertas/:id/revision: la decision de la tienda
  * sobre una oferta pendiente.
  */

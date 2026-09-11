@@ -43,7 +43,9 @@ de restricción, y no son lo mismo:
 | `PATCH /vendedor/productos/:id/reenviar` | vendedor **o** admin (2 o 3) | solo el vendedor que **propuso** esa propuesta |
 | `PATCH /vendedor/productos/:id` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `GET /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
+| `GET /vendedor/ofertas/paginado` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin (idéntico a `GET /vendedor/ofertas`) |
 | `GET /vendedor/ofertas/pendientes` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
+| `GET /vendedor/ofertas/pendientes/paginado` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** (idéntico a `GET /vendedor/ofertas/pendientes`) |
 | `GET /vendedor/ofertas/:id/rechazos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** (cualquier oferta), o el vendedor dueño (solo la suya) |
 | `GET /vendedor/ofertas/producto/:idProducto` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
 | `POST /vendedor/ofertas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin |
@@ -1413,8 +1415,12 @@ por todas mis filas de `oferta`, y una sola a Mongo por todos los
 productos distintos que aparecen ahí (con `$in`) — nunca una consulta a
 Mongo por oferta.
 
-Sin paginación por ahora: para un vendedor de prueba son decenas de
-ofertas, no miles (mismo criterio que `GET /vendedor/productos` hoy).
+Esta ruta trae **todas** las ofertas de una sola vez. Cuando el catálogo
+crece (Entrega 3) la lista se vuelve pesada — un vendedor grande, y sobre
+todo la tienda, puede tener miles de ofertas — así que existe la versión
+paginada [`GET /vendedor/ofertas/paginado`](#get-vendedorofertaspaginado),
+más abajo. Esta se queda para clientes que ya la consumen y para paneles
+chicos.
 
 ```
 GET /vendedor/ofertas
@@ -1540,6 +1546,105 @@ Un vendedor sin ninguna oferta recibe `[]`, no un error.
 
 ---
 
+## GET /vendedor/ofertas/paginado
+
+La **versión paginada** de `GET /vendedor/ofertas`. Las mismas ofertas del
+panel (cualquier estado) y **la misma forma de cada una** — nombre de
+producto/variante, portada, `estado`, `stock`, `stock_disponible`,
+`fecha_aprobacion`/`aprobado_por`, `es_inventario_limitado`, las dos fechas
+—, pero por **número de página**, igual que
+[`GET /vendedor/productos/paginado`](#get-vendedorproductospaginado) (no
+por cursor). Mismo orden: `fecha_actualizacion` descendente, con
+`id_oferta` descendente de desempate (ese desempate lo tiene también la
+ruta sin paginar, así que recorrer las páginas da exactamente la misma
+secuencia).
+
+**Autorización e identidad idénticas a `GET /vendedor/ofertas`:** cualquier
+vendedor o admin; con sesión de admin, "mis ofertas" son las de la cuenta
+de la tienda (sustitución de identidad, ver la nota al principio del
+archivo).
+
+Segmento literal `paginado`: se resuelve antes que `:id/rechazos`.
+
+### Query params
+
+| Param | Default | Regla |
+|---|---|---|
+| `pagina` | `1` | entero ≥ 1. `0`, negativo o no numérico → 400 `La pagina debe ser un numero entero mayor a 0`. |
+| `limite` | `20` | entero ≥ 1, **tope 100** (un valor mayor se capa a 100 en silencio). `0` o no numérico → 400 `El limite debe ser un numero entero mayor a 0`. |
+| `activo` | — (todas) | `true` → solo ofertas en estado `activa`; `false` → solo las que **no** están `activa` (`pendiente`, `pausada`, `retirada`, `rechazada`); ausente → sin filtrar por estado. Cualquier otro valor → 400 `El filtro activo debe ser "true" o "false"`. |
+
+`pagina`/`limite` son exactamente los mismos validadores (mismas reglas,
+mismos mensajes) que `/productos/paginacion` y `/vendedor/productos/paginado`
+— `validarLimite`/`validarPagina` en `helpers/validaciones-productos.ts`.
+
+```
+GET /vendedor/ofertas/paginado?pagina=1&limite=20&activo=true
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Ofertas obtenidas",
+  "payload": {
+    "ofertas": [
+      {
+        "id_oferta": "552",
+        "id_producto": 6,
+        "id_producto_variante": 4,
+        "nombre_producto": "Monitor Halo 27",
+        "nombre_variante": "27\" / 144 Hz",
+        "imagen": null,
+        "precio": "1899.00",
+        "stock": 12,
+        "stock_disponible": null,
+        "estado": "activa",
+        "fecha_aprobacion": "2026-09-05T00:57:18.095Z",
+        "aprobado_por": null,
+        "es_inventario_limitado": false,
+        "fecha_creacion": "2026-09-05T00:57:18.095Z",
+        "fecha_actualizacion": "2026-09-05T00:57:18.095Z"
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_ofertas": 202,
+    "total_paginas": 11
+  }
+}
+```
+
+`total_ofertas` cuenta **todas** las que cumplen el filtro (no solo la
+página); `total_paginas` es `ceil(total_ofertas / limite)`, o `0` si no hay
+ninguna. Pedir una `pagina` más allá del final devuelve `"ofertas": []`
+con el `total_ofertas` real, no un error.
+
+Por dentro: **dos consultas a Postgres** (una cuenta el total que cumple el
+filtro, otra trae solo la página) en una misma transacción `REPEATABLE
+READ READ ONLY` para que el conteo y la página salgan de la misma foto — el
+equivalente Postgres del `$facet` que usa `GET /productos/paginacion` —, y
+**una sola a Mongo con `$in`** por los productos distintos de esa página.
+Nunca una consulta por oferta, y el trabajo por request queda acotado al
+tamaño de página, sin importar cuántas ofertas tenga el vendedor.
+
+### 400 / 401 / 403 / 503 / 500
+
+Mismos cuerpos que `GET /vendedor/ofertas` (más el 400 del filtro `activo`
+de arriba). Sin sesión → 401; comprador → 403.
+
+Probado en vivo el 7 de septiembre de 2026 (54 comprobaciones sobre las dos
+rutas paginadas): `total_ofertas` cuadra con `SELECT count(*)` de la base;
+concatenar todas las páginas da exactamente la lista de `GET
+/vendedor/ofertas`, sin duplicados ni faltantes y en el mismo orden;
+`activo=true`/`false` cuadran con el conteo por estado y su suma da el
+total; página fuera de rango → `[]` con el total correcto; `limite` se capa
+a 100; un admin ve el mismo conjunto que la tienda; un vendedor normal solo
+las suyas; comprador 403, sin sesión 401.
+
+---
+
 ## GET /vendedor/ofertas/pendientes
 
 La **cola de revisión**: todas las ofertas en estado `pendiente`, de
@@ -1623,6 +1728,86 @@ rutas GET): la cuenta coincide con `SELECT count(*) ... WHERE estado =
 el comprador 403, sin sesión 401; el contenido trae el vendedor y los
 nombres correctos; las ofertas `activa`/`rechazada` no aparecen; el orden
 es `fecha_creacion` ascendente.
+
+---
+
+## GET /vendedor/ofertas/pendientes/paginado
+
+La **versión paginada** de `GET /vendedor/ofertas/pendientes`. La misma
+cola de revisión, el mismo orden (`fecha_creacion` ascendente, con
+`id_oferta` ascendente de desempate) y **la misma forma de cada oferta**
+(con el vendedor embebido, que quien revisa no conoce), pero por número de
+página.
+
+**Sin filtros:** la cola es toda de estado `pendiente` por definición, así
+que el filtro `activo` de `GET /vendedor/ofertas/paginado` no aplica aquí.
+Solo `pagina` y `limite`, con las mismas reglas y mensajes que las otras
+rutas paginadas (tope de `limite` 100, default 20).
+
+**Solo `tienda@mesh.com` o un admin**, igual que la ruta sin paginar: un
+vendedor cualquiera recibe el **mismo 404 genérico** (`No existe una oferta
+con ese id`) — no se le confirma que la ruta existe —, y no hay
+sustitución de identidad (la cola es global, no "mis pendientes"). El
+chequeo va **antes** de validar la paginación.
+
+Segmento literal: se resuelve antes que `:id/rechazos`.
+
+```
+GET /vendedor/ofertas/pendientes/paginado?pagina=1&limite=20
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Ofertas pendientes obtenidas",
+  "payload": {
+    "ofertas": [
+      {
+        "id_oferta": "591",
+        "id_producto": 12,
+        "id_producto_variante": 24,
+        "nombre_producto": "Silla Ergonomica Onda",
+        "nombre_variante": "Malla / Negro",
+        "imagen": null,
+        "precio": "80.00",
+        "stock": 0,
+        "fecha_creacion": "2026-08-28T21:40:11.002Z",
+        "vendedor": {
+          "id_usuario": "6",
+          "usuario": "ventas_sur",
+          "nombre": "Lucia",
+          "apellido": "Morales"
+        }
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_ofertas": 1,
+    "total_paginas": 1
+  }
+}
+```
+
+`total_ofertas` es el total de pendientes (no solo la página);
+`total_paginas` es `ceil(total_ofertas / limite)`. Página más allá del
+final → `"ofertas": []` con el `total_ofertas` real. Mismo motor que
+`GET /vendedor/ofertas/paginado`: dos consultas a Postgres (total + página)
+en una transacción `REPEATABLE READ READ ONLY` y una sola a Mongo con
+`$in`.
+
+### 401 / 403 / 404 / 503 / 500
+
+Mismos cuerpos que `GET /vendedor/ofertas/pendientes`. Un vendedor que no
+es la tienda ni admin → 404 `No existe una oferta con ese id`; comprador →
+403; sin sesión → 401.
+
+Probado en vivo el 7 de septiembre de 2026 (con datos de prueba sembrados y
+retirados después): concatenar las páginas da la misma lista y el mismo
+orden que `GET /vendedor/ofertas/pendientes`, sin solapamiento entre
+páginas; `total_ofertas`/`total_paginas` cuadran; página fuera de rango →
+`[]`; un vendedor normal 404, comprador 403, sin sesión 401.
 
 ---
 

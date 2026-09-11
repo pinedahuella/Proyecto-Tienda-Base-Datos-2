@@ -12,9 +12,14 @@ import {
 } from '../../helpers/validaciones-inventario';
 import { validarPrecioObligatorio } from '../../helpers/validaciones-crear-producto';
 import {
+  validarLimite,
+  validarPagina,
+} from '../../helpers/validaciones-productos';
+import {
   validarAjusteStock,
   validarDecisionRevision,
   validarEstadoOferta,
+  validarFiltroActivo,
   validarRazonRechazo,
 } from '../../helpers/validaciones-oferta';
 import {
@@ -33,6 +38,12 @@ import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { CrearOfertaPeticion } from '../../dto/crear-oferta';
 import { EditarOfertaPeticion } from '../../dto/editar-oferta';
 import { RevisarOfertaPeticion } from '../../dto/revisar-oferta';
+import {
+  OfertasPendientesPaginadas,
+  OfertasPropiasPaginadas,
+  PaginarOfertasPendientesQuery,
+  PaginarOfertasQuery,
+} from '../../dto/paginar-ofertas';
 import {
   ProductoConMisOfertas,
   ProductoVarianteConMiOferta,
@@ -700,6 +711,10 @@ export class OfertasVendedorService {
    * los productos distintos que aparecen ahi (con `$in`), nunca una por
    * oferta.
    *
+   * Orden: `fecha_actualizacion` descendente, con `id_oferta` descendente
+   * de desempate -- el mismo criterio exacto que listarPropiasPaginado(),
+   * para que recorrer la ruta paginada dé la misma secuencia que esta.
+   *
    * Para un admin, "mis ofertas" son las de la cuenta de la tienda (ver
    * resolverIdEfectivo() arriba), no las que hubiera creado el admin bajo
    * su propio id -- no deberia haber ninguna, porque crear() ya las
@@ -711,18 +726,83 @@ export class OfertasVendedorService {
   ): Promise<OfertaPropia[]> {
     const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
     const ofertas = await this.consultarOfertasPropias(idUsuario);
-    if (ofertas.length === 0) {
+    return this.armarOfertasPropias(ofertas);
+  }
+
+  /**
+   * La version paginada de listarPropias(): las mismas ofertas del panel
+   * del vendedor (cualquier estado) y la misma forma de cada una, pero por
+   * numero de pagina en vez de todas de golpe -- igual que
+   * GET /vendedor/productos/paginado, no por cursor -- y con un unico
+   * filtro, `activo` (true / false / null, ver validarFiltroActivo).
+   *
+   * Tres consultas, ninguna por oferta: dos a Postgres (una cuenta el total
+   * que cumple el filtro, otra trae solo la pagina pedida; van en la misma
+   * transaccion REPEATABLE READ para que salgan de la misma foto, el mismo
+   * espiritu que el $facet de ProductosService.listarPaginado) y una sola a
+   * Mongo con `$in` por los productos distintos de esa pagina. Pedir una
+   * pagina mas alla del final devuelve `ofertas: []` con el `total_ofertas`
+   * real, no un error.
+   *
+   * Misma paginacion por numero de pagina que el resto del proyecto:
+   * `validarLimite`/`validarPagina` son las de helpers/validaciones-productos.ts
+   * (mismas reglas y mismos mensajes que /productos y /vendedor/productos).
+   *
+   * Para un admin, "mis ofertas" son las de la cuenta de la tienda (ver
+   * resolverIdEfectivo()), igual que en listarPropias().
+   */
+  async listarPropiasPaginado(
+    idUsuarioToken: string,
+    idRolUsuario: number,
+    query: PaginarOfertasQuery,
+  ): Promise<OfertasPropiasPaginadas> {
+    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
+    const limite = validarLimite(query.limite);
+    const pagina = validarPagina(query.pagina);
+    const activo = validarFiltroActivo(query.activo);
+    const saltar = (pagina - 1) * limite;
+
+    const { filas, total } = await this.consultarOfertasPropiasPaginado(
+      idUsuario,
+      activo,
+      limite,
+      saltar,
+    );
+
+    const ofertas = await this.armarOfertasPropias(filas);
+    const totalPaginas = total === 0 ? 0 : Math.ceil(total / limite);
+
+    return {
+      ofertas,
+      pagina,
+      limite,
+      total_ofertas: total,
+      total_paginas: totalPaginas,
+    };
+  }
+
+  /**
+   * Resuelve el nombre del producto y de la variante y su portada (una sola
+   * consulta a Mongo con `$in`, nunca una por oferta) y el stock real de
+   * Redis de las que esten en venta relampago, y arma el `OfertaPropia` de
+   * cada fila cruda de `oferta`. Lo comparten listarPropias() y
+   * listarPropiasPaginado().
+   */
+  private async armarOfertasPropias(
+    filas: FilaOfertaPropia[],
+  ): Promise<OfertaPropia[]> {
+    if (filas.length === 0) {
       return [];
     }
 
     const idsProducto = [
-      ...new Set(ofertas.map((fila) => Number(fila.id_producto_mongo))),
+      ...new Set(filas.map((fila) => Number(fila.id_producto_mongo))),
     ];
     const productos = await this.consultarProductosLigeros(idsProducto);
     const productoPorId = new Map(productos.map((p) => [p._id, p]));
 
     return Promise.all(
-      ofertas.map(async (fila) => {
+      filas.map(async (fila) => {
         const producto = productoPorId.get(Number(fila.id_producto_mongo));
         const variante = producto?.variantes.find(
           (v) =>
@@ -928,6 +1008,64 @@ export class OfertasVendedorService {
       manejarErrorConexion(this.logger, error);
     }
 
+    return this.armarOfertasPendientes(filas);
+  }
+
+  /**
+   * La version paginada de listarPendientes(): la misma cola de revision
+   * (todas las ofertas `pendiente`, de la mas antigua a la mas nueva) y la
+   * misma forma de cada una, pero por numero de pagina -- igual que
+   * GET /vendedor/productos/paginado. Sin filtros: la cola es toda
+   * `pendiente` por definicion.
+   *
+   * Solo la tienda o un admin (`exigirTiendaOAdmin`, va lo primero, antes
+   * de validar la paginacion); un vendedor cualquiera recibe el mismo 404
+   * generico. No hay sustitucion de identidad: la cola es global, no "mis
+   * pendientes".
+   *
+   * Tres consultas, ninguna por oferta: dos a Postgres (total + pagina, en
+   * la misma transaccion REPEATABLE READ) y una sola a Mongo con `$in`.
+   * Pedir una pagina mas alla del final devuelve `ofertas: []` con el
+   * `total_ofertas` real.
+   */
+  async listarPendientesPaginado(
+    idUsuarioToken: string,
+    idRolUsuario: number,
+    query: PaginarOfertasPendientesQuery,
+  ): Promise<OfertasPendientesPaginadas> {
+    await this.exigirTiendaOAdmin(idUsuarioToken, idRolUsuario);
+
+    const limite = validarLimite(query.limite);
+    const pagina = validarPagina(query.pagina);
+    const saltar = (pagina - 1) * limite;
+
+    const { filas, total } = await this.consultarOfertasPendientesPaginado(
+      limite,
+      saltar,
+    );
+
+    const ofertas = await this.armarOfertasPendientes(filas);
+    const totalPaginas = total === 0 ? 0 : Math.ceil(total / limite);
+
+    return {
+      ofertas,
+      pagina,
+      limite,
+      total_ofertas: total,
+      total_paginas: totalPaginas,
+    };
+  }
+
+  /**
+   * Resuelve el nombre del producto/variante y su portada contra Mongo (una
+   * sola consulta con `$in`, nunca una por oferta) y arma la
+   * `OfertaPendiente` de cada fila cruda -- con el vendedor embebido, que
+   * quien revisa no conoce. Lo comparten listarPendientes() y
+   * listarPendientesPaginado().
+   */
+  private async armarOfertasPendientes(
+    filas: FilaOfertaPendiente[],
+  ): Promise<OfertaPendiente[]> {
     if (filas.length === 0) {
       return [];
     }
@@ -979,7 +1117,7 @@ export class OfertasVendedorService {
          JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
          LEFT JOIN usuarios ua ON ua.id_usuario = o.id_usuario_aprobo
          WHERE o.id_usuario = $1
-         ORDER BY o.fecha_actualizacion DESC`,
+         ORDER BY o.fecha_actualizacion DESC, o.id_oferta DESC`,
         [idUsuario],
       );
       return resultado.rows;
@@ -1009,6 +1147,126 @@ export class OfertasVendedorService {
       return resultado.rows;
     } catch (error) {
       manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Una pagina de las ofertas del vendedor mas el total que cumple el mismo
+   * filtro. Las dos consultas van en una transaccion REPEATABLE READ de
+   * solo lectura para que el conteo y la pagina salgan de la misma foto
+   * (con READ COMMITTED cada SELECT toma su propio snapshot y el total
+   * podria no cuadrar con la pagina). Mismo patron de cliente dedicado +
+   * BEGIN/COMMIT + intentarRollback que editar().
+   *
+   * El filtro `activo`: `true` recorta a `estado_oferta_nombre = 'activa'`,
+   * `false` a `<> 'activa'`, `null` no recorta nada. Se interpola en el SQL
+   * (no es un parametro) porque es un fragmento de condicion, no un valor;
+   * los unicos tres textos posibles salen de validarFiltroActivo, nunca del
+   * cliente.
+   *
+   * Orden: `fecha_actualizacion` descendente y `id_oferta` descendente de
+   * desempate. El desempate es imprescindible al paginar: `fecha_actualizacion`
+   * no es unica (varias ofertas comparten el instante de una carga masiva o
+   * de un recalculo de campos), y sin un segundo criterio estable una misma
+   * oferta podria aparecer en dos paginas o en ninguna.
+   */
+  private async consultarOfertasPropiasPaginado(
+    idUsuario: string,
+    activo: boolean | null,
+    limite: number,
+    saltar: number,
+  ): Promise<{ filas: FilaOfertaPropia[]; total: number }> {
+    const condicionActivo =
+      activo === null
+        ? ''
+        : activo
+          ? `AND eo.estado_oferta_nombre = 'activa'`
+          : `AND eo.estado_oferta_nombre <> 'activa'`;
+
+    const cliente = await pool.connect();
+    try {
+      await cliente.query(
+        'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+      );
+
+      const conteo = await cliente.query<{ total: string }>(
+        `SELECT count(*) AS total
+           FROM oferta o
+           JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+          WHERE o.id_usuario = $1 ${condicionActivo}`,
+        [idUsuario],
+      );
+
+      const pagina = await cliente.query<FilaOfertaPropia>(
+        `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
+                o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.id_usuario_aprobo, o.es_inventario_limitado,
+                ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
+                ua.apellido AS aprobo_apellido,
+                o.fecha_creacion, o.fecha_actualizacion
+           FROM oferta o
+           JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+           LEFT JOIN usuarios ua ON ua.id_usuario = o.id_usuario_aprobo
+          WHERE o.id_usuario = $1 ${condicionActivo}
+          ORDER BY o.fecha_actualizacion DESC, o.id_oferta DESC
+          LIMIT $2 OFFSET $3`,
+        [idUsuario, limite, saltar],
+      );
+
+      await cliente.query('COMMIT');
+      return { filas: pagina.rows, total: Number(conteo.rows[0].total) };
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
+    }
+  }
+
+  /**
+   * Una pagina de la cola de revision (ofertas `pendiente`, de la mas
+   * antigua a la mas nueva) mas el total pendiente. Misma transaccion
+   * REPEATABLE READ de solo lectura y mismo motivo que
+   * consultarOfertasPropiasPaginado(). El orden ya trae su propio desempate
+   * (`fecha_creacion ASC, id_oferta ASC`, igual que listarPendientes()).
+   */
+  private async consultarOfertasPendientesPaginado(
+    limite: number,
+    saltar: number,
+  ): Promise<{ filas: FilaOfertaPendiente[]; total: number }> {
+    const cliente = await pool.connect();
+    try {
+      await cliente.query(
+        'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+      );
+
+      const conteo = await cliente.query<{ total: string }>(
+        `SELECT count(*) AS total
+           FROM oferta o
+           JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+          WHERE eo.estado_oferta_nombre = 'pendiente'`,
+      );
+
+      const pagina = await cliente.query<FilaOfertaPendiente>(
+        `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
+                o.precio, o.stock, o.fecha_creacion,
+                u.id_usuario, u.usuario, u.nombre, u.apellido
+           FROM oferta o
+           JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+           JOIN usuarios u ON u.id_usuario = o.id_usuario
+          WHERE eo.estado_oferta_nombre = 'pendiente'
+          ORDER BY o.fecha_creacion ASC, o.id_oferta ASC
+          LIMIT $1 OFFSET $2`,
+        [limite, saltar],
+      );
+
+      await cliente.query('COMMIT');
+      return { filas: pagina.rows, total: Number(conteo.rows[0].total) };
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
     }
   }
 

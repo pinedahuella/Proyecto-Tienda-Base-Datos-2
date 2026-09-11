@@ -120,9 +120,11 @@ correr `etl/cargar_grafo.sh`). Timeout de 6 s -> 503.
 ```
 
 > El **panel de fraude** que consume este grafo
-> (`GET /admin/fraude/anillos`, solo admin) y la **conciliación** del grafo
-> con PostgreSQL (`GET /admin/grafo/conciliacion`, solo admin) están
-> documentados aparte, en `endpoints-fraude.md`.
+> (`GET /admin/fraude/anillos`, solo admin), la **conciliación** del grafo
+> con PostgreSQL (`GET /admin/grafo/conciliacion`, solo admin) y las
+> **alertas de fraude de login** por fuerza bruta / multi-cuenta
+> (`GET /admin/fraude/alertas-login`, solo admin, sobre PostgreSQL -- no
+> toca el grafo) están documentados aparte, en `endpoints-fraude.md`.
 
 ---
 
@@ -329,7 +331,10 @@ Si las credenciales son correctas, ademas de la respuesta deja una cookie
 **401** — mismo mensaje si el identificador no existe, si la contrasena no
 coincide, o si la cuenta no esta activa (`id_estado_usuario` distinto de
 activo). A proposito: no hay forma de usar esta ruta para averiguar que
-correos o usuarios estan registrados, ni cuales estan suspendidos.
+correos o usuarios estan registrados, ni cuales estan suspendidos. (El
+motivo real de cada fallo si se guarda, pero solo en el log de seguridad —
+coleccion `eventos_autenticacion` de Mongo, ver `api.md` — nunca en la
+respuesta.)
 
 ```json
 { "ok": false, "mensaje": "Correo electronico, usuario o contrasena incorrectos", "payload": null }

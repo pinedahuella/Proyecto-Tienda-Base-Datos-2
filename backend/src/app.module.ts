@@ -50,6 +50,8 @@ import { BaseDatosBuscadorService } from './services/base-datos-buscador.service
 import { BuscadorProductosController } from './controllers/buscador/productos.controller';
 import { BuscadorProductosService } from './services/buscador/productos.service';
 import { BuscadorSyncService } from './services/buscador/buscador-sync.service';
+import { EventosAutenticacionSyncService } from './services/eventos-autenticacion/eventos-autenticacion-sync.service';
+import { FraudeLoginService } from './services/fraude-login/fraude-login.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -115,6 +117,8 @@ import { BuscadorSyncService } from './services/buscador/buscador-sync.service';
     BaseDatosBuscadorService,
     BuscadorProductosService,
     BuscadorSyncService,
+    EventosAutenticacionSyncService,
+    FraudeLoginService,
   ],
 })
 export class AppModule {}

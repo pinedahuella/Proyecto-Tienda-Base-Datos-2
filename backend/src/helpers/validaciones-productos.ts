@@ -7,7 +7,10 @@ import { ErrorValidacion } from './errores';
  * caracteristicas_adicionales. `validarPagina`/`validarLimite` y
  * `construirRegexNombreFlexible` tambien las reutiliza
  * `GET /vendedor/productos/paginado` (mismas reglas, mismos mensajes, un
- * solo lugar -- ver ProductosVendedorService).
+ * solo lugar -- ver ProductosVendedorService), y `validarPagina`/
+ * `validarLimite` ademas las dos rutas paginadas de ofertas
+ * (`GET /vendedor/ofertas/paginado` y `.../pendientes/paginado`, ver
+ * OfertasVendedorService).
  */
 
 export const LIMITE_PRODUCTOS_DEFECTO = 20;

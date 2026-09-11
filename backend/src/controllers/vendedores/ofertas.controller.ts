@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Param, Patch, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../../decorators/roles.decorator';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
 import { SesionGuard } from '../../guards/sesion.guard';
@@ -8,6 +17,10 @@ import type { TokenUsuario } from '../../dto/token-usuario';
 import type { CrearOfertaPeticion } from '../../dto/crear-oferta';
 import type { EditarOfertaPeticion } from '../../dto/editar-oferta';
 import type { RevisarOfertaPeticion } from '../../dto/revisar-oferta';
+import type {
+  PaginarOfertasPendientesQuery,
+  PaginarOfertasQuery,
+} from '../../dto/paginar-ofertas';
 import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { OfertasVendedorService } from '../../services/vendedores/ofertas.service';
 
@@ -49,6 +62,29 @@ export class OfertasVendedorController {
     }
   }
 
+  // GET /vendedor/ofertas/paginado
+  // La version paginada de GET /vendedor/ofertas (que se queda tal cual):
+  // por numero de pagina -- igual que GET /vendedor/productos/paginado --
+  // con un unico filtro `activo` (true / false / ausente). Misma
+  // autorizacion e identidad efectiva que GET /vendedor/ofertas. Segmento
+  // literal, va antes de :id/rechazos.
+  @Get('paginado')
+  async listarPaginado(
+    @Query() query: PaginarOfertasQuery,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const pagina = await this.ofertasVendedorService.listarPropiasPaginado(
+        usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
+        query,
+      );
+      return exito(pagina, 'Ofertas obtenidas');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener las ofertas');
+    }
+  }
+
   // GET /vendedor/ofertas/pendientes
   // La cola de revision: todas las ofertas en estado "pendiente" de
   // cualquier vendedor. Solo la tienda o un admin -- un vendedor cualquiera
@@ -61,6 +97,27 @@ export class OfertasVendedorController {
         usuarioActual.id_rol_usuario,
       );
       return exito(ofertas, 'Ofertas pendientes obtenidas');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudieron obtener las ofertas pendientes');
+    }
+  }
+
+  // GET /vendedor/ofertas/pendientes/paginado
+  // La version paginada de GET /vendedor/ofertas/pendientes (que se queda
+  // tal cual): misma cola, mismo orden, solo tienda o admin (mismo 404
+  // disfrazado), sin filtros. Segmento literal, va antes de :id/rechazos.
+  @Get('pendientes/paginado')
+  async listarPendientesPaginado(
+    @Query() query: PaginarOfertasPendientesQuery,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const pagina = await this.ofertasVendedorService.listarPendientesPaginado(
+        usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
+        query,
+      );
+      return exito(pagina, 'Ofertas pendientes obtenidas');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudieron obtener las ofertas pendientes');
     }

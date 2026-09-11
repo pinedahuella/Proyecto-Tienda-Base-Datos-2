@@ -3,6 +3,7 @@ import { pool } from '../database/postgres';
 import { compararContrasena, hashearContrasena } from '../helpers/contrasena';
 import {
   ErrorConflicto,
+  ErrorInicioSesion,
   ErrorSesion,
   ErrorValidacion,
 } from '../helpers/errores';
@@ -100,12 +101,14 @@ export class UsuarioService {
    * Revisa el identificador (correo o usuario) y la contrasena contra la
    * base y, si coinciden y la cuenta esta activa, firma un token de sesion.
    *
-   * Lanza ErrorSesion, con el mismo mensaje, si el identificador no existe,
-   * si la contrasena no coincide, o si la cuenta no esta activa. Es a
-   * proposito que las tres den el mismo mensaje: si la cuenta suspendida
-   * dijera algo distinto, cualquiera podria usar este endpoint para
-   * confirmar la contrasena de una cuenta que no puede usar, probando
-   * contrasenas hasta que el mensaje cambiara.
+   * Lanza ErrorInicioSesion, con el mismo mensaje en los tres casos, si el
+   * identificador no existe, si la contrasena no coincide, o si la cuenta no
+   * esta activa. Es a proposito que las tres den el mismo mensaje: si la
+   * cuenta suspendida dijera algo distinto, cualquiera podria usar este
+   * endpoint para confirmar la contrasena de una cuenta que no puede usar,
+   * probando contrasenas hasta que el mensaje cambiara. El `motivo` real (y
+   * el id de la cuenta, si se conoce) viaja dentro del error solo para el
+   * log de seguridad, nunca a la respuesta HTTP.
    */
   async iniciarSesion(datos: LoginUsuarioPeticion): Promise<ResultadoLogin> {
     if (!esTextoNoVacio(datos.identificador)) {
@@ -132,25 +135,26 @@ export class UsuarioService {
       this.manejarErrorBaseDatos(error);
     }
 
-    const coincide =
-      fila != null &&
-      (await compararContrasena(datos.contrasena, fila.contrasena_hash));
-
-    if (!coincide) {
-      throw new ErrorSesion(
-        'Correo electronico, usuario o contrasena incorrectos',
-      );
+    // Si no hay cuenta con ese identificador se corta aqui, antes de gastar
+    // el compararContrasena (bcrypt): mismo comportamiento de siempre, y de
+    // paso TypeScript ya sabe que fila no es undefined mas abajo.
+    if (fila == null) {
+      throw new ErrorInicioSesion('usuario_inexistente');
     }
 
-    // A este punto TypeScript ya sabe que fila no es undefined: "coincide"
-    // solo puede ser true si fila existe, y si no coincide ya se lanzo.
+    const contrasenaCoincide = await compararContrasena(
+      datos.contrasena,
+      fila.contrasena_hash,
+    );
+    if (!contrasenaCoincide) {
+      throw new ErrorInicioSesion('credenciales_invalidas', fila.id_usuario);
+    }
+
+    if (fila.id_estado_usuario !== ID_ESTADO_ACTIVO) {
+      throw new ErrorInicioSesion('cuenta_inactiva', fila.id_usuario);
+    }
+
     const usuario = fila;
-
-    if (usuario.id_estado_usuario !== ID_ESTADO_ACTIVO) {
-      throw new ErrorSesion(
-        'Correo electronico, usuario o contrasena incorrectos',
-      );
-    }
 
     const token = await firmarToken({
       id_usuario: usuario.id_usuario,

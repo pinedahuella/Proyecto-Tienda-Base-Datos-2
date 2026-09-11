@@ -19,6 +19,24 @@ export class ErrorConexion extends Error {}
 /** El token de sesion no vino, no es valido o ya vencio. HTTP 401. */
 export class ErrorSesion extends Error {}
 
+/**
+ * Un intento de login que fallo. Extiende ErrorSesion (el controlador la
+ * sigue traduciendo a 401 con el mismo mensaje generico), pero lleva el
+ * motivo real y, cuando se conoce, el id de la cuenta: es lo que necesita
+ * el log de seguridad (eventos_autenticacion). Nada de esto llega a la
+ * respuesta HTTP -- si lo hiciera, esta ruta serviria para averiguar que
+ * cuentas existen o cuales estan suspendidas.
+ */
+export class ErrorInicioSesion extends ErrorSesion {
+  constructor(
+    public readonly motivo:
+      'credenciales_invalidas' | 'usuario_inexistente' | 'cuenta_inactiva',
+    public readonly idUsuario: string | null = null,
+  ) {
+    super('Correo electronico, usuario o contrasena incorrectos');
+  }
+}
+
 /** No existe lo que se pidio. El controlador la traduce a HTTP 404. */
 export class ErrorNoEncontrado extends Error {}
 

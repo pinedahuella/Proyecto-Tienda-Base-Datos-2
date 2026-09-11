@@ -263,29 +263,45 @@ de una o varias tablas, y el payload del token de sesion.
 Una forma rapida de saber donde va algo nuevo: si tiene un `CREATE TABLE`
 en `migrations/`, es un modelo. Si no, es un DTO.
 
-### Los logs (log_registro, log_login)
+### El log de autenticacion (coleccion `eventos_autenticacion` de Mongo)
 
-`services/log.service.ts` (`LogService`) escribe en esas dos tablas. Las
-llama `UsuarioController`, no `UsuarioService`: despues de que `registrar()`
-o `iniciarSesion()` ya tuvieron exito, el controller le pasa el id del
-usuario y la IP de la peticion (`request.ip`, de Fastify).
+`services/log.service.ts` (`LogService`) escribe la coleccion
+**`eventos_autenticacion` de MongoDB** — un documento por cada `login`
+(exitoso **y fallido**), `logout` y `registro`. Modelo en
+`models/evento-autenticacion.ts`. Lo llama `UsuarioController`, que arma un
+`ContextoPeticion` (`helpers/contexto-peticion.ts`: `ip`, `user_agent` y
+`huella_cliente` = SHA-256 de `user-agent` + `accept-language`) y se lo
+pasa junto con el `id_usuario`, el identificador tecleado y — en los
+fallos de login — el `motivo` fino (`credenciales_invalidas`,
+`usuario_inexistente`, `cuenta_inactiva`, `datos_invalidos`). Ese motivo
+sale de `ErrorInicioSesion` (en `helpers/errores.ts`) y **nunca** llega a
+la respuesta HTTP: el cliente recibe el mismo 401 generico en los tres
+casos de credenciales, para no revelar que cuentas existen.
 
-Nunca lanza error. Si el `INSERT` del log falla, se loguea el detalle
-tecnico y ahi se queda: un log que no se pudo guardar no puede tumbar un
-registro, un login o un logout que si funcionaron. Por eso no cambia nada
-de la respuesta que ya devolvian esas rutas.
+Nunca lanza error, y el controlador lo llama **sin `await`**: guardar el
+evento es best-effort y no debe retrasar ni tumbar el login. Con Mongo
+caido, `insertOne` tarda hasta 3 s en rendirse (`serverSelectionTimeoutMS`,
+ver `database/mongo.ts`), asi que el login no espera eso — el detalle queda
+en el log del servidor (`ERROR [LogService]`) y los eventos de una caida
+larga se pierden. Detalle y pruebas en
+`cambio_propuestas/2026-09-10_0906-eventos-autenticacion-mongo.md`.
 
-`log_login` guarda entradas y salidas (`login` y `logout`). Para el logout
-hay un detalle: `POST /usuario/logout` no tiene `SesionGuard` (tiene que
+Para el `logout`: `POST /usuario/logout` no tiene `SesionGuard` (tiene que
 funcionar aunque el token ya haya vencido), asi que antes de borrar la
 cookie intenta verificar el token nada mas para saber a quien atribuirle
-el logout. Si no hay cookie, o el token ya no sirve, simplemente no se
-guarda ese log — la ruta sigue respondiendo 200 igual, cerrar sesion nunca
-depende de que el log se haya podido escribir.
+el evento. Si no hay cookie, o el token ya no sirve, no se guarda nada — la
+ruta responde 200 igual.
+
+**Las tablas `log_login` / `log_registro` de PostgreSQL siguen existiendo
+pero el backend ya no las escribe** (los modelos `models/log-login.ts` y
+`log-registro.ts` quedan sin usar). El ETL de ClickHouse que las leia queda
+pendiente de repuntar a Mongo — lo coordina el equipo, ver
+`plan pendiente/fraude-login-eventos.md`.
 
 Ojo con esto al limpiar datos de prueba a mano: `usuarios` tiene `ON DELETE
 RESTRICT` desde `log_login` y `log_registro`, asi que no se puede borrar un
-usuario que ya tenga logs sin borrar esas filas primero. Lo mismo pasa con
+usuario que ya tenga logs **viejos** (de antes de este cambio) sin borrar
+esas filas primero — un usuario creado ahora ya no genera ninguna. Lo mismo pasa con
 `direcciones` y `direccion_historial`.
 
 ### Transacciones (crear una direccion)

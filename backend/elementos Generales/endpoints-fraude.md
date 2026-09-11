@@ -1,6 +1,7 @@
-# Endpoints del grafo de fraude
+# Endpoints del panel de fraude
 
-Dos rutas de admin sobre el grafo de **Neo4j**, las dos de **solo lectura**:
+Tres rutas de admin, todas de **solo lectura**. Las dos primeras sobre el
+grafo de **Neo4j**; la tercera sobre **PostgreSQL**, sin tocar el grafo:
 
 - **`GET /admin/fraude/anillos`** — el **panel de manipulación de reseñas**
   de la Entrega 2 (Bloque 4 de `BACKEND-PENDIENTE.md`): los grupos de
@@ -10,6 +11,11 @@ Dos rutas de admin sobre el grafo de **Neo4j**, las dos de **solo lectura**:
   sincronización del grafo: compara los conteos de PostgreSQL (la verdad)
   contra Neo4j (la proyección) y avisa de la deriva. Ver la sección al
   final.
+- **`GET /admin/fraude/alertas-login`** — las **alertas de fraude de
+  login** (fuerza bruta contra una cuenta o una IP, multi-cuenta desde una
+  misma IP) que detecta el propio backend con contadores de Redis, en el
+  camino del login mismo — no consulta ningún log retrospectivo. Ver la
+  sección dedicada, después de "anillos".
 
 > **Estado (2026-08-30, sincronización agregada 2026-09-04): ruta
 > implementada y PROBADA en vivo.** Contra `mesh-neo4j` cargado (150 nodos):
@@ -318,6 +324,168 @@ Contra la cola `evento_grafo` real (misma consulta que usa la conciliación).
 Borrada la siembra (`MATCH (n:Prueba) DETACH DELETE n`), el grafo vuelve a
 150 nodos y la ruta a `anillos: []`. Nada quedó tocado en PostgreSQL (la
 siembra vive solo en Neo4j).
+
+---
+
+# GET /admin/fraude/alertas-login
+
+Las alertas de fraude de **login** — fuerza bruta y multi-cuenta —, que
+detecta `FraudeLoginService` con **contadores de Redis en el propio camino
+del login**, sin esperar a ningún worker ni consultar Elasticsearch. Punto
+4 de `plan pendiente/fraude-login-eventos.md`; el esquema de referencia es
+`plan pendiente/fraude-login-eventos.sql`.
+
+> **Estado (2026-09-10): implementada y PROBADA en vivo.** Ver "Pruebas" al
+> final de esta sección.
+
+Código: `src/controllers/fraude/fraude.controller.ts` (mismo controlador
+que `anillos`, ruta hermana) + `src/services/fraude-login/fraude-login.service.ts`.
+**Solo admin** (`SesionGuard` + `@Roles(ID_ROL_ADMIN)`, en la clase) — no la
+tienda, mismo criterio que el resto del panel.
+
+## De dónde salen las alertas
+
+**Esto NO es un log de cada intento** — eso ya vive en la colección
+`eventos_autenticacion` de MongoDB (ver
+`cambio_propuestas/2026-09-10_0906-eventos-autenticacion-mongo.md`). Una
+fila de `alerta_fraude` es "esto merece que un admin lo mire": nace cuando
+un contador de Redis, revisado en cada intento de login (éxito o fallo),
+cruza su umbral.
+
+**Por decisión explícita del usuario (2026-09-10): el sistema SOLO
+alerta, nunca frena el login.** Ningún umbral bloquea ni retrasa una
+cuenta o una IP — cruzarlo únicamente deja la fila para revisión humana.
+
+Tres señales, las únicas que no requieren geolocalización (punto 2 del
+plan, todavía sin decidir) ni una consulta retrospectiva contra
+Elasticsearch:
+
+| `tipo_alerta` | Qué mide | Ventana | Umbral |
+|---|---|---|---|
+| `fuerza_bruta_ip` | Fallos de login desde una misma IP | 60 s | 8 |
+| `fuerza_bruta_cuenta` | Fallos de login contra un mismo identificador | 60 s | 5 |
+| `multi_cuenta_ip` | Identificadores **distintos** probados desde una misma IP (credential stuffing) | 300 s | 4 |
+
+Cada contador es de **ventana fija**: `INCR`/`SADD` en Redis y después
+`EXPIRE ... NX` — el TTL se pone una sola vez, al crear la clave, y no se
+reinicia con cada intento nuevo (Redis 7+, ya en `redis:8-alpine` del
+compose).
+
+**Deduplicación:** la llave de conflicto de `alerta_fraude` es
+`(tipo, clave, ventana_inicio)`, con `ventana_inicio` truncado al minuto.
+Varios cruces del umbral dentro del mismo minuto **suman `contador`** en
+una sola fila (no duplican); si el ataque sigue al minuto siguiente, nace
+una fila nueva a propósito — una alerta ya revisada no se reabre sola.
+
+## Qué llena cada columna
+
+- **`clave`** — el origen de la señal: la IP (`fuerza_bruta_ip`,
+  `multi_cuenta_ip`) o el identificador intentado (`fuerza_bruta_cuenta`).
+- **`cuenta_involucrada`** — solo en `fuerza_bruta_cuenta`, y solo si el
+  identificador corresponde a una cuenta real (`credenciales_invalidas` /
+  `cuenta_inactiva`); `null` en los otros dos tipos y cuando la cuenta no
+  existe (`usuario_inexistente`).
+- **`detalle`** — evidencia por tipo: conteos, la ventana en segundos, y
+  (solo en `multi_cuenta_ip`) hasta 20 identificadores vistos.
+- **`estado`** — `pendiente` al nacer. El admin la marca `revisada` o
+  `descartada` desde una pantalla aparte (esta ruta es de solo lectura; no
+  hay `PATCH` todavía — ver "Lo que no se hizo").
+
+## GET /admin/fraude/alertas-login
+
+```
+GET /admin/fraude/alertas-login?pagina=1&limite=20&estado=pendiente
+```
+
+Paginación por número de página (`validarLimite`/`validarPagina` de
+`helpers/validaciones-productos.ts`, mismas reglas y mensajes que el resto
+del proyecto). Un único filtro opcional:
+
+- `estado=pendiente|revisada|descartada` → solo esas.
+- sin el parámetro → todas, sin filtrar, más recientes primero
+  (`fecha_actualizacion DESC`).
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Alertas de login obtenidas",
+  "payload": {
+    "alertas": [
+      {
+        "id_alerta_fraude": "16",
+        "tipo_alerta": "fuerza_bruta_cuenta",
+        "clave": "admin_mesh",
+        "cuenta_involucrada": { "id_usuario": "5", "usuario": "admin_mesh" },
+        "detalle": { "fallos": 5, "ventana_segundos": 60 },
+        "contador": 1,
+        "ventana_inicio": "2026-09-11T04:18:00.000Z",
+        "estado": "pendiente",
+        "fecha_creacion": "2026-09-11T04:18:45.656Z",
+        "fecha_actualizacion": "2026-09-11T04:18:45.656Z"
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_alertas": 4,
+    "total_paginas": 1
+  }
+}
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
+```
+
+### 401 / 403
+
+Mismo comportamiento que `anillos`: sin sesión → `401`; sesión válida pero
+no admin (comprador, vendedor, o la tienda) → `403`.
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
+## Pruebas — hechas el 2026-09-10
+
+Contra el servidor y las bases reales (`mesh-postgres`, `mesh-redis`),
+`npm run start:dev`. Scripts en el scratchpad, no en el repo.
+
+| Caso | Resultado |
+|---|---|
+| 6 fallos en 60 s contra un mismo identificador inexistente | `mesh:fraude:fallos_cuenta:<id>` llega a 6; alerta `fuerza_bruta_cuenta` nace en el fallo 5, `contador: 2` tras el 6º (mismo minuto) |
+| 3 fallos más, con 3 identificadores distintos, misma IP | `fallos_ip` llega a 9 (≥8) → alerta `fuerza_bruta_ip`; `cuentas_ip` llega a 4 distintos (≥4) → alerta `multi_cuenta_ip` con los 4 identificadores en `detalle` |
+| Login **exitoso** después, misma IP | no rompe nada; el identificador exitoso también entra al set de `multi_cuenta_ip` (a propósito: credential stuffing puede acertar una), la alerta existente sube de `contador` |
+| 5 fallos de contraseña contra una cuenta **real** (`admin_mesh`) | la alerta trae `cuenta_involucrada: { id_usuario: "5", usuario: "admin_mesh" }` |
+| `GET /admin/fraude/alertas-login` sin filtro | `200`, 4 alertas, `total_paginas` correcto |
+| `...?estado=pendiente&limite=2` | `200`, 2 alertas, `total_paginas: 2` |
+| `...?estado=basura` | `400` "El estado debe ser uno de: ..." |
+| Sin cookie | `401` |
+| `TTL` de `mesh:fraude:fallos_cuenta:admin_mesh` tras 5 intentos rápidos | 54 s (no se reinició a 60 en cada intento — confirma `EXPIRE ... NX`) |
+
+Limpieza: `DELETE FROM alerta_fraude` (4 filas) + `redis-cli --scan --pattern
+"mesh:fraude:*" | xargs DEL` (5 claves). `npx tsc --noEmit` limpio sobre
+todos los archivos tocados.
+
+## Lo que no se hizo en esta versión (y por qué)
+
+- **`PATCH` para marcar una alerta revisada/descartada.** El plan
+  (`fraude-login-eventos.md` punto 5) lo menciona, pero no se pidió en esta
+  ronda — se deja para cuando el frontend tenga la pantalla de triage.
+- **Geolocalización de IP (país, ASN) y las señales que dependen de ella**
+  (viaje imposible, IP/ASN nueva tras fallos) — punto 2 del plan, decisión
+  pendiente entre una base offline (GeoLite2) y una API externa.
+- **El worker retrospectivo sobre Elasticsearch** (punto 3/5 del plan):
+  patrones que una ventana de Redis de 1-5 minutos no puede ver (abuso
+  lento repartido en horas). `EventosAutenticacionSyncService` ya alimenta
+  el índice; falta la consulta y el worker que la corra.
+- **Bloqueo o frenado automático.** Decisión explícita del usuario: por
+  ahora el sistema solo alerta, nunca actúa sobre el login.
 
 ---
 
