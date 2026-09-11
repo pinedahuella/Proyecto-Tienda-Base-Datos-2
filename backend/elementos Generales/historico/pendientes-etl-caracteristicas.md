@@ -2,8 +2,8 @@
 
 Este archivo no es una propuesta ni una decisión de diseño: es un registro de
 que la carga actual de datos (seed / migraciones + ETL) no hace lo que
-[Elementos Documentales/productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)
-y [Elementos Documentales/ejemplos_bson_productos.md](Elementos%20Documentales/ejemplos_bson_productos.md)
+[Elementos Documentales/productos_subproductos.md](../Elementos%20Documentales/productos_subproductos.md)
+y [Elementos Documentales/ejemplos_bson_productos.md](../Elementos%20Documentales/ejemplos_bson_productos.md)
 ya dicen que debe hacer. Esos dos archivos describen la forma correcta;
 este archivo dice qué falta para que la base real coincida con ellos.
 

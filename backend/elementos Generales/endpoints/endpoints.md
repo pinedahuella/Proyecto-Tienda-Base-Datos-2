@@ -122,9 +122,12 @@ correr `etl/cargar_grafo.sh`). Timeout de 6 s -> 503.
 > El **panel de fraude** que consume este grafo
 > (`GET /admin/fraude/anillos`, solo admin), la **conciliación** del grafo
 > con PostgreSQL (`GET /admin/grafo/conciliacion`, solo admin) y las
-> **alertas de fraude de login** por fuerza bruta / multi-cuenta
-> (`GET /admin/fraude/alertas-login`, solo admin, sobre PostgreSQL -- no
-> toca el grafo) están documentados aparte, en `endpoints-fraude.md`.
+> **alertas de fraude de login** -- nueve señales: fuerza bruta / multi-cuenta
+> / rotación de IP con contadores de Redis, más toma de cuenta, viaje
+> imposible y tres patrones lentos/repartidos (los mismos tres, en ventana
+> de 24h) consultados contra Elasticsearch
+> (`GET /admin/fraude/alertas-login`, solo admin -- no toca el grafo) están
+> documentados aparte, en `endpoints-fraude.md`.
 
 ---
 

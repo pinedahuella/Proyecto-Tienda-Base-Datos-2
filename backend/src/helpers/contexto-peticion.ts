@@ -1,5 +1,14 @@
 import { createHash } from 'crypto';
 import type { FastifyRequest } from 'fastify';
+import geoip from 'geoip-lite';
+
+/** Ubicacion aproximada de una IP -- ver `geolocalizarIp` mas abajo. */
+export interface GeoUbicacion {
+  lat: number;
+  lon: number;
+  pais: string | null;
+  ciudad: string | null;
+}
 
 /**
  * Los datos de la peticion HTTP que el log de seguridad
@@ -12,6 +21,7 @@ export interface ContextoPeticion {
   ip: string | null;
   userAgent: string | null;
   huellaCliente: string | null;
+  geo: GeoUbicacion | null;
 }
 
 /**
@@ -31,11 +41,48 @@ export function contextoDePeticion(request: FastifyRequest): ContextoPeticion {
         .update(`${userAgent}\n${idioma ?? ''}`)
         .digest('hex')
     : null;
+  const ip = request.ip || null;
 
   return {
-    ip: request.ip || null,
+    ip,
     userAgent,
     huellaCliente,
+    geo: geolocalizarIp(ip),
+  };
+}
+
+/**
+ * Geolocaliza una IP con `geoip-lite`: busqueda 100% en memoria (la base
+ * viene empaquetada con la libreria), sin llamada de red -- del orden de
+ * microsegundos, por eso se calcula aqui mismo, en el camino del login, en
+ * vez de diferirlo a un worker aparte.
+ *
+ * `null` en tres casos: sin IP, IP privada/local (192.168.x, 127.0.0.1, la
+ * `172.22.192.1` que se usa para probar el backend -- ninguna geolocaliza a
+ * un lugar real), o una IP anycast/CDN que `geoip-lite` no resuelve (ej.
+ * `1.1.1.1`, validado en la sesion donde se probo esta libreria). En
+ * cualquiera de los tres casos, quien consuma `geo` simplemente no tiene con
+ * que comparar -- no es un error.
+ */
+export function geolocalizarIp(ip: string | null): GeoUbicacion | null {
+  if (ip == null) {
+    return null;
+  }
+  const resultado = geoip.lookup(ip);
+  if (resultado == null) {
+    return null;
+  }
+  const [lat, lon] = resultado.ll;
+  if (typeof lat !== 'number' || typeof lon !== 'number') {
+    // Caso `1.1.1.1`: geoip-lite a veces devuelve un objeto con `ll: [null, null]`
+    // en vez de `null` directamente (IPs anycast/CDN sin ubicacion fija).
+    return null;
+  }
+  return {
+    lat,
+    lon,
+    pais: resultado.country || null,
+    ciudad: resultado.city || null,
   };
 }
 

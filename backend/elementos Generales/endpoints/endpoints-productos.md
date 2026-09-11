@@ -16,8 +16,8 @@ documentada aparte en [endpoints-resenas.md](endpoints-resenas.md) junto
 con `POST /resenas`.
 
 La forma de los documentos que devuelven estas rutas está explicada en
-[Elementos Documentales/productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)
-y [Elementos Documentales/ejemplos_bson_productos.md](Elementos%20Documentales/ejemplos_bson_productos.md).
+[Elementos Documentales/productos_subproductos.md](../Elementos%20Documentales/productos_subproductos.md)
+y [Elementos Documentales/ejemplos_bson_productos.md](../Elementos%20Documentales/ejemplos_bson_productos.md).
 
 Hay dos formas de listar el catálogo, con exactamente los mismos filtros y
 el mismo comportamiento (mismos estados ocultos, mismas reglas de
@@ -143,7 +143,7 @@ la tarjeta del catálogo sin ir a pedir las ofertas reales.
 
 `caracteristicas_adicionales` y `caracteristicas_personalizadas` son, las
 dos, un `Array<{ nombre, valor, unidad }>` (ver
-[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)) —
+[productos_subproductos.md](../Elementos%20Documentales/productos_subproductos.md)) —
 la primera sale del catálogo de la app, la segunda la escribe quien crea el
 producto, pero comparten exactamente la misma forma. Por eso **cualquier
 query param que no sea uno de los nombres fijos de la tabla de arriba se
@@ -205,7 +205,7 @@ convertir al tipo que le corresponde según cómo se ve: `"true"`/`"false"` a
 texto — porque así es como debe estar guardado el valor (ver
 `productos_subproductos.md`). Pero la carga de datos actual todavía guarda
 todo como texto sin excepción (es un pendiente, ver
-[pendientes-etl-caracteristicas.md](pendientes-etl-caracteristicas.md)), así
+[pendientes-etl-caracteristicas.md](../historico/pendientes-etl-caracteristicas.md)), así
 que el filtro busca contra **las dos formas a la vez** — el valor
 convertido y el texto tal cual — para encontrar el producto sin importar
 cuál de las dos formas tenga guardadas en este momento. Esta conversión
@@ -227,7 +227,7 @@ de él, sin importar qué le manden.
 
 Para las del catálogo, el nombre es literalmente el que aparece en la
 columna "Característica" de la Tabla 1 y la Tabla 2 de
-[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md)
+[productos_subproductos.md](../Elementos%20Documentales/productos_subproductos.md)
 — `Marca`, `Memoria RAM`, `Pais de origen`, `Duracion de la garantia`, etc.
 Esas tablas también dicen el tipo y la unidad de cada una, que es lo que
 hace falta para saber qué clase de `valor` mandar. Para las personalizadas
@@ -860,7 +860,7 @@ más arriba).
 No se repite aquí la lista completa de características: son las mismas
 filas, con los mismos nombres, tipos y unidades, de la Tabla 1 y la Tabla 2
 de
-[productos_subproductos.md](Elementos%20Documentales/productos_subproductos.md) —
+[productos_subproductos.md](../Elementos%20Documentales/productos_subproductos.md) —
 duplicar esa lista aquí sería mantener dos copias que se pueden desincronizar
 apenas se agregue o cambie una característica en el catálogo. La regla es
 siempre la misma: el nombre del query param es el nombre exacto de la

@@ -12,6 +12,15 @@ fraude **por IP en ClickHouse** (que todavía no está implementado en el
 backend), y si el alerting automático entra en la rúbrica de la Entrega 3 o
 basta con paneles de consulta.
 
+> **Nota (2026-09-11):** esta pregunta para el profesor sigue sin
+> respuesta, pero el usuario decidió avanzar con el paso 2 de todos modos
+> (cuatro rondas seguidas, 2026-09-11), sin esperarla -- el módulo entero
+> quedó construido y probado en vivo mientras tanto, incluida la pieza de
+> escritura (`PATCH`) y el explorador manual. Si la respuesta del profesor
+> termina pidiendo repartir la señal de otra forma (por ejemplo, que
+> ClickHouse se quede con todo lo de IP), esto habrá que ajustarlo después,
+> no antes.
+
 ---
 
 ## Paso 1 — el registro en Mongo — HECHO (2026-09-10)
@@ -48,53 +57,150 @@ Detalle y pruebas en
    para `ip`/`motivo`/`tipo`/`resultado`/`id_usuario`/`huella_cliente`/
    `identificador_intentado`, `date` para `fecha`) — hoy las agregaciones
    funcionan vía `.keyword` del mapping dinámico.
-2. **Enriquecer con geolocalización de la IP** (país, ciudad, lat/lon, ASN,
-   organización). Se difirió del paso 1. Decisión pendiente: base offline
-   embebida (MaxMind GeoLite2 / `geoip-lite`) vs API externa (mete un
-   tercero y latencia). En local no aplica: las IPs de prueba son privadas.
-3. **Endpoints de consulta** (solo admin, `SesionGuard` + `@Roles(ID_ROL_ADMIN)`,
-   mismo criterio que fraude de reseñas y buscador admin):
-   - `GET /admin/eventos/login/...` — series y agregaciones para el panel.
-   - Señales: fallos por identificador/IP en ventana (fuerza bruta),
-     `cardinality(id_usuario)` por `ip`/`huella_cliente` (multi-cuenta),
-     `geo_distance` contra la ubicación habitual (viaje imposible), IP/ASN
-     nuevo para una cuenta tras varios fallos (toma de cuenta).
-4. **Detección reactiva en tiempo real — contadores en Redis en el camino
-   del login — HECHO (2026-09-10).** Por decisión explícita del usuario:
-   esto **solo alerta, nunca frena el login** (se preguntó directamente:
-   "solo alertar" vs "frenar activamente", y se eligió alertar). Tres
-   señales, `INCR`/`SADD` + `EXPIRE ... NX` de ventana fija en el propio
-   `UsuarioController` (sin `await`, igual que `LogService` — best-effort,
-   nunca retrasa el login): `fuerza_bruta_ip` (8 fallos/60s),
-   `fuerza_bruta_cuenta` (5 fallos/60s), `multi_cuenta_ip` (4 identificadores
-   distintos/300s). Al cruzar el umbral se escribe (UPSERT, deduplicado por
-   minuto) una fila en la tabla nueva `alerta_fraude` (Postgres) —
-   `FraudeLoginService`, esquema en `fraude-login-eventos.sql` (mismo
-   folder). Listado para el admin: `GET /admin/fraude/alertas-login`
-   (paginado, filtro `estado`), en el mismo `FraudeController` que
-   `anillos`. Detalle, forma exacta de las columnas y pruebas en vivo en
-   `endpoints-fraude.md`.
+2. **Enriquecer con geolocalización de la IP — HECHO (2026-09-11, tercera
+   ronda).** Se eligió `geoip-lite` (base offline embebida, sin llamada de
+   red): validado antes contra IPs públicas reales (incluida la IP de
+   prueba oficial de MaxMind, para confirmar precisión) y contra la propia
+   IP del usuario. Se calcula **directo en el camino del login**
+   (`geolocalizarIp()` en `helpers/contexto-peticion.ts`), no en un worker
+   aparte -- es una búsqueda 100% en memoria, del orden de microsegundos,
+   así que no vale la pena la complejidad de diferirlo (decisión del
+   usuario, 2026-09-11: "un par de ms más en el login no es tan malo"). Se
+   guarda en `eventos_autenticacion` de Mongo y se replica a Elasticsearch
+   como `geo_punto`/`geo_pais`/`geo_ciudad` (ver el punto 3, "Viaje
+   imposible", para el porque de los tres campos sueltos en vez de un
+   objeto). `null` en tres casos: sin IP, IP privada/local, o una IP
+   anycast/CDN que `geoip-lite` no resuelve.
+3. **Endpoints de consulta contra `mesh_eventos_autenticacion` — tres de
+   cuatro HECHOS (2026-09-11, dos rondas), toma de cuenta, patrones
+   lentos/repartidos y viaje imposible.** Cubren justo lo que el punto 4
+   (Redis) **no puede ver**: historial completo de una cuenta, o patrones
+   repartidos en horas.
 
-   No incluye (fuera de esta ronda): geolocalización (sigue en el punto 2,
-   sin decidir) ni las señales que dependen de ella (viaje imposible,
-   IP/ASN nueva); tampoco `PATCH` para marcar una alerta revisada/descartada
-   (se agrega cuando el frontend tenga la pantalla de triage).
-5. **(Opcional, según rúbrica) Alerting retrospectivo sobre Elasticsearch.**
-   Lo que el punto 4 NO cubre: patrones que una ventana de Redis de 1-5
-   minutos no ve (abuso lento repartido en horas). Worker `@Interval` que
-   corra las señales retrospectivas contra `mesh_eventos_autenticacion` y
-   escriba en la MISMA tabla `alerta_fraude` del punto 4 (columna `origen`
-   para distinguir `redis_reactivo` de `elastic_retrospectivo` si hace
-   falta), no una tabla aparte. `GET/PATCH /admin/alertas` ya tiene el `GET`
-   (`alertas-login`, punto 4); falta el `PATCH` y esta segunda fuente.
+   - **Toma de cuenta — HECHO (2026-09-11).** IP nueva para la cuenta,
+     comparada contra todo su historial de logins exitosos (mínimo 3
+     previos para evaluar algo). `TomaCuentaService`, dispara en cada login
+     **exitoso** (fire-and-forget, en `UsuarioController.iniciarSesion`,
+     no un worker separado). Detalle, pruebas en vivo y el resto de esta
+     entrada en `endpoints/endpoints-fraude.md` y el `cambio_propuestas` de
+     esta ronda.
+   - **Patrones lentos o repartidos — HECHO (2026-09-11).** Tres señales:
+     fuerza bruta contra una cuenta repartida en 24h (Redis solo ve 60s),
+     multi-cuenta desde una IP repartida en 24h (Redis solo ve 300s), e IP
+     rotando contra una misma cuenta repartida en 24h.
+     `FraudeLoginRetrospectivoService`, worker `@Interval` cada 15 min,
+     agregaciones `terms`+`min_doc_count` y `terms`+`cardinality`+
+     `bucket_selector` — Elasticsearch entrega ya filtrada la lista de
+     sospechosos, el worker no decide a quién mirar. Estas tres señales
+     llevan el sufijo `_lenta` en el catálogo (`fuerza_bruta_cuenta_lenta`,
+     `multi_cuenta_ip_lenta`, `ip_rotacion_cuenta_lenta`) porque la
+     rotación de IP **sí** terminó teniendo una versión corta en Redis
+     también (ver el punto 4, segunda ronda, más abajo) — al principio
+     "IP rotando" no tenía par corto y no llevaba sufijo; se renombró para
+     no romper el patrón.
+   - **Viaje imposible — HECHO (2026-09-11, tercera ronda).** No es
+     `geo_distance` contra una "ubicación habitual" agregada: compara el
+     login actual contra el login exitoso **inmediatamente anterior** de
+     la misma cuenta (el que Elasticsearch devuelve ordenando por `fecha`
+     desc, con `geo_punto` presente), calcula la distancia (haversine) y
+     la velocidad implícita, y marca si supera 800 km/h.
+     `ViajeImposibleService`, dispara en cada login **exitoso**
+     (fire-and-forget, igual que `TomaCuentaService`, no el worker de 15
+     min -- es una comparación puntual entre dos eventos, no una
+     agregación sobre una ventana). Limitación conocida y **aceptada, no
+     un bug**: un usuario con VPN da un falso positivo legítimo -- decidido
+     así porque además es la única forma práctica de demostrar el patrón
+     en la demo sin depender de gente real en países distintos.
+   - **Panel de exploración manual — HECHO (2026-09-11, cuarta ronda).**
+     `GET /admin/fraude/eventos-login`: logs crudos de
+     `mesh_eventos_autenticacion` (Elasticsearch, no Mongo), paginados, con
+     filtros exactos por tipo, resultado, motivo, cuenta, IP, huella de
+     cliente, país y rango de fechas. Controller/servicio nuevos
+     (`AdminFraudeLoginController` / `FraudeLoginExploracionService`), no
+     tocan `FraudeController`/`FraudeLoginService`. Detalle y pruebas en
+     `endpoints/endpoints-fraude.md` y el `cambio_propuestas` de esta ronda.
+     "Qué otras cuentas comparten este dispositivo" (buscar por
+     `huella_cliente`) queda cubierto por el mismo filtro; no se construyó
+     ninguna vista agregada aparte (por cuenta, por dispositivo) — este
+     endpoint es solo el listado crudo filtrado.
+4. **Contadores en Redis en el camino del login — HECHO (2026-09-10),
+   CONFIRMADO como pieza válida (2026-09-10, noche).**
+
+   Este punto llegó a decir, por un tiempo, que estaba mal y pendiente de
+   revertir: la frase original ("el profesor insiste en que... se resuelve
+   con Redis") nunca se verificó, y el usuario aclaró que nunca fue parte
+   de lo hablado con el profesor (ver memoria
+   `verificar-planes-contra-conversaciones-reales` para el detalle completo
+   de esa confusión). **Esa parte de la historia sigue siendo cierta y no
+   se borra** — pero, ya aclarado el malentendido, el usuario revisó la
+   idea por sus propios méritos (no porque el profesor la haya pedido) y la
+   confirmó: son contadores menores, le parece bien tenerlos.
+
+   **Entonces, la arquitectura que queda, decidida:** Redis (este punto) y
+   Elasticsearch (punto 3) son capas **complementarias**, no una sustituye
+   a la otra — Redis para lo inmediato (en 1-5 minutos), Elasticsearch para
+   lo que necesita historial completo o ventanas largas. Solo alerta, nunca
+   frena el login (decisión explícita del usuario). Detalle técnico
+   completo en `cambio_propuestas/2026-09-10_2216-deteccion-fraude-login-redis.md`
+   y `endpoints/endpoints-fraude.md`.
+
+   **Segunda ronda (2026-09-11): `ip_rotacion_cuenta` también en Redis.**
+   Tras cerrar la ronda de Elasticsearch, se notó que tres de las cuatro
+   señales retrospectivas tenían espejo corto en Redis y una no
+   (`ip_rotacion_cuenta_lenta`, la única sin par). Se agregó el espejo
+   corto que faltaba: mismo mecanismo que `multi_cuenta_ip` (`SADD` +
+   `EXPIRE ... NX` + `SCARD`) con los roles invertidos — agrupa por
+   identificador y cuenta IPs distintas, en vez de agrupar por IP y contar
+   identificadores distintos. 300s / 4 IPs distintas, mismos números que
+   `multi_cuenta_ip` (no hay razón técnica para que cambien). El catálogo
+   `tipo_alerta_fraude` quedó en **8 filas** (antes 7): el tipo original
+   `ip_rotacion_cuenta` se renombró a `ip_rotacion_cuenta_lenta` para que
+   el nombre sin sufijo quedara libre para la versión Redis, igual que los
+   otros dos pares. Ahora **fuerza_bruta_ip es la única señal sin espejo
+   lento** (no se pidió). Detalle y pruebas en vivo en el `cambio_propuestas`
+   de esta segunda ronda.
+5. **Alerting persistente para las señales del punto 3 — RESUELTO (2026-09-11)
+   para toma de cuenta y patrones lentos: SÍ le alcanzó con agregar tipos
+   nuevos al catálogo, no hizo falta tabla aparte.** `alerta_fraude` (la
+   misma del punto 4) ya tenía estructura genérica (`tipo`, `clave`,
+   `detalle` jsonb, `estado`) — las cuatro señales retrospectivas solo
+   agregaron 4 filas a `tipo_alerta_fraude`, sin columnas ni tablas nuevas.
+   **El `PATCH` para marcar revisada/descartada — HECHO (2026-09-11, cuarta
+   ronda).** `PATCH /admin/fraude/alertas-login/:id`, body `{estado:
+   "revisada"|"descartada"}`, solo admite el destino viniendo de
+   `pendiente` (409 si ya se movió, 404 si no existe). Aplica a las 9
+   señales por igual, sin distinguir Redis/Elasticsearch — todas viven en
+   la misma tabla. Mismo controller/servicio que el explorador de logs de
+   arriba.
 
 ### Compañero (fuera de `backend/`)
 
-- **Migración real de `alerta_fraude`** (punto 4, ya HECHO del lado de
-  `backend/`): el `.sql` de referencia, aplicado en local, está en
+- **Migración real de `alerta_fraude`** (punto 4, confirmado y HECHO del
+  lado de `backend/`): el `.sql` de referencia, aplicado en local, está en
   `fraude-login-eventos.sql` (mismo folder) — mismo workflow de siempre
   (`solo-backend`), integrarlo en `migrations/` en el orden correcto
-  (después de `015_outbox_grafo.sql`) y en `migrations/README.md`.
+  (después de `015_outbox_grafo.sql`) y en `migrations/README.md`. **El
+  `.sql` de referencia ya incluye las 9 filas del catálogo** en el orden
+  final: `fuerza_bruta_ip`, `fuerza_bruta_cuenta`, `multi_cuenta_ip`,
+  `toma_cuenta`, `fuerza_bruta_cuenta_lenta`, `multi_cuenta_ip_lenta`,
+  `ip_rotacion_cuenta_lenta`, `ip_rotacion_cuenta`, `viaje_imposible` — con
+  el `INSERT` de las 9 corriendo sobre una tabla recién creada,
+  `tipo_alerta_fraude` queda con los ids 1-9 exactos que ya usa el backend
+  (`models/alerta-fraude.ts`, fijos como constantes). **La migración real NO
+  necesita el `UPDATE` de
+  renombre** que trae el `.sql` de referencia (el que cambia
+  `ip_rotacion_cuenta` por `ip_rotacion_cuenta_lenta`) — ese `UPDATE`
+  existe solo para corregir la base LOCAL de desarrollo, que en algún
+  momento tuvo la fila vieja con el nombre sin sufijo (de la primera ronda,
+  antes de que existiera la versión Redis); sobre una tabla vacía el
+  `UPDATE` simplemente no encuentra nada que renombrar y el `INSERT` ya
+  inserta los 8 nombres correctos desde el principio. **Ojo, aparte:** en
+  la base LOCAL varias de estas filas tuvieron que realinearse a mano más
+  de una vez porque pruebas anteriores dejaron huecos en el `smallserial`
+  (ids saltados, de inserciones revertidas) — no es un problema de la
+  migración real, que arranca de una tabla vacía y no tiene esos huecos,
+  pero si algo no cuadra al aplicar esto en otro entorno, revisar primero
+  si el catálogo local tiene huecos parecidos.
 - **Repuntar el ETL de ClickHouse de logueos.** `etl/extraer_eventos.sql` /
   `etl/cargar_eventos.sh` leen `log_login` / `log_registro` de PostgreSQL,
   que ya no reciben filas. Hay que leer de `eventos_autenticacion` en Mongo
@@ -108,12 +214,21 @@ Detalle y pruebas en
   `{fecha:1}` con `partialFilterExpression: {pendiente_elastic: true}`, para
   que no recorra la colección entera en cada corrida (5 s) cuando crezca.
 - **Índice `mesh_eventos_autenticacion` en Elasticsearch con mapping
-  explícito** (hoy se auto-crea con mapping dinámico y las agregaciones
-  necesitan `.keyword`): `keyword` para `ip`, `motivo`, `tipo`, `resultado`,
+  explícito, del lado oficial (carpeta `elastic/`, fuera de `backend/`)**
+  (hoy se auto-crea con mapping dinámico y las agregaciones necesitan
+  `.keyword`): `keyword` para `ip`, `motivo`, `tipo`, `resultado`,
   `id_usuario`, `huella_cliente`, `identificador_intentado`; `date` para
-  `fecha`; y más adelante `geo_point` para la geolocalización. El backend
-  ya escribe ahí (`EventosAutenticacionSyncService`); crear el mapping y
-  reindexar (marcar todo con `pendiente_elastic: true`).
+  `fecha`; **`geo_point` para `geo_punto`** (agregado 2026-09-11, ya
+  aplicado a mano en el índice LOCAL con `PUT _mapping` para poder
+  desarrollar y probar — falta integrarlo del lado oficial). **Ojo con la
+  forma exacta:** `geo_punto` tiene que ser un campo con SOLO `lat`/`lon`
+  adentro (`geo_pais`/`geo_ciudad` van SUELTOS, aparte, NO anidados dentro
+  de `geo_punto`) — un intento con los tres campos juntos dentro de un
+  mismo objeto `geo` falló en vivo con
+  `document_parsing_exception: field [pais] not supported`, porque un
+  campo `geo_point` de Elasticsearch solo acepta coordenadas, nada más. El
+  backend ya escribe ahí (`EventosAutenticacionSyncService`); crear el
+  mapping completo y reindexar (marcar todo con `pendiente_elastic: true`).
 - **Retención** de la colección (IP + User-Agent es dato personal): decidir
   una política de purga (p. ej. eventos > N meses).
 

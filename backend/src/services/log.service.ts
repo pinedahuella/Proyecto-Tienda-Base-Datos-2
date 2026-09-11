@@ -121,6 +121,7 @@ export class LogService {
       ip: datos.contexto.ip,
       user_agent: datos.contexto.userAgent,
       huella_cliente: datos.contexto.huellaCliente,
+      geo: datos.contexto.geo,
       fecha: new Date(),
       // Nace pendiente de indexar en Elasticsearch; el worker
       // (EventosAutenticacionSyncService) le quita la bandera al sincronizarlo.

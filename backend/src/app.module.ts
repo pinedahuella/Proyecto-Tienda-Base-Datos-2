@@ -52,6 +52,11 @@ import { BuscadorProductosService } from './services/buscador/productos.service'
 import { BuscadorSyncService } from './services/buscador/buscador-sync.service';
 import { EventosAutenticacionSyncService } from './services/eventos-autenticacion/eventos-autenticacion-sync.service';
 import { FraudeLoginService } from './services/fraude-login/fraude-login.service';
+import { TomaCuentaService } from './services/fraude-login/toma-cuenta.service';
+import { ViajeImposibleService } from './services/fraude-login/viaje-imposible.service';
+import { FraudeLoginRetrospectivoService } from './services/fraude-login/fraude-login-retrospectivo.service';
+import { AdminFraudeLoginController } from './controllers/admin/admin-fraude-login.controller';
+import { FraudeLoginExploracionService } from './services/fraude-login/fraude-login-exploracion.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -89,6 +94,7 @@ import { FraudeLoginService } from './services/fraude-login/fraude-login.service
     GrafoController,
     BaseDatosBuscadorController,
     BuscadorProductosController,
+    AdminFraudeLoginController,
   ],
   providers: [
     InicioService,
@@ -119,6 +125,10 @@ import { FraudeLoginService } from './services/fraude-login/fraude-login.service
     BuscadorSyncService,
     EventosAutenticacionSyncService,
     FraudeLoginService,
+    TomaCuentaService,
+    ViajeImposibleService,
+    FraudeLoginRetrospectivoService,
+    FraudeLoginExploracionService,
   ],
 })
 export class AppModule {}

@@ -29,6 +29,8 @@ import type { LoginUsuarioPeticion } from '../dto/login-usuario';
 import type { RegistroUsuarioPeticion } from '../dto/registro-usuario';
 import type { TokenUsuario } from '../dto/token-usuario';
 import { FraudeLoginService } from '../services/fraude-login/fraude-login.service';
+import { TomaCuentaService } from '../services/fraude-login/toma-cuenta.service';
+import { ViajeImposibleService } from '../services/fraude-login/viaje-imposible.service';
 import { LogService } from '../services/log.service';
 import { UsuarioService } from '../services/usuario.service';
 
@@ -44,8 +46,14 @@ import { UsuarioService } from '../services/usuario.service';
  * El log se llama SIN await a proposito: es best-effort y no debe retrasar
  * ni tumbar la respuesta (ver LogService). Cada intento de login (exito o
  * fallo) tambien se manda, igual sin await, a FraudeLoginService: contadores
- * de Redis que, si cruzan un umbral (fuerza bruta, multi-cuenta), dejan una
- * alerta en Postgres para que un admin la revise -- ver ese servicio.
+ * de Redis que, si cruzan un umbral (fuerza bruta, multi-cuenta, rotacion de
+ * IP), dejan una alerta en Postgres para que un admin la revise -- ver ese
+ * servicio. Un login EXITOSO ademas dispara, tambien sin await:
+ * TomaCuentaService (compara la IP actual contra todo el historial de la
+ * cuenta, no solo los ultimos minutos) y ViajeImposibleService (compara la
+ * ubicacion del login actual contra el login exitoso inmediatamente
+ * anterior, y marca si la velocidad implicita es mayor a la de un vuelo
+ * comercial).
  */
 @Controller('usuario')
 export class UsuarioController {
@@ -53,6 +61,8 @@ export class UsuarioController {
     private readonly usuarioService: UsuarioService,
     private readonly logService: LogService,
     private readonly fraudeLoginService: FraudeLoginService,
+    private readonly tomaCuentaService: TomaCuentaService,
+    private readonly viajeImposibleService: ViajeImposibleService,
   ) {}
 
   // POST /usuario/registro
@@ -122,6 +132,18 @@ export class UsuarioController {
         ip: contexto.ip,
         identificador,
         idUsuario: usuario.id_usuario,
+      });
+      void this.tomaCuentaService.revisarLogin({
+        idUsuario: usuario.id_usuario,
+        identificador,
+        ip: contexto.ip,
+        huellaCliente: contexto.huellaCliente,
+      });
+      void this.viajeImposibleService.revisarLogin({
+        idUsuario: usuario.id_usuario,
+        identificador,
+        geo: contexto.geo,
+        fecha: new Date(),
       });
       return exito(usuario, 'Sesion iniciada correctamente');
     } catch (error) {

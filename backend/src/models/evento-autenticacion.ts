@@ -41,6 +41,14 @@ export type MotivoFalloAutenticacion =
   | 'cuenta_inactiva'
   | 'datos_invalidos';
 
+/** Ubicacion aproximada de la IP del evento -- ver `geolocalizarIp` en `helpers/contexto-peticion.ts`. */
+export interface GeoEvento {
+  lat: number;
+  lon: number;
+  pais: string | null;
+  ciudad: string | null;
+}
+
 export interface EventoAutenticacion {
   tipo: TipoEventoAutenticacion;
   resultado: ResultadoAutenticacion;
@@ -71,6 +79,14 @@ export interface EventoAutenticacion {
    * navegador). `null` si la peticion no trae `User-Agent`.
    */
   huella_cliente: string | null;
+  /**
+   * Ubicacion aproximada de `ip` (`geoip-lite`, calculado en el mismo
+   * camino del login -- ver `contextoDePeticion`). `null` sin IP, con IP
+   * privada/local, o si no se pudo resolver (anycast/CDN). Lo consume
+   * `ViajeImposibleService` para comparar la distancia entre dos logins de
+   * una misma cuenta.
+   */
+  geo: GeoEvento | null;
   /** Momento del evento, en UTC. Lo pone el backend, no el cliente. */
   fecha: Date;
   /**

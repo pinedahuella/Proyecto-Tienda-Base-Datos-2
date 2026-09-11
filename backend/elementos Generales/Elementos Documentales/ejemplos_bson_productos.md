@@ -114,7 +114,7 @@ Cinco cosas que conviene notar:
 - **`variantes[].stock` es una copia de lectura, no la verdad.** El número real
   vive en PostgreSQL (tabla `inventario`); esto solo lo refleja, y es opcional —
   una variante sin inventario todavía creado sale sin este campo. Detalle
-  completo en [cambios-etl-productos.md](../cambios-etl-productos.md).
+  completo en [cambios-etl-productos.md](../historico/cambios-etl-productos.md).
 
 ## Cómo está organizado un evento
 

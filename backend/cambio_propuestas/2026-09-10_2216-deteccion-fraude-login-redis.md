@@ -1,5 +1,16 @@
 # Detección reactiva de fraude de login (Redis) + alerta en PostgreSQL
 
+> **Nota (2026-09-10, más tarde la misma noche).** El punto 4 del plan
+> (abajo) se apoyaba en una frase sin verificar ("el profesor insiste en
+> que... se resuelve con Redis") que nunca fue parte de lo hablado de
+> verdad con el profesor (ver memoria
+> `verificar-planes-contra-conversaciones-reales`). Aclarado el
+> malentendido, el usuario revisó la idea por sus propios méritos —no
+> porque el profesor la haya pedido— y la **confirmó como válida**: son
+> contadores menores, complementarios a lo que sí se acordó hacer con
+> Elasticsearch (punto 3 del plan), no un sustituto. Este cambio se queda
+> tal como está descrito abajo.
+
 **Fecha:** 2026-09-10, noche.
 **Alcance:** `backend/`. Migración de referencia aplicada en local (no es
 la migración real — le toca al compañero, ver abajo).

@@ -3,7 +3,11 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { redis } from '../../database/redis';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
-import { validarFiltroEstadoAlerta } from '../../helpers/validaciones-fraude';
+import { registrarAlertaFraude } from '../../helpers/registrar-alerta-fraude';
+import {
+  validarFiltroEstadoAlerta,
+  validarFiltroTipoAlerta,
+} from '../../helpers/validaciones-fraude';
 import {
   validarLimite,
   validarPagina,
@@ -16,9 +20,10 @@ import {
   AlertaFraude,
   EstadoAlertaFraude,
   FilaAlertaFraude,
-  ID_ESTADO_ALERTA_FRAUDE_PENDIENTE,
+  TipoAlertaFraude,
   ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA,
   ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_IP,
+  ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA,
   ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP,
 } from '../../models/alerta-fraude';
 
@@ -40,13 +45,22 @@ import {
  * que un admin la revise (`GET /admin/fraude/alertas-login`, tambien en
  * este servicio) -- ninguna cuenta ni IP se bloquea sola.
  *
- * Tres senales, las unicas que no necesitan geolocalizacion (punto 2 del
- * plan, todavia sin decidir) ni una consulta retrospectiva:
+ * Cuatro senales, las que no necesitan geolocalizacion (punto 2 del plan,
+ * todavia sin decidir) ni una consulta retrospectiva -- cada una tiene su
+ * espejo lento sobre Elasticsearch en `FraudeLoginRetrospectivoService`
+ * (mismo nombre + sufijo `_lenta`), salvo `fuerza_bruta_ip`, que no tiene
+ * version larga (no se pidio) e `ip_rotacion_cuenta`, que nacio primero del
+ * lado lento y se agrego aca despues (2026-09-11, segunda ronda):
  *
  *   fuerza_bruta_ip       muchos fallos desde una misma IP en poco tiempo.
  *   fuerza_bruta_cuenta   muchos fallos contra un mismo identificador.
  *   multi_cuenta_ip       muchos identificadores distintos probados desde
  *                         la misma IP (credential stuffing).
+ *   ip_rotacion_cuenta    muchas IPs distintas probando un mismo
+ *                         identificador (evade un bloqueo por IP) -- el
+ *                         espejo invertido de multi_cuenta_ip: agrupa por
+ *                         CUENTA y cuenta IPs distintas, en vez de agrupar
+ *                         por IP y contar cuentas distintas.
  *
  * Cada contador es de ventana fija: `INCR`/`SADD` y despues
  * `EXPIRE ... NX` (Redis 7+, ya en `redis:8-alpine` del compose) para que
@@ -65,6 +79,13 @@ export class FraudeLoginService {
 
   private static readonly VENTANA_MULTICUENTA_SEGUNDOS = 300;
   private static readonly UMBRAL_MULTICUENTA = 4;
+
+  // Mismos numeros que multi_cuenta_ip, con los roles invertidos (ver el
+  // comentario de la clase) -- no hay una razon tecnica para que el umbral
+  // de "cuantos distintos son sospechosos" cambie segun cual de los dos
+  // lados se agrupa.
+  private static readonly VENTANA_ROTACION_IP_SEGUNDOS = 300;
+  private static readonly UMBRAL_ROTACION_IP = 4;
 
   // ---------------------------------------------------------------------
   // Deteccion (escritura) -- llamada desde UsuarioController
@@ -87,6 +108,11 @@ export class FraudeLoginService {
       await Promise.all([
         this.revisarFuerzaBrutaIp(datos.ip, datos.fallo),
         this.revisarMultiCuentaIp(datos.ip, datos.identificador),
+        this.revisarIpRotacionCuenta(
+          datos.identificador,
+          datos.ip,
+          datos.idUsuario,
+        ),
         datos.fallo && datos.identificador != null
           ? this.revisarFuerzaBrutaCuenta(datos.identificador, datos.idUsuario)
           : Promise.resolve(),
@@ -186,16 +212,53 @@ export class FraudeLoginService {
   }
 
   /**
-   * El UPSERT que deja (o engorda) la fila de `alerta_fraude`. La llave de
-   * conflicto es (tipo, clave, ventana_inicio) -- ventana_inicio es el
-   * minuto truncado de AHORA, asi que varios cruces del umbral dentro del
-   * mismo minuto suman `contador` en una sola fila en vez de duplicar; si
-   * el ataque sigue al minuto siguiente, nace una fila nueva a proposito
-   * (ver el comentario de la columna en el `.sql` de referencia).
-   *
-   * NO pisa `id_estado_alerta_fraude` en el conflicto: si un admin ya la
-   * marco revisada/descartada dentro de ese mismo minuto (improbable, pero
-   * posible), un cruce mas del umbral no debe reabrirla sola.
+   * El espejo invertido de `revisarMultiCuentaIp`: en vez de "cuantas
+   * cuentas distintas probo esta IP", pregunta "desde cuantas IPs distintas
+   * probaron esta cuenta". Mismo mecanismo -- `SADD` + `EXPIRE ... NX` +
+   * `SCARD` -- con la clave de Redis armada al reves (por identificador, no
+   * por IP). Igual que `revisarMultiCuentaIp`, corre sin importar si el
+   * intento fallo o no: un intento exitoso cuenta igual para la rotacion
+   * (el atacante puede acertar una vez en medio de la rotacion).
+   */
+  private async revisarIpRotacionCuenta(
+    identificador: string | null,
+    ip: string,
+    idUsuario: string | null,
+  ): Promise<void> {
+    if (identificador == null) {
+      return;
+    }
+    const clave = `mesh:fraude:ips_cuenta:${identificador}`;
+    await redis.sadd(clave, ip);
+    await redis.expire(
+      clave,
+      FraudeLoginService.VENTANA_ROTACION_IP_SEGUNDOS,
+      'NX',
+    );
+    const ipsDistintas = await redis.scard(clave);
+
+    if (ipsDistintas >= FraudeLoginService.UMBRAL_ROTACION_IP) {
+      const ips = await redis.smembers(clave);
+      await this.registrarAlerta(
+        ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA,
+        identificador,
+        idUsuario,
+        {
+          ips_distintas: ipsDistintas,
+          ventana_segundos: FraudeLoginService.VENTANA_ROTACION_IP_SEGUNDOS,
+          // Mismo tope de 20 que multi_cuenta_ip: evidencia para el admin,
+          // no el conteo (ese ya esta en ips_distintas).
+          ips: ips.slice(0, 20),
+        },
+      );
+    }
+  }
+
+  /**
+   * `ventana_inicio` es el minuto truncado de AHORA -- varios cruces del
+   * umbral dentro del mismo minuto suman `contador` en vez de duplicar (ver
+   * `registrarAlertaFraude`, compartida con `TomaCuentaService` y
+   * `FraudeLoginRetrospectivoService`).
    */
   private async registrarAlerta(
     idTipoAlerta: number,
@@ -206,25 +269,13 @@ export class FraudeLoginService {
     const ventanaInicio = new Date();
     ventanaInicio.setSeconds(0, 0);
 
-    await pool.query(
-      `INSERT INTO alerta_fraude
-         (id_tipo_alerta_fraude, clave, id_usuario, detalle, ventana_inicio,
-          id_estado_alerta_fraude)
-       VALUES ($1, $2, $3, $4::jsonb, $5, $6)
-       ON CONFLICT (id_tipo_alerta_fraude, clave, ventana_inicio)
-       DO UPDATE SET
-         contador = alerta_fraude.contador + 1,
-         detalle = $4::jsonb,
-         fecha_actualizacion = now()`,
-      [
-        idTipoAlerta,
-        clave,
-        idUsuario,
-        JSON.stringify(detalle),
-        ventanaInicio,
-        ID_ESTADO_ALERTA_FRAUDE_PENDIENTE,
-      ],
-    );
+    await registrarAlertaFraude({
+      idTipoAlerta,
+      clave,
+      idUsuario,
+      detalle,
+      ventanaInicio,
+    });
   }
 
   // ---------------------------------------------------------------------
@@ -234,8 +285,9 @@ export class FraudeLoginService {
   /**
    * La version paginada, por numero de pagina (`validarLimite`/`validarPagina`
    * de `helpers/validaciones-productos.ts`, mismas reglas y mensajes que el
-   * resto del proyecto), con un filtro opcional por estado de revision. Sin
-   * el filtro devuelve todas, mas recientes primero.
+   * resto del proyecto), con filtros opcionales por estado de revision y por
+   * tipo de senal (necesario ahora que hay siete tipos mezclados en el mismo
+   * listado). Sin los filtros devuelve todas, mas recientes primero.
    */
   async listarAlertasPaginado(
     query: PaginarAlertasFraudeQuery,
@@ -243,10 +295,12 @@ export class FraudeLoginService {
     const limite = validarLimite(query.limite);
     const pagina = validarPagina(query.pagina);
     const estado = validarFiltroEstadoAlerta(query.estado);
+    const tipo = validarFiltroTipoAlerta(query.tipo);
     const saltar = (pagina - 1) * limite;
 
     const { filas, total } = await this.consultarAlertasPaginado(
       estado,
+      tipo,
       limite,
       saltar,
     );
@@ -267,17 +321,21 @@ export class FraudeLoginService {
    * `OfertasVendedorService`: con READ COMMITTED cada SELECT toma su
    * propio snapshot y el total podria no cuadrar con la pagina.
    *
-   * `estado` ya vino validado contra las tres unicas cadenas posibles
-   * (`validarFiltroEstadoAlerta`), por eso se interpola tal cual -- mismo
-   * criterio que `condicionActivo` en `OfertasVendedorService`.
+   * `estado` y `tipo` ya vinieron validados contra sus listas cerradas
+   * (`validarFiltroEstadoAlerta`/`validarFiltroTipoAlerta`), por eso se
+   * interpolan tal cual -- mismo criterio que `condicionActivo` en
+   * `OfertasVendedorService`.
    */
   private async consultarAlertasPaginado(
     estado: EstadoAlertaFraude | null,
+    tipo: TipoAlertaFraude | null,
     limite: number,
     saltar: number,
   ): Promise<{ filas: FilaAlertaFraude[]; total: number }> {
     const condicionEstado =
       estado === null ? '' : `AND ea.estado_alerta_fraude_nombre = '${estado}'`;
+    const condicionTipo =
+      tipo === null ? '' : `AND ta.tipo_alerta_fraude_nombre = '${tipo}'`;
 
     const cliente = await pool.connect();
     try {
@@ -288,9 +346,11 @@ export class FraudeLoginService {
       const conteo = await cliente.query<{ total: string }>(
         `SELECT count(*) AS total
            FROM alerta_fraude af
+           JOIN tipo_alerta_fraude ta
+             ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
            JOIN estado_alerta_fraude ea
              ON ea.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-          WHERE true ${condicionEstado}`,
+          WHERE true ${condicionEstado} ${condicionTipo}`,
       );
 
       const pagina = await cliente.query<FilaAlertaFraude>(
@@ -304,7 +364,7 @@ export class FraudeLoginService {
            JOIN estado_alerta_fraude ea
              ON ea.id_estado_alerta_fraude = af.id_estado_alerta_fraude
            LEFT JOIN usuarios u ON u.id_usuario = af.id_usuario
-          WHERE true ${condicionEstado}
+          WHERE true ${condicionEstado} ${condicionTipo}
           ORDER BY af.fecha_actualizacion DESC, af.id_alerta_fraude DESC
           LIMIT $1 OFFSET $2`,
         [limite, saltar],

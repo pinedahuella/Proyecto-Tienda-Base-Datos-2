@@ -75,8 +75,8 @@ vender es PostgreSQL. El backend la mantiene al día (`GET/POST/PATCH
 /vendedor/productos/:id/inventario`, y `stock_inicial` al crear o editar un
 producto), pero una variante recién creada sin inventario todavía no lo
 trae. Detalle completo en
-[cambios-etl-productos.md](../cambios-etl-productos.md) y
-[endpoints-vendedores.md](../endpoints-vendedores.md).
+[cambios-etl-productos.md](../historico/cambios-etl-productos.md) y
+[endpoints-vendedores.md](../endpoints/endpoints-vendedores.md).
 
 Un ejemplo completo de cómo queda el documento está en
 [ejemplos_bson_productos.md](ejemplos_bson_productos.md).
@@ -279,4 +279,4 @@ igual en `caracteristicas_adicionales` y en `caracteristicas_personalizadas`
 (del producto y de cada variante) con el mismo `$elemMatch`, así que un
 filtro dinámico como `?Edicion especial=true` encuentra el producto sin
 importar en cuál de las dos viva esa característica — ver
-[endpoints-productos.md](../endpoints-productos.md).
+[endpoints-productos.md](../endpoints/endpoints-productos.md).

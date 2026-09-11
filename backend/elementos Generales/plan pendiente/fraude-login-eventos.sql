@@ -34,25 +34,60 @@ BEGIN;
 -- 3 multi_cuenta_ip. `src/models/alerta-fraude.ts` los fija como
 -- constantes, igual que ID_ROL_COMPRADOR/ID_ROL_VENDEDOR/ID_ROL_ADMIN.
 --
--- Solo estos tres: son las senales que se pueden calcular con contadores
--- Redis en el propio camino del login (punto 4 del plan). Viaje imposible
--- e IP/ASN nueva tras fallos (punto 3 del plan, retrospectivo sobre
--- Elasticsearch) dependen de geolocalizacion, todavia sin decidir (punto
--- 2) -- se agregan filas nuevas a este catalogo cuando eso se resuelva,
--- sin tocar las que ya existen.
+-- Los pares sin sufijo / `_lenta` son la MISMA pregunta calculada por dos
+-- mecanismos distintos: sin sufijo = Redis, sincrono, ventana corta (en el
+-- propio camino del login, punto 4 del plan); `_lenta` = Elasticsearch,
+-- retrospectivo, ventana de 24h (worker FraudeLoginRetrospectivoService
+-- cada 15 min, punto 3 del plan). `toma_cuenta` y `viaje_imposible`
+-- (agregado 2026-09-11, tercera ronda) son la excepcion: no son ventanas de
+-- tiempo, comparan el login actual contra el anterior de la misma cuenta
+-- (TomaCuentaService / ViajeImposibleService, ambos en cada login exitoso).
+--
+-- `ip_rotacion_cuenta` (agregado 2026-09-11, primera ronda) nacio SOLO en
+-- Elasticsearch, sin version Redis, asi que en ese momento no llevaba
+-- sufijo. Al agregarle la version Redis (2026-09-11, segunda ronda) se
+-- RENOMBRO a `ip_rotacion_cuenta_lenta` para no romper el patron
+-- establecido -- ver el UPDATE de abajo, que hace esa migracion en la base
+-- LOCAL que ya tenia la fila vieja. Una migracion real sobre una tabla
+-- vacia no necesita el UPDATE: el INSERT de abajo ya inserta los 8 nombres
+-- correctos desde el principio.
 CREATE TABLE IF NOT EXISTS tipo_alerta_fraude (
     id_tipo_alerta_fraude      smallserial PRIMARY KEY,
     tipo_alerta_fraude_nombre  varchar(30) NOT NULL UNIQUE
 );
 
+-- Idempotente DE VERDAD (bug real encontrado el 2026-09-11: la primera
+-- version de este UPDATE no tenia el NOT EXISTS de abajo, asi que una
+-- segunda corrida -- ya con la fila NUEVA 'ip_rotacion_cuenta', la de
+-- Redis, viva -- la volvia a agarrar y chocaba con la fila
+-- 'ip_rotacion_cuenta_lenta' que ya existia. El NOT EXISTS asegura que esto
+-- SOLO renombra la fila vieja (cuando 'ip_rotacion_cuenta_lenta' TODAVIA no
+-- existe) y nunca vuelve a tocar nada una vez que el renombre ya paso, sin
+-- importar que despues nazca una fila legitima llamada 'ip_rotacion_cuenta'
+-- (la de Redis). En una tabla vacia tampoco hace nada (ninguna fila
+-- coincide con el WHERE).
+UPDATE tipo_alerta_fraude
+   SET tipo_alerta_fraude_nombre = 'ip_rotacion_cuenta_lenta'
+ WHERE tipo_alerta_fraude_nombre = 'ip_rotacion_cuenta'
+   AND NOT EXISTS (
+     SELECT 1 FROM tipo_alerta_fraude
+      WHERE tipo_alerta_fraude_nombre = 'ip_rotacion_cuenta_lenta'
+   );
+
 INSERT INTO tipo_alerta_fraude (tipo_alerta_fraude_nombre) VALUES
     ('fuerza_bruta_ip'),
     ('fuerza_bruta_cuenta'),
-    ('multi_cuenta_ip')
+    ('multi_cuenta_ip'),
+    ('toma_cuenta'),
+    ('fuerza_bruta_cuenta_lenta'),
+    ('multi_cuenta_ip_lenta'),
+    ('ip_rotacion_cuenta_lenta'),
+    ('ip_rotacion_cuenta'),
+    ('viaje_imposible')
 ON CONFLICT DO NOTHING;
 
 COMMENT ON TABLE tipo_alerta_fraude IS
-    'Catalogo de senales de fraude de login que detecta el backend: fuerza_bruta_ip, fuerza_bruta_cuenta, multi_cuenta_ip';
+    'Catalogo de senales de fraude de login que detecta el backend: fuerza_bruta_ip, fuerza_bruta_cuenta, multi_cuenta_ip, ip_rotacion_cuenta (Redis, sincronas); toma_cuenta, viaje_imposible, fuerza_bruta_cuenta_lenta, multi_cuenta_ip_lenta, ip_rotacion_cuenta_lenta (Elasticsearch, retrospectivas o comparadas contra el historial)';
 
 
 -- ------------------------------------------------------------
