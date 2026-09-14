@@ -1,0 +1,63 @@
+{
+  "index_patterns": ["mesh_eventos_autenticacion*"],
+  "priority": 200,
+  "version": 1,
+  "_meta": {
+    "descripcion": "Mapeo del indice de eventos de autenticacion. Lo llena EventosAutenticacionSyncService desde la coleccion eventos_autenticacion de MongoDB. Ver elastic/README.md"
+  },
+
+  "template": {
+    "settings": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0,
+
+      "analysis": {
+        "normalizer": {
+          "minusculas": {
+            "type": "custom",
+            "filter": ["lowercase"]
+          }
+        }
+      }
+    },
+
+    "mappings": {
+      "dynamic": false,
+
+      "properties": {
+        "tipo": { "type": "keyword" },
+        "resultado": { "type": "keyword" },
+        "motivo": { "type": "keyword" },
+        "id_usuario": { "type": "keyword" },
+        "huella_cliente": { "type": "keyword" },
+
+        "identificador_intentado": {
+          "type": "keyword",
+          "ignore_above": 256,
+          "fields": {
+            "minusculas": {
+              "type": "keyword",
+              "normalizer": "minusculas",
+              "ignore_above": 256
+            }
+          }
+        },
+
+        "ip": {
+          "type": "ip",
+          "ignore_malformed": true
+        },
+
+        "user_agent": {
+          "type": "keyword",
+          "ignore_above": 512
+        },
+
+        "fecha": {
+          "type": "date",
+          "ignore_malformed": true
+        }
+      }
+    }
+  }
+}
