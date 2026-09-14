@@ -1,9 +1,14 @@
 # Arquitectura de Mesh
 
-**Al 2026-09-06.** Es el diagrama de arquitectura que pide el enunciado, y **no
-es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 43 tablas de
-PostgreSQL y sus llaves; este dibuja los **seis** motores de persistencia, quien
-escribe en cada uno y por donde viajan los datos entre ellos.
+**Al 2026-09-11.** Es el diagrama de arquitectura que pide el enunciado, y **no
+es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las tablas de
+PostgreSQL y sus llaves (42 cajas; la base tiene 46, y las tres de alertas de la
+016 todavia no estan dibujadas); este dibuja los **seis** motores de
+persistencia, quien escribe en cada uno y por donde viajan los datos entre ellos.
+
+**Ojo: el `.drawio` de arquitectura no tiene todavia los flujos del login del
+2026-09-10.** El Mermaid de abajo si. Hasta que se redibuje, el que manda es
+este.
 
 Se actualiza en cada entrega, porque las tres lo piden como entregable. El
 historial de que entro y cuando esta al final.
@@ -29,17 +34,17 @@ flowchart TB
     FE -- "HTTP + cookie de sesion" --> BE
 
     subgraph persistencia[PERSISTENCIA]
-        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>43 tablas")]
-        MG[("MongoDB :27018<br/><b>CATALOGO E HISTORIAL</b><br/>productos, productos_eventos, categorias")]
-        RD[("Redis :6379<br/><b>TRANSITORIO Y ATOMICO</b><br/>carrito, reservas, candado")]
+        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>46 tablas")]
+        MG[("MongoDB :27018<br/><b>CATALOGO, HISTORIAL Y LOG DE LOGIN</b><br/>productos, productos_eventos, categorias,<br/>eventos_autenticacion")]
+        RD[("Redis :6379<br/><b>TRANSITORIO Y ATOMICO</b><br/>carrito, reservas, candado,<br/>contadores de fraude del login")]
         N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>90 resenas, 4 tipos de arista")]
-        ES[("Elasticsearch :9200<br/><b>BUSQUEDA DE TEXTO</b><br/>mesh_productos, difusa y sin tildes")]
+        ES[("Elasticsearch :9200<br/><b>BUSQUEDA DE TEXTO Y EVENTOS DE LOGIN</b><br/>mesh_productos, difusa y sin tildes<br/>mesh_eventos_autenticacion")]
         CH[("ClickHouse :8123<br/><b>EVENTOS EN EL TIEMPO</b><br/>vistas, logueos, registros")]
     end
 
-    BE -- "pedidos, pagos, ofertas,<br/>stock, resenas, usuarios" --> PG
-    BE -- "catalogo, historial" --> MG
-    BE -- "carrito, reservas,<br/>candado de checkout" --> RD
+    BE -- "pedidos, pagos, ofertas,<br/>stock, resenas, usuarios,<br/>alerta_fraude" --> PG
+    BE -- "catalogo, historial,<br/>cada intento de login" --> MG
+    BE -- "carrito, reservas,<br/>candado de checkout,<br/>contadores del login" --> RD
     BE -- "panel de fraude<br/>(solo lectura)" --> N4
     BE -- "buscador y buscador de admin" --> ES
     BE -- "vista de producto (escribe),<br/>tendencias y fraude por IP (lee)" --> CH
@@ -47,7 +52,8 @@ flowchart TB
     PG -. "etl/cargar.js<br/>POR LOTES" .-> MG
     PG -. "etl/cargar_grafo.sh + worker<br/>COLA evento_grafo" .-> N4
     MG -. "etl/cargar_busqueda.sh + worker<br/>BANDERA pendiente_busqueda" .-> ES
-    PG -. "etl/cargar_eventos.sh<br/>INCREMENTAL por marca de agua" .-> CH
+    MG -. "worker cada 5 s<br/>BANDERA pendiente_elastic" .-> ES
+    PG -. "etl/cargar_eventos.sh<br/>INCREMENTAL por marca de agua<br/>CONGELADA desde el 2026-09-10" .-> CH
 
     subgraph herramientas[INSPECCION, no son parte del sistema]
         H["pgAdmin :5050 · dbgate :3001 · RedisInsight :5540<br/>Neo4j Browser :7474 · ClickHouse play :8123/play"]
@@ -74,15 +80,54 @@ vistas de producto **nacen ahi** y no se derivan de nada.
 
 ---
 
+## Los flujos del login, desde el 2026-09-10
+
+Un intento de entrar, bueno o malo, sale del backend por **dos caminos a la
+vez**, y los dos existen por razones distintas:
+
+```
+login -> MongoDB eventos_autenticacion -> worker cada 5 s -> Elasticsearch
+         (cada intento, con su motivo)    (pendiente_elastic)  mesh_eventos_autenticacion
+
+login -> Redis, tres contadores --- cruza un umbral ---> PostgreSQL alerta_fraude
+         (fallos por IP, fallos por cuenta,               (UPSERT por tipo, clave
+          identificadores por IP)                          y minuto)
+```
+
+**El primero es la historia, y es para investigar despues.** MongoDB guarda
+cada intento. El worker lo copia a Elasticsearch con el mismo `_id`, asi que
+copiar dos veces el mismo evento lo sobrescribe y no lo duplica; es la misma
+forma de bandera en el documento que ya usa el buscador. El indice nace de una
+**plantilla** (`elastic/002_eventos_autenticacion.json`) y no de un mapeo fijo,
+porque el worker escribe con `index()`, que autocrea el indice, y el primer dia
+nacio con `ip` de tipo texto.
+
+**El segundo es la deteccion en el momento, y olvida.** Los contadores de Redis
+viven 60 o 300 segundos: sirven para decir "esto esta pasando ahora" sin
+consultar nada, en el mismo camino del login. Cuando uno cruza su umbral, lo
+unico que queda es una fila en `alerta_fraude`, en PostgreSQL, que es donde un
+admin la revisa y la lee `GET /admin/fraude/alertas-login`.
+
+**Una flecha que falta a proposito: ninguna ruta lee `mesh_eventos_autenticacion`.**
+El indice se llena y nadie lo consulta; las rutas de agregacion son de
+`backend/` y estan en `docs/BACKEND-PENDIENTE.md`. Por eso la flecha del
+backend a Elasticsearch solo dice "buscador".
+
+**Y la flecha de PostgreSQL a ClickHouse quedo sin agua.** Copia `log_login`,
+que desde el 2026-09-10 ya no recibe filas porque el log se mudo a Mongo. Esta
+en `etl/README.md`, y que hacer con ella se decide con el profesor.
+
+---
+
 ## Que hace cada motor, y por que ese y no otro
 
 | Motor | Que guarda | Por que ahi |
 |---|---|---|
-| **PostgreSQL** | usuarios, direcciones, categorias, **ofertas**, `precio_historial`, pedidos, lineas, pagos, kardex y resenas | Es lo que necesita transaccion. La compra entera es atomica y el descuento de stock va con `SELECT ... FOR UPDATE`. Entrega 1: cero sobreventas sobre 555 ofertas |
-| **MongoDB** | el catalogo y su historial de eventos | Los atributos varian por categoria: lo que describe una laptop no describe una camisa. Un esquema fijo serian columnas casi todas nulas. El historial es append de eventos, y se reconstruye el estado a una fecha |
-| **Redis** | carrito, venta relampago y candado de checkout | Lo transitorio (el carrito vence solo por inactividad) y lo que tiene que ser atomico sin bloquear (`inventario_limitado.lua`) |
+| **PostgreSQL** | usuarios, direcciones, categorias, **ofertas**, `precio_historial`, pedidos, lineas, pagos, kardex, resenas y las alertas de fraude del login | Es lo que necesita transaccion. La compra entera es atomica y el descuento de stock va con `SELECT ... FOR UPDATE`. Entrega 1: cero sobreventas sobre 555 ofertas |
+| **MongoDB** | el catalogo, su historial de eventos, y desde el 2026-09-10 el log de autenticacion | Los atributos varian por categoria: lo que describe una laptop no describe una camisa. Un esquema fijo serian columnas casi todas nulas. El historial es append de eventos, y se reconstruye el estado a una fecha |
+| **Redis** | carrito, venta relampago, candado de checkout y los contadores de fraude del login | Lo transitorio (el carrito vence solo por inactividad, un contador de fallos a los 60 s) y lo que tiene que ser atomico sin bloquear (`inventario_limitado.lua`) |
 | **Neo4j** | el grafo de calificaciones y domicilios | Preguntas de varios saltos y de largo variable. El porque, con la comparativa contra columnar, en `docs/DECISION-GRAFOS-VS-COLUMNAR.md` |
-| **Elasticsearch** | el indice del catalogo | Escribir "labtop" y que encuentre "laptop". El `$text` de Mongo Community no tiene difusa, y la Entrega 3 pide el motor dedicado. Ver `elastic/README.md` |
+| **Elasticsearch** | el indice del catalogo y el de eventos de autenticacion | Escribir "labtop" y que encuentre "laptop". El `$text` de Mongo Community no tiene difusa, y la Entrega 3 pide el motor dedicado. El de eventos es para agregar por IP y por cuenta, y todavia no lo lee ninguna ruta. Ver `elastic/README.md` |
 | **ClickHouse** | los eventos: vistas de producto, logueos y registros | Tendencia y fraude sobre millones de filas con hora. Guarda por columna, y las preguntas se hacen despues con SQL. Ver `clickhouse/README.md` |
 
 ### La base columnar SI esta, desde el 2026-09-06, y llego por la puerta que el ADR dejo abierta
@@ -134,16 +179,21 @@ El documento de Mongo lleva **siete numeros agregados** -- `precio_tienda`,
 tenga que preguntar por cada producto de la pagina. **Son una copia para pintar,
 no la verdad.** Cuanto queda de verdad se pregunta en PostgreSQL.
 
-### 2. Las dos flechas punteadas son por lotes, no continuas
+### 2. Las dos flechas punteadas eran por lotes; la del grafo ya no
 
-`etl/cargar.js` y `etl/cargar_grafo.sh` corren cuando alguien los corre. Una
-resena nueva no llega a Neo4j hasta entonces, y **el panel de fraude no avisa de
-que esta mirando datos viejos**. Es el pendiente 4 y esta escrito entero en
-`docs/PENDIENTE-OUTBOX.md`; la salida es un outbox transaccional, que ademas es
-la respuesta al documento de consistencia de la Entrega 3.
+`etl/cargar.js` y `etl/cargar_grafo.sh` corren cuando alguien los corre. Asi
+nacio la flecha hacia Neo4j, y una resena nueva no llegaba al grafo hasta la
+siguiente corrida.
 
-Lo mas barato que mejora esto hoy son cuatro `count` de conciliacion que comparen
-PostgreSQL contra Neo4j y avisen.
+Desde el 2026-09-04 el grafo se mantiene solo: la migracion 015 encola cada
+resena tocada en `evento_grafo` dentro de la misma transaccion (el outbox de
+`docs/PENDIENTE-OUTBOX.md`), un worker del backend la vacia cada 10 s, y
+`GET /admin/grafo/conciliacion` compara los cuatro conteos contra PostgreSQL.
+El panel de fraude ensena esa conciliacion debajo de los anillos, en gris
+cuando cuadra y en rojo cuando no.
+
+La del catalogo sigue por lotes: la nota de Mongo no se mueve hasta que corre
+`bash etl/correr.sh --notas`.
 
 ### 3. El ETL a Mongo agrega y actualiza, pero nunca borra
 
@@ -204,6 +254,7 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **Entrega 2 (2026-09-03)** | Se suman **Redis** (carrito, venta relampago y candado de checkout) y **Neo4j** (grafo de fraude, con su ETL). Se decide **no** incorporar una base columnar |
 | **Entrega 3 (2026-09-04)** | Entra **Elasticsearch** con su indice, su ETL, su cola con worker y sus dos rutas. Se escribe el documento de consistencia del checkout. **Falta** la faceta con agregaciones y la prueba de falla simulada |
 | **2026-09-06** | Entra **ClickHouse**, la sexta base, con las tres tablas de eventos, su ETL incremental desde PostgreSQL y su generador de lotes. Cambia la decision de la Entrega 2 sobre la columnar, y el porque esta arriba |
+| **2026-09-10 y 11** | El log de login se muda a **MongoDB** (`eventos_autenticacion`) y un worker lo copia a un segundo indice de **Elasticsearch**. Tres contadores de **Redis** dejan alertas en `alerta_fraude` de **PostgreSQL** (migracion 016). La copia de logueos a ClickHouse queda congelada. Solo en el Mermaid; el `.drawio` falta |
 | Entrega final | entrara el componente vectorial y el control de acceso |
 
 El `pgvector` de la Entrega final, por cierto, **ya viene en la imagen**: el

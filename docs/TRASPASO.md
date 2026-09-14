@@ -3,16 +3,19 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-06**.
+Ultima actualizacion: **2026-09-12**.
 
-**Lo de hoy, en cuatro lineas.** Entro **ClickHouse**, la sexta base, que es la
-columnar que el profesor pidio para tendencias y fraude. Todo lo que no es
-`backend/` esta hecho y medido: el contenedor, el esquema, el ETL incremental de
-los logueos, el generador de datos de prueba, el arnes y la pantalla. **Faltan
-tres rutas**, y estan escritas al detalle en `docs/BACKEND-PENDIENTE.md`.
+**Lo de hoy.** Jose David mudo el log de inicio de sesion a
+MongoDB, lo copia a Elasticsearch y detecta tres senales de fraude con Redis
+(commit `e38e9a3`). Faltaba todo lo que no es `backend/`: la tabla donde caen
+las alertas (migracion 016), los indices de Mongo, la plantilla del indice, el
+paso del arranque, la pantalla y dos arneses. Esta hecho y medido, seccion "El
+fraude del inicio de sesion". Lo que falta es sobre todo suyo: **ninguna ruta
+consulta Elasticsearch todavia**, y eso es lo que pidio el profesor.
 
-Y se reviso la lista de pendientes contra el codigo, que llevaba dos dias dando
-por abiertos dos puntos ya cerrados.
+Despues de la corrida del 2026-09-11 se tocaron dos arneses, `arrancar.ps1` y
+el panel. El 2026-09-12 se midio todo contra las bases, con los dos arreglos de
+`arrancar.ps1` rotos a proposito, y esta en esa misma seccion.
 
 ---
 
@@ -41,12 +44,18 @@ por abiertos dos puntos ya cerrados.
 >   SQL va en ASCII puro.
 > - Ninguna contrasena real en un archivo que se suba. Salen del `.env`.
 >
-> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene DIEZ arneses:
+> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene DOCE arneses:
 > `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`, `bash pruebas/notas.sh`,
 > `bash pruebas/busqueda.sh`, `bash pruebas/eventos.sh`,
+> `bash pruebas/alertas_login.sh`, `bash pruebas/ofertas_paginadas.sh`,
 > `bash pruebas/falla_checkout.sh`, `bash redis/prueba_carrito.sh`,
 > `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`,
 > `.\mongo\demostracion_indices.ps1`.
+>
+> Los dos nuevos tambien van de uno en uno, y los dos lo dicen en su cabecera:
+> `alertas_login.sh` mide contadores por IP, y en local la IP es la misma para
+> todo; `ofertas_paginadas.sh` necesita que la lista no se mueva mientras la
+> recorre.
 >
 > **`falla_checkout.sh` PARA CONTENEDORES a proposito**, asi que no se corre a la
 > vez que ningun otro. Y compra de verdad: deja pedidos, pagos y movimientos de
@@ -119,7 +128,8 @@ ocupando el 27017, y ese contestaria primero con una base vacia.
 
 Las **42 tablas** del diagrama (43 desde la migracion 015, que agrega
 `evento_grafo` y NO esta en el ER porque no es del modelo de negocio: es la cola
-de sincronizacion con Neo4j), el catalogo en MongoDB con su ETL, el historial
+de sincronizacion con Neo4j; y 46 desde la 016, cuyas tres tablas de alertas SI
+son negocio y todavia no estan dibujadas), el catalogo en MongoDB con su ETL, el historial
 por eventos, los indices y las agregaciones. El informe lo hizo el equipo.
 
 ### Entrega 2 -- lo construido
@@ -560,9 +570,11 @@ queda con la mitad de la RAM que ve, y esta maquina se quedo sin memoria tres
 veces ese mismo dia. Neo4j ya es otra JVM al lado. El dia que entre el millon de
 productos, ese numero es el primero que hay que subir.
 
-Y si Elasticsearch no sube, **el arranque no se corta**. Avisa y sigue. Es la
-unica base de la que hoy no cuelga ninguna pantalla, y tumbar la maquina entera
-por ella dejaria sin trabajar a quien venia a tocar el catalogo.
+Y si Elasticsearch no sube, **el arranque no se corta**. Avisa y sigue. Cuando
+se escribio esto era la unica base de la que no colgaba ninguna pantalla; hoy
+cuelga el buscador (la caja de la cabecera, el autocompletado y `/buscar`),
+pero el login y la portada no pasan por ella, y tumbar la maquina entera por
+ella dejaria sin trabajar a quien venia a tocar el catalogo.
 
 **Y las rutas ya existen desde esa misma noche.** Aqui decia "lo que falta es la
 ruta" y llevaba dos dias sin ser cierto. Jose David publico
@@ -803,6 +815,201 @@ la copia de logueos no duplica: tres corridas seguidas, 325 filas y 325 ids
 demas queda de adorno. El contrato completo esta en `docs/BACKEND-PENDIENTE.md`
 y la pantalla ya esta escrita contra el, asi que se enciende sola.
 
+**Y la copia de logueos esta congelada desde el 2026-09-10.** Sigue leyendo
+`log_login`, que ya no recibe filas. Esta en la seccion siguiente y en
+`etl/README.md`.
+
+---
+
+### El fraude del inicio de sesion
+
+**Hecho el 2026-09-10 y el 2026-09-11, y son dos mitades de dos personas.**
+
+La de Jose David es el commit `e38e9a3`, todo en `backend/`:
+
+```
+LogService                       cada intento de entrar va a eventos_autenticacion
+                                 de MongoDB; log_login y log_registro ya no se escriben
+EventosAutenticacionSyncService  cada 5 s copia lo que tiene pendiente_elastic
+                                 al indice mesh_eventos_autenticacion
+FraudeLoginService               tres contadores en Redis en el camino del login;
+                                 al cruzar un umbral hace un UPSERT en alerta_fraude
+GET /admin/fraude/alertas-login  la lista, solo admin
+```
+
+```
+fuerza_bruta_ip       8 fallos desde la misma IP en 60 s
+fuerza_bruta_cuenta   5 fallos contra el mismo identificador en 60 s
+multi_cuenta_ip       4 identificadores distintos desde la misma IP en 300 s
+```
+
+En el mismo commit van dos cosas que no son del fraude: las rutas
+`GET /vendedor/ofertas/paginado` y `GET /vendedor/ofertas/pendientes/paginado`
+(pendiente 13), y el timeout de MongoDB a 3 s, con el que comprar con Mongo
+caido da 503 en unos 5 s en vez de 32 (fila 11 de `CONSISTENCIA-CHECKOUT.md`).
+
+La mitad mia es lo que hacia falta para que eso funcione en cualquier maquina:
+
+```
+migrations/016_alerta_fraude.sql        alerta_fraude y sus dos catalogos
+mongo/003_eventos_autenticacion.js      la coleccion y sus seis indices
+elastic/002_eventos_autenticacion.json  la PLANTILLA del indice de eventos
+arrancar.ps1                            el paso "Indice de eventos de autenticacion"
+frontend PanelFraude.svelte             la tarjeta "Intentos de entrada sospechosos"
+pruebas/alertas_login.sh                51 OK
+pruebas/ofertas_paginadas.sh            29 OK
+pruebas/eventos.sh                      un AVISO al empezar, ver abajo
+```
+
+**Tres decisiones que no son obvias.**
+
+**1. La 016 copia el SQL del backend columna por columna, y lleva un candado.**
+Las tablas salen de `backend/elementos Generales/plan pendiente/fraude-login-eventos.sql`.
+Tienen que ser identicas porque ese SQL ya se corrio a mano en alguna base, y
+ahi el `CREATE TABLE IF NOT EXISTS` se salta: una columna de mas aqui existiria
+en unas bases y en otras no. Los catalogos se insertan por nombre, sin escribir
+ningun id y sin quemar la secuencia. Pero el backend fija esos ids en su codigo
+(1, 2 y 3), asi que el final del archivo **falla la migracion** si algun id no
+es el que el backend espera, o si falta el indice unico que necesita su
+`ON CONFLICT`. El detalle esta en `docs/base-de-datos.md`.
+
+**2. Un indice parcial para el worker.** El worker pregunta cada 5 segundos por
+`pendiente_elastic: true` ordenado por `fecha`. Sin indice era un COLLSCAN mas un
+SORT en memoria, sobre una coleccion que solo crece. Con
+`eventos_pendientes_elastic` (`{fecha: 1}`, parcial sobre `pendiente_elastic:
+true`) sale IXSCAN y sin etapa SORT, y el indice tiene el tamano de la cola, que
+casi siempre es cero. Los otros cinco los pide el plan del backend y hoy no los
+usa ninguna ruta: sirven para investigar desde `mongosh`.
+
+**3. Es una PLANTILLA y no un indice, por algo que paso de verdad.** El worker
+escribe con `index()`, que autocrea el indice si no existe. El primer dia se
+autocreo antes que la plantilla, con mapeo dinamico, y `ip` salio de tipo
+`text`. Una plantilla actua sobre cualquier indice que nazca con ese nombre, lo
+cree quien lo cree. Lleva `ip` de tipo `ip`, `identificador_intentado` con un
+subcampo `.minusculas` (para que `Admin@Mesh.com` y `admin@mesh.com` no cuenten
+como dos al agregar) y `dynamic: false`. Si el indice ya existe con `ip` de otro
+tipo, el arranque lo tira, lo rehace y marca los eventos de Mongo para que el
+worker los copie otra vez. Esta en `elastic/README.md`.
+
+**La pestana del panel se llamaba "Resenas" y ahora se llama "Fraude".** Lleva
+los anillos de calificaciones y los intentos de entrada sospechosos, y nadie
+iria a buscar los segundos bajo el nombre viejo.
+
+**Los dos arneses se rompieron a proposito, y los dos se dieron cuenta.** Por
+ejemplo, sin la tabla `alerta_fraude` o sin la plantilla, `alertas_login.sh` da
+FALLA en su parte 0 y se para, en vez de medir sobre otra cosa.
+
+**En local todo el trafico sale de `127.0.0.1`, y no es un proxy.** El
+navegador, los arneses y el servidor corren en la misma maquina, y el frontend
+habla directo a `localhost:3000`. Por eso los contadores por IP son los mismos
+para todo el equipo, y por eso `multi_cuenta_ip`, que cuenta los correos o
+usuarios tecleados (tambien las entradas que salen bien), da una alerta con 4
+cuentas distintas en 5 minutos desde el mismo equipo. `trustProxy` no pinta
+nada hoy; solo haria falta activarlo si se pone un proxy o un tunel delante del
+backend.
+
+### La corrida completa del 2026-09-11
+
+Los doce arneses en serie, de uno en uno, mas la compilacion del backend
+(`tsc`) y `svelte-check` del frontend. **303 OK y 0 FALLA** en los doce, y los
+dos compiladores sin un error (205 archivos en el frontend).
+
+```
+pruebas/resenas.sh              15     redis/prueba_carrito.sh         15
+pruebas/carrito.sh              25     redis/prueba_concurrencia.sh    61
+pruebas/notas.sh                10     neo4j/correr_fraude.sh          10
+pruebas/busqueda.sh             13     mongo/demostracion_indices.ps1  12
+pruebas/eventos.sh              31     pruebas/falla_checkout.sh       31
+pruebas/alertas_login.sh        51
+pruebas/ofertas_paginadas.sh    29
+```
+
+`falla_checkout.sh` sigue con su OJO, que es el hallazgo del 2026-09-06: con
+Mongo parado no se compra. Esa corrida dejo los pedidos 119 y 120.
+
+`eventos.sh` da verde y a la vez avisa que la copia a ClickHouse esta
+congelada: ese dia habia **24 logins en Mongo que ClickHouse no ve**. El verde
+dice que la copia funciona, no que este al dia.
+
+### Lo que se toco DESPUES de esa corrida, medido el 2026-09-12
+
+Una revision de lo nuevo encontro once cosas. Se arreglaron con Docker caido y
+se midieron al dia siguiente, de una en una:
+
+```
+.\arrancar.ps1 sobre la base ya migrada   001 a 006 "ya estaba aplicada",
+                                          007 a 016 en verde, como se predijo
+candado de la 016 roto a mano             "016_alerta_fraude.sql FALLO" y el
+  (el tipo 1 renombrado)                  arranque se corta, con los NOTICE
+                                          "already exists" en la misma salida
+indice de eventos vaciado a mano,         "Faltan al menos 30 evento(s)", marca
+  con ip de tipo ip y 0 documentos        los 30, y el worker los copia al
+                                          arrancar el backend (30 de 30)
+bash pruebas/alertas_login.sh, dos veces  52 OK y 52 OK, 0 FALLA; la segunda
+                                          espero al minuto siguiente y no
+                                          encontro nada que borrar
+bash pruebas/ofertas_paginadas.sh         26 OK, 0 FALLA, 3 SIN MEDIR (una
+                                          sola oferta pendiente)
+el panel de fraude, como admin            27 alertas en 2 paginas, los filtros,
+                                          "(vacio)", el corte a 80 caracteres,
+                                          la marca local y 400 px sin desborde;
+                                          consola sin errores
+```
+
+El candado y el hueco del indice se restauraron despues de romperlos, y las
+alertas, eventos y claves que sembro la prueba del panel se borraron.
+
+Dos cosas que salieron midiendo, y que son del backend:
+
+- **Un identificador vacio da 400 y aun asi cuenta como fallo.** Cinco
+  `POST /usuario/login` con `"identificador": ""` dejan una alerta
+  `fuerza_bruta_cuenta` cuya clave es la cadena vacia. El panel la pinta como
+  "(vacio)".
+- **Con Mongo caido el login se guarda a medias.** El 2026-09-11 Mongo dejo de
+  contestar a mitad de una prueba. Los intentos fallidos de esa prueba **no
+  estan en `eventos_autenticacion`**, pero sus alertas si llegaron a
+  `alerta_fraude`: el log es best-effort y los contadores de Redis siguen. O
+  sea que durante una caida de Mongo hay alertas sin su evidencia.
+
+Lo que cambio, y que se miro en cada uno:
+
+- **`arrancar.ps1`, el perdon de las migraciones.** `Correr-Migraciones` pinta
+  en amarillo, como "ya estaba aplicada", una migracion que falla con
+  `already exists`. Miraba la salida entera, y ahi estan siempre los
+  `NOTICE ... already exists, skipping` de los `IF NOT EXISTS`. O sea que **en
+  una base ya migrada los candados de la 015 y la 016 no paraban el arranque**,
+  dijeran lo que dijeran. Ahora solo perdona si la linea del `ERROR` lo dice.
+  Ademas `Out-String` lleva `-Width 4096`: sin eso PowerShell parte la linea del
+  error al ancho de la consola y el perdon dejaria de reconocerla.
+- **`arrancar.ps1`, el indice de eventos.** Solo marcaba eventos para recopiar
+  si el indice faltaba o habia nacido malo. Si el worker lo recreaba solo, el
+  hueco se quedaba para siempre y en verde. Ahora cuenta Mongo, pendientes e
+  indice, y si indice mas pendientes no llega a Mongo, marca todo. Es una
+  cuenta y no una comparacion por id: un sobrante en el indice puede tapar un
+  hueco del mismo tamano.
+- **`PanelFraude.svelte`.** Decia "cuentas probadas" y `multi_cuenta_ip` cuenta
+  correos o usuarios tecleados, salgan bien o mal; los textos ahora lo dicen. La
+  marca "este equipo (local)" ya no le echa la culpa a un proxy. Un identificador
+  vacio sale como "(vacio)", y uno largo se corta a 80 caracteres con el texto
+  en el `title`, hasta 1000.
+- **`alertas_login.sh`.** La llave del UPSERT es el minuto, asi que la prueba
+  podia engordar una alerta ajena del mismo minuto y despues borrarla. Ahora
+  espera a un minuto sin alertas de ese tipo antes de cada deteccion, y no borra
+  ninguna fila anterior a la corrida: la avisa. Y anota cada alerta que nace en
+  `.mesh-alertas-nacidas.txt`, para que la corrida siguiente borre lo que dejo
+  un proceso que murio sin correr su `trap`.
+- **`ofertas_paginadas.sh`.** Con menos de 2 ofertas pendientes, la parte 2 ya
+  no cuenta OK sin haber medido: dice SIN MEDIR, fuera de las dos cuentas. **El
+  2026-09-11 habia una sola pendiente**, asi que el 29 OK no se repite tal cual
+  si antes no se publica otra con un vendedor normal. Si la lista se mueve
+  mientras la recorre, repite una vez y despues dice SIN MEDIR en vez de FALLA.
+  Y la cabecera ya no dice que no escribe nada: sus dos logins suman al contador
+  de `multi_cuenta_ip`, y al final avisa si nacio una alerta.
+
+Lo que falta del fraude del login esta en `docs/PENDIENTES.md`, puntos 14 a 18,
+y lo que le toca al backend en `docs/BACKEND-PENDIENTE.md`. Lo mas importante:
+**Elasticsearch se llena y ninguna ruta lo consulta.**
+
 ---
 
 ## Las cinco cosas que hay que saber, y no son obvias
@@ -902,6 +1109,19 @@ plano o desde otro guion, que es justo como lo va a correr una persona con prisa
 Medido: una corrida clavada con 459 segundos de `elapsed` en
 `system.processes`, sin error y sin mensaje. Se cierra con `< /dev/null`.
 
+**En PowerShell 5.1, `Out-String` sin `-Width` parte las lineas al ancho de la
+consola.** Con 60 columnas, la linea de un `ERROR` de `psql` sale en tres
+pedazos, y un `-match` que busque la frase entera en una sola linea deja de
+encontrarla. Aparecio al arreglar el perdon de las migraciones: sin el
+`-Width 4096` que ahora lleva, la regla nueva habria cortado el arranque en una
+consola angosta. Medido con programas falsos que escriben como `psql`.
+
+**Un `NOTICE` no es un error, pero un `-match` sobre la salida entera no lo
+sabe.** Cada `CREATE ... IF NOT EXISTS` sobre una base ya migrada imprime
+`already exists, skipping`, y eso bastaba para que el arranque perdonara
+cualquier `RAISE EXCEPTION` de la misma migracion. Un candado que se perdona
+solo es un candado pintado.
+
 ---
 
 ### El precio del carrito ya avisa antes de cobrar
@@ -939,15 +1159,24 @@ dos puntos que llevaban dos dias hechos sin que nadie los tachara: el 409 del
 `PATCH` (punto 8) y el apagado de la venta relampago vencida (punto 7). El 409 lo
 decia este mismo documento como "lo mas urgente" cuando ya estaba resuelto.
 
-Lo que queda vivo, en orden de lo que mas duele:
+Lo que queda vivo, en orden de lo que mas duele (al 2026-09-11):
 
 | # | Que | De quien |
 |---|---|---|
+| 17 | Medir en vivo lo que se toco despues de la corrida del 2026-09-11 | mia |
+| 14 | Las rutas de agregacion sobre `mesh_eventos_autenticacion`: lo que pidio el profesor | Jose David |
 | 9 | Las tres rutas de la base columnar, y sobre todo `POST /eventos/vista` | Jose David |
 | 10 | Los filtros facetados del buscador, con agregaciones. Requisito de la Entrega 3 | los dos |
-| 11 | La prueba de falla simulada del checkout. Requisito de la Entrega 3 | mia |
+| 16 | La copia de logueos a ClickHouse, congelada desde el 2026-09-10 | decidir con el profesor |
+| 15 | Los detectores que faltan y los detalles del servicio de fraude del login | Jose David |
+| 12 | El checkout no compra con MongoDB caido: las tres salidas, por decidir | con el profesor |
+| 13 | La lista del vendedor sigue entera: a la ruta paginada le faltan filtros | Jose David |
+| 18 | Las tres tablas de la 016 en el diagrama ER | mia |
 | 5 | Decidir quien reparte el id de producto | Jose David |
 | 1 | El precio se congela al pagar y no al agregar | cubierto a medias |
+
+La 11, la prueba de falla simulada del checkout, se cerro el 2026-09-06 y esta
+tabla la seguia dando por abierta.
 
 Del 9, lo urgente es `POST /eventos/vista`: **sin esa ruta la tabla que sostiene
 el panel de tendencias no se llena nunca**, y todo lo demas de la base columnar
@@ -999,15 +1228,17 @@ Es lo que le falta al informe de la Entrega 1, cuyo indice tiene los numeros cas
 todos vacios y los tres que hay no corresponden.
 
 ```
-migrations/          el esquema (la 015 es la ultima, 016 sera la siguiente)
+migrations/          el esquema (la 016 es la ultima, 017 sera la siguiente)
                      y el generador de datos
 etl/                 las cuatro copias hacia las bases derivadas
+mongo/               los indices (catalogo, resenas y eventos_autenticacion),
+                     la demostracion de indices y el generador de lotes
 neo4j/               el modelo del grafo y las 5 consultas de fraude
 redis/               el carrito, el Lua del inventario limitado y sus arneses
-elastic/             el mapeo del indice del buscador
+elastic/             el mapeo del buscador y la plantilla del indice de eventos
 clickhouse/          el esquema de eventos y el generador de lotes.
                      La puerta es clickhouse/README.md
-pruebas/             los seis arneses de rutas y de bases
+pruebas/             los ocho arneses de rutas y de bases
 docs/                base-de-datos.md manda sobre el modelo;
                      ARQUITECTURA.md es el diagrama de arquitectura (no el ER);
                      DECISION-GRAFOS-VS-COLUMNAR.md es el ADR-3 de la Entrega 2;

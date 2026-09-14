@@ -2,9 +2,10 @@
 
 **Mesh -- Bases de Datos 2, Universidad del Istmo. Entrega 3.**
 
-Fecha: 2026-09-04. Todo lo que dice este documento sale de codigo que corre hoy
-y de mediciones contra la base viva. Donde algo no esta resuelto, se dice que no
-lo esta.
+Fecha: 2026-09-04. Ultima actualizacion: 2026-09-11, con la fila 11 (MongoDB
+caido durante el checkout). Todo lo que dice este documento sale de codigo que
+corre hoy y de mediciones contra la base viva. Donde algo no esta resuelto, se
+dice que no lo esta.
 
 ---
 
@@ -135,6 +136,7 @@ pide el enunciado.
 | 8 | Los numeros del catalogo de Mongo quedan viejos | se recalculan al final, y el ETL los rehace | ventana aceptada |
 | 9 | El grafo de Neo4j queda viejo | cola `evento_grafo` + worker cada 10 s | **reintento idempotente** |
 | 10 | El indice de busqueda queda viejo | se reconstruye entero con el ETL | ventana aceptada |
+| 11 | MongoDB cae durante el checkout | 503 antes de escribir nada; falla en unos 5 s | todo o nada, sin escritura parcial. **Como manejarlo sigue por decidir** |
 
 ### 1. El doble cobro, que ya paso
 
@@ -293,6 +295,61 @@ numeros distintos a la vez. Es correcto y esta decidido: el numero que se le
 ensena a la persona sale en vivo, y la copia existe para **filtrar y ordenar** el
 catalogo, que es una operacion masiva que no se puede hacer en vivo.
 
+### 11. MongoDB cae durante el checkout
+
+**Agregada el 2026-09-11.** Salio como hallazgo de la prueba de falla de la
+seccion 4 bis, y Jose David la midio por su lado el 2026-09-07. Su documento es
+`backend/elementos Generales/prueba-falla-mongo-checkout.md`, y pedia esta fila.
+
+MongoDB no participa del `COMMIT`, pero las dos rutas de compra lo **leen antes**
+de llegar a el: el nombre del producto y de la variante, y el estado de la
+variante, que no se copia a PostgreSQL.
+
+```
+POST /carrito/comprar                  verCarrito() lee Mongo antes de la transaccion
+POST /comprador/pedidos/:id/comprar    lee el estado de la variante dentro de la
+                                       transaccion, antes del COMMIT
+```
+
+Si esa lectura falla, la compra se corta ahi y nunca llega a
+`comprar_carrito()` ni a `comprar_pedido()`:
+
+```
+HTTP 503   "No se pudo conectar con MongoDB"
+pedido, pago, kardex y stock   iguales antes y despues
+candado de Redis               suelto, se puede reintentar de inmediato
+el carrito                     entero
+```
+
+Es lo que mide el escenario B de `bash pruebas/falla_checkout.sh`, y lo volvio
+a medir la corrida del 2026-09-11 (31 OK, 0 FALLA). En la ruta del pedido, segun
+el documento de Jose David, la transaccion hace `ROLLBACK` y el pedido se queda
+`pendiente`, reintentable.
+
+**Lo que ya cambio es cuanto tarda en fallar.** Con los valores por defecto del
+driver, la compra se quedaba colgada unos 32 s: son los 30 s de
+`serverSelectionTimeoutMS` reintentando, con la peticion y una conexion del pool
+tomadas todo ese rato. Jose David lo bajo a 3 s en `src/database/mongo.ts`, y
+ahora falla en unos 5 s (los 3 del driver mas lo que `verCarrito` hace antes).
+La semantica no cambia: sigue siendo 503 y sigue sin escribir nada.
+
+**Por eso la categoria es "todo o nada" y no "ventana aceptada".** No hay
+ninguna escritura que quede a medias, ni una que haya que compensar. Lo que hay
+es una dependencia de **disponibilidad**: sin Mongo no se vende, aunque Mongo
+nunca escriba nada del pedido.
+
+**Como manejarla sigue por decidir con el profesor.** Las tres salidas que
+propone el documento de Jose David:
+
+1. **Aceptarla y dejarla escrita**, como ya se acepta la confirmacion de reservas
+   de la fila 5. Es lo que hace esta fila hoy.
+2. **Copiar el estado de la variante a PostgreSQL**, como ya se copian precio y
+   stock a `oferta`. En la ruta del pedido el nombre ya esta congelado en
+   `pedido_producto`, asi que el estado de la variante es lo unico vivo que falta.
+3. **Degradar en vez de fallar**: seguir con el ultimo nombre conocido y dar la
+   variante por activa. El riesgo es vender una variante que se desactivo sin
+   que el backend se enterara.
+
 ---
 
 ## 4. Lo que NO esta resuelto
@@ -372,7 +429,14 @@ sale.**
 No es un fallo de consistencia -- no se cobro nada y no quedo nada a medias, que
 es lo importante -- pero **es una dependencia que no estaba escrita**, y una
 dependencia no escrita es la que tumba un sistema el dia que esa base se cae de
-verdad. Queda anotada aqui y en `docs/PENDIENTES.md`.
+verdad. Desde el 2026-09-11 es la fila 11 de la seccion 3, con lo que midio
+Jose David y las tres salidas que quedan por decidir.
+
+**Vuelta a correr el 2026-09-11: 31 OK y 0 FALLA, con el mismo OJO.** Los tres
+escenarios de caida contestaron 503 con el nombre de la base que faltaba ("No
+se pudo conectar con Redis", "con MongoDB", "con PostgreSQL"), y PostgreSQL
+quedo igual en los tres: 42 pedidos, 42 pagos, 5666 filas de kardex. Esa corrida
+dejo los pedidos 119 y 120.
 
 `docker stop` es una parada ORDENADA, con SIGTERM y cierre limpio de archivos.
 Un corte de luz es mas bruto y puede dejar cosas que esto no toca. Lo que si
@@ -387,7 +451,7 @@ que un pedido de mas. El arnes imprime al terminar los `id_pedido` que creo.
 
 ## 5. Como se comprueba todo esto
 
-No se pide creer nada de lo de arriba. Son ocho arneses y estos son los que
+No se pide creer nada de lo de arriba. Son doce arneses y estos son los que
 tocan este flujo:
 
 ```

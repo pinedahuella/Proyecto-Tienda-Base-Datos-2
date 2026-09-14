@@ -12,6 +12,12 @@ docker exec -i mesh-postgres psql -U meme -d mesh -tAc \
 -- 42
 ```
 
+Eso contaba 42 cuando se escribio. Hoy la base tiene **46**: `evento_grafo` de
+la 015, que no es del ER porque no modela negocio (es la cola hacia Neo4j), y
+las tres tablas de alertas de fraude de la 016, que SI son negocio y **todavia
+no estan en el diagrama**. Estan explicadas abajo, en "Las alertas de fraude
+del login".
+
 > **Los numeros de este documento describen el conjunto de datos que genera
 > `migrations/datos/generador.js` con su semilla fija** -- 102 productos, 202
 > variantes, **556 ofertas, 11 cuentas**, y desde la 011 tambien **90 resenas,
@@ -1031,6 +1037,143 @@ quejarse.
 Los dos numeros se pueden volver a medir, y conviene hacerlo antes de citarlos:
 el de arriba con el `EXPLAIN (ANALYZE)` de aqui, y el de los 188 ms con lo que
 describe `docs/frontend.md`.
+
+---
+
+## Las alertas de fraude del login (migracion 016)
+
+**Entraron la noche del 2026-09-10**, detras del codigo que las usa. El backend
+cuenta en Redis tres senales en el propio camino del login, y cuando una cruza
+su umbral deja una fila aqui:
+
+```
+fuerza_bruta_ip       8 fallos desde la misma IP en 60 s
+fuerza_bruta_cuenta   5 fallos contra el mismo identificador en 60 s
+multi_cuenta_ip       4 identificadores distintos desde la misma IP en 300 s
+```
+
+Son tres tablas:
+
+```
+tipo_alerta_fraude     que senal disparo la alerta      catalogo, 3 filas
+estado_alerta_fraude   en que va la revision del admin  pendiente, revisada, descartada
+alerta_fraude          la alerta
+  id_tipo_alerta_fraude   -> tipo_alerta_fraude
+  clave                   el ORIGEN de la senal: la IP, o el identificador tecleado
+  id_usuario              la cuenta, solo en fuerza_bruta_cuenta y si existe
+  detalle                 jsonb, la evidencia para un humano
+  contador                cuantas veces se cruzo el umbral en esa ventana
+  ventana_inicio          el minuto truncado de la deteccion
+  id_estado_alerta_fraude -> estado_alerta_fraude
+  id_usuario_reviso       el id REAL del admin, sin sustituir por la tienda
+  fecha_revision, fecha_creacion, fecha_actualizacion
+```
+
+**No es un log.** Una fila aqui dice "esto merece que un admin lo mire", no
+"esto paso". Cada intento, bueno o malo, vive en `eventos_autenticacion` de
+MongoDB (mas abajo); aqui solo llega lo que cruzo un umbral.
+
+**Las columnas son copia exacta del SQL de referencia del backend**
+(`backend/elementos Generales/plan pendiente/fraude-login-eventos.sql`), y no
+por comodidad: ese SQL ya se corrio a mano en alguna base, y ahi el
+`CREATE TABLE IF NOT EXISTS` de la 016 se salta entero. Una columna o un
+`CHECK` de mas existiria en unas bases y en otras no, sin que nadie se entere.
+Lo que haya que cambiarle va en una migracion nueva, con un `ALTER` que llegue a
+todas.
+
+### Los catalogos van en tabla y no en un CHECK
+
+Como cualquier otro catalogo del proyecto (`estado_oferta`, `estado_producto`,
+`motivo_movimiento`). Un tipo nuevo, como el viaje imposible el dia que haya
+geolocalizacion, es una fila en una migracion nueva, no rehacer la restriccion
+de una tabla que se escribe en cada ataque. Y la alerta apunta a su tipo con una
+llave foranea, que un texto con `CHECK` no tiene.
+
+El precio es el de siempre, y aqui con una vuelta mas. El backend no consulta el
+catalogo en cada login: **fija los ids en su codigo**, 1, 2 y 3, en
+`models/alerta-fraude.ts`, igual que `ID_ROL_ADMIN`. La migracion no escribe
+ningun id (es la regla de `migrations/README.md`): los pone la secuencia, en el
+orden del `VALUES`. En una base limpia salen 1, 2 y 3, pero si no salieran, el
+backend guardaria una `fuerza_bruta_ip` con el id de otro tipo **sin un solo
+error**: la llave foranea se cumple, solo que apunta a la fila equivocada.
+
+Por eso el final de la 016 es un candado: busca cada nombre y **falla la
+migracion** si su id no es el que el backend espera. Los numeros aparecen ahi y
+solo ahi, como comprobacion y nunca en un `INSERT`.
+
+Y los catalogos se insertan con `WHERE NOT EXISTS`, no solo con
+`ON CONFLICT DO NOTHING`. El segundo pide el `nextval` antes de descubrir el
+choque y lo quema, y la 016 corre en cada arranque: cada arranque le sumaria
+tres a la secuencia, y el cuarto tipo que se agregue un dia no saldria con el 4.
+
+### La llave del UPSERT
+
+```
+UNIQUE (id_tipo_alerta_fraude, clave, ventana_inicio)
+```
+
+`ventana_inicio` es el minuto truncado de la deteccion. Con el tipo y la clave
+forma la llave del `ON CONFLICT` del backend: varios cruces del umbral en el
+mismo minuto suben `contador` en una sola fila en vez de duplicarla. Al minuto
+siguiente nace otra, a proposito: una alerta que un admin ya reviso no se
+reabre sola. Por lo mismo, el `UPSERT` no toca el estado en el choque.
+
+**Es lo unico de la tabla que el backend no puede perder.** Su `ON CONFLICT`
+necesita un indice unico sobre esas tres columnas exactas, y sin el, el `INSERT`
+revienta con "there is no unique or exclusion constraint matching". El candado
+de la 016 lo comprueba en `pg_index`, y no en `pg_constraint`, porque al
+`ON CONFLICT` le sirve igual un `UNIQUE` que un `CREATE UNIQUE INDEX`.
+
+Dos consecuencias del diseno del backend que conviene saber al leer la tabla,
+y estan en `docs/BACKEND-PENDIENTE.md`: `clave` es `varchar(255)` y el
+identificador no tiene tope, asi que uno mas largo hace fallar el `INSERT` y la
+alerta se pierde; y el `ON CONFLICT` quema un id de la secuencia en cada choque,
+asi que los ids saltan.
+
+### El log de autenticacion se mudo a MongoDB, y `log_login` quedo congelado
+
+Desde el 2026-09-10 el backend escribe cada intento de entrar en la coleccion
+`eventos_autenticacion` de MongoDB, y ya no en `log_login` ni en `log_registro`.
+Antes solo se guardaban los logins buenos; ahora se guarda tambien cada fallo,
+con su motivo. La forma del documento esta en
+`backend/src/models/evento-autenticacion.ts`:
+
+```
+tipo                     login | logout | registro
+resultado                exito | fallo
+motivo                   por que fallo, null si salio bien
+id_usuario               null si no se puede atribuir
+identificador_intentado  el correo o usuario tecleado, tal cual
+ip, user_agent, huella_cliente
+fecha
+pendiente_elastic        true hasta que el worker lo copia a Elasticsearch
+```
+
+Solo se inserta. La unica escritura posterior es la del worker, que le quita
+`pendiente_elastic` despues de copiarlo al indice `mesh_eventos_autenticacion`.
+Y el backend la escribe sin esperar: si Mongo no contesta, el login sale igual
+y ese evento se pierde. Para un login es lo correcto, porque no tiene por que
+esperar los 3 s que tarda el driver en rendirse. Y por lo mismo esto es un log
+y no una fuente de verdad: puede faltarle un evento sin que nada lo diga.
+
+**`log_login` y `log_registro` no se borran.** Guardan el historico de antes del
+cambio, y tienen llave foranea contra `usuarios`, que en Mongo no habria. Pero
+quien las abra tiene que saber que ya no reciben filas, o va a sacar
+conclusiones de una tabla congelada. Por eso la 016 lo dice en el `COMMENT` de
+cada una, que es lo que ensenan `\d+` y pgAdmin.
+
+La consecuencia que muerde: **la copia a ClickHouse sigue leyendo `log_login`**,
+asi que desde el 2026-09-10 no recibe logueos nuevos. Ver `etl/README.md` y el
+punto 16 de `docs/PENDIENTES.md`.
+
+Los indices de la coleccion estan en `mongo/003_eventos_autenticacion.js`. Uno
+es el que importa hoy: `eventos_pendientes_elastic`, `{fecha: 1}` parcial sobre
+`pendiente_elastic: true`, que es exactamente la consulta del worker cada 5
+segundos. Sin el, esa consulta era un COLLSCAN mas un SORT en memoria sobre una
+coleccion que solo crece; con el sale IXSCAN y sin SORT, y el indice tiene el
+tamano de la cola, no el del historico. Los otros cinco (por usuario, por IP,
+por tipo y resultado, por identificador y por huella) los pide el plan del
+backend y hoy no los usa ninguna ruta.
 
 ---
 
