@@ -544,7 +544,7 @@
 	 *
 	 * Aqui SI se filtra en memoria, al reves que en el catalogo, y es correcto:
 	 * `GET /vendedor/ofertas` no pagina ni acepta filtros -- trae TODAS las
-	 * ofertas de la cuenta de un golpe. Como ya estan las 90 en el navegador,
+	 * ofertas de la cuenta de un golpe. Como ya estan las ~950 en el navegador,
 	 * un filtro local ve el total y no miente; y ademas responde sin ir al
 	 * servidor. En el catalogo seria al reves: ahi solo hay 20 de 105 en
 	 * memoria, y filtrar aqui diria "no hay ninguna" teniendo siete.
@@ -565,7 +565,7 @@
 		const texto = plano(busquedaLista.trim());
 		if (texto === '') return porEstado;
 
-		// Busca en el producto Y en la variante: quien tiene 90 ofertas suele
+		// Busca en el producto Y en la variante: quien tiene casi mil ofertas suele
 		// acordarse de una por la talla o el color, no por el nombre completo.
 		return porEstado.filter(
 			(o) =>
