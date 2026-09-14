@@ -120,6 +120,38 @@ verdad, o el dia que alguien los busque a proposito.
   pero conviene que el detalle de la alerta diga lo suficiente por si solo, o
   decirlo en la pantalla.
 
+### 5b. Probado con IPs reales de tres paises (2026-09-13)
+
+Es la prueba del tunel que pediste. Se hizo sobre una COPIA de `backend/`
+fuera del repo (el tuyo no se toco), con una sola linea cambiada en
+`src/main.ts`:
+
+```ts
+new FastifyAdapter({ trustProxy: true }),
+```
+
+La copia se expuso con un tunel rapido de Cloudflare
+(`cloudflared tunnel --url http://localhost:3100`), y se le mandaron logins
+fallidos desde tres contenedores de Tor con salida en Alemania, Japon y Estados
+Unidos. Resultado, identico en Mongo, en Elasticsearch y en `alerta_fraude`:
+
+```
+185.220.100.253 (Alemania)  8 fallos, 2 correos   -> fuerza_bruta_ip
+172.234.92.148  (Japon)     4 correos distintos   -> multi_cuenta_ip
+204.8.96.189    (EE. UU.)   3 correos distintos   -> ninguna, no llega al umbral
+```
+
+O sea: **los tres detectores funcionan con IPs de verdad y cada IP se cuenta
+aparte.** Sin `trustProxy`, detras del tunel todo habria llegado como
+`127.0.0.1`, porque `cloudflared` se conecta desde la misma maquina. Si el
+portal se ensena por un tunel o un proxy, esa linea hace falta. Y conviene que
+el proxy sea el unico que pueda hablarle al backend: con `trustProxy: true`,
+cualquiera que llegue directo puede inventarse su IP con `X-Forwarded-For`.
+
+Un detalle para quien lo repita en esta maquina: el `~/.cloudflared/config.yml`
+del tunel de LEDKID se impone sobre el tunel rapido y lo deja en 404. Se evita
+pasandole `--config` con un archivo vacio.
+
 ### 6. Mongo caido en el checkout
 
 Tu `prueba-falla-mongo-checkout.md` pedia la fila 11 en
