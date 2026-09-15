@@ -477,9 +477,10 @@
 	 * PanelTendencias: una IPv4 puede volver envuelta en IPv6.
 	 *
 	 * Importa mas aqui que alla. En desarrollo el navegador, los arneses de
-	 * pruebas/ y el servidor corren en la misma maquina, y `api.ts` le habla
-	 * directo a localhost:3000, sin proxy en el medio. Asi que 127.0.0.1 no es
-	 * una IP mal leida: ES la IP real de todo el que prueba. Quien entre con
+	 * pruebas/ y el servidor corren en la misma maquina. Asi que 127.0.0.1 no es
+	 * una IP mal leida: ES la IP real de todo el que prueba. (Por el tunel del
+	 * celular tambien sale 127.0.0.1 mientras el backend no lleve trustProxy;
+	 * ver docs/ENTRAR-DESDE-EL-CELULAR.md.) Quien entre con
 	 * cuatro cuentas seguidas en desarrollo es, para el contador, alguien
 	 * probando cuatro cuentas. Sin la marca, la primera alerta que sale en esta
 	 * lista es el propio equipo, con cara de ataque.

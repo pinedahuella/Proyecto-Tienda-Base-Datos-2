@@ -1,10 +1,17 @@
 /**
  * Lo minimo para hablar con el backend.
  *
- * La direccion esta aqui y no repartida por las paginas: si el backend
- * cambia de puerto, se cambia en esta linea y nada mas.
+ * El navegador no le habla al backend directo: le pide a `/api` del mismo
+ * sitio que sirvio la pagina, y el proxy de `vite.config.ts` lo pasa al
+ * backend. Asi funciona igual en `localhost:5173` que por un tunel desde un
+ * celular, sin saber la direccion del tunel, sin CORS y con la cookie de
+ * sesion en el mismo sitio. Ver docs/ENTRAR-DESDE-EL-CELULAR.md.
+ *
+ * El `localhost:3000` es solo para cuando esto corre en el servidor al
+ * renderizar, donde un `/api` suelto no tiene a quien pedirle. Si el backend
+ * cambia de puerto, se cambia aqui y en `vite.config.ts`.
  */
-export const API = 'http://localhost:3000';
+export const API = typeof window === 'undefined' ? 'http://localhost:3000' : '/api';
 
 /**
  * La forma unica de respuesta de la API: todos los endpoints devuelven

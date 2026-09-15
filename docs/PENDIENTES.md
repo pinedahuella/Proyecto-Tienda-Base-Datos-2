@@ -25,6 +25,7 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | 16 | La copia de logueos a ClickHouse lee `log_login`, que no recibe filas desde el 2026-09-10 | decidir con el profesor; el ETL es mio | ver abajo | media: el 2026-09-11 habia 24 logins en Mongo que ClickHouse no ve, y la ruta 3 de la columnar leeria datos viejos |
 | ~~17~~ | ~~Medir en vivo lo que se toco despues de la corrida del 2026-09-11~~ | -- | -- | **CERRADO el 2026-09-12.** Medido contra las bases y roto a proposito; los numeros estan en `docs/TRASPASO.md` |
 | 18 | Las tres tablas de la 016 no estan en el diagrama ER | mia | -- | baja: `docs/diagrama-general.drawio` sigue con las 42 cajas |
+| 19 | `trustProxy: 'loopback'` en `backend/src/main.ts` (2026-09-15) | Jose David | una linea, arriba de todo en `BACKEND-PENDIENTE.md` | media: sin ella, quien entra por el tunel del celular queda como `127.0.0.1`. Lo demas (proxy `/api`, `tunel-celular.ps1`, guia) esta hecho y probado |
 
 ---
 

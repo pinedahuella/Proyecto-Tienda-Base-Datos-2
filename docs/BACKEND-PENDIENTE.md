@@ -4,6 +4,78 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-15: una sola linea para que el login salga con la IP real
+
+Ya se puede entrar a Mesh desde un celular (con VPN o sin ella) por un tunel de
+Cloudflare, con `.\tunel-celular.ps1`. Lo que no es `backend/` esta hecho y
+probado; la guia es `docs/ENTRAR-DESDE-EL-CELULAR.md`.
+
+**Lo tuyo es esto, en `src/main.ts`, y nada mas:**
+
+```ts
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ trustProxy: 'loopback' }),
+  );
+```
+
+Sin esa linea, todo el que entra por el tunel queda como `127.0.0.1`: en
+`eventos_autenticacion`, en Elasticsearch y en `alerta_fraude`. Tus contadores
+por IP juntan a todo el mundo en uno solo, y cuatro personas distintas desde
+sus celulares ya dan una alerta de `multi_cuenta_ip`. Medido el 2026-09-15.
+
+### Por que `'loopback'` y no `true`, que es lo que se pedia en la seccion 5b
+
+Con `true`, Fastify se queda con la IP de **mas a la izquierda** de
+`X-Forwarded-For`, y esa la escribe el cliente. Cloudflare no borra la que trae
+la peticion: le agrega la real al final. Medido detras de un tunel de verdad,
+con tu misma version de Fastify, mandando `X-Forwarded-For: 1.2.3.4` desde un
+nodo de Tor:
+
+```
+lo que llega:  x-forwarded-for: 1.2.3.4,192.42.116.59    socket: 127.0.0.1
+trustProxy: true        -> request.ip = 1.2.3.4           (la inventada)
+trustProxy: 'loopback'  -> request.ip = 192.42.116.59     (la real)
+```
+
+Con `'loopback'` Fastify solo cree lo que le llega de esta misma maquina
+(`127.0.0.0/8` y `::1`, que son el tunel y el proxy de vite) y se detiene en la
+primera IP de fuera. Asi resuelve tambien el cuidado de seguridad de la 5b:
+alguien que llegue directo al puerto 3000 desde otra maquina no puede
+inventarse la IP, porque su conexion no viene de loopback y su cabecera no se
+lee. En local no cambia nada: el navegador y los arneses siguen saliendo como
+`127.0.0.1`.
+
+### Lo que YA NO hace falta
+
+Lo que se pedia en la 5b para el celular, CORS con la direccion del tunel, ya
+no hace falta. El frontend ahora pide a `/api` del mismo sitio y vite se lo
+pasa al backend, asi que para el navegador la pagina y la API son el mismo
+origen. Por eso tampoco hay que tocar la cookie: `sameSite: 'lax'` sirve tal
+cual. El `enableCors` de `localhost:5173` puede quedarse como esta.
+
+### Como comprobar que te quedo bien
+
+1. Pon la linea y levanta tu backend normal en el 3000.
+2. `.\tunel-celular.ps1` (sin `-ConCopia`), y abre el link desde tu celular con
+   los datos moviles, no con el wifi de la casa.
+3. Entra con una contrasena mala. En el panel del admin, pestana Fraude, o en
+   Mongo:
+
+   ```js
+   db.eventos_autenticacion.find().sort({ fecha: -1 }).limit(1)
+   ```
+
+   tiene que salir la IP publica de tu celular. Si sale `127.0.0.1`, la linea
+   no esta en el backend que contesta: mira que no haya otro proceso viejo
+   escuchando en el 3000.
+
+Cuando la pongas, `-ConCopia` sobra y los dos scripts (`tunel-celular.ps1` y
+`demo-fraude-pais.ps1`) usan tu linea tal cual: si `src/main.ts` ya trae
+`trustProxy`, la copia no le cambia nada.
+
+---
+
 ## LO NUEVO DEL 2026-09-11: el fraude del login, y lo que le falta
 
 Tu commit `e38e9a3` ya funciona fuera de tu maquina. Lo que no era `backend/`
@@ -101,10 +173,10 @@ verdad, o el dia que alguien los busque a proposito.
 - **`multi_cuenta_ip` cuenta textos tecleados, entradas buenas incluidas.** En
   local todo sale de `127.0.0.1`, porque el navegador, los arneses y el servidor
   corren en la misma maquina, asi que cuatro cuentas distintas en cinco minutos
-  desde el mismo equipo ya dan una alerta. No es un proxy: el frontend habla
-  directo a `localhost:3000`. `trustProxy` no hace falta hoy; si un dia se pone
-  un proxy o un tunel delante, hay que activarlo, o todo el trafico saldria con
-  la IP del proxy.
+  desde el mismo equipo ya dan una alerta. En local eso no cambia con nada.
+  Desde el 2026-09-15 el frontend pasa por el proxy de vite y hay un tunel
+  para entrar desde fuera, asi que `trustProxy` ya hace falta: ver la seccion
+  de arriba del todo.
 - **Un identificador vacio da 400 y cuenta igual como fallo.** Medido el
   2026-09-12: cinco `POST /usuario/login` con `"identificador": ""` contestan
   400 y dejan una alerta `fuerza_bruta_cuenta` con la clave vacia. Pasa porque
@@ -151,6 +223,13 @@ cualquiera que llegue directo puede inventarse su IP con `X-Forwarded-For`.
 Un detalle para quien lo repita en esta maquina: el `~/.cloudflared/config.yml`
 del tunel de LEDKID se impone sobre el tunel rapido y lo deja en 404. Se evita
 pasandole `--config` con un archivo vacio.
+
+**Corregido el 2026-09-15.** Aqui se pedia `trustProxy: true`, y para el
+celular ademas CORS con la direccion del tunel. Las dos cosas quedaron
+superadas: `true` deja inventarse la IP aunque se entre por el tunel, y el CORS
+ya no hace falta porque el frontend va por `/api`. Lo que vale es la seccion de
+arriba del todo, con `trustProxy: 'loopback'`. La demo esta en
+`docs/DEMO-OTRO-PAIS.md` y el celular en `docs/ENTRAR-DESDE-EL-CELULAR.md`.
 
 ### 6. Mongo caido en el checkout
 

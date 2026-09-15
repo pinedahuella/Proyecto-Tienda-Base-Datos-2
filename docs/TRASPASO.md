@@ -899,14 +899,32 @@ iria a buscar los segundos bajo el nombre viejo.
 ejemplo, sin la tabla `alerta_fraude` o sin la plantilla, `alertas_login.sh` da
 FALLA en su parte 0 y se para, en vez de medir sobre otra cosa.
 
-**En local todo el trafico sale de `127.0.0.1`, y no es un proxy.** El
-navegador, los arneses y el servidor corren en la misma maquina, y el frontend
-habla directo a `localhost:3000`. Por eso los contadores por IP son los mismos
-para todo el equipo, y por eso `multi_cuenta_ip`, que cuenta los correos o
-usuarios tecleados (tambien las entradas que salen bien), da una alerta con 4
-cuentas distintas en 5 minutos desde el mismo equipo. `trustProxy` no pinta
-nada hoy; solo haria falta activarlo si se pone un proxy o un tunel delante del
-backend.
+**En local todo el trafico sale de `127.0.0.1`.** El navegador, los arneses y
+el servidor corren en la misma maquina. Por eso los contadores por IP son los
+mismos para todo el equipo, y por eso `multi_cuenta_ip`, que cuenta los correos
+o usuarios tecleados (tambien las entradas que salen bien), da una alerta con 4
+cuentas distintas en 5 minutos desde el mismo equipo.
+
+**Desde el 2026-09-15 el frontend no le habla directo al backend.**
+`frontend/src/lib/api.ts` pide a `/api` del mismo sitio, y el proxy de
+`frontend/vite.config.ts` se lo pasa al 3000 (o a `MESH_BACKEND`). En local da
+igual; sirve para que por un tunel la pagina y la API sean el mismo origen, sin
+CORS ni cambios en la cookie. Los arneses siguen yendo directo al 3000.
+
+**Para entrar desde un celular** esta `.\tunel-celular.ps1`: compila el
+frontend, lo sirve en el 5173 y abre un tunel rapido de Cloudflare hacia el.
+Con `-ConCopia` usa una copia del backend con trustProxy y el login sale con la
+IP del celular; sin eso sale `127.0.0.1` hasta que Jose David ponga
+`trustProxy: 'loopback'` en `backend/src/main.ts`, que es lo unico que le toca
+(arriba de todo en `BACKEND-PENDIENTE.md`). `-Cerrar` lo apaga. Ver
+`docs/ENTRAR-DESDE-EL-CELULAR.md`.
+
+**Para ensenarlo con una IP de otro pais** esta `.\demo-fraude-pais.ps1 -Pais sg`,
+que va por Tor y un tunel contra la misma copia del backend, y
+`.\demo-fraude-pais.ps1 -Limpiar` para borrar lo sembrado. Ver
+`docs/DEMO-OTRO-PAIS.md`. Hasta el 2026-09-15 ese script decia que sembraba y
+no sembraba nada; ahora comprueba la alerta en las bases antes de decir LISTO.
+Los dos scripts arman la copia con `copia-backend.ps1`.
 
 ### La corrida completa del 2026-09-11
 
