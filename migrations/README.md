@@ -47,13 +47,18 @@ Cuidado con una migracion que falla a la mitad. La siguiente corrida la ve como
 `already exists` antes de llegar a lo que falto. Se sale borrando las tablas de
 ese archivo y volviendo a correrlo.
 
+Ese "ya aplicada" sale solo si la linea del `ERROR` de psql dice
+`already exists`. Un `NOTICE` o un `DETAIL` con esas palabras no cuentan, y
+cualquier otro error corta el arranque con exit 1.
+
 Cada archivo hace una sola cosa y se puede leer solo.
 
-## Los catorce archivos de esquema
+## Los dieciseis archivos de esquema
 
-Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Es la misma
-trampa que este documento avisa mas abajo para las comprobaciones: una lista
-escrita a mano caduca sin avisar. Antes de creerle a esta, cuentalos:
+Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
+"los catorce" con quince en la carpeta. Es la misma trampa que este documento
+avisa mas abajo para las comprobaciones: una lista escrita a mano caduca sin
+avisar. Antes de creerle a esta, cuentalos:
 
 ```bash
 ls migrations/*.sql | wc -l
@@ -78,14 +83,16 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `013_precio_del_carrito.sql` | `agregar_linea()` acepta un `id_precio_historial` y lo usa en vez de buscar el vigente, validando que sea de esa oferta |
 | `014_inventario_limitado.sql` | `oferta.es_inventario_limitado`: que ofertas se venden con el mecanismo de Redis en vez del stock con `FOR UPDATE` |
 | `015_outbox_grafo.sql` | `evento_grafo` y su trigger sobre `resena`: la cola que mantiene el grafo de Neo4j al dia |
+| `016_alerta_fraude.sql` | `alerta_fraude` y sus dos catalogos: las alertas de fraude del login. Y el aviso, en el comentario de `log_login` y `log_registro`, de que ya no se escriben |
 
-Las cinco ultimas son de la Entrega 2 y merecen una linea mas de la que caben
-en la tabla.
+De la 011 a la 015 son de la Entrega 2, la 016 de la Entrega 3, y merecen una
+linea mas de la que caben en la tabla.
 
 **La 011 cierra el diagrama.** Con `comentario`, `resena` y `likes` las 42 cajas
-del ER estan construidas; antes eran 39. (La base tiene 43 tablas desde la 015,
-pero `evento_grafo` NO es del ER: no modela nada del negocio, es la cola de
-sincronizacion con Neo4j.) Y trae un cambio de modelo que hay que
+del ER estan construidas; antes eran 39. (La base tiene 43 tablas desde la 015
+y 46 desde la 016, pero `evento_grafo` NO es del ER: no modela nada del
+negocio, es la cola de sincronizacion con Neo4j. Las tres de la 016 son
+negocio y todavia no estan en el diagrama.) Y trae un cambio de modelo que hay que
 leer en `docs/base-de-datos.md`: la resena cuelga del **producto y del
 vendedor**, no de la oferta como se habia escrito en la Entrega 1.
 
@@ -137,6 +144,39 @@ La cola no se siembra en ningun sitio y no hace falta: esta migracion corre
 antes que `migrations/datos/`, asi que cuando la semilla inserta sus resenas el
 trigger ya existe y la cola se llena sola. Se vacia con `bash etl/cargar_grafo.sh`,
 que al terminar marca como proyectado todo lo que hubiera pendiente.
+
+**La 016 llego despues que el codigo que la usa.** `FraudeLoginService` ya
+escribia en `alerta_fraude` y `GET /admin/fraude/alertas-login` ya la leia; la
+definicion salio del SQL de referencia del backend
+(`backend/elementos Generales/plan pendiente/fraude-login-eventos.sql`),
+copiada columna por columna. Tiene que ser identica porque ese SQL ya se corrio
+a mano en alguna base, y ahi el `CREATE TABLE IF NOT EXISTS` se salta: una
+columna de mas aqui existiria en unas bases y en otras no.
+
+Tres cosas suyas que conviene saber:
+
+- **Es idempotente de verdad**, no por el perdon de "already exists" de
+  `arrancar.ps1`: sale con codigo 0 en cada corrida. Medido, dos corridas
+  seguidas, las dos `EXIT=0`, y tambien encima del SQL de referencia.
+- **Los catalogos se insertan con `WHERE NOT EXISTS` y no solo con
+  `ON CONFLICT DO NOTHING`**, porque el segundo quema un `nextval` por fila
+  aunque no inserte nada. Medido en una tabla temporal: dos corridas con
+  `ON CONFLICT` dejan la secuencia en 6 con tres filas. Con eso cada arranque
+  le sumaria tres, y el cuarto tipo que se agregue un dia no saldria con el 4.
+- **El backend fija los ids** (1, 2 y 3 en `models/alerta-fraude.ts`) y aqui
+  no se escribe ninguno. Lo que cierra ese hueco es un candado al final del
+  archivo: busca cada nombre y falla la migracion si su id no es el que el
+  backend espera, y tambien si falta el indice unico que necesita el
+  `ON CONFLICT` del backend. Sus mensajes no dicen "already exists", porque
+  `Correr-Migraciones` perdona el error cuya linea de `ERROR` lo diga. Hasta
+  el 2026-09-12 el perdon miraba la salida entera, y ahi estaban siempre los
+  `NOTICE: relation ... already exists, skipping` de los `IF NOT EXISTS` del
+  mismo archivo: el candado podia disparar y salir en amarillo como "ya
+  estaba aplicada", con el arranque en verde. Al de la 015 le pasaba igual.
+
+`log_login` y `log_registro` no se borran: guardan el historico y el ETL de
+ClickHouse todavia las lee. Pero desde el 2026-09-10 no reciben filas, y eso se
+dice en el comentario de cada tabla, que es lo que ensenan `\d+` y pgAdmin.
 
 **La 012 no reemplaza a la 007: la COMPONE.** `comprar_carrito()` llama por
 dentro a las mismas `crear_pedido`, `agregar_linea` y `comprar_pedido`, en vez

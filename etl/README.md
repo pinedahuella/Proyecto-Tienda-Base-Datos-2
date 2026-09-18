@@ -56,6 +56,43 @@ detecta que la base derivada esta desfasada, y `.\arrancar.ps1 -Etl` fuerza
 
 Copia `log_login` y `log_registro` a `evento_login` y `evento_registro`.
 
+## OJO: desde el 2026-09-10 esta copia no recibe logueos nuevos
+
+El backend dejo de escribir `log_login` y `log_registro` ese dia (commit
+`e38e9a3`). Cada intento de entrar va ahora a la coleccion
+`eventos_autenticacion` de MongoDB, y de ahi un worker lo copia a
+Elasticsearch. Las dos tablas se quedaron, con el aviso en su `COMMENT`
+(migracion 016), pero ya no crecen.
+
+Esta copia sigue leyendo esas dos tablas, asi que **esta congelada**: hace bien
+su trabajo sobre un origen que ya no se mueve. Medido el 2026-09-11 con el
+aviso que imprime `pruebas/eventos.sh` al empezar:
+
+```
+ultimo log_login real            2026-09-08 22:53:58 UTC  (333 filas)
+ultimo login en MongoDB          2026-09-11 06:18:36 UTC
+logins en MongoDB despues de esa fecha: 24   <- ClickHouse no los ve
+```
+
+**El arnes sigue en verde, y es correcto que lo este.** Lo que mide es que la
+copia trae lo mismo que hay en `log_login`, sin repetir y sin perder, y eso
+sigue siendo cierto. Lo que ya no es cierto es que `log_login` tenga los
+logueos. Un verde aqui dice que la copia funciona, no que ClickHouse este al
+dia.
+
+No se toca nada hasta decidirlo con el profesor, y son dos caminos:
+
+1. **Repuntarla a MongoDB.** Es de esta carpeta, y no es cambiar el nombre de
+   una tabla: la marca de agua de hoy es el mayor `id_log_login` copiado, y los
+   eventos de Mongo no traen ese id. Hay que pensar la marca otra vez antes de
+   escribir una linea, con la trampa de la seccion de abajo en la cabeza.
+2. **Que ClickHouse deje los logueos** y se quede con las vistas de producto
+   para tendencias, que no dependen de esto. El fraude por IP pasaria entero a
+   Elasticsearch, que ya tiene cada intento con su motivo, los fallidos
+   incluidos. `log_login` solo guardaba las entradas que salieron bien.
+
+Esta en `docs/PENDIENTES.md`, punto 16.
+
 **Es una COPIA, no una mudanza.** Las dos tablas se quedan en PostgreSQL, donde
 tienen llave foranea contra `usuarios` con `ON DELETE RESTRICT`. Sacarlas de ahi
 seria perder esa integridad y quedarse con ids sueltos apuntando a cuentas que

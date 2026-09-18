@@ -4,6 +4,241 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-15: una sola linea para que el login salga con la IP real
+
+Ya se puede entrar a Mesh desde un celular (con VPN o sin ella) por un tunel de
+Cloudflare, con `.\tunel-celular.ps1`. Lo que no es `backend/` esta hecho y
+probado; la guia es `docs/ENTRAR-DESDE-EL-CELULAR.md`.
+
+**Lo tuyo es esto, en `src/main.ts`, y nada mas:**
+
+```ts
+  const app = await NestFactory.create<NestFastifyApplication>(
+    AppModule,
+    new FastifyAdapter({ trustProxy: 'loopback' }),
+  );
+```
+
+Sin esa linea, todo el que entra por el tunel queda como `127.0.0.1`: en
+`eventos_autenticacion`, en Elasticsearch y en `alerta_fraude`. Tus contadores
+por IP juntan a todo el mundo en uno solo, y cuatro personas distintas desde
+sus celulares ya dan una alerta de `multi_cuenta_ip`. Medido el 2026-09-15.
+
+### Por que `'loopback'` y no `true`, que es lo que se pedia en la seccion 5b
+
+Con `true`, Fastify se queda con la IP de **mas a la izquierda** de
+`X-Forwarded-For`, y esa la escribe el cliente. Cloudflare no borra la que trae
+la peticion: le agrega la real al final. Medido detras de un tunel de verdad,
+con tu misma version de Fastify, mandando `X-Forwarded-For: 1.2.3.4` desde un
+nodo de Tor:
+
+```
+lo que llega:  x-forwarded-for: 1.2.3.4,192.42.116.59    socket: 127.0.0.1
+trustProxy: true        -> request.ip = 1.2.3.4           (la inventada)
+trustProxy: 'loopback'  -> request.ip = 192.42.116.59     (la real)
+```
+
+Con `'loopback'` Fastify solo cree lo que le llega de esta misma maquina
+(`127.0.0.0/8` y `::1`, que son el tunel y el proxy de vite) y se detiene en la
+primera IP de fuera. Asi resuelve tambien el cuidado de seguridad de la 5b:
+alguien que llegue directo al puerto 3000 desde otra maquina no puede
+inventarse la IP, porque su conexion no viene de loopback y su cabecera no se
+lee. En local no cambia nada: el navegador y los arneses siguen saliendo como
+`127.0.0.1`.
+
+### Lo que YA NO hace falta
+
+Lo que se pedia en la 5b para el celular, CORS con la direccion del tunel, ya
+no hace falta. El frontend ahora pide a `/api` del mismo sitio y vite se lo
+pasa al backend, asi que para el navegador la pagina y la API son el mismo
+origen. Por eso tampoco hay que tocar la cookie: `sameSite: 'lax'` sirve tal
+cual. El `enableCors` de `localhost:5173` puede quedarse como esta.
+
+### Como comprobar que te quedo bien
+
+1. Pon la linea y levanta tu backend normal en el 3000.
+2. `.\tunel-celular.ps1` (sin `-ConCopia`), y abre el link desde tu celular con
+   los datos moviles, no con el wifi de la casa.
+3. Entra con una contrasena mala. En el panel del admin, pestana Fraude, o en
+   Mongo:
+
+   ```js
+   db.eventos_autenticacion.find().sort({ fecha: -1 }).limit(1)
+   ```
+
+   tiene que salir la IP publica de tu celular. Si sale `127.0.0.1`, la linea
+   no esta en el backend que contesta: mira que no haya otro proceso viejo
+   escuchando en el 3000.
+
+Cuando la pongas, `-ConCopia` sobra y los dos scripts (`tunel-celular.ps1` y
+`demo-fraude-pais.ps1`) usan tu linea tal cual: si `src/main.ts` ya trae
+`trustProxy`, la copia no le cambia nada.
+
+---
+
+## LO NUEVO DEL 2026-09-11: el fraude del login, y lo que le falta
+
+Tu commit `e38e9a3` ya funciona fuera de tu maquina. Lo que no era `backend/`
+esta hecho y medido: `migrations/016_alerta_fraude.sql` (tus tres tablas,
+copiadas columna por columna de tu `fraude-login-eventos.sql`, con un candado
+que falla la migracion si los ids no son los que fija `models/alerta-fraude.ts`),
+`mongo/003_eventos_autenticacion.js` (la coleccion y seis indices, uno parcial
+para tu worker), `elastic/002_eventos_autenticacion.json` (la PLANTILLA del
+indice, que el arranque sube antes de que tu `index()` lo autocree con `ip` de
+tipo `text`, que es lo que paso el primer dia), la tarjeta del panel y dos
+arneses. Corre `bash pruebas/alertas_login.sh`: 51 OK el 2026-09-11.
+
+Lo que queda es tuyo, en orden de lo que mas pesa.
+
+### 1. Rutas que consulten Elasticsearch (lo que pidio el profesor)
+
+El indice `mesh_eventos_autenticacion` se llena con cada login y **ninguna ruta
+lo lee**. Los unicos `search` y `count` de `backend/src` son sobre
+`mesh_productos`, y agregaciones hay cero. Investigar el fraude en
+Elasticsearch son rutas de agregacion, y los contadores de Redis no lo son:
+detectan en el momento y olvidan a los 60 o 300 segundos.
+
+Que el indice contesta ya esta demostrado. Es la parte 6 de
+`pruebas/alertas_login.sh` (`Ctrl+F` por `"aggs"`): un `terms` por `ip` con una
+`cardinality` de `identificador_intentado.minusculas` adentro, que es "desde
+que IP se tecleo mas de una cuenta". Usa `.minusculas` y no el campo a secas,
+porque tu servicio guarda el identificador tal cual se tecleo y
+`Admin@Mesh.com` y `admin@mesh.com` saldrian como dos.
+
+Las preguntas que se ven desde aqui, como ejemplo y no como contrato:
+
+```
+desde que IP se probaron mas cuentas          terms ip + cardinality identificador
+contra que cuenta se fallo mas                terms identificador.minusculas, resultado fallo
+como fueron los fallos por hora               date_histogram fecha, resultado fallo
+que navegador entro a mas cuentas             terms huella_cliente + cardinality id_usuario
+```
+
+Los nueve campos que arma tu `aDocumentoElastic` estan mapeados en la
+plantilla, y `ip` es de tipo `ip`, asi que
+acepta rangos como `127.0.0.0/8`. Si agregas un campo al evento, entra igual
+pero no se puede consultar hasta mapearlo: la plantilla lleva `dynamic: false`.
+Avisame y lo agrego.
+
+### 2. El PATCH de la alerta
+
+La tabla tiene `id_estado_alerta_fraude`, `id_usuario_reviso` y
+`fecha_revision`, y el panel ya filtra por pendiente, revisada y descartada.
+Falta la ruta para cambiarla: sin ella toda alerta se queda pendiente para
+siempre. El panel pone los botones el dia que exista.
+
+### 3. Los filtros de `GET /vendedor/ofertas/paginado`
+
+La ruta funciona y pesa 12 KB la pagina de 20 contra 612 KB la lista entera de
+`ventas.norte` (976 ofertas), medido el 2026-09-11. **Pero la pantalla no se
+puede pasar a ella**: solo filtra `activo=true|false`, y el panel tiene una
+pestana por cada uno de los cinco estados con su numero, y un buscador por
+nombre, y los dos filtran en memoria sobre la lista entera. Con paginas de 20,
+el buscador solo buscaria en la pagina que se ve.
+
+Lo que haria falta: `estado` (uno de los cinco), `nombre` (producto o
+variante), y en la misma respuesta los conteos por estado, que son los numeros
+de las pestanas. La cola de pendientes no hace falta: hoy tiene una oferta y la
+version paginada pesa mas que la entera.
+
+### 4. Las senales que faltan
+
+- **Muchas cuentas CREADAS desde una IP.** El registro ya guarda su ip, asi que
+  el dato esta.
+- **Inicios a intervalos fijos**, que es como entra un script.
+- **Salto de ubicacion.** Pide geolocalizar la IP. La salida recomendada es el
+  procesador `geoip` de Elasticsearch en un pipeline por defecto del indice: se
+  pone en la plantilla, del lado de `elastic/`, y no toca tu codigo. En local no
+  va a dar ubicacion, porque `127.0.0.1` no tiene.
+
+### 5. Los detalles de `FraudeLoginService`
+
+Con el trafico de una clase no se notan. Muerden el dia que haya trafico de
+verdad, o el dia que alguien los busque a proposito.
+
+- **El identificador no se normaliza.** Las mayusculas parten la cuenta:
+  `fuerza_bruta_cuenta` cuenta aparte a `Admin@Mesh.com` y a `admin@mesh.com`.
+- **No tiene tope de largo.** `alerta_fraude.clave` es `varchar(255)`: un
+  identificador de mas hace fallar el `INSERT` y la alerta se pierde, con un
+  warn en el log. Y en `multi_cuenta_ip` entran hasta 20 identificadores de
+  cualquier largo al `jsonb` del detalle.
+- **`INCR` y `EXPIRE` van en dos comandos.** Si el proceso cae entre los dos,
+  la clave se queda sin vencimiento hasta el siguiente intento, y ese intento
+  hereda la cuenta vieja: una ventana de 60 s puede acabar juntando fallos de
+  horas. Un `MULTI` o un Lua los hace uno.
+- **Pasado el umbral, cada intento escribe en PostgreSQL.** Un ataque sostenido
+  es un `UPSERT` por intento.
+- **El `ON CONFLICT` quema un id de la secuencia en cada choque.** Es inofensivo,
+  pero los ids de `alerta_fraude` van a saltar.
+- **`multi_cuenta_ip` cuenta textos tecleados, entradas buenas incluidas.** En
+  local todo sale de `127.0.0.1`, porque el navegador, los arneses y el servidor
+  corren en la misma maquina, asi que cuatro cuentas distintas en cinco minutos
+  desde el mismo equipo ya dan una alerta. En local eso no cambia con nada.
+  Desde el 2026-09-15 el frontend pasa por el proxy de vite y hay un tunel
+  para entrar desde fuera, asi que `trustProxy` ya hace falta: ver la seccion
+  de arriba del todo.
+- **Un identificador vacio da 400 y cuenta igual como fallo.** Medido el
+  2026-09-12: cinco `POST /usuario/login` con `"identificador": ""` contestan
+  400 y dejan una alerta `fuerza_bruta_cuenta` con la clave vacia. Pasa porque
+  `registrarLoginFallido` manda a los contadores tambien el `ErrorValidacion`,
+  y `''` es un string y no `null`. Si una peticion mal formada no es un intento
+  contra nadie, lo limpio es no contarla para la cuenta, o normalizar `''` a
+  `null` antes de llamar a `registrarIntento`.
+- **Con Mongo caido hay alertas sin su evidencia.** Visto el 2026-09-11: Mongo
+  dejo de contestar a mitad de una prueba, los intentos no quedaron en
+  `eventos_autenticacion` (el log es best-effort) y sus alertas si llegaron a
+  `alerta_fraude`, porque Redis y PostgreSQL seguian arriba. El admin ve una
+  alerta y no encuentra los intentos que la dispararon. No hace falta cambiarlo,
+  pero conviene que el detalle de la alerta diga lo suficiente por si solo, o
+  decirlo en la pantalla.
+
+### 5b. Probado con IPs reales de tres paises (2026-09-13)
+
+Es la prueba del tunel que pediste. Se hizo sobre una COPIA de `backend/`
+fuera del repo (el tuyo no se toco), con una sola linea cambiada en
+`src/main.ts`:
+
+```ts
+new FastifyAdapter({ trustProxy: true }),
+```
+
+La copia se expuso con un tunel rapido de Cloudflare
+(`cloudflared tunnel --url http://localhost:3100`), y se le mandaron logins
+fallidos desde tres contenedores de Tor con salida en Alemania, Japon y Estados
+Unidos. Resultado, identico en Mongo, en Elasticsearch y en `alerta_fraude`:
+
+```
+185.220.100.253 (Alemania)  8 fallos, 2 correos   -> fuerza_bruta_ip
+172.234.92.148  (Japon)     4 correos distintos   -> multi_cuenta_ip
+204.8.96.189    (EE. UU.)   3 correos distintos   -> ninguna, no llega al umbral
+```
+
+O sea: **los tres detectores funcionan con IPs de verdad y cada IP se cuenta
+aparte.** Sin `trustProxy`, detras del tunel todo habria llegado como
+`127.0.0.1`, porque `cloudflared` se conecta desde la misma maquina. Si el
+portal se ensena por un tunel o un proxy, esa linea hace falta. Y conviene que
+el proxy sea el unico que pueda hablarle al backend: con `trustProxy: true`,
+cualquiera que llegue directo puede inventarse su IP con `X-Forwarded-For`.
+
+Un detalle para quien lo repita en esta maquina: el `~/.cloudflared/config.yml`
+del tunel de LEDKID se impone sobre el tunel rapido y lo deja en 404. Se evita
+pasandole `--config` con un archivo vacio.
+
+**Corregido el 2026-09-15.** Aqui se pedia `trustProxy: true`, y para el
+celular ademas CORS con la direccion del tunel. Las dos cosas quedaron
+superadas: `true` deja inventarse la IP aunque se entre por el tunel, y el CORS
+ya no hace falta porque el frontend va por `/api`. Lo que vale es la seccion de
+arriba del todo, con `trustProxy: 'loopback'`. La demo esta en
+`docs/DEMO-OTRO-PAIS.md` y el celular en `docs/ENTRAR-DESDE-EL-CELULAR.md`.
+
+### 6. Mongo caido en el checkout
+
+Tu `prueba-falla-mongo-checkout.md` pedia la fila 11 en
+`docs/CONSISTENCIA-CHECKOUT.md`. Ya esta, citando tu documento y el arnes. Las
+tres salidas siguen por decidir con el profesor.
+
+---
+
 ## LO NUEVO DEL 2026-09-06: la base columnar ya existe y le faltan TRES rutas
 
 Entro **ClickHouse**, la sexta base, y es lo que el profesor pidio para tendencias
@@ -113,6 +348,15 @@ comparten **una sola IP**, `127.0.0.1`, porque todo es desarrollo local. Filtran
 por `lote = 'real'` esta ruta va a decir que las doce cuentas del sistema son un
 anillo de fraude. No esta rota, es que el dato de verdad no tiene variacion. Para
 verla funcionar hace falta el lote generado, que si trae IP variadas.
+
+**Y desde el 2026-09-10 esta ruta leeria datos congelados.** `evento_login` se
+copia de `log_login`, y tu `LogService` ya no escribe ahi: los logueos van a
+`eventos_autenticacion` de Mongo. El 2026-09-11 habia 24 logins en Mongo que
+ClickHouse no ve. Antes de escribirla hay que decidir con el profesor si la
+copia se repunta a Mongo o si el fraude por IP se hace entero en Elasticsearch
+(el punto 1 de "LO NUEVO DEL 2026-09-11", al principio de este archivo) y
+ClickHouse se queda solo con las vistas. Esta en
+`docs/PENDIENTES.md`, punto 16.
 
 ### Protegelas como ya proteges el panel de fraude
 

@@ -99,7 +99,7 @@ es el backend, que responde 403 o 404.
 | `src/lib/Direcciones.svelte` | direcciones, dentro del panel |
 | `src/lib/Pedido.svelte` | el pedido abierto y sus lineas, dentro del panel |
 | `src/lib/pedido.ts` | las cuatro rutas de `/comprador/pedidos` y el id del pedido abierto |
-| `src/lib/api.ts` | `pedir()`, la unica forma de hablar con el backend |
+| `src/lib/api.ts` | `pedir()`, la unica forma de hablar con el backend. Pide a `/api`, y el proxy de `vite.config.ts` lo pasa al backend (ver `docs/ENTRAR-DESDE-EL-CELULAR.md`) |
 | `src/lib/Cabecera.svelte` | cabecera pegada arriba |
 | `src/lib/Pie.svelte` | pie |
 | `src/lib/MarcaMesh.svelte` | logotipo |

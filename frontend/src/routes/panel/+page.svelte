@@ -117,7 +117,9 @@
 				{ id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' },
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Lo que otros vendedores quieren meter al catalogo' },
 				{ id: 'cuentas', nombre: 'Cuentas', pie: 'Los usuarios del sistema, su rol y su estado' },
-				{ id: 'fraude', nombre: 'Resenas', pie: 'Anillos de calificaciones sospechosas' },
+				// Se llamaba "Resenas". Desde el 2026-09-10 lleva tambien los intentos de
+				// entrada sospechosos, y nadie los iria a buscar bajo ese nombre.
+				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo e intentos de entrada sospechosos' },
 				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Que se esta calentando y desde que IP entran varias cuentas' },
 				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 			];

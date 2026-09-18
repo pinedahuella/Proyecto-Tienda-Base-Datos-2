@@ -5,7 +5,8 @@ cuando alguien escribe mal el nombre de un producto.
 
 ```
 localhost:9200    la API, sin contrasena y solo en local
-indice            mesh_productos
+indices           mesh_productos               el buscador del catalogo
+                  mesh_eventos_autenticacion   el log de logins (ver al final)
 ```
 
 ## Por que hace falta, si ya hay cuatro bases
@@ -154,3 +155,72 @@ total 1105
 
 Y el rechazado (`_id` 105) responde 200 en `GET /mesh_productos/_doc/105` con
 `"estado": "rechazado"` adentro.
+
+## El segundo indice: eventos de autenticacion (desde el 2026-09-10)
+
+`mesh_eventos_autenticacion` guarda cada intento de entrar -- login bueno o
+malo, logout y registro -- para las consultas de fraude del admin. No es una
+proyeccion del catalogo: sale de la coleccion `eventos_autenticacion` de
+MongoDB, y lo llena **el worker del backend**
+(`EventosAutenticacionSyncService`), no un ETL. Cada 5 segundos copia los
+eventos con `pendiente_elastic: true`, usando el `_id` de Mongo como `_id`
+aqui, asi que copiar dos veces el mismo evento lo sobrescribe.
+
+### Es una PLANTILLA, no un indice
+
+`002_eventos_autenticacion.json` se sube con
+`PUT _index_template/mesh_eventos_autenticacion`, para `mesh_eventos_autenticacion*`.
+
+El motivo es que el worker escribe con `index()`, que **autocrea** el indice si
+no existe, con mapeo dinamico: `ip` sale como `text` y deja de ser una IP. Paso
+de verdad el mismo 2026-09-10, con el primer login del dia. La plantilla actua
+sobre cualquier indice que nazca con ese nombre, lo cree quien lo cree, asi que
+el orden entre el backend y `arrancar.ps1` deja de importar.
+
+### El mapeo
+
+```
+tipo, resultado, motivo,
+id_usuario, huella_cliente   keyword
+identificador_intentado      keyword, y .minusculas con un normalizer lowercase
+ip                           ip, con ignore_malformed
+user_agent                   keyword, ignore_above 512
+fecha                        date, con ignore_malformed
+dynamic                      false
+```
+
+- **`ip` es de tipo `ip` y no `keyword`**: acepta rangos CIDR
+  (`127.0.0.0/8`) y deja la puerta abierta a geoip. Medido: `::ffff:127.0.0.1`
+  entra y se encuentra buscando `127.0.0.1`, y `null` entra sin error.
+- **`ignore_malformed` en `ip` y `fecha`**: un valor raro se guarda en `_source`
+  y no se indexa, en vez de rechazar el documento. Rechazarlo seria peor que
+  perder el campo: el worker lo reintentaria cada 5 segundos para siempre, y
+  con 500 de esos la cola se para entera.
+- **`.minusculas`** existe para agregar por cuenta sin que las mayusculas la
+  partan. El backend guarda el identificador tal cual se tecleo; medido,
+  `Admin@Mesh.com`, `admin@mesh.com` y `ADMIN@MESH.COM` son tres cubetas en el
+  campo normal y una en `.minusculas`.
+- **`dynamic: false`**: si el backend agrega un campo, el documento entra igual
+  y el campo queda en `_source`, pero no se busca hasta que alguien lo mapee
+  aqui. Con `strict` el documento se rechazaria y pasaria lo del punto de
+  arriba.
+
+### Lo que hace arrancar.ps1
+
+El paso "Indice de eventos de autenticacion", despues del buscador:
+
+1. sube la plantilla (idempotente: un PUT la reemplaza);
+2. si el indice no existe, lo crea;
+3. si existe pero `ip` no es de tipo `ip` -- nacio antes que la plantilla, o a
+   mano --, lo tira y lo rehace;
+4. en los casos 2 y 3 marca TODOS los eventos de Mongo con `pendiente_elastic`
+   para que el worker los vuelva a copiar. Tambien en el 2: un indice que falta
+   perdio lo que tenia, y sin marcar se queda vacio para siempre (medido);
+5. dice cuantos eventos hay en Mongo, cuantos en el indice y cuantos faltan;
+6. si el indice mas los pendientes no llegan a lo que hay en Mongo, marca todo
+   igual. Cubre el indice que el worker recreo solo con la plantilla y el
+   arranque que se cayo entre tirar el indice y marcar: en los dos casos el
+   indice existe, tiene `ip` de tipo `ip` y le faltan eventos. Copiar dos veces
+   no duplica, porque el `_id` es el de Mongo.
+
+No corta el arranque si falla. El login no depende de este indice.

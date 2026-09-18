@@ -5,6 +5,16 @@
 #
 #   bash pruebas/eventos.sh
 #
+# AVISO, DESDE EL 2026-09-10: EL ORIGEN YA NO RECIBE LOGUEOS. El backend dejo de
+# escribir log_login y log_registro; los logueos van ahora a la coleccion
+# eventos_autenticacion de MongoDB (backend/src/services/log.service.ts). La
+# copia que mide este arnes sigue leyendo esas dos tablas, asi que hoy solo le
+# llegan las filas que el propio arnes siembra. Un verde aqui dice que la COPIA
+# funciona, no que ClickHouse este al dia con los logueos de verdad. Al empezar
+# se imprime la fecha del ultimo log_login real y la del ultimo login guardado
+# en MongoDB, y cuantos hay en MongoDB despues de esa fecha, para que el hueco
+# se vea con numeros. Lo que aprueba o reprueba no cambio.
+#
 # QUE PRUEBA, y por que hace falta un arnes propio
 #
 # El ETL de eventos (etl/cargar_eventos.sh) copia log_login y log_registro de
@@ -199,6 +209,44 @@ limpiar() {
     rm -f "$SALIDA"
 }
 trap limpiar EXIT
+
+# ============================================================
+# AVISO: el hueco entre log_login y los logueos de verdad
+# ============================================================
+#
+# Solo informa. No suma OK ni FALLA y no para nada: lo que mide este arnes es
+# la copia, y la copia sigue haciendo lo suyo con lo que le den. Pero quien lea
+# un verde tiene que saber que desde el 2026-09-10 lo que le dan es solo lo que
+# siembra el arnes. El JavaScript entra por una variable de entorno, como en
+# pruebas/alertas_login.sh, para que las comillas lleguen enteras.
+MONGO="${MONGO:-mesh-mongo}"
+mongo_aviso() {
+    docker exec -e JS="$1" "$MONGO" sh -c 'mongosh --quiet \
+        -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" \
+        --authenticationDatabase admin "$MONGO_INITDB_DATABASE" --eval "$JS"' 2>/dev/null | tr -d '\r\n'
+}
+
+ULTIMO_LOG=$(sql "SELECT to_char(max(fecha_login) AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS')
+                    FROM log_login WHERE ip_origen IS DISTINCT FROM '$MARCA_IP'")
+FILAS_LOG=$(sql "SELECT count(*) FROM log_login WHERE ip_origen IS DISTINCT FROM '$MARCA_IP'")
+ULTIMO_EV=$(mongo_aviso 'const e = db.eventos_autenticacion.find({tipo: "login"}).sort({fecha: -1}).limit(1).toArray()[0];
+    print(e ? e.fecha.toISOString().slice(0, 19).replace("T", " ") : "ninguno")')
+if [ -n "$ULTIMO_LOG" ]; then
+    DESPUES=$(mongo_aviso 'print(db.eventos_autenticacion.countDocuments({tipo: "login", fecha: {$gt: new Date("'"${ULTIMO_LOG/ /T}"'Z")}}))')
+else
+    DESPUES=$(mongo_aviso 'print(db.eventos_autenticacion.countDocuments({tipo: "login"}))')
+fi
+
+titulo "AVISO: log_login ya no recibe logueos desde el 2026-09-10"
+echo "  El backend los guarda en eventos_autenticacion de MongoDB. Lo que este"
+echo "  arnes copia a ClickHouse es solo lo que el mismo siembra."
+echo
+echo "    ultimo log_login real            ${ULTIMO_LOG:-ninguno} UTC  ($FILAS_LOG filas)"
+echo "    ultimo login en MongoDB          ${ULTIMO_EV:-no se pudo leer} UTC"
+echo "    logins en MongoDB despues de esa fecha: ${DESPUES:-no se pudo leer}  <- ClickHouse no los ve"
+echo
+echo "  Un verde aqui dice que la copia funciona, no que ClickHouse este al dia."
+echo "  Lo arregla repuntar etl/cargar_eventos.sh a MongoDB, que esta pendiente."
 
 # ============================================================
 # 0. Que haya con que trabajar

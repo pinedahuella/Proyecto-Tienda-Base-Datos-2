@@ -2,7 +2,7 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-09-06.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-09-12.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
@@ -16,14 +16,142 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~7~~ | ~~Una venta relampago que vence sola deja `es_inventario_limitado` en true~~ | -- | -- | **CERRADO el 2026-09-04.** `revisarVencidas()`, un `@Interval` en `inventario-limitado.service.ts`, apaga la columna solo |
 | ~~8~~ | ~~Editar el stock durante una venta relampago desincroniza las dos bases~~ | -- | -- | **CERRADO el 2026-09-04.** El `PATCH` contesta 409 cuando viene `ajuste_stock` con la venta abierta |
 | 9 | Las tres rutas de la base columnar | Jose David | ver `BACKEND-PENDIENTE.md` | **alta: sin `POST /eventos/vista` la tabla que sostiene el panel de tendencias no se llena NUNCA** |
-| 10 | Los filtros facetados del buscador, con agregaciones | Jose David la consulta, yo la pantalla | ver abajo | **alta: es un requisito literal de la Entrega 3 y hoy no hay ni un `aggs` en todo el repo** |
-| ~~11~~ | ~~La prueba de falla simulada del checkout~~ | -- | -- | **CERRADO el 2026-09-06.** `bash pruebas/falla_checkout.sh`, 31 OK y 0 FALLA, con su evidencia en `CONSISTENCIA-CHECKOUT.md` |
-| 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | Jose David decide | ver abajo | media: no rompe la consistencia, pero es una dependencia que no estaba escrita |
-| 13 | `GET /vendedor/ofertas` manda 2243 ofertas y 1.2 MB en una sola respuesta | Jose David la ruta, yo la pantalla | ver abajo | media: hoy se aguanta, con el millon de productos no |
+| 10 | Los filtros facetados del buscador, con agregaciones | Jose David la consulta, yo la pantalla | ver abajo | **alta: es un requisito literal de la Entrega 3 y hoy no hay ni un `aggs` en `backend/`** |
+| ~~11~~ | ~~La prueba de falla simulada del checkout~~ | -- | -- | **CERRADO el 2026-09-06.** `bash pruebas/falla_checkout.sh`, 31 OK y 0 FALLA, con su evidencia en `CONSISTENCIA-CHECKOUT.md`. Vuelto a correr el 2026-09-11: 31 OK |
+| 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | con el profesor | ver abajo | media: ya es la fila 11 de `CONSISTENCIA-CHECKOUT.md` y falla en unos 5 s en vez de 32. Falta elegir una de las tres salidas |
+| 13 | La lista de ofertas del vendedor viene entera, sin paginar | Jose David la ruta, yo la pantalla | ver abajo | media: la ruta paginada ya existe, pero sin los filtros del panel no se puede usar |
+| 14 | Elasticsearch se llena con cada login y **ninguna ruta lo consulta** | Jose David | ver abajo | **alta: investigar en Elasticsearch es lo que pidio el profesor, y hoy hay cero agregaciones en el backend** |
+| 15 | Los detectores que faltan del fraude del login, y los detalles de los tres que hay | Jose David | ver abajo | media: lo que hay funciona; lo que falta son senales y bordes |
+| 16 | La copia de logueos a ClickHouse lee `log_login`, que no recibe filas desde el 2026-09-10 | decidir con el profesor; el ETL es mio | ver abajo | media: el 2026-09-11 habia 24 logins en Mongo que ClickHouse no ve, y la ruta 3 de la columnar leeria datos viejos |
+| ~~17~~ | ~~Medir en vivo lo que se toco despues de la corrida del 2026-09-11~~ | -- | -- | **CERRADO el 2026-09-12.** Medido contra las bases y roto a proposito; los numeros estan en `docs/TRASPASO.md` |
+| 18 | Las tres tablas de la 016 no estan en el diagrama ER | mia | -- | baja: `docs/diagrama-general.drawio` sigue con las 42 cajas |
+| 19 | `trustProxy: 'loopback'` en `backend/src/main.ts` (2026-09-15) | Jose David | una linea, arriba de todo en `BACKEND-PENDIENTE.md` | media: sin ella, quien entra por el tunel del celular queda como `127.0.0.1`. Lo demas (proxy `/api`, `tunel-celular.ps1`, guia) esta hecho y probado |
+
+---
+
+# 17. Lo que se toco despues de la corrida del 2026-09-11 -- CERRADO el 2026-09-12
+
+Las once cosas que se arreglaron con Docker caido se midieron al dia siguiente
+contra las bases, y los dos arreglos de `arrancar.ps1` se rompieron a proposito
+para ver que cortan. `alertas_login.sh` dio 52 OK dos veces seguidas y
+`ofertas_paginadas.sh` 26 OK con 3 SIN MEDIR. Los numeros estan en
+`docs/TRASPASO.md`, "Lo que se toco DESPUES de esa corrida".
+
+Queda una cosa que no depende del codigo: para que la parte 2 de
+`ofertas_paginadas.sh` mida de verdad hacen falta al menos 2 ofertas
+pendientes, y hoy hay 1. Se consigue publicando otra con un vendedor normal,
+porque desde la 010 esas nacen pendientes.
+
+---
+
+# 14. Elasticsearch se llena y ninguna ruta lo consulta
+
+**Medido el 2026-09-11 leyendo el backend.** El worker copia cada evento de
+`eventos_autenticacion` al indice `mesh_eventos_autenticacion`, y ahi se queda.
+Los unicos `search` y `count` de Elasticsearch en `backend/src` son sobre
+`mesh_productos`. Agregaciones, cero.
+
+Lo que pidio el profesor es investigar el fraude en Elasticsearch, y eso son
+rutas de agregacion. Los tres contadores de Redis no lo son: detectan en el
+momento y olvidan a los 60 o 300 segundos.
+
+**El indice ya contesta la pregunta, y esta demostrado.** La parte 6 de
+`pruebas/alertas_login.sh` hace una agregacion `terms` por `ip` con una
+`cardinality` de `identificador_intentado.minusculas` adentro, y encuentra la IP
+que probo muchas cuentas. Lo que falta es que eso sea una ruta. El detalle, con
+la consulta, esta en `docs/BACKEND-PENDIENTE.md`.
+
+---
+
+# 15. El fraude del login: las senales que faltan y los bordes de las que hay
+
+Todo es de `backend/` y esta escrito para Jose David en
+`docs/BACKEND-PENDIENTE.md`. Aqui va el resumen y por que importa.
+
+**Faltan senales.** Muchas cuentas CREADAS desde una IP (el registro ya se
+guarda con su ip, asi que el dato esta), inicios a intervalos fijos, y salto de
+ubicacion. El tercero pide geolocalizar la IP, y la salida recomendada es el
+procesador `geoip` de Elasticsearch en un pipeline por defecto del indice, que
+no toca el backend. En local no va a dar ubicacion: `127.0.0.1` no tiene.
+
+**`multi_cuenta_ip` cuenta textos tecleados, no ataques.** Suma tambien las
+entradas buenas, y en local todo sale de `127.0.0.1`. Cuatro cuentas distintas
+en cinco minutos desde el mismo equipo ya dan una alerta. En la corrida del
+2026-09-11 no salto porque ninguna ventana fija de 300 s junto cuatro, no
+porque no pueda pasar.
+
+**Y hay bordes en el servicio.** El identificador no se normaliza (las
+mayusculas parten una cuenta en dos), no tiene tope de largo (uno de mas de 255
+hace fallar el `INSERT` y la alerta se pierde), `INCR` y `EXPIRE` van en dos
+comandos, y falta el `PATCH` para marcar una alerta revisada o descartada.
+
+---
+
+# 16. La copia de logueos a ClickHouse esta congelada
+
+Desde el 2026-09-10 el backend escribe los logueos en `eventos_autenticacion`
+de MongoDB y no en `log_login`. Pero `etl/extraer_eventos.sql` y
+`etl/cargar_eventos.sh` siguen leyendo `log_login`, asi que ClickHouse no recibe
+un logueo nuevo desde entonces. **El 2026-09-11 habia 24 logins en Mongo que
+ClickHouse no ve.** `pruebas/eventos.sh` lo imprime al empezar, con esos
+numeros.
+
+`pruebas/eventos.sh` sigue en verde, y es correcto: lo que mide es que la copia
+funciona, y la copia funciona con lo que le den. Lo unico que le llega ya es lo
+que siembra el propio arnes.
+
+Hay dos salidas y hay que decidirlas con el profesor, porque cambian lo que se
+entrega:
+
+1. **Repuntar la copia a MongoDB.** Es trabajo de `etl/`, o sea mio, y no es
+   cambiar un nombre de tabla: la marca de agua de hoy es el mayor
+   `id_log_login` copiado, y los eventos de Mongo no traen ese id. Hay que
+   pensar la marca de nuevo antes de escribir nada.
+2. **Que ClickHouse deje los logueos** y se quede con las vistas de producto
+   para tendencias. El fraude por IP pasaria entero a Elasticsearch (punto 14),
+   y la ruta 3 de la columnar (`GET /admin/eventos/fraude/ip`) sobraria.
+
+Mientras no se decida, esa ruta 3, si se escribe, leeria logueos que se
+quedaron en el 2026-09-10.
 
 ---
 
 # 13. La respuesta de ofertas viene entera, sin paginar
+
+## AL DIA 2026-09-11: la ruta paginada existe, y la pantalla no la puede usar todavia
+
+Jose David publico `GET /vendedor/ofertas/paginado` y
+`GET /vendedor/ofertas/pendientes/paginado` (commit `e38e9a3`). Las dos se miden
+con `bash pruebas/ofertas_paginadas.sh`, que las recorre enteras y las compara
+oferta por oferta contra las rutas viejas: 29 OK el 2026-09-11.
+
+Lo que pesa, medido ese dia:
+
+```
+tienda@mesh.com        /vendedor/ofertas                         1243494 bytes
+                       /vendedor/ofertas/paginado?limite=20        11455 bytes
+ventas.norte@mesh.com  /vendedor/ofertas             976 ofertas  612062 bytes
+                       /vendedor/ofertas/paginado?limite=20        12409 bytes
+tienda@mesh.com        /vendedor/ofertas/pendientes      1 oferta    362 bytes
+                       /vendedor/ofertas/pendientes/paginado       433 bytes
+```
+
+**La lista del vendedor NO se migro a la paginada, y es a proposito.** La ruta
+nueva solo filtra por `activo=true|false`. El panel tiene una pestana por cada
+uno de los cinco estados, con su numero, y un buscador por nombre, y las dos
+cosas filtran en memoria sobre la lista entera. Pasar a paginas sin esos
+filtros en el servidor romperia el buscador (solo buscaria en la pagina de 20
+que se ve) y dejaria las pestanas sin sus numeros.
+
+Lo que se le pide a la ruta, y esta escrito en `docs/BACKEND-PENDIENTE.md`: un
+filtro por los cinco estados, uno por nombre, y los conteos por estado en la
+misma respuesta. Con eso la pantalla se migra.
+
+**La cola de pendientes tampoco se migro**, por otra razon: tiene una oferta, y
+la version paginada pesa mas que la entera. Tiene sentido el dia que la cola
+crezca.
+
+Lo de abajo es como estaba el 2026-09-06, y el numero sigue valiendo.
 
 Medido el 2026-09-06 con la sesion de `admin@mesh.com`:
 
@@ -80,6 +208,10 @@ El enunciado lo pide DOS veces, y con estas palabras:
 consulta del buscador es un `multi_match` dentro de un `bool` y devuelve solo
 `hits`.
 
+Desde el 2026-09-11 hay UNA en el repo, en `pruebas/alertas_login.sh`, y no
+cambia nada de este punto: va contra el indice de eventos de login, no contra
+el catalogo, y es un arnes, no una ruta. En `backend/` siguen siendo cero.
+
 Lo bueno es que el terreno ya esta puesto y no hay que reindexar nada.
 `elastic/001_indice.json` mapea `categoria_nombre.exacto` y `categoria_padre`
 como `keyword` y `precio_desde` como `double`, que es exactamente lo que una
@@ -90,7 +222,30 @@ filtros con su numero al lado, que es mia.
 
 ---
 
-# 11. La prueba de falla simulada del checkout -- ABIERTO, y es de la Entrega 3
+# 12. El checkout no compra con MongoDB caido
+
+Lo encontro la prueba de falla del 2026-09-06 y lo confirmo Jose David el
+2026-09-07 con su propia prueba: las dos rutas de compra LEEN Mongo antes del
+`COMMIT` (el nombre del producto y el estado de la variante), y si Mongo no
+contesta, la compra no sale. No se cobra nada ni queda nada a medias; es una
+dependencia de disponibilidad, no de consistencia.
+
+Lo que ya se hizo: Jose David bajo el timeout del driver de Mongo a 3 s, y la
+compra falla con 503 en unos 5 s en vez de 32. Y desde el 2026-09-11 es la fila
+11 de `docs/CONSISTENCIA-CHECKOUT.md`, que era lo que su documento pedia.
+
+Lo que falta es elegir entre las tres salidas que el propone (aceptarlo y
+documentarlo, copiar el estado de la variante a PostgreSQL, o degradar y seguir
+sin Mongo), y eso se decide con el profesor. Estan en
+`backend/elementos Generales/prueba-falla-mongo-checkout.md`.
+
+---
+
+# 11. La prueba de falla simulada del checkout -- CERRADO el 2026-09-06
+
+El texto de abajo es el de antes de cerrarlo. Se deja porque dice por que hacia
+falta; la prueba y su evidencia estan en `docs/CONSISTENCIA-CHECKOUT.md`,
+seccion 4 bis.
 
 El enunciado lo pide asi:
 

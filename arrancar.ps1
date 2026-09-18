@@ -1138,6 +1138,12 @@ function Correr-Etl {
 $ES_URL    = 'http://localhost:9200'
 $ES_INDICE = 'mesh_productos'
 
+# El indice del log de autenticacion. Mismo valor por defecto que
+# ELASTIC_INDICE_EVENTOS en backend/src/services/eventos-autenticacion/: si
+# alli cambia, cambia aqui y en el index_patterns de
+# elastic/002_eventos_autenticacion.json.
+$ES_INDICE_EVENTOS = 'mesh_eventos_autenticacion'
+
 # Hace lo mismo que etl/cargar_busqueda.sh sin depender de Git Bash, por la
 # misma razon que los otros dos: cuando esto llamaba a un .sh y no lo
 # encontraba, se saltaba el paso y el script terminaba EN VERDE con la base
@@ -1223,6 +1229,216 @@ function Correr-EtlBusqueda {
     }
     finally {
         Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+}
+
+
+# ------------------------------------------------------------
+# El indice de eventos de autenticacion
+# ------------------------------------------------------------
+# Este indice NO lo llena este script, y eso cambia todo respecto del buscador.
+# Lo llena el worker del backend (EventosAutenticacionSyncService), evento por
+# evento, con elasticClient.index(). Y index() AUTOCREA el indice si no
+# existe, con mapeo dinamico: ip, tipo y todos los textos salen como `text`
+# con un `.keyword` colgando, y ip deja de ser una IP.
+#
+# Por eso se sube una PLANTILLA y no solo un indice. La plantilla se aplica a
+# cualquier indice que nazca con ese nombre, lo cree quien lo cree, asi que
+# aunque el backend haga su primer login antes de que este paso corra, el
+# indice nace con el mapeo bueno. El mapeo esta en
+# elastic/002_eventos_autenticacion.json y el por que en elastic/README.md.
+#
+# Lo que la plantilla NO arregla es un indice que ya nacio malo, antes de que
+# ella existiera. Una plantilla solo actua al crear. Ese caso se reconoce por
+# el campo ip: con la plantilla es de tipo `ip`, y el mapeo dinamico nunca da
+# ese tipo (a un texto le pone `text`). Si no es `ip`, el indice se tira y se
+# rehace, y los eventos se vuelven a copiar desde Mongo marcandolos todos con
+# pendiente_elastic. Se puede tirar sin miedo porque es una proyeccion: todo lo
+# que tiene esta en eventos_autenticacion, y el _id es el de Mongo, asi que
+# copiar dos veces el mismo evento lo sobrescribe en vez de duplicarlo.
+#
+# El ORDEN del caso malo importa: primero borrar y crear, despues marcar. Al
+# reves, el worker podria copiar eventos recien marcados al indice viejo justo
+# antes de que se borre, y se perderian con el.
+#
+# Y al final, pase lo que pase arriba, se cuentan los dos lados: si el indice
+# mas los pendientes no llegan a lo que hay en Mongo, se marca todo otra vez.
+# Es lo que atrapa un hueco que el mapeo no delata -- el indice que el worker
+# recreo solo, o un arranque anterior que borro y se cayo antes de marcar.
+# El detalle esta en el paso d).
+#
+# Devuelve $true solo si el indice termina con ip de tipo ip y los conteos
+# dicen que no le falta nada, o que lo que faltaba quedo marcado para volver a
+# copiarse. Nunca lanza: quien llama avisa y sigue, igual que con el buscador.
+function Leer-TipoIpEventos {
+    # El nombre del indice va como clave de la respuesta; se toma la primera
+    # propiedad en vez de escribirlo, para que un alias no la deje vacia.
+    $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/ip" -TimeoutSec 20
+    $primero = @($m.PSObject.Properties)[0]
+    if ($null -eq $primero) { return $null }
+    return $primero.Value.mappings.ip.mapping.ip.type
+}
+
+# Un numero de mongosh, o $null si no contesto. Mismo criterio que
+# Contar-Nodos: no se inventa un cero.
+function Numero-Mongo($expresion) {
+    $salida = docker exec mesh-mongo sh -c (Comando-Mongo "--eval '$expresion'") 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { return $null }
+    $numeros = @($salida -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '^\d+$' })
+    if ($numeros.Count -eq 0) { return $null }
+    return [long]$numeros[-1]
+}
+
+function Preparar-IndiceEventos {
+    try {
+        # a) La plantilla. PUT sobre el mismo nombre la reemplaza, asi que es
+        #    idempotente y ademas lleva al motor cualquier cambio del .json.
+        #    -InFile y no -Body, por lo mismo que el bulk del buscador: sin BOM.
+        Invoke-RestMethod -Method Put -Uri "$ES_URL/_index_template/$ES_INDICE_EVENTOS" `
+            -ContentType 'application/json' `
+            -InFile "$PSScriptRoot\elastic\002_eventos_autenticacion.json" -TimeoutSec 30 | Out-Null
+        Ok "plantilla puesta (elastic/002_eventos_autenticacion.json)"
+
+        # b) y c) Existe? y si existe, nacio de la plantilla?
+        $existe = $true
+        $tipoIp = $null
+        try {
+            $tipoIp = Leer-TipoIpEventos
+        } catch {
+            $respuesta = $_.Exception.Response
+            if ($respuesta -and [int]$respuesta.StatusCode -eq 404) {
+                $existe = $false
+            } else {
+                Aviso "No se pudo leer el mapeo de ${ES_INDICE_EVENTOS}: $($_.Exception.Message)"
+                return $false
+            }
+        }
+
+        $rehecho = $false
+        $creado  = -not $existe
+        if ($existe -and $tipoIp -ne 'ip') {
+            $visto = if ($tipoIp) { $tipoIp } else { 'sin mapear' }
+            Aviso "$ES_INDICE_EVENTOS no nacio de la plantilla (ip es '$visto', no 'ip')."
+            Aviso "   Se borra y se rehace; los eventos se vuelven a copiar desde Mongo."
+            Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_EVENTOS" -TimeoutSec 30 | Out-Null
+            $existe  = $false
+            $rehecho = $true
+        }
+
+        if (-not $existe) {
+            # Sin cuerpo: el mapeo lo pone la plantilla. Si entre el DELETE y
+            # este PUT el worker copio un evento, el indice ya lo creo el con
+            # la plantilla y este PUT choca con resource_already_exists. Eso
+            # no es un fallo, es el mismo resultado por otro camino.
+            try {
+                Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_EVENTOS" -TimeoutSec 30 | Out-Null
+                Ok "$ES_INDICE_EVENTOS creado con el mapeo de la plantilla"
+            } catch {
+                if ("$($_.ErrorDetails.Message)" -notmatch 'resource_already_exists_exception') { throw }
+                Ok "$ES_INDICE_EVENTOS ya lo habia creado el worker, con la plantilla"
+            }
+
+            $tipoIp = Leer-TipoIpEventos
+            if ($tipoIp -ne 'ip') {
+                Aviso "$ES_INDICE_EVENTOS se creo pero ip quedo como '$tipoIp'. Revisa la plantilla."
+                return $false
+            }
+        } else {
+            Ok "$ES_INDICE_EVENTOS ya estaba, con ip de tipo ip"
+        }
+
+        # Se marca TAMBIEN cuando el indice simplemente no existia, y no solo
+        # en el caso malo. Medido: con el indice borrado a mano y dos eventos
+        # ya copiados en Mongo, crearlo sin marcar dejo "en Mongo: 2, en el
+        # indice: 0, pendientes: 0" -- vacio para siempre, porque el worker
+        # solo mira la bandera y esos dos ya no la tenian. Un indice que falta
+        # perdio todo lo que tenia, igual que uno que se tira.
+        #
+        # modifiedCount cuenta solo los que no la tenian ya, asi que en una
+        # base nueva, donde todo sigue pendiente, sale 0 y no se dice nada.
+        if ($rehecho -or $creado) {
+            $marcados = Numero-Mongo 'db.eventos_autenticacion.updateMany({}, {$set: {pendiente_elastic: true}}).modifiedCount'
+            if ($null -eq $marcados) {
+                Aviso "No se pudieron marcar los eventos en Mongo. El indice quedo vacio."
+                Aviso "   A mano, en .\arrancar.ps1 -Mongo:"
+                Aviso "   db.eventos_autenticacion.updateMany({}, {`$set: {pendiente_elastic: true}})"
+                return $false
+            }
+            if ($marcados -gt 0) {
+                Aviso "   $marcados evento(s) marcados con pendiente_elastic para volver a copiarse."
+            }
+        }
+
+        # d) Cuantos hay a cada lado. No tienen que cuadrar al instante: el
+        #    worker copia de 500 en 500 cada 5 segundos, y solo si el backend
+        #    esta corriendo.
+        #
+        #    Pero una cosa SI se tiene que cumplir siempre: cada evento de Mongo
+        #    esta en el indice o espera con la bandera. Si el indice mas los
+        #    pendientes no llegan a lo que hay en Mongo, hay eventos que no
+        #    estan en ningun lado, y el worker no los va a ver nunca porque
+        #    solo mira la bandera. Pasa con el indice bueno, en dos casos que
+        #    las ramas de arriba no ven:
+        #
+        #      - el indice falto o se tiro, y antes de este arranque el worker
+        #        lo volvio a crear, con la plantilla, al copiar un evento
+        #        nuevo. Aqui llega como "ya estaba, con ip de tipo ip" y solo
+        #        con los eventos de despues;
+        #      - un arranque anterior borro el indice malo y se cayo antes de
+        #        marcar (el PUT o la relectura con timeout). El siguiente lo
+        #        encuentra rehecho y bueno, y tampoco marca.
+        #
+        #    Por eso se compara y, si no llega, se marca TODO otra vez. Es
+        #    seguro por lo mismo que en el caso malo: el _id es el de Mongo y
+        #    copiar dos veces sobrescribe.
+        #
+        #    El orden de las tres lecturas no es casual: Mongo, pendientes, y
+        #    el indice al final y despues de un _refresh. El worker copia
+        #    PRIMERO y quita la bandera DESPUES, asi que un evento que se mueve
+        #    entre dos lecturas sale contado dos veces, nunca ninguna: el hueco
+        #    no se puede inventar. El _refresh hace que _count vea lo que el
+        #    worker ya copio y el motor todavia no publica (lo publica cada
+        #    segundo). Si el _refresh falla se cuenta igual; lo peor que pasa
+        #    es marcar de mas y recopiar eventos que ya estaban.
+        $enMongo    = Numero-Mongo 'db.eventos_autenticacion.countDocuments()'
+        $pendientes = Numero-Mongo 'db.eventos_autenticacion.countDocuments({pendiente_elastic: true})'
+        try {
+            Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE_EVENTOS/_refresh" -TimeoutSec 20 | Out-Null
+        } catch { }
+        $enIndice   = [long](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_EVENTOS/_count" -TimeoutSec 20).count
+        $conteos    = "eventos en Mongo: $enMongo   en el indice: $enIndice   pendientes de copiar: $pendientes"
+
+        # Sin los dos numeros de Mongo no hay nada que comparar, y un $null en
+        # la cuenta de abajo daria verde o amarillo al azar. No se inventa un
+        # cero: se dice que no se pudo comprobar.
+        if ($null -eq $enMongo -or $null -eq $pendientes) {
+            Aviso $conteos
+            Aviso "   Mongo no contesto al contar: no se sabe si al indice le falta algo."
+            return $false
+        }
+
+        if ($enIndice + $pendientes -ge $enMongo) {
+            Ok $conteos
+            if ($pendientes -gt 0) {
+                Aviso "   Los pendientes los copia el worker del backend. Si no bajan, el backend no esta corriendo."
+            }
+            return $true
+        }
+
+        Aviso $conteos
+        Aviso "   Faltan al menos $($enMongo - $enIndice - $pendientes) evento(s): no estan en el indice ni esperan con la bandera."
+        Aviso "   Se marcan todos con pendiente_elastic para que el worker los vuelva a copiar."
+        $marcados = Numero-Mongo 'db.eventos_autenticacion.updateMany({}, {$set: {pendiente_elastic: true}}).modifiedCount'
+        if ($null -eq $marcados) {
+            Aviso "   No se pudieron marcar. A mano, en .\arrancar.ps1 -Mongo:"
+            Aviso "   db.eventos_autenticacion.updateMany({}, {`$set: {pendiente_elastic: true}})"
+            return $false
+        }
+        Aviso "   $marcados evento(s) marcados. Los copia el worker; si el backend no esta corriendo, cuando arranque."
+        return $true
+    } catch {
+        Aviso "Fallo preparando ${ES_INDICE_EVENTOS}: $($_.Exception.Message)"
+        return $false
     }
 }
 
@@ -1392,9 +1608,13 @@ SELECT (to_regclass('public.evento_grafo') IS NOT NULL) AS hay_cola \gset
 # El cuarto argumento dice si se le perdona a un archivo el error "already
 # exists". Existe porque las dos carpetas NO se parecen en esto:
 #
-#   migrations/*.sql        se perdona. Son CREATE TABLE / CREATE TYPE, y sobre
-#                           una base ya migrada fallan asi de propio. Es la
-#                           forma en que este script sabe que ya estaban.
+#   migrations/*.sql        se perdona. De la 001 a la 006 abren con un CREATE
+#                           TABLE sin IF NOT EXISTS, y sobre una base ya
+#                           migrada mueren ahi mismo con "ERROR: relation ...
+#                           already exists". Es la forma en que este script
+#                           sabe que ya estaban. De la 007 en adelante ni
+#                           siquiera fallan: son CREATE OR REPLACE, IF NOT
+#                           EXISTS, ON CONFLICT o NOT EXISTS, y salen con 0.
 #
 #   migrations/datos/*.sql  NO se perdona, y es lo que arregla un fallo real.
 #                           Ese archivo no es idempotente, asi que sobre una
@@ -1414,6 +1634,44 @@ SELECT (to_regclass('public.evento_grafo') IS NOT NULL) AS hay_cola \gset
 # medias; para los datos es la diferencia entre cargado y roto. Ahora los datos
 # se saltan enteros cuando la base ya los tiene (ver mas abajo) y, si igual
 # llegan a correr, cualquier error los tumba fuerte.
+#
+# El perdon mira SOLO la linea del ERROR
+# ------------------------------------------------------------
+# Antes bastaba con que "already exists" saliera en cualquier parte de la
+# salida, y la salida junta todo stderr. Ahi caben dos lineas que dicen esas
+# dos palabras sin que nada "ya estuviera":
+#
+#   NOTICE:  relation "tipo_alerta_fraude" already exists, skipping
+#       La imprime cada CREATE ... IF NOT EXISTS de una base ya migrada, o
+#       sea en cada arranque. Con ella en la salida, cualquier error posterior
+#       del mismo archivo quedaba perdonado: el candado de la 015 o el de la
+#       016 podia disparar su RAISE EXCEPTION -- un id del catalogo cambiado,
+#       el indice unico del UPSERT que falta -- y salia en amarillo como "ya
+#       estaba aplicada", con el arranque siguiendo en verde.
+#
+#   DETAIL:  Key (nombre)=(Electronica) already exists.
+#       La de la llave duplicada de los datos, contada arriba.
+#
+# psql pone el ERROR y su mensaje en UNA linea
+# (psql:/migrations/001_usuarios.sql:<linea>: ERROR:  relation "rol_usuario"
+# already exists, aqui partida solo para que quepa), y el NOTICE y el DETAIL
+# van cada uno en la suya. Por eso [^\r\n]* y no .*: no deja saltar de linea.
+# -cmatch porque "ERROR:" psql lo escribe siempre en mayusculas, y un
+# RAISE NOTICE nuestro que dijera "error: ... already exists" no debe contar.
+#
+# Antes de cambiarlo se leyeron una por una la 001 a la 016 (leidas, no
+# corridas: ese dia Docker estaba caido) buscando cual fallaria en una segunda
+# corrida sobre una base ya migrada: ninguna pasaba gracias a un NOTICE o a un
+# DETAIL. Las que fallan, de la 001 a la 006, llevan el "already exists" en la
+# linea del propio ERROR. Una migracion NUEVA que falle en la segunda corrida
+# con otro mensaje va a cortar el arranque, y eso es lo que tiene que pasar:
+# hay que leerla, no perdonarla.
+#
+# El -Width 4096 del Out-String es parte del mismo arreglo. Out-String parte
+# las lineas largas al ancho de la consola; medido en PowerShell 5.1 con un
+# ancho de 60, la linea del ERROR salio en tres pedazos y ni "already exists"
+# quedaba entero. En una consola angosta el perdon fallaba al reves: cortaba
+# el arranque con exit 1 sobre una 001 que solo estaba ya aplicada.
 function Correr-Migraciones($carpeta, $rutaContenedor, $etiqueta, $perdonarExistente) {
     $scripts = @(Get-ChildItem -LiteralPath $carpeta -Filter "*.sql" -ErrorAction SilentlyContinue | Sort-Object Name)
 
@@ -1424,11 +1682,11 @@ function Correr-Migraciones($carpeta, $rutaContenedor, $etiqueta, $perdonarExist
 
     foreach ($s in $scripts) {
         # ON_ERROR_STOP corta si algo falla, en vez de dejar la base a medias
-        $salida = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -v ON_ERROR_STOP=1 -q -f "$rutaContenedor/$($s.Name)" 2>&1 | Out-String
+        $salida = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -v ON_ERROR_STOP=1 -q -f "$rutaContenedor/$($s.Name)" 2>&1 | Out-String -Width 4096
 
         if ($LASTEXITCODE -eq 0) {
             Ok "$etiqueta$($s.Name)"
-        } elseif ($perdonarExistente -and ($salida -match "already exists")) {
+        } elseif ($perdonarExistente -and ($salida -cmatch 'ERROR:[^\r\n]*already exists')) {
             Aviso "$etiqueta$($s.Name) ya estaba aplicada"
         } else {
             Error1 "$etiqueta$($s.Name) FALLO"
@@ -2629,17 +2887,37 @@ SELECT to_char(r.fecha_registro AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),
 
 Paso "Esperando a Elasticsearch"
 
-# El motor de busqueda de la Entrega 3. Todavia no lo alimenta ningun ETL, asi
-# que hoy nada mas depende de el; se espera igual para que el script no termine
-# en verde con el contenedor a medio arrancar, que es como se dejan de ver los
-# fallos.
+# El motor de busqueda de la Entrega 3. Tiene dos indices y tres cosas que lo
+# alimentan:
+#
+#   mesh_productos              el ETL del buscador lo rehace entero (aqui
+#                               abajo lo llama Correr-EtlBusqueda; a mano es
+#                               etl/cargar_busqueda.sh), y el worker
+#                               BuscadorSyncService del backend lo mantiene
+#                               al dia con la bandera pendiente_busqueda del
+#                               catalogo de Mongo.
+#   mesh_eventos_autenticacion  la copia del log de seguridad. La llena el
+#                               worker EventosAutenticacionSyncService desde
+#                               eventos_autenticacion de Mongo. Este script
+#                               no lo llena: pone la plantilla, lo rehace si
+#                               nacio malo y marca en Mongo lo que le falte.
+#
+# Del primero cuelga el buscador: GET /buscador/productos, que es la caja de
+# la cabecera, su autocompletado y la pagina /buscar. El segundo hoy no lo lee
+# ninguna ruta del backend: es la capa de consulta del log, y el original
+# esta en Mongo.
+#
+# Se espera para que el script no termine en verde con el contenedor a medio
+# arrancar, que es como se dejan de ver los fallos.
 #
 # 120 y no 60: arranca mas lento que los demas porque es una JVM que ademas
 # instala sus plantillas la primera vez.
 #
-# NO corta el arranque si no sube. Es la unica base de la que hoy no cuelga
-# ninguna pantalla, y tumbar la maquina entera por ella dejaria sin trabajar a
-# quien venia a tocar el catalogo. Se avisa y se sigue.
+# NO corta el arranque si no sube. Sin el se cae el buscador y los eventos se
+# quedan esperando en Mongo con su bandera (el worker no se la quita hasta
+# que la copia entra), pero el login y la portada del catalogo no pasan por
+# el, y tumbar la maquina entera por Elasticsearch dejaria sin trabajar a
+# quien venia a tocar otra cosa. Se avisa y se sigue.
 if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
     Aviso "Elasticsearch no respondio. El resto sigue funcionando."
     Aviso "   Es la JVM mas pesada de las dos que hay; si la maquina anda"
@@ -2687,6 +2965,27 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
         }
     } else {
         Ok "Ya cargado ($enIndice de $activos productos activos). Para rehacerlo: .\arrancar.ps1 -Etl"
+    }
+
+    # ------------------------------------------------------------
+    # El indice de eventos de autenticacion
+    # ------------------------------------------------------------
+    # Va despues del buscador y dentro de esta rama porque necesita a
+    # Elasticsearch vivo, y a Mongo con su coleccion, que se creo en la
+    # seccion 6. El como y el por que de cada caso estan arriba, junto a
+    # Preparar-IndiceEventos.
+    #
+    # Tampoco corta el arranque: el login no depende de este indice. Lo que
+    # NO se promete es que el indice este completo. El original de cada evento
+    # esta en Mongo y ahi no se pierde, pero si este paso se cae a mitad
+    # (despues de borrar el indice, o antes de marcar), al indice le pueden
+    # faltar eventos que ya no llevan la bandera. Quien lo arregla es el
+    # proximo arranque que llegue a contar los dos lados, en el paso d).
+    Paso "Indice de eventos de autenticacion"
+    if (-not (Preparar-IndiceEventos)) {
+        Aviso "El paso del indice de eventos de autenticacion no termino bien. El resto sigue."
+        Aviso "   Los eventos siguen en Mongo, pero al indice le pueden faltar. El proximo"
+        Aviso "   arranque con Elasticsearch arriba vuelve a contar y marca lo que falte."
     }
 }
 
