@@ -29,8 +29,10 @@ import type { LoginUsuarioPeticion } from '../dto/login-usuario';
 import type { RegistroUsuarioPeticion } from '../dto/registro-usuario';
 import type { TokenUsuario } from '../dto/token-usuario';
 import { FraudeLoginService } from '../services/fraude-login/fraude-login.service';
+import { FraudeLoginRetrospectivoService } from '../services/fraude-login/fraude-login-retrospectivo.service';
 import { TomaCuentaService } from '../services/fraude-login/toma-cuenta.service';
 import { ViajeImposibleService } from '../services/fraude-login/viaje-imposible.service';
+import { EventosAutenticacionSyncService } from '../services/eventos-autenticacion/eventos-autenticacion-sync.service';
 import { LogService } from '../services/log.service';
 import { UsuarioService } from '../services/usuario.service';
 
@@ -54,6 +56,14 @@ import { UsuarioService } from '../services/usuario.service';
  * ubicacion del login actual contra el login exitoso inmediatamente
  * anterior, y marca si la velocidad implicita es mayor a la de un vuelo
  * comercial).
+ *
+ * Ademas, cada intento (exito o fallo) encadena -- tambien sin await, ver
+ * `dispararRevisionElasticInmediata` -- la sincronizacion inmediata de ESE
+ * evento a Elasticsearch y un chequeo acotado a esa cuenta/IP sobre las
+ * mismas tres senales "lentas" que normalmente espera el worker de 15 min
+ * (`FraudeLoginRetrospectivoService`): no reemplaza ese worker, solo evita
+ * que haya que esperarlo para las senales que ya se pueden ver con el
+ * historial de ESTE login.
  */
 @Controller('usuario')
 export class UsuarioController {
@@ -61,9 +71,41 @@ export class UsuarioController {
     private readonly usuarioService: UsuarioService,
     private readonly logService: LogService,
     private readonly fraudeLoginService: FraudeLoginService,
+    private readonly fraudeLoginRetrospectivoService: FraudeLoginRetrospectivoService,
     private readonly tomaCuentaService: TomaCuentaService,
     private readonly viajeImposibleService: ViajeImposibleService,
+    private readonly eventosAutenticacionSyncService: EventosAutenticacionSyncService,
   ) {}
+
+  /**
+   * Encadena, sin bloquear nada, la sincronizacion inmediata del evento de
+   * login recien escrito a Elasticsearch y el chequeo acotado a esa
+   * cuenta/IP -- ver el comentario de clase. Se cuelga de la PROMESA del
+   * log (no de `void`) porque el evento tiene que existir ya en Mongo
+   * antes de poder sincronizarlo; la escritura del log en si no cambia de
+   * comportamiento, solo se retiene su promesa para encadenar despues.
+   */
+  private dispararRevisionElasticInmediata(
+    logPromesa: Promise<void>,
+    identificador: string | null,
+    ip: string | null,
+    idUsuario: string | null,
+  ): void {
+    void logPromesa
+      .then(() => this.eventosAutenticacionSyncService.sincronizarAhora())
+      .then(() =>
+        this.fraudeLoginRetrospectivoService.evaluarInmediato({
+          identificador,
+          ip,
+          idUsuario,
+        }),
+      )
+      .catch(() => {
+        // Best-effort: ni sincronizarAhora() ni evaluarInmediato() deberian
+        // lanzar (ambos ya atrapan sus propios errores), esto es solo un
+        // respaldo para no dejar una promesa rechazada sin manejar.
+      });
+  }
 
   // POST /usuario/registro
   @Post('registro')
@@ -122,10 +164,16 @@ export class UsuarioController {
       const { usuario, token } =
         await this.usuarioService.iniciarSesion(cuerpo);
       reply.setCookie(NOMBRE_COOKIE_TOKEN, token, OPCIONES_COOKIE_TOKEN);
-      void this.logService.registrarLoginExitoso(
+      const logPromesa = this.logService.registrarLoginExitoso(
         usuario.id_usuario,
         identificador,
         contexto,
+      );
+      this.dispararRevisionElasticInmediata(
+        logPromesa,
+        identificador,
+        contexto.ip,
+        usuario.id_usuario,
       );
       void this.fraudeLoginService.registrarIntento({
         fallo: false,
@@ -168,11 +216,17 @@ export class UsuarioController {
     contexto: ContextoPeticion,
   ): void {
     if (error instanceof ErrorInicioSesion) {
-      void this.logService.registrarLoginFallido(
+      const logPromesa = this.logService.registrarLoginFallido(
         error.motivo,
         error.idUsuario,
         identificador,
         contexto,
+      );
+      this.dispararRevisionElasticInmediata(
+        logPromesa,
+        identificador,
+        contexto.ip,
+        error.idUsuario,
       );
       void this.fraudeLoginService.registrarIntento({
         fallo: true,
@@ -183,11 +237,17 @@ export class UsuarioController {
       return;
     }
     if (error instanceof ErrorValidacion) {
-      void this.logService.registrarLoginFallido(
+      const logPromesa = this.logService.registrarLoginFallido(
         'datos_invalidos',
         null,
         identificador,
         contexto,
+      );
+      this.dispararRevisionElasticInmediata(
+        logPromesa,
+        identificador,
+        contexto.ip,
+        null,
       );
       void this.fraudeLoginService.registrarIntento({
         fallo: true,

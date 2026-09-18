@@ -111,6 +111,25 @@ Detalle y pruebas en
      un bug**: un usuario con VPN da un falso positivo legítimo -- decidido
      así porque además es la única forma práctica de demostrar el patrón
      en la demo sin depender de gente real en países distintos.
+   - **Disparo inmediato por login — HECHO (2026-09-15).** Además del
+     worker de 15 min (que sigue de respaldo, sin cambios), las tres
+     señales `_lenta` ahora también se evalúan justo después de cada
+     login, acotadas a la cuenta y/o la IP de ESE intento (no las 24h de
+     todas las cuentas). `UsuarioController` encadena, sin `await`:
+     `EventosAutenticacionSyncService.sincronizarAhora()` (indexa YA ese
+     evento en Elasticsearch, con `refresh: 'wait_for'` para que sea
+     buscable de inmediato) y, al terminar,
+     `FraudeLoginRetrospectivoService.evaluarInmediato()` (las mismas tres
+     consultas de arriba, pero filtradas a un solo identificador/IP en vez
+     de una agregación `terms` sobre todas). Mismo `id_tipo_alerta_fraude`
+     y misma hora truncada que el worker de 15 min: si ambos coinciden en
+     la misma hora, se juntan en una sola fila (`ON CONFLICT` de
+     `registrarAlertaFraude`) en vez de duplicar. Pedido por el profesor,
+     con la comparación explícita a como ya funcionan los contadores de
+     Redis (punto 4). Detalle y pruebas en
+     `cambio_propuestas/2026-09-15_1130-fraude-login-disparo-inmediato.md`,
+     incluido un bug real de concurrencia encontrado y corregido en la
+     misma ronda.
    - **Panel de exploración manual — HECHO (2026-09-11, cuarta ronda).**
      `GET /admin/fraude/eventos-login`: logs crudos de
      `mesh_eventos_autenticacion` (Elasticsearch, no Mongo), paginados, con

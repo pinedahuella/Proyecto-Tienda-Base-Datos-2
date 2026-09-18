@@ -120,10 +120,13 @@ correr `etl/cargar_grafo.sh`). Timeout de 6 s -> 503.
 ```
 
 > El **panel de fraude** que consume este grafo
-> (`GET /admin/fraude/anillos`, solo admin), la **conciliación** del grafo
-> con PostgreSQL (`GET /admin/grafo/conciliacion`, solo admin) y las
-> **alertas de fraude de login** -- nueve señales: fuerza bruta / multi-cuenta
-> / rotación de IP con contadores de Redis, más toma de cuenta, viaje
+> (`GET /admin/fraude/anillos`, solo admin, EN VIVO sin persistir), su
+> versión **persistida** (`GET`/`PATCH /admin/fraude/anillos-persistidos` y
+> `GET .../:id/detalle-grafo`, controller y servicio aparte, alimentados por
+> el worker `AnillosDetectorService`), la **conciliación** del grafo con
+> PostgreSQL (`GET /admin/grafo/conciliacion`, solo admin) y las **alertas
+> de fraude de login** -- nueve señales: fuerza bruta / multi-cuenta /
+> rotación de IP con contadores de Redis, más toma de cuenta, viaje
 > imposible y tres patrones lentos/repartidos (los mismos tres, en ventana
 > de 24h) consultados contra Elasticsearch
 > (`GET /admin/fraude/alertas-login`, solo admin -- no toca el grafo) están
@@ -839,6 +842,100 @@ activa:
 ```json
 { "ok": false, "mensaje": "No se pudo actualizar la contrasena", "payload": null }
 ```
+
+---
+
+## GET /perfil/alertas-fraude
+
+Requiere la cookie `mesh_token`. Las alertas de fraude que le corresponden
+al usuario logueado -- nunca recibe un id de cuenta por parametro, siempre
+sale del token. Paginado (`pagina`/`limite`, mismas reglas que el resto
+del proyecto), ordenado por `fecha_creacion` mas reciente primero. Lee la
+tabla `notificacion_fraude` (una fila por cada cuenta a la que le
+corresponde ver una alerta -- no una columna de `alerta_fraude`, ver
+`endpoints-fraude.md` para el porque).
+
+Aparecen las senales que ya traen la cuenta resuelta (`fuerza_bruta_cuenta`,
+`ip_rotacion_cuenta` y sus `_lenta`, `toma_cuenta`, `viaje_imposible`) **y
+tambien** `multi_cuenta_ip`/`multi_cuenta_ip_lenta` si esta cuenta fue una
+de las que esa IP probo (con el `detalle` redactado: sin los
+correos/usuarios de las DEMAS cuentas afectadas, solo el conteo). Solo
+`fuerza_bruta_ip` sigue sin llegarle a nadie -- no trae una lista de
+cuentas objetivo, sigue siendo solo para el panel de admin
+(`GET /admin/fraude/alertas-login`, documentado en `endpoints-fraude.md`,
+con el detalle completo del diseno). Cada fila trae `fecha_lectura` de LA
+NOTIFICACION de esa cuenta (`null` = no leida).
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Alertas de fraude obtenidas",
+  "payload": {
+    "alertas": [
+      {
+        "id_alerta_fraude": "140",
+        "tipo_alerta": "viaje_imposible",
+        "clave": "usuario_afectado",
+        "detalle": { "distancia_km": 14313, "velocidad_kmh": 80520 },
+        "contador": 1,
+        "ventana_inicio": "2026-09-15T17:34:00.000Z",
+        "fecha_creacion": "2026-09-15T17:34:54.600Z",
+        "fecha_lectura": null
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_alertas": 1,
+    "total_paginas": 1
+  }
+}
+```
+
+**401** — no hay cookie, o el token no es valido:
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+```
+
+---
+
+## PATCH /perfil/alertas-fraude/:id
+
+Requiere la cookie `mesh_token`. Marca la NOTIFICACION de esta cuenta sobre
+esa alerta como leida (`notificacion_fraude.fecha_lectura`) — idempotente,
+si ya estaba leida no pisa la fecha original. El *ownership check* va en
+el propio `UPDATE`: si no existe esa notificacion (la alerta no existe, o
+existe pero esta cuenta nunca estuvo entre los afectados), el mismo `404`
+generico en los dos casos, para no filtrar si una alerta ajena existe. En
+una alerta con varios afectados (`multi_cuenta_ip`/`multi_cuenta_ip_lenta`),
+cada cuenta marca la suya por separado — no es un estado compartido.
+
+Sin cuerpo.
+
+**200**
+
+Misma forma que una fila del `GET`, con `fecha_lectura` ya puesta.
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "El id de la alerta debe ser un numero entero", "payload": null }
+```
+
+**401** — mismo criterio que el resto de `/perfil`.
+
+**404**
+
+```json
+{ "ok": false, "mensaje": "No existe una alerta con ese id para tu cuenta", "payload": null }
+```
+
+**Pruebas — hechas el 2026-09-15.** Detalle completo (con tabla de casos)
+en `endpoints-fraude.md`, seccion "GET /perfil/alertas-fraude y PATCH
+/perfil/alertas-fraude/:id" — se documenta alli en vez de duplicarlo aqui
+porque es la misma ronda de pruebas que las otras rutas de `alerta_fraude`.
 
 ---
 

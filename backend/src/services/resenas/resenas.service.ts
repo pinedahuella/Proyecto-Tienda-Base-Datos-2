@@ -27,6 +27,8 @@ import {
   VotoResena,
 } from '../../models/resena';
 import { ProductosService } from '../productos/productos.service';
+import { GrafoSyncService } from '../grafo/grafo-sync.service';
+import { AnillosDetectorService } from '../fraude/anillos-detector.service';
 
 const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
@@ -86,7 +88,11 @@ interface FilaRespuesta {
 export class ResenasService {
   private readonly logger = new Logger(ResenasService.name);
 
-  constructor(private readonly productosService: ProductosService) {}
+  constructor(
+    private readonly productosService: ProductosService,
+    private readonly grafoSyncService: GrafoSyncService,
+    private readonly anillosDetectorService: AnillosDetectorService,
+  ) {}
 
   /**
    * Todas las resenas de un producto, con su vendedor, su autor, sus
@@ -308,6 +314,17 @@ export class ResenasService {
       );
       const fila = resultado.rows[0];
       await this.productosService.recalcularCamposCalculados([idProducto]);
+      // Sin await, a proposito: no debe retrasar la respuesta. El trigger
+      // de Postgres ya encolo el evento en evento_grafo con el INSERT de
+      // arriba; esto solo evita que la proyeccion a Neo4j tenga que
+      // esperar el proximo tick de 10s del worker. El chequeo acotado de
+      // anillos va ENCADENADO despues (no en paralelo): necesita que la
+      // resena ya este proyectada en Neo4j antes de poder buscarla ahi.
+      void this.grafoSyncService
+        .procesarAhora()
+        .then(() =>
+          this.anillosDetectorService.detectarInmediato(String(fila.id_resena)),
+        );
       return {
         id_resena: Number(fila.id_resena),
         id_comentario: Number(fila.id_comentario),

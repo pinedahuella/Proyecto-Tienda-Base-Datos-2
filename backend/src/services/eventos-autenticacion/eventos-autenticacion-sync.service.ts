@@ -31,6 +31,10 @@ const COLECCION = 'eventos_autenticacion';
  * el ETL del companero (`etl/`), igual que con el buscador de catalogo. Este
  * worker solo mantiene al dia el flujo nuevo.
  *
+ * Ademas del `@Interval`, expone `sincronizarAhora()`: la llama
+ * `UsuarioController` justo despues de cada login, para no depender solo
+ * del reloj de 5s (ver ese metodo).
+ *
  * Intervalo corto (5 s) a proposito: para el buscador de catalogo 10 s
  * sobra, pero aca la frescura importa mas. Es una sola constante si hay que
  * ajustarla.
@@ -56,7 +60,37 @@ export class EventosAutenticacionSyncService {
       return;
     }
     this.procesando = true;
+    try {
+      await this.procesarPendientes(false);
+    } finally {
+      this.procesando = false;
+    }
+  }
 
+  /**
+   * Igual que `sincronizar()`, pero fuera del reloj de 5s: la llama
+   * `UsuarioController` justo despues de loguear un evento, para que el
+   * chequeo acotado de `FraudeLoginRetrospectivoService.evaluarInmediato`
+   * no tenga que esperar el proximo tick. Indexa con `refresh: 'wait_for'`
+   * -- Elasticsearch es "near real-time": sin esto, el documento recien
+   * escrito podria no ser buscable todavia cuando el chequeo lo consulte.
+   *
+   * A proposito NO comparte el flag `procesando` de `sincronizar()`: bajo
+   * una rafaga de logins casi simultaneos (el caso que mas importa acertar
+   * rapido), si esta llamada se bloqueara cada vez que otra ya esta
+   * corriendo, la mayoria de los intentos quedarian sin sincronizar su
+   * propio evento y el chequeo acotado correria contra datos incompletos
+   * -- se probo en vivo y era justo lo que pasaba. Correr sin mutex es
+   * seguro porque `procesarPendientes` ya es idempotente (el `_id` de Mongo
+   * se reutiliza en Elastic, y un `$unset` sobre un campo que ya no esta no
+   * es un error): varias corridas superpuestas pueden reindexar el mismo
+   * documento mas de una vez, pero nunca de forma incorrecta.
+   */
+  async sincronizarAhora(): Promise<void> {
+    await this.procesarPendientes(true);
+  }
+
+  private async procesarPendientes(esperarRefresco: boolean): Promise<void> {
     try {
       const coleccion = mongoDb.collection<EventoAutenticacion>(COLECCION);
       const pendientes = await coleccion
@@ -76,6 +110,7 @@ export class EventosAutenticacionSyncService {
             index: INDICE,
             id: String(evento._id),
             document: aDocumentoElastic(evento),
+            ...(esperarRefresco ? { refresh: 'wait_for' as const } : {}),
           });
           await coleccion.updateOne(
             { _id: evento._id },
@@ -101,8 +136,6 @@ export class EventosAutenticacionSyncService {
       this.logger.warn(
         `worker de eventos de autenticacion: corrida interrumpida -- ${mensajeCorto(error)}`,
       );
-    } finally {
-      this.procesando = false;
     }
   }
 }

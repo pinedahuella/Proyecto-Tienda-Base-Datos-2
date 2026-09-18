@@ -44,13 +44,25 @@ export type TipoAlertaFraude =
 
 export type EstadoAlertaFraude = 'pendiente' | 'revisada' | 'descartada';
 
-/** Una fila de `alerta_fraude`, tal como la trae `pool.query`. */
+/**
+ * Una cuenta notificada de una alerta -- una fila de `notificacion_fraude`
+ * (ver `helpers/registrar-alerta-fraude.ts` para cómo se decide quién
+ * termina aquí), con su propio estado de lectura. Una alerta puede tener
+ * varias: `multi_cuenta_ip`/`multi_cuenta_ip_lenta` le llegan a cada cuenta
+ * que esa IP probó, no solo a una.
+ */
+export interface CuentaAfectada {
+  id_usuario: string;
+  usuario: string;
+  fecha_lectura: Date | null;
+}
+
+/** Una fila de `alerta_fraude` + sus afectados, tal como la trae `pool.query`. */
 export interface FilaAlertaFraude {
   id_alerta_fraude: string;
   tipo_alerta: TipoAlertaFraude;
   clave: string;
-  id_usuario: string | null;
-  usuario: string | null;
+  cuentas_afectadas: CuentaAfectada[];
   detalle: Record<string, unknown>;
   contador: number;
   ventana_inicio: Date;
@@ -64,7 +76,7 @@ export interface AlertaFraude {
   id_alerta_fraude: string;
   tipo_alerta: TipoAlertaFraude;
   clave: string;
-  cuenta_involucrada: { id_usuario: string; usuario: string } | null;
+  cuentas_afectadas: CuentaAfectada[];
   detalle: Record<string, unknown>;
   contador: number;
   ventana_inicio: Date;

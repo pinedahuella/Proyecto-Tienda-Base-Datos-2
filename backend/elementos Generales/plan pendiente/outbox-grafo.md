@@ -19,6 +19,18 @@
 > FALTA (fuera de `backend/`, le toca al compañero):
 > - La migración real `015` + el cambio del ETL (`etl/cargar_grafo.sh`
 >   etapa A).
+>
+> **Agregado 2026-09-15:** `GrafoSyncService.procesarAhora()` — disparo
+> bajo demanda del worker (sin esperar los 10s del `@Interval`), llamado
+> por `ResenasService.crear()` justo después de insertar la reseña. Mismo
+> patrón que `EventosAutenticacionSyncService.sincronizarAhora()` del
+> módulo de login (mismo día): SIN compartir el flag `procesando` del
+> intervalo, porque `FOR UPDATE SKIP LOCKED` ya hace seguras las corridas
+> superpuestas. Es el primer paso hacia poder detectar anillos de fraude
+> en reseñas casi en tiempo real — deliberadamente sin tocar aún nada de
+> detección ni persistencia de esas alertas, eso queda para una ronda
+> aparte. Detalle y pruebas en
+> `../../cambio_propuestas/2026-09-15_1900-grafo-sync-bajo-demanda.md`.
 
 ## De dónde viene esto
 

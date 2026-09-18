@@ -31,6 +31,18 @@ import {
 const INDICE =
   process.env.ELASTIC_INDICE_EVENTOS ?? 'mesh_eventos_autenticacion';
 
+/** Copia verbatim de `SQL_CUENTAS_AFECTADAS` en `fraude-login.service.ts` -- se duplica (chica) por el mismo motivo que el resto de este modulo, ver el comentario de clase. */
+const SQL_CUENTAS_AFECTADAS = `(
+  SELECT COALESCE(json_agg(json_build_object(
+           'id_usuario', nf.id_usuario::text,
+           'usuario', u.usuario,
+           'fecha_lectura', nf.fecha_lectura
+         ) ORDER BY u.usuario), '[]'::json)
+    FROM notificacion_fraude nf
+    JOIN usuarios u ON u.id_usuario = nf.id_usuario
+   WHERE nf.id_alerta_fraude = af.id_alerta_fraude
+)`;
+
 interface FuenteEventoElastic {
   tipo: string;
   resultado: string;
@@ -264,15 +276,15 @@ export class FraudeLoginExploracionService {
     try {
       fila = await pool.query<FilaAlertaFraude>(
         `SELECT af.id_alerta_fraude, ta.tipo_alerta_fraude_nombre AS tipo_alerta,
-                af.clave, af.id_usuario, u.usuario, af.detalle, af.contador,
+                af.clave, af.detalle, af.contador,
                 af.ventana_inicio, ea.estado_alerta_fraude_nombre AS estado,
-                af.fecha_creacion, af.fecha_actualizacion
+                af.fecha_creacion, af.fecha_actualizacion,
+                ${SQL_CUENTAS_AFECTADAS} AS cuentas_afectadas
            FROM alerta_fraude af
            JOIN tipo_alerta_fraude ta
              ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
            JOIN estado_alerta_fraude ea
              ON ea.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-           LEFT JOIN usuarios u ON u.id_usuario = af.id_usuario
           WHERE af.id_alerta_fraude = $1`,
         [id],
       );
@@ -317,10 +329,7 @@ function aAlertaFraude(fila: FilaAlertaFraude): AlertaFraude {
     id_alerta_fraude: fila.id_alerta_fraude,
     tipo_alerta: fila.tipo_alerta,
     clave: fila.clave,
-    cuenta_involucrada:
-      fila.id_usuario != null && fila.usuario != null
-        ? { id_usuario: fila.id_usuario, usuario: fila.usuario }
-        : null,
+    cuentas_afectadas: fila.cuentas_afectadas,
     detalle: fila.detalle,
     contador: fila.contador,
     ventana_inicio: fila.ventana_inicio,

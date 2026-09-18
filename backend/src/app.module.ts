@@ -40,6 +40,7 @@ import { CarritoController } from './controllers/carrito/carrito.controller';
 import { CarritoService } from './services/carrito/carrito.service';
 import { FraudeController } from './controllers/fraude/fraude.controller';
 import { FraudeService } from './services/fraude/fraude.service';
+import { AnillosDetectorService } from './services/fraude/anillos-detector.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
 import { AdminReportesService } from './services/admin/admin-reportes.service';
 import { InventarioLimitadoService } from './services/inventario-limitado/inventario-limitado.service';
@@ -57,6 +58,8 @@ import { ViajeImposibleService } from './services/fraude-login/viaje-imposible.s
 import { FraudeLoginRetrospectivoService } from './services/fraude-login/fraude-login-retrospectivo.service';
 import { AdminFraudeLoginController } from './controllers/admin/admin-fraude-login.controller';
 import { FraudeLoginExploracionService } from './services/fraude-login/fraude-login-exploracion.service';
+import { AdminFraudeAnillosController } from './controllers/admin/admin-fraude-anillos.controller';
+import { FraudeAnillosPersistidosService } from './services/fraude/fraude-anillos-persistidos.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -95,6 +98,7 @@ import { FraudeLoginExploracionService } from './services/fraude-login/fraude-lo
     BaseDatosBuscadorController,
     BuscadorProductosController,
     AdminFraudeLoginController,
+    AdminFraudeAnillosController,
   ],
   providers: [
     InicioService,
@@ -117,6 +121,7 @@ import { FraudeLoginExploracionService } from './services/fraude-login/fraude-lo
     ResenasService,
     CarritoService,
     FraudeService,
+    AnillosDetectorService,
     AdminReportesService,
     InventarioLimitadoService,
     GrafoSyncService,
@@ -129,6 +134,7 @@ import { FraudeLoginExploracionService } from './services/fraude-login/fraude-lo
     ViajeImposibleService,
     FraudeLoginRetrospectivoService,
     FraudeLoginExploracionService,
+    FraudeAnillosPersistidosService,
   ],
 })
 export class AppModule {}

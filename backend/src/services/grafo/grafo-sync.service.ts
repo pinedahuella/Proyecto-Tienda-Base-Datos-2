@@ -28,6 +28,10 @@ import {
  *     asincrono que pidio el profesor: `POST /resenas` no le habla a Neo4j,
  *     solo el trigger encola y este worker despacha. Todo idempotente.
  *
+ *     Ademas del `@Interval`, expone `procesarAhora()`: la llama
+ *     `ResenasService` justo despues de crear una resena, para no depender
+ *     solo del reloj de 10s (ver ese metodo).
+ *
  *  2. La **conciliacion** (`conciliar()`, para `GET /admin/grafo/conciliacion`):
  *     la red de seguridad. Compara los conteos de las dos bases y AVISA de
  *     la deriva -- NO repara (para eso esta `etl/cargar_grafo.sh --limpiar`).
@@ -91,7 +95,46 @@ export class GrafoSyncService {
       return;
     }
     this.procesando = true;
+    try {
+      await this.procesarPendientes(true);
+    } finally {
+      this.procesando = false;
+    }
+  }
 
+  /**
+   * Igual que `vaciarCola()`, pero fuera del reloj de 10s: la llama
+   * `ResenasService` justo despues de insertar una resena, para que la
+   * proyeccion al grafo no tenga que esperar el proximo tick.
+   *
+   * A proposito NO comparte el flag `procesando` del intervalo -- mismo
+   * motivo que `EventosAutenticacionSyncService.sincronizarAhora()` (bug
+   * real encontrado y corregido el 2026-09-15): bajo varias reseñas casi
+   * simultaneas, compartir el mutex dejaria a la mayoria de las llamadas
+   * sin hacer nada. Es seguro sin mutex porque `procesarUnEvento` ya toma
+   * cada fila con `FOR UPDATE SKIP LOCKED` -- dos corridas superpuestas se
+   * reparten la cola sin pisarse -- y ademas la proyeccion es idempotente
+   * (`MERGE`), asi que ni siquiera hace falta que `SKIP LOCKED` sea
+   * perfecto para que esto sea correcto.
+   *
+   * No corre la poda (`ejecutarPoda: false`): esa sigue atada solo al
+   * ritmo del intervalo, no a cada reseña.
+   */
+  async procesarAhora(): Promise<void> {
+    await this.procesarPendientes(false);
+  }
+
+  /**
+   * Una corrida: toma eventos pendientes de a uno (transaccion corta,
+   * `FOR UPDATE SKIP LOCKED` para no pisarse con otra instancia ni con el
+   * ETL) y los aplica a Neo4j hasta vaciar la cola o llegar al tope.
+   *
+   * Si el evento falla por un problema de DATOS (Cypher invalido, dato
+   * torcido) se le suma un intento y se sigue con el resto -- a los 5 queda
+   * apartado. Si falla por CONEXION (Neo4j o PostgreSQL caidos) se corta la
+   * corrida sin gastar intentos: se reintenta entera en la proxima.
+   */
+  private async procesarPendientes(ejecutarPoda: boolean): Promise<void> {
     let cliente: PoolClient | null = null;
     try {
       cliente = await pool.connect();
@@ -109,7 +152,7 @@ export class GrafoSyncService {
         this.logger.log(`worker del grafo: ${aplicados} evento(s) aplicados`);
       }
 
-      if (this.corridas++ % GrafoSyncService.PODA_CADA === 0) {
+      if (ejecutarPoda && this.corridas++ % GrafoSyncService.PODA_CADA === 0) {
         await this.podar(cliente);
       }
     } catch (error) {
@@ -133,7 +176,6 @@ export class GrafoSyncService {
       );
     } finally {
       cliente?.release();
-      this.procesando = false;
     }
   }
 

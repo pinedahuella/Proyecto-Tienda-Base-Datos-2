@@ -2,11 +2,13 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { redis } from '../../database/redis';
+import { ErrorNoEncontrado } from '../../helpers/errores';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { registrarAlertaFraude } from '../../helpers/registrar-alerta-fraude';
 import {
   validarFiltroEstadoAlerta,
   validarFiltroTipoAlerta,
+  validarIdAlertaFraude,
 } from '../../helpers/validaciones-fraude';
 import {
   validarLimite,
@@ -16,6 +18,11 @@ import type {
   AlertasFraudePaginadas,
   PaginarAlertasFraudeQuery,
 } from '../../dto/paginar-alertas-fraude';
+import type {
+  AlertaFraudeUsuario,
+  AlertasFraudeUsuarioPaginadas,
+  PaginarAlertasFraudeUsuarioQuery,
+} from '../../dto/alertas-fraude-usuario';
 import {
   AlertaFraude,
   EstadoAlertaFraude,
@@ -26,6 +33,24 @@ import {
   ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA,
   ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP,
 } from '../../models/alerta-fraude';
+
+/**
+ * El agregado de `notificacion_fraude` + `usuarios` para UNA alerta, como
+ * subconsulta correlacionada contra `af` -- reusado tal cual en las dos
+ * consultas de admin de este archivo (listado y, via
+ * `fraude-login-exploracion.service.ts`, el `PATCH`). `json_agg` sobre
+ * cero filas da `NULL`, de ahi el `COALESCE` a `'[]'`.
+ */
+const SQL_CUENTAS_AFECTADAS = `(
+  SELECT COALESCE(json_agg(json_build_object(
+           'id_usuario', nf.id_usuario::text,
+           'usuario', u.usuario,
+           'fecha_lectura', nf.fecha_lectura
+         ) ORDER BY u.usuario), '[]'::json)
+    FROM notificacion_fraude nf
+    JOIN usuarios u ON u.id_usuario = nf.id_usuario
+   WHERE nf.id_alerta_fraude = af.id_alerta_fraude
+)`;
 
 /**
  * Deteccion de fraude en el propio camino del login -- punto 4 de
@@ -355,15 +380,15 @@ export class FraudeLoginService {
 
       const pagina = await cliente.query<FilaAlertaFraude>(
         `SELECT af.id_alerta_fraude, ta.tipo_alerta_fraude_nombre AS tipo_alerta,
-                af.clave, af.id_usuario, u.usuario, af.detalle, af.contador,
+                af.clave, af.detalle, af.contador,
                 af.ventana_inicio, ea.estado_alerta_fraude_nombre AS estado,
-                af.fecha_creacion, af.fecha_actualizacion
+                af.fecha_creacion, af.fecha_actualizacion,
+                ${SQL_CUENTAS_AFECTADAS} AS cuentas_afectadas
            FROM alerta_fraude af
            JOIN tipo_alerta_fraude ta
              ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
            JOIN estado_alerta_fraude ea
              ON ea.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-           LEFT JOIN usuarios u ON u.id_usuario = af.id_usuario
           WHERE true ${condicionEstado} ${condicionTipo}
           ORDER BY af.fecha_actualizacion DESC, af.id_alerta_fraude DESC
           LIMIT $1 OFFSET $2`,
@@ -388,6 +413,142 @@ export class FraudeLoginService {
       // hay nada mas que hacer; sigue el error original de quien llamo.
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Listado y lectura del USUARIO -- GET/PATCH /perfil/alertas-fraude
+  // ---------------------------------------------------------------------
+
+  /**
+   * Las alertas del usuario logueado sobre SU PROPIA cuenta -- nunca recibe
+   * un id de cuenta por parametro, `idUsuario` siempre sale de la sesion
+   * (`UsuarioActual` en el controlador). Ordenado por `fecha_creacion DESC`
+   * (la senal mas nueva primero) y no por `fecha_actualizacion` -- esa es
+   * la actividad de revision del admin, no algo que le importe al usuario.
+   */
+  async listarAlertasPaginadoUsuario(
+    idUsuario: string,
+    query: PaginarAlertasFraudeUsuarioQuery,
+  ): Promise<AlertasFraudeUsuarioPaginadas> {
+    const limite = validarLimite(query.limite);
+    const pagina = validarPagina(query.pagina);
+    const saltar = (pagina - 1) * limite;
+
+    const { filas, total } = await this.consultarAlertasPaginadoUsuario(
+      idUsuario,
+      limite,
+      saltar,
+    );
+    const totalPaginas = total === 0 ? 0 : Math.ceil(total / limite);
+
+    return {
+      alertas: filas.map(aAlertaFraudeUsuario),
+      pagina,
+      limite,
+      total_alertas: total,
+      total_paginas: totalPaginas,
+    };
+  }
+
+  /** Mismo patron de transaccion REPEATABLE READ READ ONLY que `consultarAlertasPaginado`. */
+  private async consultarAlertasPaginadoUsuario(
+    idUsuario: string,
+    limite: number,
+    saltar: number,
+  ): Promise<{ filas: FilaAlertaFraudeUsuario[]; total: number }> {
+    const cliente = await pool.connect();
+    try {
+      await cliente.query(
+        'BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY',
+      );
+
+      const conteo = await cliente.query<{ total: string }>(
+        `SELECT count(*) AS total FROM notificacion_fraude WHERE id_usuario = $1`,
+        [idUsuario],
+      );
+
+      const pagina = await cliente.query<FilaAlertaFraudeUsuario>(
+        `SELECT af.id_alerta_fraude, ta.tipo_alerta_fraude_nombre AS tipo_alerta,
+                af.clave, af.detalle, af.contador, af.ventana_inicio,
+                af.fecha_creacion, nf.fecha_lectura
+           FROM notificacion_fraude nf
+           JOIN alerta_fraude af ON af.id_alerta_fraude = nf.id_alerta_fraude
+           JOIN tipo_alerta_fraude ta
+             ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
+          WHERE nf.id_usuario = $1
+          ORDER BY af.fecha_creacion DESC, af.id_alerta_fraude DESC
+          LIMIT $2 OFFSET $3`,
+        [idUsuario, limite, saltar],
+      );
+
+      await cliente.query('COMMIT');
+      return { filas: pagina.rows, total: Number(conteo.rows[0].total) };
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
+    }
+  }
+
+  /**
+   * Marca una alerta del usuario como leida -- idempotente (solo escribe si
+   * todavia estaba `NULL`, no pisa la fecha de la primera lectura) y con el
+   * ownership check en el propio `UPDATE`: si la alerta no existe O es de
+   * otra cuenta, el mismo 404 generico en los dos casos (no se distingue,
+   * para no filtrar si una alerta ajena existe -- mismo criterio que las
+   * rutas de vendedor sobre ofertas ajenas).
+   */
+  async marcarLeida(
+    idAlertaFraude: string,
+    idUsuario: string,
+  ): Promise<AlertaFraudeUsuario> {
+    const id = validarIdAlertaFraude(idAlertaFraude);
+
+    let actualizado;
+    try {
+      actualizado = await pool.query(
+        `UPDATE notificacion_fraude
+            SET fecha_lectura = COALESCE(fecha_lectura, now())
+          WHERE id_alerta_fraude = $1 AND id_usuario = $2
+          RETURNING id_notificacion`,
+        [id, idUsuario],
+      );
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+
+    if (actualizado.rowCount === 0) {
+      throw new ErrorNoEncontrado(
+        'No existe una alerta con ese id para tu cuenta',
+      );
+    }
+
+    return this.obtenerAlertaUsuarioPorId(id, idUsuario);
+  }
+
+  private async obtenerAlertaUsuarioPorId(
+    id: string,
+    idUsuario: string,
+  ): Promise<AlertaFraudeUsuario> {
+    let fila;
+    try {
+      fila = await pool.query<FilaAlertaFraudeUsuario>(
+        `SELECT af.id_alerta_fraude, ta.tipo_alerta_fraude_nombre AS tipo_alerta,
+                af.clave, af.detalle, af.contador, af.ventana_inicio,
+                af.fecha_creacion, nf.fecha_lectura
+           FROM notificacion_fraude nf
+           JOIN alerta_fraude af ON af.id_alerta_fraude = nf.id_alerta_fraude
+           JOIN tipo_alerta_fraude ta
+             ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
+          WHERE af.id_alerta_fraude = $1 AND nf.id_usuario = $2`,
+        [id, idUsuario],
+      );
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+
+    return aAlertaFraudeUsuario(fila.rows[0]);
+  }
 }
 
 function aAlertaFraude(fila: FilaAlertaFraude): AlertaFraude {
@@ -395,16 +556,71 @@ function aAlertaFraude(fila: FilaAlertaFraude): AlertaFraude {
     id_alerta_fraude: fila.id_alerta_fraude,
     tipo_alerta: fila.tipo_alerta,
     clave: fila.clave,
-    cuenta_involucrada:
-      fila.id_usuario != null && fila.usuario != null
-        ? { id_usuario: fila.id_usuario, usuario: fila.usuario }
-        : null,
+    cuentas_afectadas: fila.cuentas_afectadas,
     detalle: fila.detalle,
     contador: fila.contador,
     ventana_inicio: fila.ventana_inicio,
     estado: fila.estado,
     fecha_creacion: fila.fecha_creacion,
     fecha_actualizacion: fila.fecha_actualizacion,
+  };
+}
+
+/**
+ * Las dos senales cuyo `detalle` trae los identificadores de OTRAS cuentas
+ * afectadas por el mismo ataque (evidencia para admin) -- ver
+ * `detalleParaUsuario` justo abajo.
+ */
+const TIPOS_DETALLE_MULTIUSUARIO: TipoAlertaFraude[] = [
+  'multi_cuenta_ip',
+  'multi_cuenta_ip_lenta',
+];
+
+/**
+ * El `detalle` tal como lo ve el USUARIO afectado, no el admin: para
+ * `multi_cuenta_ip`/`multi_cuenta_ip_lenta` se quita `identificadores` --
+ * la lista de correos/usuarios de las DEMAS cuentas que esa misma IP
+ * tambien probo. `cuentas_distintas` (el conteo) se conserva -- el usuario
+ * sabe que no fue el unico blanco, sin enterarse de quienes fueron los
+ * demas. Decision explicita del usuario (2026-09-15): version resumida,
+ * no el detalle completo que ve admin.
+ */
+function detalleParaUsuario(
+  tipoAlerta: TipoAlertaFraude,
+  detalle: Record<string, unknown>,
+): Record<string, unknown> {
+  if (!TIPOS_DETALLE_MULTIUSUARIO.includes(tipoAlerta)) {
+    return detalle;
+  }
+  const resto = { ...detalle };
+  delete resto.identificadores;
+  return resto;
+}
+
+/** Una fila del listado del USUARIO, tal como la trae `pool.query` -- sin nada de la investigacion del admin (`estado`, ni el resto de afectados). */
+interface FilaAlertaFraudeUsuario {
+  id_alerta_fraude: string;
+  tipo_alerta: TipoAlertaFraude;
+  clave: string;
+  detalle: Record<string, unknown>;
+  contador: number;
+  ventana_inicio: Date;
+  fecha_creacion: Date;
+  fecha_lectura: Date | null;
+}
+
+function aAlertaFraudeUsuario(
+  fila: FilaAlertaFraudeUsuario,
+): AlertaFraudeUsuario {
+  return {
+    id_alerta_fraude: fila.id_alerta_fraude,
+    tipo_alerta: fila.tipo_alerta,
+    clave: fila.clave,
+    detalle: detalleParaUsuario(fila.tipo_alerta, fila.detalle),
+    contador: fila.contador,
+    ventana_inicio: fila.ventana_inicio,
+    fecha_creacion: fila.fecha_creacion,
+    fecha_lectura: fila.fecha_lectura,
   };
 }
 

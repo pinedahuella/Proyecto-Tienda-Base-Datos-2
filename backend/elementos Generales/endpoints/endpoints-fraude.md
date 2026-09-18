@@ -1,9 +1,10 @@
 # Endpoints del panel de fraude
 
-Cinco rutas de admin. Las dos primeras sobre el grafo de **Neo4j**; las
-otras tres sobre **PostgreSQL, Redis y Elasticsearch**, sin tocar el grafo
-— y ese segundo grupo (fraude por IP/cuenta en el login) es **solo
-Elasticsearch + Redis**, no toca Neo4j:
+Cinco rutas de admin, más dos rutas de usuario (agregadas 2026-09-15, ver
+más abajo). Las dos primeras rutas de admin son sobre el grafo de
+**Neo4j**; las otras tres sobre **PostgreSQL, Redis y Elasticsearch**, sin
+tocar el grafo — y ese segundo grupo (fraude por IP/cuenta en el login) es
+**solo Elasticsearch + Redis**, no toca Neo4j:
 
 - **`GET /admin/fraude/anillos`** — el **panel de manipulación de reseñas**
   de la Entrega 2 (Bloque 4 de `BACKEND-PENDIENTE.md`): los grupos de
@@ -27,7 +28,11 @@ Elasticsearch + Redis**, no toca Neo4j:
   rango de fechas.
 - **`PATCH /admin/fraude/alertas-login/:id`** — marcar una alerta (de
   cualquiera de las 9 señales) como `revisada` o `descartada`. Solo desde
-  `pendiente`. Es la única ruta de **escritura** de todo este panel.
+  `pendiente`.
+- **`GET /perfil/alertas-fraude` y `PATCH /perfil/alertas-fraude/:id`** —
+  las dos únicas rutas de este archivo que NO son de admin: el usuario
+  afectado ve y marca como leídas las alertas sobre su propia cuenta. Ver
+  la sección dedicada, después de "alertas-login".
 
 > **Estado (2026-08-30, sincronización agregada 2026-09-04): ruta
 > implementada y PROBADA en vivo.** Contra `mesh-neo4j` cargado (150 nodos):
@@ -474,12 +479,18 @@ que escriben alertas.
   `fuerza_bruta_cuenta_lenta`, `ip_rotacion_cuenta`,
   `ip_rotacion_cuenta_lenta` — las dos de rotación agrupan por CUENTA, no
   por IP, aunque lo que cuentan sean IPs distintas).
-- **`cuenta_involucrada`** — cuando el identificador corresponde a una
-  cuenta real: siempre en `toma_cuenta` y `viaje_imposible`; en
-  `fuerza_bruta_cuenta`, `fuerza_bruta_cuenta_lenta`, `ip_rotacion_cuenta` e
-  `ip_rotacion_cuenta_lenta` solo si existe; `null` en las señales cuyo
-  origen es una IP (`fuerza_bruta_ip`, `multi_cuenta_ip`,
-  `multi_cuenta_ip_lenta`).
+- **`cuentas_afectadas`** — **cambió de forma el 2026-09-15** (segunda
+  ronda): antes era `cuenta_involucrada`, un objeto o `null` (una sola
+  cuenta). Ahora es un ARRAY — cada cuenta a la que le corresponde ver la
+  alerta, con su propio `fecha_lectura` (viene de la tabla
+  `notificacion_fraude`, ver `endpoints.md` para el lado de usuario). Un
+  elemento en `toma_cuenta`/`viaje_imposible`/`fuerza_bruta_cuenta`/
+  `ip_rotacion_cuenta` y sus `_lenta` (cuando el identificador corresponde
+  a una cuenta real); **varios** elementos en `multi_cuenta_ip`/
+  `multi_cuenta_ip_lenta` (una por cada cuenta real que esa IP probó, no
+  solo la primera); array vacío en `fuerza_bruta_ip` (no tiene lista de
+  cuentas objetivo). Detalle de por qué en
+  `plan pendiente/notificacion-fraude-usuario.md`.
 - **`detalle`** — evidencia por tipo: conteos, la ventana, y una muestra
   (hasta 20) de identificadores o IPs vistos en `multi_cuenta_ip`,
   `multi_cuenta_ip_lenta`, `ip_rotacion_cuenta` e `ip_rotacion_cuenta_lenta`.
@@ -522,7 +533,9 @@ del proyecto). Dos filtros opcionales e independientes:
         "id_alerta_fraude": "16",
         "tipo_alerta": "fuerza_bruta_cuenta",
         "clave": "admin_mesh",
-        "cuenta_involucrada": { "id_usuario": "5", "usuario": "admin_mesh" },
+        "cuentas_afectadas": [
+          { "id_usuario": "5", "usuario": "admin_mesh", "fecha_lectura": null }
+        ],
         "detalle": { "fallos": 5, "ventana_segundos": 60 },
         "contador": 1,
         "ventana_inicio": "2026-09-11T04:18:00.000Z",
@@ -538,6 +551,33 @@ del proyecto). Dos filtros opcionales e independientes:
   }
 }
 ```
+
+Ejemplo con VARIOS afectados (`multi_cuenta_ip`, la IP probó 3 cuentas
+reales de las 4 que intentó):
+
+```json
+{
+  "id_alerta_fraude": "20",
+  "tipo_alerta": "multi_cuenta_ip",
+  "clave": "198.51.100.9",
+  "cuentas_afectadas": [
+    { "id_usuario": "3", "usuario": "comprador_sur", "fecha_lectura": null },
+    { "id_usuario": "5", "usuario": "admin_mesh", "fecha_lectura": "2026-09-15T19:41:02.000Z" },
+    { "id_usuario": "9", "usuario": "anillo_dos", "fecha_lectura": null }
+  ],
+  "detalle": {
+    "cuentas_distintas": 4,
+    "ventana_segundos": 300,
+    "identificadores": ["comprador_sur", "admin_mesh", "anillo_dos", "no.existe@mesh.test"]
+  },
+  "estado": "pendiente"
+}
+```
+
+(`no.existe@mesh.test` no resolvió a ninguna cuenta real, así que no
+aparece en `cuentas_afectadas` aunque sí en `detalle.identificadores` —
+son cosas distintas: `detalle` es evidencia cruda, `cuentas_afectadas` son
+las cuentas reales a las que se les notificó.)
 
 ### 400
 
@@ -866,7 +906,7 @@ motivo: si la alerta no existe → `404`; si existe pero ya no está pendiente
     "id_alerta_fraude": "18",
     "tipo_alerta": "fuerza_bruta_cuenta",
     "clave": "demo.fraude@mesh.test",
-    "cuenta_involucrada": null,
+    "cuentas_afectadas": [],
     "detalle": { "fallos": 5, "ventana_segundos": 60 },
     "contador": 1,
     "ventana_inicio": "2026-09-11T04:47:00.000Z",
@@ -920,6 +960,167 @@ Contra una alerta real y pendiente (`id_alerta_fraude: 18`,
 `npx tsc --noEmit` limpio. **Limpieza:** la alerta 18 se restauró a
 `pendiente` por SQL directo al terminar (era una alerta real, sembrada
 antes de esta ronda, no un dato descartable de la prueba).
+
+---
+
+## GET /perfil/alertas-fraude y PATCH /perfil/alertas-fraude/:id
+
+Segundo pedido del profesor sobre este módulo (después del disparo
+inmediato por login, más abajo): que las alertas de fraude también las vea
+el **usuario afectado**, no solo el admin — "por si cualquiera desea tomar
+acción". Detalle de diseño completo en
+`elementos Generales/plan pendiente/notificacion-fraude-usuario.md`
+(incluida la corrección de una ronda a otra: la primera versión asumía UN
+afectado por alerta, y es falso para `multi_cuenta_ip`/`multi_cuenta_ip_lenta`).
+
+Dos rutas en `PerfilController` (mismo lugar que `PATCH /perfil/contrasena`)
+— "mis datos", protegidas solo por `SesionGuard` (cualquier usuario
+logueado, no `@Roles(ID_ROL_ADMIN)`), nunca reciben un id de cuenta por
+parámetro: `id_usuario` siempre sale de la sesión. Leen/escriben la tabla
+`notificacion_fraude` (una fila por cada cuenta a la que le corresponde
+ver una alerta — no una columna en `alerta_fraude`), vía
+`FraudeLoginService`.
+
+**`GET /perfil/alertas-fraude`** — paginado (`pagina`/`limite`, mismas
+reglas que el resto del proyecto), filtrado a
+`notificacion_fraude.id_usuario = <la sesión>`, ordenado por
+`fecha_creacion` de la alerta, más nueva primero. Cada fila trae
+`fecha_lectura` de LA NOTIFICACIÓN de esa cuenta (`null` = no leída) — no
+de la alerta en sí, cada afectado tiene la suya. Aparecen las 6 señales de
+una sola cuenta (`fuerza_bruta_cuenta`, `ip_rotacion_cuenta` y sus
+`_lenta`, `toma_cuenta`, `viaje_imposible`) **y también**
+`multi_cuenta_ip`/`multi_cuenta_ip_lenta` si esta cuenta fue una de las
+probadas desde esa IP — a diferencia de la primera versión de esta ruta,
+ya no se quedan solo-admin. Solo `fuerza_bruta_ip` sigue sin llegarle a
+nadie (no trae una lista de cuentas objetivo).
+
+**El `detalle` de `multi_cuenta_ip`/`multi_cuenta_ip_lenta` viene
+redactado** para este endpoint: sin la lista `identificadores` (los
+correos/usuarios de las DEMÁS cuentas que esa misma IP también probó) —
+solo se conserva `cuentas_distintas` (el conteo) y el resto de campos.
+Decisión explícita del usuario: el afectado sabe que no fue el único
+blanco, sin enterarse de quiénes fueron los demás. Admin sigue viendo la
+lista completa en `GET /admin/fraude/alertas-login`.
+
+**`PATCH /perfil/alertas-fraude/:id`** — marca la fila de
+`notificacion_fraude` de esa cuenta como leída
+(`SET fecha_lectura = COALESCE(fecha_lectura, now())`, idempotente). El
+`ownership check` va en el propio `UPDATE`
+(`WHERE id_alerta_fraude = $1 AND id_usuario = $2` sobre
+`notificacion_fraude`) — si no existe esa notificación (la alerta no
+existe, o existe pero esta cuenta nunca estuvo entre los afectados), el
+mismo `404` genérico en los dos casos, para no filtrar si una alerta ajena
+existe.
+
+### 200 — GET
+
+Una cuenta con una alerta propia (`viaje_imposible`) y otra que además fue
+una de las probadas en un `multi_cuenta_ip` (`detalle` ya redactado, sin
+`identificadores`):
+
+```json
+{
+  "ok": true,
+  "mensaje": "Alertas de fraude obtenidas",
+  "payload": {
+    "alertas": [
+      {
+        "id_alerta_fraude": "20",
+        "tipo_alerta": "multi_cuenta_ip",
+        "clave": "198.51.100.9",
+        "detalle": { "cuentas_distintas": 4, "ventana_segundos": 300 },
+        "contador": 1,
+        "ventana_inicio": "2026-09-15T19:40:00.000Z",
+        "fecha_creacion": "2026-09-15T19:40:12.400Z",
+        "fecha_lectura": null
+      },
+      {
+        "id_alerta_fraude": "140",
+        "tipo_alerta": "viaje_imposible",
+        "clave": "usuario_afectado",
+        "detalle": { "distancia_km": 14313, "velocidad_kmh": 80520 },
+        "contador": 1,
+        "ventana_inicio": "2026-09-15T17:34:00.000Z",
+        "fecha_creacion": "2026-09-15T17:34:54.600Z",
+        "fecha_lectura": "2026-09-15T19:41:02.000Z"
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_alertas": 2,
+    "total_paginas": 1
+  }
+}
+```
+
+Sin `cuentas_afectadas` ni nada del lado admin (`estado`,
+`id_usuario_reviso`) — esa es toda la diferencia con la forma que ve el
+admin en `GET /admin/fraude/alertas-login`.
+
+### 200 — PATCH
+
+Misma forma que una fila del `GET`, con `fecha_lectura` ya puesta.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id de la alerta debe ser un numero entero", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una alerta con ese id para tu cuenta", "payload": null }
+```
+
+### 401
+
+Sin cookie de sesión válida — mismo comportamiento que el resto de `/perfil`.
+
+## Pruebas — hechas el 2026-09-15 (dos rondas)
+
+**Primera ronda** (columna `fecha_lectura_usuario`, superada por la
+segunda): 401 sin cookie, listado y paginación correctos, `PATCH`
+idempotente, 404 genérico ante alerta ajena / con `id_usuario NULL` / id
+inexistente, 400 con id no numérico. Detalle completo en
+`cambio_propuestas/2026-09-15_1500-notificacion-fraude-usuario.md`.
+
+**Segunda ronda** (la corrección: `notificacion_fraude`, multi-afectados),
+contra el servidor real, con 3 cuentas de prueba registradas para la
+ocasión (`multicuenta_test_a/b/c`) probadas desde la misma IP en un
+ataque `multi_cuenta_ip` real (más un cuarto identificador,
+`multicuenta_test_fantasma`, que no correspondía a ninguna cuenta):
+
+**Bug real encontrado y corregido en esta ronda:** `id_usuario` dentro de
+`cuentas_afectadas` salía como número JSON (`16`), no como texto —
+inconsistente con el resto de la API, donde todos los ids son string (para
+no perder precisión con bigint). `json_build_object` en Postgres serializa
+el valor tal cual es; hacía falta `nf.id_usuario::text` explícito dentro
+del `json_build_object` de `SQL_CUENTAS_AFECTADAS`. Corregido en las dos
+copias (`fraude-login.service.ts` y `fraude-login-exploracion.service.ts`)
+antes de seguir probando.
+
+| Caso | Resultado |
+|---|---|
+| Las 4 cuentas reales probadas desde la misma IP (incluida `prueba_admin_fraude`, que se sumó sin querer al loguearse para las pruebas) | la alerta `multi_cuenta_ip` nace con `cuentas_afectadas` con las 4 — `id_usuario` como string, ya corregido |
+| El identificador `multicuenta_test_fantasma` (no correspondía a ninguna cuenta) | **no** genera fila en `notificacion_fraude` ni aparece en `cuentas_afectadas`, aunque sí sigue en `detalle.identificadores` (evidencia de admin) |
+| `GET /perfil/alertas-fraude` de cada una de las 4 cuentas afectadas | cada una la trae, `detalle` SIN `identificadores`, con `cuentas_distintas` — 4 notificaciones de la misma alerta, una por cuenta |
+| Una de las 4 cuentas marca `PATCH /perfil/alertas-fraude/:id` | `200`, esa cuenta pasa a `fecha_lectura` puesta; las otras 3 siguen en `null` — confirma que la lectura es POR CUENTA, no compartida |
+| `GET /admin/fraude/alertas-login` después del `PATCH` anterior | la misma alerta muestra una cuenta con `fecha_lectura` y tres sin — admin ve quién ya se enteró |
+| Repetir el mismo ataque dentro de la misma ventana (`contador` 1→2, con un login exitoso de una de las cuentas afectadas) | `notificacion_fraude` sigue en exactamente 4 filas — el `xmax = 0` solo dispara en el `INSERT`, no en el `UPDATE` del `ON CONFLICT`, confirmado por SQL directo antes y después |
+| Ownership: una cuenta AJENA a la alerta (nunca probada desde esa IP) intenta `PATCH` | `404` "No existe una alerta con ese id para tu cuenta" |
+| Ownership, primer intento de esta prueba, descartado | se probó por error con una cuenta que en realidad SÍ era una de las afectadas — dio `200` correctamente (no es el caso de ownership que se quería probar); se repitió con una cuenta genuinamente ajena para el resultado de arriba |
+| Alerta de una sola cuenta, sembrada ANTES de que existiera `notificacion_fraude` (`toma_cuenta`, de la primera ronda) | `cuentas_afectadas: []` — no hay backfill retroactivo, decisión aceptada desde el plan, no es un bug |
+| Alerta de una sola cuenta, sembrada DESPUÉS (`fuerza_bruta_cuenta` fresca, 5 fallos contra `multicuenta_test_c`) | `cuentas_afectadas` con exactamente un elemento — confirma el camino de una-sola-cuenta sigue intacto |
+| `fuerza_bruta_ip` (sin lista de cuentas objetivo) | `cuentas_afectadas: []` en admin; nunca aparece en ningún `GET` de usuario |
+
+Confirmado además, por SQL directo, que marcar `notificacion_fraude.fecha_lectura`
+NO toca `alerta_fraude.fecha_actualizacion` ni `id_estado_alerta_fraude` —
+el estado de revisión del admin y la lectura de cada usuario afectado
+quedan completamente independientes, igual que en la primera ronda.
+
+`npx tsc --noEmit` limpio. Sin errores ni warnings en el log del servidor
+durante toda la ronda.
 
 ---
 
@@ -1033,3 +1234,207 @@ PostgreSQL y nunca cargada al grafo) — un caso de deriva real, no sembrado.
 | Neo4j caído | `503` "No se pudo conectar con Neo4j"; se recupera solo al volver |
 
 `npx tsc --noEmit` y `eslint` limpios. `cambio_propuestas/2026-09-03_2359-conciliacion-grafo.md`.
+
+---
+
+# Anillos de fraude en reseñas -- PERSISTIDOS (2026-09-17/18)
+
+Tres rutas nuevas, **controller y servicio aparte** de todo lo de arriba a
+propósito (pedido explícito): `AdminFraudeAnillosController` +
+`FraudeAnillosPersistidosService`
+(`src/controllers/admin/admin-fraude-anillos.controller.ts` +
+`src/services/fraude/fraude-anillos-persistidos.service.ts`). **Solo
+admin**, mismo criterio que el resto del panel.
+
+Estas rutas leen la tabla nueva `anillo_fraude`/`anillo_fraude_resena` (ver
+`plan pendiente/anillos-fraude-persistencia.sql`), que llena
+`AnillosDetectorService` -- el worker de 15 min y su chequeo acotado por
+reseña, que corren A.1 (ciclos) y A.2 (mismo producto) sobre una ventana de
+**60 días**. **No es lo mismo que `GET /admin/fraude/anillos`** (arriba en
+este archivo): esa sigue siendo el panel EN VIVO contra Neo4j (A.1/A.2/A.4,
+sin ventana de tiempo, sin persistir nada). Las dos conviven, cada una su
+propia vista del mismo dominio.
+
+A.4 (misma dirección) **no** está en esta tabla -- no depende de reseñas,
+así que no tiene un disparador natural con el mecanismo actual. Ver
+`plan pendiente/anillos-fraude-persistencia.md`.
+
+## GET /admin/fraude/anillos-persistidos
+
+```
+GET /admin/fraude/anillos-persistidos?pagina=1&limite=20&estado=pendiente&tipo=ciclo
+```
+
+Paginación por número de página (`validarLimite`/`validarPagina`, mismas
+reglas que el resto del proyecto). Dos filtros opcionales e independientes:
+
+- `estado=pendiente|revisada|descartada` -- reusa el mismo catálogo y las
+  mismas funciones de validación que `alertas-login`
+  (`validarFiltroEstadoAlerta`), sin duplicar nada.
+- `tipo=mutuo|ciclo|reiterado`.
+- sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
+  ordenados por `ultima_vez_confirmado_activo DESC` (los que siguen activos
+  primero, no por cuándo se crearon).
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Anillos obtenidos",
+  "payload": {
+    "anillos": [
+      {
+        "id_anillo_fraude": "19",
+        "tipo": "reiterado",
+        "clave": "9-10",
+        "cuentas": [
+          { "id_usuario": "9", "usuario": "anillo_dos" },
+          { "id_usuario": "10", "usuario": "anillo_uno" }
+        ],
+        "resenas": [87, 88],
+        "estado": "pendiente",
+        "fecha_creacion": "2026-09-18T06:21:06.153Z",
+        "ultima_vez_confirmado_activo": "2026-09-18T06:21:06.153Z",
+        "fecha_actualizacion": "2026-09-18T06:21:06.153Z"
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_anillos": 2,
+    "total_paginas": 1
+  }
+}
+```
+
+`cuentas` **no es una tabla propia** -- no existe `anillo_fraude_cuenta`:
+sale de un `UNION` sobre `resena.id_usuario`/`id_usuario_vendedor`, unido
+contra `usuarios`, para las reseñas listadas en `resenas`. Para
+`mutuo`/`ciclo`/`reiterado` toda cuenta del anillo es autor o vendedor de
+alguna de sus reseñas, así que guardarlas aparte sería redundante.
+`resenas` son los ids de `resena` (los mismos que en Neo4j) que son la
+evidencia -- ver `detalle-grafo` abajo para su contenido real.
+
+**Sin ningún campo JSON de evidencia** (a diferencia de `alerta_fraude.detalle`)
+y **sin ninguna notificación a las cuentas del anillo** -- decisión
+explícita: en un anillo de reseñas la cuenta señalada es la SOSPECHOSA, no
+la víctima (al revés que en fraude de login), así que avisarle le daría la
+oportunidad de evadir la detección. El caso es 100% interno para revisión
+de un admin. Detalle completo del razonamiento en
+`plan pendiente/anillos-fraude-persistencia.md`.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
+{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado", "payload": null }
+```
+
+### 401 / 403
+
+Mismo comportamiento que el resto del panel: sin sesión -> `401`; sesión
+válida pero no admin -> `403`.
+
+## PATCH /admin/fraude/anillos-persistidos/:id
+
+```
+PATCH /admin/fraude/anillos-persistidos/19
+Content-Type: application/json
+
+{ "estado": "revisada" }
+```
+
+Mismo criterio exacto que `PATCH /admin/fraude/alertas-login/:id`: solo
+admite `revisada`/`descartada` como destino, y **solo desde `pendiente`** --
+un anillo ya revisado o descartado no se puede volver a mover desde esta
+ruta. Devuelve el anillo actualizado (misma forma que el listado).
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "El anillo ya no está pendiente de revisión", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un anillo con ese id", "payload": null }
+```
+
+## GET /admin/fraude/anillos-persistidos/:id/detalle-grafo
+
+El detalle REAL de un anillo ya persistido -- **no vuelve a correr A.1/A.2**
+(ya se sabe cuáles son las reseñas de este anillo, en
+`anillo_fraude_resena`), solo le pide a Neo4j esas reseñas puntuales con su
+autor, vendedor, producto, fecha y calificación.
+
+```
+GET /admin/fraude/anillos-persistidos/18/detalle-grafo
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Detalle del anillo obtenido",
+  "payload": {
+    "id_anillo_fraude": "18",
+    "tipo": "ciclo",
+    "clave": "9-10-11",
+    "resenas": [
+      {
+        "id_resena": 87,
+        "autor": "anillo_uno",
+        "correo_autor": "anillo.uno@mesh.com",
+        "vendedor": "anillo_dos",
+        "correo_vendedor": "anillo.dos@mesh.com",
+        "producto": "Cartas al puerto seco",
+        "calificacion": 5,
+        "fecha": "2026-03-08T15:12:00Z"
+      }
+    ]
+  }
+}
+```
+
+`404` "No existe un anillo con ese id" si el id no existe. `503` "No se
+pudo conectar con Neo4j" si el grafo no responde en 15 s.
+
+## Pruebas -- hechas el 2026-09-17/18
+
+Contra el servidor y las bases reales (`mesh-postgres`, `mesh-neo4j`),
+`npm run start:dev`, sesión real de `admin_mesh` (HTTP de verdad, con
+`curl` y cookie de sesión -- no solo llamadas directas al servicio). Se
+usó el anillo REAL ya sembrado en el dataset (cuentas
+`anillo_uno`/`anillo_dos`/`anillo_tres`, reseñas 87-90) para no fabricar
+datos falsos -- es de marzo 2026, fuera de la ventana de 60 días, así que
+se ensanchó la ventana solo en el script de prueba (en runtime, sin tocar
+el código fuente) para tener datos que persistir.
+
+| Caso | Resultado |
+|---|---|
+| `GET .../anillos-persistidos` sin filtros | `200`, los 2 anillos (`ciclo` 9-10-11, `reiterado` 9-10), con `cuentas` y `resenas` correctos |
+| `GET .../anillos-persistidos?tipo=ciclo` | `200`, `total_anillos: 1` |
+| `GET .../anillos-persistidos?tipo=no-existe` | `400` con los 3 tipos válidos |
+| `GET .../18/detalle-grafo` | `200`, las 3 reseñas del ciclo con autor/vendedor/producto/fecha reales, ordenadas por fecha |
+| `GET .../999999999/detalle-grafo` | `404` |
+| `PATCH .../19 {"estado":"descartada"}` | `200`, el anillo pasa a `descartada` |
+| `PATCH .../19` otra vez | `409` "El anillo ya no está pendiente de revisión" |
+| `PATCH .../999999999 {"estado":"revisada"}` | `404` |
+| `GET .../anillos-persistidos?estado=pendiente&tipo=ciclo` (tras marcar) | `total_anillos: 0` -- el filtro ya no lo trae |
+| Sin cookie de sesión | `401` |
+| Sesión de `compradora.norte@mesh.com` (rol comprador) | `403` |
+
+También se probó (por servicio directo, sin HTTP) que dos `registrarAnilloFraude`
+concurrentes a la misma `clave` y que `detectar()`+`detectarInmediato()`
+corriendo al mismo tiempo sobre el mismo anillo no duplican fila -- ver
+`cambio_propuestas/2026-09-18_0015-anillos-fraude-persistencia.md`.
+
+`npx tsc --noEmit` y `eslint` limpios sobre los ocho archivos nuevos/tocados
+(`controllers/admin/admin-fraude-anillos.controller.ts`,
+`services/fraude/fraude-anillos-persistidos.service.ts`,
+`dto/paginar-anillos-fraude.ts`, `dto/marcar-anillo-fraude.ts`,
+`models/anillo-fraude.ts`, `helpers/validaciones-anillo-fraude.ts`,
+`app.module.ts`). Datos de prueba limpiados al final: `anillo_fraude`/
+`anillo_fraude_resena` quedaron vacías, sin tocar `resena` ni el grafo.

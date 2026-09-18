@@ -42,6 +42,20 @@ interface BucketConMuestra {
  * cada corrida mientras el patron siga activo. Truncar a la hora da una
  * alerta por hora persistente sin perder la reaparicion si el ataque sigue
  * horas despues.
+ *
+ * Ademas del worker de 15 min, expone `evaluarInmediato()`: la llama
+ * `UsuarioController` justo despues de cada login (ya con el evento
+ * sincronizado en Elasticsearch via
+ * `EventosAutenticacionSyncService.sincronizarAhora()`), y corre una
+ * version ACOTADA de las mismas tres senales -- filtrada a la cuenta y/o
+ * la IP de ESE login, no a las 24h completas de todas las cuentas. Mismo
+ * `idTipoAlerta` y misma hora truncada que la version de abajo: si el
+ * disparo inmediato y el worker de 15 min coinciden en la misma hora, se
+ * juntan en una sola fila via el `ON CONFLICT` de `registrarAlertaFraude`
+ * en vez de duplicar -- es la misma senal, detectada mas rapido, no una
+ * distinta. El worker de 15 min sigue de respaldo tal cual (cubre lo que
+ * el disparo inmediato se pierda: una corrida concurrente saltada, Elastic
+ * caido en ese instante).
  */
 @Injectable()
 export class FraudeLoginRetrospectivoService {
@@ -268,6 +282,191 @@ export class FraudeLoginRetrospectivoService {
       });
     }
   }
+
+  // ---------------------------------------------------------------------
+  // Version acotada -- un solo login, no las 24h de todas las cuentas.
+  // Mismos umbrales y mismo tipo de alerta que los tres metodos de arriba,
+  // ver el comentario de clase.
+  // ---------------------------------------------------------------------
+
+  /** Entrada unica para `UsuarioController`: los tres chequeos acotados a UN login. */
+  async evaluarInmediato(datos: {
+    identificador: string | null;
+    ip: string | null;
+    idUsuario: string | null;
+  }): Promise<void> {
+    try {
+      await Promise.all([
+        datos.identificador != null
+          ? this.evaluarFuerzaBrutaCuentaLentaAcotado(
+              datos.identificador,
+              datos.idUsuario,
+            )
+          : Promise.resolve(),
+        datos.ip != null
+          ? this.evaluarMultiCuentaIpLentaAcotado(datos.ip)
+          : Promise.resolve(),
+        datos.identificador != null
+          ? this.evaluarIpRotacionCuentaAcotado(
+              datos.identificador,
+              datos.idUsuario,
+            )
+          : Promise.resolve(),
+      ]);
+    } catch (error) {
+      this.logger.warn(
+        `chequeo acotado de patrones lentos interrumpido: ${mensajeCorto(error)}`,
+      );
+    }
+  }
+
+  private async evaluarFuerzaBrutaCuentaLentaAcotado(
+    identificador: string,
+    idUsuario: string | null,
+  ): Promise<void> {
+    const { count } = await elasticClient.count({
+      index: INDICE,
+      query: {
+        bool: {
+          filter: [
+            { term: { 'tipo.keyword': 'login' } },
+            { term: { 'resultado.keyword': 'fallo' } },
+            { term: { 'identificador_intentado.keyword': identificador } },
+            {
+              range: {
+                fecha: { gte: FraudeLoginRetrospectivoService.VENTANA_ELASTIC },
+              },
+            },
+          ],
+        },
+      },
+    });
+
+    if (
+      count >= FraudeLoginRetrospectivoService.UMBRAL_FUERZA_BRUTA_CUENTA_LENTA
+    ) {
+      await registrarAlertaFraude({
+        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA_LENTA,
+        clave: identificador,
+        idUsuario,
+        detalle: { fallos: count, ventana_horas: 24 },
+        ventanaInicio: horaTruncada(),
+      });
+    }
+  }
+
+  private async evaluarMultiCuentaIpLentaAcotado(ip: string): Promise<void> {
+    const respuesta = await elasticClient.search<
+      unknown,
+      { cardinalidad: { value: number }; muestra: BucketDeMuestra }
+    >({
+      index: INDICE,
+      size: 0,
+      query: {
+        bool: {
+          filter: [
+            { term: { 'tipo.keyword': 'login' } },
+            { term: { 'ip.keyword': ip } },
+            {
+              range: {
+                fecha: { gte: FraudeLoginRetrospectivoService.VENTANA_ELASTIC },
+              },
+            },
+          ],
+        },
+      },
+      aggs: {
+        cardinalidad: {
+          cardinality: { field: 'identificador_intentado.keyword' },
+        },
+        muestra: {
+          terms: {
+            field: 'identificador_intentado.keyword',
+            size: FraudeLoginRetrospectivoService.TAMANO_MUESTRA,
+          },
+        },
+      },
+    });
+
+    const cuentasDistintas = respuesta.aggregations?.cardinalidad.value ?? 0;
+    if (
+      cuentasDistintas >=
+      FraudeLoginRetrospectivoService.UMBRAL_MULTICUENTA_IP_LENTA
+    ) {
+      await registrarAlertaFraude({
+        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP_LENTA,
+        clave: ip,
+        idUsuario: null,
+        detalle: {
+          cuentas_distintas: cuentasDistintas,
+          ventana_horas: 24,
+          identificadores: (respuesta.aggregations?.muestra.buckets ?? []).map(
+            (b) => b.key,
+          ),
+        },
+        ventanaInicio: horaTruncada(),
+      });
+    }
+  }
+
+  private async evaluarIpRotacionCuentaAcotado(
+    identificador: string,
+    idUsuario: string | null,
+  ): Promise<void> {
+    const respuesta = await elasticClient.search<
+      unknown,
+      { cardinalidad: { value: number }; muestra: BucketDeMuestra }
+    >({
+      index: INDICE,
+      size: 0,
+      query: {
+        bool: {
+          filter: [
+            { term: { 'tipo.keyword': 'login' } },
+            { term: { 'identificador_intentado.keyword': identificador } },
+            {
+              range: {
+                fecha: { gte: FraudeLoginRetrospectivoService.VENTANA_ELASTIC },
+              },
+            },
+          ],
+        },
+      },
+      aggs: {
+        cardinalidad: { cardinality: { field: 'ip.keyword' } },
+        muestra: {
+          terms: {
+            field: 'ip.keyword',
+            size: FraudeLoginRetrospectivoService.TAMANO_MUESTRA,
+          },
+        },
+      },
+    });
+
+    const ipsDistintas = respuesta.aggregations?.cardinalidad.value ?? 0;
+    if (
+      ipsDistintas >= FraudeLoginRetrospectivoService.UMBRAL_IP_ROTACION_CUENTA
+    ) {
+      await registrarAlertaFraude({
+        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA_LENTA,
+        clave: identificador,
+        idUsuario,
+        detalle: {
+          ips_distintas: ipsDistintas,
+          ventana_horas: 24,
+          ips: (respuesta.aggregations?.muestra.buckets ?? []).map(
+            (b) => b.key,
+          ),
+        },
+        ventanaInicio: horaTruncada(),
+      });
+    }
+  }
+}
+
+/** Un bucket de agregacion `terms` usado solo para la muestra de evidencia. */
+interface BucketDeMuestra {
+  buckets: { key: string }[];
 }
 
 /** La hora actual truncada a en punto -- la granularidad de dedup de este worker. */
