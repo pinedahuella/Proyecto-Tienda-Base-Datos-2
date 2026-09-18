@@ -13,8 +13,8 @@ import { FraudeLoginExploracionService } from '../../services/fraude-login/fraud
  * pendiente) y punto 5 de
  * `elementos Generales/plan pendiente/fraude-login-eventos.md`. Este modulo
  * (fraude por IP/cuenta en el login) es solo Elasticsearch + Redis; no toca
- * el panel de anillos de resenas (`FraudeController`, Neo4j), que sigue
- * intacto en su propio controller.
+ * el panel de anillos de resenas (`AdminFraudeAnillosController`, Neo4j),
+ * que vive en su propio controller.
  *
  * `GET /admin/fraude/eventos-login` -- los logs crudos de
  * `mesh_eventos_autenticacion` (Elasticsearch), paginados y filtrados.

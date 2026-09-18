@@ -120,10 +120,9 @@ correr `etl/cargar_grafo.sh`). Timeout de 6 s -> 503.
 ```
 
 > El **panel de fraude** que consume este grafo
-> (`GET /admin/fraude/anillos`, solo admin, EN VIVO sin persistir), su
-> versión **persistida** (`GET`/`PATCH /admin/fraude/anillos-persistidos` y
-> `GET .../:id/detalle-grafo`, controller y servicio aparte, alimentados por
-> el worker `AnillosDetectorService`), la **conciliación** del grafo con
+> (`GET`/`PATCH /admin/fraude/alertas-resenas` y `GET .../:id/detalle-grafo`,
+> solo admin, controller y servicio aparte, alimentados por el worker
+> `AnillosDetectorService`), la **conciliación** del grafo con
 > PostgreSQL (`GET /admin/grafo/conciliacion`, solo admin) y las **alertas
 > de fraude de login** -- nueve señales: fuerza bruta / multi-cuenta /
 > rotación de IP con contadores de Redis, más toma de cuenta, viaje

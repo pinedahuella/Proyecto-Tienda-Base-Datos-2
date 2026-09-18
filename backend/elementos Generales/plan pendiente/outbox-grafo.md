@@ -15,6 +15,9 @@
 >   `estadoCola()` que nunca lanza (degrada a `null` si Postgres falla o
 >   `evento_grafo` no existe). Probado en vivo (pendientes, apartados, tabla
 >   ausente, Neo4j caído). Ver `endpoints-fraude.md`.
+>   **Eliminado el 2026-09-18**, junto con el panel EN VIVO
+>   `GET /admin/fraude/anillos` que era su único consumidor (ver
+>   `plan pendiente/anillos-fraude-persistencia.md`).
 >
 > FALTA (fuera de `backend/`, le toca al compañero):
 > - La migración real `015` + el cambio del ETL (`etl/cargar_grafo.sh`

@@ -1,26 +1,27 @@
 # Endpoints del panel de fraude
 
-Cinco rutas de admin, más dos rutas de usuario (agregadas 2026-09-15, ver
-más abajo). Las dos primeras rutas de admin son sobre el grafo de
-**Neo4j**; las otras tres sobre **PostgreSQL, Redis y Elasticsearch**, sin
-tocar el grafo — y ese segundo grupo (fraude por IP/cuenta en el login) es
-**solo Elasticsearch + Redis**, no toca Neo4j:
+Seis rutas de admin, más dos rutas de usuario (agregadas 2026-09-15, ver
+más abajo). El panel de fraude en reseñas y la conciliación tocan el grafo
+de **Neo4j**; el de fraude de login es **solo Elasticsearch + Redis**, sin
+tocar el grafo:
 
-- **`GET /admin/fraude/anillos`** — el **panel de manipulación de reseñas**
-  de la Entrega 2 (Bloque 4 de `BACKEND-PENDIENTE.md`): los grupos de
-  cuentas cuyo patrón de calificaciones no se explica por el uso normal de
-  la tienda.
+- **`GET`/`PATCH /admin/fraude/alertas-resenas` y
+  `GET /admin/fraude/alertas-resenas/:id/detalle-grafo`** — el **panel de
+  manipulación de reseñas** de la Entrega 2 (Bloque 4 de
+  `BACKEND-PENDIENTE.md`): los anillos de cuentas cuyo patrón de
+  calificaciones no se explica por el uso normal de la tienda, detectados
+  por un worker y persistidos en PostgreSQL. Nombrado en paralelo con
+  `alertas-login`. Ver la sección "Anillos de fraude en reseñas", al final.
 - **`GET /admin/grafo/conciliacion`** — la **red de seguridad** de la
   sincronización del grafo: compara los conteos de PostgreSQL (la verdad)
-  contra Neo4j (la proyección) y avisa de la deriva. Ver la sección al
-  final.
+  contra Neo4j (la proyección) y avisa de la deriva. Ver la sección
+  dedicada.
 - **`GET /admin/fraude/alertas-login`** — las **alertas de fraude de
   login**: nueve señales, guardadas todas en PostgreSQL — cuatro inmediatas
   con contadores de Redis en el camino del login (fuerza bruta, multi-cuenta,
   rotación de IP) y cinco consultadas contra Elasticsearch (toma de cuenta,
   viaje imposible, y tres patrones lentos/repartidos que una ventana de
-  Redis de minutos no puede ver). Ver la sección dedicada, después de
-  "anillos".
+  Redis de minutos no puede ver). Ver la sección dedicada.
 - **`GET /admin/fraude/eventos-login`** — el **explorador manual** de los
   logs crudos de autenticación, contra Elasticsearch directamente (no
   contra Mongo, que es el origen pero no el que se consulta). Filtros
@@ -34,19 +35,19 @@ tocar el grafo — y ese segundo grupo (fraude por IP/cuenta en el login) es
   afectado ve y marca como leídas las alertas sobre su propia cuenta. Ver
   la sección dedicada, después de "alertas-login".
 
-> **Estado (2026-08-30, sincronización agregada 2026-09-04): ruta
-> implementada y PROBADA en vivo.** Contra `mesh-neo4j` cargado (150 nodos):
-> autorización 401/403/403/403/200, `anillos: []` con el grafo real, y los 4
-> grupos correctos con un anillo sembrado
-> (`neo4j/consultas/siembra.cypher`). Neo4j caído → 503 en 0.3 s. Desde
-> 2026-09-04 la respuesta también trae `sincronizacion` (qué tan al día está
-> el grafo respecto a PostgreSQL) — ver "Pruebas".
+> **2026-09-18: se eliminó el panel EN VIVO `GET /admin/fraude/anillos`**
+> (`FraudeController.anillos()`, `FraudeService`, `models/fraude.ts`) —
+> era la prueba de concepto de la Entrega 2, sin persistencia. Con los
+> anillos ya detectados por worker y persistidos (sección "Anillos de
+> fraude en reseñas"), ese código quedó sin uso y se borró junto con
+> `GrafoSyncService.estadoSincronizacion()` (el dato auxiliar de
+> sincronización que solo consumía esa ruta). La documentación de esa
+> ruta vieja, incluidas sus pruebas del 2026-08-30/09-04, queda solo en
+> `cambio_propuestas/` como registro histórico.
 
-Código: `src/controllers/fraude/fraude.controller.ts` +
-`src/services/fraude/fraude.service.ts`. Cliente Neo4j:
-`src/database/neo4j.ts` (helpers `consultarGrafo` en modo **READ** para el
-panel, y `ejecutarGrafo` en modo **WRITE** para el worker del outbox — ver
-abajo). Pantalla que la consume: `frontend/src/lib/PanelFraude.svelte`.
+Cliente Neo4j: `src/database/neo4j.ts` (helpers `consultarGrafo` en modo
+**READ**, y `ejecutarGrafo` en modo **WRITE** para el worker del outbox —
+ver abajo).
 
 ---
 
@@ -77,270 +78,22 @@ comprueba que el worker no dejó nada atrás. Modelo:
   `tiene_calle` (una dirección sin calle no identifica una casa, solo una
   ciudad).
 
-Si el grafo está vacío (`GET /grafo` devuelve `nodos: 0`), esta ruta
-responde `200` con `anillos: []` y `analizado` en ceros — no falla, pero no
-sirve de nada hasta que se corra el ETL.
+Si el grafo está vacío (`GET /grafo` devuelve `nodos: 0`), las consultas de
+detección y de conciliación responden igual sin fallar, simplemente no
+encuentran nada — no sirve de nada hasta que se corra el ETL.
 
 ---
 
-## GET /admin/fraude/anillos
-
-**Solo admin** (`SesionGuard` + `@Roles(ID_ROL_ADMIN)`, ambos en la clase
-del controlador). **No la tienda**: la tienda es un vendedor más, y
-enseñarle quién la está calificando de forma sospechosa le entrega justo la
-lista que no debería ver. Sin cuerpo, sin query params.
-
-```
-GET /admin/fraude/anillos
-```
-
-### Qué hace por dentro
-
-Corre **cuatro consultas Cypher en paralelo** (adaptadas de
-`neo4j/consultas/A1..A4`, que están escritas para el visor de línea de
-comandos y no se pueden ejecutar tal cual desde el driver). La lógica de
-detección es la misma; el `RETURN` arma ya la forma del payload.
-
-| Consulta | Qué busca | `tipo` que produce |
-|---|---|---|
-| **A.1** grupos cíclicos | Camino cerrado `ESCRIBIO`/`CALIFICA_A` de 4 a 8 saltos. Ancla cada anillo en su cuenta de menor id (no lo cuenta una vez por rotación) y exige cuentas distintas | 2 cuentas → `mutuo`; 3+ → `ciclo` |
-| **A.2** par sobre mismo producto | Dos cuentas que se califican en **los dos sentidos** sobre el **mismo producto** (la frase literal del enunciado) | `reiterado` |
-| **A.4** misma dirección | Cuentas distintas en un nodo `:Direccion` **con calle**. Adjunta las reseñas que esas cuentas se escribieron entre sí, si las hay | `direccion` |
-| **conteo** | `count` de `:Usuario`, `:Resena` y todas las relaciones | (llena `analizado`) |
-
-**Deduplicación:** el mismo par puede llegar por A.1 y por A.2 (o por varias
-rotaciones del mismo ciclo). Se juntan por la clave "ids ordenados": la
-evidencia se acumula y `reiterado` **tapa** a `mutuo` (misma pareja, señal
-más fuerte). Un grupo `direccion` **siempre** es su propia entrada, aunque
-toque a las mismas cuentas: es un hallazgo distinto.
-
-**`senales`** — frases redactadas por el backend a partir de lo que
-devuelve el grafo, sin volver a consultarlo:
-
-- ciclo / mutuo / reiterado: el camino cerrado, todas las notas 5★ (o ≥4★),
-  la ventana de tiempo entre la primera y la última reseña (si es ≤ 72 h), y
-  si todas las cuentas se crearon el mismo día (`fecha_alta` del nodo).
-- direccion: la dirección compartida, mismo día de alta, y si además se
-  califican entre sí.
-
-**Orden:** más señales primero; a igualdad, más reseñas.
-
-### 200
-
-```json
-{
-  "ok": true,
-  "mensaje": "Analisis completado",
-  "payload": {
-    "anillos": [
-      {
-        "id": "ciclo-11-12-13",
-        "tipo": "ciclo",
-        "saltos": 6,
-        "cuentas": [
-          {
-            "id_usuario": 11,
-            "usuario": "ventas_altiplano",
-            "correo_electronico": "ventas.altiplano@mesh.com",
-            "nombre": "Rodrigo",
-            "apellido": "Similox"
-          }
-        ],
-        "productos": [
-          { "id_producto": 12, "nombre": "Laptop Ambar Campus 14" }
-        ],
-        "resenas": [
-          {
-            "id_resena": 901,
-            "autor": "ventas_altiplano",
-            "vendedor": "ventas_bocacosta",
-            "producto": "Laptop Ambar Campus 14",
-            "calificacion": 5,
-            "fecha": "2026-07-01T09:00:00Z"
-          }
-        ],
-        "senales": [
-          "La calificacion forma un circulo cerrado entre 3 cuentas: ventas_altiplano -> ventas_bocacosta -> ventas_izabal -> ventas_altiplano",
-          "Las 3 calificaciones son de 5 estrellas",
-          "Las 3 resenas se escribieron en un intervalo de 40 minutos"
-        ]
-      }
-    ],
-    "analizado": { "cuentas": 10, "resenas": 86, "relaciones": 272 },
-    "sincronizacion": {
-      "ultima_sincronizacion": "2026-09-04T06:21:57.459Z",
-      "pendientes": 0,
-      "apartados": 0
-    }
-  }
-}
-```
-
-**Contra los datos sembrados de hoy `anillos` es `[]`** — y eso es lo
-**correcto**: no hay anillos reales (0 pares mutuos, 0 autocalificaciones,
-verificado en PostgreSQL). El frontend, ante `[]` + `analizado`, dice
-"se recorrieron N cuentas, M reseñas… sin encontrar nada", que es un
-resultado, no un error. Para ver la ruta devolver anillos hay que sembrar
-uno con `neo4j/correr_fraude.sh` (lo del compañero).
-
-- `cuentas[].nombre` / `apellido` salen como `""` si el nodo no los trae.
-- `resenas[].fecha` es lo que devuelve `toString(datetime)` del grafo (ISO
-  8601, normalmente con `Z`). El frontend hace `new Date(...)`.
-- `productos` se deduce de `resenas` (los productos distintos que aparecen).
-- **`sincronizacion`** — que tan al día está el grafo respecto a
-  PostgreSQL, para que el panel no enseñe un análisis sobre datos
-  incompletos sin decirlo (mismos números que `cola` y
-  `ultima_sincronizacion` de `GET /admin/grafo/conciliacion`, calculados con
-  la misma consulta a `evento_grafo`):
-  - `ultima_sincronizacion`: `max(procesado_en)` del outbox, o `null` si
-    nada se ha procesado todavía.
-  - `pendientes`: eventos sin aplicar (`procesado_en IS NULL`,
-    `intentos < 5`).
-  - `apartados`: eventos que fallaron 5 veces y no se reintentan más.
-  - **`sincronizacion` completo puede salir `null`** — si PostgreSQL no
-    respondió a tiempo (3 s) o si `evento_grafo` todavía no existe (falta la
-    migración `015`). Es un dato auxiliar: cuando falla, el resto de la
-    respuesta (`anillos`, `analizado`) sigue igual, no se cae el endpoint.
-    Ver `GrafoSyncService.estadoSincronizacion()`.
-
-### 401
-
-```json
-{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
-{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
-```
-
-### 403
-
-```json
-{ "ok": false, "mensaje": "No tienes permiso para hacer esto", "payload": null }
-```
-
-Sesión válida pero no es admin (un comprador, un vendedor, o **la tienda**).
-
-### 503
-
-```json
-{ "ok": false, "mensaje": "No se pudo conectar con Neo4j", "payload": null }
-```
-
-Neo4j no responde, o el análisis no terminó en 15 s.
-
-### 500
-
-```json
-{ "ok": false, "mensaje": "No se pudo completar el analisis de fraude", "payload": null }
-```
-
-Cualquier otra cosa (por ejemplo un error de sintaxis de Cypher —
-`Neo.ClientError.Statement.*` — que sería un bug del backend, no una caída
-de la base).
-
----
-
-## Lo que NO se hizo en esta versión (y por qué)
-
-- **A.3 (ráfagas) y A.5 (puntaje compuesto) como consultas propias.** El
-  contrato del frontend solo define cuatro `tipo` (`ciclo`, `mutuo`,
-  `reiterado`, `direccion`), así que A.3 no tiene dónde encajar como
-  "anillo". Su señal —"muchas notas en pocos días"— se cubre desde el
-  backend con la ventana de 72 h calculada sobre las reseñas del grupo.
-  A.5 (el ranking por número de señales) se replica con el `sort` final.
-  Si el equipo quiere las consultas Cypher A.3/A.5 exactas, es un cambio
-  acotado en `fraude.service.ts`.
-- **El cruce "ninguna de estas cuentas compró el producto que calificó".**
-  Es, según `neo4j/README.md`, la señal de fraude más fuerte, pero vive en
-  PostgreSQL (`pedido` / `pedido_producto`), no en el grafo. Añadirla es
-  una consulta a Postgres con los `id_resena` encontrados. Se dejó fuera a
-  propósito para no acoplar este servicio a Postgres en la primera versión
-  — **conviene discutirlo**, porque el enunciado la menciona.
-- **`analizado.relaciones`** cuenta **todas** las relaciones del grafo
-  (`ESCRIBIO` + `CALIFICA_A` + `SOBRE` + `VIVE_EN`). Si se prefiere contar
-  solo las de reseña (× 3 por reseña), es un cambio de una línea en
-  `CYPHER_CONTEO`.
-
----
-
-## Lo que le toca al compañero (fuera de `backend/`)
-
-Nada de esquema. Solo asegurarse de que **el grafo esté cargado** antes de
-la demo:
-
-1. `./etl/cargar_grafo.sh` (desde Git Bash) — carga el grafo desde
-   PostgreSQL. `GET /grafo` tiene que dejar de decir `nodos: 0`.
-2. Para la presentación, como los datos reales no tienen anillo:
-   `bash neo4j/correr_fraude.sh` siembra un anillo de mentira (cuentas con
-   id negativo, etiqueta `:Prueba`), y lo borra al final. Con él sembrado,
-   `GET /admin/fraude/anillos` debería devolver esos grupos.
-
-El backend **no** dispara el ETL ni reconstruye el grafo: es un script de
-shell que se corre a mano, y el grafo es de solo lectura para el backend.
-
----
-
-## Pruebas — hechas el 2026-08-30
-
-Contra los contenedores reales (`mesh-postgres`, `mesh-neo4j` con el grafo
-cargado, 150 nodos), backend en `npm run start:dev`. Scripts en el
-scratchpad, no en el repo.
-
-### Autorización
-
-| Sesión | Resultado |
-|---|---|
-| Sin sesión | `401` "No hay sesion activa" |
-| `comprador_sur` (rol comprador) | `403` |
-| `mesh_tienda` (la tienda, rol vendedor) | `403` |
-| `ventas_norte` (rol vendedor) | `403` |
-| `admin_mesh` (rol admin) | `200` |
-
-### Grafo real, sin sembrar
-
-`200`, `anillos: []`, `analizado: { cuentas: 8, resenas: 86, relaciones: 260 }`.
-Es el resultado **correcto**: los datos sembrados no tienen anillo.
-
-### Con un anillo de mentira sembrado (`neo4j/consultas/siembra.cypher`)
-
-Devuelve **4 grupos**, ninguno repite cuenta:
-
-| `tipo` | cuentas | `saltos` | reseñas | señales clave |
-|---|---|---|---|---|
-| `direccion` | anillo_a..d (4) | 2 | 8 | misma dirección con calle; además se califican entre sí; todas 5★ |
-| `reiterado` | doble_a, doble_b | 4 | 4 | 2 productos en común; ráfaga de 30 min; todas 5★ |
-| `ciclo` | anillo_a/b/c | 6 | 3 | círculo cerrado `anillo_c → anillo_a → anillo_b → anillo_c`; 40 min; todas 5★ |
-| `reiterado` | anillo_a, anillo_b | 4 | 2 | mismo producto; 1 hora; todas 5★ |
-
-Verificado: el par `anillo_a`↔`anillo_b` sale **una sola vez** como
-`reiterado` (no además como `mutuo`); `analizado` sube a
-`{ 14, 98, 300 }` con la siembra puesta.
-
-### Neo4j caído
-
-`docker stop mesh-neo4j` → la ruta responde `503` "No se pudo conectar con
-Neo4j" en **0.3 s**, no se cuelga.
-
-### `sincronizacion` — probado el 2026-09-04
-
-Contra la cola `evento_grafo` real (misma consulta que usa la conciliación).
-
-| Caso | `sincronizacion` |
-|---|---|
-| Cola al día (sin pendientes ni apartados) | igual a `ultima_sincronizacion`/`cola` de `GET /admin/grafo/conciliacion` en el mismo instante |
-| Evento insertado a mano, leído antes de que el worker lo aplique (10 s) | `pendientes: 1` |
-| El mismo evento, tras el siguiente tick del worker | `pendientes: 0`, `ultima_sincronizacion` avanza a la hora del tick |
-| Evento con `intentos = 5` (simulando uno apartado) | `apartados: 1`; el worker nunca lo toca (`WHERE intentos < 5`) |
-| Tabla `evento_grafo` renombrada (simulando la migración `015` sin aplicar) | `sincronizacion: null`; `anillos` y `analizado` siguen presentes, la ruta sigue en `200` |
-| Neo4j caído (con la cola normal) | sigue en `503` antes de llegar a leer `sincronizacion` — mismo comportamiento que antes de este cambio |
-
-`npx tsc --noEmit` y `eslint` limpios sobre los cuatro archivos tocados
-(`models/grafo.ts`, `models/fraude.ts`, `services/grafo/grafo-sync.service.ts`,
-`services/fraude/fraude.service.ts`).
-
-### Limpieza
-
-Borrada la siembra (`MATCH (n:Prueba) DETACH DELETE n`), el grafo vuelve a
-150 nodos y la ruta a `anillos: []`. Nada quedó tocado en PostgreSQL (la
-siembra vive solo en Neo4j).
+> El panel EN VIVO que corría cuatro consultas Cypher (A.1/A.2/A.4 +
+> conteo) contra Neo4j en cada request (`GET /admin/fraude/anillos`, sin
+> persistir nada) se eliminó el 2026-09-18 — ver la nota al inicio de este
+> archivo. Las consultas A.1/A.2, con ventana de tiempo agregada, siguen
+> vivas en `AnillosDetectorService` (el worker que llena la tabla
+> `anillo_fraude`); A.4 (misma dirección) quedó sin implementar en ningún
+> lado tras el borrado (ver "Lo que le toca al compañero" al final de la
+> sección "Anillos de fraude en reseñas"). Payload y pruebas históricas de
+> aquel panel (2026-09-04) en
+> `cambio_propuestas/2026-09-04_0745-sincronizacion-panel-fraude.md`.
 
 ---
 
@@ -1140,7 +893,7 @@ job que lo reconcilie de ser necesario".
 Código: `src/controllers/grafo/grafo.controller.ts` +
 `src/services/grafo/grafo-sync.service.ts` (el worker del outbox se
 agregará a esta misma clase). **Solo admin** — no la tienda, es información
-de operación de todo el sistema, mismo criterio que `/admin/fraude/anillos`.
+de operación de todo el sistema, mismo criterio que `/admin/fraude/alertas-resenas`.
 
 ## Qué compara
 
@@ -1237,32 +990,33 @@ PostgreSQL y nunca cargada al grafo) — un caso de deriva real, no sembrado.
 
 ---
 
-# Anillos de fraude en reseñas -- PERSISTIDOS (2026-09-17/18)
+# Anillos de fraude en reseñas -- alertas-resenas (2026-09-17/18, renombrado 2026-09-18)
 
-Tres rutas nuevas, **controller y servicio aparte** de todo lo de arriba a
+Tres rutas, **controller y servicio aparte** de todo lo de arriba a
 propósito (pedido explícito): `AdminFraudeAnillosController` +
 `FraudeAnillosPersistidosService`
 (`src/controllers/admin/admin-fraude-anillos.controller.ts` +
 `src/services/fraude/fraude-anillos-persistidos.service.ts`). **Solo
-admin**, mismo criterio que el resto del panel.
+admin**, mismo criterio que el resto del panel. Nombradas `alertas-resenas`
+en paralelo con `alertas-login` (mismo sustantivo, distinto dominio) desde
+que se eliminó el panel EN VIVO `GET /admin/fraude/anillos` (ver la nota al
+inicio de este archivo) y el sufijo `-persistidos` dejó de tener con qué
+contrastar.
 
 Estas rutas leen la tabla nueva `anillo_fraude`/`anillo_fraude_resena` (ver
 `plan pendiente/anillos-fraude-persistencia.sql`), que llena
 `AnillosDetectorService` -- el worker de 15 min y su chequeo acotado por
 reseña, que corren A.1 (ciclos) y A.2 (mismo producto) sobre una ventana de
-**60 días**. **No es lo mismo que `GET /admin/fraude/anillos`** (arriba en
-este archivo): esa sigue siendo el panel EN VIVO contra Neo4j (A.1/A.2/A.4,
-sin ventana de tiempo, sin persistir nada). Las dos conviven, cada una su
-propia vista del mismo dominio.
+**60 días**.
 
 A.4 (misma dirección) **no** está en esta tabla -- no depende de reseñas,
 así que no tiene un disparador natural con el mecanismo actual. Ver
 `plan pendiente/anillos-fraude-persistencia.md`.
 
-## GET /admin/fraude/anillos-persistidos
+## GET /admin/fraude/alertas-resenas
 
 ```
-GET /admin/fraude/anillos-persistidos?pagina=1&limite=20&estado=pendiente&tipo=ciclo
+GET /admin/fraude/alertas-resenas?pagina=1&limite=20&estado=pendiente&tipo=ciclo
 ```
 
 Paginación por número de página (`validarLimite`/`validarPagina`, mismas
@@ -1335,10 +1089,10 @@ de un admin. Detalle completo del razonamiento en
 Mismo comportamiento que el resto del panel: sin sesión -> `401`; sesión
 válida pero no admin -> `403`.
 
-## PATCH /admin/fraude/anillos-persistidos/:id
+## PATCH /admin/fraude/alertas-resenas/:id
 
 ```
-PATCH /admin/fraude/anillos-persistidos/19
+PATCH /admin/fraude/alertas-resenas/19
 Content-Type: application/json
 
 { "estado": "revisada" }
@@ -1361,7 +1115,7 @@ ruta. Devuelve el anillo actualizado (misma forma que el listado).
 { "ok": false, "mensaje": "No existe un anillo con ese id", "payload": null }
 ```
 
-## GET /admin/fraude/anillos-persistidos/:id/detalle-grafo
+## GET /admin/fraude/alertas-resenas/:id/detalle-grafo
 
 El detalle REAL de un anillo ya persistido -- **no vuelve a correr A.1/A.2**
 (ya se sabe cuáles son las reseñas de este anillo, en
@@ -1369,7 +1123,7 @@ El detalle REAL de un anillo ya persistido -- **no vuelve a correr A.1/A.2**
 autor, vendedor, producto, fecha y calificación.
 
 ```
-GET /admin/fraude/anillos-persistidos/18/detalle-grafo
+GET /admin/fraude/alertas-resenas/18/detalle-grafo
 ```
 
 ### 200
@@ -1414,15 +1168,15 @@ el código fuente) para tener datos que persistir.
 
 | Caso | Resultado |
 |---|---|
-| `GET .../anillos-persistidos` sin filtros | `200`, los 2 anillos (`ciclo` 9-10-11, `reiterado` 9-10), con `cuentas` y `resenas` correctos |
-| `GET .../anillos-persistidos?tipo=ciclo` | `200`, `total_anillos: 1` |
-| `GET .../anillos-persistidos?tipo=no-existe` | `400` con los 3 tipos válidos |
+| `GET .../alertas-resenas` sin filtros | `200`, los 2 anillos (`ciclo` 9-10-11, `reiterado` 9-10), con `cuentas` y `resenas` correctos |
+| `GET .../alertas-resenas?tipo=ciclo` | `200`, `total_anillos: 1` |
+| `GET .../alertas-resenas?tipo=no-existe` | `400` con los 3 tipos válidos |
 | `GET .../18/detalle-grafo` | `200`, las 3 reseñas del ciclo con autor/vendedor/producto/fecha reales, ordenadas por fecha |
 | `GET .../999999999/detalle-grafo` | `404` |
 | `PATCH .../19 {"estado":"descartada"}` | `200`, el anillo pasa a `descartada` |
 | `PATCH .../19` otra vez | `409` "El anillo ya no está pendiente de revisión" |
 | `PATCH .../999999999 {"estado":"revisada"}` | `404` |
-| `GET .../anillos-persistidos?estado=pendiente&tipo=ciclo` (tras marcar) | `total_anillos: 0` -- el filtro ya no lo trae |
+| `GET .../alertas-resenas?estado=pendiente&tipo=ciclo` (tras marcar) | `total_anillos: 0` -- el filtro ya no lo trae |
 | Sin cookie de sesión | `401` |
 | Sesión de `compradora.norte@mesh.com` (rol comprador) | `403` |
 

@@ -5,7 +5,7 @@ import { TipoAnilloFraude } from '../models/anillo-fraude';
 const REGEX_ID_ENTERO = /^\d+$/;
 
 /**
- * El filtro `tipo` de GET /admin/fraude/anillos-persistidos: opcional, uno
+ * El filtro `tipo` de GET /admin/fraude/alertas-resenas: opcional, uno
  * de `mutuo`/`ciclo`/`reiterado`. Ausente (o vacio) devuelve `null` -- sin
  * filtrar, todos -- mismo criterio que `validarFiltroTipoAlerta`
  * (`helpers/validaciones-fraude.ts`).

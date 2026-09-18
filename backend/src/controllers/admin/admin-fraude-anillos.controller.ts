@@ -17,21 +17,19 @@ import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { FraudeAnillosPersistidosService } from '../../services/fraude/fraude-anillos-persistidos.service';
 
 /**
- * El panel de admin sobre los anillos de fraude en reseñas YA PERSISTIDOS
+ * El panel de admin sobre los anillos de fraude en reseñas
  * (`anillo_fraude`/`anillo_fraude_resena`, ver
- * `elementos Generales/plan pendiente/anillos-fraude-persistencia.sql`) --
- * distinto de `FraudeController` (`GET /admin/fraude/anillos`), que sigue
- * siendo el panel EN VIVO contra Neo4j (A.1/A.2/A.4, sin pasar por esta
- * tabla). Los dos conviven a propósito, pedidos como piezas separadas.
+ * `elementos Generales/plan pendiente/anillos-fraude-persistencia.sql`).
+ * Nombrado en paralelo con las rutas de fraude de login (`alertas-login`,
+ * `eventos-login`): mismo sustantivo, distinto dominio.
  *
- * `GET /admin/fraude/anillos-persistidos` -- paginado, filtrable por
- * `estado` (`pendiente`/`revisada`/`descartada`) y `tipo`
- * (`mutuo`/`ciclo`/`reiterado`).
- * `PATCH /admin/fraude/anillos-persistidos/:id` -- marcar un anillo
- * revisado o descartado (solo si está `pendiente`).
- * `GET /admin/fraude/anillos-persistidos/:id/detalle-grafo` -- el detalle
- * real de ESE anillo (autor/vendedor/producto/fecha/calificación de cada
- * reseña de su evidencia), consultado en vivo contra Neo4j.
+ * `GET /admin/fraude/alertas-resenas` -- paginado, filtrable por `estado`
+ * (`pendiente`/`revisada`/`descartada`) y `tipo` (`mutuo`/`ciclo`/`reiterado`).
+ * `PATCH /admin/fraude/alertas-resenas/:id` -- marcar un anillo revisado o
+ * descartado (solo si está `pendiente`).
+ * `GET /admin/fraude/alertas-resenas/:id/detalle-grafo` -- el detalle real
+ * de ESE anillo (autor/vendedor/producto/fecha/calificación de cada reseña
+ * de su evidencia), consultado en vivo contra Neo4j.
  *
  * `@UseGuards(SesionGuard)` y `@Roles(ID_ROL_ADMIN)` en la clase, mismo
  * criterio que `FraudeController`/`AdminFraudeLoginController`: solo admin.
@@ -44,8 +42,8 @@ export class AdminFraudeAnillosController {
     private readonly fraudeAnillosPersistidosService: FraudeAnillosPersistidosService,
   ) {}
 
-  // GET /admin/fraude/anillos-persistidos
-  @Get('anillos-persistidos')
+  // GET /admin/fraude/alertas-resenas
+  @Get('alertas-resenas')
   async listar(@Query() query: PaginarAnillosFraudeQuery) {
     try {
       const pagina =
@@ -56,8 +54,8 @@ export class AdminFraudeAnillosController {
     }
   }
 
-  // PATCH /admin/fraude/anillos-persistidos/:id
-  @Patch('anillos-persistidos/:id')
+  // PATCH /admin/fraude/alertas-resenas/:id
+  @Patch('alertas-resenas/:id')
   async marcar(@Param('id') id: string, @Body() body: MarcarAnilloFraudeBody) {
     try {
       const anillo = await this.fraudeAnillosPersistidosService.marcarAnillo(
@@ -70,8 +68,8 @@ export class AdminFraudeAnillosController {
     }
   }
 
-  // GET /admin/fraude/anillos-persistidos/:id/detalle-grafo
-  @Get('anillos-persistidos/:id/detalle-grafo')
+  // GET /admin/fraude/alertas-resenas/:id/detalle-grafo
+  @Get('alertas-resenas/:id/detalle-grafo')
   async detalleGrafo(@Param('id') id: string) {
     try {
       const detalle =

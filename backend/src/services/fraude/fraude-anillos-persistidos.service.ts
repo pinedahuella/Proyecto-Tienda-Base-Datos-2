@@ -64,16 +64,12 @@ const SQL_RESENAS_DE_ANILLO = `(
 )`;
 
 /**
- * `GET`/`PATCH /admin/fraude/anillos-persistidos` -- el panel de admin sobre
+ * `GET`/`PATCH /admin/fraude/alertas-resenas` -- el panel de admin sobre
  * `anillo_fraude`/`anillo_fraude_resena`
  * (`elementos Generales/plan pendiente/anillos-fraude-persistencia.sql`),
  * los anillos `mutuo`/`ciclo`/`reiterado` que ya detectó y guardó
- * `AnillosDetectorService`.
- *
- * Servicio aparte de `FraudeService` (el panel EN VIVO, `GET
- * /admin/fraude/anillos`, que sigue corriendo A.1/A.2/A.4 contra Neo4j sin
- * pasar por esta tabla) -- son dos vistas distintas del mismo dominio,
- * pedidas explícitamente separadas.
+ * `AnillosDetectorService`. Nombrado en paralelo con `alertas-login`: mismo
+ * sustantivo, distinto dominio.
  */
 @Injectable()
 export class FraudeAnillosPersistidosService {
@@ -82,7 +78,7 @@ export class FraudeAnillosPersistidosService {
   private static readonly LIMITE_MS_GRAFO = 15000;
 
   // ---------------------------------------------------------------------
-  // GET /admin/fraude/anillos-persistidos
+  // GET /admin/fraude/alertas-resenas
   // ---------------------------------------------------------------------
 
   async listarPaginado(
@@ -184,7 +180,7 @@ export class FraudeAnillosPersistidosService {
   }
 
   // ---------------------------------------------------------------------
-  // PATCH /admin/fraude/anillos-persistidos/:id
+  // PATCH /admin/fraude/alertas-resenas/:id
   // ---------------------------------------------------------------------
 
   /**
@@ -268,7 +264,7 @@ export class FraudeAnillosPersistidosService {
   }
 
   // ---------------------------------------------------------------------
-  // GET /admin/fraude/anillos-persistidos/:id/detalle-grafo
+  // GET /admin/fraude/alertas-resenas/:id/detalle-grafo
   // ---------------------------------------------------------------------
 
   /**
@@ -395,7 +391,7 @@ function aResenaDeAnilloGrafo(fila: FilaResenaGrafo): ResenaDeAnilloGrafo {
 
 /**
  * Neo4j devuelve los enteros como su propio tipo `Integer`. Mismo criterio
- * que `fraude.service.ts` / `anillos-detector.service.ts`.
+ * que `anillos-detector.service.ts`.
  */
 function aNumero(valor: unknown): number {
   if (neo4j.isInt(valor)) {
@@ -406,10 +402,9 @@ function aNumero(valor: unknown): number {
 
 /**
  * El detalle puntual de un conjunto YA CONOCIDO de resenas -- a diferencia
- * de `CYPHER_GRUPOS_CICLICOS`/`CYPHER_PARES_MISMO_PRODUCTO`
- * (`fraude.service.ts`/`anillos-detector.service.ts`), esta consulta NO
- * busca ningun patron: solo trae, para cada resena de la lista, quien la
- * escribio, a quien califica y sobre que producto.
+ * de las consultas de deteccion de `anillos-detector.service.ts`, esta
+ * consulta NO busca ningun patron: solo trae, para cada resena de la lista,
+ * quien la escribio, a quien califica y sobre que producto.
  */
 const CYPHER_DETALLE_RESENAS = `
 MATCH (r:Resena) WHERE r.id IN $ids

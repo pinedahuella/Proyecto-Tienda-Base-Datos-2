@@ -74,7 +74,8 @@ interface FuenteEventoElastic {
  *     `FraudeLoginService.listarAlertasPaginado`.
  *
  * Este modulo (fraude por IP/cuenta en el login) es solo Elasticsearch +
- * Redis: no toca el panel de anillos de resenas (`FraudeService`, Neo4j).
+ * Redis: no toca el panel de anillos de resenas
+ * (`AdminFraudeAnillosController`/`FraudeAnillosPersistidosService`, Neo4j).
  */
 @Injectable()
 export class FraudeLoginExploracionService {

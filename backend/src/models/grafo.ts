@@ -45,23 +45,6 @@ export interface EstadoColaGrafo {
   apartados: number;
 }
 
-/**
- * Version resumida del estado de la cola, para paneles auxiliares que solo
- * necesitan saber si el grafo puede estar desactualizado (hoy: el panel de
- * fraude) sin pedir el informe completo de la conciliacion. La entrega
- * `GrafoSyncService.estadoSincronizacion()`, que a diferencia de
- * `conciliar()` nunca lanza: si Postgres falla o `evento_grafo` todavia no
- * existe, el llamador recibe `null` en vez de un error.
- */
-export interface SincronizacionGrafo {
-  /** `max(procesado_en)` de `evento_grafo`, o `null` si nada se ha procesado. */
-  ultima_sincronizacion: string | null;
-  /** Eventos sin aplicar todavia (`procesado_en IS NULL`, `intentos < 5`). */
-  pendientes: number;
-  /** Eventos apartados por fallar 5 veces (`intentos >= 5`). */
-  apartados: number;
-}
-
 /** Lo que devuelve `GET /admin/grafo/conciliacion`. */
 export interface ConciliacionGrafo {
   /**

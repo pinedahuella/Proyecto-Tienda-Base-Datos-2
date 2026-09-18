@@ -4,10 +4,23 @@
 > construido, persistido y con endpoints propios, probado en vivo.**
 > Detección (puntos 0/3), persistencia (punto 2, ver "Persistencia -- YA
 > HECHA") y ahora **también los endpoints de admin** (`GET`/`PATCH
-> /admin/fraude/anillos-persistidos` + `GET .../:id/detalle-grafo`, ver
-> `endpoints-fraude.md`, sección "Anillos de fraude en reseñas --
-> PERSISTIDOS"). Lo único que sigue sin construir es **A.4 (misma
-> dirección)** -- fuera de alcance en todas las rondas de este plan.
+> /admin/fraude/alertas-resenas` + `GET .../:id/detalle-grafo`, ver
+> `endpoints-fraude.md`, sección "Anillos de fraude en reseñas"). Lo único
+> que sigue sin construir es **A.4 (misma dirección)** -- fuera de alcance
+> en todas las rondas de este plan.
+>
+> **Actualización, misma noche del 2026-09-18:** el panel EN VIVO
+> `GET /admin/fraude/anillos` (`FraudeController.anillos()` /
+> `FraudeService` / `models/fraude.ts`) se eliminó por completo -- era la
+> prueba de concepto de la Entrega 2, sin persistencia, ya redundante con
+> lo de arriba. Se borró junto con `GrafoSyncService.estadoSincronizacion()`
+> (dato auxiliar que solo consumía esa ruta). Las rutas
+> `GET`/`PATCH /admin/fraude/anillos-persistidos` se renombraron a
+> `alertas-resenas` (sin el sufijo `-persistidos`, que ya no tenía con qué
+> contrastar) para quedar en paralelo con `alertas-login`. El resto de este
+> documento describe el estado y el razonamiento ANTES de este borrado --
+> las referencias a `GET /admin/fraude/anillos` y a `anillos-persistidos`
+> más abajo son historia, no el contrato vigente.
 
 ## Contexto
 

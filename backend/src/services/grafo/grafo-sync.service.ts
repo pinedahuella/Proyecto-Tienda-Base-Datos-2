@@ -12,7 +12,6 @@ import {
   EstadoColaGrafo,
   EventoGrafoApartado,
   FilaConciliacion,
-  SincronizacionGrafo,
 } from '../../models/grafo';
 
 /**
@@ -44,12 +43,6 @@ export class GrafoSyncService {
 
   /** La conciliacion toca las dos bases; que no se cuelgue. */
   private static readonly LIMITE_MS = 15000;
-
-  /**
-   * `estadoSincronizacion()` es un dato auxiliar de otro panel: mas corto
-   * que `LIMITE_MS` para que una Postgres lenta no atrase esa otra ruta.
-   */
-  private static readonly LIMITE_MS_SINCRONIZACION = 3000;
 
   /** Cada cuanto corre el worker que vacia la cola. */
   private static readonly INTERVALO_MS = 10000;
@@ -393,40 +386,6 @@ export class GrafoSyncService {
     };
   }
 
-  /**
-   * Version resumida del estado de la cola, para paneles auxiliares que
-   * solo quieren avisar si el grafo puede estar desactualizado (hoy: el
-   * panel de fraude, `GET /admin/fraude/anillos`) sin acoplarse al informe
-   * completo de la conciliacion. A diferencia de `conciliar()`, esta
-   * version **nunca lanza**: si Postgres falla, se cuelga, o `evento_grafo`
-   * todavia no existe (falta la migracion `015`), devuelve `null` -- mismo
-   * criterio que `InventarioLimitadoService.estado()` con Redis. El panel
-   * que la llama no deberia fallar solo porque este dato auxiliar no se
-   * pudo leer.
-   */
-  async estadoSincronizacion(): Promise<SincronizacionGrafo | null> {
-    try {
-      const cola = await conLimiteDeTiempo(
-        this.estadoCola(),
-        GrafoSyncService.LIMITE_MS_SINCRONIZACION,
-        'el estado de sincronizacion del grafo',
-      );
-      if (cola == null) {
-        return null;
-      }
-      return {
-        ultima_sincronizacion: cola.ultimaSincronizacion,
-        pendientes: cola.estado.pendientes,
-        apartados: cola.estado.apartados,
-      };
-    } catch (error) {
-      this.logger.warn(
-        `No se pudo leer el estado de sincronizacion del grafo: ${(error as Error)?.message ?? error}`,
-      );
-      return null;
-    }
-  }
-
   // -------------------------------------------------------------------
   // PostgreSQL: lo que el grafo DEBERIA tener
   // -------------------------------------------------------------------
@@ -661,7 +620,7 @@ function fila(
 /**
  * Neo4j devuelve los enteros como su tipo `Integer` de 64 bits. Los conteos
  * de este dominio son chicos: se pasan a `number` sin riesgo. Mismo criterio
- * que `fraude.service.ts` y `base-datos-grafo.service.ts`.
+ * que `base-datos-grafo.service.ts`.
  */
 function aEntero(valor: unknown): number {
   if (neo4j.isInt(valor)) {

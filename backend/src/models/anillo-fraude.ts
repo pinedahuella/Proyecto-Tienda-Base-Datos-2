@@ -27,7 +27,7 @@ export interface CuentaDeAnillo {
   usuario: string;
 }
 
-/** `GET /admin/fraude/anillos-persistidos`: un anillo, forma de API. */
+/** `GET /admin/fraude/alertas-resenas`: un anillo, forma de API. */
 export interface AnilloFraude {
   id_anillo_fraude: string;
   tipo: TipoAnilloFraude;
@@ -53,7 +53,7 @@ export interface ResenaDeAnilloGrafo {
 }
 
 /**
- * `GET /admin/fraude/anillos-persistidos/:id/detalle-grafo`: el detalle REAL
+ * `GET /admin/fraude/alertas-resenas/:id/detalle-grafo`: el detalle REAL
  * de un anillo ya persistido, consultado en vivo contra Neo4j a partir de
  * los ids de `anillo_fraude_resena` -- no vuelve a correr A.1/A.2, solo pide
  * las resenas puntuales que ya se sabe que son la evidencia de este anillo.

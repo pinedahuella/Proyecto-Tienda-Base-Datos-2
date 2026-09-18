@@ -1,5 +1,5 @@
 /**
- * Cuerpo esperado en PATCH /admin/fraude/anillos-persistidos/:id -- marcar
+ * Cuerpo esperado en PATCH /admin/fraude/alertas-resenas/:id -- marcar
  * un anillo (`mutuo`/`ciclo`/`reiterado`) como revisado o descartado.
  *
  * Solo se admite viniendo de `pendiente` -- mismo criterio que

@@ -2,7 +2,7 @@ import { EstadoAlertaFraude } from '../models/alerta-fraude';
 import { AnilloFraude, TipoAnilloFraude } from '../models/anillo-fraude';
 
 /**
- * Query params esperados en GET /admin/fraude/anillos-persistidos.
+ * Query params esperados en GET /admin/fraude/alertas-resenas.
  *
  * Mismo criterio que `PaginarAlertasFraudeQuery` (`dto/paginar-alertas-fraude.ts`):
  * cada filtro es opcional e independiente.
@@ -18,7 +18,7 @@ export interface PaginarAnillosFraudeQuery {
   tipo?: string;
 }
 
-/** Respuesta de GET /admin/fraude/anillos-persistidos. */
+/** Respuesta de GET /admin/fraude/alertas-resenas. */
 export interface AnillosFraudePaginados {
   anillos: AnilloFraude[];
   pagina: number;

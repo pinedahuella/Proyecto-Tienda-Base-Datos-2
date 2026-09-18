@@ -7,9 +7,9 @@ import { registrarAnilloFraude } from '../../helpers/registrar-anillo-fraude';
 
 /**
  * `elementos Generales/plan pendiente/anillos-fraude-persistencia.md`: el
- * worker periodico que re-evalua A.1 (ciclos) y A.2 (mismo producto) -- las
- * dos consultas de `FraudeService` que pasan por resenas -- acotadas a una
- * ventana de tiempo, cada `INTERVALO_MS`, y persiste lo que encuentra en
+ * worker periodico que re-evalua A.1 (ciclos) y A.2 (mismo producto) --
+ * consultas Cypher de deteccion sobre resenas -- acotadas a una ventana de
+ * tiempo, cada `INTERVALO_MS`, y persiste lo que encuentra en
  * `anillo_fraude`/`anillo_fraude_resena` (ver
  * `anillos-fraude-persistencia.sql`, mismo folder).
  *
@@ -110,11 +110,10 @@ export class AnillosDetectorService {
   }
 
   /**
-   * Junta el resultado de A.1/A.2 por el conjunto de cuentas -- mismo
-   * criterio de `FraudeService.armarAnillos`: un par puede llegar por las
-   * dos consultas (o por varias rotaciones del mismo ciclo) y se junta, no
-   * se duplica; "reiterado" pisa el tipo de un par que tambien salio como
-   * "mutuo" (misma pareja, senal mas fuerte).
+   * Junta el resultado de A.1/A.2 por el conjunto de cuentas: un par puede
+   * llegar por las dos consultas (o por varias rotaciones del mismo ciclo) y
+   * se junta, no se duplica; "reiterado" pisa el tipo de un par que tambien
+   * salio como "mutuo" (misma pareja, senal mas fuerte).
    */
   private agrupar(
     ciclicos: FilaGrupo[],
@@ -212,7 +211,7 @@ interface FilaGrupo {
 /**
  * Neo4j devuelve los enteros como su propio tipo `Integer` (64 bits). Los
  * ids de este dominio son chicos: se pasan a `number` sin riesgo. Mismo
- * criterio que `fraude.service.ts` / `grafo-sync.service.ts`.
+ * criterio que `grafo-sync.service.ts`.
  */
 function aNumero(valor: unknown): number {
   if (neo4j.isInt(valor)) {
@@ -231,8 +230,7 @@ function mensajeCorto(error: unknown): string {
 }
 
 /**
- * A.1 con ventana: mismo patron que `CYPHER_GRUPOS_CICLICOS` de
- * `fraude.service.ts` (camino cerrado ESCRIBIO/CALIFICA_A de 4 a 8 saltos),
+ * A.1 con ventana: camino cerrado ESCRIBIO/CALIFICA_A de 4 a 8 saltos,
  * exigiendo ademas que TODAS las resenas del camino caigan dentro de los
  * ultimos `$dias` dias -- un ciclo con una sola resena vieja ya no cuenta
  * como activo. Solo devuelve los ids (no el detalle de cuentas/resenas que
