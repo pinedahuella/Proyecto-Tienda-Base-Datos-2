@@ -2849,6 +2849,109 @@ SELECT to_char(r.fecha_registro AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),
         }
 
         # ------------------------------------------------------------
+        # La copia de las compras y las devoluciones
+        # ------------------------------------------------------------
+        # Gemelo de etl/cargar_compras.sh, y se repite aqui por lo mismo de
+        # siempre: PowerShell 5.1 le pega un BOM a lo que manda por tuberia. Lo
+        # que explica el porque de todo esto esta en ese archivo y en
+        # etl/extraer_compras.sql.
+        #
+        # En corto: compra_producto y devolucion_producto solo las llena el backend
+        # por UN camino (el carrito). Los 44 pedidos de la semilla, lo comprado
+        # antes de que se enchufara y los pedidos que se pagan despues nunca
+        # llegaban, y el ranking de mas vendidos arrancaba en cero teniendo meses
+        # de ventas guardadas.
+        #
+        # No tiene marca de agua sino el conjunto de pares (pedido, oferta) que
+        # ClickHouse ya tiene, y por eso en un arranque normal no copia nada.
+        function Reparar-OrdenCompras($tabla) {
+            $clave = Consultar-ClickHouse "SELECT sorting_key FROM system.tables WHERE database = '$($env_['CLICKHOUSE_DB'])' AND name = '$tabla'"
+            if ($null -eq $clave -or $clave -eq '') { return $false }
+            if ($clave -match 'id_oferta') { return $true }
+
+            # La clave vieja (id_producto, fecha, id_pedido) colapsaba dos ofertas del
+            # mismo producto en el mismo pedido. Se reconstruye la tabla: ClickHouse no
+            # deja cambiar un ORDER BY con un ALTER. Ver clickhouse/reparar_orden_compras.sh.
+            Aviso "$tabla lleva la clave vieja ($clave): se reconstruye."
+            $nueva = "$($tabla)_nueva"
+            $pasos = @(
+                "DROP TABLE IF EXISTS $nueva",
+                "CREATE TABLE $nueva AS $tabla ENGINE = ReplacingMergeTree ORDER BY (id_producto, fecha, id_pedido, id_oferta) TTL toDateTime(fecha) + INTERVAL 12 MONTH",
+                "INSERT INTO $nueva SELECT * FROM $tabla",
+                "EXCHANGE TABLES $tabla AND $nueva",
+                "DROP TABLE $nueva"
+            )
+            foreach ($paso in $pasos) {
+                docker exec -i mesh-clickhouse clickhouse-client `
+                    --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
+                    --database $env_['CLICKHOUSE_DB'] --query $paso 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { return $false }
+            }
+            return $true
+        }
+
+        function Copiar-Compras($tabla, $motivo) {
+            if (-not (Reparar-OrdenCompras $tabla)) { return -1 }
+
+            $ya = Consultar-ClickHouse "SELECT arrayStringConcat(groupArray(concat(toString(id_pedido), ':', toString(id_oferta))), ',') FROM $tabla WHERE lote = 'real'"
+            # $null es que la base NO contesto, y no es lo mismo que vacio: vacio es
+            # "no he copiado nada" y $null recopiaria todo.
+            if ($null -eq $ya) { return -1 }
+
+            # psql -c NO interpola variables (:'motivo'), asi que se sustituyen aqui,
+            # y se quitan los comentarios para que el argumento no crezca: Windows
+            # limita una linea de comandos a unos 32 mil caracteres, y la lista de
+            # pares ya copiados va dentro. A partir de unos 3000 pares hay que
+            # cambiarlo por bash etl/cargar_compras.sh.
+            $sql = (Get-Content "$PSScriptRoot\etl\extraer_compras.sql" -Raw) -replace '(?m)^--.*$', ''
+            $sql = $sql -replace ":'motivo'", "'$motivo'" -replace ":'ya'", "'$ya'"
+
+            $crudo = docker exec -i mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] `
+                -qtAX -F "`t" -v ON_ERROR_STOP=1 -c $sql
+            if ($LASTEXITCODE -ne 0) {
+                Aviso "No se pudo leer $motivo de PostgreSQL."
+                return -1
+            }
+
+            # El fin de linea de Windows muerde por los dos lados: ver Copiar-Eventos.
+            $lineas = @($crudo | ForEach-Object { $_ -replace "`r", "" } | Where-Object { $_ -ne '' })
+            if ($lineas.Count -eq 0) { return 0 }
+
+            ($lineas -join "`n") | docker exec -i mesh-clickhouse clickhouse-client `
+                --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
+                --database $env_['CLICKHOUSE_DB'] `
+                --input_format_tsv_crlf_end_of_line 1 `
+                --query "INSERT INTO $tabla (fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip, lote) FORMAT TabSeparated" | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Aviso "$tabla no se pudo copiar a ClickHouse."
+                return -1
+            }
+            return $lineas.Count
+        }
+
+        $nV = Copiar-Compras "compra_producto" "venta"
+        $nD = Copiar-Compras "devolucion_producto" "devolucion"
+
+        if ($nV -lt 0 -or $nD -lt 0) {
+            Error1 "Las compras no se copiaron a ClickHouse."
+            Error1 "El ranking de mas vendidos y el de compras de Tendencias van a salir vacios."
+            exit 1
+        }
+
+        # La cuenta que dice si quedo cuadrado, igual que en el .sh. Solo avisa: un
+        # descuadre puede ser legitimo (una fila que el backend escribio y
+        # PostgreSQL ya no tiene) y parar el arranque por eso seria peor.
+        $enPg = docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -qtAX -c "SELECT count(*) FROM stock_movimiento sm JOIN motivo_movimiento mm USING (id_motivo_movimiento) WHERE mm.motivo_nombre = 'venta' AND sm.id_pedido IS NOT NULL"
+        $enCh = Consultar-ClickHouse "SELECT count() FROM compra_producto WHERE lote = 'real'"
+        if ("$enPg".Trim() -ne "$enCh".Trim()) {
+            Aviso "Las ventas no cuadran: PostgreSQL $("$enPg".Trim()), ClickHouse $("$enCh".Trim()). Corre  bash etl/cargar_compras.sh  para ver cual falta."
+        } elseif ($nV -eq 0 -and $nD -eq 0) {
+            Ok "compras ya copiadas, nada nuevo"
+        } else {
+            Ok "compras copiadas: $nV venta(s) y $nD devolucion(es)"
+        }
+
+        # ------------------------------------------------------------
         # El lote de eventos de mentira, solo si se pidio
         # ------------------------------------------------------------
         # Va DESPUES de la copia, y ese orden se puede razonar en una linea: el
@@ -2881,6 +2984,28 @@ SELECT to_char(r.fecha_registro AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),
             } else {
                 $cuantas = Consultar-ClickHouse "SELECT count() FROM vista_producto WHERE lote = 'generado-$semillaVistas'"
                 Ok "lote sembrado: $cuantas vista(s) con lote generado-$semillaVistas"
+
+                # El resto del embudo (carrito, compra, devolucion, busquedas y
+                # clics) sale de ESTAS vistas y con la misma semilla. Va despues y
+                # solo si las vistas entraron: sin ellas no hay de donde derivarlo
+                # y la guardia de generar_actividad.sql lo rechazaria. Antes de
+                # esto cuatro de las seis tablas de eventos se quedaban en cero y
+                # los rankings de Tendencias salian vacios.
+                $sqlActividad = Get-Content "$PSScriptRoot\clickhouse\lote\generar_actividad.sql" -Raw
+                $sqlActividad | docker exec -i mesh-clickhouse clickhouse-client `
+                    --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
+                    --database $env_['CLICKHOUSE_DB'] `
+                    --param_semilla=$semillaVistas --multiquery 2>&1 | Out-Null
+
+                if ($LASTEXITCODE -ne 0) {
+                    Aviso "Las vistas entraron, pero la actividad (carrito, compras, busquedas) no."
+                    Aviso "   Para rehacerlo:  .\arrancar.ps1 -BorrarVistas $semillaVistas"
+                    Aviso "   Y despues:       .\arrancar.ps1 -Vistas $VistasPedidas -Semilla $semillaVistas"
+                } else {
+                    $compras   = Consultar-ClickHouse "SELECT count() FROM compra_producto WHERE lote = 'generado-$semillaVistas'"
+                    $busquedas = Consultar-ClickHouse "SELECT count() FROM busqueda_realizada WHERE lote = 'generado-$semillaVistas'"
+                    Ok "actividad sembrada: $compras compra(s) y $busquedas busqueda(s) con lote generado-$semillaVistas"
+                }
             }
         }
 
@@ -2901,7 +3026,7 @@ SELECT to_char(r.fecha_registro AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),
             if ($LASTEXITCODE -ne 0) {
                 Aviso "No se pudo borrar el lote $VistasBorrar."
             } else {
-                Ok "lote generado-$VistasBorrar borrado de las dos tablas"
+                Ok "lote generado-$VistasBorrar borrado de las nueve tablas"
             }
         }
     }

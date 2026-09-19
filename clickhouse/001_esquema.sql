@@ -130,6 +130,16 @@ TTL toDateTime(fecha) + INTERVAL 12 MONTH;
 -- verdad ya quedo segura en PostgreSQL sin depender de esto). Por eso
 -- ReplacingMergeTree por id_pedido: si el evento se reintenta algun dia, la
 -- fila repetida se colapsa sola en vez de contar la compra dos veces.
+-- EL ORDER BY LLEVA id_oferta, Y SIN EL SE PERDIAN UNIDADES (2026-09-18).
+-- ReplacingMergeTree colapsa las filas con la misma clave de ordenacion. Con
+-- (id_producto, fecha, id_pedido) dos ofertas DEL MISMO PRODUCTO en el MISMO
+-- pedido -- comprarle el mismo articulo a dos vendedores -- comparten clave (la
+-- fecha es la misma) y una se lleva a la otra. Medido: el pedido 121 tenia tres
+-- lineas de venta en PostgreSQL (ofertas 5, 46 y 51, las dos ultimas del producto
+-- 11) y aqui quedaban dos. sum(cantidad), que es la metrica de compra y de
+-- devolucion en los rankings, salia corta. Una tabla que ya existe no cambia de
+-- clave con este CREATE: para las bases hechas antes esta clickhouse/
+-- reparar_orden_compras.sh, que arrancar.ps1 corre solo.
 CREATE TABLE IF NOT EXISTS compra_producto
 (
     fecha        DateTime64(3),
@@ -142,7 +152,7 @@ CREATE TABLE IF NOT EXISTS compra_producto
     lote         LowCardinality(String) DEFAULT 'real'
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (id_producto, fecha, id_pedido)
+ORDER BY (id_producto, fecha, id_pedido, id_oferta)
 TTL toDateTime(fecha) + INTERVAL 12 MONTH;
 
 
@@ -171,7 +181,7 @@ CREATE TABLE IF NOT EXISTS devolucion_producto
     lote         LowCardinality(String) DEFAULT 'real'
 )
 ENGINE = ReplacingMergeTree
-ORDER BY (id_producto, fecha, id_pedido)
+ORDER BY (id_producto, fecha, id_pedido, id_oferta)
 TTL toDateTime(fecha) + INTERVAL 12 MONTH;
 
 

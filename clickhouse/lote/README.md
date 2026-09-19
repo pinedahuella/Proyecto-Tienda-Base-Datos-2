@@ -6,7 +6,8 @@ senales plantadas dentro que se pueden senalar con el dedo.
 | | |
 |---|---|
 | `generar_vistas.sql` | siembra vistas de producto, logueos y registros marcados |
-| `borrar_lote.sql` | deshace un lote por su semilla, **de las cuatro tablas, incluido el resumen que no se vacia solo** |
+| `generar_actividad.sql` | siembra el resto del embudo, encima de esas vistas: carrito, compra, devolucion, busquedas y clics |
+| `borrar_lote.sql` | deshace un lote por su semilla, **de las nueve tablas, incluido el resumen que no se vacia solo** |
 
 Esta carpeta es una subcarpeta por el mismo motivo que `migrations/lote/` y
 `mongo/lote/`. `arrancar.ps1` corre los archivos que encuentra sueltos en la
@@ -500,3 +501,51 @@ comprobacion vale la pena hacerla antes de ensenar el panel.
 ```sql
 SELECT lote, count() FROM evento_login GROUP BY lote;
 ```
+
+---
+
+# La actividad: el resto del embudo (2026-09-18)
+
+`generar_actividad.sql` existe porque, medido ese dia, cuatro de las seis tablas de eventos
+estaban vacias o casi: `busqueda_realizada` y `busqueda_clic` en cero, y compra,
+devolucion y carrito con las pocas filas que dejo alguien probando. Dos de los seis
+rankings de Tendencias no ensenaban nada y el estante de mas vendidos salia vacio.
+
+Sale de las vistas de la MISMA semilla, asi el embudo es coherente:
+
+```
+vista_producto -> carrito (1 de cada 6, si tenia cuenta) -> compra (1 de cada 3)
+                                                              -> devolucion (1 de cada 8, dias despues)
+vista con origen 'buscador' -> busqueda_clic -> busqueda_realizada
+mas busquedas sin clic, y algunas que no encuentran nada (tablet, consola, dron...)
+```
+
+Con la semilla 42 y 3000 vistas: 3882 vistas, 451 carritos, 154 compras, 14 devoluciones,
+1174 clics y unas 2300 busquedas. `arrancar.ps1 -Vistas 3000 -Semilla 42` corre las dos.
+
+## LA TRAMPA DE LAS FECHAS, y por que hay que sembrar el mismo dia
+
+Las vistas llevan la fecha de cuando se corrio el generador (las de la semilla 42 de antes
+eran del 24 de agosto al 6 de septiembre) y los rankings miran **los ultimos 7 dias** por
+defecto. La tabla tenia 3882 filas y la pantalla salia vacia. Todo lo de `generar_actividad.sql`
+hereda la fecha de las vistas, asi que **para una demo hay que renovar el lote el mismo dia**:
+
+```
+.\arrancar.ps1 -BorrarVistas 42
+.\arrancar.ps1 -Vistas 3000 -Semilla 42
+```
+
+El lote de eventos NO se renueva solo. Si la pantalla de Tendencias sale vacia con la tabla
+llena, mira primero de que dia son las filas.
+
+## Lo que no es real
+
+`id_oferta` vale lo mismo que `id_producto` (no apunta a ninguna oferta) y `id_pedido` va entre
+3000000000 y 3999999999. Los terminos de busqueda salen de una lista fija por rango de
+producto, aproximada al catalogo. Ninguna fila lleva una cuenta real.
+
+## Dos trampas de ClickHouse que salieron escribiendolo
+
+`throwIf` exige un mensaje CONSTANTE (Code 44): no se puede decir cuantas filas hay dentro
+del error de la guardia. Y un alias de `WITH` que usa una columna no se puede resolver desde
+una subconsulta (Code 1, "correlated column"): va dentro de la rama que lo usa.

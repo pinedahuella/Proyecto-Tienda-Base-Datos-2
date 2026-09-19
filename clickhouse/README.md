@@ -379,3 +379,23 @@ Y para limpiar:
 TRUNCATE TABLE vista_producto;
 TRUNCATE TABLE vistas_por_producto_dia;
 ```
+
+---
+
+# La clave de ordenacion de compra_producto y devolucion_producto (2026-09-18)
+
+Llevaba `(id_producto, fecha, id_pedido)` y perdia unidades: dos ofertas del mismo producto
+en el mismo pedido comparten clave (misma fecha) y `ReplacingMergeTree` colapsa una. El
+pedido 121 tenia 3 lineas de venta en PostgreSQL y aqui quedaban 2. Ahora lleva
+`id_oferta` al final.
+
+Una tabla que ya existe no cambia de clave con el `CREATE TABLE IF NOT EXISTS` de
+`001_esquema.sql`, y ClickHouse no permite un `ALTER` sobre el `ORDER BY`. Para las bases
+hechas antes esta `bash clickhouse/reparar_orden_compras.sh`: reconstruye la tabla,
+copia todas las filas de cualquier lote y las intercambia con `EXCHANGE TABLES`. Es
+idempotente y `arrancar.ps1` lo corre solo. Tiene una ventana de milisegundos en la que el
+backend podria escribir en la tabla vieja; `etl/cargar_compras.sh` la recupera despues.
+
+Las tablas se llenan de tres maneras y conviene no mezclarlas: el backend por eventos
+(`lote real`), `etl/cargar_compras.sh` con lo que ya estaba en PostgreSQL (tambien `real`),
+y `clickhouse/lote` con datos de mentira (`generado-N`).

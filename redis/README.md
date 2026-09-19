@@ -1,7 +1,8 @@
 # La capa de Redis
 
-El almacen clave-valor de Mesh: el carrito con expiracion por inactividad y la
-oferta de inventario limitado que no se sobrevende.
+El almacen clave-valor de Mesh: el carrito con expiracion por inactividad, la
+oferta de inventario limitado que no se sobrevende y el ranking de los productos
+mas vendidos.
 
 Esta carpeta es una pieza SUELTA y a proposito. No hay rutas HTTP aqui: el
 backend es de otra persona y no se toca. Lo que hay es el diseno, los dos
@@ -14,6 +15,7 @@ enchufarlo sea llamar a `EVALSHA` desde donde corresponda.
 | `inventario_limitado.lua` | Comprobar y descontar EN UN SOLO PASO. Lo que la rubrica pide. |
 | `prueba_carrito.sh` | Evidencia del TTL por inactividad, y de que al vencer no hay nada que liberar. |
 | `prueba_concurrencia.sh` | Evidencia de que 1000 solicitudes sobre 100 unidades venden 100. |
+| `mas_vendidos.sh` | Muestra el ranking de mas vendidos y, con `--reconstruir`, lo recalcula desde ClickHouse. |
 
 ```
 bash redis/prueba_carrito.sh          # unos 50 segundos
@@ -404,6 +406,90 @@ esta en la lista de la seccion 5, no inventada como si existiera.
 
 ---
 
+# 2b. El ranking de mas vendidos
+
+**Agregado el 2026-09-18.** A diferencia de las dos anteriores, esta pieza no es
+un script Lua ni la escribi yo: el worker es de Jose David
+(`backend/src/services/productos/mas-vendidos-sync.service.ts`). Aqui queda lo
+que le toca a la capa de Redis, que es dejar dicho que clave es, quien la
+escribe y como se comprueba.
+
+## La clave
+
+```
+mesh:productos:mas_vendidos       ZSET
+    miembro   el id de producto
+    puntaje   las unidades vendidas en la ventana
+```
+
+Redis guarda SOLO el id y el orden. El nombre, el precio y la foto no estan
+aqui: `GET /productos/mas-vendidos` lee los primeros 8 con `ZREVRANGE` y trae el
+documento de Mongo con un `$in`, que no respeta el orden y por eso el backend lo
+reordena. Es la regla de todo el proyecto, un dato vive en un solo sitio.
+
+## Quien la escribe, y como
+
+Un `@Interval` del backend, **cada 10 minutos**, agrega `compra_producto` de
+ClickHouse (`sum(cantidad)` por producto, tope 20):
+
+```
+1. ultimas 24 horas
+2. si no hubo ninguna compra, los ultimos 7 dias
+3. si tampoco, NO se toca Redis y se queda el ranking anterior, aunque este viejo
+```
+
+El reemplazo es atomico: se arma en `mesh:productos:mas_vendidos:tmp` y se
+publica con `RENAME`, asi que nadie lee un ranking a medio construir. **No lleva
+`EXPIRE`**, a proposito. Un ranking viejo que se muestra es mejor que un
+estante vacio, y si tuviera vencimiento, un fin de semana sin compras lo
+vaciaria.
+
+## Lo que hay que saber
+
+**Se recalcula cada 10 minutos, no al momento.** Una compra nueva tarda hasta
+ese rato en mover el estante de la portada. Es el precio de no agregar
+`compra_producto` en cada visita a la portada, que es lo que esta pieza evita.
+
+**Al arrancar el backend puede estar vacio hasta 10 minutos.** `@Interval` de
+`@nestjs/schedule` espera un intervalo entero antes de su primera corrida. Esto
+sale de como funciona la libreria y NO se midio reiniciando el backend, que es de
+otra persona. Con Redis vacio la ruta contesta `200` con una lista vacia y el
+estante de la portada simplemente no sale, sin ningun error.
+
+**Cuenta todo lo que hay en `compra_producto`, tambien lo sembrado.** No filtra
+por `lote`. Es la misma limitacion de los seis rankings de `/admin/eventos/*` y
+esta pedida en `docs/BACKEND-PENDIENTE.md`.
+
+## Verlo y reconstruirlo
+
+```
+bash redis/mas_vendidos.sh                  # muestra lo que hay ahora
+bash redis/mas_vendidos.sh --reconstruir    # lo recalcula desde ClickHouse, ya
+```
+
+`--reconstruir` ejecuta la misma consulta y el mismo `RENAME` que el worker, para
+no esperar los 10 minutos en una demo. **No lo reemplaza**: en produccion el
+unico camino es el worker. Como son dos copias de una misma regla, el script lee
+del backend el nombre de la clave y el tope, y se niega a escribir si ya no
+coinciden con los suyos.
+
+Medido el 2026-09-18 con el backend y las bases vivas, con filas sembradas en
+`compra_producto` (lote `prueba-mas-vendidos`, borradas al terminar):
+
+```
+compras de hoy     reconstruye, el orden sale 1, 3, 2, 11 y `GET /productos/mas-vendidos`
+                   devuelve el mismo orden; la clave :tmp no queda
+solo hace 5 dias   cae a la ventana de 7 dias y reemplaza lo que habia
+sin ninguna compra deja la clave anterior INTACTA (se puso un 555 a mano y sigue)
+clave del backend  una copia del script con otra clave se niega a escribir y sale con 1
+```
+
+Las dos ramas de los ultimos casos se midieron con una copia del script que solo
+mira el lote de prueba, porque en ese momento ya habia compras reales en
+ClickHouse que tapaban los dos casos. El script tal cual no se puede aislar asi.
+
+---
+
 # 3. La evidencia
 
 Salida real, de la maquina donde corre el proyecto. Redis 8.10.1 en el
@@ -789,5 +875,7 @@ Dicho para que nadie lo suponga:
   50 conexiones eso lo decide la red. Para una venta donde el orden importe
   haria falta una lista y otra conversacion.
 - **No reconcilia con PostgreSQL** (punto 10 de arriba).
+- **No calcula el ranking de mas vendidos**: eso es de `backend/`. Aqui solo
+  esta la clave, su ciclo de vida y un script para verla y reconstruirla (2b).
 - **No corre en Redis Cluster** tal como esta: faltan las llaves de ranura en
   los nombres de clave (seccion 2).

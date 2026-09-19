@@ -130,6 +130,16 @@ FROM
     SELECT 'evento_registro'         AS tabla, count() AS filas FROM evento_registro         WHERE lote = marca
     UNION ALL
     SELECT 'vistas_por_producto_dia' AS tabla, count() AS filas FROM vistas_por_producto_dia WHERE lote = marca
+    UNION ALL
+    SELECT 'carrito_producto' AS tabla, count() AS filas FROM carrito_producto WHERE lote = marca
+    UNION ALL
+    SELECT 'compra_producto' AS tabla, count() AS filas FROM compra_producto WHERE lote = marca
+    UNION ALL
+    SELECT 'devolucion_producto' AS tabla, count() AS filas FROM devolucion_producto WHERE lote = marca
+    UNION ALL
+    SELECT 'busqueda_realizada' AS tabla, count() AS filas FROM busqueda_realizada WHERE lote = marca
+    UNION ALL
+    SELECT 'busqueda_clic' AS tabla, count() AS filas FROM busqueda_clic WHERE lote = marca
 )
 ORDER BY tabla
 FORMAT PrettyCompact;
@@ -164,6 +174,26 @@ ALTER TABLE evento_registro
     DELETE WHERE lote = concat('generado-', toString({semilla:UInt64}))
     SETTINGS mutations_sync = 2;
 
+ALTER TABLE carrito_producto
+    DELETE WHERE lote = concat('generado-', toString({semilla:UInt64}))
+    SETTINGS mutations_sync = 2;
+
+ALTER TABLE compra_producto
+    DELETE WHERE lote = concat('generado-', toString({semilla:UInt64}))
+    SETTINGS mutations_sync = 2;
+
+ALTER TABLE devolucion_producto
+    DELETE WHERE lote = concat('generado-', toString({semilla:UInt64}))
+    SETTINGS mutations_sync = 2;
+
+ALTER TABLE busqueda_realizada
+    DELETE WHERE lote = concat('generado-', toString({semilla:UInt64}))
+    SETTINGS mutations_sync = 2;
+
+ALTER TABLE busqueda_clic
+    DELETE WHERE lote = concat('generado-', toString({semilla:UInt64}))
+    SETTINGS mutations_sync = 2;
+
 
 -- ============================================================
 -- PASO 3 -- el recuento, y falla si quedo algo
@@ -181,7 +211,12 @@ SELECT throwIf(
     (SELECT count() FROM vista_producto          WHERE lote = marca) +
     (SELECT count() FROM vistas_por_producto_dia WHERE lote = marca) +
     (SELECT count() FROM evento_login            WHERE lote = marca) +
-    (SELECT count() FROM evento_registro         WHERE lote = marca) > 0,
+    (SELECT count() FROM evento_registro         WHERE lote = marca) +
+    (SELECT count() FROM carrito_producto WHERE lote = marca) +
+    (SELECT count() FROM compra_producto WHERE lote = marca) +
+    (SELECT count() FROM devolucion_producto WHERE lote = marca) +
+    (SELECT count() FROM busqueda_realizada WHERE lote = marca) +
+    (SELECT count() FROM busqueda_clic WHERE lote = marca) > 0,
     concat('Quedaron filas del lote generado-', toString({semilla:UInt64}), ' despues de borrar. ',
            'Mira system.mutations en la base mesh_eventos, que ahi esta la que no termino')
 )
@@ -200,6 +235,16 @@ FROM
     SELECT 'evento_registro'         AS tabla, count() AS filas FROM evento_registro         WHERE lote = marca
     UNION ALL
     SELECT 'vistas_por_producto_dia' AS tabla, count() AS filas FROM vistas_por_producto_dia WHERE lote = marca
+    UNION ALL
+    SELECT 'carrito_producto' AS tabla, count() AS filas FROM carrito_producto WHERE lote = marca
+    UNION ALL
+    SELECT 'compra_producto' AS tabla, count() AS filas FROM compra_producto WHERE lote = marca
+    UNION ALL
+    SELECT 'devolucion_producto' AS tabla, count() AS filas FROM devolucion_producto WHERE lote = marca
+    UNION ALL
+    SELECT 'busqueda_realizada' AS tabla, count() AS filas FROM busqueda_realizada WHERE lote = marca
+    UNION ALL
+    SELECT 'busqueda_clic' AS tabla, count() AS filas FROM busqueda_clic WHERE lote = marca
 )
 ORDER BY tabla
 FORMAT PrettyCompact;
@@ -220,6 +265,16 @@ FROM
     SELECT lote, 'evento_registro'         AS tabla, count() AS filas FROM evento_registro         GROUP BY lote
     UNION ALL
     SELECT lote, 'vistas_por_producto_dia' AS tabla, count() AS filas FROM vistas_por_producto_dia GROUP BY lote
+    UNION ALL
+    SELECT lote, 'carrito_producto'        AS tabla, count() AS filas FROM carrito_producto        GROUP BY lote
+    UNION ALL
+    SELECT lote, 'compra_producto'         AS tabla, count() AS filas FROM compra_producto         GROUP BY lote
+    UNION ALL
+    SELECT lote, 'devolucion_producto'     AS tabla, count() AS filas FROM devolucion_producto     GROUP BY lote
+    UNION ALL
+    SELECT lote, 'busqueda_realizada'      AS tabla, count() AS filas FROM busqueda_realizada      GROUP BY lote
+    UNION ALL
+    SELECT lote, 'busqueda_clic'           AS tabla, count() AS filas FROM busqueda_clic           GROUP BY lote
 )
 ORDER BY lote, tabla
 FORMAT PrettyCompact;
