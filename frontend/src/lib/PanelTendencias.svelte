@@ -41,14 +41,20 @@
 	 * mas, y ahi cada unidad cuenta por lo que es.
 	 *
 	 *
-	 * LO QUE ESTAS RUTAS NO SABEN
+	 * SOLO CUENTAN LOS EVENTOS REALES
 	 * ---------------------------------------------------------------
-	 * No reciben `lote`. Las tablas de eventos llevan la columna `lote` ('real' o
-	 * 'generado') justamente para no confundir lo que midio el portal con lo que
-	 * sembro clickhouse/lote, y estas seis consultas cuentan TODO. Con un lote
-	 * sembrado en la base, el ranking mezcla las dos cosas y desde aqui no se
-	 * puede saber cual es cual. Se dice en pantalla, en la propia nota, y esta
-	 * pedido a Jose David en docs/BACKEND-PENDIENTE.md.
+	 * Las tablas de eventos llevan la columna `lote` ('real' para lo que mando el
+	 * portal o salio de un pedido pagado, 'generado-N' para lo que siembra
+	 * clickhouse/lote). Desde el 2026-09-19 las seis consultas filtran
+	 * `lote = 'real'` y NO reciben ningun parametro para pedir lo contrario:
+	 * decision de Jose David, "las metricas en todo lugar son sobre solo los
+	 * reales". Lo sembrado no entra en ninguna lista de esta pantalla, y por eso
+	 * aqui no hay selector de lote ni aviso de mezcla. Antes de esa fecha si
+	 * mezclaban y esta pantalla lo avisaba; ya no es cierto.
+	 *
+	 * Consecuencia para una demo: los datos de demo sembrados no se ven aqui. Lo
+	 * que se ve es lo real, que en una base recien armada son las ventas que copia
+	 * etl/cargar_compras.sh desde PostgreSQL y lo que se genere usando la app.
 	 *
 	 * Y el producto sale sin su id cuando ya no tiene documento en Mongo: la ruta
 	 * contesta `producto: null` y el id se pierde por el camino. La fila se pinta
@@ -144,7 +150,11 @@
 	const LIMITES = [5, 10, 20, 50];
 
 	let clave = $state<Clave>('vista');
-	let dias = $state(7);
+	// 30 y no 7: como solo cuentan los eventos REALES, en una base joven casi todo
+	// cae fuera de una semana. Medido el 2026-09-19 (filas de compra reales a 7 / 30
+	// / 365 dias: 5 / 45 / 143); con 7 el ranking de compras trae 4 filas y con 30,
+	// 9. La ventana se cambia desde el selector.
+	let dias = $state(30);
 	let limite = $state(10);
 	let direccion = $state<'positivo' | 'negativo'>('positivo');
 
@@ -350,8 +360,8 @@
 	</p>
 
 	<p class="aviso">
-		Estas cuentas incluyen todo lo guardado, tambien las filas que sembro el generador de lotes.
-		La ruta no separa lo medido de lo sembrado.
+		Aqui solo cuentan los eventos reales, los que mando el portal o salieron de un pedido pagado.
+		Lo que siembra el generador de lotes no entra en ninguna de estas listas.
 	</p>
 
 	{#if cargando}

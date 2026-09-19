@@ -430,7 +430,7 @@ reordena. Es la regla de todo el proyecto, un dato vive en un solo sitio.
 ## Quien la escribe, y como
 
 Un `@Interval` del backend, **cada 10 minutos**, agrega `compra_producto` de
-ClickHouse (`sum(cantidad)` por producto, tope 20):
+ClickHouse (`sum(cantidad)` por producto, tope 20, **solo filas con `lote = 'real'`**):
 
 ```
 1. ultimas 24 horas
@@ -456,9 +456,13 @@ sale de como funciona la libreria y NO se midio reiniciando el backend, que es d
 otra persona. Con Redis vacio la ruta contesta `200` con una lista vacia y el
 estante de la portada simplemente no sale, sin ningun error.
 
-**Cuenta todo lo que hay en `compra_producto`, tambien lo sembrado.** No filtra
-por `lote`. Es la misma limitacion de los seis rankings de `/admin/eventos/*` y
-esta pedida en `docs/BACKEND-PENDIENTE.md`.
+**Solo cuenta ventas reales, y lo sembrado NUNCA entra.** Desde el 2026-09-19 el
+worker filtra `AND lote = 'real'` y no hay ningun parametro para pedir lo contrario
+(decision de Jose David, la misma de los seis rankings de `/admin/eventos/*`).
+Las compras que siembra `clickhouse/lote` (lote `generado-N`) no mueven este
+ranking. Antes de esa fecha si lo movian, y una version anterior de esta seccion
+lo decia asi; ya no es cierto. Lo que si entra como `real` son las ventas que
+`etl/cargar_compras.sh` copia desde PostgreSQL, porque son ventas de verdad.
 
 ## Verlo y reconstruirlo
 
@@ -471,7 +475,7 @@ bash redis/mas_vendidos.sh --reconstruir    # lo recalcula desde ClickHouse, ya
 no esperar los 10 minutos en una demo. **No lo reemplaza**: en produccion el
 unico camino es el worker. Como son dos copias de una misma regla, el script lee
 del backend el nombre de la clave y el tope, y se niega a escribir si ya no
-coinciden con los suyos.
+coinciden con los suyos, o si el worker dejo de filtrar por `lote = 'real'`.
 
 Medido el 2026-09-18 con el backend y las bases vivas, con filas sembradas en
 `compra_producto` (lote `prueba-mas-vendidos`, borradas al terminar):
@@ -487,6 +491,22 @@ clave del backend  una copia del script con otra clave se niega a escribir y sal
 Las dos ramas de los ultimos casos se midieron con una copia del script que solo
 mira el lote de prueba, porque en ese momento ya habia compras reales en
 ClickHouse que tapaban los dos casos. El script tal cual no se puede aislar asi.
+
+**Vuelto a medir el 2026-09-19, con el filtro de lote real ya puesto.** Las filas de
+prueba ya no pueden ir en un lote aparte (no contarian), asi que se sembraron como
+`real` con un marcador en `id_pedido` (mayor o igual que 990000000) y la copia del
+script filtra ademas por ese marcador:
+
+```
+el script tal cual        reconstruye con los mismos 4 productos que la consulta a mano
+copia con marcador        2 productos (5 con 4 unidades, 6 con 2); una fila de lote
+                          'generado-prueba-mv' con 999 unidades NO entra
+servicio sin el filtro    una copia del script apuntada a un servicio sin `lote = 'real'`
+                          se niega a escribir y sale con 1
+```
+
+Las filas sembradas se borraron al terminar (por marcador Y lote, nunca por lote
+solo) y el ranking de Redis se restauro tal como estaba.
 
 ---
 

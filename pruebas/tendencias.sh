@@ -24,25 +24,41 @@
 #      malo da 400 en vez de callarse.
 #   5. EL ESTANTE. Lee el ZSET de Redis, respeta su orden, salta el id que ya no
 #      tiene producto visible y contesta 200 sin sesion.
+#   6. QUE LO SEMBRADO NO ENTRA. Desde el 2026-09-19 las seis rutas y el worker
+#      de mas vendidos cuentan SOLO lote = 'real', sin parametro para lo
+#      contrario. Una fila de lote 'generado-...' con un total enorme no puede
+#      aparecer en ningun ranking.
 #
-# COMO SE MIDE SIN ENSUCIAR EL RESULTADO. Las tablas ya traen filas ajenas (el
-# lote generado de clickhouse/lote pone miles de vistas), asi que el numero que
-# devuelve la ruta para el producto 1 no es solo el sembrado aqui. Se le resta:
-# antes de sembrar se calcula, directo en ClickHouse y con la misma metrica, lo
-# que ya hay para ese producto sin contar el lote de esta prueba, y lo esperado
-# es esa base mas lo sembrado. Los terminos de busqueda llevan un nombre unico y
-# no necesitan base.
+# COMO SE SIEMBRA AHORA, Y POR QUE CAMBIO. Antes las filas de prueba llevaban
+# lote 'prueba-tendencias' y las rutas las contaban. Con el filtro fijo de lote
+# real esas filas ya no cuentan, asi que la prueba sembraba y no media nada.
+# Ahora se siembra con lote = 'real' (es lo unico que las rutas leen) y lo que
+# distingue a las filas de la prueba de las de verdad son MARCADORES en otras
+# columnas:
 #
-# LO QUE SIEMBRA Y LO QUE LIMPIA. Filas con lote 'prueba-tendencias' en las seis
-# tablas de mesh_eventos, y la clave mesh:productos:mas_vendidos de Redis, que
-# se GUARDA antes y se RESTAURA al terminar (si no existia, se borra). Al final
-# comprueba que no quedo ni una fila. Hay un trap: si el proceso muere, limpia.
+#   id_producto   987654321 (ficticio) en las cuatro tablas de producto. No existe
+#                 en Mongo, asi que la ruta lo devuelve con `producto: null`, y esa
+#                 es la fila que se busca. Sin producto real no hace falta restar
+#                 lo que ya hubiera: no hay nada mas con ese id.
+#   termino       empieza con 'prueba-tendencias-' en las dos de busqueda.
+#
+# LA REGLA QUE NO SE ROMPE al limpiar: se borra por marcador Y por lote real,
+# nunca por lote solo. Con lote = 'real' a secas se borrarian ventas de verdad.
+# vistas_por_producto_dia se llena sola por una vista materializada y solo mira
+# lo que ENTRA, asi que va aparte; su clave es (dia, id_producto, lote), o sea
+# que con el id ficticio esas filas son enteramente de la prueba.
+#
+# LO QUE SIEMBRA Y LO QUE LIMPIA. Las filas marcadas en las seis tablas y en el
+# resumen, y la clave mesh:productos:mas_vendidos de Redis, que se GUARDA antes y
+# se RESTAURA al terminar (si no existia, se borra). Al final comprueba que no
+# quedo ni una fila marcada. Hay un trap: si el proceso muere, limpia.
 #
 # LO QUE CUESTA CORRERLO. Dos inicios de sesion (admin y comprador), que suman
 # al contador multi_cuenta_ip del fraude de login. Y hay una carrera pequena
-# con el worker de mas vendidos, que reescribe esa clave cada 10 minutos: si
-# cae justo en medio, el paso 5 puede dar un rojo que no es del codigo. Se
-# repite solo. Corre de a uno, con nadie mas tocando eventos.
+# con el worker de mas vendidos, que reescribe esa clave cada 10 minutos y ahora
+# vera brevemente el id ficticio en compra_producto (lo salta, no tiene producto
+# visible): si cae justo en medio, el paso 5 puede dar un rojo que no es del
+# codigo. Se repite solo. Corre de a uno, con nadie mas tocando eventos.
 #
 # No instala nada: curl, docker y node, que ya estan.
 
@@ -85,20 +101,18 @@ TARRO_COMPRADOR=".mesh-tend-comprador.txt"
 CUERPO=".mesh-tend-cuerpo.txt"
 RESPALDO_ZSET=".mesh-tend-zset.txt"
 
-LOTE="prueba-tendencias"
-# vistas_por_producto_dia va AL FINAL a proposito: no se le siembra nada, se llena
-# sola por una vista materializada cuando entra una fila en vista_producto, y esa
-# vista solo mira lo que ENTRA. Borrar de vista_producto no le quita nada, asi que
-# hay que borrarla aparte. Sin ella aqui, cada corrida de esta prueba dejaba tres
-# filas 'prueba-tendencias' en el resumen (se vio el 2026-09-18) y la comprobacion
-# de "no queda nada" pasaba en verde por no mirarla.
-TABLAS="vista_producto carrito_producto compra_producto devolucion_producto busqueda_realizada busqueda_clic vistas_por_producto_dia"
-# El producto sobre el que se mide. Tiene que existir en Mongo y estar activo:
-# el 1 es la Laptop Ambar Campus 14 del catalogo curado.
+# Los marcadores de lo sembrado. Ver la cabecera.
+FALSO=987654321
+PREFIJO_TERMINO="prueba-tendencias-"
+TERMINO="${PREFIJO_TERMINO}termino-${$}"
+TERMINO_VIEJO="${PREFIJO_TERMINO}viejo-${$}"
+# Un producto real, solo para el ZSET del estante (paso 5).
 P=1
 Q=2
-TERMINO="prueba-tendencias-termino-${$}"
-TERMINO_VIEJO="prueba-tendencias-viejo-${$}"
+
+# Las tablas de producto (marcador: id_producto) y las de busqueda (marcador: termino).
+TABLAS_PRODUCTO="vista_producto carrito_producto compra_producto devolucion_producto vistas_por_producto_dia"
+TABLAS_BUSQUEDA="busqueda_realizada busqueda_clic"
 
 ok=0; fallo=0
 OK()    { echo "  OK    $1"; ok=$((ok+1)); }
@@ -140,22 +154,46 @@ entrar() {
         -d "{\"identificador\":\"$1\",\"contrasena\":\"$3\"}"
 }
 
-# El total que devuelve una ruta de producto para el producto $2, o 0 si no sale.
-total_producto() { get "/admin/eventos/$1?dias=$3&limite=200" "$TARRO_ADMIN" >/dev/null; jx "(j.payload.find(x=>x.producto&&x.producto._id===$2)||{total:0}).total" < "$CUERPO"; }
+# El total de la fila del producto FICTICIO, que la ruta devuelve con
+# `producto: null` (0 si no sale). Los reales nunca son null.
+total_falso() { get "/admin/eventos/$1?dias=$2&limite=200" "$TARRO_ADMIN" >/dev/null; jx "(j.payload.find(x=>x.producto===null)||{total:0}).total" < "$CUERPO"; }
 total_termino()  { get "/admin/eventos/$1?dias=$3&limite=200" "$TARRO_ADMIN" >/dev/null; jx "(j.payload.find(x=>x.termino==='$2')||{total:-1}).total" < "$CUERPO"; }
 
 igual() { # descripcion esperado obtenido
     if [ "$3" = "$2" ]; then OK "$1 ($3)"; else FALLA "$1 -- esperado $2, salio $3"; fi
 }
 
+# Cuantas filas MARCADAS hay ahora, sumadas en todas las tablas. Sirve para los
+# restos de una corrida anterior y para la comprobacion final.
+filas_marcadas() {
+    local n=0 t c
+    for t in $TABLAS_PRODUCTO; do
+        c=$(ch "SELECT count() FROM $t WHERE lote = 'real' AND id_producto = $FALSO")
+        n=$((n + c))
+    done
+    for t in $TABLAS_BUSQUEDA; do
+        c=$(ch "SELECT count() FROM $t WHERE lote = 'real' AND startsWith(termino, '$PREFIJO_TERMINO')")
+        n=$((n + c))
+    done
+    echo "$n"
+}
+
 # ---------- limpieza ----------
+# SIEMPRE marcador Y lote real. Nunca por lote solo: borraria ventas de verdad.
 BORRADO=0
+borrar_marcadas() {
+    local t
+    for t in $TABLAS_PRODUCTO; do
+        ch "ALTER TABLE $t DELETE WHERE lote = 'real' AND id_producto = $FALSO SETTINGS mutations_sync = 2" >/dev/null 2>&1
+    done
+    for t in $TABLAS_BUSQUEDA; do
+        ch "ALTER TABLE $t DELETE WHERE lote = 'real' AND startsWith(termino, '$PREFIJO_TERMINO') SETTINGS mutations_sync = 2" >/dev/null 2>&1
+    done
+}
 limpiar() {
     [ "$BORRADO" = 1 ] && return
     BORRADO=1
-    for t in $TABLAS; do
-        ch "ALTER TABLE $t DELETE WHERE lote = '$LOTE' SETTINGS mutations_sync = 1" >/dev/null 2>&1
-    done
+    borrar_marcadas
     # Restaura el ZSET tal como estaba.
     rcli DEL "$CLAVE_RANKING" >/dev/null
     if [ -s "$RESPALDO_ZSET" ]; then
@@ -178,23 +216,19 @@ if [ "$codigo" != "200" ]; then
 fi
 OK "el backend contesta y la ruta de mas vendidos existe"
 
-for t in $TABLAS; do
+for t in $TABLAS_PRODUCTO $TABLAS_BUSQUEDA; do
     if ! ch "SELECT 1 FROM $t LIMIT 1" >/dev/null 2>&1; then
         FALLA "no se puede leer $CH_BASE.$t -- corrio clickhouse/001_esquema.sql?"
         exit 1
     fi
 done
-OK "las seis tablas se leen en $CH_BASE"
+OK "las seis tablas y el resumen se leen en $CH_BASE"
 
 # Restos de una corrida que murio sin su trap.
-restos=0
-for t in $TABLAS; do
-    n=$(ch "SELECT count() FROM $t WHERE lote = '$LOTE'")
-    restos=$((restos + n))
-done
+restos=$(filas_marcadas)
 if [ "$restos" -gt 0 ]; then
-    echo "  (habia $restos fila(s) de una corrida anterior, se borran)"
-    for t in $TABLAS; do ch "ALTER TABLE $t DELETE WHERE lote = '$LOTE' SETTINGS mutations_sync = 1" >/dev/null; done
+    echo "  (habia $restos fila(s) marcadas de una corrida anterior, se borran)"
+    borrar_marcadas
 fi
 OK "sin restos de otra corrida"
 
@@ -215,74 +249,73 @@ for r in vista carrito compra devolucion busqueda busqueda-clic; do
     igual "$r con admin" 200 "$(get "/admin/eventos/$r" "$TARRO_ADMIN")"
 done
 
-# ============================================================
-titulo "2. Se siembra, con duplicados a proposito"
-# ============================================================
-# Las bases de lo que ya hay, SIN contar esta prueba, con la metrica de cada tabla.
-b_vista7=$(ch "SELECT uniqExact(sesion) FROM vista_producto WHERE id_producto=$P AND lote != '$LOTE' AND fecha >= now() - INTERVAL 7 DAY")
-b_vista30=$(ch "SELECT uniqExact(sesion) FROM vista_producto WHERE id_producto=$P AND lote != '$LOTE' AND fecha >= now() - INTERVAL 30 DAY")
-b_carrito=$(ch "SELECT uniqExact(id_usuario) FROM carrito_producto WHERE id_producto=$P AND lote != '$LOTE' AND fecha >= now() - INTERVAL 7 DAY")
-b_compra=$(ch "SELECT sum(cantidad) FROM compra_producto WHERE id_producto=$P AND lote != '$LOTE' AND fecha >= now() - INTERVAL 7 DAY")
-b_devol=$(ch "SELECT sum(cantidad) FROM devolucion_producto WHERE id_producto=$P AND lote != '$LOTE' AND fecha >= now() - INTERVAL 7 DAY")
-echo "  bases previas del producto $P (7 dias)  vistas $b_vista7  carrito $b_carrito  compras $b_compra  devoluciones $b_devol"
+# Antes de sembrar: no puede haber ya otra fila con `producto: null` en las
+# rutas de producto, o no se sabria cual es la del id ficticio.
+for r in vista carrito compra devolucion; do
+    get "/admin/eventos/$r?dias=365&limite=200" "$TARRO_ADMIN" >/dev/null
+    huerfanas=$(jx 'j.payload.filter(x=>x.producto===null).length' < "$CUERPO")
+    if [ "$huerfanas" != "0" ]; then
+        FALLA "$r ya trae $huerfanas fila(s) de un producto sin ficha antes de sembrar: la prueba no distinguiria la suya"
+        exit 1
+    fi
+done
+OK "ninguna ruta de producto trae filas huerfanas antes de sembrar"
 
+# ============================================================
+titulo "2. Se siembra, con lote real, con duplicados y con marcadores"
+# ============================================================
 # vista: sesiones A, A, B dentro de la ventana y C hace 10 dias.
 #        distintas en 7 dias = 2, y COUNT(*) daria 3. En 30 dias = 3, y COUNT(*) 4.
 ch "INSERT INTO vista_producto (fecha,id_producto,sesion,ip,origen,lote) VALUES
-    (now(),$P,'pt-A','127.0.0.1','catalogo','$LOTE'),
-    (now(),$P,'pt-A','127.0.0.1','catalogo','$LOTE'),
-    (now(),$P,'pt-B','127.0.0.1','catalogo','$LOTE'),
-    (now() - INTERVAL 10 DAY,$P,'pt-C','127.0.0.1','catalogo','$LOTE')"
+    (now(),$FALSO,'pt-A','127.0.0.1','catalogo','real'),
+    (now(),$FALSO,'pt-A','127.0.0.1','catalogo','real'),
+    (now(),$FALSO,'pt-B','127.0.0.1','catalogo','real'),
+    (now() - INTERVAL 10 DAY,$FALSO,'pt-C','127.0.0.1','catalogo','real')"
 # carrito: la cuenta 900000001 dos veces y la 900000002 una. Distintas 2, COUNT(*) 3.
 ch "INSERT INTO carrito_producto (fecha,id_producto,id_oferta,id_usuario,cantidad,ip,lote) VALUES
-    (now(),$P,1,900000001,2,'127.0.0.1','$LOTE'),
-    (now(),$P,1,900000001,1,'127.0.0.1','$LOTE'),
-    (now(),$P,1,900000002,1,'127.0.0.1','$LOTE')"
+    (now(),$FALSO,1,900000001,2,'127.0.0.1','real'),
+    (now(),$FALSO,1,900000001,1,'127.0.0.1','real'),
+    (now(),$FALSO,1,900000002,1,'127.0.0.1','real')"
 # compra: cantidades 5 y 3. SUM da 8, COUNT(*) daria 2.
 ch "INSERT INTO compra_producto (fecha,id_producto,id_oferta,id_usuario,cantidad,id_pedido,ip,lote) VALUES
-    (now(),$P,1,900000001,5,990000001,'127.0.0.1','$LOTE'),
-    (now(),$P,1,900000002,3,990000002,'127.0.0.1','$LOTE')"
+    (now(),$FALSO,1,900000001,5,990000001,'127.0.0.1','real'),
+    (now(),$FALSO,1,900000002,3,990000002,'127.0.0.1','real')"
 # devolucion: 2 y 1. SUM da 3, COUNT(*) daria 2.
 ch "INSERT INTO devolucion_producto (fecha,id_producto,id_oferta,id_usuario,cantidad,id_pedido,ip,lote) VALUES
-    (now(),$P,1,900000001,2,990000001,'127.0.0.1','$LOTE'),
-    (now(),$P,1,900000002,1,990000002,'127.0.0.1','$LOTE')"
+    (now(),$FALSO,1,900000001,2,990000001,'127.0.0.1','real'),
+    (now(),$FALSO,1,900000002,1,990000002,'127.0.0.1','real')"
 # busqueda: el termino con las sesiones s1, s1 y s2 (distintas 2, COUNT(*) 3),
 # y otro termino de hace 10 dias.
 ch "INSERT INTO busqueda_realizada (fecha,termino,resultados,sesion,lote) VALUES
-    (now(),'$TERMINO',5,'pt-s1','$LOTE'),
-    (now(),'$TERMINO',5,'pt-s1','$LOTE'),
-    (now(),'$TERMINO',5,'pt-s2','$LOTE'),
-    (now() - INTERVAL 10 DAY,'$TERMINO_VIEJO',0,'pt-s1','$LOTE')"
+    (now(),'$TERMINO',5,'pt-s1','real'),
+    (now(),'$TERMINO',5,'pt-s1','real'),
+    (now(),'$TERMINO',5,'pt-s2','real'),
+    (now() - INTERVAL 10 DAY,'$TERMINO_VIEJO',0,'pt-s1','real')"
 # clic: dos clics de la misma sesion. Distintas 1, COUNT(*) daria 2.
 ch "INSERT INTO busqueda_clic (fecha,termino,id_producto,posicion,sesion,lote) VALUES
-    (now(),'$TERMINO',$P,1,'pt-s1','$LOTE'),
-    (now(),'$TERMINO',$P,2,'pt-s1','$LOTE')"
-OK "sembradas las filas del lote $LOTE"
+    (now(),'$TERMINO',$FALSO,1,'pt-s1','real'),
+    (now(),'$TERMINO',$FALSO,2,'pt-s1','real')"
+OK "sembradas las filas marcadas (lote real, id_producto $FALSO, terminos $PREFIJO_TERMINO...)"
 
 # ============================================================
 titulo "3. La metrica de cada tabla"
 # ============================================================
-igual "vista, 7 dias: sesiones DISTINTAS, no eventos (un COUNT(*) daria $((b_vista7 + 3)))" \
-    $((b_vista7 + 2)) "$(total_producto vista $P 7)"
-igual "carrito, 7 dias: cuentas DISTINTAS (un COUNT(*) daria $((b_carrito + 3)))" \
-    $((b_carrito + 2)) "$(total_producto carrito $P 7)"
-igual "compra, 7 dias: SUMA de unidades (un COUNT(*) daria $((b_compra + 2)))" \
-    $((b_compra + 8)) "$(total_producto compra $P 7)"
-igual "devolucion, 7 dias: SUMA de unidades (un COUNT(*) daria $((b_devol + 2)))" \
-    $((b_devol + 3)) "$(total_producto devolucion $P 7)"
+igual "vista, 7 dias: sesiones DISTINTAS, no eventos (un COUNT(*) daria 3)" 2 "$(total_falso vista 7)"
+igual "carrito, 7 dias: cuentas DISTINTAS (un COUNT(*) daria 3)" 2 "$(total_falso carrito 7)"
+igual "compra, 7 dias: SUMA de unidades (un COUNT(*) daria 2)" 8 "$(total_falso compra 7)"
+igual "devolucion, 7 dias: SUMA de unidades (un COUNT(*) daria 2)" 3 "$(total_falso devolucion 7)"
 igual "busqueda: sesiones DISTINTAS por termino (un COUNT(*) daria 3)" 2 "$(total_termino busqueda "$TERMINO" 7)"
 igual "busqueda-clic: sesiones DISTINTAS por termino (un COUNT(*) daria 2)" 1 "$(total_termino busqueda-clic "$TERMINO" 7)"
 
 # El arnes se vigila a si mismo: si los datos sembrados no distinguen la metrica
 # buena de la mala, todo lo de arriba pasaria igual con un COUNT(*).
-[ $((b_vista7 + 2)) -ne $((b_vista7 + 3)) ] && [ 8 -ne 2 ] && OK "los datos sembrados separan la metrica buena de COUNT(*)" \
+[ 2 -ne 3 ] && [ 8 -ne 2 ] && OK "los datos sembrados separan la metrica buena de COUNT(*)" \
     || FALLA "los datos sembrados no separan la metrica buena de COUNT(*)"
 
 # ============================================================
 titulo "4. La ventana, el limite y la direccion"
 # ============================================================
-igual "vista, 30 dias: la fila de hace 10 dias SI entra" \
-    $((b_vista30 + 3)) "$(total_producto vista $P 30)"
+igual "vista, 30 dias: la fila de hace 10 dias SI entra" 3 "$(total_falso vista 30)"
 igual "busqueda, 7 dias: el termino de hace 10 dias NO sale" -1 "$(total_termino busqueda "$TERMINO_VIEJO" 7)"
 igual "busqueda, 30 dias: el termino de hace 10 dias SI sale" 1 "$(total_termino busqueda "$TERMINO_VIEJO" 30)"
 
@@ -314,15 +347,35 @@ igual "sin ranking contesta 200, no un error" 200 "$c"
 igual "y la lista va vacia" 0 "$(jx 'j.payload.length' < "$CUERPO")"
 
 # ============================================================
-titulo "6. Limpieza"
+titulo "6. Lo sembrado (lote generado) no entra en ningun ranking"
+# ============================================================
+# Filas de lote 'generado-prueba-tendencias' con totales enormes y con los MISMOS
+# marcadores. Si alguna ruta las contara, los totales del paso 3 se moverian.
+# Se borran por marcador Y por su lote, y solo esas.
+LOTE_AJENO="generado-prueba-tendencias"
+ch "INSERT INTO compra_producto (fecha,id_producto,id_oferta,id_usuario,cantidad,id_pedido,ip,lote) VALUES
+    (now(),$FALSO,1,900000003,999,990000009,'127.0.0.1','$LOTE_AJENO')"
+ch "INSERT INTO vista_producto (fecha,id_producto,sesion,ip,origen,lote) VALUES
+    (now(),$FALSO,'pt-gen-1','127.0.0.1','catalogo','$LOTE_AJENO'),
+    (now(),$FALSO,'pt-gen-2','127.0.0.1','catalogo','$LOTE_AJENO')"
+ch "INSERT INTO busqueda_realizada (fecha,termino,resultados,sesion,lote) VALUES
+    (now(),'$TERMINO',5,'pt-gen-1','$LOTE_AJENO'),
+    (now(),'$TERMINO',5,'pt-gen-2','$LOTE_AJENO')"
+igual "compra: los 999 del lote generado no suman (sigue 8)" 8 "$(total_falso compra 7)"
+igual "vista: las dos sesiones del lote generado no cuentan (sigue 2)" 2 "$(total_falso vista 7)"
+igual "busqueda: las dos sesiones del lote generado no cuentan (sigue 2)" 2 "$(total_termino busqueda "$TERMINO" 7)"
+ch "ALTER TABLE compra_producto DELETE WHERE lote = '$LOTE_AJENO' AND id_producto = $FALSO SETTINGS mutations_sync = 2" >/dev/null
+ch "ALTER TABLE vista_producto DELETE WHERE lote = '$LOTE_AJENO' AND id_producto = $FALSO SETTINGS mutations_sync = 2" >/dev/null
+ch "ALTER TABLE vistas_por_producto_dia DELETE WHERE lote = '$LOTE_AJENO' AND id_producto = $FALSO SETTINGS mutations_sync = 2" >/dev/null
+ch "ALTER TABLE busqueda_realizada DELETE WHERE lote = '$LOTE_AJENO' AND startsWith(termino, '$PREFIJO_TERMINO') SETTINGS mutations_sync = 2" >/dev/null
+
+# ============================================================
+titulo "7. Limpieza"
 # ============================================================
 limpiar
-resto=0
-for t in $TABLAS; do
-    n=$(ch "SELECT count() FROM $t WHERE lote = '$LOTE'")
-    resto=$((resto + n))
-done
-igual "no queda ni una fila del lote $LOTE" 0 "$resto"
+igual "no queda ni una fila marcada, resumen incluido" 0 "$(filas_marcadas)"
+igual "ni una del lote generado de la prueba" 0 \
+    "$(ch "SELECT (SELECT count() FROM compra_producto WHERE lote = '$LOTE_AJENO') + (SELECT count() FROM vista_producto WHERE lote = '$LOTE_AJENO') + (SELECT count() FROM vistas_por_producto_dia WHERE lote = '$LOTE_AJENO') + (SELECT count() FROM busqueda_realizada WHERE lote = '$LOTE_AJENO')")"
 
 echo
 echo "=============================================================="
