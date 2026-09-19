@@ -26,6 +26,7 @@ import { CancelacionResultado } from '../../dto/cancelar-pedido';
 import { DetallePedido } from '../../models/pedido-producto';
 import { MetodoPago, METODO_PAGO_TARJETA } from '../../models/metodo-pago';
 import { ProductosService } from '../productos/productos.service';
+import { EventosService } from '../eventos/eventos.service';
 
 const REGEX_ID = /^\d+$/;
 
@@ -54,7 +55,10 @@ interface CompraResultadoPostgres {
 export class PedidosCompradorService {
   private readonly logger = new Logger(PedidosCompradorService.name);
 
-  constructor(private readonly productosService: ProductosService) {}
+  constructor(
+    private readonly productosService: ProductosService,
+    private readonly eventosService: EventosService,
+  ) {}
 
   /**
    * Abre un pedido vacio en estado "pendiente", llamando a
@@ -667,6 +671,7 @@ export class PedidosCompradorService {
   async cancelarPedido(
     idPedidoParametro: string,
     idUsuario: string,
+    ip: string,
   ): Promise<CancelacionResultado> {
     if (!REGEX_ID.test(idPedidoParametro)) {
       throw new ErrorValidacion('El id no es valido');
@@ -685,6 +690,33 @@ export class PedidosCompradorService {
       if (cancelacion.stock.length > 0) {
         const idsProducto = cancelacion.stock.map((linea) => linea.id_producto);
         await this.productosService.recalcularCamposCalculados(idsProducto);
+
+        // Evento de analitica en ClickHouse (plan pendiente/eventos-clickhouse.md).
+        // Solo cuando el pedido SI estaba comprado (stock.length > 0) -- uno
+        // pendiente nunca llego a "compra" en el embudo, asi que cancelarlo
+        // no es una devolucion que valga la pena medir. Fire-and-forget, SIN
+        // `await`: mismo criterio que `registrarCompra`.
+        const lineas = await pool.query<{
+          id_producto: string;
+          id_oferta: string;
+          cantidad: number;
+        }>(
+          `SELECT pp.id_producto_mongo AS id_producto, ph.id_oferta, pp.cantidad
+             FROM pedido_producto pp
+             JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+            WHERE pp.id_pedido = $1`,
+          [idPedido],
+        );
+        void this.eventosService.registrarDevolucion({
+          idUsuario,
+          idPedido,
+          ip,
+          lineas: lineas.rows.map((linea) => ({
+            idProducto: Number(linea.id_producto),
+            idOferta: Number(linea.id_oferta),
+            cantidad: linea.cantidad,
+          })),
+        });
       }
 
       return cancelacion;

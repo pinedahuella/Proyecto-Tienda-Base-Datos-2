@@ -3,6 +3,14 @@ export interface BuscarProductosQuery {
   /** Lo que la persona escribio. Busca en nombre, descripcion y variantes. */
   nombre?: string;
   limite?: string;
+  /**
+   * Opcional, solo para el evento de analitica `busqueda_realizada` en
+   * ClickHouse (ver `elementos Generales/plan pendiente/eventos-clickhouse.md`).
+   * La genera el navegador, igual que en `POST /eventos/vista`. Si no
+   * viene, la busqueda funciona igual -- simplemente no se registra el
+   * evento (nunca bloquea ni rechaza la busqueda).
+   */
+  sesion?: string;
 }
 
 /**

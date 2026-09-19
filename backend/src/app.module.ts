@@ -59,6 +59,10 @@ import { AdminFraudeLoginController } from './controllers/admin/admin-fraude-log
 import { FraudeLoginExploracionService } from './services/fraude-login/fraude-login-exploracion.service';
 import { AdminFraudeAnillosController } from './controllers/admin/admin-fraude-anillos.controller';
 import { FraudeAnillosPersistidosService } from './services/fraude/fraude-anillos-persistidos.service';
+import { EventosController } from './controllers/eventos.controller';
+import { EventosService } from './services/eventos/eventos.service';
+import { AdminEventosController } from './controllers/admin/admin-eventos.controller';
+import { AdminEventosService } from './services/admin/admin-eventos.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -98,6 +102,8 @@ import { FraudeAnillosPersistidosService } from './services/fraude/fraude-anillo
     BuscadorProductosController,
     AdminFraudeLoginController,
     AdminFraudeAnillosController,
+    EventosController,
+    AdminEventosController,
   ],
   providers: [
     InicioService,
@@ -133,6 +139,8 @@ import { FraudeAnillosPersistidosService } from './services/fraude/fraude-anillo
     FraudeLoginRetrospectivoService,
     FraudeLoginExploracionService,
     FraudeAnillosPersistidosService,
+    EventosService,
+    AdminEventosService,
   ],
 })
 export class AppModule {}

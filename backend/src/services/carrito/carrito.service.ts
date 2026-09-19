@@ -34,6 +34,7 @@ import { METODO_PAGO_TARJETA } from '../../models/metodo-pago';
 import { Producto } from '../../models/producto';
 import { ProductosService } from '../productos/productos.service';
 import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
+import { EventosService } from '../eventos/eventos.service';
 
 const REGEX_ID = /^\d+$/;
 
@@ -125,6 +126,7 @@ export class CarritoService {
   constructor(
     private readonly productosService: ProductosService,
     private readonly inventarioLimitadoService: InventarioLimitadoService,
+    private readonly eventosService: EventosService,
   ) {}
 
   /** TTL del carrito, en segundos: 24 h de INACTIVIDAD (se re-pone en cada toque). */
@@ -468,18 +470,20 @@ export class CarritoService {
   async comprarCarrito(
     idUsuario: string,
     datos: ComprarCarritoPeticion,
+    ip: string,
   ): Promise<ComprarCarritoRespuesta> {
     // Un candado corto por cuenta cierra el hueco del doble submit (dos
     // POST /carrito/comprar identicos y concurrentes creaban dos pedidos,
     // cobrando dos veces). Ver conCandadoCheckout.
     return this.conCandadoCheckout(idUsuario, () =>
-      this.ejecutarCompraCarrito(idUsuario, datos),
+      this.ejecutarCompraCarrito(idUsuario, datos, ip),
     );
   }
 
   private async ejecutarCompraCarrito(
     idUsuario: string,
     datos: ComprarCarritoPeticion,
+    ip: string,
   ): Promise<ComprarCarritoRespuesta> {
     if (!esTextoNoVacio(datos.metodo_pago)) {
       throw new ErrorValidacion('El metodo_pago es obligatorio');
@@ -582,6 +586,22 @@ export class CarritoService {
     await this.confirmarReservas(idUsuario, lineasConReserva);
 
     await this.vaciar(idUsuario);
+
+    // Evento de analitica en ClickHouse (plan pendiente/eventos-clickhouse.md).
+    // Fire-and-forget, SIN `await`: si ClickHouse esta caido o tarda, la
+    // compra ya quedo cerrada en PostgreSQL y no debe verse afectada -- ver
+    // `EventosService.registrarCompra`, que nunca lanza. Una fila por linea
+    // del pedido, todas en un solo INSERT.
+    void this.eventosService.registrarCompra({
+      idUsuario,
+      idPedido: compra.id_pedido,
+      ip,
+      lineas: lineas.map((linea) => ({
+        idProducto: linea.id_producto,
+        idOferta: linea.id_oferta,
+        cantidad: linea.cantidad,
+      })),
+    });
 
     const idsProducto = compra.stock.map((linea) => linea.id_producto);
     await this.productosService.recalcularCamposCalculados(idsProducto);

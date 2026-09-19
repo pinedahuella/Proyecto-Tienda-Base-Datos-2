@@ -6,8 +6,10 @@ import {
   Param,
   Post,
   Put,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
@@ -102,11 +104,13 @@ export class CarritoController {
   async comprar(
     @Body() cuerpo: ComprarCarritoPeticion,
     @UsuarioActual() usuarioActual: TokenUsuario,
+    @Req() request: FastifyRequest,
   ) {
     try {
       const resultado = await this.carritoService.comprarCarrito(
         usuarioActual.id_usuario,
         cuerpo,
+        request.ip,
       );
       const mensaje = resultado.comprado
         ? 'Compra realizada correctamente'

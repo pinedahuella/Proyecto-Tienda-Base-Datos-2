@@ -6,8 +6,10 @@ import {
   Param,
   Patch,
   Post,
+  Req,
   UseGuards,
 } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
@@ -202,11 +204,13 @@ export class PedidosCompradorController {
   async cancelar(
     @Param('id') id: string,
     @UsuarioActual() usuarioActual: TokenUsuario,
+    @Req() request: FastifyRequest,
   ) {
     try {
       const resultado = await this.pedidosCompradorService.cancelarPedido(
         id,
         usuarioActual.id_usuario,
+        request.ip,
       );
       return exito(resultado, 'Pedido cancelado correctamente');
     } catch (error) {

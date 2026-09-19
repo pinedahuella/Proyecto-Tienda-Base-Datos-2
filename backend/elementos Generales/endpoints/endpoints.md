@@ -167,6 +167,19 @@ caida, solo como "no hay nada que buscar". Timeout de 6 s -> 503.
 
 ---
 
+> **`POST /eventos/vista`** (pública), **`POST /eventos/carrito`** (exige
+> sesión) y **`POST /eventos/busqueda-clic`** (pública) -- registran en
+> ClickHouse que alguien vio la ficha de un producto, lo agregó al carrito,
+> o hizo clic en un resultado de búsqueda (fire-and-forget, `202`). Las
+> seis piezas del plan de eventos de producto/buscador ya están
+> construidas -- las otras tres (compra, devolución, búsqueda realizada)
+> no tienen ruta propia, van directo enganchadas al código existente.
+> `GET /admin/eventos/*` (seis rutas, solo admin) expone las filas crudas
+> de cada tabla en una ventana de días hacia atrás, sin agrupar ni calcular
+> tendencias. Todo documentado en `endpoints-eventos.md`.
+
+---
+
 ## POST /usuario/registro
 
 Cuerpo:

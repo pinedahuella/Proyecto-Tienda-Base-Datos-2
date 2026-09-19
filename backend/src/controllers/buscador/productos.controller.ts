@@ -1,11 +1,14 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
+import type { FastifyRequest } from 'fastify';
 import { Roles } from '../../decorators/roles.decorator';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
+import { idUsuarioDeCookieOpcional } from '../../helpers/sesion-opcional';
 import type { BuscarProductosQuery } from '../../dto/buscar-productos';
 import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { BuscadorProductosService } from '../../services/buscador/productos.service';
+import { EventosService } from '../../services/eventos/eventos.service';
 
 /**
  * Controlador de las rutas /buscador/productos.
@@ -26,16 +29,35 @@ import { BuscadorProductosService } from '../../services/buscador/productos.serv
 export class BuscadorProductosController {
   constructor(
     private readonly buscadorProductosService: BuscadorProductosService,
+    private readonly eventosService: EventosService,
   ) {}
 
-  // GET /buscador/productos?nombre=...&limite=...
+  // GET /buscador/productos?nombre=...&limite=...&sesion=...
   @Get()
-  async buscar(@Query() query: BuscarProductosQuery) {
+  async buscar(
+    @Query() query: BuscarProductosQuery,
+    @Req() request: FastifyRequest,
+  ) {
     try {
       const resultados = await this.buscadorProductosService.buscar(
         query.nombre,
         query.limite,
       );
+
+      // Evento de analitica en ClickHouse, SIN ruta propia -- el backend ya
+      // corrio la busqueda, no hace falta que el frontend avise nada (ver
+      // EventosService.registrarBusqueda). Solo si mandan `sesion`: sin
+      // ella el evento se salta en silencio, nunca bloquea ni rechaza la
+      // busqueda de nadie.
+      if (typeof query.sesion === 'string' && query.sesion.trim() !== '') {
+        void this.eventosService.registrarBusqueda({
+          termino: query.nombre ?? '',
+          resultados: resultados.length,
+          idUsuario: await idUsuarioDeCookieOpcional(request),
+          sesion: query.sesion.trim(),
+        });
+      }
+
       return exito(resultados, 'Busqueda completada');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo completar la busqueda');
