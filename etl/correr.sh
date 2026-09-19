@@ -36,6 +36,12 @@ set +a
 BASE="$DB_NAME"
 SOLO_NOTAS=0
 
+# A que base de MONGO se escribe. Sin nada, la del .env. Con MESH_MONGO_BASE se
+# apunta a otra (una copia hecha con mongodump), y sirve para probar cambios del
+# ETL sin arriesgar el catalogo vivo: pruebas/etl_mongo.sh lo usa asi. Es aparte
+# de `otra_base` de arriba, que es la de PostgreSQL de donde se extrae.
+BASE_MONGO="${MESH_MONGO_BASE:-}"
+
 for ARG in "$@"; do
     case "$ARG" in
         --notas) SOLO_NOTAS=1 ;;
@@ -72,9 +78,9 @@ if [ "$SOLO_NOTAS" = "0" ]; then
 
     docker exec -i mesh-mongo sh -c 'cat > /tmp/cargar.js' < "$RAIZ/etl/cargar.js"
 
-    docker exec mesh-mongo sh -c 'mongosh --quiet \
+    docker exec -e BASE_MONGO="$BASE_MONGO" mesh-mongo sh -c 'mongosh --quiet \
         -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" \
-        --authenticationDatabase admin "$MONGO_INITDB_DATABASE" \
+        --authenticationDatabase admin "${BASE_MONGO:-$MONGO_INITDB_DATABASE}" \
         --file /tmp/cargar.js'
 
 fi
@@ -93,7 +99,7 @@ docker exec -i mesh-postgres \
 
 docker exec -i mesh-mongo sh -c 'cat > /tmp/cargar_notas.js' < "$RAIZ/etl/cargar_notas.js"
 
-docker exec mesh-mongo sh -c 'mongosh --quiet \
+docker exec -e BASE_MONGO="$BASE_MONGO" mesh-mongo sh -c 'mongosh --quiet \
     -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" \
-    --authenticationDatabase admin "$MONGO_INITDB_DATABASE" \
+    --authenticationDatabase admin "${BASE_MONGO:-$MONGO_INITDB_DATABASE}" \
     --file /tmp/cargar_notas.js'

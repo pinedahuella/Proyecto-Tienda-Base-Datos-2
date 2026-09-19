@@ -52,19 +52,50 @@ const ids = notas.map(n => n.id_producto);
 //
 // updateOne con $set y no replaceOne: aqui solo mandan estos dos campos. El
 // resto del documento es de cargar.js y no se toca.
+//
+// Y la nota SI la indexa el buscador (resenas_promedio y resenas_total estan en
+// elastic/001_indice.json), asi que cuando cambia hay que avisarle con la misma
+// bandera que usa el backend, `pendiente_busqueda: true`. Solo cuando CAMBIA: una
+// bandera puesta en todos los documentos en cada corrida haria reindexar el
+// catalogo entero por nada.
+//
+// Por eso el update es un pipeline y no un $set plano: necesita comparar contra
+// lo que ya hay. `$eq` compara entre tipos numericos, asi que el int 5 y el
+// double 5.0 son lo mismo y no marcan. Si la nota no cambio, el `$cond` devuelve
+// la bandera que ya tenia el documento (si no tenia ninguna, no escribe nada).
+// Un pipeline sigue contando en matchedCount, que es lo que detecta huerfanos.
 const escrituras = notas.map(function (nota) {
     return {
         updateOne: {
             filter: { _id: nota.id_producto },
-            update: {
-                $set: {
-                    resenas_promedio: nota.resenas_promedio,
-                    resenas_total: nota.resenas_total
+            update: [
+                {
+                    $set: {
+                        pendiente_busqueda: {
+                            $cond: [
+                                {
+                                    $and: [
+                                        { $eq: ['$resenas_promedio', nota.resenas_promedio] },
+                                        { $eq: ['$resenas_total', nota.resenas_total] }
+                                    ]
+                                },
+                                '$pendiente_busqueda',
+                                true
+                            ]
+                        },
+                        resenas_promedio: nota.resenas_promedio,
+                        resenas_total: nota.resenas_total
+                    }
                 }
-            }
+            ]
         }
     };
 });
+
+// Cuantos documentos esperan al buscador antes y despues, para decir cuantos
+// marco esta etapa. Es una resta y no un conteo exacto: el worker del backend
+// puede estar limpiando la bandera al mismo tiempo.
+const pendientesAntes = db.productos.countDocuments({ pendiente_busqueda: true });
 
 let escritos = 0;
 if (escrituras.length > 0) {
@@ -90,7 +121,8 @@ const apagados = db.productos.updateMany(
         _id: { $nin: ids }
     },
     {
-        $set: { resenas_promedio: 0, resenas_total: 0 }
+        // Estos si cambiaron seguro: decian tener resenas y ahora dicen cero.
+        $set: { resenas_promedio: 0, resenas_total: 0, pendiente_busqueda: true }
     }
 ).modifiedCount;
 
@@ -99,6 +131,8 @@ const apagados = db.productos.updateMany(
 // ============================================================
 print('notas       ' + escritos + ' de ' + ids.length + ' productos con resenas');
 print('apagados    ' + apagados + ' que decian tener resenas y ya no las tienen');
+print('buscador    ' + Math.max(0, db.productos.countDocuments({ pendiente_busqueda: true }) - pendientesAntes) +
+    ' productos marcados para reindexar (pendiente_busqueda)');
 
 if (huerfanos > 0) {
     print('AVISO: ' + huerfanos + ' producto(s) con resenas no existen en Mongo.');

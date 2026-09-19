@@ -1,7 +1,7 @@
 # Los ETL de Mesh
 
-Son **cuatro**, uno por cada base derivada, y los cuatro son proyecciones: se
-pueden tirar enteras y reconstruir sin perder un dato del negocio.
+Son **cinco**, uno por cada base derivada (ClickHouse tiene dos), y los cinco son
+proyecciones: se pueden tirar enteras y reconstruir sin perder un dato del negocio.
 
 Tres salen de PostgreSQL, que es la fuente de verdad. **El del buscador no**, y
 esa excepcion es deliberada: sale de MongoDB, porque el catalogo vive ahi y hay
@@ -11,8 +11,10 @@ productos que NO tienen fila en PostgreSQL. Esta explicado en
 ```
 A ClickHouse -- los eventos
 ---------------------------------------
-extraer_eventos.sql
+extraer_eventos.sql   los logueos y registros (CONGELADO desde el 2026-09-10, ver abajo)
 cargar_eventos.sh
+extraer_compras.sql   las ventas y devoluciones (lo que cuenta hoy)
+cargar_compras.sh
 (el esquema vive en clickhouse/001_esquema.sql)
 ```
 
@@ -877,3 +879,111 @@ IXSCAN (usa indice)
 indice: productos_pendientes_de_busqueda
 documentos examinados: 0 de 1105
 ```
+
+---
+
+# Lo que cambio el 2026-09-18
+
+Cuatro cosas, y las cuatro salen de mirar lo que Jose David publico ese dia contra
+lo que el ETL cargaba.
+
+## 1. cargar.js ya no le pasa por encima a lo que edita la aplicacion
+
+El backend edita el catalogo SOLO en Mongo (`PATCH /vendedor/productos/:id`, un
+`updateOne` sobre `db.productos`) y anota cada edicion como un evento nuevo en
+`productos_eventos`. No escribe nada en PostgreSQL. O sea que desde que alguien edita
+un producto, la fila relacional queda vieja y el documento de Mongo es el que manda.
+
+Con el `replaceOne` de antes, la siguiente corrida deshacia la edicion, borraba sus
+eventos (el `deleteMany` de `numero > eventos.length`), se llevaba
+`caracteristicas_personalizadas` y se llevaba `pendiente_busqueda`.
+
+La regla nueva: un producto cuyo historial en Mongo llega mas lejos que el que deriva
+PostgreSQL **fue editado desde la aplicacion y no se reemplaza**. Se le refrescan solo
+los cinco agregados de las ofertas (tambien dentro de cada variante que ya existia), no
+se tocan sus eventos, y el ETL dice cuantos conservo (`CONSERVADOS n`). Los demas siguen
+derivandose enteros de PostgreSQL. El detalle y el caso limite (un historial relacional
+que encoge se ve igual que una edicion, y se acepta a proposito porque el error va hacia
+conservar de mas) estan en la cabecera de `cargar.js`.
+
+**Lo que NO se midio como dano hecho.** Hoy no hay ningun producto de PostgreSQL editado
+desde la aplicacion: los 16 eventos de modificacion que hay en Mongo (productos 7, 13, 33,
+51, 68 y 86) coinciden con el historial de PostgreSQL. El riesgo era estructural. Se probo
+simulando la edicion sobre una copia de la base y con un mutante que apaga la regla.
+
+```
+bash pruebas/etl_mongo.sh        21 OK: copia la base, simula lo que hace el backend,
+                                 corre el ETL contra la copia y la borra. No toca la viva
+```
+
+Para apuntar el ETL a otra base de Mongo (esa copia) esta `MESH_MONGO_BASE` en
+`etl/correr.sh`. Sin ella, la del `.env`. Es aparte de `otra_base`, que es la de PostgreSQL.
+
+## 2. El ETL marca pendiente_busqueda
+
+Cuando el ETL cambia algo que el buscador indexa (nombre, descripcion, estado,
+categoria, precios, stock, nota, variantes), marca el documento con
+`pendiente_busqueda: true`, la misma bandera que pone el backend, y el worker
+`BuscadorSyncService` lo copia a Elasticsearch solo. Antes el indice quedaba viejo hasta
+que alguien corriera `etl/cargar_busqueda.sh`. Solo marca cuando algo CAMBIO: una corrida
+que no cambia nada marca cero, y se ve en la salida (`buscador  0 productos marcados`).
+La etapa de notas lo hace con un update en pipeline que compara antes de marcar.
+
+## 3. cargar_compras.sh: las compras y devoluciones que el backend nunca anoto
+
+`compra_producto` y `devolucion_producto` las escribe el backend "al instante", pero solo
+por UN camino, el carrito. Nunca llegaban:
+
+```
+los 44 pedidos de la semilla y todo lo anterior al 2026-09-06
+los pedidos pendientes que se pagan despues (comprarPedido no anota nada)
+cualquier fila que se pierda por una caida de ClickHouse (es fire-and-forget)
+```
+
+Medido: 141 lineas de venta en PostgreSQL y **2** filas en ClickHouse. Ahora salen de
+`stock_movimiento` (motivos venta y devolucion), con `lote = 'real'`:
+
+```
+bash etl/cargar_compras.sh
+  compra_producto      ventas: 139 nueva(s). PostgreSQL 141, ClickHouse (real) 141  -> cuadra
+  devolucion_producto  devoluciones: 5 nueva(s). PostgreSQL 7, ClickHouse (real) 7  -> cuadra
+```
+
+Tres decisiones que no son obvias.
+
+**No tiene marca de agua, compara contra el conjunto de pares (pedido, oferta).** Como
+`comprarPedido` llega tarde, un pedido viejo pagado hoy tiene un id MENOR que el ultimo
+copiado, y una marca de agua se lo saltaria para siempre. Lo que el backend ya escribio se
+respeta y solo se agrega lo que falta.
+
+**La fecha viaja como epoca, no como texto.** ClickHouse lee un texto sin zona en la de su
+servidor (America/Guatemala, por el `TZ` del docker-compose) y el backend tambien escribe
+hora de Guatemala. Una epoca es el mismo instante en cualquier zona. Se midio: la compra
+real de las 21:19 sale a las 21:19.
+
+**Descubrio un defecto del esquema.** El pedido 121 compro el producto 11 a dos vendedores
+en el mismo instante, y con la clave `ORDER BY (id_producto, fecha, id_pedido)`
+`ReplacingMergeTree` colapsaba una de las dos lineas: PostgreSQL tenia 3 y ClickHouse 2, y
+`sum(cantidad)`, que es la metrica de compra en los rankings, salia corta. La clave ahora
+lleva `id_oferta`. Una tabla que ya existia no cambia de clave con un `CREATE ... IF NOT
+EXISTS`, asi que `clickhouse/reparar_orden_compras.sh` la reconstruye (idempotente) y
+`arrancar.ps1` lo hace solo. El ETL se niega a correr con la clave vieja.
+
+```
+bash pruebas/etl_compras.sh      22 OK: cuadra por filas, unidades y pares; el pedido 121
+                                 completo; la fecha al milisegundo; una segunda corrida copia 0;
+                                 se BORRAN filas del destino y el ETL las trae de vuelta
+```
+
+`arrancar.ps1` tiene su gemelo en PowerShell y lo corre en cada arranque. Se probo de
+verdad: borrando 16 ventas y 2 devoluciones del destino y viendo que las recupera. Ese
+camino pasa la lista de pares por la linea de comandos de Windows (unos 32 mil caracteres),
+asi que **a partir de unos 3000 pares hay que usar el .sh**.
+
+## 4. Un defecto conocido que NO se arreglo: la copia de logueos escribe en UTC
+
+`extraer_eventos.sql` formatea la fecha como texto en UTC y ClickHouse la lee en la zona
+de su servidor (Guatemala), o sea 6 horas corrida hacia adelante. Nadie lo ve porque esa
+copia esta congelada desde el 2026-09-10 (el backend ya no escribe `log_login`) y nada la
+lee. Si algun dia se repunta la copia a `eventos_autenticacion` de Mongo (pendiente 16),
+hay que corregirlo entonces: la solucion es la de `extraer_compras.sql`, mandar epoca.

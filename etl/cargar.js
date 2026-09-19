@@ -50,9 +50,50 @@
 // El _id de las tres es determinista, asi que correr esto dos veces actualiza
 // en vez de duplicar.
 //
-// El ETL es el unico dueno de estas colecciones: cada documento se reemplaza
-// entero, porque PostgreSQL manda. Un campo que la aplicacion escriba aqui por
-// su cuenta se pierde en la siguiente corrida.
+// QUIEN MANDA DEPENDE DE DONDE SE EDITO EL PRODUCTO
+//
+// Hasta el 2026-09-18 esta cabecera decia "el ETL es el unico dueno de estas
+// colecciones, PostgreSQL manda". Ya no es cierto, y cargar.js dejo de
+// comportarse como si lo fuera. El backend edita el catalogo SOLO en Mongo
+// (PATCH /vendedor/productos/:id, un updateOne sobre db.productos) y anota cada
+// edicion como un evento nuevo en productos_eventos, con el siguiente numero.
+// No escribe nada en las tablas de PostgreSQL. O sea que en cuanto alguien edita
+// un producto, la fila relacional queda vieja y el documento de Mongo pasa a ser
+// el que dice la verdad.
+//
+// Con el replaceOne de antes, la siguiente corrida de este archivo:
+//
+//   - devolvia el nombre, la descripcion, el estado y las variantes a lo que dice
+//     PostgreSQL, o sea DESHACIA la edicion;
+//   - borraba los eventos de esa edicion (el deleteMany de abajo, con numero >
+//     eventos.length), y con ellos la reconstruccion del producto a una fecha;
+//   - se llevaba caracteristicas_personalizadas, que el ETL no conoce;
+//   - se llevaba pendiente_busqueda, y el buscador ya no se enteraba del cambio.
+//
+// Medido el 2026-09-18 sobre la base viva: 16 eventos de modificacion repartidos
+// en 10 productos, seis de ellos con fila en PostgreSQL. Esos seis eran justo los
+// que la corrida siguiente iba a pisar.
+//
+// LA REGLA. Un producto cuyo historial en Mongo llega mas lejos que el que
+// deriva PostgreSQL (un evento con numero mayor que los que el ETL arma) fue
+// editado desde la aplicacion. Ese producto NO se reemplaza:
+//
+//   - se refrescan solo los agregados que si vienen de las ofertas (los cinco,
+//     tambien dentro de cada variante que ya existia);
+//   - no se toca ningun evento ajeno;
+//   - se cuenta y se dice al final.
+//
+// Los demas siguen como siempre: el documento se deriva entero de PostgreSQL. Si
+// un dia el historial relacional ENCOGE (una fila mal fechada que se corrige), sus
+// eventos sobrantes se ven iguales a una edicion del backend y el producto cae en
+// la rama conservadora. Se acepta a proposito: el error va hacia conservar de mas
+// y no hacia borrar.
+//
+// Y pendiente_busqueda. Cuando el ETL cambia algo que el buscador indexa (nombre,
+// descripcion, estado, categoria, precios, stock, nota, variantes), marca el
+// documento con `pendiente_busqueda: true`, la misma bandera que pone el backend,
+// y el worker BuscadorSyncService lo copia a Elasticsearch solo. Antes el ETL
+// dejaba el indice viejo hasta que alguien corriera etl/cargar_busqueda.sh.
 
 const RUTA = '/tmp/mesh-productos.json';
 const RUTA_CATEGORIAS = '/tmp/mesh-categorias.json';
@@ -371,21 +412,102 @@ function leerLineas(ruta) {
 // Cargar los productos y sus eventos
 // ============================================================
 const productos = leerLineas(RUTA);
+const idsEtl = productos.map(p => p.id_producto);
+
+// Lo que YA hay en Mongo de estos productos, para decidir antes de escribir.
+// Dos lecturas en bloque y no una por producto: son mil consultas de menos.
+const existentes = new Map();
+db.productos.find({ _id: { $in: idsEtl } }).forEach(d => existentes.set(d._id, d));
+
+const ultimoEvento = new Map();
+db.productos_eventos.aggregate([
+    { $match: { id_producto: { $in: idsEtl } } },
+    { $group: { _id: '$id_producto', ultimo: { $max: '$numero' } } }
+]).forEach(g => ultimoEvento.set(g._id, g.ultimo));
+
+// Los cinco agregados que viajan de las ofertas, en la raiz y en cada variante.
+const AGREGADOS = ['precio_tienda', 'precio_desde', 'stock_tienda', 'stock_total', 'total_ofertas'];
+
+// String() y no ===: un NumberDecimal es un objeto y dos iguales no son ===.
+// Las dos caras (lo que hay y lo que se va a escribir) pasan por la misma
+// funcion, asi que da igual como se imprima.
+const igualesAgregados = (a, b) => AGREGADOS.every(c => String(a[c]) === String(b[c]));
+
+// Lo que el buscador indexa (elastic/001_indice.json). Si esta firma cambia, el
+// indice de Elasticsearch quedo viejo.
+function firmaBusqueda(d) {
+    const c = d.categoria || {};
+    return JSON.stringify([
+        d.nombre, d.descripcion, d.estado,
+        [c.id_categoria, c.nombre, c.categoria_padre],
+        String(d.precio_desde), String(d.precio_tienda),
+        d.stock_total, d.total_ofertas, d.resenas_promedio, d.resenas_total,
+        (d.variantes || []).map(v => [v.nombre_variante, v.descripcion])
+    ]);
+}
 
 const escrituraProductos = [];
 const escrituraEventos = [];
 let sinHistorial = 0;
+let editadosEnMongo = 0;
+let marcadosParaBuscador = 0;
 
 for (const producto of productos) {
     const doc = aDecimal(documentoDe(producto));
-    escrituraProductos.push({
-        // replaceOne y no updateOne con set: el documento se deriva entero de
-        // PostgreSQL, asi que un campo que ya no exista alla tampoco debe
-        // quedar aqui.
-        replaceOne: { filter: { _id: doc._id }, replacement: doc, upsert: true }
-    });
-
     const eventos = eventosDe(producto);
+    const previo = existentes.get(doc._id);
+
+    // Un evento con numero mayor que los que arma el ETL no salio de PostgreSQL.
+    const editadoEnMongo = previo !== undefined &&
+        (ultimoEvento.get(doc._id) || 0) > eventos.length;
+
+    if (editadoEnMongo) {
+        editadosEnMongo++;
+
+        // Solo los agregados. Cada variante se busca por su id: una que el
+        // vendedor agrego o quito desde el panel no tiene pareja y no se toca.
+        const conjunto = {};
+        const filtros = [];
+        let cambio = !igualesAgregados(previo, doc);
+        for (const c of AGREGADOS) conjunto[c] = doc[c];
+
+        (doc.variantes || []).forEach(function (v, i) {
+            const enMongo = (previo.variantes || [])
+                .find(x => x.id_producto_variante === v.id_producto_variante);
+            if (!enMongo) return;
+            const marcador = 'v' + i;
+            for (const c of AGREGADOS) conjunto['variantes.$[' + marcador + '].' + c] = v[c];
+            filtros.push({ [marcador + '.id_producto_variante']: v.id_producto_variante });
+            if (!igualesAgregados(enMongo, v)) cambio = true;
+        });
+
+        if (cambio) {
+            conjunto.pendiente_busqueda = true;
+            if (previo.pendiente_busqueda !== true) marcadosParaBuscador++;
+        }
+
+        const operacion = { filter: { _id: doc._id }, update: { $set: conjunto } };
+        if (filtros.length > 0) operacion.arrayFilters = filtros;
+        escrituraProductos.push({ updateOne: operacion });
+    } else {
+        // Nuevo, o con algo indexable distinto, o con la bandera ya puesta por el
+        // backend y todavia sin copiar: en los tres casos sale marcado. replaceOne
+        // se lleva la bandera si no se reescribe, y ese ultimo caso perderia un
+        // aviso que el worker aun no ha atendido.
+        if (previo === undefined ||
+            previo.pendiente_busqueda === true ||
+            firmaBusqueda(previo) !== firmaBusqueda(doc)) {
+            doc.pendiente_busqueda = true;
+            if (previo === undefined || previo.pendiente_busqueda !== true) marcadosParaBuscador++;
+        }
+        escrituraProductos.push({
+            // replaceOne y no updateOne con set: aqui el documento se deriva
+            // entero de PostgreSQL, asi que un campo que ya no exista alla
+            // tampoco debe quedar aqui.
+            replaceOne: { filter: { _id: doc._id }, replacement: doc, upsert: true }
+        });
+    }
+
     if (eventos.length === 0) {
         // Sin historial no hay nada que reconstruir. Pasa si alguien inserto
         // el producto sin escribir su fila de historial; se avisa en vez de
@@ -400,11 +522,14 @@ for (const producto of productos) {
 
     // Si el historial encogio, por ejemplo porque se corrigio una fila mal
     // fechada, los eventos sobrantes de la corrida anterior seguirian ahi con
-    // su _id viejo.
-    db.productos_eventos.deleteMany({
-        id_producto: producto.id_producto,
-        numero: { $gt: eventos.length }
-    });
+    // su _id viejo. NUNCA en un producto editado desde la aplicacion: ahi los
+    // que sobran son las ediciones, y son lo unico que no se puede recuperar.
+    if (!editadoEnMongo) {
+        db.productos_eventos.deleteMany({
+            id_producto: producto.id_producto,
+            numero: { $gt: eventos.length }
+        });
+    }
 }
 
 // ============================================================
@@ -452,6 +577,10 @@ const catBorradas = db.categorias.deleteMany({
 print('productos   ' + productos.length);
 print('categorias  ' + categorias.length + (catBorradas.deletedCount ? '  (' + catBorradas.deletedCount + ' borradas)' : ''));
 print('eventos     ' + escrituraEventos.length);
+if (editadosEnMongo > 0) {
+    print('CONSERVADOS ' + editadosEnMongo + ' productos editados desde la aplicacion: solo se refrescaron sus agregados');
+}
+print('buscador    ' + marcadosParaBuscador + ' productos marcados para reindexar (pendiente_busqueda)');
 if (sinHistorial > 0) {
     print('AVISO: ' + sinHistorial + ' productos sin ninguna fila de historial: no se pueden reconstruir');
 }
