@@ -330,7 +330,7 @@
 	let error = $state('');
 	let aviso = $state('');
 
-	/** 'todas' o uno de los tres estados. La ruta trae los tres, el filtro es local. */
+	/** 'todas' o uno de los cinco estados. Se filtra en el SERVIDOR (`estado=`) y por eso cambiarlo pide otra pagina. */
 	let filtro = $state<'todas' | EstadoOferta>('todas');
 
 	// ------------------------------------------------- el catalogo paginado
@@ -542,12 +542,17 @@
 	/**
 	 * El buscador de la lista de un vendedor normal.
 	 *
-	 * Aqui SI se filtra en memoria, al reves que en el catalogo, y es correcto:
-	 * `GET /vendedor/ofertas` no pagina ni acepta filtros -- trae TODAS las
-	 * ofertas de la cuenta de un golpe. Como ya estan las ~950 en el navegador,
-	 * un filtro local ve el total y no miente; y ademas responde sin ir al
-	 * servidor. En el catalogo seria al reves: ahi solo hay 20 de 105 en
-	 * memoria, y filtrar aqui diria "no hay ninguna" teniendo siete.
+	 * Se usan LAS DOS RUTAS de ofertas, cada una para lo que hace bien:
+	 *
+	 *   sin texto  GET /vendedor/ofertas/paginado  una pagina de 20, ya filtrada por
+	 *              estado en el servidor, mas los seis totales de las pestanas
+	 *   con texto  GET /vendedor/ofertas           TODAS, y se filtra aqui
+	 *
+	 * El servidor no busca por texto, y filtrar solo la pagina que hay en pantalla
+	 * diria "ninguna oferta se llama asi" teniendo tres en otra pagina. Con texto
+	 * se trae la lista completa una sola vez (la primera que se escribe algo) y se
+	 * guarda en `completas`; al vaciar la caja se vuelve a las paginas. Quien no
+	 * busca nunca descarga esa lista, que para la tienda pesa 1.2 MB.
 	 */
 	let busquedaLista = $state('');
 
@@ -559,11 +564,25 @@
 			.toLowerCase();
 	}
 
-	let listaFiltrada = $derived.by(() => {
-		const porEstado = filtro === 'todas' ? ofertas : ofertas.filter((o) => o.estado === filtro);
+	/** La lista completa, solo cuando se busca por texto. null = todavia no se ha pedido. */
+	let completas = $state<Oferta[] | null>(null);
+	let cargandoCompletas = $state(false);
 
+	let hayBusqueda = $derived(busquedaLista.trim() !== '');
+
+	/**
+	 * Las ofertas que se estan viendo.
+	 *
+	 * Sin busqueda son las de la PAGINA que trajo el servidor, que ya viene
+	 * filtrada por estado. Con busqueda son las de `completas`, filtradas aqui por
+	 * estado y por texto.
+	 */
+	let listaFiltrada = $derived.by(() => {
 		const texto = plano(busquedaLista.trim());
-		if (texto === '') return porEstado;
+		if (texto === '') return ofertas;
+
+		const base = completas ?? [];
+		const porEstado = filtro === 'todas' ? base : base.filter((o) => o.estado === filtro);
 
 		// Busca en el producto Y en la variante: quien tiene casi mil ofertas suele
 		// acordarse de una por la talla o el color, no por el nombre completo.
@@ -573,48 +592,159 @@
 		);
 	});
 
-	/** Cuantas hay de cada estado, para las pestanas. */
-	let conteos = $derived({
-		todas: ofertas.length,
-		pendiente: ofertas.filter((o) => o.estado === 'pendiente').length,
-		activa: ofertas.filter((o) => o.estado === 'activa').length,
-		pausada: ofertas.filter((o) => o.estado === 'pausada').length,
-		retirada: ofertas.filter((o) => o.estado === 'retirada').length,
-		rechazada: ofertas.filter((o) => o.estado === 'rechazada').length
+	/**
+	 * Cuantas hay de cada estado, para las pestanas.
+	 *
+	 * Vienen del SERVIDOR, no se cuentan aqui: con una pagina en memoria se diria
+	 * "Activas 8" teniendo 894. Cada numero es el `total_ofertas` de una peticion
+	 * con `estado=` (ver cargarConteos), que cuenta todas las ofertas de la
+	 * cuenta y no las de la pagina.
+	 */
+	let conteos = $state<Record<'todas' | EstadoOferta, number>>({
+		todas: 0,
+		pendiente: 0,
+		activa: 0,
+		pausada: 0,
+		retirada: 0,
+		rechazada: 0
 	});
 
 	// ---------------------------------------------------------------- cargar
-	async function cargar() {
-		cargando = true;
-		error = '';
+	/** Ofertas por pagina de la lista. */
+	const POR_PAGINA = 20;
 
-		const r = await pedir<Oferta[]>('/vendedor/ofertas');
-		// Antes el `return` de expiro() se iba dejando `cargando` en true, y la
-		// pantalla se quedaba con "Cargando tus ofertas..." pegado para
-		// siempre si el aviso de sesion no llegaba a sacar a nadie.
-		if (expiro(r)) {
-			cargando = false;
-			return;
-		}
+	/** Lo que devuelve GET /vendedor/ofertas/paginado. */
+	interface PaginaOfertas {
+		ofertas: Oferta[];
+		pagina: number;
+		limite: number;
+		total_ofertas: number;
+		total_paginas: number;
+	}
 
-		if (r.ok && r.payload) {
-			ofertas = r.payload;
-			traidasTodas = true;
-		} else {
-			error = mensajeUtil(r);
-		}
-		cargando = false;
+	let pagina = $state(1);
+	let totalPaginas = $state(0);
+	let cargandoPagina = $state(false);
+
+	/**
+	 * Si la lista ya se cargo al menos una vez. Para un vendedor normal es que si
+	 * desde el primer momento; para la tienda solo si entra a la lista.
+	 *
+	 * Hace falta para no mentir al parchear: en la vista de catalogo la lista esta
+	 * vacia A PROPOSITO, y meterle la fila recien tocada la dejaba con UN elemento.
+	 */
+	let listaCargada = $state(false);
+
+	function urlPagina(numero: number, estado: 'todas' | EstadoOferta, limite = POR_PAGINA): string {
+		const p = new URLSearchParams({ pagina: String(numero), limite: String(limite) });
+		if (estado !== 'todas') p.set('estado', estado);
+		return `/vendedor/ofertas/paginado?${p.toString()}`;
 	}
 
 	/**
-	 * Si ya se trajo la lista completa. Para un vendedor normal es que si
-	 * desde el primer momento; para la tienda solo si la pide a proposito.
-	 *
-	 * Hace falta para no mentir en las pestanas: los contadores por estado se
-	 * calculan sobre lo que hay en memoria, y con media lista dirian
-	 * "Activas 3" teniendo 180.
+	 * Los seis numeros de las pestanas: una peticion de UNA oferta por cada estado
+	 * mas una sin filtro, y de cada una solo se lee `total_ofertas`. Van juntas.
+	 * Es lo que el servidor ya calcula bien (cuenta todas las ofertas de la cuenta
+	 * que cumplen el filtro, en una sola foto de la base), y asi no se descarga
+	 * ninguna oferta para saber cuantas hay.
 	 */
-	let traidasTodas = $state(false);
+	async function cargarConteos(): Promise<void> {
+		const pedidos: ('todas' | EstadoOferta)[] = ['todas', ...ESTADOS];
+		const respuestas = await Promise.all(
+			pedidos.map((e) => pedir<PaginaOfertas>(urlPagina(1, e, 1)))
+		);
+
+		if (respuestas.some((r) => expiro(r))) return;
+
+		const mala = respuestas.find((r) => !r.ok || !r.payload);
+		if (mala) {
+			error = mensajeUtil(mala);
+			return;
+		}
+
+		const nuevos = { ...conteos };
+		pedidos.forEach((e, i) => {
+			nuevos[e] = respuestas[i].payload.total_ofertas;
+		});
+		conteos = nuevos;
+	}
+
+	/** Una pagina de la lista, del estado que este elegido en las pestanas. */
+	async function cargarPagina(numero: number): Promise<void> {
+		cargandoPagina = true;
+		error = '';
+
+		const r = await pedir<PaginaOfertas>(urlPagina(numero, filtro));
+		cargandoPagina = false;
+
+		// Antes el `return` de expiro() se iba dejando `cargando` en true, y la
+		// pantalla se quedaba con "Cargando tus ofertas..." pegado para siempre.
+		if (expiro(r)) return;
+
+		if (!r.ok || !r.payload) {
+			error = mensajeUtil(r);
+			return;
+		}
+
+		// Una pagina que quedo mas alla del final (se movieron ofertas de estado
+		// mientras se miraba) devuelve [] con el total correcto: se va a la ultima.
+		const p = r.payload;
+		if (p.ofertas.length === 0 && p.total_paginas > 0 && numero > p.total_paginas) {
+			return cargarPagina(p.total_paginas);
+		}
+
+		ofertas = p.ofertas;
+		pagina = p.pagina;
+		totalPaginas = p.total_paginas;
+		listaCargada = true;
+	}
+
+	/** Entrar a la lista: los contadores y la primera pagina, en paralelo. */
+	async function cargar() {
+		cargando = true;
+		error = '';
+		completas = null; // una lista de una busqueda anterior puede estar vieja
+		await Promise.all([cargarConteos(), cargarPagina(1)]);
+		cargando = false;
+	}
+
+	/** Volver a preguntar sin perder el sitio: contadores y la pagina en la que se estaba. */
+	async function refrescarLista() {
+		completas = null;
+		await Promise.all([cargarConteos(), cargarPagina(pagina)]);
+		// Si se estaba buscando, la lista completa hay que traerla otra vez.
+		if (busquedaLista.trim() !== '') void alBuscarEnLista();
+	}
+
+	function elegirFiltro(e: 'todas' | EstadoOferta) {
+		if (filtro === e) return;
+		filtro = e;
+		// Buscando, el filtro se aplica en memoria a `completas`: no hay a donde ir.
+		if (!hayBusqueda) void cargarPagina(1);
+	}
+
+	function irAPagina(numero: number) {
+		if (cargandoPagina || numero < 1 || numero > totalPaginas) return;
+		void cargarPagina(numero);
+	}
+
+	/**
+	 * Al escribir en el buscador: la PRIMERA vez que hay texto se trae la lista
+	 * completa (la ruta sin paginar), y de ahi en adelante se filtra en memoria.
+	 * Ver la explicacion de `busquedaLista`.
+	 */
+	async function alBuscarEnLista() {
+		if (busquedaLista.trim() === '' || completas !== null || cargandoCompletas) return;
+		cargandoCompletas = true;
+		const r = await pedir<Oferta[]>('/vendedor/ofertas');
+		cargandoCompletas = false;
+		if (expiro(r)) return;
+		if (r.ok && r.payload) {
+			completas = r.payload;
+		} else {
+			error = mensajeUtil(r);
+		}
+	}
 
 	/**
 	 * Una tanda del catalogo.
@@ -697,19 +827,31 @@
 	 * actualizacion la pone un trigger. Recalcularlos aqui seria adivinar.
 	 */
 	function guardarEnLista(o: Oferta) {
-		// En la vista de catalogo `ofertas` esta vacia A PROPOSITO -- son las
-		// 202 que no se piden. Meterle la fila recien tocada la dejaba con UN
-		// elemento, y las pestanas de arriba pasaban a decir "Todas 1" cuando
-		// en realidad hay 202 sin cargar. No es la lista: es un hueco.
-		if (!traidasTodas) return;
+		// En la vista de catalogo la lista no se ha cargado A PROPOSITO. Meterle la
+		// fila recien tocada la dejaba con UN elemento y las pestanas pasaban a
+		// decir "Todas 1" cuando en realidad hay cientos sin cargar. No es la
+		// lista: es un hueco.
+		if (!listaCargada) return;
 
-		const i = ofertas.findIndex((x) => x.id_oferta === o.id_oferta);
-		if (i === -1) {
-			ofertas = [o, ...ofertas];
-		} else {
-			ofertas[i] = o;
-			ofertas = ofertas;
+		const iPagina = ofertas.findIndex((x) => x.id_oferta === o.id_oferta);
+		const iCompletas = completas ? completas.findIndex((x) => x.id_oferta === o.id_oferta) : -1;
+		const estadoAntes =
+			iPagina !== -1
+				? ofertas[iPagina].estado
+				: iCompletas !== -1 && completas
+					? completas[iCompletas].estado
+					: null;
+
+		if (iPagina !== -1) ofertas[iPagina] = o;
+		if (completas) {
+			if (iCompletas !== -1) completas[iCompletas] = o;
+			else completas = [o, ...completas];
 		}
+
+		// Una oferta nueva, o que cambio de estado, mueve los contadores y puede
+		// cambiar de pestana o de pagina. Eso no se recalcula aqui: se le vuelve a
+		// preguntar al servidor, que es quien lo sabe.
+		if (estadoAntes !== o.estado) void refrescarLista();
 	}
 
 	// ---------------------------------------------------------------- editar
@@ -943,14 +1085,17 @@
 		// viejo hasta la siguiente recarga completa.
 		const disponible = abierta ? sembrado : null;
 
-		const i = ofertas.findIndex((x) => x.id_oferta === idOferta);
-		if (i !== -1) {
-			ofertas[i] = {
-				...ofertas[i],
-				es_inventario_limitado: abierta,
-				stock_disponible: disponible
-			};
-			ofertas = ofertas;
+		// La oferta puede estar en la pagina, en la lista completa de una busqueda,
+		// o en las dos: se parchea donde este.
+		for (const lista of [ofertas, completas ?? []]) {
+			const i = lista.findIndex((x) => x.id_oferta === idOferta);
+			if (i !== -1) {
+				lista[i] = {
+					...lista[i],
+					es_inventario_limitado: abierta,
+					stock_disponible: disponible
+				};
+			}
 		}
 
 		if (productoElegido == null) return;
@@ -1614,7 +1759,7 @@
 					Publicar una oferta
 				</button>
 				<button type="button" onclick={abrirRevision}>Revisar ofertas</button>
-				{#if !traidasTodas}
+				{#if !listaCargada}
 					<!--
 						Traerse las 202 de golpe sigue siendo posible, pero solo si
 						se pide: es la ruta que esta pantalla existe para evitar.
@@ -2097,7 +2242,7 @@
 		{:else if error}
 			<p class="malo" role="alert">{error}</p>
 			<button type="button" class="enlace" onclick={cargar}>Reintentar</button>
-		{:else if ofertas.length === 0}
+		{:else if conteos.todas === 0}
 			<p class="quieto">
 				Todavia no tienes ofertas. Publica una sobre cualquier variante del catalogo.
 			</p>
@@ -2109,7 +2254,7 @@
 							type="button"
 							class="pestana"
 							class:elegida={filtro === e}
-							onclick={() => (filtro = e)}
+							onclick={() => elegirFiltro(e)}
 						>
 							{e === 'todas' ? 'Todas' : e[0].toUpperCase() + e.slice(1) + 's'}
 							<span class="cuenta">{conteos[e]}</span>
@@ -2124,13 +2269,16 @@
 					<input
 						type="search"
 						bind:value={busquedaLista}
+						oninput={alBuscarEnLista}
 						autocomplete="off"
 						placeholder="Buscar por producto o presentacion"
 					/>
 				</label>
 			</div>
 
-			{#if listaFiltrada.length === 0}
+			{#if hayBusqueda && completas === null}
+				<p class="quieto">Buscando entre todas tus ofertas...</p>
+			{:else if listaFiltrada.length === 0}
 				{#if busquedaLista.trim() !== ''}
 					<p class="quieto">
 						Ninguna oferta {filtro === 'todas' ? '' : filtro + ' '}se llama asi.
@@ -2370,6 +2518,34 @@
 						</article>
 					{/each}
 				</div>
+
+				<!-- Solo sin busqueda: con texto se ve la lista completa filtrada y no hay
+				     paginas que recorrer. -->
+				{#if !hayBusqueda && totalPaginas > 1}
+					<nav class="paginas" aria-label="Paginas de tus ofertas">
+						<button
+							type="button"
+							onclick={() => irAPagina(pagina - 1)}
+							disabled={cargandoPagina || pagina <= 1}
+						>
+							Anterior
+						</button>
+						<span class="cuenta-paginas" aria-live="polite">
+							Pagina {pagina} de {totalPaginas}
+							<span class="menor">
+								({conteos[filtro]}
+								{conteos[filtro] === 1 ? 'oferta' : 'ofertas'})
+							</span>
+						</span>
+						<button
+							type="button"
+							onclick={() => irAPagina(pagina + 1)}
+							disabled={cargandoPagina || pagina >= totalPaginas}
+						>
+							Siguiente
+						</button>
+					</nav>
+				{/if}
 			{/if}
 		{/if}
 	{:else}
@@ -3007,6 +3183,22 @@
 		gap: var(--e3);
 		margin-bottom: 1rem;
 	}
+
+	/* Los controles de pagina de la lista. */
+	.paginas {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--e3);
+		flex-wrap: wrap;
+		margin-top: var(--e4);
+	}
+
+	.cuenta-paginas {
+		font-size: var(--f-ms);
+		color: var(--gris);
+	}
+
 
 	.buscar-lista {
 		flex: 0 1 20rem;
