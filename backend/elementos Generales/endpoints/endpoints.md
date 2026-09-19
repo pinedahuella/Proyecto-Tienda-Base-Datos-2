@@ -174,9 +174,11 @@ caida, solo como "no hay nada que buscar". Timeout de 6 s -> 503.
 > seis piezas del plan de eventos de producto/buscador ya están
 > construidas -- las otras tres (compra, devolución, búsqueda realizada)
 > no tienen ruta propia, van directo enganchadas al código existente.
-> `GET /admin/eventos/*` (seis rutas, solo admin) expone las filas crudas
-> de cada tabla en una ventana de días hacia atrás, sin agrupar ni calcular
-> tendencias. Todo documentado en `endpoints-eventos.md`.
+> `GET /admin/eventos/*` (seis rutas, solo admin) expone el ranking de
+> tendencias de cada tabla (agrupado por producto o por término, "los
+> primeros M" o "los últimos M" de "N" días hacia atrás) -- ya no filas
+> crudas, esa versión se reemplazó por completo. Todo documentado en
+> `endpoints-eventos.md`.
 >
 > **`GET /productos/mas-vendidos`** (pública, sin sesión) -- el ranking de
 > productos más vendidos, calculado agregando `compra_producto` de

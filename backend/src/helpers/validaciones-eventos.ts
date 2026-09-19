@@ -92,17 +92,21 @@ export function validarLimiteEvento(valor: string | undefined): number {
 }
 
 /**
- * `recientes` (por defecto) trae las filas mas nuevas primero
- * (`ORDER BY fecha DESC`); `antiguos` las mas viejas primero dentro de la
- * misma ventana (`ASC`). Devuelve ya la palabra clave SQL -- interpolarla
- * es seguro porque solo puede valer una de estas dos, nunca texto libre.
+ * La direccion del ranking de `GET /admin/eventos/*` (tendencias):
+ * `positivo` (por defecto) trae primero los que MAS tuvieron esa metrica
+ * (`ORDER BY total DESC` -- los primeros M); `negativo` trae primero los
+ * que MENOS (`ASC` -- los ultimos M). Devuelve ya la palabra clave SQL --
+ * interpolarla es segura porque solo puede valer una de estas dos, nunca
+ * texto libre del cliente.
  */
-export function validarOrdenEvento(valor: string | undefined): 'ASC' | 'DESC' {
-  if (valor == null || valor === '' || valor === 'recientes') {
+export function validarDireccionEvento(
+  valor: string | undefined,
+): 'ASC' | 'DESC' {
+  if (valor == null || valor === '' || valor === 'positivo') {
     return 'DESC';
   }
-  if (valor === 'antiguos') {
+  if (valor === 'negativo') {
     return 'ASC';
   }
-  throw new ErrorValidacion('orden debe ser uno de: recientes, antiguos');
+  throw new ErrorValidacion('direccion debe ser uno de: positivo, negativo');
 }

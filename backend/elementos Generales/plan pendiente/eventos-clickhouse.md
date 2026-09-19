@@ -8,11 +8,14 @@
 > queda ningun emisor pendiente de este plan.
 >
 > **Extra, pedido despues de cerrar las seis piezas: `GET /admin/eventos/*`**
-> -- seis rutas de solo lectura (una por tabla), solo admin, que devuelven
-> filas CRUDAS en una ventana de dias hacia atras (`dias`/`limite`/`orden`
-> como query params). NO agrupan ni calculan tendencias -- eso seria un
-> panel aparte, no construido. Ver `endpoints-eventos.md`, seccion
-> "GET /admin/eventos/*", para el contrato completo y las pruebas.
+> -- seis rutas de solo lectura (una por tabla), solo admin. La PRIMERA
+> version (misma noche del 2026-09-18) devolvia filas CRUDAS en una
+> ventana de dias hacia atras, sin agrupar nada -- se **reemplazo por
+> completo** unas horas despues (ver el extra de abajo, "el ranking de
+> tendencias por tabla"), a peticion del usuario, porque no aportaba nada
+> util. `AdminEventosController`/`AdminEventosService`,
+> `dto/consultar-eventos.ts` y `models/evento-clickhouse.ts` de esa
+> primera version ya NO existen en el codigo.
 >
 > **Segundo extra, sesion aparte del 2026-09-18: el ranking de "productos
 > mas vendidos".** Primer consumidor de AGREGADOS sobre `compra_producto`
@@ -30,6 +33,28 @@
 >
 > Redis solo guarda id + orden, nunca nombre/precio/imagen -- eso sigue
 > viviendo unicamente en Mongo, igual que el resto del catalogo.
+>
+> **Tercer extra, misma sesion: el ranking de tendencias por tabla
+> (reemplaza la primera version de `GET /admin/eventos/*`).** Seis rutas,
+> mismos nombres/prefijo, pero ahora agregan de verdad: `dias` (N),
+> `limite` (M) y `direccion` (`positivo` = los primeros M, `negativo` =
+> los ultimos M). La metrica cambia segun la tabla, decision explicita del
+> usuario:
+>
+> - `vista`, `carrito` -- personas distintas (`sesion` en vista,
+>   `id_usuario` en carrito porque esa tabla no tiene `sesion`).
+> - `compra`, `devolucion` -- `sum(cantidad)`, igual que
+>   `MasVendidosSyncService`.
+> - `busqueda`, `busqueda-clic` -- `sesion` distinta, agrupado por
+>   `termino` (no por producto).
+>
+> `vista`/`carrito`/`compra`/`devolucion` hacen una segunda consulta a
+> Mongo para el detalle del producto (sin filtrar por estado, a diferencia
+> del catalogo publico); `busqueda`/`busqueda-clic` no la necesitan, el
+> termino ya es todo el dato. Contrato completo y las pruebas de
+> aislamiento (que confirman que es `DISTINCT` de verdad y no `COUNT(*)`,
+> y que es `SUM` de verdad y no un conteo de filas) en
+> `endpoints-eventos.md`.
 >
 > **`carrito_producto` cambio de diseño respecto al primer borrador de este
 > documento** (mas abajo, sin actualizar todavia en el cuerpo): ahora lleva

@@ -11,12 +11,12 @@ companero). Las seis piezas del plan ya estan construidas:
   `devolucion_producto`, `busqueda_realizada` -- enganchados directo al
   codigo que ya existe).
 - **Lectura** -- `GET /admin/eventos/*` (seis rutas, solo admin): el
-  explorador de filas crudas, ver la seccion dedicada mas abajo.
+  ranking de tendencias de cada tabla, ver la seccion dedicada mas abajo.
 
 Código: `src/controllers/eventos.controller.ts` +
 `src/services/eventos/eventos.service.ts` (escritura);
-`src/controllers/admin/admin-eventos.controller.ts` +
-`src/services/admin/admin-eventos.service.ts` (lectura). Cliente nuevo:
+`src/controllers/admin/admin-tendencias.controller.ts` +
+`src/services/admin/admin-tendencias.service.ts` (lectura). Cliente nuevo:
 `src/database/clickhouse.ts` (mismo patron que `elastic.ts`: HTTP, sin
 socket persistente). Helper compartido:
 `src/helpers/sesion-opcional.ts` (`idUsuarioDeCookieOpcional`) -- extraido
@@ -408,10 +408,16 @@ local.
 
 ---
 
-# GET /admin/eventos/* -- explorador de las seis tablas
+# GET /admin/eventos/* -- ranking de tendencias por tabla
 
-Seis rutas de solo lectura, una por tabla, para que un admin pueda mirar
-las filas crudas sin entrar a `clickhouse-client` a mano:
+Seis rutas de solo lectura, una por tabla, que agregan y ordenan --
+**reemplazan** una version anterior (2026-09-18, misma noche) que
+devolvia filas crudas ordenadas por fecha, sin agrupar nada. Esa version
+se borro por completo (`AdminEventosController`/`AdminEventosService`,
+`dto/consultar-eventos.ts`, `models/evento-clickhouse.ts`) porque, en
+palabras del usuario, "no servian de nada literalmente" -- un admin no
+gana nada mirando eventos sueltos ordenados por fecha, la pregunta real
+siempre es "cual es el mas/menos [lo que sea] en los ultimos N dias".
 
 - `GET /admin/eventos/vista`
 - `GET /admin/eventos/carrito`
@@ -420,77 +426,126 @@ las filas crudas sin entrar a `clickhouse-client` a mano:
 - `GET /admin/eventos/busqueda`
 - `GET /admin/eventos/busqueda-clic`
 
-**Nunca agrupan ni calculan tendencias** ("los 10 productos más vistos",
-etc.) -- son las filas tal cual quedaron guardadas, en una ventana de
-tiempo. Si algún día hace falta un panel de tendencias de verdad, es una
-pieza aparte, no esta.
-
-Código: `src/controllers/admin/admin-eventos.controller.ts` +
-`src/services/admin/admin-eventos.service.ts`. Nuevo:
-`helpers/manejar-error-clickhouse.ts` (mismo patrón que
-`manejar-error-elastic.ts`: distingue un error que sí devolvió el
-servidor de ClickHouse -- `ClickHouseError`, se relanza tal cual, 500 --
-de uno que ni siquiera logró conectarse -- `ErrorConexion`, 503).
+Código: `src/controllers/admin/admin-tendencias.controller.ts` +
+`src/services/admin/admin-tendencias.service.ts`. Nuevos:
+`dto/consultar-tendencias.ts`, `models/tendencia-evento.ts`
+(`TendenciaProducto`/`TendenciaTermino`). Reusa
+`helpers/manejar-error-clickhouse.ts` (sin cambios) y
+`helpers/validaciones-eventos.ts` (`validarDiasEvento`/`validarLimiteEvento`
+sin cambios; `validarOrdenEvento` se borro y se reemplazo por
+`validarDireccionEvento`).
 
 **Solo admin** (`SesionGuard` + `@Roles(ID_ROL_ADMIN)`, en la clase) -- no
 la tienda, mismo criterio que el resto de paneles.
 
-**Los mismos tres query params en las seis rutas:**
+## La metrica NO es la misma en las seis tablas
+
+Decision explicita del usuario (2026-09-18), segun que tan facil es
+repetir la accion sin que el numero se infle:
+
+- **`vista`, `carrito`** -- se cuentan **personas distintas**, no eventos
+  totales: ver una ficha o agregar algo al carrito es una accion de bajo
+  esfuerzo que "casi cualquiera puede hacer" varias veces, asi que lo que
+  importa es a cuanta gente distinta le intereso. `vista_producto` cuenta
+  `sesion` distinta (puede ser anonima); `carrito_producto` **no tiene
+  columna `sesion`** en el esquema real (el carrito siempre exige cuenta),
+  asi que ahi se cuenta `id_usuario` distinto -- misma idea, columna
+  distinta porque la tabla es distinta.
+- **`compra`, `devolucion`** -- conteo **normal**, `sum(cantidad)`, igual
+  que `MasVendidosSyncService`: completar una compra no es trivial ni
+  repetible sin friccion, asi que cada unidad vendida o devuelta cuenta
+  por lo que es, sin dividir por persona.
+- **`busqueda`, `busqueda-clic`** -- `sesion` distinta, pero agrupado por
+  **`termino`**, no por producto: la pregunta es que tan buscado (o
+  cliqueado) esta un termino, no un producto puntual. `busqueda-clic`
+  podria haberse agrupado por `id_producto` en vez de `termino` (la fila
+  trae los dos) -- se eligio `termino` a pedido explicito del usuario.
+
+## Los mismos tres query params en las seis rutas
 
 | Param | Obligatorio | Qué es |
 |---|---|---|
-| `dias` | no | Cuántos días hacia atrás mirar. Defecto `7`, tope `365` (el mismo horizonte que el `TTL` de las tablas) -- un valor fuera de rango se recorta, no rechaza la petición |
-| `limite` | no | Cuántas filas como máximo. Defecto `20`, tope `200`, mismo criterio de recorte |
-| `orden` | no | `recientes` (defecto, `ORDER BY fecha DESC`) o `antiguos` (`ASC`) |
+| `dias` | no | **N**: cuántos días hacia atrás mirar. Defecto `7`, tope `365` -- un valor fuera de rango se recorta, no rechaza la petición |
+| `limite` | no | **M**: cuántos resultados del ranking traer como máximo. Defecto `20`, tope `200`, mismo criterio de recorte |
+| `direccion` | no | `positivo` (defecto) -- los primeros M, de mayor a menor métrica. `negativo` -- los últimos M, de menor a mayor |
 
 ```
-GET /admin/eventos/vista?dias=7&limite=20&orden=recientes
+GET /admin/eventos/compra?dias=30&limite=5&direccion=positivo
+GET /admin/eventos/vista?dias=7&direccion=negativo
 ```
 
-**La consulta es la misma en las seis, solo cambia la tabla:**
+**La consulta comparte forma en las seis, solo cambian la tabla, la
+columna de agrupación y la métrica** (`AdminTendenciasService.consultarRanking`):
 
 ```sql
-SELECT * FROM <tabla>
+SELECT <id_producto|termino> AS clave, <metrica> AS total
+  FROM <tabla>
  WHERE fecha >= now() - INTERVAL {dias:UInt32} DAY
- ORDER BY fecha <ASC|DESC>
+ GROUP BY <id_producto|termino>
+ ORDER BY total <DESC|ASC>
  LIMIT {limite:UInt32}
 ```
 
-`dias` y `limite` van por `query_params` de ClickHouse (bind seguro, no
-interpolación); `orden` se interpola directo porque `validarOrdenEvento`
-ya lo fija a uno de dos literales (`ASC`/`DESC`), nunca texto libre del
-cliente. El nombre de tabla tampoco viene del cliente -- cada ruta lo fija
-a una constante en el propio código.
+`dias` y `limite` van por `query_params` de ClickHouse (bind seguro);
+`direccion` se interpola directo porque `validarDireccionEvento` ya la
+fija a uno de dos literales (`ASC`/`DESC`), nunca texto libre del
+cliente. Tabla, columna de agrupación y métrica tampoco vienen del
+cliente -- cada ruta los fija a constantes en el propio código.
 
-### 200 (ejemplo con `GET /admin/eventos/carrito`)
+`total` sale como STRING de ClickHouse en las cuatro consultas
+(`count(DISTINCT ...)` y `sum(cantidad)` promueven a `UInt64`, igual que
+`id_producto` en `models/evento-clickhouse.ts` de antes) -- se convierte
+a `number` en el servicio antes de responder, nunca llega crudo al
+cliente.
+
+## Las cuatro que agrupan por producto: segunda consulta a MongoDB
+
+`vista`, `carrito`, `compra` y `devolucion` devuelven `id_producto`, y con
+esos ids el servicio pide el detalle real a MongoDB (`$in`, reordenado
+para que coincida con el ranking -- Mongo no respeta el orden de la lista
+de ids). **A diferencia de `GET /productos/mas-vendidos` (pública), aquí
+NO se filtra por `estado`**: un admin explorando tendencias necesita ver
+un producto inactivo, en revisión o ya borrado también, no solo lo que un
+comprador vería. Un id sin documento en Mongo sale con `producto: null`,
+nunca se descarta -- el total sigue siendo un dato válido aunque el
+producto ya no exista.
+
+### 200 (ejemplo con `GET /admin/eventos/compra`)
 
 ```json
 {
   "ok": true,
-  "mensaje": "Eventos de carrito obtenidos",
+  "mensaje": "Tendencia de compras obtenida",
   "payload": [
-    {
-      "fecha": "2026-09-18 17:12:27.958",
-      "id_producto": "12",
-      "id_oferta": "5",
-      "id_usuario": "3",
-      "cantidad": 2,
-      "ip": "::ffff:127.0.0.1",
-      "lote": "real"
-    }
+    { "total": 4, "producto": { "_id": 1, "nombre": "Laptop Ambar Campus 14", "...": "..." } }
   ]
 }
 ```
 
-La forma de cada fila depende de la tabla -- son las mismas columnas
-documentadas arriba para cada evento, sin transformar nada.
+## Las dos que agrupan por término: sin segunda consulta
+
+`busqueda` y `busqueda-clic` devuelven el `termino` tal cual -- no hay
+ningún "producto" al que pedirle nombre para un texto de búsqueda, así
+que no hacen ninguna consulta a Mongo.
+
+### 200 (ejemplo con `GET /admin/eventos/busqueda`)
+
+```json
+{
+  "ok": true,
+  "mensaje": "Tendencia de busquedas obtenida",
+  "payload": [
+    { "termino": "laptop", "total": 2 }
+  ]
+}
+```
 
 ### 400
 
 ```json
 { "ok": false, "mensaje": "dias debe ser un numero entero mayor a 0", "payload": null }
 { "ok": false, "mensaje": "El limite debe ser un numero entero mayor a 0", "payload": null }
-{ "ok": false, "mensaje": "orden debe ser uno de: recientes, antiguos", "payload": null }
+{ "ok": false, "mensaje": "direccion debe ser uno de: positivo, negativo", "payload": null }
 ```
 
 ### 401 / 403
@@ -502,34 +557,37 @@ sesión válida pero no admin (comprador, vendedor, o **la tienda**) → `403`.
 
 ```json
 { "ok": false, "mensaje": "No se pudo conectar con ClickHouse", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
 ```
 
 ## Pruebas -- hechas el 2026-09-18
 
-Contra el servidor y ClickHouse reales, con sesión real de `admin_mesh`.
+Contra el servidor, ClickHouse y MongoDB reales, con sesión real de
+`admin_mesh`.
 
 | Caso | Resultado |
 |---|---|
-| Sin sesión | `401` |
-| Sesión de `comprador_sur` (rol comprador) | `403` |
-| `GET /admin/eventos/vista` sin params | `200`, las filas reales de prueba de esta misma sesión, más recientes primero |
-| Las otras cinco rutas (`carrito`, `compra`, `devolucion`, `busqueda`, `busqueda-clic`), sin params | `200` en las seis, cada una con sus columnas correctas |
-| `orden=antiguos` | `200`, la fila más vieja primero (orden invertido, confirmado) |
+| Sin sesión | `401` "No hay sesion activa" |
+| Sesión de `comprador_sur` (rol comprador) | `403` "No tienes permiso para hacer esto" |
+| Las seis rutas, sin params, con datos reales | `200` en las seis: `vista`/`carrito` con el producto correcto y `total` correcto; `compra`/`devolucion` con el producto y la suma correcta; `busqueda`/`busqueda-clic` con `termino: "laptop"` y su conteo |
 | `dias=0` | `400` "dias debe ser un numero entero mayor a 0" |
-| `orden=lateral` | `400` con los dos valores válidos |
-| `limite=999` | `200` (se recorta a 200 en silencio, no rechaza) |
-| Fila sembrada a mano con `fecha = now() - INTERVAL 10 DAY`, consultada con `dias=5` | **no aparece** -- confirma que el filtro de ventana excluye de verdad, no es solo un `LIMIT` |
-| La misma fila, consultada con `dias=15` | **sí aparece** -- confirma que la ventana también incluye cuando corresponde |
+| `limite=0` | `400` "El limite debe ser un numero entero mayor a 0" |
+| `direccion=lateral` | `400` con los dos valores válidos |
+| **`carrito`, prueba de aislamiento**: 5 filas insertadas a mano (`lote: generado-prueba-distinct`) para un `id_producto` ficticio, 3 de un `id_usuario` y 2 de otro | `total: 2` -- confirma que es `COUNT(DISTINCT id_usuario)` de verdad, no `COUNT(*)` (que habría dado 5) |
+| **`compra`, prueba de aislamiento**: 2 filas insertadas a mano (`lote: generado-prueba-suma`) con `cantidad` 5 y 3 | `total: 8` -- confirma que es `SUM(cantidad)` de verdad, no `COUNT(*)` (que habría dado 2) |
+| Producto del ranking sin documento en Mongo (el `id_producto` ficticio de la prueba de aislamiento) | `producto: null`, la fila no se descarta |
+| `direccion=positivo` vs `direccion=negativo` | orden confirmado por consulta directa a ClickHouse (con un solo producto en la ventana no se aprecia diferencia en pantalla, pero el `ORDER BY total ASC/DESC` se verificó aparte) |
 
-Fila de prueba de la ventana de días borrada al terminar (`ALTER TABLE ...
-DELETE`, la única forma de borrar en `MergeTree`). `npx tsc --noEmit` y
+Las filas de prueba de aislamiento se borraron al terminar (`ALTER TABLE
+... DELETE ... SETTINGS mutations_sync = 1`). `npx tsc --noEmit` y
 `eslint` limpios. Sin errores en el log del servidor durante toda la
 ronda.
 
 ## Lo que sigue
 
-Ninguno -- las seis piezas del plan
-(`plan pendiente/eventos-clickhouse.md`) ya están construidas y probadas.
-Lo que queda es del lado del compañero: formalizar el esquema en
-`clickhouse/001_esquema.sql` y decidir sobre generadores de datos
-sembrados -- ver ese documento, sección "Lo que sigue".
+Ninguno de este lado -- las seis piezas del plan original
+(`plan pendiente/eventos-clickhouse.md`) y este ranking de tendencias
+están construidos y probados. Lo que queda es del lado del compañero:
+formalizar el esquema en `clickhouse/001_esquema.sql` y decidir sobre
+generadores de datos sembrados -- ver ese documento, sección "Lo que
+sigue".

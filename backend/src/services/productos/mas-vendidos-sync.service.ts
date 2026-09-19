@@ -85,7 +85,7 @@ export class MasVendidosSyncService {
    * Agrega `compra_producto` de los ultimos `cantidad` `unidad` hacia atras.
    * `unidad` nunca sale del cliente -- son las dos constantes literales que
    * llama `recalcular()` -- asi que interpolarla en el `INTERVAL` es segura,
-   * mismo criterio que `orden` en `AdminEventosService.consultarTabla`.
+   * mismo criterio que `direccion` en `AdminTendenciasService.consultarRanking`.
    */
   private async consultarVentana(
     cantidad: number,

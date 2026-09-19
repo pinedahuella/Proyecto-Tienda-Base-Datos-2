@@ -61,8 +61,8 @@ import { AdminFraudeAnillosController } from './controllers/admin/admin-fraude-a
 import { FraudeAnillosPersistidosService } from './services/fraude/fraude-anillos-persistidos.service';
 import { EventosController } from './controllers/eventos.controller';
 import { EventosService } from './services/eventos/eventos.service';
-import { AdminEventosController } from './controllers/admin/admin-eventos.controller';
-import { AdminEventosService } from './services/admin/admin-eventos.service';
+import { AdminTendenciasController } from './controllers/admin/admin-tendencias.controller';
+import { AdminTendenciasService } from './services/admin/admin-tendencias.service';
 import { MasVendidosSyncService } from './services/productos/mas-vendidos-sync.service';
 import { MasVendidosController } from './controllers/productos/mas-vendidos.controller';
 import { MasVendidosService } from './services/productos/mas-vendidos.service';
@@ -106,7 +106,7 @@ import { MasVendidosService } from './services/productos/mas-vendidos.service';
     AdminFraudeLoginController,
     AdminFraudeAnillosController,
     EventosController,
-    AdminEventosController,
+    AdminTendenciasController,
     MasVendidosController,
   ],
   providers: [
@@ -144,7 +144,7 @@ import { MasVendidosService } from './services/productos/mas-vendidos.service';
     FraudeLoginExploracionService,
     FraudeAnillosPersistidosService,
     EventosService,
-    AdminEventosService,
+    AdminTendenciasService,
     MasVendidosSyncService,
     MasVendidosService,
   ],
