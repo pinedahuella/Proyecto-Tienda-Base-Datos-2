@@ -980,10 +980,20 @@ verdad: borrando 16 ventas y 2 devoluciones del destino y viendo que las recuper
 camino pasa la lista de pares por la linea de comandos de Windows (unos 32 mil caracteres),
 asi que **a partir de unos 3000 pares hay que usar el .sh**.
 
-## 4. Un defecto conocido que NO se arreglo: la copia de logueos escribe en UTC
+## 4. La copia de logueos escribia en UTC, y ya no (arreglado el mismo dia)
 
-`extraer_eventos.sql` formatea la fecha como texto en UTC y ClickHouse la lee en la zona
-de su servidor (Guatemala), o sea 6 horas corrida hacia adelante. Nadie lo ve porque esa
-copia esta congelada desde el 2026-09-10 (el backend ya no escribe `log_login`) y nada la
-lee. Si algun dia se repunta la copia a `eventos_autenticacion` de Mongo (pendiente 16),
-hay que corregirlo entonces: la solucion es la de `extraer_compras.sql`, mandar epoca.
+`extraer_eventos.sql` formateaba la fecha como texto en UTC y ClickHouse la lee en la zona
+de su servidor (Guatemala), o sea 6 horas corrida hacia adelante. Medido: el login 359 es de
+las 16:53 en PostgreSQL y salia a las 22:53 en ClickHouse. Nadie lo veia porque esa copia
+esta congelada desde el 2026-09-10 (el backend ya no escribe `log_login`) y nada la lee.
+
+Ahora manda la fecha como epoca, igual que `extraer_compras.sql`, en el .sql y en el gemelo
+de `arrancar.ps1`. Las 334 filas que ya estaban copiadas quedaron corridas y se
+recopiaron: se borraron las de `lote = 'real'` de `evento_login` y `evento_registro` (es una
+copia, la fuente sigue en PostgreSQL) y el ETL las trajo de nuevo. Verificado: el login 359
+sale a las 16:53:58.146 y la suma de todos los instantes es identica en las dos bases.
+
+Una base hecha antes de este arreglo sigue con la fecha corrida hasta que se haga lo mismo:
+`ALTER TABLE evento_login DELETE WHERE lote = 'real'` (y `evento_registro`) y despues
+`bash etl/cargar_eventos.sh`. Esa copia sigue congelada; repuntarla a `eventos_autenticacion`
+de Mongo es el pendiente 16 y ya no arrastra este defecto.

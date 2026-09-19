@@ -2816,13 +2816,13 @@ if (-not (Esperar-Contenedor "mesh-clickhouse" 90)) {
         }
 
         $selLogueos = @"
-SELECT to_char(l.fecha_login AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),
+SELECT round(extract(epoch FROM l.fecha_login)::numeric, 3),
        l.id_usuario, host(l.ip_origen), t.tipo_login_nombre, 'real', l.id_log_login
   FROM log_login l JOIN tipo_login t USING (id_tipo_login)
  WHERE l.id_log_login > @MARCA@ ORDER BY l.id_log_login
 "@
         $selRegistros = @"
-SELECT to_char(r.fecha_registro AT TIME ZONE 'UTC','YYYY-MM-DD HH24:MI:SS.MS'),
+SELECT round(extract(epoch FROM r.fecha_registro)::numeric, 3),
        r.id_usuario, host(r.ip_origen), r.id_log_registro, 'real'
   FROM log_registro r
  WHERE r.id_log_registro > @MARCA@ ORDER BY r.id_log_registro

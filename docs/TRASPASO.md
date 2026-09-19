@@ -89,8 +89,9 @@ id_pedido)`, dos ofertas del mismo producto en el mismo pedido se colapsaban: el
 pedidos pendientes que se pagan despues (`comprarPedido`) nunca llegaban a ClickHouse. Pedido a David en
 `BACKEND-PENDIENTE.md`. Mientras tanto `cargar_compras.sh` lo compensa, pero solo cuando corre.
 
-**4. La copia de logueos escribe en UTC y ClickHouse lee en Guatemala**: 6 horas corrida. Nadie lo ve
-porque esa copia esta congelada. No se arreglo; esta anotado en `etl/README.md`.
+**4. La copia de logueos escribia en UTC y ClickHouse lee en Guatemala**: 6 horas corrida (el login 359,
+de las 16:53, salia a las 22:53). Nadie lo veia porque esa copia esta congelada. Ya se arreglo: la fecha
+viaja como epoca y las 334 filas se recopiaron, ver `etl/README.md`, seccion 4.
 
 **Tres salvedades honestas.** (a) El dano de `cargar.js` era estructural, no hecho: hoy ningun producto
 de PostgreSQL esta editado desde la aplicacion, y los 16 eventos de modificacion de Mongo coinciden con
@@ -1199,6 +1200,19 @@ que es la ultima llamada a `azar()`, comprobada con
 ofertas. La parte social tiene su propia semilla (`azarSocial`) justamente para
 no arrastrarse con eso.
 
+**"El servidor respondio algo inesperado" al entrar es casi siempre el backend reiniciandose.** El
+backend corre con `nest start --watch` y el observador lo reinicia con cualquier toque a `backend/`,
+incluidos los de OneDrive sin cambio de contenido. Durante esos segundos el proxy de Vite no tiene a
+quien pasarle la peticion, contesta algo que no es JSON y `pedir()` lo traduce a ese texto. Medido el
+2026-09-18: el backend se reinicio a las 22:23:10 (proceso nuevo colgando de `nest.js start --watch`,
+`dist/` sin cambios desde las 21:03), y un login fallo justo ahi; 15 logins seguidos despues dieron
+200 con JSON. Ya no se llega a ver: el proxy de Vite (`vite.config.ts`) contesta un 503 en JSON con la cabecera
+`x-mesh-proxy-error` cuando no alcanza al backend, y `pedir()` (`api.ts`) reintenta esas peticiones
+(8 veces, 1.5 s, unos 12 s en total) sin duplicar nada: la cabecera dice que la peticion nunca llego.
+Si el backend sigue caido, la persona lee "El servidor se esta reiniciando" en vez del mensaje
+inutil. Probado con `pedir()` compilado: backend caido, backend que vuelve a los 4 s (el POST entra UNA
+vez) y un 503 propio del backend (no se reintenta). El reinicio en si sigue pasando: es de `backend/`.
+
 **Tras varios recargados de HMR la pestana de Chrome se congela** y
 `Runtime.evaluate` da timeout. Se cierra y se abre otra.
 
@@ -1377,3 +1391,36 @@ docs/                base-de-datos.md manda sobre el modelo;
 backend/             de Jose David. NO SE TOCA. Su doc buena esta en
                      "elementos Generales/endpoints-*.md"
 ```
+
+---
+
+## El carrito y la ficha ya no dejan pasar del stock (2026-09-18)
+
+El carrito de Redis es SOLO INTENCION, y asi lo dejo documentado Jose David
+(`backend/elementos Generales/endpoints/endpoints-carrito.md`): "el stock no se comprueba al agregar
+-- nunca fue una reserva --", el PUT es "Redis puro" y acepta cualquier cantidad de 1 a 1000, y "el limite
+real es el stock, que no se comprueba aca para una oferta normal (se ve en GET /carrito y bloquea al
+pagar)". Redis no piensa: **quien debe frenar es el frontend**, y el backend es la red de abajo, que
+rechaza con 409 al pagar. Por eso no se puede vender de mas, pero sin el limite del frontend una persona
+llegaba a tener la olla arrocera en **6 con 4 en stock**, una linea que no se puede comprar, con el `+`
+siempre activo. **Esto NO es un hueco del backend y no se le pide nada a David** (una nota mia decia lo
+contrario y estaba equivocada). El limite se pone en los dos sitios donde se agrega:
+
+```
+CarritoRedis.svelte   el "+" se apaga al llegar a stock_disponible y dice "No hay mas unidades". Solo se
+                      frena SUBIR: bajar siempre se puede. Una linea que ya se paso ensena "Ajustar a N", que
+                      la deja en lo que si hay
+producto/[id]         el input tiene max, y lo escrito por encima se recorta al tope (escribir 50 con 9 libres
+                      deja 9). Lee el carrito al entrar para restar lo que YA tienes, y avisa "Ya tienes 3 en
+                      el carrito. Puedes agregar 9 mas". Si pediste mas de lo que cabe, agrega lo que cabe y
+                      te dice cuanto
+```
+
+**Una venta relampago tiene otro tope.** El PUT reserva contra el contador de Redis, y lo que ya tenias
+apartado ya no esta en ese contador; restarlo otra vez le quitaria unidades que si hay. Ahi el tope es lo
+que queda. En el carrito, `stock_disponible` de una linea relampago es el de PostgreSQL congelado y solo es
+una cota superior: la exactitud la sigue decidiendo el backend.
+
+Medido en el navegador con el carrito real de `admin@mesh.com`: la laptop (3 de 12) deja el `+` activo y
+la ficha da `max=9`; la olla (6 con stock 4) salia con el `+` deshabilitado y "Ajustar a 4", que la dejo en
+4 y comprable; en la ficha de la olla, con las 4 ya en el carrito, el input y el boton quedan deshabilitados.

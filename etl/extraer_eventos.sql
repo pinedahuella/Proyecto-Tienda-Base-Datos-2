@@ -119,6 +119,15 @@ SELECT CASE WHEN :es_login IN (0, 1) THEN 0 ELSE 1 / 0 END WHERE false;
 -- ============================================================
 SELECT
 
+    -- CORREGIDO EL 2026-09-18: la fecha viaja como EPOCA y no como texto. Lo de
+    -- abajo, sobre el formato del texto y el AT TIME ZONE 'UTC', describe la
+    -- version anterior y se deja como historia de por que era asi. Ese texto se
+    -- escribia en UTC y ClickHouse lo lee sin zona en la de SU servidor, que aqui
+    -- es America/Guatemala (TZ del docker-compose): todo quedaba 6 horas corrido
+    -- hacia adelante. Medido: el login 359 es de las 16:53 en PostgreSQL y salia a
+    -- las 22:53 en ClickHouse. Una epoca es el mismo instante en cualquier zona.
+    -- Ver etl/extraer_compras.sql, que ya lo hacia asi.
+    --
     -- ClickHouse lee DateTime64(3) desde texto, pero solo con este formato
     -- exacto. El de PostgreSQL por defecto trae el desplazamiento pegado
     -- ("2026-09-06 20:31:00.123+00") y ClickHouse lo rechaza entero, no lo
@@ -129,7 +138,7 @@ SELECT
     -- MS y no US: la columna de ClickHouse guarda milisegundos. Mandar
     -- microsegundos no da error, se truncan en silencio, y entonces el texto
     -- que se manda deja de ser el texto que se guarda.
-    to_char(l.fecha_login AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS'),
+    round(extract(epoch FROM l.fecha_login)::numeric, 3),
 
     l.id_usuario,
 
@@ -185,7 +194,7 @@ ORDER BY l.id_log_login;
 -- dos sentidos como el login. Los comentarios de la rama de arriba valen
 -- igual para cada linea de aqui.
 SELECT
-    to_char(r.fecha_registro AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS.MS'),
+    round(extract(epoch FROM r.fecha_registro)::numeric, 3),
     r.id_usuario,
     coalesce(host(r.ip_origen), '::'),
     'real',

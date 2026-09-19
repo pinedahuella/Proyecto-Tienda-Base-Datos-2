@@ -35,6 +35,49 @@ export interface RespuestaApi<T> {
 }
 
 /**
+ * El proxy de Vite (vite.config.ts) pone esta cabecera cuando NO alcanzo al
+ * backend, por ejemplo mientras se reinicia. Quiere decir que la peticion nunca
+ * llego, asi que reintentarla es seguro aunque sea un POST.
+ */
+const CABECERA_PROXY = 'x-mesh-proxy-error';
+
+/** Cuantas veces se reintenta y cuanto se espera entre una y otra: unos 12 segundos, lo que tarda `nest start --watch` en volver. */
+const REINTENTOS = 8;
+const ESPERA_MS = 1500;
+
+const esperar = (ms: number) => new Promise<void>((resolver) => setTimeout(resolver, ms));
+
+/**
+ * fetch, pero aguanta que el backend se este reiniciando.
+ *
+ * Reintenta en dos casos y solo en el navegador (al renderizar en el servidor
+ * no hay proxy, y hacer esperar al HTML doce segundos seria peor):
+ *
+ *   - el proxy dijo que no llego al backend (cabecera de arriba): cualquier
+ *     metodo, porque no hubo nada que duplicar;
+ *   - el fetch fallo del todo (sin red) y era un GET: repetir una lectura no
+ *     cambia nada. Un POST que fallo asi NO se reintenta: puede haber llegado.
+ *
+ * Si se agotan los intentos devuelve la ultima respuesta, que es el JSON del
+ * proxy con el texto de "se esta reiniciando", o relanza el error de red.
+ */
+async function conReintento(url: string, opciones: RequestInit): Promise<Response> {
+	const metodo = (opciones.method ?? 'GET').toUpperCase();
+	const reintenta = typeof window !== 'undefined';
+
+	for (let intento = 0; ; intento++) {
+		const agotado = !reintenta || intento >= REINTENTOS || opciones.signal?.aborted === true;
+		try {
+			const respuesta = await fetch(url, opciones);
+			if (agotado || respuesta.headers.get(CABECERA_PROXY) !== '1') return respuesta;
+		} catch (error) {
+			if (agotado || metodo !== 'GET') throw error;
+		}
+		await esperar(ESPERA_MS);
+	}
+}
+
+/**
  * Hace la peticion y siempre devuelve una RespuestaApi, nunca lanza.
  *
  * Es a proposito: el backend ya responde con la misma forma en 200, 400,
@@ -47,7 +90,7 @@ export async function pedir<T>(ruta: string, opciones: RequestInit = {}): Promis
 	let respuesta: Response;
 
 	try {
-		respuesta = await fetch(`${API}${ruta}`, {
+		respuesta = await conReintento(`${API}${ruta}`, {
 			// credentials para que el navegador mande y guarde la cookie de
 			// sesion que pone /usuario/login. El registro todavia no la usa,
 			// pero el resto de las rutas si.
