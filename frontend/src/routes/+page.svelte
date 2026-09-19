@@ -291,6 +291,19 @@
 	let primeraVez = $state(true);
 
 	/**
+	 * Lo mas vendido, de GET /productos/mas-vendidos. Es publica y no recibe
+	 * filtros: el backend lee un ranking que un worker recalcula cada 10 minutos
+	 * desde ClickHouse y trae de Mongo el mismo documento de siempre, asi que las
+	 * tarjetas son las del catalogo.
+	 *
+	 * Una lista vacia NO es un error. El backend la devuelve asi cuando todavia
+	 * no hay ranking (nadie ha comprado, o el worker no ha corrido), y en ese caso
+	 * el estante simplemente no sale. Por eso tampoco hay caja roja si falla: es
+	 * un adorno encima del catalogo y el catalogo sigue funcionando sin el.
+	 */
+	let masVendidos = $state<Producto[]>([]);
+
+	/**
 	 * Si lo ultimo que fallo fue traer la SIGUIENTE tanda, no la busqueda.
 	 *
 	 * Los dos fallos se ven igual en pantalla (el mismo parrafo rojo) pero no se
@@ -853,8 +866,16 @@
 		)
 	);
 
+	async function cargarMasVendidos() {
+		const r = await pedir<Producto[]>('/productos/mas-vendidos');
+		// Los dos lados: ok con payload que no es lista se ha visto, y una sola
+		// tarjeta mal formada tumbaria el pintado de la portada entera.
+		masVendidos = r.ok && Array.isArray(r.payload) ? r.payload : [];
+	}
+
 	onMount(() => {
 		cargarCategorias();
+		cargarMasVendidos();
 		buscar();
 	});
 
@@ -982,6 +1003,104 @@
 	<title>Mesh</title>
 </svelte:head>
 
+{#snippet tarjeta(p: Producto, puesto?: number)}
+		<article class="tarjeta">
+			<a class="cara" href="/producto/{p._id}?origen=catalogo">
+				<div class="foto">
+			{#if puesto}
+				<span class="puesto-vendido" title="Puesto {puesto} entre los mas vendidos">{puesto}</span>
+			{/if}
+					<!-- Una portada que no carga se trata igual que no tenerla.
+					     Las urls son de fuera (Wikimedia), y cuando una se cae el
+					     navegador deja su icono de imagen rota con el texto alt al
+					     lado: se ve peor que el hueco limpio de "Sin imagen", y
+					     ademas parece un fallo de la pagina y no del enlace. -->
+					{#if portada(p) && !rotas.includes(p._id)}
+						<img
+							src={portada(p)}
+							alt={p.nombre}
+							loading="lazy"
+							onerror={() => marcarRota(p._id)}
+						/>
+					{:else}
+						<span class="sin-foto">Sin imagen</span>
+					{/if}
+				</div>
+
+				<div class="cuerpo">
+					<span class="categoria">{p.categoria.nombre}</span>
+					<h2>{p.nombre}</h2>
+					<p class="desc">{p.descripcion ?? ''}</p>
+
+					{#if resumen(p).length > 0}
+						<ul class="rasgos">
+							{#each resumen(p) as c (c.nombre)}
+								<li><span>{c.nombre}</span> {conUnidad(c)}</li>
+							{/each}
+						</ul>
+					{/if}
+
+					<!-- La base de la tarjeta: precio arriba, y DEBAJO una sola
+					     linea con lo demas.
+
+					     Antes esto eran cuatro bloques sueltos --el precio, el
+					     "desde", los vendedores y el stock-- y cada uno aparecia o
+					     no segun el producto. El resultado era que el precio, que
+					     es lo que la gente busca con la vista, quedaba a distinta
+					     altura en cada tarjeta de la misma fila. Medido en la
+					     portada: 705, 725, 705 y 753 pixeles. Se lee como algo mal
+					     montado aunque cada tarjeta por separado este bien.
+
+					     Ahora todo lo de abajo va en un bloque con `margin-top:
+					     auto` y el pie SIEMPRE ocupa una linea, tenga uno o tres
+					     datos. Los precios quedan alineados en la fila entera. -->
+					<div class="base">
+						<div class="pie-tarjeta">
+							<strong class="precio">{precio(p)}</strong>
+							<span class="variantes">
+								{p.variantes.length}
+								{p.variantes.length === 1 ? 'variante' : 'variantes'}
+							</span>
+						</div>
+
+						<p class="meta">
+							<!-- El segundo precio solo aparece cuando alguien lo tiene
+							     mas barato que la tienda. Si no, no se pintan dos
+							     numeros iguales. -->
+							{#if precioDesde(p)}
+								<span class="desde">desde <strong>{precioDesde(p)}</strong></span>
+							{/if}
+
+							{#if p.total_ofertas > 1}
+								<span>{p.total_ofertas} vendedores</span>
+							{/if}
+
+							<!-- El stock SOLO cuando es un problema.
+
+							     Antes cada tarjeta decia "63 en existencia", y ese
+							     numero no le sirve a nadie que este eligiendo: da
+							     igual si hay 63 o 200, lo que importa es si HAY. En
+							     doce tarjetas eran doce lineas repitiendo que si.
+							     Ahora se calla cuando hay, y habla cuando no --que
+							     es cuando cambia la decision.
+
+							     0 no siempre quiere decir "agotado": ver estadoStock(). -->
+							{#if p.stock_total !== undefined}
+								{@const estado = estadoStock(p)}
+								{#if estado === 'agotado'}
+									<span class="stock agotado">Agotado</span>
+								{:else if estado === 'sin-oferta'}
+									<span class="stock sin-dato">Nadie lo vende</span>
+								{/if}
+							{/if}
+						</p>
+					</div>
+				</div>
+			</a>
+		</article>
+{/snippet}
+
+
 <Cabecera />
 
 <main>
@@ -1041,6 +1160,27 @@
 				</button>
 			</div>
 		</div>
+
+		<!--
+			El estante de lo mas vendido, ARRIBA del catalogo y de sus filtros.
+
+			Solo sale con el catalogo sin filtrar. El ranking no obedece a ningun
+			filtro, y ensenarlo encima de una lista que si los obedece haria creer
+			que esos productos son resultados de la busqueda.
+		-->
+		{#if masVendidos.length > 0 && !hayFiltro}
+			<section class="mas-vendidos" aria-labelledby="t-mas-vendidos">
+				<div class="cab-estante">
+					<h2 id="t-mas-vendidos">Lo mas vendido ahora</h2>
+					<p>Se recalcula cada 10 minutos con las compras mas recientes.</p>
+				</div>
+				<div class="estante">
+					{#each masVendidos as p, i (p._id)}
+						{@render tarjeta(p, i + 1)}
+					{/each}
+				</div>
+			</section>
+		{/if}
 
 		<!-- Los filtros. Cada cambio vuelve a preguntarle al backend.
 
@@ -1367,97 +1507,7 @@
 
 		<div class="rejilla">
 			{#each productos as p (p._id)}
-				<article class="tarjeta">
-					<a class="cara" href="/producto/{p._id}?origen=catalogo">
-						<div class="foto">
-							<!-- Una portada que no carga se trata igual que no tenerla.
-							     Las urls son de fuera (Wikimedia), y cuando una se cae el
-							     navegador deja su icono de imagen rota con el texto alt al
-							     lado: se ve peor que el hueco limpio de "Sin imagen", y
-							     ademas parece un fallo de la pagina y no del enlace. -->
-							{#if portada(p) && !rotas.includes(p._id)}
-								<img
-									src={portada(p)}
-									alt={p.nombre}
-									loading="lazy"
-									onerror={() => marcarRota(p._id)}
-								/>
-							{:else}
-								<span class="sin-foto">Sin imagen</span>
-							{/if}
-						</div>
-
-						<div class="cuerpo">
-							<span class="categoria">{p.categoria.nombre}</span>
-							<h2>{p.nombre}</h2>
-							<p class="desc">{p.descripcion ?? ''}</p>
-
-							{#if resumen(p).length > 0}
-								<ul class="rasgos">
-									{#each resumen(p) as c (c.nombre)}
-										<li><span>{c.nombre}</span> {conUnidad(c)}</li>
-									{/each}
-								</ul>
-							{/if}
-
-							<!-- La base de la tarjeta: precio arriba, y DEBAJO una sola
-							     linea con lo demas.
-
-							     Antes esto eran cuatro bloques sueltos --el precio, el
-							     "desde", los vendedores y el stock-- y cada uno aparecia o
-							     no segun el producto. El resultado era que el precio, que
-							     es lo que la gente busca con la vista, quedaba a distinta
-							     altura en cada tarjeta de la misma fila. Medido en la
-							     portada: 705, 725, 705 y 753 pixeles. Se lee como algo mal
-							     montado aunque cada tarjeta por separado este bien.
-
-							     Ahora todo lo de abajo va en un bloque con `margin-top:
-							     auto` y el pie SIEMPRE ocupa una linea, tenga uno o tres
-							     datos. Los precios quedan alineados en la fila entera. -->
-							<div class="base">
-								<div class="pie-tarjeta">
-									<strong class="precio">{precio(p)}</strong>
-									<span class="variantes">
-										{p.variantes.length}
-										{p.variantes.length === 1 ? 'variante' : 'variantes'}
-									</span>
-								</div>
-
-								<p class="meta">
-									<!-- El segundo precio solo aparece cuando alguien lo tiene
-									     mas barato que la tienda. Si no, no se pintan dos
-									     numeros iguales. -->
-									{#if precioDesde(p)}
-										<span class="desde">desde <strong>{precioDesde(p)}</strong></span>
-									{/if}
-
-									{#if p.total_ofertas > 1}
-										<span>{p.total_ofertas} vendedores</span>
-									{/if}
-
-									<!-- El stock SOLO cuando es un problema.
-
-									     Antes cada tarjeta decia "63 en existencia", y ese
-									     numero no le sirve a nadie que este eligiendo: da
-									     igual si hay 63 o 200, lo que importa es si HAY. En
-									     doce tarjetas eran doce lineas repitiendo que si.
-									     Ahora se calla cuando hay, y habla cuando no --que
-									     es cuando cambia la decision.
-
-									     0 no siempre quiere decir "agotado": ver estadoStock(). -->
-									{#if p.stock_total !== undefined}
-										{@const estado = estadoStock(p)}
-										{#if estado === 'agotado'}
-											<span class="stock agotado">Agotado</span>
-										{:else if estado === 'sin-oferta'}
-											<span class="stock sin-dato">Nadie lo vende</span>
-										{/if}
-									{/if}
-								</p>
-							</div>
-						</div>
-					</a>
-				</article>
+				{@render tarjeta(p)}
 			{/each}
 		</div>
 
@@ -1874,6 +1924,7 @@
 	}
 
 	.foto {
+		position: relative;
 		display: flex;
 		align-items: center;
 		justify-content: center;
@@ -2201,6 +2252,59 @@
 		text-align: center;
 		font-size: var(--f-ms);
 		color: var(--rojo);
+	}
+
+	/* -- el estante de lo mas vendido -- */
+
+	.mas-vendidos {
+		margin-bottom: 2rem;
+	}
+
+	.cab-estante {
+		display: flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		gap: var(--e1) var(--e3);
+		margin-bottom: var(--e3);
+	}
+
+	.cab-estante h2 {
+		font-size: var(--f-lg);
+	}
+
+	.cab-estante p {
+		font-size: var(--f-ms);
+		color: var(--gris);
+	}
+
+	/* Una sola fila que se desliza, no una segunda rejilla: ocho tarjetas en
+	   rejilla empujarian el catalogo de verdad dos pantallas hacia abajo. */
+	.estante {
+		display: flex;
+		gap: var(--e4);
+		padding-bottom: var(--e2);
+		overflow-x: auto;
+		scroll-snap-type: x proximity;
+	}
+
+	.estante .tarjeta {
+		flex: 0 0 250px;
+		scroll-snap-align: start;
+	}
+
+	.puesto-vendido {
+		position: absolute;
+		top: 8px;
+		left: 8px;
+		z-index: 1;
+		min-width: 26px;
+		padding: 2px 8px;
+		font-size: var(--f-sm);
+		font-weight: 500;
+		text-align: center;
+		color: var(--sobre-indigo);
+		background: var(--indigo);
+		border-radius: 999px;
 	}
 
 	@media (max-width: 620px) {

@@ -121,7 +121,7 @@
 				// Se llamaba "Resenas". Desde el 2026-09-10 lleva tambien los intentos de
 				// entrada sospechosos, y nadie los iria a buscar bajo ese nombre.
 				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo e intentos de entrada sospechosos' },
-				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Que se esta calentando y desde que IP entran varias cuentas' },
+				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Lo mas visto, comprado y buscado en los ultimos dias' },
 				// Distinta de "Fraude": esa es EN VIVO contra el grafo y solo la ve
 				// un admin; esta es "a mi cuenta le paso algo" y la ve cualquiera --
 				// GET /perfil/alertas-fraude, filtrado a la sesion de quien pregunta.
@@ -763,15 +763,10 @@
 				</div>
 
 				<div class="hoja" class:oculta={seccionViva !== 'tendencias'}>
-					<!-- Va PEGADA a la de resenas y no al final, porque las dos
-					     contestan la misma pregunta por caminos distintos y se leen
-					     mejor juntas. El grafo sabe que dos cuentas se califican
-					     entre si; no sabe que las dos entran desde la misma casa a
-					     la misma hora. Esa segunda mitad es esta.
-
-					     Y como la de resenas, es SOLO del admin: dice desde que IP
-					     entra cada cuenta, que es justo lo que un vendedor no tiene
-					     por que poder mirar. -->
+					<!-- Los seis rankings de ClickHouse (vistas, carrito, compras,
+					     devoluciones, busquedas y clics de busqueda). Es SOLO del
+					     admin: las rutas GET /admin/eventos/* llevan el mismo candado.
+					     El fraude por IP ya no vive aqui, lo cubre la pestana Fraude. -->
 					{#if visitadas.has('tendencias')}
 						<PanelTendencias alExpirarSesion={expiro} />
 					{/if}
