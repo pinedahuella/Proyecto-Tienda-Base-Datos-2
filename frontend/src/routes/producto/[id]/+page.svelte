@@ -438,6 +438,58 @@
 		const r = await pedir<{ correo_electronico?: string }>('/usuario/yo');
 		haySesion = r.ok;
 		correoSesion = r.ok ? (r.payload?.correo_electronico ?? null) : null;
+		if (r.ok) void cargarEnCarrito();
+	}
+
+	/**
+	 * Lo que esta persona YA tiene en el carrito, por oferta.
+	 *
+	 * Hace falta para poner el tope BIEN. El PUT del carrito fija el total, y el
+	 * backend acepta cualquier numero (contesta 200 con la linea marcada "no hay
+	 * tantas unidades"), asi que el limite tiene que estar aqui: si esta ficha
+	 * dice "hay 4" y deja escribir 5, la persona se lleva al carrito una linea
+	 * que no se puede comprar. Con 3 ya en el carrito y 4 de stock, agregar 2
+	 * tambien pasa del tope, y sin esta lectura la ficha no lo sabe.
+	 */
+	let enCarrito = $state<Record<number, number>>({});
+
+	async function cargarEnCarrito() {
+		const r = await pedir<{ lineas: { id_oferta: number; cantidad: number }[] }>('/carrito');
+		if (!r.ok || !r.payload) return;
+		const mapa: Record<number, number> = {};
+		for (const l of r.payload.lineas) mapa[Number(l.id_oferta)] = l.cantidad;
+		enCarrito = mapa;
+	}
+
+	/** El maximo por linea que acepta el backend. */
+	const TOPE_POR_LINEA = 1000;
+
+	/**
+	 * Cuantas unidades MAS se pueden agregar a esta oferta ahora mismo.
+	 *
+	 * Una oferta normal se compara contra el stock: lo que ya tienes en el
+	 * carrito cuenta, asi que quedan `stock - lo que ya hay`.
+	 *
+	 * Una venta relampago es distinta. El PUT RESERVA unidades contra el contador
+	 * de Redis, y lo que ya tenias apartado ya no esta en ese contador (se
+	 * descuenta al reservar). Restarlo otra vez le quitaria unidades que si estan.
+	 * Por eso ahi el tope es simplemente lo que queda.
+	 */
+	function maximoAgregar(o: Oferta): number {
+		const ya = enCarrito[Number(o.id_oferta)] ?? 0;
+		const libres = enVentaRelampago(o) ? unidades(o) : unidades(o) - ya;
+		return Math.max(0, Math.min(libres, TOPE_POR_LINEA - ya));
+	}
+
+	/** Si lo escrito pasa del tope, lo deja en el tope. Es lo que evita el "5" con 4 en stock. */
+	function acotarCantidad(o: Oferta) {
+		const id = Number(o.id_oferta);
+		const escrito = String(cantidades[id] ?? '').trim();
+		if (escrito === '') return;
+		const n = Number(escrito);
+		if (!Number.isFinite(n)) return;
+		const tope = maximoAgregar(o);
+		if (n > tope) cantidades[id] = tope;
 	}
 
 	onMount(mirarSesion);
@@ -548,7 +600,25 @@
 			yaHabia = linea?.cantidad ?? 0;
 		}
 
-		const total = yaHabia + cantidad;
+		// EL TOPE, con el carrito recien leido (el de arriba puede estar viejo si la
+		// persona lo toco en otra pestana). Si pidio mas de lo que cabe, se agrega lo
+		// que cabe y se le dice: rebotarla obligaria a adivinar el numero.
+		const libres = Math.min(
+			enVentaRelampago(o) ? unidades(o) : unidades(o) - yaHabia,
+			TOPE_POR_LINEA - yaHabia
+		);
+		if (libres <= 0) {
+			agregando = '';
+			enCarrito[Number(o.id_oferta)] = yaHabia;
+			errorPedido =
+				yaHabia > 0
+					? `Ya tienes en tu carrito todas las unidades disponibles (${yaHabia}).`
+					: 'Esta oferta no tiene unidades disponibles.';
+			return;
+		}
+		const agregar = Math.min(cantidad, libres);
+		const recortada = agregar < cantidad;
+		const total = yaHabia + agregar;
 
 		// El tope del backend es 1000 por linea. Se avisa aqui con el numero
 		// concreto en vez de gastar el viaje para recibir el mismo error.
@@ -567,13 +637,16 @@
 			// (la variable local, antes de sumarle `yaHabia`), no el total
 			// resultante: la pregunta que el evento contesta es "cuanto se
 			// agrego en este clic", no "cuanto hay ahora".
-			registrarCarrito(id, Number(o.id_oferta), cantidad);
+			registrarCarrito(id, Number(o.id_oferta), agregar);
 
 			// No se afirma cuanto stock queda: el PUT no lo mira -- agregar al
 			// carrito nunca fue una reserva -- y decir un numero que el servidor
 			// no comprobo seria inventarlo. La disponibilidad se ve en el
 			// carrito, que la calcula al pintarlo.
-			avisoPedido = `"${v.nombre_variante}" de ${o.vendedor.usuario} queda en ${total} en tu carrito.`;
+			avisoPedido =
+				`"${v.nombre_variante}" de ${o.vendedor.usuario} queda en ${total} en tu carrito.` +
+				(recortada ? ` Pediste ${cantidad}, pero solo habia ${agregar} disponibles.` : '');
+			enCarrito[Number(o.id_oferta)] = total;
 			cantidades[Number(o.id_oferta)] = '';
 			// Se abre el carrito y se vuelve a contar: es lo que hace que se vea
 			// que "algo paso". Antes el unico rastro era una linea de texto.
@@ -905,16 +978,28 @@
 													min="1"
 													step="1"
 													bind:value={cantidades[Number(o.id_oferta)]}
+													max={maximoAgregar(o)}
+													oninput={() => acotarCantidad(o)}
 													placeholder="1"
-													disabled={unidades(o) === 0}
+													disabled={unidades(o) === 0 || maximoAgregar(o) === 0}
 												/>
 												<button
 													type="button"
 													onclick={() => alPedido(v, o)}
-													disabled={agregando !== '' || unidades(o) === 0}
+													disabled={agregando !== '' || unidades(o) === 0 || maximoAgregar(o) === 0}
 												>
 													{agregando === o.id_oferta ? 'Agregando...' : 'Agregar'}
 												</button>
+												{#if unidades(o) > 0 && (enCarrito[Number(o.id_oferta)] ?? 0) > 0}
+													<small class="tope">
+														Ya tienes {enCarrito[Number(o.id_oferta)]} en el carrito.
+														{#if maximoAgregar(o) > 0}
+															Puedes agregar {maximoAgregar(o)} mas.
+														{:else}
+															Ya tienes todas las que hay.
+														{/if}
+													</small>
+												{/if}
 											</div>
 										{/if}
 
@@ -1631,5 +1716,11 @@
 			grid-template-columns: 1fr;
 			gap: var(--e5);
 		}
+	}
+	/* El aviso de cuantas quedan por agregar, debajo del boton. */
+	.tope {
+		flex-basis: 100%;
+		font-size: var(--f-sm);
+		color: var(--gris);
 	}
 </style>

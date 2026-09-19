@@ -202,6 +202,21 @@
 			error = 'El maximo por linea es 1000';
 			return;
 		}
+		// EL TOPE DE STOCK, aqui y no en el servidor, y es POR DISENO: el carrito de
+		// Redis es solo intencion y el backend lo documenta asi ("el stock no se
+		// comprueba al agregar", endpoints-carrito.md); quien frena es el frontend
+		// y el servidor rechaza al pagar. El PUT acepta cualquier
+		// cantidad y contesta 200 dejando la linea marcada "no hay tantas
+		// unidades", o sea que sin este limite el "+" te lleva a una linea que no
+		// se puede comprar. Solo se frena SUBIR: bajar siempre se puede, incluso
+		// desde una linea que ya se paso (5 con 4 en stock).
+		if (nueva > linea.cantidad && nueva > linea.stock_disponible) {
+			error =
+				linea.stock_disponible > 0
+					? `Solo hay ${linea.stock_disponible} ${linea.stock_disponible === 1 ? 'unidad' : 'unidades'} de esta oferta.`
+					: 'Esta oferta no tiene unidades disponibles.';
+			return;
+		}
 
 		ocupada = linea.id_oferta;
 		const r = await pedir(
@@ -409,6 +424,14 @@
 								{MOTIVO[l.motivo] ?? 'No se puede comprar'}
 								{#if l.motivo === 'stock_insuficiente'}
 									— quedan {l.stock_disponible}
+									<button
+										type="button"
+										class="ajustar"
+										disabled={ocupada === l.id_oferta}
+										onclick={() => cambiarCantidad(l, l.stock_disponible)}
+									>
+										Ajustar a {l.stock_disponible}
+									</button>
 								{/if}
 							</span>
 						{/if}
@@ -428,7 +451,8 @@
 						<button
 							type="button"
 							aria-label="Agregar uno"
-							disabled={ocupada === l.id_oferta}
+							disabled={ocupada === l.id_oferta || l.cantidad >= Math.min(1000, l.stock_disponible)}
+							title={l.cantidad >= Math.min(1000, l.stock_disponible) ? 'No hay mas unidades' : undefined}
 							onclick={() => cambiarCantidad(l, l.cantidad + 1)}>+</button
 						>
 					</div>
@@ -862,5 +886,21 @@
 		.pendiente-nota {
 			text-align: left;
 		}
+	}
+	/* "Ajustar a N": deja una linea que se paso en lo que si hay. */
+	.ajustar {
+		margin-left: 6px;
+		padding: 0;
+		font: inherit;
+		color: var(--indigo);
+		text-decoration: underline;
+		background: none;
+		border: 0;
+		cursor: pointer;
+	}
+
+	.ajustar:disabled {
+		color: var(--gris);
+		cursor: default;
 	}
 </style>
