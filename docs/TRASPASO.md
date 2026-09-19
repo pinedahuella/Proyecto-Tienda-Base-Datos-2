@@ -54,6 +54,41 @@ redis/mas_vendidos.sh              ver el ranking de mas vendidos y reconstruirl
                                   los 10 minutos del worker. Documentado en redis/README.md, 2b
 ```
 
+**La corrida final de los quince arneses, 2026-09-19, en serie y de uno en uno.** 322 comprobaciones
+contadas y 0 FALLA, con los tres que no imprimen un numero (`redis/prueba_carrito.sh`,
+`redis/prueba_concurrencia.sh` y `neo4j/correr_fraude.sh`) en verde:
+
+```
+resenas 15        carrito 25         notas 10           busqueda 13        ofertas_paginadas 40
+alertas_login 52  eventos 31         tendencias 50      etl_compras 22     etl_mongo 21
+mongo/demostracion_indices 12        falla_checkout 31 (con su 1 "para declarar en la entrega")
+```
+
+No salio verde a la primera, y las dos causas eran de mi lado:
+
+**1. `alertas_login.sh` se paro en el terreno.** Comparaba el catalogo `tipo_alerta_fraude` contra TRES
+filas copiadas dentro del arnes, y desde el 2026-09-18 David lo tiene en nueve. Decia que la base estaba mal
+cuando el viejo era el arnes. Ahora lee los ids de `backend/src/models/alerta-fraude.ts` y no los copia:
+52 OK.
+
+**2. ClickHouse rechazaba consultas por falta de memoria, y `eventos.sh` dio rojo dos veces.** Medido:
+105 MiB de memoria rastreada contra 1.09 GiB residente, y `system.errors` con 68099 veces
+`MEMORY_LIMIT_EXCEEDED`. El tope de 1 GiB se mide contra la residente, y la llenaban los logs de sistema del
+propio ClickHouse: `trace_log` 17.5 millones de filas (319 MiB), `text_log` 3.8 millones (169 MiB),
+`asynchronous_metric_log` 52 millones, mas que todos los datos de eventos. Arreglo de raiz en
+`clickhouse/config.d/limites.xml`: se apagan siete logs de sistema (`remove="1"`) y se dejan `query_log`,
+`part_log` y `error_log`. Se valido antes en un contenedor desechable contra un control (el control crea los
+nueve logs, con la config nueva quedan dos), porque un elemento mal puesto tumba el arranque sin mensaje.
+Aplicado: el contenedor paso de 1.28 GiB a 306 MiB, los datos intactos, y `eventos.sh`, `tendencias.sh` y
+`etl_compras.sh` en verde. **Una base hecha antes necesita reiniciar `mesh-clickhouse` para tomar el
+archivo**, y borrar a mano los logs viejos (`DROP TABLE system.trace_log` y los otros seis) o seguiran ocupando
+disco.
+
+Dos cosas que hay que decir. `falla_checkout.sh` hizo compras reales (deja pedidos, pagos y movimientos de
+stock; su cabecera lo avisa). Y el lote `generado-42` de ClickHouse ya no existe: una ejecucion de
+`-BorrarVistas 42` a las 22:19 lo borro sin que yo la haya lanzado (probablemente un proceso paralelo de esta
+sesion). Como desde el 2026-09-19 ninguna pantalla lee lo sembrado, no se volvio a sembrar.
+
 **El pull del 2026-09-19: cuatro decisiones de David que tocaron mis capas.**
 
 ```

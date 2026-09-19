@@ -7,28 +7,28 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 
 | # | Que | De quien | Cuanto | Urgencia |
 |---|---|---|---|---|
-| 1 | El precio se congela al PAGAR, no al agregar | **cubierto por otro camino** | -- | media: ya no cobra en silencio, pero el precio sigue sin congelarse |
+| 1 | El precio se congela al PAGAR, no al agregar | el frontend | -- | **decidido el 2026-09-19: lo maneja el frontend** (guarda el precio que enseno y lo manda al pagar, como ya hace `Checkout.svelte` con `lineas_precio_visto`). No se complica el backend |
 | ~~2~~ | ~~La semilla no respalda con compras las 86 resenas~~ | -- | -- | **CERRADO el 2026-08-30** |
 | ~~3~~ | ~~`Carrito.svelte` quedo muerto~~ | -- | -- | **CERRADO el 2026-08-30** |
 | ~~4~~ | ~~El grafo se queda viejo y el ETL relee todo~~ | -- | -- | **CERRADO el 2026-09-04.** La cola (015) es mia, el worker y la conciliacion son de Jose David, y el aviso del panel es mio. El grafo se mantiene solo |
-| 5 | Dos asignadores de id de producto que no se hablan | Jose David decide | ver abajo | **alta, pero ya no es INVISIBLE.** El arranque avisa desde el 2026-09-04. Quien reparte el id sigue sin decidirse |
+| 5 | Dos asignadores de id de producto que no se hablan | -- | -- | **sin prioridad (decidido el 2026-09-19)**: "da igual". El arranque sigue avisando si hay cruce |
 | ~~6~~ | ~~La nota no llega al catalogo hasta que corre el ETL~~ | -- | -- | **CERRADO el 2026-09-04.** Etapa nueva del ETL, con `bash pruebas/notas.sh` (10 OK) |
 | ~~7~~ | ~~Una venta relampago que vence sola deja `es_inventario_limitado` en true~~ | -- | -- | **CERRADO el 2026-09-04.** `revisarVencidas()`, un `@Interval` en `inventario-limitado.service.ts`, apaga la columna solo |
 | ~~8~~ | ~~Editar el stock durante una venta relampago desincroniza las dos bases~~ | -- | -- | **CERRADO el 2026-09-04.** El `PATCH` contesta 409 cuando viene `ajuste_stock` con la venta abierta |
 | ~~9~~ | ~~Las tres rutas de la base columnar~~ | -- | -- | **CERRADO el 2026-09-18**, pero con otra forma: `POST /eventos/vista|carrito|busqueda-clic`, seis rankings `GET /admin/eventos/*` y `GET /productos/mas-vendidos`. El panel y el estante de la portada estan hechos, con `bash pruebas/tendencias.sh` (50 OK desde que solo cuentan `lote = 'real'`). David decidio el 2026-09-19 que las seis rutas cuentan solo lote real, sin parametro: no queda nada pendiente ahi |
 | 10 | Los filtros facetados del buscador, con agregaciones | Jose David la consulta, yo la pantalla | ver abajo | **alta: es un requisito literal de la Entrega 3 y hoy no hay ni un `aggs` en `backend/`** |
 | ~~11~~ | ~~La prueba de falla simulada del checkout~~ | -- | -- | **CERRADO el 2026-09-06.** `bash pruebas/falla_checkout.sh`, 31 OK y 0 FALLA, con su evidencia en `CONSISTENCIA-CHECKOUT.md`. Vuelto a correr el 2026-09-11: 31 OK |
-| 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | con el profesor | ver abajo | media: ya es la fila 11 de `CONSISTENCIA-CHECKOUT.md` y falla en unos 5 s en vez de 32. Falta elegir una de las tres salidas |
-| 13 | La lista de ofertas del vendedor viene entera, sin paginar | Jose David la ruta, yo la pantalla | ver `BACKEND-PENDIENTE.md` | **casi cerrado el 2026-09-19**: David agrego el filtro `estado` y el panel ya pagina con contadores exactos. Queda un `q` de busqueda por texto en la ruta paginada (los nombres estan en Mongo); mientras, el buscador pide la lista completa |
+| 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | Entrega 3 | ver abajo | **es de la Entrega 3 (decidido el 2026-09-19)**; queda la fila 11 de `CONSISTENCIA-CHECKOUT.md` y las tres salidas por elegir entonces |
+| 13 | La lista de ofertas del vendedor viene entera, sin paginar | Jose David la ruta, yo la pantalla | ver `BACKEND-PENDIENTE.md` | **cerrado en lo que importa el 2026-09-19**: David agrego el filtro `estado` y el panel ya pagina con contadores exactos. El `q` de busqueda por texto **no importa (decidido el mismo dia)**; mientras, el buscador pide la lista completa |
 | 14 | Elasticsearch se llena con cada login y **ninguna ruta lo consulta** | Jose David | ver abajo | **alta: investigar en Elasticsearch es lo que pidio el profesor, y hoy hay cero agregaciones en el backend** |
 | 15 | Los detectores que faltan del fraude del login, y los detalles de los tres que hay | Jose David | ver abajo | media: lo que hay funciona; lo que falta son senales y bordes |
-| 16 | La copia de logueos a ClickHouse lee `log_login`, que no recibe filas desde el 2026-09-10 | decidir con el profesor; el ETL es mio | ver abajo | media: el 2026-09-11 habia 24 logins en Mongo que ClickHouse no ve, y cualquier analisis de logins sobre ClickHouse leeria datos viejos. La fecha en UTC (6 horas corrida en ClickHouse) ya se corrigio el 2026-09-18, ver `etl/README.md` |
+| ~~16~~ | ~~La copia de logueos a ClickHouse lee `log_login`, que no recibe filas~~ | -- | -- | **CERRADO por decision (2026-09-19)**: ClickHouse ya no maneja registros de login, los lleva Elasticsearch. La copia queda congelada a proposito |
 | ~~17~~ | ~~Medir en vivo lo que se toco despues de la corrida del 2026-09-11~~ | -- | -- | **CERRADO el 2026-09-12.** Medido contra las bases y roto a proposito; los numeros estan en `docs/TRASPASO.md` |
 | ~~20~~ | ~~`comprarPedido` no anota la compra en ClickHouse~~ | -- | -- | **DESCARTADO el 2026-09-19 por Jose David**: es codigo viejo que ninguna pantalla usa (el checkout paga por el carrito). `etl/cargar_compras.sh` lo cubre si alguien lo llama a mano |
 | ~~21~~ | ~~El lote de eventos de demo no se renueva solo~~ | -- | -- | **YA NO APLICA (2026-09-19)**: los rankings cuentan solo lote real y lo sembrado no se ve en Tendencias. Para una demo hay que generar eventos REALES usando la app |
 | 22 | Tablas que quedan en cero y no tienen script: `rechazo_oferta`, `anillo_fraude`, `anillo_fraude_resena` | mia | -- | baja: medidas en 0 el 2026-09-18. Se llenan usando la aplicacion (rechazar una oferta, correr la deteccion de anillos), no hay generador |
 | 23 | Busquedas y clics de busqueda reales en cero | mia | -- | media: esas dos pestanas de Tendencias salen vacias en cualquier ventana porque solo cuentan lote real, y solo se llenan usando el buscador con sesion y abriendo un resultado. Para una demo hay que buscar en la app antes |
-| 18 | Las tres tablas de la 016 no estan en el diagrama ER | mia | -- | baja: `docs/diagrama-general.drawio` sigue con las 42 cajas |
+| 18 | Las tres tablas de la 016 no estan en el diagrama ER | mia | -- | baja: **se hace despues (decidido el 2026-09-19)**. `docs/diagrama-general.drawio` sigue con las 42 cajas |
 | ~~19~~ | ~~`trustProxy: 'loopback'` en `backend/src/main.ts`~~ | -- | -- | **CERRADO el 2026-09-19**: David lo agrego. `copia-backend.ps1` ya lo preveia |
 
 ---
