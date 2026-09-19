@@ -76,6 +76,161 @@ TTL toDateTime(fecha) + INTERVAL 12 MONTH;
 
 
 -- ============================================================
+-- carrito_producto -- se agrego el producto al carrito
+-- ============================================================
+--
+-- El carrito EN SI sigue viviendo en Redis (el HASH mutable de
+-- redis/inventario_limitado.lua y compania) -- esto es solo el evento
+-- puntual de la accion, que nunca se actualiza despues de nacer. Sin el no
+-- hay forma de medir el embudo completo: cuantas vistas de verdad pasan a
+-- carrito, y de esas cuantas terminan en compra.
+--
+-- `id_producto` E `id_oferta` van juntos, sin normalizar: el carrito real
+-- opera por oferta (vendedor + variante), pero la pregunta que mas importa
+-- es de producto ("que se vende mas"), no de oferta -- por eso el orden
+-- fisico lidera con `id_producto` y `id_oferta` viaja como columna
+-- consultable aparte.
+--
+-- Sin `sesion` ni `origen`, a diferencia de `vista_producto`: el carrito
+-- SIEMPRE exige cuenta en este proyecto (no hay carrito de invitado), asi
+-- que no hay visitante anonimo que distinguir, y no hay un "por donde
+-- llegaste" equivalente para la accion de agregar.
+--
+-- `ip` se queda aunque `id_usuario` ya identifique a quien actuo -- no por
+-- costumbre, sino por una pregunta ya anticipada: cruzar el fraude de login
+-- por IP con patrones de carrito repartidos entre varias cuentas, la misma
+-- idea de correlacion que ya usan los anillos de fraude en Neo4j.
+CREATE TABLE IF NOT EXISTS carrito_producto
+(
+    fecha        DateTime64(3),
+    id_producto  UInt64,
+    id_oferta    UInt64,
+    id_usuario   UInt64,
+    cantidad     UInt32,
+    ip           IPv6,
+    lote         LowCardinality(String) DEFAULT 'real'
+)
+ENGINE = MergeTree
+ORDER BY (id_producto, fecha)
+TTL toDateTime(fecha) + INTERVAL 12 MONTH;
+
+
+-- ============================================================
+-- compra_producto -- linea de un pedido ya pagado
+-- ============================================================
+--
+-- COPIA analitica, no la fuente de ganancias -- esa sigue siendo
+-- PostgreSQL (GET /admin/reportes/ventas), exacta y transaccional. Esta
+-- tabla es solo para medir TASA de conversion (que tan seguido una vista
+-- termina en compra), nunca para calcular un monto.
+--
+-- Se escribe fire-and-forget desde el backend (sin worker con outbox, a
+-- diferencia de resenas->Neo4j o logueos->Elasticsearch: una compra que se
+-- pierde aqui por una caida puntual no arriesga nada, porque la venta de
+-- verdad ya quedo segura en PostgreSQL sin depender de esto). Por eso
+-- ReplacingMergeTree por id_pedido: si el evento se reintenta algun dia, la
+-- fila repetida se colapsa sola en vez de contar la compra dos veces.
+CREATE TABLE IF NOT EXISTS compra_producto
+(
+    fecha        DateTime64(3),
+    id_producto  UInt64,
+    id_oferta    UInt64,
+    id_usuario   UInt64,
+    cantidad     UInt32,
+    id_pedido    UInt64,
+    ip           IPv6,
+    lote         LowCardinality(String) DEFAULT 'real'
+)
+ENGINE = ReplacingMergeTree
+ORDER BY (id_producto, fecha, id_pedido)
+TTL toDateTime(fecha) + INTERVAL 12 MONTH;
+
+
+-- ============================================================
+-- devolucion_producto -- linea de un pedido devuelto o cancelado
+-- ============================================================
+--
+-- IDENTICA a compra_producto en columnas. Se evaluo agregar un campo
+-- `motivo` (el motivo_movimiento de PostgreSQL) y se descarto: aqui solo
+-- tiene un valor relevante (devolucion, generico), sin ninguna variante mas
+-- especifica que capturar -- una columna con un solo valor posible no
+-- aporta nada.
+--
+-- Solo se escribe cuando el pedido SI estaba comprado (tenia stock que
+-- devolver): uno pendiente nunca fue una compra en el embudo, asi que
+-- cancelarlo no es una devolucion que valga la pena medir.
+CREATE TABLE IF NOT EXISTS devolucion_producto
+(
+    fecha        DateTime64(3),
+    id_producto  UInt64,
+    id_oferta    UInt64,
+    id_usuario   UInt64,
+    cantidad     UInt32,
+    id_pedido    UInt64,
+    ip           IPv6,
+    lote         LowCardinality(String) DEFAULT 'real'
+)
+ENGINE = ReplacingMergeTree
+ORDER BY (id_producto, fecha, id_pedido)
+TTL toDateTime(fecha) + INTERVAL 12 MONTH;
+
+
+-- ============================================================
+-- busqueda_realizada -- un termino buscado en el buscador
+-- ============================================================
+--
+-- Pregunta: que tan seguido se busca este termino, y cuantos resultados
+-- dio -- para detectar busquedas sin resultado y tendencias de busqueda.
+-- Publica y sin sesion obligatoria, mismo criterio que vista_producto:
+-- id_usuario nullable mas sesion para distinguir visitantes anonimos entre
+-- si.
+--
+-- Se escribe SIN que el navegador tenga que avisar nada aparte: el backend
+-- ya corrio la busqueda al procesar GET /buscador/productos (la ruta
+-- publica, nunca /admin), asi que sesion viaja como parametro OPCIONAL de
+-- esa misma peticion -- si no viene, el evento se salta en silencio, nunca
+-- bloquea ni rechaza la busqueda de nadie.
+CREATE TABLE IF NOT EXISTS busqueda_realizada
+(
+    fecha        DateTime64(3),
+    termino      String,
+    resultados   UInt32,
+    id_usuario   Nullable(UInt64),
+    sesion       String,
+    lote         LowCardinality(String) DEFAULT 'real'
+)
+ENGINE = MergeTree
+ORDER BY (termino, fecha)
+TTL toDateTime(fecha) + INTERVAL 12 MONTH;
+
+
+-- ============================================================
+-- busqueda_clic -- clic sobre un resultado de busqueda
+-- ============================================================
+--
+-- Pregunta: la gente hace clic en el primer resultado o baja hasta el
+-- quinto -- mide relevancia. Junto con busqueda_realizada arma el par
+-- impresion/clic clasico (CTR por termino y por posicion).
+--
+-- A diferencia de busqueda_realizada, esta SI necesita que el navegador
+-- avise: hacer clic es una interaccion pura de interfaz que el backend no
+-- puede saber por su cuenta solo por haber contestado la busqueda.
+CREATE TABLE IF NOT EXISTS busqueda_clic
+(
+    fecha        DateTime64(3),
+    termino      String,
+    id_producto  UInt64,
+    posicion     UInt16,
+    id_usuario   Nullable(UInt64),
+    sesion       String,
+    lote         LowCardinality(String) DEFAULT 'real'
+)
+ENGINE = MergeTree
+ORDER BY (termino, fecha)
+TTL toDateTime(fecha) + INTERVAL 12 MONTH;
+
+
+-- ============================================================
 -- evento_login -- copia de log_login
 -- ============================================================
 --

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import Cabecera from '$lib/Cabecera.svelte';
@@ -22,6 +23,17 @@
 	let entrando = $state(false);
 	let errorGeneral = $state('');
 	let errores = $state<{ identificador?: string; contrasena?: string }>({});
+	let campoIdentificador = $state<HTMLInputElement | null>(null);
+
+	// Foco al cargar, con .focus() y no el atributo `autofocus`: el atributo
+	// dispara el aviso de accesibilidad a11y_autofocus (mover el foco sin que
+	// la persona lo pida desorienta a quien usa lector de pantalla), y aqui
+	// hace falta igual para que el correo quede listo para escribir apenas
+	// carga la pagina -- lo usa demo-fraude-login.ps1, que manda las teclas
+	// sin poder hacer clic primero.
+	onMount(() => {
+		campoIdentificador?.focus();
+	});
 
 	function validar() {
 		const nuevos: typeof errores = {};
@@ -98,6 +110,7 @@
 						id="identificador"
 						type="text"
 						autocomplete="username"
+						bind:this={campoIdentificador}
 						placeholder="tu@correo.com o tu usuario"
 						bind:value={identificador}
 						aria-invalid={errores.identificador ? 'true' : undefined}

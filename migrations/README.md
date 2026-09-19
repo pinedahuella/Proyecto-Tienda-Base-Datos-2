@@ -53,7 +53,7 @@ cualquier otro error corta el arranque con exit 1.
 
 Cada archivo hace una sola cosa y se puede leer solo.
 
-## Los dieciseis archivos de esquema
+## Los diecinueve archivos de esquema
 
 Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
 "los catorce" con quince en la carpeta. Es la misma trampa que este documento
@@ -84,8 +84,11 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `014_inventario_limitado.sql` | `oferta.es_inventario_limitado`: que ofertas se venden con el mecanismo de Redis en vez del stock con `FOR UPDATE` |
 | `015_outbox_grafo.sql` | `evento_grafo` y su trigger sobre `resena`: la cola que mantiene el grafo de Neo4j al dia |
 | `016_alerta_fraude.sql` | `alerta_fraude` y sus dos catalogos: las alertas de fraude del login. Y el aviso, en el comentario de `log_login` y `log_registro`, de que ya no se escriben |
+| `017_alertas_fraude_extendidas.sql` | amplia `tipo_alerta_fraude` de 3 a 9 filas: las seis senales contra Elasticsearch (`toma_cuenta`, `viaje_imposible` y las tres `_lenta` con su version corta `ip_rotacion_cuenta`) |
+| `018_notificacion_fraude.sql` | `notificacion_fraude`: una fila por cuenta afectada por una alerta, con su propia lectura -- lo que ve el usuario en `/perfil/alertas-fraude`, aparte de la revision del admin |
+| `019_anillo_fraude.sql` | `anillo_fraude`, `anillo_fraude_resena` y su catalogo: persiste los anillos mutuo/ciclo/reiterado que antes solo detectaba y logueaba `AnillosDetectorService` |
 
-De la 011 a la 015 son de la Entrega 2, la 016 de la Entrega 3, y merecen una
+De la 011 a la 015 son de la Entrega 2, la 016 a la 019 de la Entrega 3, y merecen una
 linea mas de la que caben en la tabla.
 
 **La 011 cierra el diagrama.** Con `comentario`, `resena` y `likes` las 42 cajas

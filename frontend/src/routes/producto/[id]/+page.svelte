@@ -17,6 +17,7 @@
 		direccionEnUnaLinea
 	} from '$lib/pedido';
 	import { carrito } from '$lib/estadoCarrito.svelte';
+	import { registrarVista, registrarCarrito, type OrigenVista } from '$lib/eventos';
 
 	/**
 	 * La ficha de un producto: la foto arriba y debajo todo lo que la base
@@ -143,6 +144,20 @@
 
 		if (r.ok && r.payload) {
 			producto = r.payload;
+
+			// Evento de analitica en ClickHouse (POST /eventos/vista),
+			// fire-and-forget: NUNCA debe retrasar ni afectar esta pantalla si
+			// falla. `origen` viaja en la URL desde donde se enlazo aqui
+			// (routes/+page.svelte pone `catalogo`, BuscadorCabecera y
+			// /buscar ponen `buscador`); sin ese parametro -- un enlace
+			// pegado a mano, un bookmark, escribir la URL -- se cuenta como
+			// `enlace_directo`, que es justo lo que paso.
+			const origenValido = new Set<OrigenVista>(['catalogo', 'buscador', 'enlace_directo']);
+			const origenUrl = page.url.searchParams.get('origen');
+			const origen: OrigenVista = origenValido.has(origenUrl as OrigenVista)
+				? (origenUrl as OrigenVista)
+				: 'enlace_directo';
+			registrarVista(cual, origen);
 		} else if (r.estado === 404) {
 			error = 'Ese producto no esta en el catalogo publico';
 		} else {
@@ -547,6 +562,13 @@
 		agregando = '';
 
 		if (r.ok) {
+			// Evento de analitica en ClickHouse (POST /eventos/carrito),
+			// fire-and-forget. `cantidad` es lo que esta accion AGREGO
+			// (la variable local, antes de sumarle `yaHabia`), no el total
+			// resultante: la pregunta que el evento contesta es "cuanto se
+			// agrego en este clic", no "cuanto hay ahora".
+			registrarCarrito(id, Number(o.id_oferta), cantidad);
+
 			// No se afirma cuanto stock queda: el PUT no lo mira -- agregar al
 			// carrito nunca fue una reserva -- y decir un numero que el servidor
 			// no comprobo seria inventarlo. La disponibilidad se ve en el

@@ -417,6 +417,70 @@ Si lo corres a mano con psql, la parte de MongoDB queda pendiente. El
 procedimiento completo esta en migrations/lote/README.md.
 
 
+DEMOSTRAR UNA SOLA SENAL DE FRAUDE, RAPIDO Y SIN FALLAR
+--------------------------------------------------
+  .\demo-evento-fraude.ps1 -Tipo fuerza_bruta_cuenta -Cuenta ventas.norte@mesh.com
+  .\demo-evento-fraude.ps1 -Tipo fuerza_bruta_ip     -Cuenta ventas.norte@mesh.com
+  .\demo-evento-fraude.ps1 -Tipo multi_cuenta_ip
+
+Para cuando el tiempo de clase es corto: son peticiones HTTP directas, sin
+ventanas que escriben solas, asi que no hay foco que perder ni forma de que
+se interrumpa a medio camino. Cada corrida dispara SOLO el tipo que elijas
+(los numeros de intentos estan calculados para no cruzar el umbral de los
+otros dos por accidente), lo confirma leyendo la alerta directo de
+PostgreSQL, y abre el panel de fraude al final.
+
+  -Cuenta correo             la cuenta objetivo (fuerza_bruta_cuenta / _ip)
+  -Cuentas correo1,correo2,...   4+ cuentas reales distintas (multi_cuenta_ip)
+
+OJO si corres varios tipos en menos de 5 minutos: multi_cuenta_ip cuenta
+identificadores distintos probados desde la IP en Redis, y ese contador se
+ACUMULA entre corridas sin importar cual demo los mando. No es un bug, es la
+senal funcionando bien -- si quieres que cada corrida se vea aislada,
+espera 5 minutos entre una y otra.
+
+No cubre viaje_imposible, ip_rotacion_cuenta ni toma_cuenta -- las tres
+necesitan una IP distinta a la anterior, y desde esta maquina el origen
+nunca cambia. Para esas esta .\demo-fraude-pais.ps1.
+
+
+DEMOSTRAR EL FRAUDE DE LOGIN, CON VENTANAS DE VERDAD (mas teatral, mas fragil)
+--------------------------------------------------
+  .\demo-fraude-login.ps1 -Cuenta ventas.norte@mesh.com
+
+Abre Chrome (o Edge) y escribe solo, con teclas de verdad, varios intentos de
+entrada fallidos contra -Cuenta. Dispara dos alertas reales:
+
+  fuerza_bruta_cuenta   5+ fallos contra la misma cuenta en 60s
+  fuerza_bruta_ip       8+ fallos desde la misma IP en 60s
+
+SOLO ataca la cuenta que le mandes, nunca una lista escondida. Para probar
+tambien multi_cuenta_ip (4+ cuentas distintas desde la misma IP) hay que
+pedirlo aparte, con las cuentas exactas que quieras usar:
+
+  .\demo-fraude-login.ps1 -Cuenta ventas.norte@mesh.com `
+    -OtrasCuentas compradora.norte@mesh.com,comprador.sur@mesh.com,admin@mesh.com
+
+Sin -OtrasCuentas esa parte se salta sola, avisando por que.
+
+Al final abre el panel de fraude para verlas
+(admin@mesh.com / Admin123, pestana "Fraude"), y en la cuenta que se ataco
+tambien salen en la campanita de la cabecera.
+
+NO toques el mouse ni el teclado mientras corre: manda las pulsaciones a la
+ventana que este al frente, sea cual sea. Si algo le roba el foco (un aviso
+de Chrome, una notificacion de Windows) intenta recuperarlo solo; si tampoco
+puede, se detiene en vez de escribir a ciegas en otra cosa.
+
+  -OtrasCuentas correo1,correo2,...   cuentas extra para multi_cuenta_ip
+                                      (vacio por defecto)
+  -IntentosFuerzaBruta N              cuantos fallos mandar (por defecto 8)
+
+NO CUBRE viaje_imposible ni ip_rotacion_cuenta: las dos piden que el intento
+venga de una IP DISTINTA a la anterior, y desde una sola maquina la IP nunca
+cambia. Para esas dos esta .\demo-fraude-pais.ps1, que usa Tor de verdad.
+
+
 LOS DOS GENERADORES, Y EN QUE SE DIFERENCIAN
 ==================================================
 

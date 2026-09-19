@@ -4,6 +4,7 @@
 	import MarcaMesh from './MarcaMesh.svelte';
 	import BotonTema from './BotonTema.svelte';
 	import BuscadorCabecera from './BuscadorCabecera.svelte';
+	import NotificacionesFraude from './NotificacionesFraude.svelte';
 	import { pedir } from './api';
 	import { cerrarSesion, ID_ROL_ADMIN, leerSesion, verificarSesion } from './sesion';
 	import { carrito } from './estadoCarrito.svelte';
@@ -227,6 +228,11 @@
 						<span class="burbuja">{carrito.cuenta}</span>
 					{/if}
 				</button>
+
+				<!-- La campanita: mismo criterio que el carrito, de un toque y sin
+				     esconderse tras la hamburguesa -- es justo lo que la hace "avisar"
+				     y no solo estar disponible si alguien la va a buscar. -->
+				<NotificacionesFraude />
 
 				<!-- En pantalla grande, la fila de siempre.
 
