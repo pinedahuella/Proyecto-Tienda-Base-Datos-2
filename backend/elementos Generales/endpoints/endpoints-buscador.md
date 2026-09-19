@@ -58,10 +58,12 @@ estado esta `GET /buscador/productos/admin`, mas abajo.
 |---|---|---|
 | `nombre` | sí | El texto a buscar. Con difusa (`fuzziness: AUTO`, tolera errores de tecleo) y sin distinguir tildes (analizador `espanol_llano`), sobre `nombre` (con más peso), `descripcion` y `variantes` |
 | `limite` | no | Cuántos resultados como máximo. Por defecto 20, tope 50 |
+| `sesion` | no | Solo para el evento de analítica `busqueda_realizada` en ClickHouse (`elementos Generales/plan pendiente/eventos-clickhouse.md`). La genera el navegador, igual que en `POST /eventos/vista`. Si no viene, la búsqueda funciona igual -- simplemente no se registra el evento |
 
 ```
 GET /buscador/productos?nombre=labtop
 GET /buscador/productos?nombre=ambár&limite=5
+GET /buscador/productos?nombre=laptop&sesion=sesion-generada-en-el-navegador
 ```
 
 **200**
