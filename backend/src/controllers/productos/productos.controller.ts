@@ -58,7 +58,10 @@ export class ProductosController {
     @Query('fecha') fecha: string | undefined,
   ) {
     try {
-      const producto = await this.productosService.reconstruirEnFecha(id, fecha);
+      const producto = await this.productosService.reconstruirEnFecha(
+        id,
+        fecha,
+      );
       return exito(producto, 'Producto reconstruido correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo reconstruir el producto');
@@ -79,7 +82,10 @@ export class ProductosController {
     @Query('fecha') fecha: string | undefined,
   ) {
     try {
-      const oferta = await this.productosService.reconstruirOfertaEnFecha(id, fecha);
+      const oferta = await this.productosService.reconstruirOfertaEnFecha(
+        id,
+        fecha,
+      );
       return exito(oferta, 'Oferta reconstruida correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo reconstruir la oferta');

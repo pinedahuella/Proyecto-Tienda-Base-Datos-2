@@ -63,6 +63,9 @@ import { EventosController } from './controllers/eventos.controller';
 import { EventosService } from './services/eventos/eventos.service';
 import { AdminEventosController } from './controllers/admin/admin-eventos.controller';
 import { AdminEventosService } from './services/admin/admin-eventos.service';
+import { MasVendidosSyncService } from './services/productos/mas-vendidos-sync.service';
+import { MasVendidosController } from './controllers/productos/mas-vendidos.controller';
+import { MasVendidosService } from './services/productos/mas-vendidos.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -104,6 +107,7 @@ import { AdminEventosService } from './services/admin/admin-eventos.service';
     AdminFraudeAnillosController,
     EventosController,
     AdminEventosController,
+    MasVendidosController,
   ],
   providers: [
     InicioService,
@@ -141,6 +145,8 @@ import { AdminEventosService } from './services/admin/admin-eventos.service';
     FraudeAnillosPersistidosService,
     EventosService,
     AdminEventosService,
+    MasVendidosSyncService,
+    MasVendidosService,
   ],
 })
 export class AppModule {}

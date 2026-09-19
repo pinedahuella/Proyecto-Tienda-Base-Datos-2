@@ -177,6 +177,12 @@ caida, solo como "no hay nada que buscar". Timeout de 6 s -> 503.
 > `GET /admin/eventos/*` (seis rutas, solo admin) expone las filas crudas
 > de cada tabla en una ventana de días hacia atrás, sin agrupar ni calcular
 > tendencias. Todo documentado en `endpoints-eventos.md`.
+>
+> **`GET /productos/mas-vendidos`** (pública, sin sesión) -- el ranking de
+> productos más vendidos, calculado agregando `compra_producto` de
+> ClickHouse cada 10 minutos (`MasVendidosSyncService`) y publicado en un
+> ZSET de Redis; la ruta lee ese ZSET y trae el detalle real a MongoDB.
+> Documentado en `endpoints-productos.md`.
 
 ---
 

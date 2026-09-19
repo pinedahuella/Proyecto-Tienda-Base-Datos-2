@@ -479,6 +479,81 @@ un producto que no se va a mostrar.
 
 ---
 
+## GET /productos/mas-vendidos
+
+**Pública, sin sesión** — controlador separado (`MasVendidosController`,
+mismo criterio que `OfertasVendedorController`/`VentasLimitadasController`,
+que ya comparten el prefijo `vendedor/ofertas`), no un método más de
+`ProductosController`: esta ruta no consulta Mongo con los filtros de
+siempre, primero lee el ranking ya calculado en Redis.
+
+Un GET sencillo, sin query params ni cuerpo:
+
+```
+GET /productos/mas-vendidos
+```
+
+**De dónde sale el ranking:** `MasVendidosSyncService`
+(`src/services/productos/mas-vendidos-sync.service.ts`) recalcula cada 10
+minutos, agregando `compra_producto` de ClickHouse de las últimas 24h (o
+de los últimos 7 días si no hubo ninguna compra en 24h; si tampoco hay
+nada en 7 días, deja el ranking anterior sin tocar), y publica hasta 20
+ids en el ZSET `mesh:productos:mas_vendidos`. Ver
+`elementos Generales/plan pendiente/eventos-clickhouse.md`.
+
+Esta ruta (`MasVendidosService.obtener()`) lee los primeros 8 de ese ZSET
+(`ZREVRANGE`, ya en orden de más a menos vendido) y trae el detalle real
+de esos productos a MongoDB con `$in` — Redis nunca guarda nombre, precio
+ni imagen, solo el id y el orden. Mongo con `$in` no respeta el orden de
+la lista de ids: el resultado se reordena en el backend para que coincida
+con el ranking real. Solo trae productos `activo` (mismo criterio de
+visibilidad que el resto del catálogo público) — un id del ranking sin
+producto visible (se desactivó, se borró) se salta en silencio, sin
+romper la respuesta.
+
+### 200
+
+Mismo documento completo que `GET /productos/:id` (Mongo tal cual, sin
+recortar), en un array ordenado de más a menos vendido:
+
+```json
+{
+  "ok": true,
+  "mensaje": "Productos mas vendidos obtenidos",
+  "payload": [
+    { "_id": 1, "nombre": "Laptop Ambar Campus 14", "...": "..." }
+  ]
+}
+```
+
+Si el ranking todavía no existe (el worker nunca corrió con éxito, por
+ejemplo justo después de levantar el stack sin ninguna compra en los
+últimos 7 días) o no queda ningún producto visible entre los ids del
+ranking, `payload` sale como array vacío — nunca un error.
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
+```
+
+## Pruebas — hechas el 2026-09-18
+
+Contra el servidor, Redis y MongoDB reales, sin sesión.
+
+| Caso | Resultado |
+|---|---|
+| Ranking real con una compra (producto 1) | `200`, `payload` con el documento completo de ese producto |
+| `RENAME` del ZSET a un lado (simula que el worker nunca corrió) | `200`, `payload: []` — no rompe |
+| Ranking restaurado | `200`, vuelve a traer el producto real |
+| `GET /productos/:id` y `GET /productos` (del otro controlador) | siguen respondiendo `200` normal — sin colisión de rutas con `mas-vendidos` |
+| Un id inexistente (`99999`) insertado a mano al frente del ZSET | `200`, ese id se salta en silencio, solo sale el producto real — confirma el filtro de visibilidad/reordenado sin romper nada |
+
+`npx tsc --noEmit` y `eslint` limpios sobre los archivos nuevos.
+
+---
+
 ## GET /productos/:id/historial
 
 **Pública, sin restricción de rol ni de dueño** — a diferencia de la

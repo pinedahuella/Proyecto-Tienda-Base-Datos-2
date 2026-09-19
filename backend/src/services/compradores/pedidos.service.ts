@@ -1,14 +1,24 @@
 import { Injectable, Logger } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
-import { ErrorConflicto, ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
+import {
+  ErrorConflicto,
+  ErrorNoEncontrado,
+  ErrorValidacion,
+} from '../../helpers/errores';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
 import { validarCantidadMovimiento } from '../../helpers/validaciones-inventario';
 import { validarIdOferta } from '../../helpers/validaciones-pedido';
 import { validarYCobrarTarjeta } from '../../helpers/validaciones-tarjeta';
-import { AgregarLineaPeticion, LineaPedidoResultado } from '../../dto/agregar-linea-pedido';
-import { RestarLineaPeticion, LineaRestada } from '../../dto/restar-linea-pedido';
+import {
+  AgregarLineaPeticion,
+  LineaPedidoResultado,
+} from '../../dto/agregar-linea-pedido';
+import {
+  RestarLineaPeticion,
+  LineaRestada,
+} from '../../dto/restar-linea-pedido';
 import { CrearPedidoPeticion } from '../../dto/crear-pedido';
 import {
   CambiarDireccionPedidoPeticion,
@@ -246,7 +256,9 @@ export class PedidosCompradorService {
     // 404 generico, tanto si no existe como si existe pero esta apagada --
     // no se puede agregar al carrito en ninguno de los dos casos.
     if (variante == null || variante.estado !== 'activa') {
-      throw new ErrorNoEncontrado('No existe una variante con ese id en este producto');
+      throw new ErrorNoEncontrado(
+        'No existe una variante con ese id en este producto',
+      );
     }
 
     const linea = {
@@ -259,10 +271,12 @@ export class PedidosCompradorService {
     };
 
     try {
-      const resultado = await pool.query<{ agregar_linea: LineaPedidoResultado }>(
-        'SELECT agregar_linea($1, $2::jsonb)',
-        [idPedido, JSON.stringify(linea)],
-      );
+      const resultado = await pool.query<{
+        agregar_linea: LineaPedidoResultado;
+      }>('SELECT agregar_linea($1, $2::jsonb)', [
+        idPedido,
+        JSON.stringify(linea),
+      ]);
       return resultado.rows[0].agregar_linea;
     } catch (error) {
       if (this.esErrorDeNegocio(error)) {
@@ -323,7 +337,10 @@ export class PedidosCompradorService {
     idDetalleParametro: string,
     idUsuario: string,
   ): Promise<void> {
-    if (!REGEX_ID.test(idPedidoParametro) || !REGEX_ID.test(idDetalleParametro)) {
+    if (
+      !REGEX_ID.test(idPedidoParametro) ||
+      !REGEX_ID.test(idDetalleParametro)
+    ) {
       throw new ErrorValidacion('El id no es valido');
     }
     const idPedido = Number(idPedidoParametro);
@@ -603,7 +620,10 @@ export class PedidosCompradorService {
       throw new ErrorValidacion('El metodo_pago es obligatorio');
     }
 
-    const { estadoPedido } = await this.verificarPedidoPropio(idPedido, idUsuario);
+    const { estadoPedido } = await this.verificarPedidoPropio(
+      idPedido,
+      idUsuario,
+    );
 
     if (estadoPedido !== 'pendiente') {
       throw new ErrorConflicto(`El pedido ${idPedido} ya esta ${estadoPedido}`);
@@ -630,10 +650,9 @@ export class PedidosCompradorService {
         return { comprado: false, avisos };
       }
 
-      const resultado = await cliente.query<{ comprar_pedido: CompraResultadoPostgres }>(
-        'SELECT comprar_pedido($1, $2)',
-        [idPedido, datos.metodo_pago],
-      );
+      const resultado = await cliente.query<{
+        comprar_pedido: CompraResultadoPostgres;
+      }>('SELECT comprar_pedido($1, $2)', [idPedido, datos.metodo_pago]);
       await cliente.query('COMMIT');
 
       const compra = resultado.rows[0].comprar_pedido;
@@ -681,10 +700,9 @@ export class PedidosCompradorService {
     await this.verificarPedidoPropio(idPedido, idUsuario);
 
     try {
-      const resultado = await pool.query<{ cancelar_pedido: CancelacionResultado }>(
-        'SELECT cancelar_pedido($1)',
-        [idPedido],
-      );
+      const resultado = await pool.query<{
+        cancelar_pedido: CancelacionResultado;
+      }>('SELECT cancelar_pedido($1)', [idPedido]);
       const cancelacion = resultado.rows[0].cancelar_pedido;
 
       if (cancelacion.stock.length > 0) {

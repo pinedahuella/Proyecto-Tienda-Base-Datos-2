@@ -65,5 +65,4 @@ export interface CompraCarritoPendienteDeConfirmar {
 }
 
 export type ComprarCarritoRespuesta =
-  | CompraCarritoExitosa
-  | CompraCarritoPendienteDeConfirmar;
+  CompraCarritoExitosa | CompraCarritoPendienteDeConfirmar;

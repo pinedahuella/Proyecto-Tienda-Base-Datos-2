@@ -184,7 +184,9 @@ export function validarRangoFechasEvento(
   const hasta = validarFechaEvento(fechaHasta, 'fecha_hasta');
 
   if (desde != null && hasta != null && desde > hasta) {
-    throw new ErrorValidacion('fecha_desde no puede ser posterior a fecha_hasta');
+    throw new ErrorValidacion(
+      'fecha_desde no puede ser posterior a fecha_hasta',
+    );
   }
 
   return { desde, hasta };
@@ -199,7 +201,9 @@ function validarFechaEvento(
   }
   const fecha = new Date(valor);
   if (Number.isNaN(fecha.getTime())) {
-    throw new ErrorValidacion(`${nombreCampo} debe ser una fecha valida (ISO 8601)`);
+    throw new ErrorValidacion(
+      `${nombreCampo} debe ser una fecha valida (ISO 8601)`,
+    );
   }
   return fecha;
 }
@@ -212,7 +216,9 @@ function validarFechaEvento(
  * `FraudeLoginExploracionService.listarEventosPaginado`): con esta bandera
  * se puede medir el costo real del enriquecimiento contra la version base.
  */
-export function validarIncluirUsuarioEvento(valor: string | undefined): boolean {
+export function validarIncluirUsuarioEvento(
+  valor: string | undefined,
+): boolean {
   if (valor == null || valor === '') {
     return false;
   }

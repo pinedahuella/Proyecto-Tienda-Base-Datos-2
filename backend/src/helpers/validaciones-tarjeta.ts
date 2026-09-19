@@ -107,7 +107,9 @@ export function validarYCobrarTarjeta(tarjeta: unknown): void {
   }
 
   if (typeof vencimiento !== 'string') {
-    throw new ErrorValidacion('El vencimiento es obligatorio, en formato MM/AA');
+    throw new ErrorValidacion(
+      'El vencimiento es obligatorio, en formato MM/AA',
+    );
   }
   const coincidencia = REGEX_VENCIMIENTO.exec(vencimiento);
   if (!coincidencia) {

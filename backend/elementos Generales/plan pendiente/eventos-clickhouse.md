@@ -14,6 +14,23 @@
 > panel aparte, no construido. Ver `endpoints-eventos.md`, seccion
 > "GET /admin/eventos/*", para el contrato completo y las pruebas.
 >
+> **Segundo extra, sesion aparte del 2026-09-18: el ranking de "productos
+> mas vendidos".** Primer consumidor de AGREGADOS sobre `compra_producto`
+> (todo lo de arriba son filas crudas). Dos piezas nuevas:
+>
+> 1. `MasVendidosSyncService` (`src/services/productos/mas-vendidos-sync.service.ts`)
+>    -- worker cada 10 min, agrega `compra_producto` de las ultimas 24h (o
+>    7 dias si 24h viene vacio; si tambien viene vacio, NO toca Redis) y
+>    publica hasta 20 ids en el ZSET `mesh:productos:mas_vendidos`
+>    (reemplazo atomico via `RENAME`).
+> 2. `GET /productos/mas-vendidos` (publica) -- lee los primeros 8 del ZSET
+>    y trae el detalle real a MongoDB, reordenado para que coincida con el
+>    ranking (Mongo `$in` no respeta el orden). Contrato completo y pruebas
+>    en `endpoints-productos.md`.
+>
+> Redis solo guarda id + orden, nunca nombre/precio/imagen -- eso sigue
+> viviendo unicamente en Mongo, igual que el resto del catalogo.
+>
 > **`carrito_producto` cambio de diseño respecto al primer borrador de este
 > documento** (mas abajo, sin actualizar todavia en el cuerpo): ahora lleva
 > tambien `id_oferta` (no solo `id_producto`) e `ip`, sin `sesion` ni

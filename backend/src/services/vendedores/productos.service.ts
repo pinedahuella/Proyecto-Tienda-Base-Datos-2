@@ -113,7 +113,10 @@ export class ProductosVendedorService {
     private readonly productosService: ProductosService,
   ) {}
 
-  async crear(idUsuario: string, datos: CrearProductoPeticion): Promise<Producto> {
+  async crear(
+    idUsuario: string,
+    datos: CrearProductoPeticion,
+  ): Promise<Producto> {
     // Primero que cualquier otra cosa, ni siquiera validar el cuerpo: si
     // no sos la tienda ni admin, el 404 disfrazado tiene que ganarle a
     // cualquier 400 de validacion -- si no, alguien sin permiso podria
@@ -147,9 +150,10 @@ export class ProductosVendedorService {
         datos.caracteristicas_adicionales,
         categoria.caracteristicas,
       );
-      const caracteristicasPersonalizadas = validarCaracteristicasPersonalizadas(
-        datos.caracteristicas_personalizadas,
-      );
+      const caracteristicasPersonalizadas =
+        validarCaracteristicasPersonalizadas(
+          datos.caracteristicas_personalizadas,
+        );
 
       const idProducto = await this.siguienteIdProducto(coleccionProductos);
       const fechaCreacion = new Date();
@@ -170,7 +174,7 @@ export class ProductosVendedorService {
         categoria: {
           id_categoria: categoria._id,
           nombre: categoria.nombre,
-          categoria_padre: categoria.categoria_padre as string,
+          categoria_padre: categoria.categoria_padre,
         },
         // Los calculados nacen en 0/null: todavia no existe ninguna oferta
         // sobre este producto (eso es de otro servicio, sobre `oferta` en
@@ -261,9 +265,10 @@ export class ProductosVendedorService {
         datos.caracteristicas_adicionales,
         categoria.caracteristicas,
       );
-      const caracteristicasPersonalizadas = validarCaracteristicasPersonalizadas(
-        datos.caracteristicas_personalizadas,
-      );
+      const caracteristicasPersonalizadas =
+        validarCaracteristicasPersonalizadas(
+          datos.caracteristicas_personalizadas,
+        );
 
       const idProducto = await this.siguienteIdProducto(coleccionProductos);
       const fechaCreacion = new Date();
@@ -284,7 +289,7 @@ export class ProductosVendedorService {
         categoria: {
           id_categoria: categoria._id,
           nombre: categoria.nombre,
-          categoria_padre: categoria.categoria_padre as string,
+          categoria_padre: categoria.categoria_padre,
         },
         precio_tienda: null,
         precio_desde: null,
@@ -368,7 +373,9 @@ export class ProductosVendedorService {
    * Cada propuesta trae el documento del producto (desde Mongo) y su
    * historial de rechazos. Sin `vendedor` embebido: ya se que soy yo.
    */
-  async listarPropuestasPropias(idUsuario: string): Promise<PropuestaProducto[]> {
+  async listarPropuestasPropias(
+    idUsuario: string,
+  ): Promise<PropuestaProducto[]> {
     let filas: FilaPropuesta[];
     try {
       const resultado = await pool.query<FilaPropuesta>(
@@ -483,7 +490,8 @@ export class ProductosVendedorService {
         [idsPropuesta],
       );
       for (const fila of resultado.rows) {
-        const lista = rechazosPorPropuesta.get(fila.id_propuesta_producto) ?? [];
+        const lista =
+          rechazosPorPropuesta.get(fila.id_propuesta_producto) ?? [];
         lista.push({
           id_rechazo_producto: fila.id_rechazo_producto,
           razon_rechazo: fila.razon_rechazo,
@@ -672,7 +680,9 @@ export class ProductosVendedorService {
         [idProducto, idUsuario],
       );
       if (bloqueo.rows[0] == null) {
-        throw new ErrorNoEncontrado('No existe una propuesta tuya para ese producto');
+        throw new ErrorNoEncontrado(
+          'No existe una propuesta tuya para ese producto',
+        );
       }
 
       const doc = await coleccionProductos.findOne(
@@ -890,11 +900,7 @@ export class ProductosVendedorService {
   private async siguienteIdProducto(
     coleccion: Collection<Producto>,
   ): Promise<number> {
-    const ultimo = await coleccion
-      .find()
-      .sort({ _id: -1 })
-      .limit(1)
-      .toArray();
+    const ultimo = await coleccion.find().sort({ _id: -1 }).limit(1).toArray();
     return (ultimo[0]?._id ?? 0) + 1;
   }
 
@@ -908,7 +914,12 @@ export class ProductosVendedorService {
     const resultado = await coleccion
       .aggregate<{ maximo: number | null }>([
         { $unwind: '$variantes' },
-        { $group: { _id: null, maximo: { $max: '$variantes.id_producto_variante' } } },
+        {
+          $group: {
+            _id: null,
+            maximo: { $max: '$variantes.id_producto_variante' },
+          },
+        },
       ])
       .toArray();
 
@@ -948,9 +959,10 @@ export class ProductosVendedorService {
         peticionVariante.caracteristicas_adicionales,
         categoria.caracteristicas_variante,
       );
-      const caracteristicasPersonalizadas = validarCaracteristicasPersonalizadas(
-        peticionVariante.caracteristicas_personalizadas,
-      );
+      const caracteristicasPersonalizadas =
+        validarCaracteristicasPersonalizadas(
+          peticionVariante.caracteristicas_personalizadas,
+        );
 
       let idProductoVariante: number;
       // undefined para una variante nueva de verdad: ahi si nace con los
@@ -962,10 +974,14 @@ export class ProductosVendedorService {
       // seguir siendo lo que ya era, no lo que esta funcion adivine.
       let existente: ProductoVariante | undefined;
 
-      if (variantesExistentes != null && peticionVariante.id_producto_variante != null) {
+      if (
+        variantesExistentes != null &&
+        peticionVariante.id_producto_variante != null
+      ) {
         existente = variantesExistentes.find(
           (candidata) =>
-            candidata.id_producto_variante === peticionVariante.id_producto_variante,
+            candidata.id_producto_variante ===
+            peticionVariante.id_producto_variante,
         );
         if (existente == null) {
           throw new ErrorValidacion(
@@ -1035,6 +1051,9 @@ export class ProductosVendedorService {
 
   /** El primer evento del producto: numero 1, operacion "creacion", la copia completa del producto. */
   private async crearEventoCreacion(producto: Producto): Promise<void> {
+    // Se desestructura _id a proposito para excluirlo de "datos" (el
+    // evento ya lo guarda aparte, en id_producto).
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { _id, ...datos } = producto;
 
     const evento: ProductoEventoCreacion = {
@@ -1139,7 +1158,9 @@ export class ProductosVendedorService {
       !vieneCaracteristicasPersonalizadas &&
       !vieneVariantes
     ) {
-      throw new ErrorValidacion('Debes enviar al menos un campo para actualizar');
+      throw new ErrorValidacion(
+        'Debes enviar al menos un campo para actualizar',
+      );
     }
 
     const coleccion = mongoDb.collection<Producto>('productos');
@@ -1171,7 +1192,7 @@ export class ProductosVendedorService {
 
       let categoriaCompleta: CategoriaDocumento | null = null;
       if (categoriaCambia) {
-        categoriaCompleta = await this.obtenerCategoriaValida(idCategoriaNueva!);
+        categoriaCompleta = await this.obtenerCategoriaValida(idCategoriaNueva);
       } else if (vieneCaracteristicasAdicionales || vieneVariantes) {
         categoriaCompleta = await this.obtenerCategoriaPorId(
           productoActual.categoria.id_categoria,
@@ -1244,7 +1265,7 @@ export class ProductosVendedorService {
         const categoriaEmbebida: ProductoCategoria = {
           id_categoria: categoriaCompleta._id,
           nombre: categoriaCompleta.nombre,
-          categoria_padre: categoriaCompleta.categoria_padre as string,
+          categoria_padre: categoriaCompleta.categoria_padre,
         };
         conjuntoSet.categoria = categoriaEmbebida;
         cambiosEvento.categoria = categoriaEmbebida;
@@ -1259,11 +1280,13 @@ export class ProductosVendedorService {
       }
       if (caracteristicasPersonalizadas != null) {
         if (caracteristicasPersonalizadas.length > 0) {
-          conjuntoSet.caracteristicas_personalizadas = caracteristicasPersonalizadas;
+          conjuntoSet.caracteristicas_personalizadas =
+            caracteristicasPersonalizadas;
         } else {
           conjuntoUnset.caracteristicas_personalizadas = '';
         }
-        cambiosEvento.caracteristicas_personalizadas = caracteristicasPersonalizadas;
+        cambiosEvento.caracteristicas_personalizadas =
+          caracteristicasPersonalizadas;
       }
       if (variantes != null) {
         conjuntoSet.variantes = variantes;
@@ -1303,7 +1326,9 @@ export class ProductosVendedorService {
       .findOne({ _id: idCategoria });
 
     if (categoria == null) {
-      throw new ErrorValidacion('La categoria actual del producto ya no existe');
+      throw new ErrorValidacion(
+        'La categoria actual del producto ya no existe',
+      );
     }
 
     return categoria;

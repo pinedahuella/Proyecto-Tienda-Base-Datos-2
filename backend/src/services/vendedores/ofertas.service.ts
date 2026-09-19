@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { mongoDb } from '../../database/mongo';
-import { ErrorConflicto, ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
+import {
+  ErrorConflicto,
+  ErrorNoEncontrado,
+  ErrorValidacion,
+} from '../../helpers/errores';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import {
@@ -242,8 +246,7 @@ export class OfertasVendedorService {
     datos: CrearOfertaPeticion,
   ): Promise<OfertaPropia> {
     const idTienda = await this.obtenerIdTienda();
-    const idUsuario =
-      idRolUsuario === ID_ROL_ADMIN ? idTienda : idUsuarioToken;
+    const idUsuario = idRolUsuario === ID_ROL_ADMIN ? idTienda : idUsuarioToken;
     // La tienda (y los admin, que actuan como ella) publican ya aprobado y
     // activo; cualquier otro vendedor nace `pendiente`.
     const esCuentaTienda = idUsuario === idTienda;
@@ -255,7 +258,9 @@ export class OfertasVendedorService {
     );
     const precio = validarPrecioObligatorio(datos.precio);
     const stockInicial =
-      datos.stock_inicial != null ? validarStockInicial(datos.stock_inicial) : 0;
+      datos.stock_inicial != null
+        ? validarStockInicial(datos.stock_inicial)
+        : 0;
 
     let producto: ProductoLigero;
     try {
@@ -410,14 +415,23 @@ export class OfertasVendedorService {
     idOfertaParametro: string,
     datos: EditarOfertaPeticion,
   ): Promise<OfertaPropia> {
-    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
+    const idUsuario = await this.resolverIdEfectivo(
+      idUsuarioToken,
+      idRolUsuario,
+    );
     if (!REGEX_ID.test(idOfertaParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }
     const idOferta = Number(idOfertaParametro);
 
-    if (datos.precio == null && datos.estado == null && datos.ajuste_stock == null) {
-      throw new ErrorValidacion('Debes enviar al menos un campo para actualizar');
+    if (
+      datos.precio == null &&
+      datos.estado == null &&
+      datos.ajuste_stock == null
+    ) {
+      throw new ErrorValidacion(
+        'Debes enviar al menos un campo para actualizar',
+      );
     }
 
     const precio =
@@ -425,7 +439,9 @@ export class OfertasVendedorService {
     const estado =
       datos.estado != null ? validarEstadoOferta(datos.estado) : null;
     const ajusteStock =
-      datos.ajuste_stock != null ? validarAjusteStock(datos.ajuste_stock) : null;
+      datos.ajuste_stock != null
+        ? validarAjusteStock(datos.ajuste_stock)
+        : null;
 
     // Comprueba dueno y de paso trae los ids de Mongo y si ya fue aprobada
     // -- se pide antes de tocar nada, para no dejar un cambio a medias si
@@ -724,7 +740,10 @@ export class OfertasVendedorService {
     idUsuarioToken: string,
     idRolUsuario: number,
   ): Promise<OfertaPropia[]> {
-    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
+    const idUsuario = await this.resolverIdEfectivo(
+      idUsuarioToken,
+      idRolUsuario,
+    );
     const ofertas = await this.consultarOfertasPropias(idUsuario);
     return this.armarOfertasPropias(ofertas);
   }
@@ -756,7 +775,10 @@ export class OfertasVendedorService {
     idRolUsuario: number,
     query: PaginarOfertasQuery,
   ): Promise<OfertasPropiasPaginadas> {
-    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
+    const idUsuario = await this.resolverIdEfectivo(
+      idUsuarioToken,
+      idRolUsuario,
+    );
     const limite = validarLimite(query.limite);
     const pagina = validarPagina(query.pagina);
     const activo = validarFiltroActivo(query.activo);
@@ -857,7 +879,10 @@ export class OfertasVendedorService {
     idUsuarioToken: string,
     idRolUsuario: number,
   ): Promise<ProductoConMisOfertas> {
-    const idUsuario = await this.resolverIdEfectivo(idUsuarioToken, idRolUsuario);
+    const idUsuario = await this.resolverIdEfectivo(
+      idUsuarioToken,
+      idRolUsuario,
+    );
     if (!REGEX_ID.test(idProductoParametro)) {
       throw new ErrorValidacion('El id no es valido');
     }
@@ -1079,7 +1104,8 @@ export class OfertasVendedorService {
     return filas.map((fila) => {
       const producto = productoPorId.get(Number(fila.id_producto_mongo));
       const variante = producto?.variantes.find(
-        (v) => v.id_producto_variante === Number(fila.id_producto_variante_mongo),
+        (v) =>
+          v.id_producto_variante === Number(fila.id_producto_variante_mongo),
       );
 
       return {
@@ -1087,7 +1113,8 @@ export class OfertasVendedorService {
         id_producto: Number(fila.id_producto_mongo),
         id_producto_variante: Number(fila.id_producto_variante_mongo),
         nombre_producto: producto?.nombre ?? '(producto no encontrado)',
-        nombre_variante: variante?.nombre_variante ?? '(variante no encontrada)',
+        nombre_variante:
+          variante?.nombre_variante ?? '(variante no encontrada)',
         imagen: variante?.imagenes[0] ?? null,
         precio: fila.precio,
         stock: fila.stock,

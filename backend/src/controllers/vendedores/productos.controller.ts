@@ -113,9 +113,7 @@ export class ProductosVendedorController {
   // GET /vendedor/productos/propuestas/todas
   // Todas las propuestas, en cualquier estado. Solo tienda o admin.
   @Get('propuestas/todas')
-  async listarTodasLasPropuestas(
-    @UsuarioActual() usuarioActual: TokenUsuario,
-  ) {
+  async listarTodasLasPropuestas(@UsuarioActual() usuarioActual: TokenUsuario) {
     try {
       const propuestas =
         await this.productosVendedorService.listarTodasLasPropuestas(
@@ -143,7 +141,10 @@ export class ProductosVendedorController {
         );
       return exito(rechazos, 'Rechazos de la propuesta obtenidos');
     } catch (error) {
-      manejarErrorHttp(error, 'No se pudieron obtener los rechazos de la propuesta');
+      manejarErrorHttp(
+        error,
+        'No se pudieron obtener los rechazos de la propuesta',
+      );
     }
   }
 
@@ -157,11 +158,12 @@ export class ProductosVendedorController {
     @UsuarioActual() usuarioActual: TokenUsuario,
   ) {
     try {
-      const producto = await this.productosVendedorService.obtenerHistorialPropio(
-        id,
-        usuarioActual.id_usuario,
-        fecha,
-      );
+      const producto =
+        await this.productosVendedorService.obtenerHistorialPropio(
+          id,
+          usuarioActual.id_usuario,
+          fecha,
+        );
       return exito(producto, 'Producto reconstruido correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo reconstruir el producto');

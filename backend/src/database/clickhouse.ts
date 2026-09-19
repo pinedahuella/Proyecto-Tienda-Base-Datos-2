@@ -35,4 +35,6 @@ export const clickhouse = createClient({
   request_timeout: 8000,
 });
 
-logger.log(`Cliente de ClickHouse listo para http://${host}:${port}/${database}`);
+logger.log(
+  `Cliente de ClickHouse listo para http://${host}:${port}/${database}`,
+);

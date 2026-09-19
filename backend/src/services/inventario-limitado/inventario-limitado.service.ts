@@ -78,7 +78,8 @@ interface FilaOfertaLimitada {
 
 /** La primera palabra que devuelven `reservar` / `redimensionar` de Redis. */
 export type ResultadoReservar = 'VENDIDO' | 'AGOTADO' | 'SIN_OFERTA';
-export type ResultadoRedimensionar = 'REDIMENSIONADO' | 'AGOTADO' | 'TICKET_AJENO';
+export type ResultadoRedimensionar =
+  'REDIMENSIONADO' | 'AGOTADO' | 'TICKET_AJENO';
 export type ResultadoConfirmar = 'CONFIRMADO' | 'SIN_TICKET' | 'TICKET_AJENO';
 export type ResultadoDevolver = 'DEVUELTO' | 'SIN_TICKET' | 'TICKET_AJENO';
 

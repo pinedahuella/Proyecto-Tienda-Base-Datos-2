@@ -139,7 +139,10 @@ export class OfertasVendedorController {
       );
       return exito(rechazos, 'Rechazos de la oferta obtenidos');
     } catch (error) {
-      manejarErrorHttp(error, 'No se pudieron obtener los rechazos de la oferta');
+      manejarErrorHttp(
+        error,
+        'No se pudieron obtener los rechazos de la oferta',
+      );
     }
   }
 

@@ -161,7 +161,11 @@ export class ProductosService {
         { $match: filtro },
         {
           $facet: {
-            productos: [{ $sort: { _id: 1 } }, { $skip: saltar }, { $limit: limite }],
+            productos: [
+              { $sort: { _id: 1 } },
+              { $skip: saltar },
+              { $limit: limite },
+            ],
             total: [{ $count: 'total' }],
           },
         },
@@ -214,10 +218,12 @@ export class ProductosService {
 
     let producto: Producto;
     try {
-      const encontrado = await mongoDb.collection<Producto>('productos').findOne({
-        _id: idProducto,
-        estado: ESTADO_PRODUCTO_VISIBLE,
-      });
+      const encontrado = await mongoDb
+        .collection<Producto>('productos')
+        .findOne({
+          _id: idProducto,
+          estado: ESTADO_PRODUCTO_VISIBLE,
+        });
 
       if (encontrado == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
@@ -249,7 +255,9 @@ export class ProductosService {
    * pedido -- mismo criterio que el resto del backend (nunca una consulta
    * a Mongo por linea).
    */
-  async obtenerEstadosVariante(idsProducto: number[]): Promise<Map<string, string>> {
+  async obtenerEstadosVariante(
+    idsProducto: number[],
+  ): Promise<Map<string, string>> {
     const idsUnicos = [...new Set(idsProducto)];
     try {
       const productos = await mongoDb
@@ -368,9 +376,15 @@ export class ProductosService {
         throw new ErrorNoEncontrado('El producto no existia en esa fecha');
       }
 
-      return { _id: idProducto, ...(resultado[0].producto as object) } as Producto;
+      return {
+        _id: idProducto,
+        ...(resultado[0].producto as object),
+      } as Producto;
     } catch (error) {
-      if (error instanceof ErrorValidacion || error instanceof ErrorNoEncontrado) {
+      if (
+        error instanceof ErrorValidacion ||
+        error instanceof ErrorNoEncontrado
+      ) {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);
@@ -452,7 +466,10 @@ export class ProductosService {
         stock: stockResultado.rows[0]?.stock_resultante ?? 0,
       };
     } catch (error) {
-      if (error instanceof ErrorValidacion || error instanceof ErrorNoEncontrado) {
+      if (
+        error instanceof ErrorValidacion ||
+        error instanceof ErrorNoEncontrado
+      ) {
         throw error;
       }
       manejarErrorConexion(this.logger, error);
@@ -673,9 +690,11 @@ export class ProductosService {
           fila.precio_desde != null
             ? Decimal128.fromString(fila.precio_desde)
             : null;
-        conjuntoSet[`variantes.$[${marcador}].stock_tienda`] = fila.stock_tienda;
+        conjuntoSet[`variantes.$[${marcador}].stock_tienda`] =
+          fila.stock_tienda;
         conjuntoSet[`variantes.$[${marcador}].stock_total`] = fila.stock_total;
-        conjuntoSet[`variantes.$[${marcador}].total_ofertas`] = fila.total_ofertas;
+        conjuntoSet[`variantes.$[${marcador}].total_ofertas`] =
+          fila.total_ofertas;
         arrayFilters.push({
           [`${marcador}.id_producto_variante`]: Number(
             fila.id_producto_variante_mongo,
@@ -685,7 +704,11 @@ export class ProductosService {
 
       await mongoDb
         .collection<Producto>('productos')
-        .updateOne({ _id: idProducto }, { $set: conjuntoSet }, { arrayFilters });
+        .updateOne(
+          { _id: idProducto },
+          { $set: conjuntoSet },
+          { arrayFilters },
+        );
     } catch (error) {
       // No se relanza: cuando esto se llama, la compra o la cancelacion ya
       // se confirmaron en PostgreSQL. Que falle la actualizacion de la
@@ -952,7 +975,9 @@ export class ProductosService {
         $or: [
           { caracteristicas_adicionales: { $elemMatch: elemMatch } },
           { caracteristicas_personalizadas: { $elemMatch: elemMatch } },
-          { 'variantes.caracteristicas_adicionales': { $elemMatch: elemMatch } },
+          {
+            'variantes.caracteristicas_adicionales': { $elemMatch: elemMatch },
+          },
           {
             'variantes.caracteristicas_personalizadas': {
               $elemMatch: elemMatch,

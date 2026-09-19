@@ -1,4 +1,12 @@
-import { Body, Controller, Get, Param, Patch, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { Roles } from '../../decorators/roles.decorator';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
@@ -36,10 +44,14 @@ export class AdminFraudeLoginController {
   @Get('eventos-login')
   async eventosLogin(@Query() query: PaginarEventosAutenticacionQuery) {
     try {
-      const pagina = await this.fraudeLoginExploracionService.listarEventosPaginado(query);
+      const pagina =
+        await this.fraudeLoginExploracionService.listarEventosPaginado(query);
       return exito(pagina, 'Eventos de autenticacion obtenidos');
     } catch (error) {
-      manejarErrorHttp(error, 'No se pudieron obtener los eventos de autenticacion');
+      manejarErrorHttp(
+        error,
+        'No se pudieron obtener los eventos de autenticacion',
+      );
     }
   }
 

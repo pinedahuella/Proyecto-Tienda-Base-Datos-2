@@ -384,7 +384,11 @@ export class CarritoService {
 
     const ticket = await this.leerTicket(idUsuario, idOferta);
     if (ticket != null) {
-      await this.inventarioLimitadoService.devolver(idOferta, idUsuario, ticket);
+      await this.inventarioLimitadoService.devolver(
+        idOferta,
+        idUsuario,
+        ticket,
+      );
     }
 
     try {
@@ -688,9 +692,7 @@ export class CarritoService {
    * Redis -- mismo truco que usa `inventario_limitado.lua` para no
    * necesitar una clave nueva por cada reserva (ver ese archivo).
    */
-  private async leerHashCompleto(
-    idUsuario: string,
-  ): Promise<{
+  private async leerHashCompleto(idUsuario: string): Promise<{
     cantidades: Record<number, number>;
     tickets: Record<number, number>;
   }> {

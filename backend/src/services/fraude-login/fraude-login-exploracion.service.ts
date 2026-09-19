@@ -14,7 +14,10 @@ import {
   validarNuevoEstadoAlerta,
   validarRangoFechasEvento,
 } from '../../helpers/validaciones-fraude';
-import { validarLimite, validarPagina } from '../../helpers/validaciones-productos';
+import {
+  validarLimite,
+  validarPagina,
+} from '../../helpers/validaciones-productos';
 import type {
   EventoAutenticacionAdmin,
   EventosAutenticacionPaginados,
@@ -141,17 +144,22 @@ export class FraudeLoginExploracionService {
         size: limite,
         track_total_hits: true,
         sort: [{ fecha: 'desc' }],
-        query: filtros.length > 0 ? { bool: { filter: filtros } } : { match_all: {} },
+        query:
+          filtros.length > 0
+            ? { bool: { filter: filtros } }
+            : { match_all: {} },
       });
     } catch (error) {
-      this.logger.error(`explorador de eventos de login: ${mensajeCorto(error)}`);
+      this.logger.error(
+        `explorador de eventos de login: ${mensajeCorto(error)}`,
+      );
       throw error;
     }
 
     const total =
       typeof respuesta.hits.total === 'number'
         ? respuesta.hits.total
-        : respuesta.hits.total?.value ?? 0;
+        : (respuesta.hits.total?.value ?? 0);
     const totalPaginas = total === 0 ? 0 : Math.ceil(total / limite);
 
     const eventosBase = respuesta.hits.hits.map(aEventoAutenticacionAdmin);
@@ -213,7 +221,10 @@ export class FraudeLoginExploracionService {
       ...evento,
       cuenta_involucrada:
         evento.id_usuario != null && usuariosPorId.has(evento.id_usuario)
-          ? { id_usuario: evento.id_usuario, usuario: usuariosPorId.get(evento.id_usuario)! }
+          ? {
+              id_usuario: evento.id_usuario,
+              usuario: usuariosPorId.get(evento.id_usuario)!,
+            }
           : null,
     }));
   }

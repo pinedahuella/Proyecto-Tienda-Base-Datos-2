@@ -54,7 +54,10 @@ export function validarDescripcionVariante(descripcion: unknown): string {
 
 /** Para PATCH /vendedor/productos/:id: el estado tiene que ser uno del catalogo. */
 export function validarEstadoProducto(estado: unknown): string {
-  if (typeof estado !== 'string' || !ESTADOS_PRODUCTO_VALIDOS.includes(estado)) {
+  if (
+    typeof estado !== 'string' ||
+    !ESTADOS_PRODUCTO_VALIDOS.includes(estado)
+  ) {
     throw new ErrorValidacion(
       `El estado debe ser uno de: ${ESTADOS_PRODUCTO_VALIDOS.join(', ')}`,
     );
@@ -106,7 +109,10 @@ export function validarImagenes(imagenes: unknown): string[] {
   if (imagenes == null) {
     return [];
   }
-  if (!Array.isArray(imagenes) || !imagenes.every((img) => esTextoNoVacio(img))) {
+  if (
+    !Array.isArray(imagenes) ||
+    !imagenes.every((img) => esTextoNoVacio(img))
+  ) {
     throw new ErrorValidacion('imagenes debe ser una lista de URLs de texto');
   }
   return imagenes;
@@ -136,7 +142,9 @@ export function validarValorSegunTipoDato(
       return valor;
     case 'decimal':
       if (typeof valor !== 'number' || Number.isNaN(valor)) {
-        throw new ErrorValidacion(`"${nombreCaracteristica}" debe ser un numero`);
+        throw new ErrorValidacion(
+          `"${nombreCaracteristica}" debe ser un numero`,
+        );
       }
       return valor;
     case 'booleano':

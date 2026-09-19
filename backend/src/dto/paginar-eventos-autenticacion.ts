@@ -48,7 +48,12 @@ export interface EventoAutenticacionAdmin {
   ip: string | null;
   user_agent: string | null;
   huella_cliente: string | null;
-  geo: { lat: number; lon: number; pais: string | null; ciudad: string | null } | null;
+  geo: {
+    lat: number;
+    lon: number;
+    pais: string | null;
+    ciudad: string | null;
+  } | null;
   fecha: string;
 }
 
