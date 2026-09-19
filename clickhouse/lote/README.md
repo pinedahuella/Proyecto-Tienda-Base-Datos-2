@@ -506,6 +506,12 @@ SELECT lote, count() FROM evento_login GROUP BY lote;
 
 # La actividad: el resto del embudo (2026-09-18)
 
+> **AVISO DEL 2026-09-19.** Desde hoy las seis rutas de `/admin/eventos/*` y el ranking de mas vendidos cuentan
+> SOLO `lote = 'real'` (decision de Jose David, sin parametro). **Nada de lo que siembra este generador se ve en
+> Tendencias ni en el estante de la portada.** Sigue sirviendo para consultar ClickHouse a mano
+> (http://localhost:8123/play) y para probar consultas sobre datos con forma real. Las secciones de abajo se
+> escribieron cuando si se veia y se dejan como estan.
+
 `generar_actividad.sql` existe porque, medido ese dia, cuatro de las seis tablas de eventos
 estaban vacias o casi: `busqueda_realizada` y `busqueda_clic` en cero, y compra,
 devolucion y carrito con las pocas filas que dejo alguien probando. Dos de los seis

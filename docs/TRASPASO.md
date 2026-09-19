@@ -54,6 +54,28 @@ redis/mas_vendidos.sh              ver el ranking de mas vendidos y reconstruirl
                                   los 10 minutos del worker. Documentado en redis/README.md, 2b
 ```
 
+**El pull del 2026-09-19: cuatro decisiones de David que tocaron mis capas.**
+
+```
+GET /vendedor/ofertas/paginado   el filtro `activo` (true/false) se reemplazo por `estado` (uno de los cinco).
+                                 Con el, total_ofertas da el total EXACTO de cada estado. OfertasVendedor.svelte
+                                 ya pagina de verdad (20 por pagina) y sus seis pestanas salen de seis peticiones
+                                 de UNA oferta. pruebas/ofertas_paginadas.sh adaptado: 40 OK, tres mutantes
+trustProxy: 'loopback'           agregado en main.ts. copia-backend.ps1 ya lo preveia (si el repo lo trae, la copia
+                                 no parcha nada). Cierra el pendiente 19
+rankings y mas vendidos          solo lote 'real', sin parametro (ver "Los hallazgos" abajo, el 1). Adaptados:
+                                 redis/mas_vendidos.sh (y su candado), PanelTendencias, pruebas/tendencias.sh (50 OK)
+comprarPedido                    David lo evaluo y lo descarta: es codigo viejo que ninguna pantalla usa. No se
+                                 engancha, y BACKEND-PENDIENTE ya no se lo pide
+```
+
+**Lo unico del panel de ofertas que sigue sin resolverse de raiz es el buscador por texto.** El backend no
+busca por texto (los nombres viven en Mongo), asi que cuando se escribe algo el panel pide la lista completa
+(1.2 MB con las 2243 ofertas de la tienda) y filtra en el navegador; al vaciar la caja vuelve a las paginas sin
+pedir nada. Es una concesion, y la peticion de un `q` en la ruta paginada esta escrita en
+`docs/BACKEND-PENDIENTE.md`. Probado en el navegador con la tienda: pagina 1 y 2 distintas, pestana vacia con su
+mensaje, busqueda de "laptop" da 159 de 2243.
+
 **Y despues, la misma noche: el ETL y las demos que arrancaban en cero.** Se pidio revisar
 si el ETL reflejaba lo que David cambio y si la base columnar se podia llenar de forma nativa.
 La respuesta a la primera fue **no**, y la revision destapo tres cosas. Todo esta en
@@ -75,10 +97,16 @@ redis/mas_vendidos.sh    ver y reconstruir el ranking sin esperar los 10 minutos
 
 **Cuatro hallazgos que no son obvios.**
 
-**1. La demo arrancaba vacia aunque la tabla tuviera 3882 filas.** Las vistas generadas eran del
-24 de agosto al 6 de septiembre y los rankings miran los ultimos 7 dias. El lote se siembra con la
-fecha del dia que se corre: para una demo hay que renovarlo el mismo dia
-(`.\arrancar.ps1 -BorrarVistas 42` y despues `.\arrancar.ps1 -Vistas 3000 -Semilla 42`). No se renueva solo.
+**1. Lo sembrado YA NO se ve en Tendencias, por decision de David (2026-09-19).** Las seis rutas de
+`/admin/eventos/*` y el ranking de mas vendidos cuentan SOLO `lote = 'real'`, fijo y sin parametro. Lo que
+siembra `clickhouse/lote` (lote `generado-N`) no aparece en ninguna de esas pantallas ni en el estante de la
+portada. Lo que si las llena son datos reales: las ventas que copia `etl/cargar_compras.sh` desde PostgreSQL
+(143 lineas de venta con fechas desde enero) y todo lo que se haga usando la app. Medido ese dia, eventos
+reales por ventana de 7 / 30 / 365 dias: compras 5 / 45 / 143, devoluciones 3 / 7 / 7, vistas 22, carrito 12,
+busquedas 0 y clics de busqueda 0. Por eso el panel de Tendencias abre en **30 dias** y no en 7 (con 7 se ve
+pobre). Las busquedas estan en cero DE VERDAD y solo se llenan buscando en la caja de la cabecera y abriendo un
+resultado. `generar_actividad.sql` y `-Vistas` siguen funcionando, pero hoy ninguna pantalla los lee: sirven
+para consultar ClickHouse a mano en http://localhost:8123/play.
 
 **2. La clave de ordenacion de las tablas de compra perdia unidades.** Con `(id_producto, fecha,
 id_pedido)`, dos ofertas del mismo producto en el mismo pedido se colapsaban: el pedido 121 tenia
@@ -108,10 +136,10 @@ misma sesion, dos filas de la misma cuenta, cantidades de 5 y 3.
 
 **Tres cosas que no son obvias.**
 
-**1. Estas rutas no reciben `lote`.** Cuentan todo lo guardado, tambien las
-3882 vistas que sembro `clickhouse/lote`. El panel lo dice en una nota; esta
-pedido en `docs/BACKEND-PENDIENTE.md`. Es la misma leccion de siempre: un
-ranking que mezcla lo medido con lo sembrado tiene forma de hallazgo.
+**1. Estas rutas cuentan SOLO `lote = 'real'`** (desde el 2026-09-19, decision de Jose David, sin
+parametro para pedir lo contrario). El panel lo dice en una nota. Antes contaban tambien lo sembrado y esta
+nota decia lo contrario: un ranking que mezcla lo medido con lo sembrado tiene forma de hallazgo, y David lo
+cerro por el lado bueno.
 
 **2. Un producto borrado sale sin id.** La ruta contesta `producto: null` y el
 id se pierde por el camino, asi que la fila se pinta como "Producto que ya no

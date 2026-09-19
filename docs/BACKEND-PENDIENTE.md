@@ -6,6 +6,11 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ## LO NUEVO DEL 2026-09-15: una sola linea para que el login salga con la IP real
 
+> **RESUELTO EL 2026-09-19.** Jose David agrego `trustProxy: 'loopback'` en `backend/src/main.ts`, con
+> la explicacion de por que 'loopback' y no `true`, y lo probo con un `X-Forwarded-For` simulado. Lo de
+> abajo se deja como historia. `copia-backend.ps1` ya lo preveia: si `main.ts` trae su propio
+> `trustProxy`, la copia lleva el del repo y no parcha nada.
+
 Ya se puede entrar a Mesh desde un celular (con VPN o sin ella) por un tunel de
 Cloudflare, con `.\tunel-celular.ps1`. Lo que no es `backend/` esta hecho y
 probado; la guia es `docs/ENTRAR-DESDE-EL-CELULAR.md`.
@@ -253,19 +258,11 @@ tres salidas siguen por decidir con el profesor.
 > - Ademas, `GET /productos/mas-vendidos`: el frontend ya la consume, arriba del
 >   catalogo, y sale solo cuando no hay filtros puestos.
 >
-> **Lo unico que falta, y es para ti:** los seis rankings no reciben `lote`.
-> Cuentan todo lo guardado, incluidas las 3882 vistas del lote generado, y desde
-> la pantalla no se puede saber cual es cual. Lo que se pide, igual que en las
-> firmas de abajo:
->
-> ```
-> query   lote   real | generado | todo     por defecto real
-> ```
->
-> Es un `AND lote = {lote:String}` en `consultarRanking` (y `lote != ''` para
-> `todo`), con el mismo criterio que ya usas en el `WHERE fecha >= ...`. Con
-> `real` por defecto, un ranking sin parametros dejaria de mezclar lo sembrado.
-> Si lo pones, el panel lo enchufa en un selector; hoy solo avisa en una nota.
+> **RESUELTO EL 2026-09-19, y de otra manera que la pedida.** Aqui se pedia un parametro `lote`
+> en los seis rankings. Jose David decidio lo contrario: las seis rutas y el worker de mas vendidos
+> cuentan SOLO `lote = 'real'`, fijo y sin parametro, porque una tendencia mezclada con datos
+> sembrados "no es una tendencia, es un numero inventado". Esta bien asi y no se le pide mas: el panel
+> ya lo dice en pantalla. La consecuencia para las demos esta en `docs/TRASPASO.md`.
 >
 > Y una cosa menor: cuando un producto del ranking ya no tiene documento en Mongo
 > la fila sale con `producto: null` y **sin el id**, asi que no se puede ni
@@ -1817,9 +1814,11 @@ del codigo y sin probarlo contra el servidor**:
 - La devolucion si se anota al cancelar (`pedidos.service.ts`, ~719). O sea que hay devoluciones
   registradas de compras que nunca se registraron.
 
-Lo que se pide es una llamada a `registrarCompra` al terminar `comprarPedido`, igual que en el
-carrito. Mientras no este, el ranking de mas vendidos y el de compras de Tendencias no ven esas
-ventas, salvo que alguien corra `bash etl/cargar_compras.sh`.
+**RESPONDIDO EL 2026-09-19 por Jose David:** `comprarPedido` y `POST /comprador/pedidos` son codigo
+VIEJO, anterior al carrito de Redis; `Checkout.svelte` solo se instancia con `modo="carrito"` y ninguna
+pantalla llega a pagar por ahi, asi que **no se va a enganchar el registro** y no se le pide nada. Lo
+dejo asi: el hueco existe pero sobre un camino que la interfaz actual no usa. `etl/cargar_compras.sh`
+sigue cubriendolo si alguien lo llama a mano.
 
 Lo otro que se encontro ya esta arreglado del lado de aqui y no requiere nada tuyo: la clave de
 ordenacion de `compra_producto` colapsaba dos ofertas del mismo producto en el mismo pedido (el
@@ -1828,6 +1827,28 @@ pedido 121 tenia 3 lineas y ClickHouse guardaba 2). Ahora lleva `id_oferta`, ver
 devolucion, por fin suma todas las lineas. Los numeros de `GET /admin/eventos/compra` pueden subir
 respecto a lo que veias antes en un pedido con dos vendedores del mismo producto.
 
-Y una que si es tuya y sigue igual: los seis rankings de `/admin/eventos/*` no reciben `lote` (ver
-mas arriba). Con la actividad generada ahora contando dentro de `compra_producto`, el ranking de mas
-vendidos mezcla ventas reales con inventadas, y nada en la respuesta lo dice.
+Lo que sigue siendo tuyo de aquel dia es solo esto: cuando un producto del ranking ya no tiene
+documento en Mongo la fila sale con `producto: null` y **sin el id**, asi que no se puede mostrar cual
+era (un `id_producto` junto al `producto` lo arregla).
+
+---
+
+## LO NUEVO DEL 2026-09-19: buscar por texto en `GET /vendedor/ofertas/paginado`
+
+Para Jose David. Gracias por el filtro `estado`: con el, el panel de ofertas ya pagina de verdad y las
+pestanas cuentan bien (seis peticiones de una oferta, `total_ofertas` de cada una; ver `docs/TRASPASO.md`).
+
+Queda UNA cosa que el panel no puede hacer sin traer todo: **buscar por texto**. El panel tiene una caja
+"buscar por producto o presentacion" y, como la ruta paginada no busca, cuando se escribe algo tiene que
+pedir `GET /vendedor/ofertas` entera (1.2 MB con las 2243 ofertas de la tienda) y filtrar en el navegador.
+Es lo unico que hoy obliga a usar la ruta sin paginar.
+
+Lo que se pide es un parametro `q` en la paginada, que se combine con `estado` y con la paginacion, y que
+`total_ofertas` cuente lo que cumple los dos. La dificultad es tuya de ver y la dejo dicha: el nombre del
+producto y el de la variante viven en Mongo, y la ruta los resuelve DESPUES de paginar
+(`armarOfertasPropias`), asi que filtrar por ellos en la consulta de PostgreSQL no se puede tal cual. Lo
+que sirve es buscar primero en Mongo los ids de producto (o variante) cuyo nombre coincide, como ya hace
+`GET /productos?nombre=`, y filtrar las ofertas de PostgreSQL con esos ids.
+
+Cuando exista, el panel deja de usar la ruta sin paginar por completo y el buscador pasa a ser una peticion
+mas de `limite=20`.
