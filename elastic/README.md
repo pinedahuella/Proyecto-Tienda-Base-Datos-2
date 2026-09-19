@@ -186,6 +186,8 @@ identificador_intentado      keyword, y .minusculas con un normalizer lowercase
 ip                           ip, con ignore_malformed
 user_agent                   keyword, ignore_above 512
 fecha                        date, con ignore_malformed
+geo_punto                    geo_point (agregado 2026-09-18)
+geo_pais, geo_ciudad         text con .keyword, ignore_above 256 (agregado 2026-09-18)
 dynamic                      false
 ```
 
@@ -204,6 +206,16 @@ dynamic                      false
   y el campo queda en `_source`, pero no se busca hasta que alguien lo mapee
   aqui. Con `strict` el documento se rechazaria y pasaria lo del punto de
   arriba.
+- **`geo_punto` es SOLO `lat`/`lon`, `geo_pais`/`geo_ciudad` van sueltos y
+  aparte, NO anidados dentro de `geo_punto`**: un `geo_point` de Elasticsearch
+  solo acepta coordenadas -- el backend lo probo con los tres campos juntos
+  dentro de un mismo objeto `geo` y fallo en vivo con
+  `document_parsing_exception: field [pais] not supported`. `geo_pais`/
+  `geo_ciudad` llevan `.keyword` (no son `keyword` puro, como `ip`/`tipo`)
+  porque el backend filtra con `geo_pais.keyword` -- mismo patron que el
+  mapeo dinamico les habria dado por defecto, solo que declarado a mano para
+  que sobreviva bajo `dynamic: false`. Los tres son `null` cuando la IP es
+  privada/local o `geoip-lite` no la resuelve.
 
 ### Lo que hace arrancar.ps1
 
@@ -211,8 +223,9 @@ El paso "Indice de eventos de autenticacion", despues del buscador:
 
 1. sube la plantilla (idempotente: un PUT la reemplaza);
 2. si el indice no existe, lo crea;
-3. si existe pero `ip` no es de tipo `ip` -- nacio antes que la plantilla, o a
-   mano --, lo tira y lo rehace;
+3. si existe pero `ip` no es de tipo `ip`, o `geo_punto` no es de tipo
+   `geo_point` -- nacio antes que la plantilla (o antes de que la plantilla
+   trajera `geo_punto`), o a mano --, lo tira y lo rehace;
 4. en los casos 2 y 3 marca TODOS los eventos de Mongo con `pendiente_elastic`
    para que el worker los vuelva a copiar. Tambien en el 2: un indice que falta
    perdio lo que tenia, y sin marcar se queda vacio para siempre (medido);

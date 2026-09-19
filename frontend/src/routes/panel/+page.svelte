@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
 	import { conJson, pedir } from '$lib/api';
@@ -10,6 +10,7 @@
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
 	import PanelFraude from '$lib/PanelFraude.svelte';
+	import AlertasFraudeUsuario from '$lib/AlertasFraudeUsuario.svelte';
 	import PanelTendencias from '$lib/PanelTendencias.svelte';
 	import PanelReportes from '$lib/PanelReportes.svelte';
 	import {
@@ -121,6 +122,10 @@
 				// entrada sospechosos, y nadie los iria a buscar bajo ese nombre.
 				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo e intentos de entrada sospechosos' },
 				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Que se esta calentando y desde que IP entran varias cuentas' },
+				// Distinta de "Fraude": esa es EN VIVO contra el grafo y solo la ve
+				// un admin; esta es "a mi cuenta le paso algo" y la ve cualquiera --
+				// GET /perfil/alertas-fraude, filtrado a la sesion de quien pregunta.
+				{ id: 'alertas', nombre: 'Alertas', pie: 'Avisos de seguridad sobre tu propia cuenta' },
 				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 			];
 		}
@@ -132,12 +137,16 @@
 					? { id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' }
 					: { id: 'catalogo', nombre: 'Proponer', pie: 'Mandale al catalogo un producto que falte' },
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Como van las que mandaste' },
+				{ id: 'alertas', nombre: 'Alertas', pie: 'Avisos de seguridad sobre tu propia cuenta' },
 				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 			];
 		}
 
-		// Un comprador tiene poco que gestionar: su cuenta y por donde seguir.
-		return [{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }];
+		// Un comprador tiene poco que gestionar: su cuenta, sus alertas y por donde seguir.
+		return [
+			{ id: 'alertas', nombre: 'Alertas', pie: 'Avisos de seguridad sobre tu propia cuenta' },
+			{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
+		];
 	});
 
 	/** Cual se esta mirando. Vacio quiere decir "todavia no se ha decidido". */
@@ -185,6 +194,25 @@
 		url.searchParams.set('s', id);
 		history.replaceState(history.state, '', url);
 	}
+
+	/**
+	 * Un enlace de FUERA del panel a `/panel?s=alertas` (la campanita de
+	 * Cabecera, "Ver todas") caia en el vacio: como el destino es la MISMA
+	 * ruta, SvelteKit no vuelve a montar el componente ni a correr `onMount`
+	 * -- solo actualiza la URL, y `seccion` se habia leido una sola vez, ahi
+	 * arriba. La direccion cambiaba a `?s=alertas` y la pantalla se quedaba
+	 * en la pestana de antes.
+	 *
+	 * `afterNavigate` corre en CUALQUIER navegacion que SI pasa por el router
+	 * de SvelteKit (un `<a>`, `goto()`, atras/adelante), asi que aqui se
+	 * vuelve a leer `?s=` y se corrige. No estorba a `irA`: esa usa
+	 * `history.replaceState` a mano, que no pasa por el router y por eso
+	 * nunca dispara esto -- las dos conviven sin pisarse.
+	 */
+	afterNavigate(() => {
+		const deLaUrl = new URL(window.location.href).searchParams.get('s') ?? '';
+		if (deLaUrl !== seccion) seccion = deLaUrl;
+	});
 
 	/**
 	 * La linea de bienvenida, segun el rol.
@@ -661,6 +689,16 @@
 					</section>
 				</div>
 			{/if}
+			</div>
+
+			<!-- Comun a las tres cuentas -- admin, vendedor y comprador. A
+			     diferencia de "Fraude" (PanelFraude, EN VIVO contra el grafo,
+			     solo admin), esto es "a MI cuenta le paso algo" y lo ve
+			     cualquiera: GET /perfil/alertas-fraude ya filtra por la sesion. -->
+			<div class="hoja" class:oculta={seccionViva !== 'alertas'}>
+				{#if visitadas.has('alertas')}
+					<AlertasFraudeUsuario alExpirarSesion={expiro} />
+				{/if}
 			</div>
 
 			<!-- De aqui para abajo, una hoja por seccion.

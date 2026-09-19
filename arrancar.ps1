@@ -1257,6 +1257,14 @@ function Correr-EtlBusqueda {
 # que tiene esta en eventos_autenticacion, y el _id es el de Mongo, asi que
 # copiar dos veces el mismo evento lo sobrescribe en vez de duplicarlo.
 #
+# Un PUT de plantilla nuevo (como el que agrego geo_punto/geo_pais/geo_ciudad
+# el 2026-09-18) tampoco toca un indice que ya existia ANTES del PUT, por la
+# misma razon: una plantilla solo actua al crear. Por eso la comprobacion mira
+# TAMBIEN geo_punto, no solo ip: si el indice ya estaba pero geo_punto no es de
+# tipo `geo_point` (falta del todo, o quedo `text`/`float` por un mapeo
+# dinamico de antes de esta plantilla), es el mismo caso que un ip mal
+# mapeado y se trata igual -- se tira y se rehace.
+#
 # El ORDEN del caso malo importa: primero borrar y crear, despues marcar. Al
 # reves, el worker podria copiar eventos recien marcados al indice viejo justo
 # antes de que se borre, y se perderian con el.
@@ -1277,6 +1285,16 @@ function Leer-TipoIpEventos {
     $primero = @($m.PSObject.Properties)[0]
     if ($null -eq $primero) { return $null }
     return $primero.Value.mappings.ip.mapping.ip.type
+}
+
+# Mismo mecanismo que Leer-TipoIpEventos, para el campo geo_punto. $null si el
+# campo no esta mapeado del todo (indice de antes de que geo_punto existiera).
+function Leer-TipoGeoPuntoEventos {
+    $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/geo_punto" -TimeoutSec 20
+    $primero = @($m.PSObject.Properties)[0]
+    if ($null -eq $primero) { return $null }
+    if (-not $primero.Value.mappings.geo_punto) { return $null }
+    return $primero.Value.mappings.geo_punto.mapping.geo_punto.type
 }
 
 # Un numero de mongosh, o $null si no contesto. Mismo criterio que
@@ -1302,8 +1320,10 @@ function Preparar-IndiceEventos {
         # b) y c) Existe? y si existe, nacio de la plantilla?
         $existe = $true
         $tipoIp = $null
+        $tipoGeoPunto = $null
         try {
             $tipoIp = Leer-TipoIpEventos
+            $tipoGeoPunto = Leer-TipoGeoPuntoEventos
         } catch {
             $respuesta = $_.Exception.Response
             if ($respuesta -and [int]$respuesta.StatusCode -eq 404) {
@@ -1316,9 +1336,10 @@ function Preparar-IndiceEventos {
 
         $rehecho = $false
         $creado  = -not $existe
-        if ($existe -and $tipoIp -ne 'ip') {
-            $visto = if ($tipoIp) { $tipoIp } else { 'sin mapear' }
-            Aviso "$ES_INDICE_EVENTOS no nacio de la plantilla (ip es '$visto', no 'ip')."
+        if ($existe -and ($tipoIp -ne 'ip' -or $tipoGeoPunto -ne 'geo_point')) {
+            $vistoIp = if ($tipoIp) { $tipoIp } else { 'sin mapear' }
+            $vistoGeo = if ($tipoGeoPunto) { $tipoGeoPunto } else { 'sin mapear' }
+            Aviso "$ES_INDICE_EVENTOS no nacio de la plantilla actual (ip es '$vistoIp', geo_punto es '$vistoGeo')."
             Aviso "   Se borra y se rehace; los eventos se vuelven a copiar desde Mongo."
             Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_EVENTOS" -TimeoutSec 30 | Out-Null
             $existe  = $false
@@ -1339,12 +1360,13 @@ function Preparar-IndiceEventos {
             }
 
             $tipoIp = Leer-TipoIpEventos
-            if ($tipoIp -ne 'ip') {
-                Aviso "$ES_INDICE_EVENTOS se creo pero ip quedo como '$tipoIp'. Revisa la plantilla."
+            $tipoGeoPunto = Leer-TipoGeoPuntoEventos
+            if ($tipoIp -ne 'ip' -or $tipoGeoPunto -ne 'geo_point') {
+                Aviso "$ES_INDICE_EVENTOS se creo pero ip quedo como '$tipoIp' y geo_punto como '$tipoGeoPunto'. Revisa la plantilla."
                 return $false
             }
         } else {
-            Ok "$ES_INDICE_EVENTOS ya estaba, con ip de tipo ip"
+            Ok "$ES_INDICE_EVENTOS ya estaba, con ip de tipo ip y geo_punto de tipo geo_point"
         }
 
         # Se marca TAMBIEN cuando el indice simplemente no existia, y no solo

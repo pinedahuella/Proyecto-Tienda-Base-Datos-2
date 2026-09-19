@@ -10,6 +10,7 @@
 		MINIMO_LETRAS,
 		type ResultadoBusqueda
 	} from './buscador';
+	import { registrarClicBusqueda } from './eventos';
 
 	/**
 	 * Buscar tambien lo que no esta activo. Solo tiene sentido para un admin:
@@ -181,10 +182,19 @@
 		campo?.focus();
 	}
 
-	/** Abre la ficha de un resultado. La ficha es la fuente de verdad. */
-	async function abrir(r: ResultadoBusqueda) {
+	/**
+	 * Abre la ficha de un resultado. La ficha es la fuente de verdad.
+	 *
+	 * `posicion` es 1-based (el primero de la lista es 1, no 0) porque asi lo
+	 * pide `POST /eventos/busqueda-clic` -- es el lugar en el que estaba en
+	 * ESTA lista, no un indice de arreglo. No se manda en la busqueda de
+	 * admin (`verTodo`): las mismas razones que ya evitan el `sesion` en
+	 * `buscador.ts` aplican aqui.
+	 */
+	async function abrir(r: ResultadoBusqueda, posicion: number) {
+		if (!verTodo) registrarClicBusqueda(texto.trim(), r.id_producto, posicion);
 		cerrar();
-		await goto(`/producto/${r.id_producto}`);
+		await goto(`/producto/${r.id_producto}?origen=buscador`);
 	}
 
 	/** Manda a la pagina de resultados con lo que haya escrito. */
@@ -214,7 +224,7 @@
 		if (evento.key === 'Enter') {
 			evento.preventDefault();
 			const elegida = resultados[resaltada];
-			if (elegida) abrir(elegida);
+			if (elegida) abrir(elegida, resaltada + 1);
 			else verTodos();
 			return;
 		}
@@ -325,7 +335,7 @@
 						role="option"
 						aria-selected={i === resaltada}
 						onmouseenter={() => (resaltada = i)}
-						onclick={() => abrir(r)}
+						onclick={() => abrir(r, i + 1)}
 					>
 						<span class="texto">
 							<span class="nombre">{r.nombre}</span>

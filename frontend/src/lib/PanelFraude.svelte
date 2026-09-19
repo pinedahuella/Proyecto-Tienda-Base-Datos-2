@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { mensajeUtil, pedir } from './api';
+	import { conJson, mensajeUtil, pedir } from './api';
 
 	/**
 	 * Panel de manipulacion de resenas. Es una pantalla que pide el enunciado
@@ -12,54 +12,31 @@
 	 *    productos"
 	 *
 	 * Lo que ensena NO se calcula aqui ni en PostgreSQL: sale del grafo de
-	 * Neo4j, que es la familia que el equipo eligio implementar. Las consultas
-	 * viven en neo4j/consultas/A1_anillo.cypher .. A5_puntaje.cypher y el
-	 * backend las expone ya resueltas.
+	 * Neo4j, que es la familia que el equipo eligio implementar.
+	 *
+	 * **Hasta el 2026-09-18 esto tenia DOS vistas: una EN VIVO** (
+	 * `GET /admin/fraude/anillos`, recalculaba A.1/A.2/A.4 contra Neo4j en
+	 * cada carga, sin persistir nada) **y una PERSISTIDA** (la de abajo,
+	 * `alertas-resenas`, alimentada por el worker `AnillosDetectorService`).
+	 * Jose David elimino la EN VIVO ese dia -- era la prueba de concepto de
+	 * la Entrega 2, ya redundante con la persistida, sin estado de revision
+	 * ni forma de marcar un caso trabajado. Con ella se fue tambien
+	 * `GrafoSyncService.estadoSincronizacion()`, que era su unico consumidor
+	 * (ver `plan pendiente/anillos-fraude-persistencia.md`). Este componente
+	 * se actualizo el mismo dia: ya no hay "grupos en vivo" ni el vacio con
+	 * denominador que tenian (`analizado.cuentas`) -- todo lo que se ve
+	 * ahora sale de la tabla `anillo_fraude`, con su propio estado
+	 * (pendiente/revisada/descartada).
 	 *
 	 *
-	 * LA RUTA -- conectada desde el 2026-08-30
+	 * LA RUTA
 	 * ---------------------------------------------------------------
-	 *   GET /admin/fraude/anillos     (solo admin; la tienda recibe 403)
+	 *   GET/PATCH /admin/fraude/alertas-resenas   (solo admin; la tienda 403)
 	 *
-	 * El backend es de Jose David y aqui no se toca. El contrato quedo igual
-	 * al que este componente ya esperaba -- se comprobo campo por campo contra
-	 * `backend/src/models/fraude.ts` -- asi que las interfaces de abajo son
-	 * las suyas y no una copia que se pueda desfasar en silencio.
-	 *
-	 * La ruta NO devuelve 404 nunca. Los codigos que si contesta son
-	 * 401 (sesion), 403 (no sos admin), 503 (Neo4j caido o el analisis paso de
-	 * 15 s) y 500. Por eso ya no hay un estado "todavia no conectado": seria
-	 * codigo que describe un mundo que dejo de existir.
-	 *
-	 *
-	 * LOS DOS VACIOS, QUE NO SON EL MISMO
-	 * ---------------------------------------------------------------
-	 * Esto es lo mas facil de hacer mal en esta pantalla, y son DOS casos que
-	 * llegan identicos: `anillos: []` y un 200.
-	 *
-	 * 1. **Se analizo y no habia nada.** La consulta corrio perfecta y devolvio
-	 *    CERO. Una pantalla que ante eso dice "no hay datos" hace pensar que
-	 *    esta rota, asi que aqui se dice cuantas cuentas y cuantas resenas se
-	 *    ANALIZARON para llegar a ese cero. Un cero con denominador es un
-	 *    resultado; un cero solo es una duda.
-	 *
-	 *    Con el conjunto sembrado esto ya NO deberia pasar: desde el 2026-08-30
-	 *    la semilla trae un anillo de verdad -- tres cuentas `anillo.*@mesh.com`
-	 *    que se compran entre si para poder calificarse en circulo -- y la ruta
-	 *    devuelve tres grupos (`ciclo`, `reiterado` y `direccion`). Si esta
-	 *    pantalla sale vacia contra la semilla, algo se rompio: mira el grafo.
-	 *
-	 *    Aqui ya no hay datos de ejemplo. Los hubo mientras la ruta no existia,
-	 *    y se quitaron el dia que hubo un anillo real: una pantalla de fraude
-	 *    con nombres inventados adentro es la ultima que uno quiere ensenar.
-	 *
-	 * 2. **No se analizo nada, porque el grafo esta vacio.** Si nadie corrio
-	 *    `etl/cargar_grafo.sh`, la ruta contesta 200 con `analizado` en CEROS.
-	 *    Ensenar "se recorrieron 0 cuentas y 0 resenas sin encontrar nada" es
-	 *    presentar una auditoria que no ocurrio como si fuera una auditoria
-	 *    limpia. Es la peor de las dos mentiras posibles aqui, porque tiene
-	 *    forma de buena noticia. Se detecta con `analizado.cuentas === 0` y se
-	 *    dice lo que hay que hacer para arreglarlo.
+	 * El backend es de Jose David y aqui no se toca. Renombrada ese mismo
+	 * 2026-09-18 desde `anillos-persistidos`: sin la version en vivo con la
+	 * que contrastar, el sufijo ya no decia nada, y queda en paralelo con
+	 * `alertas-login`.
 	 *
 	 *
 	 * LA SEGUNDA SECCION -- intentos de entrada sospechosos (2026-09-10)
@@ -74,74 +51,13 @@
 
 	let { alExpirarSesion }: { alExpirarSesion: () => void } = $props();
 
-	/** Una cuenta dentro de un grupo sospechoso. */
-	interface CuentaSenalada {
-		id_usuario: number;
-		usuario: string;
-		correo_electronico: string;
-		nombre: string;
-		apellido: string;
-	}
-
-	/** Una resena concreta que forma parte del patron. */
-	interface ResenaSenalada {
-		id_resena: number;
-		autor: string;
-		vendedor: string;
-		producto: string;
-		calificacion: number;
-		fecha: string;
-	}
-
 	/**
-	 * Un grupo de cuentas con un patron anomalo.
-	 *
-	 * `tipo` dice QUE forma tiene el patron, y no es cosmetico: cada forma se
-	 * detecta con una consulta distinta y significa una cosa distinta. Se
-	 * guarda para poder explicarle a quien mira POR QUE esas cuentas estan
-	 * juntas en la lista, en vez de darle una lista de nombres sin motivo.
-	 */
-	interface Anillo {
-		id: string;
-		tipo: 'ciclo' | 'mutuo' | 'reiterado' | 'direccion';
-		/** Cuantos saltos tiene el camino que las une. Es el dato que hace que esto sea un grafo y no una tabla. */
-		saltos: number;
-		cuentas: CuentaSenalada[];
-		productos: { id_producto: number; nombre: string }[];
-		resenas: ResenaSenalada[];
-		/** Frases cortas, ya redactadas por el backend, que explican la sospecha. */
-		senales: string[];
-	}
-
-	interface RespuestaFraude {
-		anillos: Anillo[];
-		/** El denominador. Sin esto, un cero no se puede interpretar. */
-		analizado: {
-			cuentas: number;
-			resenas: number;
-			relaciones: number;
-		};
-	}
-
-	const NOMBRE_TIPO: Record<Anillo['tipo'], string> = {
-		ciclo: 'Ciclo de calificaciones',
-		mutuo: 'Se califican entre si',
-		reiterado: 'Reiteracion sobre los mismos productos',
-		direccion: 'Cuentas que comparten direccion'
-	};
-
-	const EXPLICACION_TIPO: Record<Anillo['tipo'], string> = {
-		ciclo: 'A califica a B, B a C y C vuelve a A. Un comprador normal no recibe de vuelta la calificacion que da: el camino se cierra solo cuando las cuentas se estan sosteniendo entre ellas.',
-		mutuo: 'Las dos cuentas se calificaron la una a la otra. Puede ser legitimo una vez; deja de serlo cuando se repite.',
-		reiterado:
-			'Las mismas cuentas se califican una y otra vez sobre los mismos productos. Es la frase exacta del enunciado, y es la senal mas dificil de producir por casualidad.',
-		direccion:
-			'Cuentas distintas registradas en la misma direccion normalizada. Por si solo no prueba nada -- una familia comparte casa -- pero junto con calificaciones cruzadas deja de ser coincidencia.'
-	};
-
-	/**
-	 * Lo que devuelve `GET /admin/grafo/conciliacion`, del que aqui solo se usa
-	 * lo justo para poder decir si este analisis mira datos frescos.
+	 * Lo que devuelve `GET /admin/grafo/conciliacion`: si el grafo que
+	 * detecta los anillos esta al dia con PostgreSQL. `conciliar()` no
+	 * dependia de la ruta EN VIVO que se elimino -- solo su prima
+	 * `estadoSincronizacion()` era exclusiva de esa ruta -- asi que esto
+	 * sigue funcionando igual, solo que ahora acompana a los anillos
+	 * PERSISTIDOS en vez de a un analisis en vivo.
 	 *
 	 * `cuadra` sale de CUATRO recursos, no de los seis: los conteos de
 	 * productos y usuarios NO cuentan para el veredicto, porque el ETL completo
@@ -156,9 +72,6 @@
 		sugerencia: string | null;
 	}
 
-	let anillos = $state<Anillo[]>([]);
-	let analizado = $state<RespuestaFraude['analizado'] | null>(null);
-
 	/**
 	 * El estado de la sincronizacion del grafo. `null` mientras no llega o si
 	 * la ruta fallo.
@@ -170,75 +83,30 @@
 	 */
 	let conciliacion = $state<Conciliacion | null>(null);
 
-	let cargando = $state(true);
-	let error = $state('');
-	/**
-	 * El grafo esta vacio: la ruta contesto bien pero no habia nada que
-	 * recorrer. Es un estado propio y no un resultado -- ver la nota de arriba.
-	 */
-	let grafoVacio = $derived(
-		anillos.length === 0 && analizado !== null && analizado.cuentas === 0
-	);
-
-	/** Que tarjeta esta desplegada. Una a la vez: son largas. */
-	let abierta = $state<string | null>(null);
-
 	// onMount y no $effect: esto corre UNA vez al montar el panel. Con $effect
 	// se repite solo -- en este mismo proyecto se vieron seis llamadas en el
 	// mismo instante con un console.trace.
 	//
-	// Las dos secciones salen a la vez y ninguna espera a la otra. El analisis
-	// del grafo tarda unos 8 s y las alertas de entrada contestan en menos de
-	// medio segundo: encadenarlas dejaria las alertas esperando por nada.
+	// Las tres cargas salen a la vez y ninguna espera a la otra.
 	onMount(() => {
-		void cargar();
+		void cargarConciliacion();
 		void cargarAlertas(1);
+		void cargarAnillosPersistidos(1);
 	});
 
-	async function cargar() {
-		cargando = true;
-		error = '';
-
-		const respuesta = await pedir<RespuestaFraude>('/admin/fraude/anillos');
-
-		cargando = false;
-
-		if (respuesta.estado === 401) {
-			alExpirarSesion();
-			return;
-		}
-
-		if (!respuesta.ok || !respuesta.payload) {
-			// mensajeUtil y no `respuesta.mensaje` a secas. Si el cuerpo no trae
-			// `mensaje` -- un 500 que no salio del controlador, un proxy en el
-			// medio -- `error` quedaba en undefined, que es FALSY, y la pantalla
-			// se caia en la rama del vacio: ensenaba "no se encontro ningun
-			// patron anomalo" habiendo fallado. Un fallo disfrazado de auditoria
-			// limpia es exactamente lo que este panel no puede hacer.
-			error = mensajeUtil(respuesta);
-			anillos = [];
-			analizado = null;
-			return;
-		}
-
-		anillos = respuesta.payload.anillos ?? [];
-		analizado = respuesta.payload.analizado ?? null;
-
-		void cargarConciliacion();
-	}
-
 	/**
-	 * Si el grafo que se acaba de analizar esta al dia con PostgreSQL.
+	 * Si el grafo que alimenta a `AnillosDetectorService` esta al dia con
+	 * PostgreSQL.
 	 *
-	 * Va en una peticion APARTE y despues, no antes, y no se espera con await:
-	 * es informacion SOBRE el analisis, no parte de el. Si esta ruta falla o
-	 * tarda, el panel tiene que ensenar sus anillos igual -- bloquear el
-	 * analisis por no poder decir si esta fresco seria cambiar un problema
-	 * chico por uno grande.
+	 * Va en una peticion APARTE y no se espera con await: es informacion
+	 * SOBRE los anillos, no parte de ellos. Si esta ruta falla o tarda, el
+	 * panel tiene que ensenar sus anillos igual -- bloquear la lista por no
+	 * poder decir si esta fresca seria cambiar un problema chico por uno
+	 * grande.
 	 *
 	 * Y por eso un fallo aqui deja `conciliacion` en null y no pinta nada, en
 	 * vez de pintar un aviso de error: "no se pudo comprobar si esta al dia" al
-	 * lado de un analisis correcto asusta mas de lo que informa.
+	 * lado de una lista correcta asusta mas de lo que informa.
 	 */
 	async function cargarConciliacion() {
 		conciliacion = null;
@@ -266,10 +134,6 @@
 		return `hace ${d} ${d === 1 ? 'dia' : 'dias'}`;
 	}
 
-	function alternar(id: string) {
-		abierta = abierta === id ? null : id;
-	}
-
 	/**
 	 * La fecha de una resena, para leerse.
 	 *
@@ -289,10 +153,6 @@
 			hour: '2-digit',
 			minute: '2-digit'
 		});
-	}
-
-	function nombreCompleto(c: CuentaSenalada): string {
-		return [c.nombre, c.apellido].filter(Boolean).join(' ') || c.usuario;
 	}
 
 	// ------------------------------------------------ intentos de entrada
@@ -317,32 +177,59 @@
 	 * (`AlertaFraude`) y de `dto/paginar-alertas-fraude.ts`, con las fechas
 	 * como texto porque asi llegan por JSON.
 	 *
-	 * Lo que esta seccion NO hace, a proposito: marcar una alerta como
-	 * revisada o descartada. Esa ruta no existe todavia, y un boton que llama a
-	 * una ruta que no existe es un error que la pantalla provoca sola. El
-	 * filtro por estado si esta, porque la ruta ya lo acepta.
+	 * Ampliado el 2026-09-18 a las nueve senales que ya usa el backend (tres
+	 * de Redis, seis de Elasticsearch -- ver la tabla en
+	 * `backend/elementos Generales/endpoints/endpoints-fraude.md`) y con el
+	 * triage (`PATCH /admin/fraude/alertas-login/:id`) que hasta ahora estaba
+	 * escrito como "no existe todavia".
 	 */
-	type TipoAlerta = 'fuerza_bruta_ip' | 'fuerza_bruta_cuenta' | 'multi_cuenta_ip';
+	type TipoAlerta =
+		| 'fuerza_bruta_ip'
+		| 'fuerza_bruta_cuenta'
+		| 'multi_cuenta_ip'
+		| 'ip_rotacion_cuenta'
+		| 'toma_cuenta'
+		| 'viaje_imposible'
+		| 'fuerza_bruta_cuenta_lenta'
+		| 'multi_cuenta_ip_lenta'
+		| 'ip_rotacion_cuenta_lenta';
 	type EstadoAlerta = 'pendiente' | 'revisada' | 'descartada';
 	type FiltroAlerta = 'todas' | EstadoAlerta;
+	type FiltroTipo = 'todos' | TipoAlerta;
+
+	/**
+	 * Una cuenta a la que le corresponde ver esta alerta, con su propia
+	 * lectura -- viene de `notificacion_fraude`. Reemplaza a
+	 * `cuenta_involucrada` (un objeto o null, una sola cuenta), que cambio de
+	 * forma el 2026-09-15: `multi_cuenta_ip`/`multi_cuenta_ip_lenta` le tocan
+	 * a VARIAS cuentas a la vez, no a una sola.
+	 */
+	interface CuentaAfectada {
+		id_usuario: string;
+		usuario: string;
+		fecha_lectura: string | null;
+	}
 
 	interface AlertaLogin {
 		id_alerta_fraude: string;
 		tipo_alerta: TipoAlerta;
-		/** La IP en los dos tipos de IP; el identificador intentado en fuerza_bruta_cuenta. */
+		/** La IP en los tipos por IP; el identificador intentado en los demas. */
 		clave: string;
-		/** Solo en fuerza_bruta_cuenta, y solo si el identificador es de una cuenta real. */
-		cuenta_involucrada: { id_usuario: string; usuario: string } | null;
 		/**
-		 * La evidencia, distinta por tipo: `fallos` y `ventana_segundos` en los
-		 * de fuerza bruta; `cuentas_distintas`, `ventana_segundos` e
-		 * `identificadores` (hasta 20) en multi_cuenta_ip. Es un jsonb sin
-		 * esquema, asi que cada campo se lee blindado.
+		 * Vacio en fuerza_bruta_ip (no trae lista de cuentas objetivo). Un
+		 * elemento en la mayoria de los tipos; varios en multi_cuenta_ip /
+		 * multi_cuenta_ip_lenta (una por cada cuenta real que esa IP probo).
+		 */
+		cuentas_afectadas: CuentaAfectada[];
+		/**
+		 * La evidencia, distinta por tipo -- ver `evidencia()` mas abajo para
+		 * el detalle campo por campo. Es un jsonb sin esquema, asi que cada
+		 * campo se lee blindado.
 		 */
 		detalle: Record<string, unknown>;
-		/** Cuantas veces se cruzo el umbral dentro del mismo minuto. Nace en 1. */
+		/** Cuantas veces se cruzo el umbral dentro de la misma ventana. Nace en 1. */
 		contador: number;
-		/** El minuto, truncado, en que se detecto. */
+		/** El minuto (Redis/toma_cuenta/viaje_imposible) o la hora (worker de 15 min), truncado. */
 		ventana_inicio: string;
 		estado: EstadoAlerta;
 		fecha_creacion: string;
@@ -360,8 +247,25 @@
 	const QUE_PASO: Record<TipoAlerta, string> = {
 		fuerza_bruta_ip: 'Muchos intentos fallidos desde una IP',
 		fuerza_bruta_cuenta: 'Muchos intentos fallidos contra una cuenta',
-		multi_cuenta_ip: 'Muchos correos o usuarios distintos desde una IP'
+		multi_cuenta_ip: 'Muchos correos o usuarios distintos desde una IP',
+		ip_rotacion_cuenta: 'Muchas IPs distintas contra una misma cuenta',
+		toma_cuenta: 'Login exitoso desde una IP nueva para la cuenta',
+		viaje_imposible: 'Velocidad imposible entre dos logins de la cuenta',
+		fuerza_bruta_cuenta_lenta: 'Intentos fallidos contra una cuenta, repartidos en 24h',
+		multi_cuenta_ip_lenta: 'Correos o usuarios distintos desde una IP, repartidos en 24h',
+		ip_rotacion_cuenta_lenta: 'IPs distintas contra una cuenta, repartidas en 24h'
 	};
+
+	/** Las tres senales cuya `clave` es una IP. En las otras seis, la clave es el identificador tecleado. */
+	const TIPOS_POR_IP = new Set<TipoAlerta>(['fuerza_bruta_ip', 'multi_cuenta_ip', 'multi_cuenta_ip_lenta']);
+
+	/** Las que agrupan una LISTA de valores en `detalle` (identificadores o IPs vistas). */
+	const TIPOS_CON_LISTA = new Set<TipoAlerta>([
+		'multi_cuenta_ip',
+		'multi_cuenta_ip_lenta',
+		'ip_rotacion_cuenta',
+		'ip_rotacion_cuenta_lenta'
+	]);
 
 	const FILTROS: FiltroAlerta[] = ['todas', 'pendiente', 'revisada', 'descartada'];
 
@@ -378,11 +282,31 @@
 		descartada: 'Descartada'
 	};
 
+	/** Para el select de tipo. El orden es el mismo de la tabla del profesor: Redis primero, luego Elasticsearch. */
+	const FILTROS_TIPO: FiltroTipo[] = [
+		'todos',
+		'fuerza_bruta_ip',
+		'fuerza_bruta_cuenta',
+		'multi_cuenta_ip',
+		'ip_rotacion_cuenta',
+		'toma_cuenta',
+		'viaje_imposible',
+		'fuerza_bruta_cuenta_lenta',
+		'multi_cuenta_ip_lenta',
+		'ip_rotacion_cuenta_lenta'
+	];
+
+	const NOMBRE_FILTRO_TIPO: Record<FiltroTipo, string> = {
+		todos: 'Todos los tipos',
+		...QUE_PASO
+	};
+
 	/** Cuantas por pagina. El mismo 20 que el resto de las listas del panel. */
 	const POR_PAGINA = 20;
 
 	let alertas = $state<AlertaLogin[]>([]);
 	let filtroAlertas = $state<FiltroAlerta>('todas');
+	let filtroTipoAlertas = $state<FiltroTipo>('todos');
 	let paginaAlertas = $state(1);
 	let totalPaginasAlertas = $state(0);
 	let totalAlertas = $state(0);
@@ -407,6 +331,9 @@
 	 */
 	let pedidoAlertas = 0;
 
+	/** Id de la alerta cuyo PATCH esta en vuelo, para deshabilitar sus botones y no doble-mandar. */
+	let marcandoAlerta = $state<string | null>(null);
+
 	/** Si en la pagina hay alguna IP local, para ensenar la linea que lo explica. */
 	let hayLocales = $derived(alertas.some((a) => origenEsIp(a) && esLocal(a.clave)));
 
@@ -420,6 +347,7 @@
 
 		const partes = [`pagina=${pagina}`, `limite=${POR_PAGINA}`];
 		if (filtroAlertas !== 'todas') partes.push(`estado=${filtroAlertas}`);
+		if (filtroTipoAlertas !== 'todos') partes.push(`tipo=${filtroTipoAlertas}`);
 
 		const r = await pedir<AlertasPaginadas>(`/admin/fraude/alertas-login?${partes.join('&')}`);
 
@@ -467,9 +395,55 @@
 		void cargarAlertas(1);
 	}
 
-	/** La clave es una IP en dos de los tres tipos; en el otro es un correo o un usuario. */
+	function cambiarFiltroTipo(t: FiltroTipo) {
+		if (t === filtroTipoAlertas) return;
+		filtroTipoAlertas = t;
+		void cargarAlertas(1);
+	}
+
+	/** La clave es una IP en tres de las nueve senales; en las otras seis es el identificador tecleado. */
 	function origenEsIp(a: AlertaLogin): boolean {
-		return a.tipo_alerta !== 'fuerza_bruta_cuenta';
+		return TIPOS_POR_IP.has(a.tipo_alerta);
+	}
+
+	/**
+	 * PATCH /admin/fraude/alertas-login/:id -- marca una alerta pendiente
+	 * como revisada o descartada. Solo transiciona desde pendiente (mismo
+	 * criterio que el backend): un 409 quiere decir que alguien mas (otra
+	 * pestana, otro admin) ya la movio mientras se miraba esta.
+	 */
+	async function marcarAlerta(a: AlertaLogin, estado: 'revisada' | 'descartada') {
+		marcandoAlerta = a.id_alerta_fraude;
+		const r = await pedir<AlertaLogin>(
+			`/admin/fraude/alertas-login/${a.id_alerta_fraude}`,
+			conJson('PATCH', { estado })
+		);
+		marcandoAlerta = null;
+
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+
+		if (!r.ok || !r.payload) {
+			// Un 409 (ya se movio) o un 404 (ya no existe) se leen igual que
+			// cualquier otro fallo: se avisa y se refresca la pagina actual, que
+			// es lo que hace que la alerta "vieja" desaparezca o cambie sola.
+			errorAlertas = mensajeUtil(r);
+			void cargarAlertas(paginaAlertas);
+			return;
+		}
+
+		// Reemplaza la fila en el sitio, sin recargar la pagina entera: si el
+		// filtro elegido es "pendiente", la fila ya no deberia estar en la
+		// lista visible, asi que se quita en vez de dejarla con el estado
+		// nuevo y el filtro viejo contradiciendose en pantalla.
+		if (filtroAlertas !== 'todas' && filtroAlertas !== estado) {
+			alertas = alertas.filter((x) => x.id_alerta_fraude !== a.id_alerta_fraude);
+			totalAlertas = Math.max(0, totalAlertas - 1);
+		} else {
+			alertas = alertas.map((x) => (x.id_alerta_fraude === a.id_alerta_fraude ? r.payload! : x));
+		}
 	}
 
 	/**
@@ -513,31 +487,78 @@
 	 * Lo que se midio, en una frase. Se arma aqui y no en la plantilla por lo
 	 * mismo que la linea de sincronizacion: un {#if} en medio de una frase deja
 	 * espacios sueltos antes del punto.
+	 *
+	 * Cada tipo llena su `detalle` distinto (ver "Que llena cada columna" en
+	 * `endpoints-fraude.md`); esta funcion sabe leer las nueve formas.
 	 */
 	function evidencia(a: AlertaLogin): string {
 		const d = a.detalle ?? {};
-		const ventana = duracion(d.ventana_segundos);
+		const ventana = duracion(d.ventana_segundos) || (entero(d.ventana_horas) ? `${entero(d.ventana_horas)} horas` : '');
 		const cola = ventana ? ` en ${ventana}` : '';
 
-		if (a.tipo_alerta === 'multi_cuenta_ip') {
-			const n = entero(d.cuentas_distintas);
-			if (n === null) return '--';
-			return `${n} ${n === 1 ? 'correo o usuario distinto' : 'correos o usuarios distintos'}${cola}`;
-		}
+		switch (a.tipo_alerta) {
+			case 'multi_cuenta_ip':
+			case 'multi_cuenta_ip_lenta': {
+				const n = entero(d.cuentas_distintas);
+				if (n === null) return '--';
+				return `${n} ${n === 1 ? 'correo o usuario distinto' : 'correos o usuarios distintos'}${cola}`;
+			}
 
-		const f = entero(d.fallos);
-		if (f === null) return '--';
-		return `${f} ${f === 1 ? 'intento fallido' : 'intentos fallidos'}${cola}`;
+			case 'ip_rotacion_cuenta':
+			case 'ip_rotacion_cuenta_lenta': {
+				const n = entero(d.ips_distintas);
+				if (n === null) return '--';
+				return `${n} ${n === 1 ? 'IP distinta' : 'IPs distintas'}${cola}`;
+			}
+
+			case 'toma_cuenta': {
+				const conocidas = entero(d.ips_conocidas);
+				const previos = entero(d.logins_exitosos_previos);
+				if (conocidas === null) return '--';
+				return `IP nueva para la cuenta (tenia ${conocidas} conocida${conocidas === 1 ? '' : 's'}${previos !== null ? `, ${previos} login${previos === 1 ? '' : 's'} previo${previos === 1 ? '' : 's'}` : ''})`;
+			}
+
+			case 'viaje_imposible': {
+				const km = entero(d.distancia_km);
+				const kmh = entero(d.velocidad_kmh);
+				if (km === null || kmh === null) return '--';
+				return `${km.toLocaleString('es-GT')} km en poco tiempo -- ${kmh.toLocaleString('es-GT')} km/h implicitos`;
+			}
+
+			default: {
+				const f = entero(d.fallos);
+				if (f === null) return '--';
+				return `${f} ${f === 1 ? 'intento fallido' : 'intentos fallidos'}${cola}`;
+			}
+		}
 	}
 
 	/**
-	 * Los identificadores que vio multi_cuenta_ip. El backend guarda hasta 20.
+	 * Los valores vistos en las senales que agrupan una lista: identificadores
+	 * en multi_cuenta_ip/multi_cuenta_ip_lenta, IPs en
+	 * ip_rotacion_cuenta/ip_rotacion_cuenta_lenta. El backend guarda hasta 20.
 	 * Un null se vuelve texto vacio y no la palabra "null", que en esta lista
 	 * pareceria alguien que tecleo "null".
 	 */
-	function identificadores(a: AlertaLogin): string[] {
-		const lista = a.detalle?.identificadores;
-		return Array.isArray(lista) ? lista.map((x) => (x == null ? '' : String(x))) : [];
+	function vistosEnDetalle(a: AlertaLogin): string[] {
+		const campo = a.tipo_alerta === 'ip_rotacion_cuenta' || a.tipo_alerta === 'ip_rotacion_cuenta_lenta'
+			? a.detalle?.ips
+			: a.detalle?.identificadores;
+		return Array.isArray(campo) ? campo.map((x) => (x == null ? '' : String(x))) : [];
+	}
+
+	/** El titulo de la lista de `vistosEnDetalle`, distinto si son IPs o identificadores tecleados. */
+	function tituloVistos(a: AlertaLogin): string {
+		return a.tipo_alerta === 'ip_rotacion_cuenta' || a.tipo_alerta === 'ip_rotacion_cuenta_lenta'
+			? 'IPs vistas'
+			: 'Correos o usuarios tecleados';
+	}
+
+	/** La ubicacion de `viaje_imposible`, como "Ciudad, Pais" -- ya sea la anterior o la actual. */
+	function ubicacion(valor: unknown): string {
+		if (valor == null || typeof valor !== 'object') return '--';
+		const u = valor as { pais?: unknown; ciudad?: unknown };
+		return [u.ciudad, u.pais].filter((x) => typeof x === 'string' && x.length > 0).join(', ') || '--';
 	}
 
 	/** Hasta donde se pinta un texto tecleado antes de cortarlo. */
@@ -607,234 +628,252 @@
 			case 'pendiente':
 				return 'No hay alertas pendientes.';
 			case 'revisada':
-				return 'No hay alertas revisadas. Marcarlas todavia no se puede desde aqui.';
+				return 'No hay alertas revisadas.';
 			case 'descartada':
-				return 'No hay alertas descartadas. Marcarlas todavia no se puede desde aqui.';
+				return 'No hay alertas descartadas.';
 			default:
-				return 'Ningun intento de entrada ha cruzado un limite. Se vigilan los fallos desde una IP, los fallos contra una cuenta y cuantos correos o usuarios distintos se teclean desde una IP.';
+				return 'Ningun intento de entrada ha cruzado un limite. Se vigilan nueve senales: cuatro contadores de Redis en el propio login y cinco consultas contra el historial en Elasticsearch.';
+		}
+	}
+
+	// ------------------------------------------------ manipulacion de resenas
+	/**
+	 * La segunda fuente de esta pantalla: `anillo_fraude` /
+	 * `anillo_fraude_resena` de PostgreSQL, que llena `AnillosDetectorService`
+	 * (worker cada 15 min + chequeo acotado por resena nueva) cuando A.1/A.2
+	 * encuentran un grupo dentro de la ventana de 60 dias.
+	 *
+	 * Hasta el 2026-09-18 esto convivia con un panel EN VIVO
+	 * (`GET /admin/fraude/anillos`, Neo4j puro, sin persistencia ni triage) --
+	 * Jose David lo elimino ese dia por redundante, y esta es ahora la UNICA
+	 * vista de "manipulacion de resenas" del panel, con estado
+	 * (pendiente/revisada/descartada) para que un admin la trabaje como una
+	 * cola, igual que las alertas de login. Renombrada el mismo dia de
+	 * `anillos-persistidos` a `alertas-resenas` -- ver
+	 * `backend/elementos Generales/plan pendiente/anillos-fraude-persistencia.md`.
+	 *
+	 * Sin evidencia jsonb ni notificacion a las cuentas del anillo: al reves
+	 * que en fraude de login, aqui la cuenta senalada es la SOSPECHOSA, y
+	 * avisarle le daria la oportunidad de evadir la deteccion. El detalle real
+	 * (autor/vendedor/producto/fecha/calificacion) se pide aparte, contra
+	 * Neo4j, solo cuando se despliega una fila -- `detalle-grafo` no vuelve a
+	 * correr A.1/A.2.
+	 */
+	type TipoAnillo = 'mutuo' | 'ciclo' | 'reiterado';
+	type FiltroTipoAnillo = 'todos' | TipoAnillo;
+
+	interface CuentaDeAnillo {
+		id_usuario: string;
+		usuario: string;
+	}
+
+	interface AnilloPersistido {
+		id_anillo_fraude: string;
+		tipo: TipoAnillo;
+		/** Los ids de cuenta ordenados y unidos con "-", ej. "9-10". Sin el tipo: ver el .sql para el porque. */
+		clave: string;
+		cuentas: CuentaDeAnillo[];
+		/** Los ids de resena que son la evidencia -- los mismos en Postgres y en Neo4j. */
+		resenas: number[];
+		estado: EstadoAlerta;
+		fecha_creacion: string;
+		ultima_vez_confirmado_activo: string;
+		fecha_actualizacion: string;
+	}
+
+	interface AnillosPersistidosPaginados {
+		anillos: AnilloPersistido[];
+		pagina: number;
+		limite: number;
+		total_anillos: number;
+		total_paginas: number;
+	}
+
+	/** Una resena de `GET .../:id/detalle-grafo`, contra Neo4j en vivo. */
+	interface ResenaDetalleAnillo {
+		id_resena: number;
+		autor: string;
+		correo_autor: string;
+		vendedor: string;
+		correo_vendedor: string;
+		producto: string;
+		calificacion: number;
+		fecha: string;
+	}
+
+	interface DetalleAnilloGrafo {
+		id_anillo_fraude: string;
+		tipo: TipoAnillo;
+		clave: string;
+		resenas: ResenaDetalleAnillo[];
+	}
+
+	const NOMBRE_TIPO_ANILLO: Record<TipoAnillo, string> = {
+		mutuo: 'Se califican entre si',
+		ciclo: 'Ciclo de calificaciones',
+		reiterado: 'Reiteracion sobre los mismos productos'
+	};
+
+	const FILTROS_TIPO_ANILLO: FiltroTipoAnillo[] = ['todos', 'mutuo', 'ciclo', 'reiterado'];
+	const NOMBRE_FILTRO_TIPO_ANILLO: Record<FiltroTipoAnillo, string> = {
+		todos: 'Todos los tipos',
+		...NOMBRE_TIPO_ANILLO
+	};
+
+	let anillosPersistidos = $state<AnilloPersistido[]>([]);
+	let filtroEstadoAnillosP = $state<FiltroAlerta>('pendiente');
+	let filtroTipoAnillosP = $state<FiltroTipoAnillo>('todos');
+	let paginaAnillosP = $state(1);
+	let totalPaginasAnillosP = $state(0);
+	let totalAnillosP = $state(0);
+	let filtroVistoAnillosP = $state<FiltroAlerta>('pendiente');
+	let cargandoAnillosP = $state(true);
+	let errorAnillosP = $state('');
+	let pedidoAnillosP = 0;
+	let marcandoAnilloP = $state<string | null>(null);
+
+	/** Que fila tiene el detalle-grafo desplegado. Una a la vez. */
+	let abiertoAnilloP = $state<string | null>(null);
+	/** Cache por id: null mientras carga, el detalle una vez llega. No se vuelve a pedir al cerrar y reabrir. */
+	let detalleAnilloP = $state<Record<string, DetalleAnilloGrafo | 'cargando' | 'error'>>({});
+
+	async function cargarAnillosPersistidos(pagina: number) {
+		const este = ++pedidoAnillosP;
+		paginaAnillosP = pagina;
+		cargandoAnillosP = true;
+		errorAnillosP = '';
+
+		const partes = [`pagina=${pagina}`, `limite=${POR_PAGINA}`];
+		if (filtroEstadoAnillosP !== 'todas') partes.push(`estado=${filtroEstadoAnillosP}`);
+		if (filtroTipoAnillosP !== 'todos') partes.push(`tipo=${filtroTipoAnillosP}`);
+
+		const r = await pedir<AnillosPersistidosPaginados>(
+			`/admin/fraude/alertas-resenas?${partes.join('&')}`
+		);
+
+		if (este !== pedidoAnillosP) return;
+		cargandoAnillosP = false;
+
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+
+		if (!r.ok || !r.payload) {
+			errorAnillosP = mensajeUtil(r);
+			anillosPersistidos = [];
+			return;
+		}
+
+		const p = r.payload;
+		const lista = p.anillos ?? [];
+
+		if (lista.length === 0 && p.total_paginas > 0 && pagina > p.total_paginas) {
+			void cargarAnillosPersistidos(p.total_paginas);
+			return;
+		}
+
+		anillosPersistidos = lista;
+		filtroVistoAnillosP = filtroEstadoAnillosP;
+		paginaAnillosP = p.pagina;
+		totalPaginasAnillosP = p.total_paginas;
+		totalAnillosP = p.total_anillos;
+	}
+
+	function cambiarFiltroEstadoAnillosP(f: FiltroAlerta) {
+		if (f === filtroEstadoAnillosP) return;
+		filtroEstadoAnillosP = f;
+		void cargarAnillosPersistidos(1);
+	}
+
+	function cambiarFiltroTipoAnillosP(t: FiltroTipoAnillo) {
+		if (t === filtroTipoAnillosP) return;
+		filtroTipoAnillosP = t;
+		void cargarAnillosPersistidos(1);
+	}
+
+	async function marcarAnilloPersistido(a: AnilloPersistido, estado: 'revisada' | 'descartada') {
+		marcandoAnilloP = a.id_anillo_fraude;
+		const r = await pedir<AnilloPersistido>(
+			`/admin/fraude/alertas-resenas/${a.id_anillo_fraude}`,
+			conJson('PATCH', { estado })
+		);
+		marcandoAnilloP = null;
+
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+
+		if (!r.ok || !r.payload) {
+			errorAnillosP = mensajeUtil(r);
+			void cargarAnillosPersistidos(paginaAnillosP);
+			return;
+		}
+
+		if (filtroEstadoAnillosP !== 'todas' && filtroEstadoAnillosP !== estado) {
+			anillosPersistidos = anillosPersistidos.filter((x) => x.id_anillo_fraude !== a.id_anillo_fraude);
+			totalAnillosP = Math.max(0, totalAnillosP - 1);
+		} else {
+			anillosPersistidos = anillosPersistidos.map((x) =>
+				x.id_anillo_fraude === a.id_anillo_fraude ? r.payload! : x
+			);
+		}
+	}
+
+	/**
+	 * Despliega/cierra el detalle real de un anillo. Lo pide contra Neo4j
+	 * SOLO la primera vez que se abre (`detalle-grafo` no vuelve a correr
+	 * A.1/A.2, pero sigue siendo una consulta al grafo, y pedirla en cada
+	 * clic de "cerrar y volver a abrir" seria gratuito).
+	 */
+	async function alternarDetalleAnilloP(a: AnilloPersistido) {
+		if (abiertoAnilloP === a.id_anillo_fraude) {
+			abiertoAnilloP = null;
+			return;
+		}
+		abiertoAnilloP = a.id_anillo_fraude;
+
+		if (detalleAnilloP[a.id_anillo_fraude]) return;
+
+		detalleAnilloP = { ...detalleAnilloP, [a.id_anillo_fraude]: 'cargando' };
+		const r = await pedir<DetalleAnilloGrafo>(
+			`/admin/fraude/alertas-resenas/${a.id_anillo_fraude}/detalle-grafo`
+		);
+
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+
+		detalleAnilloP = {
+			...detalleAnilloP,
+			[a.id_anillo_fraude]: r.ok && r.payload ? r.payload : 'error'
+		};
+	}
+
+	/** El texto de la etiqueta del titulo, igual que `etiquetaAlertas`. */
+	function etiquetaAnillosP(): string {
+		if (filtroVistoAnillosP === 'todas') {
+			return `${totalAnillosP} ${totalAnillosP === 1 ? 'anillo' : 'anillos'}`;
+		}
+		const nombre = NOMBRE_FILTRO[filtroVistoAnillosP].toLowerCase();
+		return `${totalAnillosP} ${totalAnillosP === 1 ? nombre.slice(0, -1) : nombre}`;
+	}
+
+	function textoVacioAnillosP(): string {
+		switch (filtroVistoAnillosP) {
+			case 'pendiente':
+				return 'No hay anillos pendientes de revisar.';
+			case 'revisada':
+				return 'No hay anillos revisados.';
+			case 'descartada':
+				return 'No hay anillos descartados.';
+			default:
+				return 'Ningun anillo mutuo, ciclo o reiterado sigue activo en la ventana de 60 dias.';
 		}
 	}
 </script>
-
-<section class="fraude">
-	<div class="titulo">
-		<h2>Manipulacion de resenas</h2>
-		{#if !cargando && !error && !grafoVacio}
-			<span class="etiqueta" class:limpio={anillos.length === 0}>
-				{anillos.length}
-				{anillos.length === 1 ? 'grupo senalado' : 'grupos senalados'}
-			</span>
-		{/if}
-		{#if !cargando}
-			<div class="acciones">
-				<button type="button" onclick={cargar}>Volver a analizar</button>
-			</div>
-		{/if}
-	</div>
-
-	<p class="intro">
-		Grupos de cuentas cuyo patron de calificaciones no se explica por el uso normal de la
-		tienda. Se calcula recorriendo el grafo de relaciones entre cuentas, resenas y productos,
-		no consultando una tabla.
-	</p>
-
-	<!--
-		De cuando son los datos que se acaban de analizar.
-
-		Este renglon es la respuesta a algo que este proyecto tuvo escrito como
-		pendiente durante dias: el grafo se llena por una cola, y hasta ahora el
-		panel ensenaba un analisis correcto sobre datos que podian estar
-		incompletos SIN DECIRLO. Un panel que falla se arregla; uno que calla se
-		cree.
-
-		Solo aparece con el analisis ya pintado. Antes de eso no hay nada de que
-		decir la antiguedad, y ponerlo arriba de un "Analizando..." solo agrega
-		ruido.
-	-->
-	{#if conciliacion && !cargando && !error}
-		<p class="sincro" class:atrasado={!conciliacion.cuadra}>
-			{#if conciliacion.cuadra}
-				Grafo al dia con PostgreSQL, sincronizado {hace(conciliacion.ultima_sincronizacion)}.
-			{:else}
-				<!-- La frase se escribe ENTERA en cada rama en vez de armarla con un
-				     {#if} en medio. Con el {#if} intercalado, Svelte deja el salto de
-				     linea como espacio y el punto quedaba separado: "con PostgreSQL ."
-				     Se vio en pantalla, no leyendo el codigo. Repetir seis palabras es
-				     mas barato que pelearse con los espacios de la plantilla. -->
-				<strong>Este analisis puede estar incompleto.</strong>
-				{#if conciliacion.cola && conciliacion.cola.pendientes > 0}
-					El grafo no cuadra con PostgreSQL y hay {conciliacion.cola.pendientes}
-					{conciliacion.cola.pendientes === 1 ? 'cambio' : 'cambios'} sin aplicar.
-				{:else}
-					El grafo no cuadra con PostgreSQL.
-				{/if}
-				{#if conciliacion.sugerencia}
-					{conciliacion.sugerencia}
-				{/if}
-			{/if}
-			<!-- Los apartados se dicen SIEMPRE, cuadre o no. Un evento que fallo
-			     cinco veces no se va a reintentar solo, asi que si nadie lo mira
-			     se queda ahi para siempre: es la unica parte de este mecanismo
-			     que necesita una persona. -->
-			{#if conciliacion.cola && conciliacion.cola.apartados > 0}
-				<strong>
-					Hay {conciliacion.cola.apartados}
-					{conciliacion.cola.apartados === 1 ? 'cambio' : 'cambios'} que fallaron y ya no se
-					reintentan.
-				</strong>
-			{/if}
-		</p>
-	{/if}
-
-	{#if cargando}
-		<p class="gris">Analizando el grafo de resenas...</p>
-	{:else if error}
-		<div class="fallo" role="alert">
-			<p>{error}</p>
-			<button type="button" onclick={cargar}>Reintentar</button>
-		</div>
-	{:else if grafoVacio}
-		<!-- El OTRO vacio: la ruta contesto bien, pero no habia grafo que
-		     recorrer. Sin esta rama, el bloque de abajo diria "se recorrieron 0
-		     cuentas y 0 resenas sin encontrar nada", que es una auditoria que
-		     nunca ocurrio presentada como una auditoria limpia. -->
-		<div class="pendiente">
-			<h3>El grafo esta vacio: no se analizo nada</h3>
-			<p>
-				La consulta corrio y contesto bien, pero Neo4j no tiene ni una cuenta ni una resena
-				que recorrer. <strong>Esto no quiere decir que no haya fraude</strong>: quiere decir
-				que todavia no se ha mirado.
-			</p>
-			<p class="gris">
-				El grafo es una proyeccion de PostgreSQL y se carga con
-				<code>bash etl/cargar_grafo.sh</code> (desde Git Bash). Se corre solo tambien al
-				arrancar con <code>.\arrancar.ps1</code>.
-			</p>
-			<button type="button" onclick={cargar}>Volver a analizar</button>
-		</div>
-	{:else if anillos.length === 0}
-		<!-- El vacio con su denominador. Ver la nota larga de arriba. -->
-		<div class="limpio-caja">
-			<h3>No se encontro ningun patron anomalo</h3>
-			{#if analizado}
-				<p>
-					Se recorrieron <strong>{analizado.cuentas}</strong> cuentas,
-					<strong>{analizado.resenas}</strong> resenas y
-					<strong>{analizado.relaciones}</strong> relaciones del grafo sin encontrar ciclos de
-					calificacion, pares mutuos ni reiteracion sobre los mismos productos.
-				</p>
-				<p class="gris">
-					Un resultado vacio aqui significa que el analisis corrio y no hallo nada, no que
-					falten datos.
-				</p>
-			{:else}
-				<p class="gris">El analisis corrio y no devolvio ningun grupo.</p>
-			{/if}
-		</div>
-	{:else}
-		<ul class="lista">
-			<!-- La clave lleva el indice ademas del id, y no es paranoia: el id
-			     de un grupo `direccion` se arma solo con los ids de sus cuentas,
-			     asi que dos direcciones distintas habitadas por LAS MISMAS dos
-			     cuentas producen el mismo id dos veces. Pasa de verdad -- la
-			     misma casa esta cargada varias veces escrita distinto, lo
-			     documenta etl/extraer_grafo.sql -- y una clave repetida en un
-			     {#each} de Svelte 5 no degrada la lista: lanza
-			     `each_key_duplicate` y revienta el panel entero. -->
-			{#each anillos as anillo, i (anillo.id + '#' + i)}
-				{@const clave = anillo.id + '#' + i}
-				{@const desplegada = abierta === clave}
-				<li class="anillo" class:desplegada>
-					<button type="button" class="cabeza" onclick={() => alternar(clave)}>
-						<span class="tipo tipo-{anillo.tipo}">{NOMBRE_TIPO[anillo.tipo]}</span>
-
-						<span class="cuentas-resumen">
-							{#each anillo.cuentas as cuenta, i (cuenta.id_usuario)}
-								<span class="cuenta">{cuenta.usuario}</span>{#if i < anillo.cuentas.length - 1}<span
-										class="flecha">-&gt;</span
-									>{/if}
-							{/each}
-							{#if anillo.tipo === 'ciclo'}
-								<span class="flecha">-&gt;</span>
-								<span class="cuenta cierra">{anillo.cuentas[0].usuario}</span>
-							{/if}
-						</span>
-
-						<span class="saltos">{anillo.saltos} saltos</span>
-						<span class="chevron" aria-hidden="true">{desplegada ? '-' : '+'}</span>
-					</button>
-
-					{#if desplegada}
-						<div class="detalle">
-							<p class="porque">{EXPLICACION_TIPO[anillo.tipo]}</p>
-
-							<div class="columnas">
-								<div>
-									<h4>Cuentas ({anillo.cuentas.length})</h4>
-									<ul class="simple">
-										{#each anillo.cuentas as cuenta (cuenta.id_usuario)}
-											<li>
-												<span class="fuerte">{cuenta.usuario}</span>
-												<span class="gris">{nombreCompleto(cuenta)}</span>
-												<span class="gris correo">{cuenta.correo_electronico}</span>
-											</li>
-										{/each}
-									</ul>
-								</div>
-
-								<div>
-									<h4>Productos involucrados ({anillo.productos.length})</h4>
-									<ul class="simple">
-										{#each anillo.productos as producto (producto.id_producto)}
-											<li>
-												<a href="/producto/{producto.id_producto}">{producto.nombre}</a>
-											</li>
-										{/each}
-									</ul>
-								</div>
-							</div>
-
-							{#if anillo.senales.length > 0}
-								<h4>Por que se senalo</h4>
-								<ul class="senales">
-									{#each anillo.senales as senal}
-										<li>{senal}</li>
-									{/each}
-								</ul>
-							{/if}
-
-							<h4>Las resenas del patron ({anillo.resenas.length})</h4>
-							<div class="tabla">
-								<table>
-									<thead>
-										<tr>
-											<th>Quien califica</th>
-											<th>A quien</th>
-											<th>Producto</th>
-											<th>Nota</th>
-											<th>Cuando</th>
-										</tr>
-									</thead>
-									<tbody>
-										{#each anillo.resenas as resena (resena.id_resena)}
-											<tr>
-												<td class="fuerte">{resena.autor}</td>
-												<td>{resena.vendedor}</td>
-												<td>{resena.producto}</td>
-												<td class="nota">{resena.calificacion}</td>
-												<td class="gris">{fecha(resena.fecha)}</td>
-											</tr>
-										{/each}
-									</tbody>
-								</table>
-							</div>
-						</div>
-					{/if}
-				</li>
-			{/each}
-		</ul>
-	{/if}
-</section>
 
 <!--
 	Intentos de entrada sospechosos. Tarjeta aparte, con su titulo y su carga:
@@ -868,23 +907,38 @@
 	</div>
 
 	<p class="intro">
-		Tres contadores vigilan las entradas al portal: dos cuentan fallos y el otro cuenta los correos
-		o usuarios distintos que se teclean desde una IP, salgan bien o mal. Cuando uno cruza su limite
-		queda aqui una alerta para que alguien la mire. Nadie se bloquea solo: esto avisa, no frena.
+		Nueve senales vigilan las entradas al portal: cuatro contadores de Redis en el propio login y
+		cinco consultas contra el historial completo en Elasticsearch (toma de cuenta, viaje imposible
+		y tres patrones repartidos en 24 horas). Cuando una cruza su limite queda aqui una alerta para
+		que alguien la mire. Nadie se bloquea solo: esto avisa, no frena.
 	</p>
 
-	<div class="pestanas" role="group" aria-label="Filtrar por estado">
-		{#each FILTROS as f (f)}
-			<button
-				type="button"
-				class="pestana"
-				class:elegida={filtroAlertas === f}
-				aria-pressed={filtroAlertas === f}
-				onclick={() => cambiarFiltro(f)}
+	<div class="filtros-alertas">
+		<div class="pestanas" role="group" aria-label="Filtrar por estado">
+			{#each FILTROS as f (f)}
+				<button
+					type="button"
+					class="pestana"
+					class:elegida={filtroAlertas === f}
+					aria-pressed={filtroAlertas === f}
+					onclick={() => cambiarFiltro(f)}
+				>
+					{NOMBRE_FILTRO[f]}
+				</button>
+			{/each}
+		</div>
+
+		<label class="filtro-tipo">
+			<span class="gris">Tipo</span>
+			<select
+				value={filtroTipoAlertas}
+				onchange={(e) => cambiarFiltroTipo(e.currentTarget.value as FiltroTipo)}
 			>
-				{NOMBRE_FILTRO[f]}
-			</button>
-		{/each}
+				{#each FILTROS_TIPO as t (t)}
+					<option value={t}>{NOMBRE_FILTRO_TIPO[t]}</option>
+				{/each}
+			</select>
+		</label>
 	</div>
 
 	{#if hayLocales}
@@ -910,8 +964,8 @@
 		     vaciar la lista: vaciarla hace saltar la pagina entera en cada clic. -->
 		<ul class="lista-alertas" class:esperando={cargandoAlertas} aria-busy={cargandoAlertas}>
 			{#each alertas as a (a.id_alerta_fraude)}
-				{@const ids = identificadores(a)}
-				{@const vistas = entero(a.detalle?.cuentas_distintas)}
+				{@const ids = vistosEnDetalle(a)}
+				{@const vistas = entero(a.detalle?.cuentas_distintas ?? a.detalle?.ips_distintas)}
 				{@const clave = tecleado(a.clave)}
 				<li class="alerta">
 					<div class="alerta-cabeza">
@@ -929,16 +983,33 @@
 								{/if}
 							</dd>
 						</div>
-						{#if a.cuenta_involucrada}
+						{#if a.cuentas_afectadas.length > 0}
 							<div>
-								<dt>Cuenta real</dt>
-								<dd class="clave">{a.cuenta_involucrada.usuario}</dd>
+								<dt>{a.cuentas_afectadas.length === 1 ? 'Cuenta afectada' : 'Cuentas afectadas'}</dt>
+								<dd class="afectadas">
+									{#each a.cuentas_afectadas as c (c.id_usuario)}
+										<span class="clave afectada" title={c.fecha_lectura ? `Leida ${fecha(c.fecha_lectura)}` : 'No leida por esta cuenta'}>
+											{c.usuario}
+											<span class="punto-lectura" class:leida={c.fecha_lectura !== null}></span>
+										</span>
+									{/each}
+								</dd>
 							</div>
 						{/if}
 						<div>
 							<dt>Lo que se vio</dt>
 							<dd>{evidencia(a)}</dd>
 						</div>
+						{#if a.tipo_alerta === 'viaje_imposible'}
+							<div>
+								<dt>De</dt>
+								<dd>{ubicacion(a.detalle?.ubicacion_anterior)}</dd>
+							</div>
+							<div>
+								<dt>A</dt>
+								<dd>{ubicacion(a.detalle?.ubicacion_actual)}</dd>
+							</div>
+						{/if}
 						<div>
 							<dt>Veces</dt>
 							<dd>{veces(a)}</dd>
@@ -952,7 +1023,7 @@
 					{#if ids.length > 0}
 						<div class="probadas">
 							<h4>
-								Correos o usuarios tecleados{vistas !== null && vistas > ids.length
+								{tituloVistos(a)}{vistas !== null && vistas > ids.length
 									? ` (se ven ${ids.length} de ${vistas})`
 									: ''}
 							</h4>
@@ -967,6 +1038,27 @@
 									<li class="probada" title={t.titulo}>{t.texto}</li>
 								{/each}
 							</ul>
+						</div>
+					{/if}
+
+					{#if a.estado === 'pendiente'}
+						<div class="triage">
+							<button
+								type="button"
+								class="revisar"
+								disabled={marcandoAlerta === a.id_alerta_fraude}
+								onclick={() => marcarAlerta(a, 'revisada')}
+							>
+								Marcar revisada
+							</button>
+							<button
+								type="button"
+								class="descartar"
+								disabled={marcandoAlerta === a.id_alerta_fraude}
+								onclick={() => marcarAlerta(a, 'descartada')}
+							>
+								Descartar
+							</button>
 						</div>
 					{/if}
 				</li>
@@ -994,6 +1086,241 @@
 					type="button"
 					onclick={() => cargarAlertas(paginaAlertas + 1)}
 					disabled={paginaAlertas >= totalPaginasAlertas || cargandoAlertas}
+				>
+					Siguiente
+				</button>
+			</nav>
+		{/if}
+	{/if}
+</section>
+
+<!--
+	Manipulacion de resenas: los anillos mutuo/ciclo/reiterado que detecto y
+	guardo AnillosDetectorService en anillo_fraude, con estado para que un
+	admin los trabaje como cola. Ver el bloque "manipulacion de resenas" del
+	script para el porque del panel EN VIVO que este reemplazo el 2026-09-18.
+-->
+<section class="fraude" aria-labelledby="titulo-anillos-p">
+	<div class="titulo">
+		<h2 id="titulo-anillos-p">Manipulacion de resenas</h2>
+		{#if !errorAnillosP && !(cargandoAnillosP && anillosPersistidos.length === 0)}
+			<span
+				class="etiqueta"
+				class:limpio={totalAnillosP === 0 ||
+					filtroVistoAnillosP === 'revisada' ||
+					filtroVistoAnillosP === 'descartada'}
+			>
+				{etiquetaAnillosP()}
+			</span>
+		{/if}
+		<div class="acciones">
+			<button
+				type="button"
+				onclick={() => cargarAnillosPersistidos(paginaAnillosP)}
+				disabled={cargandoAnillosP}
+			>
+				Volver a mirar
+			</button>
+		</div>
+	</div>
+
+	<p class="intro">
+		Grupos de cuentas cuyo patron de calificaciones no se explica por el uso normal de la
+		tienda: se califican entre si, en ciclo, o de forma reiterada sobre los mismos productos.
+		Cada 15 minutos, y de inmediato tras cada resena nueva, un worker recorre el grafo de
+		relaciones entre cuentas, resenas y productos sobre una ventana de 60 dias y guarda lo que
+		encuentra, con estado propio para que un admin lo trabaje como una cola. Cuentas que
+		comparten direccion todavia no se detecta.
+	</p>
+
+	<!--
+		De cuando esta al dia el grafo que alimenta esta deteccion. Existe por
+		una razon concreta que este proyecto tuvo escrito como pendiente durante
+		dias: el grafo se llena por una cola, y un panel que no lo dice ensena un
+		analisis correcto sobre datos que podian estar incompletos SIN AVISAR.
+	-->
+	{#if conciliacion}
+		<p class="sincro" class:atrasado={!conciliacion.cuadra}>
+			{#if conciliacion.cuadra}
+				Grafo al dia con PostgreSQL, sincronizado {hace(conciliacion.ultima_sincronizacion)}.
+			{:else}
+				<strong>Esta lista puede estar incompleta.</strong>
+				{#if conciliacion.cola && conciliacion.cola.pendientes > 0}
+					El grafo no cuadra con PostgreSQL y hay {conciliacion.cola.pendientes}
+					{conciliacion.cola.pendientes === 1 ? 'cambio' : 'cambios'} sin aplicar.
+				{:else}
+					El grafo no cuadra con PostgreSQL.
+				{/if}
+				{#if conciliacion.sugerencia}
+					{conciliacion.sugerencia}
+				{/if}
+			{/if}
+			{#if conciliacion.cola && conciliacion.cola.apartados > 0}
+				<strong>
+					Hay {conciliacion.cola.apartados}
+					{conciliacion.cola.apartados === 1 ? 'cambio' : 'cambios'} que fallaron y ya no se
+					reintentan.
+				</strong>
+			{/if}
+		</p>
+	{/if}
+
+	<div class="filtros-alertas">
+		<div class="pestanas" role="group" aria-label="Filtrar anillos por estado">
+			{#each FILTROS as f (f)}
+				<button
+					type="button"
+					class="pestana"
+					class:elegida={filtroEstadoAnillosP === f}
+					aria-pressed={filtroEstadoAnillosP === f}
+					onclick={() => cambiarFiltroEstadoAnillosP(f)}
+				>
+					{NOMBRE_FILTRO[f]}
+				</button>
+			{/each}
+		</div>
+
+		<label class="filtro-tipo">
+			<span class="gris">Tipo</span>
+			<select
+				value={filtroTipoAnillosP}
+				onchange={(e) => cambiarFiltroTipoAnillosP(e.currentTarget.value as FiltroTipoAnillo)}
+			>
+				{#each FILTROS_TIPO_ANILLO as t (t)}
+					<option value={t}>{NOMBRE_FILTRO_TIPO_ANILLO[t]}</option>
+				{/each}
+			</select>
+		</label>
+	</div>
+
+	{#if errorAnillosP}
+		<div class="fallo" role="alert">
+			<p>{errorAnillosP}</p>
+			<button type="button" onclick={() => cargarAnillosPersistidos(paginaAnillosP)}>
+				Reintentar
+			</button>
+		</div>
+	{:else if cargandoAnillosP && anillosPersistidos.length === 0}
+		<p class="gris">Buscando anillos guardados...</p>
+	{:else if anillosPersistidos.length === 0}
+		<div class="limpio-caja">
+			<p>{textoVacioAnillosP()}</p>
+		</div>
+	{:else}
+		<ul class="lista-alertas" class:esperando={cargandoAnillosP} aria-busy={cargandoAnillosP}>
+			{#each anillosPersistidos as a (a.id_anillo_fraude)}
+				{@const detalle = detalleAnilloP[a.id_anillo_fraude]}
+				{@const desplegado = abiertoAnilloP === a.id_anillo_fraude}
+				<li class="alerta">
+					<div class="alerta-cabeza">
+						<span class="tipo tipo-{a.tipo}">{NOMBRE_TIPO_ANILLO[a.tipo]}</span>
+						<span class="estado estado-{a.estado}">{NOMBRE_ESTADO[a.estado] ?? a.estado}</span>
+					</div>
+
+					<dl class="datos">
+						<div>
+							<dt>Cuentas</dt>
+							<dd class="afectadas">
+								{#each a.cuentas as c (c.id_usuario)}
+									<span class="clave">{c.usuario}</span>
+								{/each}
+							</dd>
+						</div>
+						<div>
+							<dt>Resenas involucradas</dt>
+							<dd>{a.resenas.length}</dd>
+						</div>
+						<div>
+							<dt>Visto por ultima vez</dt>
+							<dd>{fecha(a.ultima_vez_confirmado_activo)}</dd>
+						</div>
+						<div>
+							<dt>Detectado</dt>
+							<dd>{fecha(a.fecha_creacion)}</dd>
+						</div>
+					</dl>
+
+					<div class="triage">
+						<button type="button" class="revisar" onclick={() => alternarDetalleAnilloP(a)}>
+							{desplegado ? 'Ocultar detalle' : 'Ver detalle real'}
+						</button>
+						{#if a.estado === 'pendiente'}
+							<button
+								type="button"
+								class="revisar"
+								disabled={marcandoAnilloP === a.id_anillo_fraude}
+								onclick={() => marcarAnilloPersistido(a, 'revisada')}
+							>
+								Marcar revisado
+							</button>
+							<button
+								type="button"
+								class="descartar"
+								disabled={marcandoAnilloP === a.id_anillo_fraude}
+								onclick={() => marcarAnilloPersistido(a, 'descartada')}
+							>
+								Descartar
+							</button>
+						{/if}
+					</div>
+
+					{#if desplegado}
+						<div class="detalle">
+							{#if detalle === 'cargando' || detalle === undefined}
+								<p class="gris">Consultando el grafo...</p>
+							{:else if detalle === 'error'}
+								<p class="gris">No se pudo traer el detalle del grafo.</p>
+							{:else}
+								<div class="tabla">
+									<table>
+										<thead>
+											<tr>
+												<th>Quien califica</th>
+												<th>A quien</th>
+												<th>Producto</th>
+												<th>Nota</th>
+												<th>Cuando</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each detalle.resenas as resena (resena.id_resena)}
+												<tr>
+													<td class="fuerte" title={resena.correo_autor}>{resena.autor}</td>
+													<td title={resena.correo_vendedor}>{resena.vendedor}</td>
+													<td>{resena.producto}</td>
+													<td class="nota">{resena.calificacion}</td>
+													<td class="gris">{fecha(resena.fecha)}</td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							{/if}
+						</div>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+
+		{#if totalPaginasAnillosP > 1}
+			<nav class="paginacion" aria-label="Paginas de anillos guardados">
+				<button
+					type="button"
+					onclick={() => cargarAnillosPersistidos(paginaAnillosP - 1)}
+					disabled={paginaAnillosP <= 1 || cargandoAnillosP}
+				>
+					Anterior
+				</button>
+
+				<span class="cuantas">
+					Pagina {paginaAnillosP} de {totalPaginasAnillosP}
+					<span class="menor">({etiquetaAnillosP()})</span>
+				</span>
+
+				<button
+					type="button"
+					onclick={() => cargarAnillosPersistidos(paginaAnillosP + 1)}
+					disabled={paginaAnillosP >= totalPaginasAnillosP || cargandoAnillosP}
 				>
 					Siguiente
 				</button>
@@ -1047,7 +1374,6 @@
 	}
 
 	.acciones button,
-	.pendiente button,
 	.fallo button {
 		padding: 8px 16px;
 		font-family: inherit;
@@ -1062,8 +1388,7 @@
 			color var(--t);
 	}
 
-	.acciones button:hover,
-	.pendiente button:hover {
+	.acciones button:hover {
 		border-color: var(--indigo);
 		color: var(--indigo);
 	}
@@ -1105,16 +1430,8 @@
 		color: var(--tinta);
 	}
 
-	code {
-		padding: 1px 6px;
-		font-size: 0.88em;
-		background: var(--panel);
-		border-radius: 4px;
-	}
-
 	/* -- estados que no son la lista -- */
 
-	.pendiente,
 	.limpio-caja {
 		padding: 22px 24px;
 		background: var(--panel);
@@ -1122,21 +1439,10 @@
 		border-radius: var(--r2);
 	}
 
-	.pendiente h3,
-	.limpio-caja h3 {
-		font-size: var(--f-md);
-		margin-bottom: 8px;
-	}
-
-	.pendiente p,
 	.limpio-caja p {
 		max-width: 620px;
 		margin-bottom: 10px;
 		font-size: var(--f-base);
-	}
-
-	.pendiente button {
-		margin-top: 6px;
 	}
 
 	.fallo {
@@ -1152,47 +1458,7 @@
 		border-radius: var(--r);
 	}
 
-	/* -- la lista de anillos -- */
-
-	.lista {
-		list-style: none;
-		display: flex;
-		flex-direction: column;
-		gap: var(--e3);
-	}
-
-	.anillo {
-		border: 1px solid var(--linea);
-		border-radius: var(--r2);
-		overflow: hidden;
-	}
-
-	.anillo.desplegada {
-		border-color: var(--indigo);
-	}
-
-	/* La cabecera entera es el boton: el area pulsable es la fila completa y
-	   no solo el signo de la derecha. Un objetivo de 12 pixeles al borde de la
-	   tarjeta se falla mas de lo que se acierta en un telefono. */
-	.cabeza {
-		display: flex;
-		align-items: center;
-		gap: var(--e3);
-		flex-wrap: wrap;
-		width: 100%;
-		padding: 14px 18px;
-		font-family: inherit;
-		font-size: var(--f-base);
-		text-align: left;
-		color: var(--tinta);
-		background: none;
-		border: 0;
-		cursor: pointer;
-	}
-
-	.cabeza:hover {
-		background: var(--panel);
-	}
+	/* -- el tipo de anillo, y el detalle desplegado de una fila -- */
 
 	.tipo {
 		padding: 3px 10px;
@@ -1208,119 +1474,15 @@
 		border: 1px solid var(--rojo);
 	}
 
-	.tipo-mutuo,
-	.tipo-direccion {
+	.tipo-mutuo {
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border: 1px solid var(--indigo);
 	}
 
-	.cuentas-resumen {
-		display: flex;
-		align-items: center;
-		gap: var(--e1);
-		flex-wrap: wrap;
-	}
-
-	.cuenta {
-		font-weight: 500;
-	}
-
-	/* La cuenta repetida que cierra el ciclo. Se pinta distinta para que se
-	   lea como "vuelve a la primera" y no como una cuarta cuenta. */
-	.cuenta.cierra {
-		color: var(--gris);
-	}
-
-	.flecha {
-		color: var(--gris-2);
-	}
-
-	.saltos {
-		margin-left: auto;
-		font-size: var(--f-sm);
-		color: var(--gris);
-		white-space: nowrap;
-	}
-
-	.chevron {
-		width: 18px;
-		text-align: center;
-		color: var(--gris);
-	}
-
-	/* -- el detalle desplegado -- */
-
 	.detalle {
 		padding: 4px 18px 20px;
 		border-top: 1px solid var(--linea);
-	}
-
-	.porque {
-		max-width: 680px;
-		margin: 16px 0 20px;
-		font-size: var(--f-base);
-		color: var(--gris);
-	}
-
-	.detalle h4 {
-		font-size: var(--f-ms);
-		margin: 18px 0 8px;
-		color: var(--tinta);
-	}
-
-	.columnas {
-		display: grid;
-		grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-		gap: var(--e4) var(--e5);
-	}
-
-	.columnas h4 {
-		margin-top: 0;
-	}
-
-	ul.simple {
-		list-style: none;
-		display: flex;
-		flex-direction: column;
-		gap: var(--e2);
-		font-size: var(--f-base);
-	}
-
-	ul.simple li {
-		display: flex;
-		flex-direction: column;
-		gap: var(--e1);
-	}
-
-	.correo {
-		font-size: var(--f-sm);
-		overflow-wrap: anywhere;
-	}
-
-	ul.simple a {
-		color: var(--indigo);
-	}
-
-	ul.senales {
-		list-style: none;
-		display: flex;
-		flex-direction: column;
-		gap: var(--e1);
-		font-size: var(--f-base);
-	}
-
-	ul.senales li {
-		padding-left: 16px;
-		position: relative;
-		color: var(--texto);
-	}
-
-	ul.senales li::before {
-		content: '-';
-		position: absolute;
-		left: 0;
-		color: var(--gris-2);
 	}
 
 	/* La tabla se desborda en horizontal DENTRO de su caja, y nunca empuja el
@@ -1383,6 +1545,32 @@
 		background: var(--indigo-cl);
 		border-color: var(--indigo);
 		color: var(--indigo);
+	}
+
+	.filtros-alertas {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		flex-wrap: wrap;
+		gap: var(--e3);
+	}
+
+	.filtro-tipo {
+		display: flex;
+		align-items: center;
+		gap: var(--e2);
+		margin-bottom: var(--e4);
+		font-size: var(--f-ms);
+	}
+
+	.filtro-tipo select {
+		padding: 0.3rem 0.5rem;
+		font-family: inherit;
+		font-size: var(--f-ms);
+		color: var(--tinta);
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
 	}
 
 	/* La linea que explica la marca local. Gris y del tamano de un pie de
@@ -1459,6 +1647,67 @@
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border-color: var(--indigo);
+	}
+
+	.afectadas {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--e1);
+	}
+
+	.afectada {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+	}
+
+	/* Un puntito, no un texto: nueve cuentas afectadas con "leida"/"no leida"
+	   escrito al lado de cada una pesaria mas de lo que ayuda. El title de
+	   `.afectada` dice la fecha exacta a quien lo necesite. */
+	.punto-lectura {
+		width: 7px;
+		height: 7px;
+		border-radius: 50%;
+		background: var(--rojo);
+	}
+
+	.punto-lectura.leida {
+		background: var(--verde, #2f8f4e);
+	}
+
+	.triage {
+		display: flex;
+		gap: var(--e2);
+		margin-top: var(--e3);
+		padding-top: var(--e3);
+		border-top: 1px solid var(--linea);
+	}
+
+	.triage button {
+		padding: 6px 14px;
+		font-family: inherit;
+		font-size: var(--f-sm);
+		background: none;
+		border-radius: var(--r);
+		cursor: pointer;
+		transition:
+			border-color var(--t),
+			color var(--t);
+	}
+
+	.triage .revisar {
+		color: var(--indigo);
+		border: 1px solid var(--indigo);
+	}
+
+	.triage .descartar {
+		color: var(--gris);
+		border: 1px solid var(--linea);
+	}
+
+	.triage button:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 
 	.datos {

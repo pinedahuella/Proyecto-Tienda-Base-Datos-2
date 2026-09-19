@@ -16,6 +16,7 @@
  */
 
 import { pedir, mensajeUtil } from './api';
+import { sesionAnalitica } from './sesionAnalitica';
 
 /**
  * Un resultado tal como lo devuelve el indice. Es el mismo contrato que
@@ -92,7 +93,17 @@ export async function buscarProductos(
 	}
 
 	const base = verTodo ? '/buscador/productos/admin' : '/buscador/productos';
-	const ruta = `${base}?nombre=${encodeURIComponent(consulta)}&limite=${limite}`;
+	let ruta = `${base}?nombre=${encodeURIComponent(consulta)}&limite=${limite}`;
+
+	// El evento `busqueda_realizada` en ClickHouse lo dispara el backend SOLO,
+	// enganchado a esta misma peticion -- nunca a la de admin (ver
+	// endpoints-eventos.md): las busquedas de un admin revisando el catalogo
+	// no son parte del embudo de un comprador real, y mandar `sesion` ahi
+	// contaminaria la analitica sin que nadie lo pidiera.
+	if (!verTodo) {
+		ruta += `&sesion=${encodeURIComponent(sesionAnalitica())}`;
+	}
+
 	const respuesta = await pedir<ResultadoBusqueda[]>(ruta);
 
 	if (!respuesta.ok) {

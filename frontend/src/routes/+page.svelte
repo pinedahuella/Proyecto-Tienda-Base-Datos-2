@@ -1368,7 +1368,7 @@
 		<div class="rejilla">
 			{#each productos as p (p._id)}
 				<article class="tarjeta">
-					<a class="cara" href="/producto/{p._id}">
+					<a class="cara" href="/producto/{p._id}?origen=catalogo">
 						<div class="foto">
 							<!-- Una portada que no carga se trata igual que no tenerla.
 							     Las urls son de fuera (Wikimedia), y cuando una se cae el

@@ -12,6 +12,7 @@
 		MINIMO_LETRAS,
 		type ResultadoBusqueda
 	} from '$lib/buscador';
+	import { registrarClicBusqueda } from '$lib/eventos';
 
 	/**
 	 * La pagina de resultados del buscador, /buscar?q=...
@@ -151,9 +152,15 @@
 		</div>
 	{:else}
 		<ul class="lista">
-			{#each resultados as r (r.id_producto)}
+			{#each resultados as r, i (r.id_producto)}
 				<li>
-					<a class="fila" href="/producto/{r.id_producto}">
+					<a
+						class="fila"
+						href="/producto/{r.id_producto}?origen=buscador"
+						onclick={() => {
+							if (!verTodo) registrarClicBusqueda(consulta, r.id_producto, i + 1);
+						}}
+					>
 						<span class="texto">
 							<span class="nombre">{r.nombre}</span>
 							<span class="bajo">
