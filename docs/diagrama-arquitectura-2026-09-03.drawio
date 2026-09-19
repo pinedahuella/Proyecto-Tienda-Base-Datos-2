@@ -1,0 +1,119 @@
+<mxfile host="Mesh" type="device">
+  <diagram name="Arquitectura Mesh - Entrega 2" id="arq-mesh-e2">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="titulo" value="Mesh &#8212; arquitectura poliglota al cierre de la Entrega 2 (2026-09-03)" style="text;html=1;fontSize=20;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitulo" value="Los cuatro motores de persistencia, quien escribe en cada uno y por donde viajan los datos entre ellos." style="text;html=1;fontSize=12;fontColor=#606060;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="900" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="capaCliente" value="CLIENTE" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9E9E9E;dashed=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=4;fontSize=11;fontColor=#757575;" vertex="1" parent="1">
+          <mxGeometry x="40" y="90" width="300" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="frontend" value="Frontend&#10;SvelteKit&#10;:5173" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EBF7;strokeColor=#2F3A8F;fontColor=#2F3A8F;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="80" y="120" width="220" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="capaApp" value="APLICACION" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9E9E9E;dashed=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=4;fontSize=11;fontColor=#757575;" vertex="1" parent="1">
+          <mxGeometry x="400" y="90" width="320" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="backend" value="Backend&#10;NestJS + Fastify&#10;:3000" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8EBF7;strokeColor=#2F3A8F;fontColor=#2F3A8F;fontStyle=1;fontSize=13;" vertex="1" parent="1">
+          <mxGeometry x="440" y="120" width="240" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="capaPersistencia" value="PERSISTENCIA" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9E9E9E;dashed=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=4;fontSize=11;fontColor=#757575;" vertex="1" parent="1">
+          <mxGeometry x="40" y="300" width="1500" height="330" as="geometry" />
+        </mxCell>
+
+        <mxCell id="pg" value="PostgreSQL 18&#10;:5432&#10;&#10;FUENTE DE VERDAD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DDEBF7;strokeColor=#1F6FB2;fontColor=#134B7C;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="80" y="340" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="pgDetalle" value="42 tablas. usuarios y direcciones,&#10;categorias, ofertas, precio_historial,&#10;pedidos, lineas, pagos, kardex, resenas.&#10;Transaccion de compra con FOR UPDATE.&#10;Migracion 014: oferta.es_inventario_limitado" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F7FAFD;strokeColor=#8FBEDC;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="80" y="455" width="280" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="mongo" value="MongoDB 27018&#10;&#10;CATALOGO Y SU HISTORIAL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#DEF3E4;strokeColor=#2E8B57;fontColor=#1E5C3A;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="420" y="340" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="mongoDetalle" value="Colecciones: productos, productos_eventos,&#10;categorias.&#10;Atributos variables por categoria.&#10;Indices catalogo_categoria, catalogo_precio&#10;y catalogo_rating.&#10;Historial por eventos, reconstruible por fecha." style="rounded=0;whiteSpace=wrap;html=1;fillColor=#F6FBF8;strokeColor=#A6D5B8;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="420" y="455" width="280" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="redis" value="Redis 6379&#10;&#10;LO TRANSITORIO Y LO ATOMICO" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBE9E7;strokeColor=#C0392B;fontColor=#8E2B20;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="760" y="340" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="redisDetalle" value="mesh:carrito:&lt;usuario&gt;   HASH, TTL 24 h&#10;mesh:oferta:&lt;id&gt;         venta relampago&#10;mesh:oferta:&lt;id&gt;:reservas   ZSET&#10;mesh:checkout:&lt;usuario&gt;  candado, EX 30 NX&#10;&#10;inventario_limitado.lua, ejecucion atomica" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FEF7F6;strokeColor=#E8B4AE;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="760" y="455" width="280" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="neo4j" value="Neo4j 7687 bolt&#10;&#10;RELACIONES ENTRE CUENTAS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F3E8FB;strokeColor=#7B3FA0;fontColor=#5A2C77;fontStyle=1;fontSize=13;verticalAlign=top;spacingTop=8;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="340" width="280" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="neoDetalle" value="(:Usuario)-[:ESCRIBIO]-&gt;(:Resena)&#10;(:Resena)-[:CALIFICA_A]-&gt;(:Usuario)&#10;(:Resena)-[:SOBRE]-&gt;(:Producto)&#10;(:Usuario)-[:VIVE_EN]-&gt;(:Direccion)&#10;&#10;5 consultas de fraude, una de varios saltos" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#FBF7FD;strokeColor=#CDB0DC;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="455" width="280" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="capaEtl" value="MIGRACION POR LOTES (no es tiempo real: ver docs/PENDIENTE-OUTBOX.md)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9E9E9E;dashed=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=4;fontSize=11;fontColor=#757575;" vertex="1" parent="1">
+          <mxGeometry x="40" y="680" width="1500" height="150" as="geometry" />
+        </mxCell>
+        <mxCell id="etlMongo" value="etl/cargar.js&#10;PostgreSQL &#8594; MongoDB&#10;replaceOne con upsert. NO borra." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6DC;strokeColor=#C9A227;fontColor=#7A6112;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="240" y="720" width="260" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="etlGrafo" value="etl/cargar_grafo.sh&#10;PostgreSQL &#8594; Neo4j&#10;Relee las 90 resenas cada vez (14 s)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6DC;strokeColor=#C9A227;fontColor=#7A6112;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="900" y="720" width="260" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="capaHerr" value="HERRAMIENTAS DE INSPECCION (no son parte del sistema)" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#BDBDBD;dashed=1;verticalAlign=top;align=left;spacingLeft=8;spacingTop=4;fontSize=11;fontColor=#9E9E9E;" vertex="1" parent="1">
+          <mxGeometry x="40" y="870" width="1500" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="herr" value="pgAdmin :5050          dbgate :3001          RedisInsight :5540          Neo4j Browser :7474" style="text;html=1;fontSize=12;fontColor=#9E9E9E;align=center;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="60" y="900" width="1460" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="eFrontBack" value="HTTP + cookie de sesion" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#2F3A8F;fontSize=10;fontColor=#2F3A8F;" edge="1" parent="1" source="frontend" target="backend">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="eBackPg" value="pedidos, pagos, ofertas,&#10;stock, resenas, usuarios" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#1F6FB2;fontSize=10;fontColor=#134B7C;exitX=0.25;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="backend" target="pg">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eBackMongo" value="catalogo,&#10;historial" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#2E8B57;fontSize=10;fontColor=#1E5C3A;exitX=0.45;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="backend" target="mongo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eBackRedis" value="carrito, reservas,&#10;candado de checkout" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#C0392B;fontSize=10;fontColor=#8E2B20;exitX=0.7;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="backend" target="redis">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eBackNeo" value="panel de fraude&#10;(solo lectura)" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#7B3FA0;fontSize=10;fontColor=#5A2C77;exitX=0.95;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="backend" target="neo4j">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="ePgEtl" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#C9A227;dashed=1;" edge="1" parent="1" source="pgDetalle" target="etlMongo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eEtlMongo" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#C9A227;dashed=1;" edge="1" parent="1" source="etlMongo" target="mongoDetalle">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ePgEtlGrafo" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#C9A227;dashed=1;" edge="1" parent="1" source="pgDetalle" target="etlGrafo">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="eEtlNeo" value="" style="edgeStyle=orthogonalEdgeStyle;html=1;rounded=0;strokeColor=#C9A227;dashed=1;" edge="1" parent="1" source="etlGrafo" target="neoDetalle">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="notaAdr2" value="ADR-2: el producto vive en MongoDB pero SUS OFERTAS se quedan en PostgreSQL.&#10;El descuento de stock tiene que ser atomico, y eso lo sostiene SELECT ... FOR UPDATE.&#10;El documento lleva cinco numeros agregados (precio_tienda, precio_desde, stock_tienda,&#10;stock_total, total_ofertas) mas resenas_promedio y resenas_total: son una COPIA PARA&#10;PINTAR la tarjeta, no la verdad. Cuanto queda de verdad se pregunta en PostgreSQL." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFDE7;strokeColor=#C9A227;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;" vertex="1" parent="1">
+          <mxGeometry x="760" y="90" width="420" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="notaLimites" value="LO QUE ESTE DIAGRAMA NO ESCONDE&#10;&#10;1. Las dos flechas amarillas son POR LOTES, no continuas. Una resena nueva no llega a&#10;   Neo4j hasta que alguien corre el ETL, y el panel de fraude no avisa de que mira datos&#10;   viejos. Pendiente 4, docs/PENDIENTE-OUTBOX.md.&#10;2. Hay DOS repartidores de id de producto que no se hablan (el bigserial de PostgreSQL y&#10;   el maximo _id de Mongo que usa el panel), y una TERCERA cuenta que nadie mira: la&#10;   secuencia. Pendiente 5, docs/PENDIENTES.md.&#10;3. La base columnar NO esta, y es una decision, no un olvido: docs/DECISION-GRAFOS-VS-COLUMNAR.md.&#10;4. Todo corre en UNA sola maquina, en siete contenedores del mismo Docker." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF3F3;strokeColor=#C0392B;fontSize=10;align=left;spacingLeft=8;verticalAlign=top;spacingTop=6;fontColor=#7A2018;" vertex="1" parent="1">
+          <mxGeometry x="1200" y="90" width="340" height="190" as="geometry" />
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

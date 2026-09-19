@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { mensajeUtil, pedir } from './api';
+	import TendenciasAuto from './TendenciasAuto.svelte';
 
 	/**
 	 * Panel de tendencias. Es la pantalla de la familia COLUMNAR del proyecto,
@@ -148,6 +149,21 @@
 	const VENTANAS = [1, 7, 14, 30, 90, 365];
 
 	const LIMITES = [5, 10, 20, 50];
+
+	/**
+	 * Que se ve al abrir. `auto` es lo nuevo y es lo que abre: las consultas de
+	 * siempre y la de compras en ascenso YA CALCULADAS, mas el constructor de
+	 * consultas propias (TendenciasAuto). `rankings` es la pantalla de antes, con
+	 * sus seis pestanas y sus mandos, a la que se llega con un clic o desde el
+	 * "Ver completo" de una tarjeta.
+	 */
+	let vista = $state<'auto' | 'rankings'>('auto');
+
+	function verRanking(nueva: Clave) {
+		clave = nueva;
+		vista = 'rankings';
+		void cargar();
+	}
 
 	let clave = $state<Clave>('vista');
 	// 30 y no 7: como solo cuentan los eventos REALES, en una base joven casi todo
@@ -298,7 +314,7 @@
 <section class="tendencias">
 	<div class="titulo">
 		<h2>Tendencias</h2>
-		{#if !cargando}
+		{#if vista === 'rankings' && !cargando}
 			<div class="acciones">
 				<button type="button" onclick={cargar}>Volver a medir</button>
 			</div>
@@ -311,6 +327,18 @@
 		que llegue a la tabla de pedidos.
 	</p>
 
+	<div class="pestanas" role="group" aria-label="Como ver las tendencias">
+		<button type="button" class:activa={vista === 'auto'} aria-pressed={vista === 'auto'} onclick={() => (vista = 'auto')}>
+			Automaticas y mis consultas
+		</button>
+		<button type="button" class:activa={vista === 'rankings'} aria-pressed={vista === 'rankings'} onclick={() => (vista = 'rankings')}>
+			Rankings
+		</button>
+	</div>
+
+	{#if vista === 'auto'}
+		<TendenciasAuto {alExpirarSesion} {verRanking} />
+	{:else}
 	<div class="pestanas" role="group" aria-label="Que medir">
 		{#each RANKINGS as r (r.clave)}
 			<button
@@ -413,6 +441,7 @@
 				no sale en ninguna lista.
 			</p>
 		{/if}
+	{/if}
 	{/if}
 </section>
 

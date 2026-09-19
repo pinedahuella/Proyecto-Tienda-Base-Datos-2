@@ -10,15 +10,15 @@ El .\ del principio es obligatorio.
 
   .\arrancar.ps1
 
-Es el de todos los dias. Levanta los 8 contenedores y deja la base como
+Es el de todos los dias. Levanta los 9 contenedores y deja la base como
 estaba: lo que compraste, los productos que creaste y las cuentas nuevas
 siguen ahi.
 
 Es seguro correrlo las veces que quieras. Lo que ya esta hecho no lo
 vuelve a hacer, solo comprueba que este bien:
 
-  - levanta PostgreSQL, MongoDB, Redis, Neo4j, Elasticsearch y las 3
-    consolas web
+  - levanta PostgreSQL, MongoDB, Redis, Neo4j, Elasticsearch, ClickHouse
+    y las 3 consolas web
   - corre las migraciones que falten (las corridas no se repiten)
   - comprueba que MongoDB tenga el catalogo completo, y si le falta
     algo lo vuelve a cargar
@@ -37,8 +37,8 @@ Tarda ~1 minuto.
   .\arrancar.ps1 -Reiniciar
 
 Hace `docker compose down -v`, que BORRA LOS VOLUMENES: se van las
-CINCO bases enteras -- PostgreSQL, MongoDB, Redis, Neo4j y el indice
-de busqueda de Elasticsearch -- y despues
+SEIS bases enteras -- PostgreSQL, MongoDB, Redis, Neo4j, el indice
+de busqueda de Elasticsearch y ClickHouse -- y despues
 las vuelve a construir desde los archivos del repositorio.
 
 ESTO NO SE DESHACE. Se pierde todo lo que hayas hecho a mano:

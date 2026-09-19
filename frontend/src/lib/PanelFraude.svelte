@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { conJson, mensajeUtil, pedir } from './api';
+	import BloquearCuenta from './BloquearCuenta.svelte';
 
 	/**
 	 * Panel de manipulacion de resenas. Es una pantalla que pide el enunciado
@@ -988,9 +989,12 @@
 								<dt>{a.cuentas_afectadas.length === 1 ? 'Cuenta afectada' : 'Cuentas afectadas'}</dt>
 								<dd class="afectadas">
 									{#each a.cuentas_afectadas as c (c.id_usuario)}
+										<span class="cuenta-con-accion">
 										<span class="clave afectada" title={c.fecha_lectura ? `Leida ${fecha(c.fecha_lectura)}` : 'No leida por esta cuenta'}>
 											{c.usuario}
 											<span class="punto-lectura" class:leida={c.fecha_lectura !== null}></span>
+										</span>
+										<BloquearCuenta idUsuario={c.id_usuario} usuario={c.usuario} {alExpirarSesion} />
 										</span>
 									{/each}
 								</dd>
@@ -1222,7 +1226,10 @@
 							<dt>Cuentas</dt>
 							<dd class="afectadas">
 								{#each a.cuentas as c (c.id_usuario)}
-									<span class="clave">{c.usuario}</span>
+									<span class="cuenta-con-accion">
+										<span class="clave">{c.usuario}</span>
+										<BloquearCuenta idUsuario={c.id_usuario} usuario={c.usuario} {alExpirarSesion} />
+									</span>
 								{/each}
 							</dd>
 						</div>
@@ -1647,6 +1654,14 @@
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border-color: var(--indigo);
+	}
+
+	/* La cuenta y su boton de bloquear van juntos, en una sola pieza que no se parte. */
+	.cuenta-con-accion {
+		display: inline-flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
 	}
 
 	.afectadas {

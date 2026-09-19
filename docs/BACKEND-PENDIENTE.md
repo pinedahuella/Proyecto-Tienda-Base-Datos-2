@@ -1852,3 +1852,36 @@ que sirve es buscar primero en Mongo los ids de producto (o variante) cuyo nombr
 
 Cuando exista, el panel deja de usar la ruta sin paginar por completo y el buscador pasa a ser una peticion
 mas de `limite=20`.
+
+---
+
+## LO NUEVO DEL 2026-09-19: la consulta de ascenso entre periodos, como ruta
+
+Para Jose David. Los seis rankings de `GET /admin/eventos/*` ordenan por una ventana de `dias`, pero la
+Entrega 2 pide una consulta que identifique **variaciones de demanda entre periodos**, y esa consulta hoy
+solo se corre a mano en la consola de ClickHouse (`http://localhost:8123/play`). Esta escrita y medida en
+`clickhouse/README.md`, seccion "Productos en ascenso", y responde en 13 ms leyendo del resumen
+`vistas_por_producto_dia`:
+
+```sql
+SELECT id_producto,
+       countMergeIf(vistas, dia >  today() - 7) AS ahora,
+       countMergeIf(vistas, dia <= today() - 7) AS antes,
+       uniqMergeIf(sesiones, dia > today() - 7) AS personas,
+       round(ahora / greatest(antes, 1), 2)     AS veces
+FROM vistas_por_producto_dia
+WHERE lote = 'real'
+GROUP BY id_producto
+ORDER BY veces DESC
+LIMIT 20;
+```
+
+Lo que se pide es una ruta solo admin, `GET /admin/eventos/ascenso?dias=7&limite=20`, con `dias` como la
+frontera entre "ahora" y "antes", el mismo `lote = 'real'` fijo que las otras seis y la misma segunda
+consulta a Mongo para el detalle del producto. La columna `personas` tiene que viajar en la respuesta: sin
+ella un producto al que le repiten el clic cientos de veces sale de lider (en el lote de prueba del 19 de
+septiembre el producto inflado sale primero con 270 veces y 6 personas, y el ascenso real es el segundo con
+7.87 veces y 366 personas). Desde el 2026-09-19 el panel ya compara **compras y devoluciones** contra el
+periodo anterior por su cuenta (pide la ventana de N y la de 2N y resta, lo que solo es exacto cuando el total
+SUMA), pero las **vistas** no se pueden restar porque cuentan sesiones distintas: para eso hace falta esta
+consulta, que lee del resumen diario. Cuando exista, `TendenciasAuto.svelte` la agrega a las automaticas.

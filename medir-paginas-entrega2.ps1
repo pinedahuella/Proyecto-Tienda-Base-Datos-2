@@ -51,8 +51,9 @@ try {
         if ($t -match "\t") { continue }
         if ($t.Length -gt 90) { continue }
 
-        # Titulo de seccion: "3. OFERTA CON INVENTARIO LIMITADO..."
-        if ($t -match '^([1-9])\.\s+[A-Z]') {
+        # Titulo de seccion, todo en mayusculas: "3. OFERTA CON INVENTARIO LIMITADO..."
+        # (las alternativas numeradas de los registros de decision no lo son)
+        if ($t -cmatch '^([1-9])\.\s+\p{Lu}[\p{Lu} ,\-]+$') {
             $n = $matches[1]
             if (-not $pares.ContainsKey($n)) {
                 $pares[$n] = $p.Range.Information(3)
@@ -62,7 +63,7 @@ try {
         }
 
         # Titulo de subseccion: "3.2. Por que un script Lua..."
-        if ($t -match '^[1-9]\.[0-9]+\.?\s+\S') {
+        if ($t -match '^[1-9]\.[0-9]+\.\s+\S') {
             if (-not $pares.ContainsKey($t)) {
                 $pares[$t] = $p.Range.Information(3)
                 Write-Output ("  pagina " + $pares[$t] + "     " + $t)

@@ -18,7 +18,15 @@
 	 * admin) ni `cuentas_afectadas` (uno mismo ya sabe que es el afectado).
 	 * Solo `fecha_lectura`, que es de esta cuenta y no de la alerta.
 	 */
-	let { alExpirarSesion }: { alExpirarSesion: () => void } = $props();
+	/**
+	 * `alCambiarContrasena` lo pone la pagina del panel: lleva a Mi cuenta con el
+	 * formulario de contrasena ya abierto. Es la salida rapida para quien ve una
+	 * alerta de toma de cuenta y no tiene que ir a buscar donde se cambia.
+	 */
+	let {
+		alExpirarSesion,
+		alCambiarContrasena
+	}: { alExpirarSesion: () => void; alCambiarContrasena?: () => void } = $props();
 
 	type TipoAlerta =
 		| 'fuerza_bruta_ip'
@@ -193,6 +201,11 @@
 			</span>
 		{/if}
 		<div class="acciones">
+			{#if alCambiarContrasena && total > 0}
+				<button type="button" class="principal" onclick={alCambiarContrasena}>
+					Cambiar mi contrasena ahora
+				</button>
+			{/if}
 			<button type="button" onclick={() => cargar(pagina)} disabled={cargando}>
 				Volver a mirar
 			</button>
@@ -243,6 +256,11 @@
 								onclick={() => marcarLeida(a)}
 							>
 								Marcar como leida
+							</button>
+						{/if}
+						{#if alCambiarContrasena}
+							<button type="button" class="marcar" onclick={alCambiarContrasena}>
+								Cambiar contrasena
 							</button>
 						{/if}
 					</div>
@@ -307,6 +325,18 @@
 
 	.acciones {
 		margin-left: auto;
+	}
+
+	.acciones {
+		display: flex;
+		gap: 8px;
+		flex-wrap: wrap;
+	}
+
+	.acciones .principal {
+		color: #fff;
+		background: var(--indigo);
+		border-color: var(--indigo);
 	}
 
 	.acciones button {

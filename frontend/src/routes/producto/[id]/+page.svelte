@@ -522,7 +522,7 @@
 			// enlace, y desde la ficha no hay ningun campo de direccion, asi que
 			// la persona quedaba sin saber adonde ir.
 			errorPedido = 'Para abrir un pedido hace falta una direccion de entrega.';
-			salidaDelError = { texto: 'Agregar una direccion', href: '/panel' };
+			salidaDelError = { texto: 'Agregar una direccion', href: '/panel?s=cuenta' };
 			return null;
 		}
 

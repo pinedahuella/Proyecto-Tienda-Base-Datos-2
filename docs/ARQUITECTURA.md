@@ -1,14 +1,17 @@
 # Arquitectura de Mesh
 
-**Al 2026-09-11.** Es el diagrama de arquitectura que pide el enunciado, y **no
-es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las tablas de
-PostgreSQL y sus llaves (42 cajas; la base tiene 46, y las tres de alertas de la
-016 todavia no estan dibujadas); este dibuja los **seis** motores de
-persistencia, quien escribe en cada uno y por donde viajan los datos entre ellos.
+**Al 2026-09-19.** Es el diagrama de arquitectura que pide el enunciado, y **no
+es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 50 tablas de
+PostgreSQL y sus llaves y lo genera `python docs/generar-er.py` desde la base
+viva; este dibuja los **seis** motores de persistencia, quien escribe en cada
+uno y por donde viajan los datos entre ellos.
 
-**Ojo: el `.drawio` de arquitectura no tiene todavia los flujos del login del
-2026-09-10.** El Mermaid de abajo si. Hasta que se redibuje, el que manda es
-este.
+**El `.drawio` de arquitectura se rehizo el 2026-09-19** con
+`python docs/generar-arquitectura.py`: seis motores, lo que hace el backend con
+cada uno y las ocho rutas de datos entre motores, numeradas y explicadas en su
+leyenda. `--informe` saca la variante compacta que va en el Word, y `--grafo` el
+dibujo del modelo de Neo4j. El anterior quedo como
+`diagrama-arquitectura-2026-09-03.drawio`.
 
 Se actualiza en cada entrega, porque las tres lo piden como entregable. El
 historial de que entro y cuando esta al final.
@@ -34,12 +37,12 @@ flowchart TB
     FE -- "HTTP + cookie de sesion" --> BE
 
     subgraph persistencia[PERSISTENCIA]
-        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>46 tablas")]
+        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>50 tablas")]
         MG[("MongoDB :27018<br/><b>CATALOGO, HISTORIAL Y LOG DE LOGIN</b><br/>productos, productos_eventos, categorias,<br/>eventos_autenticacion")]
         RD[("Redis :6379<br/><b>TRANSITORIO Y ATOMICO</b><br/>carrito, reservas, candado,<br/>contadores de fraude del login")]
-        N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>90 resenas, 4 tipos de arista")]
+        N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>163 nodos y 281 relaciones,<br/>90 resenas, 4 tipos de arista")]
         ES[("Elasticsearch :9200<br/><b>BUSQUEDA DE TEXTO Y EVENTOS DE LOGIN</b><br/>mesh_productos, difusa y sin tildes<br/>mesh_eventos_autenticacion")]
-        CH[("ClickHouse :8123<br/><b>EVENTOS EN EL TIEMPO</b><br/>vistas, logueos, registros")]
+        CH[("ClickHouse :8123<br/><b>EVENTOS EN EL TIEMPO</b><br/>seis tablas de eventos de producto y buscador,<br/>copia de logueos y resumen diario")]
     end
 
     BE -- "pedidos, pagos, ofertas,<br/>stock, resenas, usuarios,<br/>alerta_fraude" --> PG
@@ -54,6 +57,9 @@ flowchart TB
     MG -. "etl/cargar_busqueda.sh + worker<br/>BANDERA pendiente_busqueda" .-> ES
     MG -. "worker cada 5 s<br/>BANDERA pendiente_elastic" .-> ES
     PG -. "etl/cargar_eventos.sh<br/>INCREMENTAL por marca de agua<br/>CONGELADA desde el 2026-09-10" .-> CH
+    PG -. "etl/cargar_compras.sh<br/>compras y devoluciones, en cada arranque" .-> CH
+    N4 -. "detector de anillos, cada 15 min<br/>anillo_fraude" .-> PG
+    CH -. "worker de mas vendidos, cada 10 min<br/>ZSET" .-> RD
 
     subgraph herramientas[INSPECCION, no son parte del sistema]
         H["pgAdmin :5050 · dbgate :3001 · RedisInsight :5540<br/>Neo4j Browser :7474 · ClickHouse play :8123/play"]
@@ -219,7 +225,7 @@ en PostgreSQL, el maximo `_id` de Mongo que usa el panel del vendedor, y la
 secuencia estaba en 1126 con el maximo en 1105, un hueco de 21. Esta entero en
 el pendiente 5 de `docs/PENDIENTES.md`.
 
-**Todo corre en una sola maquina**, en siete contenedores del mismo Docker. Eso
+**Todo corre en una sola maquina**, en nueve contenedores del mismo Docker. Eso
 importa para cualquier discusion sobre escalar: una base distribuida en un solo
 nodo se queda con todos sus costes y ninguna de sus ventajas.
 
@@ -255,6 +261,7 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **Entrega 3 (2026-09-04)** | Entra **Elasticsearch** con su indice, su ETL, su cola con worker y sus dos rutas. Se escribe el documento de consistencia del checkout. **Falta** la faceta con agregaciones y la prueba de falla simulada |
 | **2026-09-06** | Entra **ClickHouse**, la sexta base, con las tres tablas de eventos, su ETL incremental desde PostgreSQL y su generador de lotes. Cambia la decision de la Entrega 2 sobre la columnar, y el porque esta arriba |
 | **2026-09-10 y 11** | El log de login se muda a **MongoDB** (`eventos_autenticacion`) y un worker lo copia a un segundo indice de **Elasticsearch**. Tres contadores de **Redis** dejan alertas en `alerta_fraude` de **PostgreSQL** (migracion 016). La copia de logueos a ClickHouse queda congelada. Solo en el Mermaid; el `.drawio` falta |
+| **2026-09-18 y 19** | Seis eventos de producto y buscador en ClickHouse, con su resumen diario y los rankings de tendencias. Un worker cada 10 minutos cachea lo mas vendido en un ZSET de Redis. El detector de anillos (cada 15 minutos) guarda en PostgreSQL lo que encuentra en Neo4j. `etl/cargar_compras.sh` copia compras y devoluciones a ClickHouse. El `.drawio` de arquitectura se rehizo entero y el ER se genera desde la base viva |
 | Entrega final | entrara el componente vectorial y el control de acceso |
 
 El `pgvector` de la Entrega final, por cierto, **ya viene en la imagen**: el

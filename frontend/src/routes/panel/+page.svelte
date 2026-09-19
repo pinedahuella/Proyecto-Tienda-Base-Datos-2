@@ -12,6 +12,7 @@
 	import PanelFraude from '$lib/PanelFraude.svelte';
 	import AlertasFraudeUsuario from '$lib/AlertasFraudeUsuario.svelte';
 	import PanelTendencias from '$lib/PanelTendencias.svelte';
+	import DemoFraude from '$lib/DemoFraude.svelte';
 	import PanelReportes from '$lib/PanelReportes.svelte';
 	import {
 		cerrarSesion,
@@ -108,7 +109,7 @@
 	 * cambiarse el apellido, asi que las ofertas van primeras y la cuenta al
 	 * final. Al admin le pasa lo mismo con los reportes.
 	 */
-	let secciones = $derived.by<Seccion[]>(() => {
+	let todasLasSecciones = $derived.by<Seccion[]>(() => {
 		if (!perfil) return [];
 
 		if (esAdmin) {
@@ -122,6 +123,7 @@
 				// entrada sospechosos, y nadie los iria a buscar bajo ese nombre.
 				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo e intentos de entrada sospechosos' },
 				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Lo mas visto, comprado y buscado en los ultimos dias' },
+				{ id: 'demo', nombre: 'Demo', pie: 'Disparar ataques y anillos de prueba para la defensa' },
 				// Distinta de "Fraude": esa es EN VIVO contra el grafo y solo la ve
 				// un admin; esta es "a mi cuenta le paso algo" y la ve cualquiera --
 				// GET /perfil/alertas-fraude, filtrado a la sesion de quien pregunta.
@@ -151,6 +153,29 @@
 
 	/** Cual se esta mirando. Vacio quiere decir "todavia no se ha decidido". */
 	let seccion = $state('');
+
+	/**
+	 * DOS ambitos para el admin: lo PERSONAL y lo de ADMINISTRAR.
+	 *
+	 * El admin tenia todo en una sola barra, con Alertas y Mi cuenta al lado de
+	 * Reportes y Fraude, y desde "Mi perfil" caia en los reportes. Se confundian
+	 * dos cosas distintas. Ahora "Mi perfil" (header) abre Alertas y Mi cuenta,
+	 * y "Admin" (header) abre lo de administrar el sistema. El ambito sale de la
+	 * seccion que se mira, asi que el enlace directo y el boton de atras siguen
+	 * funcionando sin estado nuevo.
+	 *
+	 * Solo aplica al admin: el vendedor y el comprador tienen sus secciones como
+	 * siempre. Lo del vendedor (ofertas, propuestas) es SU trabajo, no un ambito
+	 * aparte.
+	 */
+	const PERSONALES = new Set(['alertas', 'cuenta']);
+	let enPerfil = $derived(esAdmin && PERSONALES.has(seccion));
+
+	let secciones = $derived(
+		esAdmin
+			? todasLasSecciones.filter((s) => PERSONALES.has(s.id) === enPerfil)
+			: todasLasSecciones
+	);
 
 	/**
 	 * La elegida de verdad.
@@ -223,7 +248,9 @@
 	 */
 	let saludo = $derived(
 		esAdmin
-			? 'Desde aqui gestionas las cuentas y los catalogos del sistema.'
+			? enPerfil
+				? 'Tus datos, tus direcciones y los avisos de seguridad de tu cuenta. Lo de administrar el sistema esta en el boton Admin de arriba.'
+				: 'Desde aqui gestionas las cuentas y los catalogos del sistema. Tus datos personales estan en Mi perfil.'
 			: esVendedor
 				? 'Aqui llevas tus ofertas: a que precio vendes cada variante y cuantas unidades te quedan.'
 				: 'Aqui estan los datos de tu cuenta y tus direcciones de entrega. Tus pedidos tienen su propia pagina.'
@@ -329,6 +356,18 @@
 		}
 
 		modo = nuevo;
+	}
+
+	/**
+	 * La salida rapida de "Alertas": lleva a Mi cuenta con el formulario de
+	 * contrasena ya abierto, en vez de dejar a la persona buscando donde se
+	 * cambia. Es la misma pantalla de siempre, solo que sin los dos clics de
+	 * en medio.
+	 */
+	function cambiarContrasenaRapido() {
+		irA('cuenta');
+		abrir('contrasena');
+		setTimeout(() => document.getElementById("c-actual")?.focus(), 250);
 	}
 
 	/** PATCH /perfil. Los mensajes son los mismos que devuelve el backend. */
@@ -498,6 +537,9 @@
 			</div>
 		{:else if perfil}
 			<div class="saludo">
+				{#if esAdmin}
+					<p class="ambito">{enPerfil ? 'Mi perfil' : 'Administracion'}</p>
+				{/if}
 				<h1>Hola, {perfil.nombre}</h1>
 				<!-- Uno por rol. Antes era un texto fijo -- "Tu tienda esta lista.
 				     Publica tu primer producto" -- que salia igual para los tres:
@@ -697,7 +739,7 @@
 			     cualquiera: GET /perfil/alertas-fraude ya filtra por la sesion. -->
 			<div class="hoja" class:oculta={seccionViva !== 'alertas'}>
 				{#if visitadas.has('alertas')}
-					<AlertasFraudeUsuario alExpirarSesion={expiro} />
+					<AlertasFraudeUsuario alExpirarSesion={expiro} alCambiarContrasena={cambiarContrasenaRapido} />
 				{/if}
 			</div>
 
@@ -759,6 +801,12 @@
 					     tambien por enlace directo, /panel?s=fraude. -->
 					{#if visitadas.has('fraude')}
 						<PanelFraude alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'demo'}>
+					{#if visitadas.has('demo')}
+						<DemoFraude alExpirarSesion={expiro} />
 					{/if}
 				</div>
 
@@ -852,6 +900,15 @@
 	.saludo {
 		max-width: 560px;
 		margin-bottom: 22px;
+	}
+
+	.saludo .ambito {
+		margin-bottom: 4px;
+		font-size: var(--f-sm);
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--indigo);
 	}
 
 	.saludo h1 {

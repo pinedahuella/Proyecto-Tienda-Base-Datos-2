@@ -3,7 +3,80 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-18**.
+Ultima actualizacion: **2026-09-19, madrugada**.
+
+**Lo de la madrugada del 2026-09-19: el informe de la Entrega 2, el ER y el diagrama de arquitectura.**
+Se corrieron `bash pruebas/etl_mongo.sh` (21 OK) y `.\arrancar.ps1` (termina en Listo). El informe se
+rehizo entero, y con el salieron dos diagramas nuevos y tres cosas que hay que saber.
+
+```
+docs/generar-er.py            dibuja docs/diagrama-general.drawio y .png LEYENDO la base viva (information_schema
+                              y pg_constraint). 50 cajas y 66 lineas. Falla si una tabla no tiene caja, si una
+                              llave no tiene linea o si dos cajas se pisan. `--modulo fraude` saca la vista
+                              recortada del informe. El ER de la Entrega 1 quedo en diagrama-general-entrega1.*
+docs/generar-arquitectura.py  dibuja docs/diagrama-arquitectura.drawio y .png: seis motores y ocho rutas de datos
+                              numeradas. `--informe` es la variante compacta para el Word y `--grafo` el modelo de
+                              Neo4j. El del 2026-09-03 quedo como diagrama-arquitectura-2026-09-03.drawio
+docs/informe-entrega2/        los .drawio y .png que usa el Word
+```
+
+**Lo que se descubrio al medir para el informe.** (1) Al borrar una resena el nodo `:Producto` queda huerfano en
+Neo4j (52 contra 51 tras correr `pruebas/resenas.sh`), y el arranque solo se queja si el grafo tiene MENOS. No
+afecta a ninguna consulta. `.\arrancar.ps1 -ReiniciarGrafo` lo reconstruye y se hizo al final. (2) El panel de
+Tendencias rankea por ventana de dias y NO compara contra el periodo anterior: la consulta de ascenso vive solo
+en la consola de ClickHouse. Esta pedida como ruta en `docs/BACKEND-PENDIENTE.md`. (3) `alertas-resenas` esta vacia
+porque el anillo sembrado (marzo de 2026) queda fuera de la ventana de 60 dias del detector. La demostracion es
+`neo4j/correr_fraude.sh`, que no usa ventana. Tambien se cerro el pendiente 18 (el ER).
+
+**Y el mismo dia, tres pedidos del equipo que se hicieron en `frontend/` (2026-09-19).**
+
+```
+TendenciasAuto.svelte    NUEVO. El panel de Tendencias abre ahora en "Automaticas y mis consultas": los seis
+                         rankings de 30 dias y "Compras en ascenso" se calculan SOLOS al abrir. Debajo, un
+                         constructor de consulta propia (que medir, dias, cuantos, orden, comparar) que se puede
+                         GUARDAR como automatica (localStorage, no la base). La pestana "Rankings" es la de antes.
+                         Sin ruta nueva: todo sale de las seis de GET /admin/eventos/*
+BloquearCuenta.svelte    NUEVO. Boton "Bloquear" junto a cada cuenta de las alertas de login y de los anillos, con
+                         confirmacion en la misma linea y "Deshacer". Es PATCH /admin/usuarios/:id con
+                         id_estado_usuario 3 (suspendido) y 1 (activo). No sale en la cuenta propia
+AlertasFraudeUsuario     "Cambiar mi contrasena ahora" (cabecera y por alerta): abre Mi cuenta con el formulario de
+                         contrasena ya abierto y el foco en el primer campo
+PanelAdmin.svelte        Cuentas ahora tiene un BUSCADOR general (usuario, correo, nombre, rol, estado e id; sin
+                         importar mayusculas ni tildes; varias palabras se piden todas). Se quito el aviso "la cuenta
+                         de la tienda no se edita": la fila sigue con sus selects apagados, sin texto
+demo-anillo-resenas.ps1  NUEVO. Arma un anillo de resenas de 2, 3 o 4 cuentas (registra, pasa a
+                         vendedor, publica y aprueba una oferta, compra real y resena). Probado dos
+                         veces, ciclo de 3 y par mutuo de 2, y detectado por AnillosDetectorService
+                         en menos de 10 s las dos. Con el mismo -Prefijo es reentrante: no repite la
+                         resena (409) ni la aprobacion. NO ES REVERSIBLE, deja pedidos y kardex reales
+DemoFraude.svelte        NUEVA pestana Demo en el panel del admin (/panel?s=demo). Version visual de
+                         demo-evento-fraude.ps1 y de la mitad de lo de arriba: dispara los tres
+                         ataques de login por fetch, y crea (via GET /admin/usuarios + POST
+                         /usuario/registro, NUNCA login) las cuentas de un anillo, sin tocar la sesion
+                         del admin que esta usando la pagina -- ese era el riesgo real, POST
+                         /usuario/login pone LA cookie de quien la llame. El resto del anillo (rol,
+                         oferta, compra, resena) sigue siendo el .ps1: reescribirlo en el navegador
+                         seria una segunda copia de la misma logica de negocio, que no es de este
+                         lado. Cargar productos con semilla solo arma el comando para copiar, porque
+                         una pagina no puede lanzar un proceso local
+Cabecera (buscador)      El buscador de la cabecera es el MISMO para el admin: ruta publica (solo lo activo), con
+                         `sesion` y registrando el clic en busqueda-clic. Antes usaba la de admin y no registraba nada,
+                         por eso sus busquedas no subian en Tendencias. El catalogo del admin no se toco
+Cabecera + panel/+page   "Admin" y "Mi perfil" ya son DOS cosas para el admin. El header trae un boton "Admin"
+                         (solo en cuentas de admin) que abre /panel?s=reportes (Reportes, Ofertas, Catalogo,
+                         Propuestas, Cuentas, Fraude, Tendencias), y "Mi perfil" abre /panel?s=cuenta (solo Alertas y
+                         Mi cuenta). El ambito sale de la seccion que se mira, sin estado nuevo. Comprador y vendedor
+                         no cambian. Los enlaces de Checkout y de la ficha a "agregar direccion" van a ?s=cuenta
+```
+
+**Lo que hay que saber de la comparacion.** La ruta solo entiende "los ultimos N dias", asi que el periodo anterior
+se saca RESTANDO (ventana 2N menos ventana N) y solo es exacto cuando el total SUMA: compras y devoluciones. Las
+vistas, el carrito y las busquedas cuentan sesiones o cuentas distintas y no se pueden restar, por eso no se ofrece
+comparar ahi (la consulta que si lo hace esta en `clickhouse/README.md` y pedida como ruta en
+`BACKEND-PENDIENTE.md`). Con los datos reales de hoy todo sale "nuevo" (0 a 45 la laptop) porque no hubo ventas en
+el periodo anterior, y es correcto. Probado con Chrome sin ventana (protocolo de depuracion, Node 24 sin instalar
+nada): las tarjetas cargan solas, el constructor consulta y guarda, lo guardado sobrevive a recargar, y bloquear y
+deshacer cambio el estado de la cuenta a 3 y de vuelta a 1 (suspendida, el login da 401). `svelte-check` 0 errores.
 
 **Lo de hoy (2026-09-18, sesion larga, varios pulls seguidos).** Jose David
 amplio el catalogo de `tipo_alerta_fraude` a nueve senales (Redis + las
@@ -1428,9 +1501,14 @@ medir-paginas-entrega2.ps1     abre el .docx con Word y apunta las paginas
 
 **Son DOS pasadas y el orden importa.** `python-docx` no sabe paginar, asi que la
 primera pasada deja el indice con guiones, el `.ps1` mide con Word de verdad y la
-segunda pasada escribe los numeros. Medido: 43 paginas y 16693 palabras, y las
-dos mediciones dieron la misma paginacion, asi que el indice no se corre al
-rellenarse.
+segunda pasada escribe los numeros. Medido el 2026-09-19: 68 paginas, 8 secciones, 38
+subsecciones, 7 figuras (cuatro son capturas de pantalla) y 16 tablas, y las dos mediciones dieron la misma paginacion,
+asi que el indice no se corre al rellenarse. El contenido ahora es una lista de bloques
+(parrafo, tabla, figura, codigo, registro de decision, ver la cabecera del generador) y
+el generador se NIEGA a escribir el Word si el texto lleva dos puntos, punto y coma,
+comillas angulares, rayas largas, puntos suspensivos o menciones de como se escribio.
+Ojo, el medidor solo cuenta como titulo de seccion una linea EN MAYUSCULAS: las
+alternativas numeradas de los registros de decision lo confundian.
 
 Es lo que le falta al informe de la Entrega 1, cuyo indice tiene los numeros casi
 todos vacios y los tres que hay no corresponden.
