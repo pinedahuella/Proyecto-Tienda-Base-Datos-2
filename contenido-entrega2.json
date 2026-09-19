@@ -1669,9 +1669,9 @@
          "Anotada en `docs/BACKEND-PENDIENTE.md`. El panel ya compara compras y devoluciones con dos ventanas, y la de vistas se corre en la consola de ClickHouse"
         ],
         [
-         "Tablas que se llenan solo usando la aplicación",
+         "`rechazo_oferta` se llena solo usando la aplicación",
          "José Manuel",
-         "`rechazo_oferta`, `anillo_fraude` y `anillo_fraude_resena` están en cero, y el anillo sembrado queda fuera de la ventana de 60 días"
+         "Sigue en cero, no hay generador. Se llena rechazando una oferta desde el panel del vendedor"
         ],
         [
          "Reconciliar el stock de Redis contra `stock_movimiento`",
