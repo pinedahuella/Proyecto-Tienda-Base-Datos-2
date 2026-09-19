@@ -399,3 +399,18 @@ backend podria escribir en la tabla vieja; `etl/cargar_compras.sh` la recupera d
 Las tablas se llenan de tres maneras y conviene no mezclarlas: el backend por eventos
 (`lote real`), `etl/cargar_compras.sh` con lo que ya estaba en PostgreSQL (tambien `real`),
 y `clickhouse/lote` con datos de mentira (`generado-N`).
+
+---
+
+# Los logs de sistema de ClickHouse se apagan (2026-09-18)
+
+`limites.xml` apaga siete logs que ClickHouse escribe por defecto: `trace_log`, `text_log`, `metric_log`,
+`asynchronous_metric_log`, `processors_profile_log`, `latency_log` y `query_metric_log`. En doce dias de
+desarrollo habian llegado a 17.5, 3.8 y 52 millones de filas, pesaban mas que todos los eventos, y con el tope de
+1 GiB (que se mide contra la memoria RESIDENTE, no contra la rastreada) hacian que consultas legitimas fallaran con
+`MEMORY_LIMIT_EXCEEDED`. Se quedan `query_log`, `part_log` y `error_log`, que pesan kilobytes.
+
+Para saber si el archivo esta puesto, no basta con que el contenedor este sano: pregunta
+`SELECT name FROM system.tables WHERE database = 'system' AND name = 'trace_log'`, que tiene que dar vacio.
+Si diera una fila, el contenedor sigue con la configuracion vieja y hay que reiniciarlo. Detalle y medicion en
+`docs/TRASPASO.md`.

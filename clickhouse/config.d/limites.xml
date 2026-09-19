@@ -91,4 +91,44 @@
       users.d y no de config.d. El porque completo esta alla.
     -->
 
+    <!--
+      LOS LOGS DE SISTEMA QUE SE COMIAN EL TOPE (2026-09-18).
+
+      Con el tope de 1 GiB de arriba, las consultas legitimas empezaron a fallar
+      con MEMORY_LIMIT_EXCEEDED: pruebas/eventos.sh dio rojo dos veces seguidas
+      porque un SELECT devolvia vacio. Medido en ese momento:
+
+          memoria RASTREADA por las consultas     105 MiB
+          memoria RESIDENTE del proceso           1.09 GiB
+          system.errors, MEMORY_LIMIT_EXCEEDED    68099 veces
+
+      El servidor mide su tope contra la memoria RESIDENTE, no contra la que
+      rastrea, y la diferencia la llenaban sus propios logs. En doce dias de
+      desarrollo habian crecido a esto:
+
+          system.trace_log                 17.5 millones de filas   319 MiB
+          system.text_log                   3.8 millones de filas   169 MiB
+          system.asynchronous_metric_log   52   millones de filas    29 MiB
+          system.metric_log                                          34 MiB
+
+      Mas que todos los datos de eventos juntos, con sus fusiones en segundo plano
+      compitiendo por el mismo gigabyte. Ninguno le sirve a una base de eventos de
+      este tamano, asi que se apagan con remove="1", que es la forma que tiene
+      ClickHouse de decir que esa tabla no se crea ni se escribe.
+
+      Se dejan query_log, part_log y error_log: pesan kilobytes y son lo que se
+      mira cuando una consulta sale mal.
+
+      OJO al editar este bloque. Un elemento que ClickHouse no reconoce tumba el
+      arranque sin un solo mensaje (ver arriba, los doce reinicios). Cada nombre
+      de aqui se comprobo primero en un contenedor desechable.
+    -->
+    <trace_log remove="1"/>
+    <text_log remove="1"/>
+    <metric_log remove="1"/>
+    <asynchronous_metric_log remove="1"/>
+    <processors_profile_log remove="1"/>
+    <latency_log remove="1"/>
+    <query_metric_log remove="1"/>
+
 </clickhouse>
