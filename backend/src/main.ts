@@ -17,10 +17,21 @@ import { AppModule } from './app.module';
  * en AppModule.
  */
 async function bootstrap() {
-  // Fastify en lugar de Express: mismo Nest, servidor mas rapido
+  // Fastify en lugar de Express: mismo Nest, servidor mas rapido.
+  //
+  // trustProxy: 'loopback' -- sin esto, `request.ip` siempre da 127.0.0.1
+  // (o la IP del tunel) cuando la peticion pasa por un proxy que corre en
+  // esta misma maquina: el proxy /api de Vite en desarrollo, o un tunel
+  // para entrar desde el celular. Con 'loopback', Fastify confia en el
+  // header X-Forwarded-For SOLO cuando quien se conecto directo es
+  // 127.0.0.1/::1, y de ahi saca la IP real -- nunca confia en un
+  // X-Forwarded-For que venga de una IP publica cualquiera (eso permitiria
+  // falsificarla). Afecta el `ip` que se guarda en `vista_producto`,
+  // `carrito_producto`, `compra_producto` y `devolucion_producto`
+  // (ver `EventosService`), ademas de cualquier deteccion de fraude por IP.
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule,
-    new FastifyAdapter(),
+    new FastifyAdapter({ trustProxy: 'loopback' }),
   );
 
   // Permite que el frontend (puerto 5173) le hable al backend (puerto 3000).

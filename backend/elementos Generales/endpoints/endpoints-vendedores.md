@@ -1572,14 +1572,22 @@ Segmento literal `paginado`: se resuelve antes que `:id/rechazos`.
 |---|---|---|
 | `pagina` | `1` | entero ≥ 1. `0`, negativo o no numérico → 400 `La pagina debe ser un numero entero mayor a 0`. |
 | `limite` | `20` | entero ≥ 1, **tope 100** (un valor mayor se capa a 100 en silencio). `0` o no numérico → 400 `El limite debe ser un numero entero mayor a 0`. |
-| `activo` | — (todas) | `true` → solo ofertas en estado `activa`; `false` → solo las que **no** están `activa` (`pendiente`, `pausada`, `retirada`, `rechazada`); ausente → sin filtrar por estado. Cualquier otro valor → 400 `El filtro activo debe ser "true" o "false"`. |
+| `estado` | — (todas) | Uno de los cinco `ESTADOS_OFERTA`: `pendiente`, `activa`, `pausada`, `retirada`, `rechazada` — filtra a **esa sola**, no un booleano. Ausente → sin filtrar por estado. Cualquier otro valor → 400 `El estado debe ser uno de: pendiente, activa, pausada, retirada, rechazada`. |
+
+**Cambio del 2026-09-19:** antes el único filtro era `activo` (`true`/`false`,
+un booleano que solo distinguía "activa" de "todo lo demás junto"). Se
+reemplazó por `estado`, que deja pedir cualquiera de las cinco por
+separado — a petición del usuario, para que se pudiera filtrar por
+cualquier estado individual, no solo activa/no-activa.
 
 `pagina`/`limite` son exactamente los mismos validadores (mismas reglas,
 mismos mensajes) que `/productos/paginacion` y `/vendedor/productos/paginado`
 — `validarLimite`/`validarPagina` en `helpers/validaciones-productos.ts`.
+`estado` va como parámetro ligado en la consulta a Postgres (`$2::text IS
+NULL OR estado_oferta_nombre = $2`), no interpolado.
 
 ```
-GET /vendedor/ofertas/paginado?pagina=1&limite=20&activo=true
+GET /vendedor/ofertas/paginado?pagina=1&limite=20&estado=activa
 ```
 
 ### 200
@@ -1631,17 +1639,28 @@ tamaño de página, sin importar cuántas ofertas tenga el vendedor.
 
 ### 400 / 401 / 403 / 503 / 500
 
-Mismos cuerpos que `GET /vendedor/ofertas` (más el 400 del filtro `activo`
+Mismos cuerpos que `GET /vendedor/ofertas` (más el 400 del filtro `estado`
 de arriba). Sin sesión → 401; comprador → 403.
 
 Probado en vivo el 7 de septiembre de 2026 (54 comprobaciones sobre las dos
 rutas paginadas): `total_ofertas` cuadra con `SELECT count(*)` de la base;
 concatenar todas las páginas da exactamente la lista de `GET
 /vendedor/ofertas`, sin duplicados ni faltantes y en el mismo orden;
-`activo=true`/`false` cuadran con el conteo por estado y su suma da el
-total; página fuera de rango → `[]` con el total correcto; `limite` se capa
+página fuera de rango → `[]` con el total correcto; `limite` se capa
 a 100; un admin ve el mismo conjunto que la tienda; un vendedor normal solo
 las suyas; comprador 403, sin sesión 401.
+
+**Pruebas del filtro `estado` -- hechas el 2026-09-19**, contra el
+servidor y PostgreSQL reales, con sesión de `ventas_norte` (id 4, 80
+ofertas `activa`, 8 `pausada`, ninguna en las otras tres):
+
+| Caso | Resultado |
+|---|---|
+| `estado=activa` | `total_ofertas: 80` -- cuadra exacto con `SELECT count(*) ... WHERE estado_oferta_nombre = 'activa'` |
+| `estado=pausada` | `total_ofertas: 8` -- cuadra exacto |
+| `estado=retirada` / `pendiente` / `rechazada` | `total_ofertas: 0` -- correcto, no hay ninguna oferta en esos tres estados en TODA la base (confirmado con una consulta aparte a Postgres) |
+| sin `estado` | `total_ofertas: 88` (80 + 8, la suma de las dos que sí existen) |
+| `estado=lateral` | `400` "El estado debe ser uno de: pendiente, activa, pausada, retirada, rechazada" |
 
 ---
 

@@ -20,7 +20,7 @@ const REGEX_ID_ENTERO = /^\d+$/;
 /**
  * El filtro `estado` de GET /admin/fraude/alertas-login: opcional, uno de
  * `pendiente`/`revisada`/`descartada`. Ausente (o vacio) devuelve `null` --
- * sin filtrar, todas -- mismo criterio que `validarFiltroActivo` de
+ * sin filtrar, todas -- mismo criterio que `validarFiltroEstadoOferta` de
  * `validaciones-oferta.ts`.
  */
 export function validarFiltroEstadoAlerta(
@@ -210,7 +210,7 @@ function validarFechaEvento(
 
 /**
  * `incluir_usuario` del explorador: `true`/`false`, no nulo -- a diferencia
- * de `validarFiltroActivo` (que devuelve `null` sin filtrar), aca ausente
+ * de `validarFiltroEstadoOferta` (que devuelve `null` sin filtrar), aca ausente
  * significa `false` (no hacer el lookup extra contra Postgres), no "sin
  * decidir". Mismas dos versiones convivan a proposito (ver
  * `FraudeLoginExploracionService.listarEventosPaginado`): con esta bandera

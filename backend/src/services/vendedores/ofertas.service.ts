@@ -23,7 +23,7 @@ import {
   validarAjusteStock,
   validarDecisionRevision,
   validarEstadoOferta,
-  validarFiltroActivo,
+  validarFiltroEstadoOferta,
   validarRazonRechazo,
 } from '../../helpers/validaciones-oferta';
 import {
@@ -753,7 +753,8 @@ export class OfertasVendedorService {
    * del vendedor (cualquier estado) y la misma forma de cada una, pero por
    * numero de pagina en vez de todas de golpe -- igual que
    * GET /vendedor/productos/paginado, no por cursor -- y con un unico
-   * filtro, `activo` (true / false / null, ver validarFiltroActivo).
+   * filtro, `estado` (uno de los cinco `ESTADOS_OFERTA`, o ausente para
+   * traerlas todas, ver validarFiltroEstadoOferta).
    *
    * Tres consultas, ninguna por oferta: dos a Postgres (una cuenta el total
    * que cumple el filtro, otra trae solo la pagina pedida; van en la misma
@@ -781,12 +782,12 @@ export class OfertasVendedorService {
     );
     const limite = validarLimite(query.limite);
     const pagina = validarPagina(query.pagina);
-    const activo = validarFiltroActivo(query.activo);
+    const estado = validarFiltroEstadoOferta(query.estado);
     const saltar = (pagina - 1) * limite;
 
     const { filas, total } = await this.consultarOfertasPropiasPaginado(
       idUsuario,
-      activo,
+      estado,
       limite,
       saltar,
     );
@@ -1185,11 +1186,15 @@ export class OfertasVendedorService {
    * podria no cuadrar con la pagina). Mismo patron de cliente dedicado +
    * BEGIN/COMMIT + intentarRollback que editar().
    *
-   * El filtro `activo`: `true` recorta a `estado_oferta_nombre = 'activa'`,
-   * `false` a `<> 'activa'`, `null` no recorta nada. Se interpola en el SQL
-   * (no es un parametro) porque es un fragmento de condicion, no un valor;
-   * los unicos tres textos posibles salen de validarFiltroActivo, nunca del
-   * cliente.
+   * El filtro `estado`: uno de los cinco `ESTADOS_OFERTA`
+   * (`pendiente`/`activa`/`pausada`/`retirada`/`rechazada`), o `null` para
+   * no filtrar. Va como parametro ($2), no interpolado -- a diferencia del
+   * viejo filtro `activo` (que solo podia salir de dos ramas fijas del
+   * codigo), `estado` es un texto que sale directo de la peticion (ya
+   * validado por `validarFiltroEstadoOferta` contra la lista de cinco,
+   * pero de todas formas no hay motivo para interpolarlo pudiendo
+   * enlazarlo). `$2::text IS NULL OR ... = $2` deja pasar todo cuando no
+   * se filtra, sin tener que armar dos textos de consulta distintos.
    *
    * Orden: `fecha_actualizacion` descendente y `id_oferta` descendente de
    * desempate. El desempate es imprescindible al paginar: `fecha_actualizacion`
@@ -1199,17 +1204,10 @@ export class OfertasVendedorService {
    */
   private async consultarOfertasPropiasPaginado(
     idUsuario: string,
-    activo: boolean | null,
+    estado: string | null,
     limite: number,
     saltar: number,
   ): Promise<{ filas: FilaOfertaPropia[]; total: number }> {
-    const condicionActivo =
-      activo === null
-        ? ''
-        : activo
-          ? `AND eo.estado_oferta_nombre = 'activa'`
-          : `AND eo.estado_oferta_nombre <> 'activa'`;
-
     const cliente = await pool.connect();
     try {
       await cliente.query(
@@ -1220,8 +1218,9 @@ export class OfertasVendedorService {
         `SELECT count(*) AS total
            FROM oferta o
            JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
-          WHERE o.id_usuario = $1 ${condicionActivo}`,
-        [idUsuario],
+          WHERE o.id_usuario = $1
+            AND ($2::text IS NULL OR eo.estado_oferta_nombre = $2)`,
+        [idUsuario, estado],
       );
 
       const pagina = await cliente.query<FilaOfertaPropia>(
@@ -1234,10 +1233,11 @@ export class OfertasVendedorService {
            FROM oferta o
            JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
            LEFT JOIN usuarios ua ON ua.id_usuario = o.id_usuario_aprobo
-          WHERE o.id_usuario = $1 ${condicionActivo}
+          WHERE o.id_usuario = $1
+            AND ($2::text IS NULL OR eo.estado_oferta_nombre = $2)
           ORDER BY o.fecha_actualizacion DESC, o.id_oferta DESC
-          LIMIT $2 OFFSET $3`,
-        [idUsuario, limite, saltar],
+          LIMIT $3 OFFSET $4`,
+        [idUsuario, estado, limite, saltar],
       );
 
       await cliente.query('COMMIT');

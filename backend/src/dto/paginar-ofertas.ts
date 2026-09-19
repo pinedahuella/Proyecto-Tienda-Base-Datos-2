@@ -7,18 +7,20 @@ import { OfertaPendiente, OfertaPropia } from '../models/oferta';
  * mismas ofertas del panel del vendedor -- todo estado -- y la misma forma
  * de cada una, pero por numero de pagina en vez de "todas de golpe", igual
  * que GET /vendedor/productos/paginado (no por cursor). Un unico filtro
- * posible: `activo` (ver validarFiltroActivo en helpers/validaciones-oferta.ts).
+ * posible: `estado` (ver validarFiltroEstadoOferta en
+ * helpers/validaciones-oferta.ts) -- uno de los cinco `ESTADOS_OFERTA`
+ * (`pendiente`, `activa`, `pausada`, `retirada`, `rechazada`), no un
+ * booleano: filtra a UNA sola de las cinco a la vez.
  *
- *   - `activo=true`  -> solo las ofertas en estado `activa`.
- *   - `activo=false` -> solo las que NO estan `activa` (pendiente, pausada,
- *     retirada o rechazada).
- *   - sin el parametro -> todas, sin filtrar por estado (como la ruta sin
+ *   - `estado=activa`    -> solo las ofertas en estado `activa`.
+ *   - `estado=pausada`   -> solo las `pausada`, y asi con cada una.
+ *   - sin el parametro   -> todas, sin filtrar por estado (como la ruta sin
  *     paginar).
  */
 export interface PaginarOfertasQuery {
   pagina?: string;
   limite?: string;
-  activo?: string;
+  estado?: string;
 }
 
 /** Respuesta de GET /vendedor/ofertas/paginado. */

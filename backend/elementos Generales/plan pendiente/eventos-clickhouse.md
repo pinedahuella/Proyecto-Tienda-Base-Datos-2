@@ -56,6 +56,22 @@
 > y que es `SUM` de verdad y no un conteo de filas) en
 > `endpoints-eventos.md`.
 >
+> **Cuarto extra, sesion siguiente (2026-09-19): `trustProxy` y `lote`
+> fijo.** Dos hallazgos de `docs/BACKEND-PENDIENTE.md` (escritos por el
+> companero) que se atendieron:
+>
+> 1. `trustProxy: 'loopback'` agregado en `main.ts` -- sin el, `request.ip`
+>    (el campo `ip` de los cuatro eventos que lo llevan) siempre daba
+>    `127.0.0.1` detras del proxy `/api` de Vite o de un tunel de celular.
+>    Probado en vivo con `X-Forwarded-For` simulado.
+> 2. Los seis rankings de `/admin/eventos/*` y `MasVendidosSyncService`
+>    ahora filtran `AND lote = 'real'` -- FIJO, sin ningun query param
+>    para pedir lo contrario (decision explicita del usuario: "las
+>    metricas en todo lugar... son sobre solo los reales, simple"). Antes
+>    contaban tambien filas sembradas por un script. Probado insertando
+>    una fila sembrada aislada con una cantidad exagerada (999): no
+>    aparecio en ningun ranking.
+>
 > **`carrito_producto` cambio de diseño respecto al primer borrador de este
 > documento** (mas abajo, sin actualizar todavia en el cuerpo): ahora lleva
 > tambien `id_oferta` (no solo `id_producto`) e `ip`, sin `sesion` ni

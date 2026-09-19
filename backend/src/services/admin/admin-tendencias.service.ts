@@ -50,6 +50,10 @@ import { Producto } from '../../models/producto';
  * diferencia del catalogo publico. Las dos que agrupan por `termino` no
  * necesitan ninguna segunda consulta: el termino ya es toda la
  * informacion, no hay un "producto" al que pedirle nombre.
+ *
+ * Las seis solo cuentan `lote = 'real'` -- nunca mezclan con datos
+ * sembrados, sin ningun parametro para pedir lo contrario (ver
+ * `consultarRanking`).
  */
 @Injectable()
 export class AdminTendenciasService {
@@ -170,6 +174,11 @@ export class AdminTendenciasService {
    * ClickHouse (`count`/`sum` promueven a `UInt64`, igual que
    * `MasVendidosSyncService`) -- se convierte a `number` en cada metodo
    * publico, no aqui, para que esta funcion se quede generica.
+   *
+   * Solo cuenta `lote = 'real'` -- sin parametro para pedir lo contrario,
+   * mismo criterio que `MasVendidosSyncService`: una tendencia de admin
+   * mezclada con datos sembrados por un script no es una tendencia, es un
+   * numero inventado.
    */
   private async consultarRanking(
     tabla: string,
@@ -186,6 +195,7 @@ export class AdminTendenciasService {
         query: `SELECT ${columnaAgrupar} AS clave, ${metrica} AS total
                   FROM ${tabla}
                  WHERE fecha >= now() - INTERVAL {dias:UInt32} DAY
+                   AND lote = 'real'
                  GROUP BY ${columnaAgrupar}
                  ORDER BY total ${direccion}
                  LIMIT {limite:UInt32}`,

@@ -65,7 +65,8 @@ export class OfertasVendedorController {
   // GET /vendedor/ofertas/paginado
   // La version paginada de GET /vendedor/ofertas (que se queda tal cual):
   // por numero de pagina -- igual que GET /vendedor/productos/paginado --
-  // con un unico filtro `activo` (true / false / ausente). Misma
+  // con un unico filtro `estado` (uno de los cinco ESTADOS_OFERTA, o
+  // ausente para traerlas todas). Misma
   // autorizacion e identidad efectiva que GET /vendedor/ofertas. Segmento
   // literal, va antes de :id/rechazos.
   @Get('paginado')

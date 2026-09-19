@@ -69,6 +69,18 @@ código: `fecha` es el momento en que el backend recibe la petición
 `formatoFechaClickHouse` en `eventos.service.ts`), `lote` siempre
 `'real'` -- si esta ruta lo escribió, no es un dato inventado.
 
+**`request.ip` depende de `trustProxy: 'loopback'` en `main.ts`**
+(agregado el 2026-09-19, antes faltaba): sin eso, cualquier petición que
+pase por un proxy que corre en la misma máquina (el proxy `/api` de Vite
+en desarrollo, o un túnel para entrar desde el celular) llegaba con
+`request.ip = 127.0.0.1` sin importar quién visitaba de verdad, porque
+Fastify no confiaba en el header `X-Forwarded-For` que trae la IP real.
+Con `'loopback'`, Fastify SÍ confía en ese header, pero solo cuando quien
+se conectó directo es 127.0.0.1/::1 -- una IP pública cualquiera no puede
+falsificarlo. Probado en vivo: una petición con
+`X-Forwarded-For: 200.150.10.55` quedó guardada con esa IP real, y una
+sin el header siguió guardando `127.0.0.1` normal.
+
 ### 202
 
 ```json
@@ -481,10 +493,20 @@ columna de agrupación y la métrica** (`AdminTendenciasService.consultarRanking
 SELECT <id_producto|termino> AS clave, <metrica> AS total
   FROM <tabla>
  WHERE fecha >= now() - INTERVAL {dias:UInt32} DAY
+   AND lote = 'real'
  GROUP BY <id_producto|termino>
  ORDER BY total <DESC|ASC>
  LIMIT {limite:UInt32}
 ```
+
+**`AND lote = 'real'` es fijo, sin ningún parámetro para pedir lo
+contrario** (agregado el 2026-09-19, antes faltaba): las seis rutas nunca
+mezclan con datos sembrados por un script (`lote = 'generado-<semilla>'`)
+-- decisión explícita del usuario, "las métricas en todo lugar son sobre
+solo los reales, simple". Mismo criterio en `MasVendidosSyncService`.
+Probado en vivo: una fila sembrada a mano (`lote: 'generado-prueba-lote'`)
+con `cantidad: 999` en un producto ficticio no apareció en ningún
+ranking, ni en estas seis rutas ni en `GET /productos/mas-vendidos`.
 
 `dias` y `limite` van por `query_params` de ClickHouse (bind seguro);
 `direccion` se interpola directo porque `validarDireccionEvento` ya la

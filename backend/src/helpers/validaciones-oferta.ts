@@ -1,5 +1,8 @@
 import { ErrorValidacion } from './errores';
-import { ESTADOS_OFERTA_VALIDOS } from '../models/estado-oferta';
+import {
+  ESTADOS_OFERTA,
+  ESTADOS_OFERTA_VALIDOS,
+} from '../models/estado-oferta';
 
 /**
  * Reglas de PATCH /vendedor/ofertas/:id: que estado se le puede poner a una
@@ -31,20 +34,28 @@ export function validarAjusteStock(valor: unknown): number {
 }
 
 /**
- * El filtro `activo` de GET /vendedor/ofertas/paginado: un booleano de
- * texto, opcional. `"true"` recorta a las ofertas en estado `activa`;
- * `"false"` a las que NO lo estan (pendiente, pausada, retirada o
- * rechazada); ausente (o vacio) devuelve `null` -- sin filtrar por estado,
- * igual que la ruta sin paginar. Cualquier otro valor es un 400.
+ * El filtro `estado` de GET /vendedor/ofertas/paginado: opcional, uno de
+ * los cinco `ESTADOS_OFERTA` (`pendiente`/`activa`/`pausada`/`retirada`/
+ * `rechazada`) -- a diferencia de `PATCH /vendedor/ofertas/:id`
+ * (`validarEstadoOferta`, que solo admite los tres que un vendedor puede
+ * PONER), aqui se puede filtrar por CUALQUIERA de los cinco, incluidos
+ * `pendiente` y `rechazada`: es una lectura, no una escritura. Ausente (o
+ * vacio) devuelve `null` -- sin filtrar, todas, igual que la ruta sin
+ * paginar. Mismo criterio que `validarFiltroEstadoAlerta` de
+ * `validaciones-fraude.ts`.
  */
-export function validarFiltroActivo(valor: string | undefined): boolean | null {
+export function validarFiltroEstadoOferta(
+  valor: string | undefined,
+): string | null {
   if (valor == null || valor === '') {
     return null;
   }
-  if (valor !== 'true' && valor !== 'false') {
-    throw new ErrorValidacion('El filtro activo debe ser "true" o "false"');
+  if (!ESTADOS_OFERTA.includes(valor)) {
+    throw new ErrorValidacion(
+      `El estado debe ser uno de: ${ESTADOS_OFERTA.join(', ')}`,
+    );
   }
-  return valor === 'true';
+  return valor;
 }
 
 /**

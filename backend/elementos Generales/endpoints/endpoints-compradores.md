@@ -34,6 +34,22 @@ carrito (`agregar_linea` guarda el id de la fila vigente de
 `precio_historial`, que nunca se actualiza), así que subir el precio
 después no cambia lo que va a pagar quien ya la tenía en su carrito.
 
+> **`POST /comprador/pedidos` (abrir un pedido directo, sin carrito) y
+> `POST /comprador/pedidos/:id/comprar` (pagarlo) son código VIEJO,
+> anterior a la migración al carrito de Redis (`POST /carrito/comprar`,
+> ver `endpoints-carrito.md`) -- confirmado revisando el frontend
+> (2026-09-19): `Checkout.svelte` todavía tiene un `modo='pedido'` que
+> llama a esta ruta, pero en toda la app solo se instancia una vez
+> (`+layout.svelte`) y siempre con `modo="carrito"`. `Pedido.svelte` (la
+> pantalla que sí sigue abriendo un pedido directo y agregándole líneas)
+> nunca renderiza `Checkout`, así que hoy no hay ningún botón que llegue a
+> pagar por este camino -- solo es alcanzable llamando la ruta a mano.
+> Sigue viva y funcional (no se borró), pero no hace falta invertir en
+> ella: por eso, por ejemplo, `comprarPedido()` nunca se enganchó al
+> registro de `compra_producto` en ClickHouse (`EventosService.registrarCompra`,
+> ver `endpoints-eventos.md`) como sí se hizo con `CarritoService` -- un
+> hueco real, pero sobre un camino que la interfaz actual no usa.
+
 ---
 
 ## POST /comprador/pedidos
@@ -711,11 +727,24 @@ DELETE /comprador/pedidos/3/detalles/4
 
 ## POST /comprador/pedidos/:id/comprar
 
+**Ruta vieja, ver la nota al inicio de este documento** -- superada por
+`POST /carrito/comprar` desde la migración al carrito de Redis; el
+frontend actual no tiene ningún botón que llegue aquí.
+
 Confirma la compra: llama a `comprar_pedido(id_pedido, metodo_pago)`, que
 descuenta el stock de cada oferta, registra el pago (nace `pagado` de una
 vez, sin importar el método — simplificación de la primera entrega, ver
 `docs/base-de-datos.md`) y pasa el pedido a `comprado`. Todo o nada — si
 algo falla, no se descuenta ni se cobra nada.
+
+**No registra `compra_producto` en ClickHouse** (a diferencia de
+`CarritoService.ejecutarCompraCarrito()`, ver `endpoints-eventos.md`) --
+detectado leyendo el código el 2026-09-18, sin probarlo contra el
+servidor, y documentado en `docs/BACKEND-PENDIENTE.md`. Como esta ruta ya
+no es alcanzable desde la interfaz real (ver la nota del inicio), no se
+prioriza enganchar el registro aquí: el ranking de "más vendidos" y las
+tendencias de compra de ClickHouse solo ven ventas hechas por el carrito,
+que es como se compra hoy en la práctica.
 
 ```json
 { "metodo_pago": "tarjeta", "tarjeta": { "numero": "4242424242424242", "vencimiento": "12/28", "cvv": "123", "titular": "Ana Lopez" } }

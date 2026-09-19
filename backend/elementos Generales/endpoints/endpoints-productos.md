@@ -498,7 +498,9 @@ GET /productos/mas-vendidos
 minutos, agregando `compra_producto` de ClickHouse de las últimas 24h (o
 de los últimos 7 días si no hubo ninguna compra en 24h; si tampoco hay
 nada en 7 días, deja el ranking anterior sin tocar), y publica hasta 20
-ids en el ZSET `mesh:productos:mas_vendidos`. Ver
+ids en el ZSET `mesh:productos:mas_vendidos`. **Solo cuenta `lote = 'real'`**
+(agregado el 2026-09-19), sin ningún parámetro para pedir lo contrario --
+nunca mezcla con datos sembrados por un script. Ver
 `elementos Generales/plan pendiente/eventos-clickhouse.md`.
 
 Esta ruta (`MasVendidosService.obtener()`) lee los primeros 8 de ese ZSET

@@ -16,6 +16,11 @@ import { redis } from '../../database/redis';
  * (aunque ya este viejo) en vez de vaciarlo; mostrar algo desactualizado es
  * mejor que no mostrar nada.
  *
+ * Solo cuenta `lote = 'real'` -- nunca mezcla con datos sembrados
+ * (`lote = 'generado-<semilla>'`), sin excepcion ni parametro para pedir lo
+ * contrario: un ranking de "mas vendidos" con ventas inventadas mostraria
+ * un numero que nadie midio de verdad.
+ *
  * Guarda mas productos de los que el catalogo va a mostrar
  * (`TOPE_ALMACENADO`): si mañana cambia cuantos se pintan en la pagina, no
  * hace falta tocar este worker ni la consulta a ClickHouse, solo el
@@ -95,6 +100,7 @@ export class MasVendidosSyncService {
       query: `SELECT id_producto, sum(cantidad) AS total
                 FROM compra_producto
                WHERE fecha >= now() - INTERVAL {cantidad:UInt32} ${unidad}
+                 AND lote = 'real'
                GROUP BY id_producto
                ORDER BY total DESC
                LIMIT {tope:UInt32}`,
