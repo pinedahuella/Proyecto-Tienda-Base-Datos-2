@@ -15,15 +15,18 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~6~~ | ~~La nota no llega al catalogo hasta que corre el ETL~~ | -- | -- | **CERRADO el 2026-09-04.** Etapa nueva del ETL, con `bash pruebas/notas.sh` (10 OK) |
 | ~~7~~ | ~~Una venta relampago que vence sola deja `es_inventario_limitado` en true~~ | -- | -- | **CERRADO el 2026-09-04.** `revisarVencidas()`, un `@Interval` en `inventario-limitado.service.ts`, apaga la columna solo |
 | ~~8~~ | ~~Editar el stock durante una venta relampago desincroniza las dos bases~~ | -- | -- | **CERRADO el 2026-09-04.** El `PATCH` contesta 409 cuando viene `ajuste_stock` con la venta abierta |
-| 9 | Las tres rutas de la base columnar | Jose David | ver `BACKEND-PENDIENTE.md` | **alta: sin `POST /eventos/vista` la tabla que sostiene el panel de tendencias no se llena NUNCA** |
+| ~~9~~ | ~~Las tres rutas de la base columnar~~ | -- | -- | **CERRADO el 2026-09-18**, pero con otra forma: `POST /eventos/vista|carrito|busqueda-clic`, seis rankings `GET /admin/eventos/*` y `GET /productos/mas-vendidos`. El panel y el estante de la portada estan hechos, con `bash pruebas/tendencias.sh` (45 OK). **Queda pedirle a Jose David un parametro `lote` en los seis rankings**: hoy cuentan tambien lo que sembro el generador |
 | 10 | Los filtros facetados del buscador, con agregaciones | Jose David la consulta, yo la pantalla | ver abajo | **alta: es un requisito literal de la Entrega 3 y hoy no hay ni un `aggs` en `backend/`** |
 | ~~11~~ | ~~La prueba de falla simulada del checkout~~ | -- | -- | **CERRADO el 2026-09-06.** `bash pruebas/falla_checkout.sh`, 31 OK y 0 FALLA, con su evidencia en `CONSISTENCIA-CHECKOUT.md`. Vuelto a correr el 2026-09-11: 31 OK |
 | 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | con el profesor | ver abajo | media: ya es la fila 11 de `CONSISTENCIA-CHECKOUT.md` y falla en unos 5 s en vez de 32. Falta elegir una de las tres salidas |
 | 13 | La lista de ofertas del vendedor viene entera, sin paginar | Jose David la ruta, yo la pantalla | ver abajo | media: la ruta paginada ya existe, pero sin los filtros del panel no se puede usar |
 | 14 | Elasticsearch se llena con cada login y **ninguna ruta lo consulta** | Jose David | ver abajo | **alta: investigar en Elasticsearch es lo que pidio el profesor, y hoy hay cero agregaciones en el backend** |
 | 15 | Los detectores que faltan del fraude del login, y los detalles de los tres que hay | Jose David | ver abajo | media: lo que hay funciona; lo que falta son senales y bordes |
-| 16 | La copia de logueos a ClickHouse lee `log_login`, que no recibe filas desde el 2026-09-10 | decidir con el profesor; el ETL es mio | ver abajo | media: el 2026-09-11 habia 24 logins en Mongo que ClickHouse no ve, y la ruta 3 de la columnar leeria datos viejos |
+| 16 | La copia de logueos a ClickHouse lee `log_login`, que no recibe filas desde el 2026-09-10 | decidir con el profesor; el ETL es mio | ver abajo | media: el 2026-09-11 habia 24 logins en Mongo que ClickHouse no ve, y cualquier analisis de logins sobre ClickHouse leeria datos viejos. **Ademas esa copia escribe la fecha en UTC y ClickHouse la lee en Guatemala (6 horas corrida): si se repunta hay que corregirlo, ver `etl/README.md`** |
 | ~~17~~ | ~~Medir en vivo lo que se toco despues de la corrida del 2026-09-11~~ | -- | -- | **CERRADO el 2026-09-12.** Medido contra las bases y roto a proposito; los numeros estan en `docs/TRASPASO.md` |
+| 20 | `comprarPedido` no anota la compra en ClickHouse (solo el carrito lo hace) | Jose David | una llamada a `registrarCompra` | media: `etl/cargar_compras.sh` lo compensa, pero solo cuando alguien lo corre. Ver `BACKEND-PENDIENTE.md` |
+| 21 | El lote de eventos de demo no se renueva solo y sus fechas caducan | mia | ver `clickhouse/lote/README.md` | media: a los 7 dias, Tendencias vuelve a salir vacio con la tabla llena. Se renueva con `-BorrarVistas 42` y `-Vistas 3000 -Semilla 42` |
+| 22 | Tablas que quedan en cero y no tienen script: `rechazo_oferta`, `anillo_fraude`, `anillo_fraude_resena` | mia | -- | baja: medidas en 0 el 2026-09-18. Se llenan usando la aplicacion (rechazar una oferta, correr la deteccion de anillos), no hay generador |
 | 18 | Las tres tablas de la 016 no estan en el diagrama ER | mia | -- | baja: `docs/diagrama-general.drawio` sigue con las 42 cajas |
 | 19 | `trustProxy: 'loopback'` en `backend/src/main.ts` (2026-09-15) | Jose David | una linea, arriba de todo en `BACKEND-PENDIENTE.md` | media: sin ella, quien entra por el tunel del celular queda como `127.0.0.1`. Lo demas (proxy `/api`, `tunel-celular.ps1`, guia) esta hecho y probado |
 
@@ -109,10 +112,11 @@ entrega:
    pensar la marca de nuevo antes de escribir nada.
 2. **Que ClickHouse deje los logueos** y se quede con las vistas de producto
    para tendencias. El fraude por IP pasaria entero a Elasticsearch (punto 14),
-   y la ruta 3 de la columnar (`GET /admin/eventos/fraude/ip`) sobraria.
+   y la ruta `GET /admin/eventos/fraude/ip`, que se penso y no se escribio, ya no
+   hace falta.
 
-Mientras no se decida, esa ruta 3, si se escribe, leeria logueos que se
-quedaron en el 2026-09-10.
+Mientras no se decida, cualquier lectura de logins en ClickHouse veria logueos
+que se quedaron en el 2026-09-10.
 
 ---
 

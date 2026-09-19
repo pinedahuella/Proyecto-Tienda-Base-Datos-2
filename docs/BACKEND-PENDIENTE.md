@@ -241,6 +241,36 @@ tres salidas siguen por decidir con el profesor.
 
 ## LO NUEVO DEL 2026-09-06: la base columnar ya existe y le faltan TRES rutas
 
+> **ACTUALIZADO EL 2026-09-18. Lo de abajo son las firmas del 2026-09-06 y NO se
+> van a construir tal cual. Lo que paso:**
+>
+> - **Ruta 1** (`POST /eventos/vista`): hecha, junto con `carrito` y `busqueda-clic`.
+> - **Ruta 2** (`GET /admin/eventos/tendencias`): reemplazada por seis rankings,
+>   `GET /admin/eventos/vista|carrito|compra|devolucion|busqueda|busqueda-clic`. La
+>   pantalla de Tendencias se reescribio contra ellos y ya funciona.
+> - **Ruta 3** (`GET /admin/eventos/fraude/ip`): descartada. El fraude por IP lo
+>   cubre Elasticsearch con las alertas de login.
+> - Ademas, `GET /productos/mas-vendidos`: el frontend ya la consume, arriba del
+>   catalogo, y sale solo cuando no hay filtros puestos.
+>
+> **Lo unico que falta, y es para ti:** los seis rankings no reciben `lote`.
+> Cuentan todo lo guardado, incluidas las 3882 vistas del lote generado, y desde
+> la pantalla no se puede saber cual es cual. Lo que se pide, igual que en las
+> firmas de abajo:
+>
+> ```
+> query   lote   real | generado | todo     por defecto real
+> ```
+>
+> Es un `AND lote = {lote:String}` en `consultarRanking` (y `lote != ''` para
+> `todo`), con el mismo criterio que ya usas en el `WHERE fecha >= ...`. Con
+> `real` por defecto, un ranking sin parametros dejaria de mezclar lo sembrado.
+> Si lo pones, el panel lo enchufa en un selector; hoy solo avisa en una nota.
+>
+> Y una cosa menor: cuando un producto del ranking ya no tiene documento en Mongo
+> la fila sale con `producto: null` y **sin el id**, asi que no se puede ni
+> mostrar cual era. Un `id_producto` junto al `producto` lo arregla.
+
 Entro **ClickHouse**, la sexta base, y es lo que el profesor pidio para tendencias
 y para fraude. Todo lo que no es `backend/` ya esta hecho y medido: el contenedor,
 el esquema, el ETL que copia los logueos, el generador de datos de prueba, el arnes
@@ -1771,3 +1801,33 @@ publico), que es lo que hace posible el boton.
    foto y reponer existencias mas tarde sube PostgreSQL y deja Redis en cero. El
    boton lo corta antes de llamar. Si algun dia se quiere cerrar por el lado
    correcto, el sitio es `activar()`.
+
+---
+
+## LO NUEVO DEL 2026-09-18 (noche): la compra de un pedido pendiente no se anota en ClickHouse
+
+Para Jose David. Al escribir `etl/cargar_compras.sh` (que copia de PostgreSQL lo que el
+backend nunca anoto en `compra_producto` y `devolucion_producto`) salio esto, **por lectura
+del codigo y sin probarlo contra el servidor**:
+
+- `CarritoService` (`carrito.service.ts`, ~599) llama a `registrarCompra` al pagar. Ese es el
+  unico camino que anota la compra.
+- `PedidosCompradorService.comprarPedido` (`pedidos.service.ts`, ~640-665), el que paga un pedido
+  que ya estaba pendiente, **no lo llama**. Esas compras no llegan a ClickHouse.
+- La devolucion si se anota al cancelar (`pedidos.service.ts`, ~719). O sea que hay devoluciones
+  registradas de compras que nunca se registraron.
+
+Lo que se pide es una llamada a `registrarCompra` al terminar `comprarPedido`, igual que en el
+carrito. Mientras no este, el ranking de mas vendidos y el de compras de Tendencias no ven esas
+ventas, salvo que alguien corra `bash etl/cargar_compras.sh`.
+
+Lo otro que se encontro ya esta arreglado del lado de aqui y no requiere nada tuyo: la clave de
+ordenacion de `compra_producto` colapsaba dos ofertas del mismo producto en el mismo pedido (el
+pedido 121 tenia 3 lineas y ClickHouse guardaba 2). Ahora lleva `id_oferta`, ver
+`clickhouse/001_esquema.sql`. Una consecuencia para ti: `sum(cantidad)`, la metrica de compra y de
+devolucion, por fin suma todas las lineas. Los numeros de `GET /admin/eventos/compra` pueden subir
+respecto a lo que veias antes en un pedido con dos vendedores del mismo producto.
+
+Y una que si es tuya y sigue igual: los seis rankings de `/admin/eventos/*` no reciben `lote` (ver
+mas arriba). Con la actividad generada ahora contando dentro de `compra_producto`, el ranking de mas
+vendidos mezcla ventas reales con inventadas, y nada en la respuesta lo dice.

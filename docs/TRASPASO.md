@@ -3,19 +3,130 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-12**.
+Ultima actualizacion: **2026-09-18**.
 
-**Lo de hoy.** Jose David mudo el log de inicio de sesion a
-MongoDB, lo copia a Elasticsearch y detecta tres senales de fraude con Redis
-(commit `e38e9a3`). Faltaba todo lo que no es `backend/`: la tabla donde caen
-las alertas (migracion 016), los indices de Mongo, la plantilla del indice, el
-paso del arranque, la pantalla y dos arneses. Esta hecho y medido, seccion "El
-fraude del inicio de sesion". Lo que falta es sobre todo suyo: **ninguna ruta
-consulta Elasticsearch todavia**, y eso es lo que pidio el profesor.
+**Lo de hoy (2026-09-18, sesion larga, varios pulls seguidos).** Jose David
+amplio el catalogo de `tipo_alerta_fraude` a nueve senales (Redis + las
+retrospectivas de Elasticsearch: `toma_cuenta`, `viaje_imposible` y las tres
+`_lenta`), construyo la persistencia de los anillos de fraude en resenas
+(`anillo_fraude`/`anillo_fraude_resena`), y el mismo dia elimino el panel EN
+VIVO viejo (`GET /admin/fraude/anillos`) por redundante y renombro
+`anillos-persistidos` a **`alertas-resenas`**. Del lado de aqui: migraciones
+`017`-`019`, `PanelFraude.svelte` con las nueve senales y sin la seccion en
+vivo, una campanita de alertas de seguridad en `Cabecera.svelte` (para
+CUALQUIER cuenta, no solo admin -- `GET`/`PATCH /perfil/alertas-fraude`), y
+dos scripts de demo (`demo-fraude-login.ps1` visual con SendKeys en modo
+incognito, `demo-evento-fraude.ps1` por HTTP directo, mas rapido y confiable
+para clase).
 
-Despues de la corrida del 2026-09-11 se tocaron dos arneses, `arrancar.ps1` y
-el panel. El 2026-09-12 se midio todo contra las bases, con los dos arreglos de
-`arrancar.ps1` rotos a proposito, y esta en esa misma seccion.
+**Y despues, la misma sesion:** seis eventos nuevos de producto/buscador en
+ClickHouse (`vista_producto`, `carrito_producto`, `compra_producto`,
+`devolucion_producto`, `busqueda_realizada`, `busqueda_clic`) -- ver
+`backend/elementos Generales/endpoints/endpoints-eventos.md`. El primer pull
+de esta pieza llego ROTO (referenciaba 5 archivos nunca commiteados,
+`npx tsc --noEmit` lo destapo con 8 errores); el segundo pull los trajo. Aqui
+se formalizaron las cinco tablas nuevas en `clickhouse/001_esquema.sql`, se
+creo el "sesion" analitico del navegador (`sesionAnalitica.ts`,
+`sessionStorage`, NO es la cookie de login) y se engancharon los tres eventos
+que si necesitan aviso del frontend (vista, agregar al carrito, clic en
+busqueda) en sus pantallas. Probado en vivo con trafico real, no simulado.
+
+**Y al final del dia, el ultimo pull (`3255560`), que cambio la respuesta a lo
+anterior.** Las seis rutas `GET /admin/eventos/vista|carrito|compra|devolucion|busqueda|busqueda-clic`
+dejaron de ser un explorador de filas crudas: David las reescribio como
+**rankings** (`dias`, `limite`, `direccion`), y agrego
+`GET /productos/mas-vendidos` (publica, un worker recalcula un ZSET de Redis
+cada 10 minutos desde `compra_producto`). Las dos rutas que el panel de
+tendencias esperaba desde hace semanas (`/admin/eventos/tendencias` y
+`/admin/eventos/fraude/ip`) **ya no van a existir**: el panel se reescribio
+contra los seis rankings, y el fraude por IP lo cubre la pestana Fraude.
+
+Lo que se hizo de este lado, todo medido con el backend vivo:
+
+```
+frontend PanelTendencias.svelte   reescrito: seis pestanas, ventana, cuantos y orden
+frontend routes/+page.svelte      el estante "Lo mas vendido ahora" arriba del catalogo
+                                  (solo sin filtros), con la tarjeta pasada a un snippet
+pruebas/tendencias.sh             el arnes numero 13, 45 OK
+pruebas/etl_mongo.sh              el 14, 21 OK. El ETL de Mongo sobre una COPIA de la base
+pruebas/etl_compras.sh            el 15, 22 OK. El ETL de compras a ClickHouse
+redis/mas_vendidos.sh              ver el ranking de mas vendidos y reconstruirlo ya, sin esperar
+                                  los 10 minutos del worker. Documentado en redis/README.md, 2b
+```
+
+**Y despues, la misma noche: el ETL y las demos que arrancaban en cero.** Se pidio revisar
+si el ETL reflejaba lo que David cambio y si la base columnar se podia llenar de forma nativa.
+La respuesta a la primera fue **no**, y la revision destapo tres cosas. Todo esta en
+`etl/README.md` (seccion "Lo que cambio el 2026-09-18"); aqui va lo que hay que saber.
+
+```
+etl/cargar.js            ya no reemplaza los productos que edito la aplicacion (el backend edita SOLO
+                         en Mongo y el replaceOne deshacia la edicion y borraba sus eventos), y marca
+                         pendiente_busqueda para que el worker reindexe. Probado sobre una copia
+etl/cargar_notas.js      lo mismo: marca solo cuando la nota cambio
+etl/cargar_compras.sh    NUEVO. Copia stock_movimiento a compra_producto y devolucion_producto:
+                         141 ventas en PostgreSQL contra 2 filas en ClickHouse. Cuadra, no duplica
+clickhouse/lote/         NUEVO generar_actividad.sql: carrito, compra, devolucion, busquedas y clics,
+                         derivados de las vistas. Antes 4 de las 6 tablas estaban en cero
+clickhouse/reparar_orden_compras.sh   reconstruye la clave de ordenacion (ver abajo)
+arrancar.ps1             corre el gemelo de compras en cada arranque, y -Vistas siembra tambien la actividad
+redis/mas_vendidos.sh    ver y reconstruir el ranking sin esperar los 10 minutos del worker
+```
+
+**Cuatro hallazgos que no son obvios.**
+
+**1. La demo arrancaba vacia aunque la tabla tuviera 3882 filas.** Las vistas generadas eran del
+24 de agosto al 6 de septiembre y los rankings miran los ultimos 7 dias. El lote se siembra con la
+fecha del dia que se corre: para una demo hay que renovarlo el mismo dia
+(`.\arrancar.ps1 -BorrarVistas 42` y despues `.\arrancar.ps1 -Vistas 3000 -Semilla 42`). No se renueva solo.
+
+**2. La clave de ordenacion de las tablas de compra perdia unidades.** Con `(id_producto, fecha,
+id_pedido)`, dos ofertas del mismo producto en el mismo pedido se colapsaban: el pedido 121 tenia
+3 lineas y ClickHouse guardaba 2. Ahora lleva `id_oferta`. Las bases hechas antes necesitan
+`bash clickhouse/reparar_orden_compras.sh` (arrancar.ps1 lo hace solo).
+
+**3. El backend solo anota las compras del carrito.** Lo comprado antes del 2026-09-06, la semilla y los
+pedidos pendientes que se pagan despues (`comprarPedido`) nunca llegaban a ClickHouse. Pedido a David en
+`BACKEND-PENDIENTE.md`. Mientras tanto `cargar_compras.sh` lo compensa, pero solo cuando corre.
+
+**4. La copia de logueos escribe en UTC y ClickHouse lee en Guatemala**: 6 horas corrida. Nadie lo ve
+porque esa copia esta congelada. No se arreglo; esta anotado en `etl/README.md`.
+
+**Tres salvedades honestas.** (a) El dano de `cargar.js` era estructural, no hecho: hoy ningun producto
+de PostgreSQL esta editado desde la aplicacion, y los 16 eventos de modificacion de Mongo coinciden con
+PostgreSQL. (b) En mi prueba del gemelo PowerShell borre tambien el pedido 121 del destino y las dos filas que
+el backend habia escrito para el se recuperaron desde PostgreSQL con IP `::` en vez de la local: dato de
+desarrollo, pero una perdida real. (c) `pruebas/eventos.sh` dio 1 FALLA una vez, justo despues de otra prueba, y
+tres corridas seguidas despues dieron 31 OK: no se reprodujo y no se pudo explicar.
+
+**La metrica NO es la misma en las seis pestanas**, y es lo primero que dice la
+pantalla: vista y busquedas cuentan sesiones DISTINTAS, carrito cuentas
+DISTINTAS y compra y devolucion SUMAN unidades. El arnes siembra duplicados a
+proposito para que un `COUNT(*)` dificilmente pase por bueno: vistas de una
+misma sesion, dos filas de la misma cuenta, cantidades de 5 y 3.
+
+**Tres cosas que no son obvias.**
+
+**1. Estas rutas no reciben `lote`.** Cuentan todo lo guardado, tambien las
+3882 vistas que sembro `clickhouse/lote`. El panel lo dice en una nota; esta
+pedido en `docs/BACKEND-PENDIENTE.md`. Es la misma leccion de siempre: un
+ranking que mezcla lo medido con lo sembrado tiene forma de hallazgo.
+
+**2. Un producto borrado sale sin id.** La ruta contesta `producto: null` y el
+id se pierde por el camino, asi que la fila se pinta como "Producto que ya no
+existe en el catalogo", con su total y sin enlace.
+
+**3. Sembrar a mano en ClickHouse pide `--database`.** `clickhouse-client`
+entra a `default`, donde las seis tablas TAMBIEN existen: el `INSERT` sale
+bien y el backend, que mira `mesh_eventos`, no ve ni una fila. Paso midiendo
+esto (los rankings salian vacios con datos "sembrados") y se perdio un rato
+creyendo que era la ruta. Ya limpiado; el arnes lo lleva puesto.
+
+Antes de eso, el 2026-09-10 al 2026-09-12: Jose David mudo el log de inicio
+de sesion a MongoDB, lo copia a Elasticsearch y detecto tres senales de
+fraude con Redis (commit `e38e9a3`). Esa ronda sigue en la seccion "El fraude
+del inicio de sesion" mas abajo, con sus cifras del 09-12 (ya superadas por
+las nueve senales de hoy, pero el razonamiento de fondo no cambio).
 
 ---
 
@@ -44,10 +155,11 @@ el panel. El 2026-09-12 se midio todo contra las bases, con los dos arreglos de
 >   SQL va en ASCII puro.
 > - Ninguna contrasena real en un archivo que se suba. Salen del `.env`.
 >
-> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene DOCE arneses:
+> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene QUINCE arneses:
 > `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`, `bash pruebas/notas.sh`,
 > `bash pruebas/busqueda.sh`, `bash pruebas/eventos.sh`,
 > `bash pruebas/alertas_login.sh`, `bash pruebas/ofertas_paginadas.sh`,
+> `bash pruebas/tendencias.sh`, `bash pruebas/etl_mongo.sh`, `bash pruebas/etl_compras.sh`,
 > `bash pruebas/falla_checkout.sh`, `bash redis/prueba_carrito.sh`,
 > `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`,
 > `.\mongo\demostracion_indices.ps1`.
@@ -810,6 +922,7 @@ las dos consultas contestan en 17 ms
 la copia de logueos no duplica: tres corridas seguidas, 325 filas y 325 ids
 ```
 
+**(Escrito el 2026-09-06 y ya superado, ver "Lo de hoy": las rutas se publicaron el 2026-09-18, pero como rankings y no con estas firmas.)**
 **Lo que falta son TRES rutas**, y la que de verdad urge es
 `POST /eventos/vista`: sin ella `vista_producto` no se llena nunca y todo lo
 demas queda de adorno. El contrato completo esta en `docs/BACKEND-PENDIENTE.md`
@@ -1183,7 +1296,7 @@ Lo que queda vivo, en orden de lo que mas duele (al 2026-09-11):
 |---|---|---|
 | 17 | Medir en vivo lo que se toco despues de la corrida del 2026-09-11 | mia |
 | 14 | Las rutas de agregacion sobre `mesh_eventos_autenticacion`: lo que pidio el profesor | Jose David |
-| 9 | Las tres rutas de la base columnar, y sobre todo `POST /eventos/vista` | Jose David |
+| ~~9~~ | ~~Las tres rutas de la base columnar~~ **HECHAS el 2026-09-18** (seis rankings, `POST /eventos/*` y mas vendidos). Queda pedir el filtro `lote` | Jose David |
 | 10 | Los filtros facetados del buscador, con agregaciones. Requisito de la Entrega 3 | los dos |
 | 16 | La copia de logueos a ClickHouse, congelada desde el 2026-09-10 | decidir con el profesor |
 | 15 | Los detectores que faltan y los detalles del servicio de fraude del login | Jose David |
