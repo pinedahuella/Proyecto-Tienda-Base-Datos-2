@@ -60,7 +60,10 @@ junto a sus credenciales (tunel mesh, id 3f0267e6-ea95-4114-86b4-21b8d10470d8). 
 la U el tunel necesita WARP (mesh-publico.ps1 lo conecta si el 7844 esta cerrado).
 
 Para iniciar sesion TU MISMO desde otro pais, con el frontend de verdad (viaje imposible
-y toma de cuenta), en el panel: "Entrar a Mesh desde otro pais". O:
+y toma de cuenta), en el panel: "Login desde otro pais" o "Entrar a Mesh desde otro pais".
+Los dos te dan un LINK CON EL NOMBRE DEL PAIS, por ejemplo https://mesh-singapur.ledkid.com/entrar,
+que abres en cualquier navegador o en el celular y en el que quien inicie sesion aparece en ese
+pais. Se prepara una sola vez con  .\mesh-publico.ps1 -Accion paises  (ya hecho). O:
   .\demo-entrar-otro-pais.ps1 -Pais sg     abre una ventana de Chrome que sale por ese pais
   .\demo-entrar-otro-pais.ps1 -Estado      desde donde sales, y si sigue abierto
   .\demo-entrar-otro-pais.ps1 -Cerrar      cierra la ventana, el tunel y Tor

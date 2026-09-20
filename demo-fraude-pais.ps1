@@ -90,6 +90,7 @@ if ($Limpiar) {
 # --- Tor: imagen propia, contenedor y busqueda de salida en el pais ---
 # Viven en tor-demo.ps1, que comparte con demo-entrar-otro-pais.ps1.
 . (Join-Path $repo 'tor-demo.ps1')
+. (Join-Path $repo 'pais-enlace.ps1')
 
 # Si hay una ventana abierta desde otro pais (demo-entrar-otro-pais.ps1), el Tor es de
 # ella. Cambiarle el pais por debajo le rompe la sesion, asi que se pide cerrarla antes.
@@ -261,8 +262,27 @@ Ok "8 intentos con 4 correos distintos (respuestas del backend: $(($codigos | Se
 Ok "El backend los registro con la IP $ipSalida"
 Ok "Alertas: $alertas"
 
-# --- cerrar el tunel y Tor ---
-Paso "Cerrando el tunel y Tor"
+# --- el link para entrar TU MISMO desde ese pais ---
+# Tor sigue vivo (es el mismo de los intentos): se le pone el link con el nombre del pais
+# (mesh-singapur.ledkid.com) y se deja abierto para que inicies sesion tu, desde el navegador
+# que quieras. Se cierra con .\demo-entrar-otro-pais.ps1 -Cerrar o con su boton del panel.
+# Con la sesion guardada, Limpiar-Demo ya no quita ese Tor.
+$enlace = $null
+if (-not $ConCopia) {
+    Paso "El link de $($TituloPais[$Pais]), para entrar tu mismo"
+    $enlace = Abrir-EnlacePais $Pais
+    if ($enlace) {
+        Ok "Listo: $enlace"
+        New-Item -ItemType Directory -Force $MeshDemoTmp | Out-Null
+        @{ pais = $Pais; url = $enlace; tunelPid = $null; ip = $ipSalida; enlace = $enlace; desde = (Get-Date -Format 's') } |
+            ConvertTo-Json | Set-Content (Join-Path $MeshDemoTmp 'entrar-pais.json') -Encoding ascii
+    } else {
+        Write-Host "   Sin link por pais; la demo termina como siempre." -ForegroundColor Yellow
+    }
+}
+
+# --- cerrar el tunel de los intentos ---
+Paso "Cerrando el tunel de los intentos"
 Limpiar-Demo
 Ok $(if ($ConCopia) { "Backend normal arriba en 3000; ClickHouse y Neo4j reactivandose" } else { "Listo. El backend, ClickHouse y Neo4j no se tocaron" })
 
@@ -271,6 +291,13 @@ Write-Host " LISTO. La alerta de $($Pais.ToUpper()) ($ipSalida) ya esta en el pa
 Write-Host " Abre este link y entra como admin@mesh.com / Admin123:"
 Write-Host "   http://localhost:5173/panel?s=fraude" -ForegroundColor Yellow
 Write-Host ""
+if ($enlace) {
+    Write-Host " Ahora entra TU MISMO desde $($TituloPais[$Pais]). Abre este link en CUALQUIER navegador (tambien el celular):" -ForegroundColor Green
+    Write-Host "   $enlace/entrar" -ForegroundColor Yellow
+    Write-Host " Quien lo abra aparece en $($TituloPais[$Pais]) para la tienda, y su login queda con esa IP. Va mas lento: sale por Tor."
+    Write-Host " Para cerrar el link:   .\demo-entrar-otro-pais.ps1 -Cerrar" -ForegroundColor Yellow
+    Write-Host ""
+}
 Write-Host " Para borrar la alerta de demostracion cuando termines:"
 Write-Host "   .\demo-fraude-pais.ps1 -Limpiar" -ForegroundColor Yellow
 Write-Host "=============================================================="

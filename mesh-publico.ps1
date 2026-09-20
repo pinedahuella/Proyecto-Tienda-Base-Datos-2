@@ -4,6 +4,7 @@
 #   .\mesh-publico.ps1 -Accion encender     abre la direccion publica (sin ventana)
 #   .\mesh-publico.ps1 -Accion apagar       la cierra
 #   .\mesh-publico.ps1 -Accion estado       si esta abierta y si contesta
+#   .\mesh-publico.ps1 -Accion paises       UNA vez: los links por pais (mesh-singapur.ledkid.com...)
 #
 # Es un tunel de Cloudflare NOMBRADO y aparte: se llama 'mesh', es distinto del de LEDKID
 # ('ledkid') y del de ENKID, y no comparte ni toca su config ni su servicio. Lleva al
@@ -25,13 +26,14 @@
 # necesita WARP; Asegurar-SalidaTunel lo conecta si el puerto 7844 esta cerrado.
 
 param(
-    [ValidateSet('encender', 'apagar', 'estado')]
+    [ValidateSet('encender', 'apagar', 'estado', 'paises')]
     [string]$Accion = 'estado'
 )
 
 # Nada de ErrorActionPreference = 'Stop': cloudflared escribe avisos por stderr.
 $repo = $PSScriptRoot
 . (Join-Path $repo 'copia-backend.ps1')
+. (Join-Path $repo 'pais-enlace.ps1')
 $cf = 'C:\Program Files (x86)\cloudflared\cloudflared.exe'
 $cfg = Join-Path $env:USERPROFILE '.cloudflared\config-mesh.yml'
 $direccion = 'https://mesh.ledkid.com'
@@ -50,6 +52,13 @@ function Proceso-Mesh {
 
 function Publico-Responde {
     try { return ((Invoke-WebRequest "$direccion/api/productos?limite=1" -UseBasicParsing -TimeoutSec 20).StatusCode -eq 200) } catch { return $false }
+}
+
+if ($Accion -eq 'paises') {
+    # Una sola vez: un nombre por pais (mesh-singapur.ledkid.com...) en el DNS y en el tunel
+    # 'mesh'. Son registros NUEVOS de ledkid.com; no cambia ninguno existente ni el tunel de LEDKID.
+    Paso "Los links de Mesh por pais, en Cloudflare"
+    if (Configurar-EnlacesPaises) { exit 0 } else { exit 1 }
 }
 
 if ($Accion -eq 'estado') {

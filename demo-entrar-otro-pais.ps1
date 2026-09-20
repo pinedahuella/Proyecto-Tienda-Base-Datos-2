@@ -41,6 +41,7 @@ param(
 $repo = $PSScriptRoot
 . (Join-Path $repo 'copia-backend.ps1')
 . (Join-Path $repo 'tor-demo.ps1')
+. (Join-Path $repo 'pais-enlace.ps1')
 $inicio = Get-Date
 function Paso($t) { Write-Host ("`n>> $t  [+{0} s]" -f [int]((Get-Date) - $inicio).TotalSeconds) -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "   $t" -ForegroundColor Green }
@@ -82,6 +83,7 @@ if ($Cerrar) {
     $s = Leer-Sesion
     Cerrar-Ventanas
     Ok "Ventanas de Chrome cerradas"
+    if (@(Proxy-DePais).Count -gt 0) { Cerrar-EnlacePais; Ok "Link por pais cerrado" }
     if ($s -and $s.tunelPid) {
         $p = Get-Process -Id $s.tunelPid -ErrorAction SilentlyContinue
         if ($p -and $p.ProcessName -eq 'cloudflared') { Stop-Process -Id $s.tunelPid -Force -ErrorAction SilentlyContinue; Ok "Tunel cerrado" }
@@ -108,6 +110,10 @@ if ($Estado) {
     Paso "La ventana y el tunel"
     if ($s) {
         Ok "Sesion abierta desde $($s.pais.ToUpper()) desde las $($s.desde)"
+        if ($s.enlace) {
+            $vivo = try { (Invoke-WebRequest "$($s.enlace)/api/productos?limite=1" -UseBasicParsing -TimeoutSec 30).StatusCode -eq 200 } catch { $false }
+            if ($vivo) { Ok "Link por pais arriba: $($s.enlace)/entrar" } else { Mal "El link por pais ya no contesta: $($s.enlace)" }
+        }
         $abierta = @(Chrome-DeEstasVentanas).Count -gt 0
         if ($abierta) { Ok "La ventana de Chrome sigue abierta" } else { Mal "La ventana de Chrome ya no esta abierta" }
         if (Tunel-Responde $s.url) { Ok "Tunel arriba: $($s.url)" } else { Mal "El tunel no contesta" }
@@ -152,9 +158,29 @@ $paisPc = Pais-De-Ip $ipPc
 if ($paisPc -ne $Pais.ToUpper()) { Write-Host "   OJO: el proxy del PC salio por $ipPc ($paisPc), no por $($Pais.ToUpper()). Tor cambia de circuito; si pasa en la ventana, cierrala y vuelve a abrirla." -ForegroundColor Yellow }
 else { Ok "El proxy del PC sale por $ipPc ($paisPc)" }
 
+# El link con el nombre del pais (mesh-singapur.ledkid.com), para abrirlo desde CUALQUIER navegador.
+# Va antes del tunel: abrirlo deja abierta la direccion publica, y el paso siguiente la reutiliza.
+Paso "El link de $($TituloPais[$Pais]), para abrir desde cualquier navegador"
+$enlace = Abrir-EnlacePais $Pais
+if ($enlace) { Ok "Listo: $enlace" } else { Write-Host "   Sin link por pais; queda la ventana de Chrome." -ForegroundColor Yellow }
+
 Paso "Tunel a la tienda"
 $url = $null; $tunelPid = $null
-if ($previa -and $previa.url -and $previa.tunelPid -and (Get-Process -Id $previa.tunelPid -ErrorAction SilentlyContinue) -and (Tunel-Responde $previa.url)) {
+# Si la direccion publica de Mesh esta abierta (mesh-publico.ps1) se usa esa: es un https FIJO,
+# no hace falta abrir otro tunel (ahorra unos 30 s) y el link es el mismo de siempre. Ese
+# tunel NO es de este script: no se guarda su pid, asi que -Cerrar nunca lo apaga.
+$direccionPublica = 'https://mesh.ledkid.com'
+$meshAbierto = @(Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" |
+    Where-Object { $_.CommandLine -and $_.CommandLine.Contains('config-mesh.yml') }).Count -gt 0
+if ($meshAbierto -and (Tunel-Responde $direccionPublica)) {
+    $url = $direccionPublica
+    Ok "Se usa la direccion publica fija: $url (no hace falta abrir otro tunel)"
+    # Un tunel rapido de una sesion anterior ya sobra
+    if ($previa -and $previa.tunelPid) {
+        $viejo = Get-Process -Id $previa.tunelPid -ErrorAction SilentlyContinue
+        if ($viejo -and $viejo.ProcessName -eq 'cloudflared') { Stop-Process -Id $previa.tunelPid -Force -ErrorAction SilentlyContinue }
+    }
+} elseif ($previa -and $previa.url -and $previa.tunelPid -and (Get-Process -Id $previa.tunelPid -ErrorAction SilentlyContinue) -and (Tunel-Responde $previa.url)) {
     $url = $previa.url; $tunelPid = $previa.tunelPid
     Ok "Se reutiliza el tunel de antes: $url"
 } else {
@@ -183,12 +209,22 @@ if (-not $SinNavegador) {
 }
 
 New-Item -ItemType Directory -Force $MeshDemoTmp | Out-Null
-@{ pais = $Pais; url = $url; tunelPid = $tunelPid; ip = $salida.Ip; desde = (Get-Date -Format 's') } |
+@{ pais = $Pais; url = $url; tunelPid = $tunelPid; ip = $salida.Ip; enlace = $enlace; desde = (Get-Date -Format 's') } |
     ConvertTo-Json | Set-Content $sesion -Encoding ascii
 
 Write-Host "`n=============================================================="
 Write-Host " LISTO. Esa ventana de Chrome esta en $($Pais.ToUpper()) para la tienda." -ForegroundColor Green
 Write-Host " Inicia sesion en ella con tu cuenta (por ejemplo desarrollador1@mesh.com)."
+Write-Host ""
+if ($enlace) {
+    Write-Host " Mesh desde $($TituloPais[$Pais]), abre este link en CUALQUIER navegador (tambien el celular):" -ForegroundColor Green
+    Write-Host "   $enlace/entrar" -ForegroundColor Yellow
+    Write-Host " Quien lo abra aparece en $($TituloPais[$Pais]) para la tienda, sin instalar nada. Va un poco mas lento: sale por Tor."
+} else {
+    Write-Host " La tienda, en la ventana de Chrome que se abrio:" -ForegroundColor Green
+    Write-Host "   $url/entrar" -ForegroundColor Yellow
+    Write-Host " OJO: solo esa ventana sale por $($Pais.ToUpper()). Si abres el link en tu navegador de siempre, la tienda te ve desde tu pais."
+}
 Write-Host ""
 Write-Host " Para el viaje imposible: entra con la MISMA cuenta desde otro pais."
 Write-Host "   .\demo-entrar-otro-pais.ps1 -Pais de     (cambia de pais y abre otra ventana)" -ForegroundColor Yellow

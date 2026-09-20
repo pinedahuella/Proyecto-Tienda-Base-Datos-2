@@ -186,7 +186,7 @@ const CATALOGO = [
   // --- Demos de fraude ----------------------------------------------------
   {
     id: 'entrar-pais', grupo: 'Demos de fraude', titulo: 'Entrar a Mesh desde otro pais',
-    explica: 'Abre una ventana de Chrome que sale a internet por ese pais y muestra la tienda real. Inicia sesion tu mismo con una cuenta. Para el viaje imposible, entra con la misma cuenta desde otro pais: vuelve a pulsar Ejecutar con otro pais y se abre otra ventana. Tus otras ventanas no cambian.',
+    explica: 'Te da un link con el nombre del pais (mesh-singapur.ledkid.com) que abre la tienda real vista desde ese pais, en cualquier navegador o en el celular, y ademas abre una ventana de Chrome ya puesta en ese pais. Inicia sesion tu mismo. Para el viaje imposible, entra con la misma cuenta desde otro pais: vuelve a pulsar Ejecutar con otro pais. Tus otras ventanas no cambian.',
     script: 'demo-entrar-otro-pais.ps1', confirmar: null,
     campos: [
       { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },
@@ -201,7 +201,7 @@ const CATALOGO = [
   },
   {
     id: 'entrar-pais-cerrar', grupo: 'Demos de fraude', titulo: 'Cerrar la ventana de otro pais',
-    explica: 'Cierra la ventana de Chrome, el tunel y Tor. Tus otras ventanas no se tocan.',
+    explica: 'Cierra el link por pais, la ventana de Chrome, el tunel y Tor. Tus otras ventanas no se tocan, y mesh.ledkid.com sigue como estaba.',
     script: 'demo-entrar-otro-pais.ps1', campos: [], confirmar: null,
     construir: () => ['-Cerrar'],
   },
@@ -237,7 +237,7 @@ const CATALOGO = [
   },
   {
     id: 'demo-pais', grupo: 'Demos de fraude', titulo: 'Login desde otro pais',
-    explica: 'Usa Tor de verdad para intentar entrar desde la IP de otro pais y confirma en las bases que salto la alerta. Mesh sigue funcionando todo el rato: el tunel va al backend real y no se apaga nada. Necesita internet y el backend arriba.',
+    explica: 'Usa Tor de verdad para intentar entrar desde la IP de otro pais y confirma en las bases que salto la alerta. Al final te da un link con el nombre del pais (mesh-singapur.ledkid.com) para entrar TU MISMO desde ese pais, en cualquier navegador, y lo deja abierto hasta que lo cierres. Mesh sigue funcionando todo el rato. Abre la direccion publica si estaba cerrada.',
     script: 'demo-fraude-pais.ps1', confirmar: null,
     campos: [
       { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },

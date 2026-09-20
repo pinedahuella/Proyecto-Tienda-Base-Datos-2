@@ -78,6 +78,42 @@ Limites: la salida de Tor cambia de IP dentro del pais (mismo pais, otra IP), y 
 desde Tor puede ir lento. Cada pais es un Tor: para cambiar de pais se rehace el
 contenedor, unos 50 segundos con el tunel ya abierto.
 
+## El link con el nombre del pais, para abrirlo en cualquier navegador
+
+`https://mesh-singapur.ledkid.com`, `mesh-alemania`, `mesh-japon`, `mesh-eeuu`,
+`mesh-holanda`, `mesh-francia`, `mesh-reinounido` y `mesh-canada`, todos en
+`.ledkid.com`. Es la tienda real, pero cualquier persona que abra el link de un pais
+aparece para el backend en ESE pais, sin instalar nada y desde el navegador o el celular
+que quiera. Lo dan los dos botones: **Login desde otro pais** (al final de la demo con
+curl) y **Entrar a Mesh desde otro pais**. Se cierra con **Cerrar la ventana de otro pais**
+o `.\demo-entrar-otro-pais.ps1 -Cerrar`.
+
+Como funciona: `panel-comandos/pais-proxy.mjs` recibe lo que llega a ese nombre y lo
+reenvia a `https://mesh.ledkid.com` SALIENDO POR TOR del pais (SOCKS5 en
+`127.0.0.1:9051`, el Tor de Docker). Para el backend, la IP es la de la salida de Tor y su
+pais sale de geoip. No reenvia quien es el visitante (`X-Forwarded-For`, `CF-*`), porque
+si lo hiciera el backend veria la IP real de quien abre el link. Solo reenvia a
+`mesh.ledkid.com`, solo contesta al nombre de SU pais y solo escucha en `127.0.0.1`;
+llega hasta el por el tunel `mesh`.
+
+Probado el 2026-09-20 con un Chrome normal, sin proxy y con la IP real de esta maquina:
+login por el link de Singapur y luego por el de Alemania, con la misma cuenta. El backend
+registro `SG` y despues `DE`, y salto `viaje_imposible` (9933 km en 0.02 h) y
+`toma_cuenta`. La IP real del visitante no aparece en ningun registro.
+
+Lo que hay que saber:
+- **Es mas lento** que la tienda normal, porque cada conexion nueva pasa por Tor.
+- **Necesita la direccion publica abierta** (`mesh.ledkid.com`): el proxy le habla a ella.
+  Si esta cerrada, el link la abre. Publicar Mesh es publicarlo con sus cuentas de prueba.
+- **Uno a la vez**: hay un solo Tor, asi que solo esta abierto el link del ultimo pais que
+  se pidio. Los otros nombres contestan 502 mientras no esten abiertos.
+- **Se prepara UNA vez** por cuenta de Cloudflare: `.\mesh-publico.ps1 -Accion paises`
+  agrega un registro DNS nuevo por pais en `ledkid.com` (solo altas, no cambia ninguno
+  existente) y los nombres al ingress del tunel `mesh`. El tunel de LEDKID no se toca.
+- Los nombres son de un solo nivel (`mesh-singapur.ledkid.com`, no
+  `singapur.mesh.ledkid.com`): el certificado gratuito de Cloudflare cubre `*.ledkid.com`
+  y no los de dos niveles.
+
 ## Precalentar, para que en clase no tarde
 
 Lo lento no se ve y se puede hacer antes:
