@@ -334,6 +334,33 @@ services:
     mem_limit: 1g
 
   # ------------------------------------------------------------------
+  # kibana-vistas -- deja Kibana listo, una sola vez por arranque
+  # ------------------------------------------------------------------
+  # No es un servicio: corre docker/kibana/vistas.sh y termina. Espera a que
+  # Kibana abra y a que existan los indices, crea las vistas de datos
+  # (Eventos de autenticacion y Productos) y deja el rango de Discover en 60
+  # dias. Es automatico a proposito: las vistas viven en el volumen de
+  # Elasticsearch, no en el repositorio, y sin esto quien hace pull o corre
+  # arrancar.ps1 -Reiniciar encuentra Kibana vacio.
+  #
+  # Usa la imagen de Kibana, que ya esta descargada y trae bash y curl. El
+  # entrypoint quita los retornos de carro del script: en Windows git puede
+  # entregarlo con CRLF y bash lo leeria como comandos que no existen.
+  #
+  # Queda en estado Exited (0) cuando termina. Es lo esperado, no un fallo.
+  kibana-vistas:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    container_name: mesh-kibana-vistas
+    restart: "no"
+    depends_on:
+      kibana:
+        condition: service_started
+    entrypoint: ["bash", "-c", "tr -d '\\r' < /init/vistas.sh | bash"]
+    volumes:
+      - ./docker/kibana:/init:ro
+    mem_limit: 64m
+
+  # ------------------------------------------------------------------
   # ClickHouse -- la base columnar de los eventos
   # ------------------------------------------------------------------
   # Es la SEXTA base y la tercera PROYECCION: la verdad de los logueos y los

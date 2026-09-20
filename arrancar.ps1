@@ -3368,6 +3368,36 @@ if ($faltanNodos.Count -gt 0) {
 
 
 # ------------------------------------------------------------
+# 9c. Vistas de Kibana
+# ------------------------------------------------------------
+# Las vistas de datos de Kibana (Eventos de autenticacion y Productos) las crea
+# el contenedor mesh-kibana-vistas, que arranca con el docker compose up de mas
+# arriba y corre docker/kibana/vistas.sh. Viven en el volumen de Elasticsearch y
+# no en el repositorio, asi que una maquina nueva o un -Reiniciar las tiene
+# vacias, y por eso se crean solas en cada arranque.
+#
+# Este paso NO las crea, las espera y cuenta que paso. Va aqui, despues del ETL y
+# de la sincronizacion de Elasticsearch, porque el contenedor necesita que los
+# indices existan. Espera hasta 3 minutos y, si Kibana no abre a tiempo, sigue:
+# el contenedor no se detiene y termina el trabajo solo. Mesh funciona igual sin
+# Kibana.
+if ((docker ps -a --filter "name=mesh-kibana-vistas" --format "{{.Names}}") -eq "mesh-kibana-vistas") {
+    Paso "Vistas de Kibana"
+    $finVistas = (Get-Date).AddSeconds(180)
+    $estadoVistas = ""
+    while ((Get-Date) -lt $finVistas) {
+        $estadoVistas = (docker inspect -f "{{.State.Status}}" mesh-kibana-vistas 2>$null)
+        if ($estadoVistas -ne "running") { break }
+        Start-Sleep -Seconds 3
+    }
+    docker logs --tail 6 mesh-kibana-vistas 2>&1 | ForEach-Object { Ok "$_" }
+    if ($estadoVistas -eq "running") {
+        Aviso "Kibana todavia esta abriendo. El contenedor sigue solo y crea las vistas cuando pueda."
+    }
+}
+
+
+# ------------------------------------------------------------
 # 10. Resumen
 # ------------------------------------------------------------
 Paso "Listo"
@@ -3379,6 +3409,7 @@ Write-Host "   DbGate         http://localhost:3001    ventana de MongoDB" -Fore
 Write-Host "   RedisInsight   http://localhost:5540    ventana de Redis, con el TTL contando" -ForegroundColor White
 # Kibana tarda cerca de un minuto en abrir despues de que Elasticsearch responde,
 # y por eso este resumen no lo espera: la direccion ya esta, solo hay que darle tiempo.
+# Sus vistas de datos las crea solo el contenedor kibana-vistas del compose.
 Write-Host "   Kibana         http://localhost:5601    ventana de Elasticsearch, los indices y sus campos" -ForegroundColor White
 # El navegador de Neo4j no es un visor mas: DIBUJA el grafo, y un anillo de
 # cuentas que se califican entre si solo se ve dibujado. En una tabla de filas
