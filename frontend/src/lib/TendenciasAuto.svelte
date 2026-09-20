@@ -374,7 +374,10 @@
 	function subtitulo(c: Consulta): string {
 		const cuando = c.dias === 1 ? 'Ultimo dia' : `Ultimos ${c.dias} dias`;
 		if (c.comparar) return `${cuando} contra los ${c.dias} anteriores`;
-		return `${cuando}, ${c.direccion === 'positivo' ? 'los ' + c.limite + ' que mas' : 'los ' + c.limite + ' que menos'}`;
+		// La unidad va aqui y no en cada fila: en una tarjeta angosta "sesiones
+		// distintas" al lado de cada numero le quitaba el sitio al nombre del producto.
+		const orden = c.direccion === 'positivo' ? 'los ' + c.limite + ' que mas' : 'los ' + c.limite + ' que menos';
+		return `${cuando}, ${orden}, en ${medidaDe(c.clave).unidad[1]}`;
 	}
 
 	function veces(f: Fila): string {
@@ -426,7 +429,6 @@
 				{:else}
 					<span class="cifra">
 						<strong>{f.total}</strong>
-						<small>{f.total === 1 ? m.unidad[0] : m.unidad[1]}</small>
 					</span>
 				{/if}
 				<span class="pista" aria-hidden="true">
@@ -438,7 +440,7 @@
 			</li>
 		{/each}
 	</ol>
-	{#if comparar}
+	{#if comparar && filas.some((x) => (x.antes ?? 0) > 0)}
 		<p class="leyenda">
 			<span class="muestra-ahora"></span> periodo actual
 			<span class="muestra-antes"></span> periodo anterior
