@@ -292,6 +292,48 @@ services:
       start_period: 60s
 
   # ------------------------------------------------------------------
+  # Kibana -- la ventana de Elasticsearch
+  # ------------------------------------------------------------------
+  # No es una base: es el visor de Elasticsearch, igual que pgAdmin lo es de
+  # PostgreSQL, DbGate de MongoDB y RedisInsight de Redis. Sirve para MIRAR
+  # los indices mesh_productos y mesh_eventos_autenticacion sin escribir curl,
+  # con el buscador (Discover), los campos y las agregaciones a la vista.
+  # Mesh funciona igual sin el.
+  #
+  # La misma version que Elasticsearch (8.15.3): Kibana se niega a hablar con
+  # un Elasticsearch de otra version mayor o mas nueva que la suya.
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.15.3
+    container_name: mesh-kibana
+    restart: unless-stopped
+    # service_started y no service_healthy a proposito. Esperar la salud de
+    # Elasticsearch haria que `docker compose up -d` se quedara detenido hasta
+    # un minuto en un arranque en frio, y Kibana ya reintenta solo hasta que
+    # Elasticsearch contesta.
+    depends_on:
+      elasticsearch:
+        condition: service_started
+    environment:
+      # El nombre del servicio, no localhost: dentro del contenedor localhost
+      # es el propio Kibana.
+      ELASTICSEARCH_HOSTS: "http://elasticsearch:9200"
+
+      # El tope de memoria de Node. Sin el, Kibana toma casi 1.4 GB de heap y
+      # esta maquina ya se quedo sin memoria varias veces (ver el heap de
+      # Elasticsearch, aqui arriba). 640 MB alcanza para mirar dos indices.
+      NODE_OPTIONS: "--max-old-space-size=640"
+
+      # Nada de mandar datos de uso a Elastic.
+      TELEMETRY_OPTIN: "false"
+      TELEMETRY_ALLOWCHANGINGOPTINSTATUS: "false"
+    ports:
+      # Solo localhost: Elasticsearch esta con la seguridad apagada (ver su
+      # bloque), asi que Kibana, que puede leer y borrar sus indices, no debe
+      # quedar abierto a la red.
+      - "127.0.0.1:5601:5601"
+    mem_limit: 1g
+
+  # ------------------------------------------------------------------
   # ClickHouse -- la base columnar de los eventos
   # ------------------------------------------------------------------
   # Es la SEXTA base y la tercera PROYECCION: la verdad de los logueos y los

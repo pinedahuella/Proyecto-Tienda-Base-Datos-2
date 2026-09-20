@@ -3377,6 +3377,9 @@ Write-Host ""
 Write-Host "   pgAdmin        http://localhost:5050    ventana de PostgreSQL" -ForegroundColor White
 Write-Host "   DbGate         http://localhost:3001    ventana de MongoDB" -ForegroundColor White
 Write-Host "   RedisInsight   http://localhost:5540    ventana de Redis, con el TTL contando" -ForegroundColor White
+# Kibana tarda cerca de un minuto en abrir despues de que Elasticsearch responde,
+# y por eso este resumen no lo espera: la direccion ya esta, solo hay que darle tiempo.
+Write-Host "   Kibana         http://localhost:5601    ventana de Elasticsearch, los indices y sus campos" -ForegroundColor White
 # El navegador de Neo4j no es un visor mas: DIBUJA el grafo, y un anillo de
 # cuentas que se califican entre si solo se ve dibujado. En una tabla de filas
 # es una lista de pares que no dice nada.
