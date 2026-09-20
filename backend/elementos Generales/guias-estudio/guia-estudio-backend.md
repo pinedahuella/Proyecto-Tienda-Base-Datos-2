@@ -374,8 +374,8 @@ seguidos: de ahí sale el precio cobrado y quién vendió).
 
 ## 3. Redis — el carrito
 
-`src/services/carrito/carrito.service.ts` (léelo entero, ~595 líneas, la
-cabecera 71–114 es una mini-clase). Controlador: `carrito/carrito.controller.ts`.
+`src/services/carrito/carrito.service.ts` (léelo entero, 1081 líneas, la
+cabecera 78–121 es una mini-clase). Controlador: `carrito/carrito.controller.ts`.
 
 - **Estructura**: `mesh:carrito:<id_usuario>` = HASH `{ <id_oferta>: cantidad }`.
   El carrito es literalmente un `Map<id_oferta, cantidad>` — solo la
