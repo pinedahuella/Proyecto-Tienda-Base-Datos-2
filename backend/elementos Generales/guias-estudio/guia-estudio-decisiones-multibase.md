@@ -72,7 +72,9 @@ POST   /carrito/comprar            -> comprarCarrito()
 
 ### La trampa del precio congelado — y cómo se resolvió
 
-La función `agregar_linea()` de `migrations/007_flujo_pedido.sql` **congela el precio en el momento de agregar al carrito**: guarda el `id_precio_historial` vigente en ese instante, para que si el vendedor sube el precio después, el pedido conserve el que se le mostró a la persona.
+La función `agregar_linea()` de `migrations/007_flujo_pedido.sql` congela el precio: guarda el `id_precio_historial` vigente en el momento en que se ejecuta, para que si el vendedor sube el precio después, el pedido conserve el que se le mostró a la persona. Esto describe el diseño de 007, de cuando "el carrito" literalmente era una fila de `pedido` — en ese modelo, llamar a `agregar_linea()` SÍ coincidía con el momento de agregar algo al carrito.
+
+**Ojo con leer esto como el comportamiento actual del carrito en Redis: no lo es.** `agregar_linea()` nunca se llama cuando alguien agrega algo al carrito hoy — `PUT /carrito/lineas/:idOferta` es Redis puro (`HSET`/`EXPIRE`, cero consultas a Postgres, ver `carrito.service.ts:283-364`). La función solo se ejecuta **dentro de `comprar_carrito()`** (`migrations/012_comprar_carrito.sql`), es decir, recién al pagar — que puede ser hasta 24h después de que la oferta entró al carrito. Esa brecha entre "cuándo se llama a la función" y "cuándo la persona vio el precio" es exactamente la trampa que el resto de esta sección explica.
 
 Ese diseño asumía que entre "agregar al carrito" y "pagar" podían pasar días (el carrito viejo era una fila de `pedido`). Con el carrito en Redis, `POST /carrito/comprar` llama a `comprar_carrito()` (`migrations/012_comprar_carrito.sql`), que **crea el pedido, agrega todas las líneas y paga en la misma llamada** — agregar y comprar pasan casi en el mismo instante. Si no se hacía nada, el precio que se "congelaría" sería el vigente al pagar, no el que la persona vio en el catálogo mientras el carrito esperaba hasta 24h en Redis. Sería un cobro incorrecto silencioso.
 
