@@ -6,6 +6,14 @@
 #
 #   .\demo-fraude-pais.ps1 -Pais sg
 #   .\demo-fraude-pais.ps1 -Limpiar      (borra lo que sembro la demo)
+#   .\demo-fraude-pais.ps1 -Precalentar -Pais sg   (deja lista la parte lenta ANTES)
+#
+# -Precalentar hace lo que tarda, sin tocar nada de lo que se ve: comprueba que el
+# tunel pueda salir (en la U hace falta WARP), construye una vez la imagen de Tor
+# (la demo ya no instala paquetes en vivo), compila la copia del backend, y deja
+# Tor corriendo con salida en el pais y comprobada. Despues la demo solo manda los
+# intentos. No para el backend ni pausa ClickHouse y Neo4j: eso sigue siendo de la
+# demo. Tor caliente pesa unos 50 MB; para soltarlo: docker rm -f mesh-tor-demo
 #
 # Paises probados: sg (Singapur), de (Alemania), jp (Japon), us (EE.UU.),
 # nl (Holanda), fr (Francia), gb (Reino Unido), ca (Canada).
@@ -15,7 +23,8 @@
 param(
     [ValidateSet('sg','de','jp','us','nl','fr','gb','ca')]
     [string]$Pais = 'sg',
-    [switch]$Limpiar
+    [switch]$Limpiar,
+    [switch]$Precalentar
 )
 
 # Nada de ErrorActionPreference = 'Stop': con los comandos de docker, un stderr
@@ -24,7 +33,9 @@ param(
 $repo = $PSScriptRoot
 . (Join-Path $repo 'copia-backend.ps1')
 $marca = 'mesh-demo-pais'
-function Paso($t) { Write-Host "`n>> $t" -ForegroundColor Cyan }
+$inicioDemo = Get-Date
+# Cada paso dice a los cuantos segundos empezo, para ver donde se va el tiempo.
+function Paso($t) { Write-Host ("`n>> $t  [+{0} s]" -f [int]((Get-Date) - $inicioDemo).TotalSeconds) -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "   $t" -ForegroundColor Green }
 function Mal($t)  { Write-Host "   $t" -ForegroundColor Red }
 
@@ -70,6 +81,97 @@ if ($Limpiar) {
     exit 0
 }
 
+# --- Tor: imagen propia, para no instalar paquetes en vivo ---
+# Antes cada corrida arrancaba un alpine pelado y hacia `apk add tor curl` delante
+# de todos. La imagen se construye UNA vez (con -Precalentar, o sola la primera
+# vez que hace falta) y despues Tor arranca en segundos.
+$ImagenTor = 'mesh-tor-demo:local'
+
+function Preparar-ImagenTor {
+    if (docker images -q $ImagenTor) { return $true }
+    $dir = Join-Path $MeshDemoTmp 'tor'
+    New-Item -ItemType Directory -Force $dir | Out-Null
+    Set-Content (Join-Path $dir 'Dockerfile') "FROM alpine:3`nRUN apk add --no-cache tor curl" -Encoding ascii
+    docker build -t $ImagenTor $dir *> (Join-Path $MeshDemoTmp 'tor-build.log')
+    return ($LASTEXITCODE -eq 0)
+}
+
+# Levanta Tor con salida en el pais y espera a que arme circuitos. Si ya hay uno
+# precalentado para ESTE pais (lo marca la etiqueta mesh.pais) lo reutiliza.
+function Levantar-Tor {
+    $caliente = docker ps -q --filter 'name=^mesh-tor-demo$' --filter "label=mesh.pais=$Pais"
+    if ($caliente) {
+        Ok "Tor ya estaba caliente para '$Pais'"
+    } else {
+        docker rm -f mesh-tor-demo *> $null
+        $etiqueta = "mesh.pais=$Pais"
+        if (docker images -q $ImagenTor) {
+            docker run -d --name mesh-tor-demo --memory 96m --label $etiqueta $ImagenTor `
+                tor --SocksPort 127.0.0.1:9050 --ExitNodes "{$Pais}" --StrictNodes 1 *> $null
+        } else {
+            docker run -d --name mesh-tor-demo --memory 96m --label $etiqueta alpine:3 sh -c `
+                "apk add --no-cache tor curl >/dev/null && exec tor --SocksPort 127.0.0.1:9050 --ExitNodes '{$Pais}' --StrictNodes 1" *> $null
+        }
+    }
+    for ($i=0; $i -lt 40; $i++) {
+        if ((docker logs mesh-tor-demo 2>&1) -match 'Bootstrapped 100') { return $true }
+        Start-Sleep 5
+    }
+    # Sin esto la falla salia muda ("Tor no arranco a tiempo") y no habia por donde
+    # empezar: paso una vez en frio y no se pudo reproducir.
+    Mal "Ultimas lineas de Tor:"
+    docker logs --tail 5 mesh-tor-demo 2>&1 | ForEach-Object { Write-Host "     $_" }
+    return $false
+}
+
+# ipinfo a veces ubica el nodo en otro pais; se piden circuitos hasta que cuadre.
+# El pais se pregunta desde esta PC y no por Tor: ipinfo contesta 403 a todo lo
+# que sale de un nodo de Tor (medido el 2026-09-15), y la demo no encontraba
+# salida en ningun pais. Devuelve @{ Socks; Ip } o $null.
+function Buscar-SalidaTor {
+    for ($c=1; $c -le 15; $c++) {
+        $s = "c${c}:x@127.0.0.1:9050"
+        $ip = (docker exec mesh-tor-demo curl -s -m 40 --socks5-hostname $s https://api.ipify.org 2>$null)
+        if ($ip -notmatch '^[0-9a-fA-F:.]+$') { continue }
+        $pais2 = try { (Invoke-RestMethod "https://ipinfo.io/$ip/country" -TimeoutSec 10).Trim() } catch {
+            try { (Invoke-RestMethod "http://ip-api.com/line/${ip}?fields=countryCode" -TimeoutSec 10).Trim() } catch { '' } }
+        if ($pais2 -eq $Pais.ToUpper()) { return @{ Socks = $s; Ip = $ip } }
+    }
+    return $null
+}
+
+# --- -Precalentar: lo lento, hecho antes y sin tocar lo que se ve ---
+if ($Precalentar) {
+    Paso "Precalentando la demo para '$($Pais.ToUpper())'"
+    Paso "Salida del tunel"
+    Asegurar-SalidaTunel | Out-Null
+    Paso "Imagen de Tor"
+    if (-not (Preparar-ImagenTor)) { Mal "No se pudo construir la imagen. Mira $MeshDemoTmp\tor-build.log"; exit 1 }
+    Ok "Lista ($ImagenTor)"
+    Paso "Copia del backend con trustProxy"
+    if (-not (Preparar-CopiaBackend $repo)) { Mal "No compilo la copia. Mira $MeshDemoTmp\build.log"; exit 1 }
+    Ok "Copia lista"
+    Paso "Tor con salida en '$Pais'"
+    if (-not (Levantar-Tor)) { Mal "Tor no arranco a tiempo."; docker rm -f mesh-tor-demo *> $null; exit 1 }
+    $sal = Buscar-SalidaTor
+    if (-not $sal) { Mal "No consegui una salida en '$Pais'. Prueba otro pais."; docker rm -f mesh-tor-demo *> $null; exit 1 }
+    Ok "Salida comprobada, IP $($sal.Ip) ($($Pais.ToUpper()))"
+    Write-Host "`n=============================================================="
+    Write-Host " LISTO. Todo lo lento ya esta hecho para $($Pais.ToUpper())." -ForegroundColor Green
+    Write-Host " Cuando quieras la demo:   .\demo-fraude-pais.ps1 -Pais $Pais" -ForegroundColor Yellow
+    Write-Host " Tor queda corriendo (unos 50 MB). Para soltarlo:"
+    Write-Host "   docker rm -f mesh-tor-demo"
+    Write-Host "=============================================================="
+    exit 0
+}
+
+# --- que el tunel pueda salir (en la U hace falta WARP) ---
+# Antes de parar nada: si esto falla no hay que deshacer nada. No se aborta, porque
+# el tunel mismo dice si subio o no; se avisa para no esperar dos minutos a ciegas.
+Paso "Comprobando que el tunel pueda salir"
+$salidaTunel = Asegurar-SalidaTunel
+if (-not $salidaTunel) { Write-Host "   Sigo, pero es probable que el tunel no levante." -ForegroundColor Yellow }
+
 # --- hacer sitio en RAM: la demo del login no usa ClickHouse ni Neo4j ---
 # Esta maquina se queda sin memoria con todo arriba. Se paran las dos bases
 # que esta demo no toca (el login usa Postgres, Mongo, Redis y Elastic) y se
@@ -81,30 +183,11 @@ Ok "ClickHouse y Neo4j pausados; se reactivan al terminar"
 
 # --- Tor en el pais elegido, con un circuito que de verdad salga de ahi ---
 Paso "Levantando Tor con salida en '$Pais'"
-docker rm -f mesh-tor-demo *> $null
-docker run -d --name mesh-tor-demo --memory 96m alpine:3 sh -c `
-    "apk add --no-cache tor curl >/dev/null && exec tor --SocksPort 127.0.0.1:9050 --ExitNodes '{$Pais}' --StrictNodes 1" *> $null
-$listo = $false
-for ($i=0; $i -lt 40; $i++) {
-    Start-Sleep 5
-    if ((docker logs mesh-tor-demo 2>&1) -match 'Bootstrapped 100') { $listo = $true; break }
-}
-if (-not $listo) { Mal "Tor no arranco a tiempo."; docker rm -f mesh-tor-demo *> $null; docker start mesh-clickhouse mesh-neo4j *> $null; exit 1 }
+if (-not (Levantar-Tor)) { Mal "Tor no arranco a tiempo."; docker rm -f mesh-tor-demo *> $null; docker start mesh-clickhouse mesh-neo4j *> $null; exit 1 }
 
-# ipinfo a veces ubica el nodo en otro pais; se piden circuitos hasta que cuadre.
-# El pais se pregunta desde esta PC y no por Tor: ipinfo contesta 403 a todo lo
-# que sale de un nodo de Tor (medido el 2026-09-15), y la demo no encontraba
-# salida en ningun pais.
-$socks = ''; $ipSalida = ''
-for ($c=1; $c -le 15; $c++) {
-    $s = "c${c}:x@127.0.0.1:9050"
-    $ip = (docker exec mesh-tor-demo curl -s -m 40 --socks5-hostname $s https://api.ipify.org 2>$null)
-    if ($ip -notmatch '^[0-9a-fA-F:.]+$') { continue }
-    $pais2 = try { (Invoke-RestMethod "https://ipinfo.io/$ip/country" -TimeoutSec 10).Trim() } catch {
-        try { (Invoke-RestMethod "http://ip-api.com/line/${ip}?fields=countryCode" -TimeoutSec 10).Trim() } catch { '' } }
-    if ($pais2 -eq $Pais.ToUpper()) { $socks = $s; $ipSalida = $ip; break }
-}
-if (-not $socks) { Mal "No consegui una salida en '$Pais'. Prueba otro pais."; docker rm -f mesh-tor-demo *> $null; docker start mesh-clickhouse mesh-neo4j *> $null; exit 1 }
+$salida = Buscar-SalidaTor
+if (-not $salida) { Mal "No consegui una salida en '$Pais'. Prueba otro pais."; docker rm -f mesh-tor-demo *> $null; docker start mesh-clickhouse mesh-neo4j *> $null; exit 1 }
+$socks = $salida.Socks; $ipSalida = $salida.Ip
 Ok "IP de salida: $ipSalida ($($Pais.ToUpper()))"
 
 # --- copia del backend con trustProxy (el repo NO se toca) ---

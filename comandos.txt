@@ -1,6 +1,70 @@
 COMANDOS DEL PROYECTO
 
 
+EL PANEL DE COMANDOS, PARA NO ESCRIBIR NADA
+--------------------------------------------------
+  .\panel-comandos.ps1
+
+Abre en el navegador (http://127.0.0.1:5199) una pagina con un boton por cada
+comando de este archivo. Se lanza sin ventana y no pide iniciar sesion, ni hace
+falta que nada de Mesh este corriendo: sirve justo para levantarlo.
+
+  Arrancar y parar     levantar todo (bases, backend y frontend), ver que esta
+                       corriendo, reiniciar el backend o el frontend, pararlos
+  Productos de prueba  generar y borrar lotes con semilla, en las dos bases
+  Reconstruir bases    rehacer el grafo, rehacer Mongo, borrar todo y empezar de cero
+  Demos de fraude      una senal de login, el anillo de resenas, el login desde otro pais
+
+Cada tarjeta muestra el comando exacto que va a correr y tiene un boton Copiar,
+por si prefieres pegarlo en la terminal. Abajo va saliendo lo que imprime, con
+un boton Parar. Solo corre un comando a la vez.
+
+Los que borran piden confirmar, y borrar todo pide escribir BORRAR TODO. Esa
+confirmacion la exige tambien el servidor, no solo la pagina.
+
+Tambien sale DENTRO de Mesh, en la pestana Comandos del panel (/panel?s=comandos),
+para el admin y para las cuentas desarrollador1, desarrollador2 y asi. Es la version
+de todos los dias: usa el mismo diseno de Mesh (tarjeta, pildoras, modo oscuro), los
+comandos van agrupados en cuatro pildoras y cada fila trae su comando, Copiar y
+Ejecutar. Lo peligroso abre una confirmacion en la misma fila. La salida sale encima
+de la lista.
+
+Esa pestana no ejecuta nada por si sola: le habla al programa local por
+http://127.0.0.1:5199, que solo le concede CORS y el token a localhost:5173 y
+127.0.0.1:5173. Si el programa esta apagado la pestana dice como encenderlo y se
+llena sola cuando arranca. Ver la pestana no da ningun permiso, los comandos los
+valida el servidor local.
+
+La pagina http://127.0.0.1:5199 sigue existiendo como version de emergencia, para
+cuando Mesh esta apagado (justo cuando hace falta levantarlo). Tiene el mismo aspecto.
+
+Para apagarlo:   .\panel-comandos.ps1 -Parar
+Se NIEGA si hay un comando corriendo. Apagarlo a mitad de uno lo corta y puede dejar
+las bases a medias (paso con la demo de otro pais: dejo Tor arriba, ClickHouse, Neo4j
+y el backend parados). Para apagarlo igual:   .\panel-comandos.ps1 -Parar -Forzar
+
+Antes de la clase, la demo de otro pais se puede dejar lista:
+  .\demo-fraude-pais.ps1 -Precalentar -Pais sg
+Detalle y tiempos en docs/DEMO-OTRO-PAIS.md. En la red de la U el tunel necesita
+WARP, y los scripts lo conectan solos si el puerto 7844 esta cerrado.
+
+Backend y frontend se sirven compilados (npm run build), no en modo watch. El
+proyecto vive en OneDrive y cada sincronizacion dispara recargas sin parar, que
+dejan al backend reiniciandose y al login diciendo "el servidor se esta
+reiniciando". Despues de editar codigo hay que usar Reiniciar el backend o
+Reiniciar el frontend. Los logs quedan en %TEMP%\mesh-logs.
+
+Seguridad, por si lo van a dejar corriendo. Escucha solo en 127.0.0.1, solo
+ejecuta la lista fija de comandos de panel-comandos/servidor.mjs (cada valor se
+valida antes de armar nada) y cada peticion lleva un token que solo tiene la
+pagina que sirve el propio panel. Para agregar un comando se agrega una entrada
+a esa lista y la pagina lo dibuja sola.
+
+Las cuentas que crea el anillo de resenas son desarrollador1@mesh.com,
+desarrollador2@mesh.com y asi, con la contrasena Desarrollo123!. Las borra un
+-Reiniciar.
+
+
 ARRANCAR LAS BASES DE DATOS
 --------------------------------------------------
 Desde la raiz del proyecto (Proyecto-Tienda-Base-Datos-2), NO desde backend:

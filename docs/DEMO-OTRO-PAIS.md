@@ -27,6 +27,50 @@ Manda 8 intentos fallidos con 4 correos distintos, asi que aparecen dos
 alertas de esa IP: "muchos intentos desde una IP" y "muchos correos desde una
 IP".
 
+## Precalentar, para que en clase no tarde
+
+Lo lento no se ve y se puede hacer antes:
+
+```powershell
+.\demo-fraude-pais.ps1 -Precalentar -Pais sg
+```
+
+Comprueba que el tunel pueda salir, construye UNA vez la imagen de Tor
+(`mesh-tor-demo:local`, unos 60 MB; antes cada corrida instalaba `tor` y `curl`
+en un alpine pelado, delante de todos), compila la copia del backend y deja Tor
+corriendo con salida en el pais, comprobada. No para el backend ni pausa
+ClickHouse y Neo4j: eso sigue siendo de la demo. Tor caliente pesa unos 50 MB y se
+suelta con `docker rm -f mesh-tor-demo`.
+
+La demo lo detecta sola: si hay un Tor corriendo con la etiqueta del mismo pais lo
+reutiliza, y si es de otro pais lo rehace. Sin precalentar sigue funcionando igual,
+solo que mas lento. Desde el panel de comandos es el boton "Precalentar la demo de
+otro pais".
+
+Medido el 2026-09-20 en esta maquina: precalentado completo en frio, con Tor
+fallando una vez sin causa conocida (a mano arranca en 16 s); con la imagen y la
+copia ya hechas, 7 s. La demo entera con Tor caliente tardo 226 s, y ahora cada paso
+imprime a los cuantos segundos empezo, para ver donde se va lo que queda. Lo que
+queda es sobre todo arrancar la copia en el 3100, abrir el tunel y volver a levantar
+el backend normal: eso no se puede precalentar, porque la copia y el backend normal no
+pueden correr a la vez (duplicarian los `@Interval`).
+
+## La red de la U bloquea el tunel
+
+`cloudflared` sale siempre por el puerto 7844 y el firewall de la U lo bloquea por
+puerto (el sintoma es "El tunel no levanto"). La salida es la misma que en LEDKID:
+WARP, el cliente de Cloudflare, en modo MASQUE, que lo mete dentro de HTTPS.
+
+`demo-fraude-pais.ps1` y `tunel-celular.ps1` llaman ahora a `Asegurar-SalidaTunel`
+(en `copia-backend.ps1`). Prueba el 7844 y solo si esta cerrado usa WARP: si no esta
+conectado corre `warp-cli tunnel protocol set MASQUE` y `warp-cli connect`. Si WARP
+YA esta conectado no lo toca, porque el tunel de LEDKID cuelga de el. Sin WARP
+instalado avisa y sigue, y el tunel dira si subio.
+
+Probado: con el 7844 libre (WARP conectado, en esta maquina) no cambia nada, y el
+camino de "puerto cerrado" devuelve falso. **NO probado desde la red de la U**: el
+camino que conecta WARP no se ha ejecutado de verdad.
+
 ## Que hace por dentro, en cuatro pasos
 
 1. Levanta **Tor** en un contenedor con salida en el pais elegido, y pide

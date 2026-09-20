@@ -13,10 +13,12 @@
 	import AlertasFraudeUsuario from '$lib/AlertasFraudeUsuario.svelte';
 	import PanelTendencias from '$lib/PanelTendencias.svelte';
 	import DemoFraude from '$lib/DemoFraude.svelte';
+	import PanelComandos from '$lib/PanelComandos.svelte';
 	import PanelReportes from '$lib/PanelReportes.svelte';
 	import {
 		cerrarSesion,
 		CORREO_TIENDA,
+		esCuentaDesarrollador,
 		ID_ROL_ADMIN,
 		ID_ROL_VENDEDOR,
 		SesionIndeterminada,
@@ -52,6 +54,19 @@
 
 	let esAdmin = $derived(perfil?.id_rol_usuario === ID_ROL_ADMIN);
 	let esVendedor = $derived(perfil?.id_rol_usuario === ID_ROL_VENDEDOR);
+
+	/**
+	 * Las cuentas `desarrollador*` ven la pestana Comandos, igual que el admin.
+	 * En el backend son vendedores comunes: esto solo decide que se pinta, ver
+	 * `esCuentaDesarrollador` en sesion.ts.
+	 */
+	let esDesarrollador = $derived(esCuentaDesarrollador(perfil?.correo_electronico));
+	let veComandos = $derived(esAdmin || esDesarrollador);
+	const COMANDOS: Seccion = {
+		id: 'comandos',
+		nombre: 'Comandos',
+		pie: 'Arrancar el sistema, cargar productos con semilla y lanzar demos'
+	};
 
 	/**
 	 * Quien administra el catalogo compartido: la cuenta de la tienda, o un
@@ -124,6 +139,7 @@
 				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo e intentos de entrada sospechosos' },
 				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Lo mas visto, comprado y buscado en los ultimos dias' },
 				{ id: 'demo', nombre: 'Demo', pie: 'Disparar ataques y anillos de prueba para la defensa' },
+				COMANDOS,
 				// Distinta de "Fraude": esa es EN VIVO contra el grafo y solo la ve
 				// un admin; esta es "a mi cuenta le paso algo" y la ve cualquiera --
 				// GET /perfil/alertas-fraude, filtrado a la sesion de quien pregunta.
@@ -139,6 +155,7 @@
 					? { id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' }
 					: { id: 'catalogo', nombre: 'Proponer', pie: 'Mandale al catalogo un producto que falte' },
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Como van las que mandaste' },
+				...(veComandos ? [COMANDOS] : []),
 				{ id: 'alertas', nombre: 'Alertas', pie: 'Avisos de seguridad sobre tu propia cuenta' },
 				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 			];
@@ -146,6 +163,7 @@
 
 		// Un comprador tiene poco que gestionar: su cuenta, sus alertas y por donde seguir.
 		return [
+			...(veComandos ? [COMANDOS] : []),
 			{ id: 'alertas', nombre: 'Alertas', pie: 'Avisos de seguridad sobre tu propia cuenta' },
 			{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 		];
@@ -742,6 +760,16 @@
 					<AlertasFraudeUsuario alExpirarSesion={expiro} alCambiarContrasena={cambiarContrasenaRapido} />
 				{/if}
 			</div>
+
+			{#if veComandos}
+				<div class="hoja" class:oculta={seccionViva !== 'comandos'}>
+					<!-- El panel de comandos de desarrollo, incrustado. Lo ve el admin y
+					     las cuentas desarrollador; ver PanelComandos.svelte. -->
+					{#if visitadas.has('comandos')}
+						<PanelComandos />
+					{/if}
+				</div>
+			{/if}
 
 			<!-- De aqui para abajo, una hoja por seccion.
 

@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Comandos de Mesh</title>
+<style>
+  /* Esta es la version de emergencia: sirve cuando Mesh esta apagado (justo cuando
+     hace falta levantarlo). La de todos los dias es la pestana Comandos dentro de
+     Mesh (frontend/src/lib/PanelComandos.svelte). Las dos usan la misma paleta de
+     Mesh, la de frontend/src/routes/+layout.svelte, y la misma disposicion. Aqui el
+     tema lo decide el sistema operativo; dentro de Mesh lo decide su boton. */
+  :root {
+    color-scheme: light;
+    --tinta: #16181f; --texto: #3a3e49; --gris: #545965; --linea: #e3e1dc;
+    --panel: #f5f3ef; --off: #faf9f6; --blanco: #ffffff;
+    --indigo: #2f3a8f; --indigo-os: #242d72; --indigo-cl: #e8ebf7; --sobre-indigo: #ffffff;
+    --rojo: #b3352c; --rojo-cl: #fbeceb; --sobre-rojo: #ffffff;
+    --r: 6px; --r2: 10px; --t: 0.18s ease;
+    --f-xs: 0.75rem; --f-sm: 0.82rem; --f-ms: 0.88rem; --f-base: 0.94rem; --f-md: 1.05rem; --f-xl: 1.4rem; --f-2xl: 1.75rem;
+    --e1: 4px; --e2: 8px; --e3: 12px; --e4: 16px; --e5: 24px; --e6: 32px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      color-scheme: dark;
+      --tinta: #edeff7; --texto: #bcc2d2; --gris: #a6adc0; --linea: #262c45;
+      --panel: #161b31; --off: #0f1428; --blanco: #141a33;
+      --indigo: #8a9ae4; --indigo-os: #a3b0ec; --indigo-cl: #1c2447; --sobre-indigo: #10142a;
+      --rojo: #e08b81; --rojo-cl: #2e1b1a; --sobre-rojo: #2a1210;
+    }
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, Roboto, 'Helvetica Neue', Arial, sans-serif;
+    font-size: 16px; line-height: 1.5; color: var(--texto); background: var(--off);
+  }
+  main { max-width: 1000px; margin: 0 auto; padding: var(--e6) var(--e4) 64px; }
+  h1 { font-size: var(--f-2xl); font-weight: 400; color: var(--tinta); }
+  .sub { max-width: 640px; margin: var(--e2) 0 var(--e5); color: var(--gris); }
+
+  .hoja { padding: 26px 28px; background: var(--blanco); border: 1px solid var(--linea); border-radius: var(--r2); }
+  .titulo { display: flex; align-items: center; gap: var(--e2); margin-bottom: var(--e2); }
+  .titulo h2 { font-size: var(--f-xl); font-weight: 400; color: var(--tinta); }
+  .cuantas { padding: 3px 11px; font-size: var(--f-sm); color: var(--gris); background: var(--panel); border-radius: 999px; }
+  .intro { max-width: 640px; margin-bottom: var(--e4); color: var(--gris); }
+
+  .servicios { display: flex; flex-wrap: wrap; gap: var(--e2); margin-bottom: var(--e5); list-style: none; }
+  .servicios li { display: inline-flex; align-items: center; gap: 7px; padding: 3px 11px; font-size: var(--f-sm); color: var(--texto); background: var(--panel); border-radius: 999px; }
+  .punto { width: 7px; height: 7px; background: var(--indigo); border-radius: 50%; }
+  .servicios .dice { color: var(--gris); }
+  .servicios li.caido { color: var(--rojo); background: var(--rojo-cl); }
+  .servicios li.caido .punto { background: var(--rojo); }
+  .servicios li.caido .dice { color: var(--rojo); }
+
+  .pestanas { display: flex; flex-wrap: wrap; gap: var(--e1); margin-bottom: var(--e2); }
+  .pestanas button {
+    padding: 7px 16px; font: inherit; font-size: var(--f-ms); color: var(--gris); background: var(--blanco);
+    border: 1px solid var(--linea); border-radius: 999px; cursor: pointer; white-space: nowrap;
+    transition: color var(--t), background var(--t), border-color var(--t);
+  }
+  .pestanas button:hover { color: var(--tinta); border-color: var(--indigo); }
+  .pestanas button.activa { color: var(--sobre-indigo); background: var(--indigo); border-color: var(--indigo); }
+
+  .lista { list-style: none; }
+  .fila {
+    display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--e3) var(--e5); align-items: start;
+    padding: var(--e5) 0; border-bottom: 1px solid var(--linea);
+  }
+  .fila:last-child { border-bottom: 0; padding-bottom: 0; }
+  .fila h3 { font-size: var(--f-base); font-weight: 600; color: var(--tinta); }
+  .explica { max-width: 640px; margin-top: 2px; font-size: var(--f-ms); color: var(--gris); }
+  .campos { display: flex; flex-wrap: wrap; gap: var(--e3) var(--e4); margin-top: var(--e3); }
+  .campos label { display: flex; flex-direction: column; gap: var(--e1); font-size: var(--f-sm); color: var(--gris); }
+  input, select {
+    min-width: 0; padding: 7px 10px; font: inherit; font-size: var(--f-base); color: var(--tinta);
+    background: var(--blanco); border: 1px solid var(--linea); border-radius: var(--r);
+  }
+  .campos input[type=number] { width: 130px; }
+  .campos input[type=text] { width: 250px; max-width: 100%; }
+  select { cursor: pointer; }
+  input:focus, select:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 3px var(--indigo-cl); }
+  code.cmd {
+    display: inline-block; max-width: 100%; margin-top: var(--e3); padding: 4px 10px;
+    font: var(--f-sm) ui-monospace, 'Cascadia Mono', Consolas, monospace; color: var(--texto);
+    background: var(--panel); border-radius: var(--r); word-break: break-all;
+  }
+  code.cmd.malo { color: var(--rojo); background: var(--rojo-cl); }
+  code.cmd:empty { display: none; }
+  .mensaje { margin-top: var(--e2); font-size: var(--f-ms); color: var(--rojo); }
+
+  .acciones { display: flex; gap: var(--e2); align-items: center; }
+  button { font: inherit; font-size: var(--f-base); border-radius: var(--r); cursor: pointer; transition: background var(--t), border-color var(--t), opacity var(--t); }
+  button:focus-visible { outline: none; box-shadow: 0 0 0 3px var(--indigo-cl); }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  .primario { padding: 8px 16px; color: var(--sobre-indigo); background: var(--indigo); border: 1px solid var(--indigo); }
+  .primario:hover:not(:disabled) { background: var(--indigo-os); border-color: var(--indigo-os); }
+  .suave { padding: 7px 14px; color: var(--texto); background: var(--blanco); border: 1px solid var(--linea); }
+  .suave:hover:not(:disabled) { border-color: var(--indigo); color: var(--tinta); }
+  .riesgo { padding: 8px 16px; color: var(--rojo); background: var(--blanco); border: 1px solid var(--rojo); }
+  .riesgo:hover:not(:disabled) { background: var(--rojo-cl); }
+  .rojo { padding: 7px 14px; color: var(--sobre-rojo); background: var(--rojo); border: 1px solid var(--rojo); }
+
+  .confirma {
+    grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: var(--e3) var(--e4);
+    padding: var(--e3) var(--e4); background: var(--rojo-cl); border-radius: var(--r);
+  }
+  .confirma p { flex: 1 1 260px; font-size: var(--f-ms); color: var(--rojo); }
+  .confirma input { width: 210px; }
+  .confirma .botones { display: flex; gap: var(--e2); }
+
+  .terminal { margin: var(--e4) 0 var(--e2); overflow: hidden; color: #dfe3f0; background: #0f1428; border: 1px solid #262c45; border-radius: var(--r2); }
+  .barra { display: flex; align-items: center; justify-content: space-between; gap: var(--e3); padding: 10px var(--e4); border-bottom: 1px solid #262c45; }
+  .que { display: flex; align-items: center; flex-wrap: wrap; gap: var(--e2) var(--e3); min-width: 0; font-size: var(--f-ms); }
+  .que strong { font-weight: 600; }
+  .tiempo { color: #a6adc0; }
+  .sello { padding: 2px 10px; font-size: var(--f-xs); color: #10142a; background: #a6adc0; border-radius: 999px; }
+  .sello.corriendo { background: #8a9ae4; } .sello.ok { background: #b9c3f2; } .sello.fallo { background: #e08b81; }
+  .barra button { padding: 5px 14px; font-size: var(--f-sm); color: #dfe3f0; background: transparent; border: 1px solid #3a4266; }
+  .barra button:hover { border-color: #8a9ae4; }
+  pre { height: 220px; padding: var(--e3) var(--e4); overflow: auto; font: 400 var(--f-sm)/1.5 ui-monospace, 'Cascadia Mono', Consolas, monospace; white-space: pre-wrap; word-break: break-word; }
+
+  @media (max-width: 620px) {
+    .hoja { padding: 22px 20px; }
+    .fila { grid-template-columns: 1fr; }
+    .campos input[type=text] { width: 100%; }
+  }
+  @media (prefers-reduced-motion: reduce) { button, .pestanas button { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Mesh</h1>
+  <p class="sub">Version de emergencia del panel de comandos, para cuando Mesh esta apagado. Con Mesh arriba, la misma lista esta en Comandos dentro de tu panel.</p>
+
+  <section class="hoja">
+    <div class="titulo"><h2>Comandos</h2><span class="cuantas" id="cuantas" hidden></span></div>
+    <p class="intro">Cada fila lanza el mismo comando que escribirias en la terminal. Lo ejecuta un programa local de esta maquina y lo que sale se ve abajo.</p>
+    <ul class="servicios" id="servicios" aria-label="Servicios de Mesh" aria-live="polite"></ul>
+    <div class="pestanas" id="pestanas" role="tablist" aria-label="Tipo de comando"></div>
+    <div id="salida-caja"></div>
+    <ul class="lista" id="lista"></ul>
+  </section>
+</main>
+
+<script>
+const TOKEN = '__TOKEN__';
+const $ = (id) => document.getElementById(id);
+
+async function api(ruta, cuerpo) {
+  const r = await fetch(ruta, {
+    method: cuerpo === undefined ? 'GET' : 'POST',
+    headers: { 'x-token': TOKEN, 'Content-Type': 'application/json' },
+    body: cuerpo === undefined ? undefined : JSON.stringify(cuerpo),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `Error ${r.status}`);
+  return j;
+}
+
+function el(tag, props = {}, ...hijos) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    // data-* y aria-* son ATRIBUTOS; asignarlos como propiedad no hace nada
+    if (k === 'class') e.className = v;
+    else if (k.startsWith('on')) e.addEventListener(k.slice(2), v);
+    else if (k.includes('-')) e.setAttribute(k, v);
+    else e[k] = v;
+  }
+  for (const h of hijos) if (h) e.append(h);
+  return e;
+}
+
+let catalogo = [], grupo = '', confirmando = null, corriendo = false;
+const valores = {}, vistas = {}, mensajes = {}, temporizadores = {};
+
+// ------------------------------------------------------------ servicios
+async function pintarServicios() {
+  try {
+    const lista = await api('/api/estado');
+    $('servicios').replaceChildren(...lista.map((s) =>
+      el('li', { class: s.arriba ? '' : 'caido', title: 'Puerto ' + s.puerto },
+        el('span', { class: 'punto' }), s.nombre + ' ', el('span', { class: 'dice', textContent: s.arriba ? 'arriba' : 'apagado' }))));
+  } catch { /* el propio panel se cayo */ }
+}
+
+// ------------------------------------------------------------ vista previa
+async function vista(c) {
+  try { const r = await api('/api/vista', { id: c.id, valores: valores[c.id] }); vistas[c.id] = { texto: r.comando, ok: true }; }
+  catch (e) { vistas[c.id] = { texto: e.message, ok: false }; }
+  pintarFila(c);
+}
+function alCambiar(c, campo, v) {
+  valores[c.id][campo.nombre] = v;
+  clearTimeout(temporizadores[c.id]);
+  temporizadores[c.id] = setTimeout(() => vista(c), 150);
+}
+
+// ------------------------------------------------------------ filas
+function pintarFila(c) {
+  const ant = document.querySelector(`[data-id="${c.id}"]`);
+  if (ant) ant.replaceWith(fila(c));
+}
+
+function fila(c) {
+  const v = vistas[c.id];
+  const campos = c.campos.length ? el('div', { class: 'campos' }, ...c.campos.map((f) => {
+    let entrada;
+    if (f.tipo === 'opcion') {
+      entrada = el('select', { onchange: (e) => alCambiar(c, f, e.target.value) }, ...f.opciones.map((o) => el('option', { value: o, textContent: o })));
+      entrada.value = valores[c.id][f.nombre];
+    } else {
+      entrada = el('input', { type: f.tipo === 'entero' ? 'number' : 'text', value: valores[c.id][f.nombre], placeholder: f.opcional ? 'opcional' : '', oninput: (e) => alCambiar(c, f, e.target.value) });
+      if (f.tipo === 'entero') { entrada.min = f.min; entrada.max = f.max; }
+    }
+    return el('label', {}, el('span', { textContent: f.etiqueta }), entrada);
+  })) : null;
+
+  const copiar = el('button', { class: 'suave', textContent: 'Copiar', disabled: !v?.ok, onclick: async (e) => {
+    try { await navigator.clipboard.writeText(v.texto); e.target.textContent = 'Copiado'; } catch { e.target.textContent = 'Selecciona y copia'; }
+    setTimeout(() => (e.target.textContent = 'Copiar'), 1400);
+  } });
+  const ejecutar = el('button', { class: c.confirmar ? 'riesgo' : 'primario', textContent: 'Ejecutar', disabled: corriendo || !v?.ok,
+    title: corriendo ? 'Hay un comando corriendo' : '', onclick: () => {
+      mensajes[c.id] = '';
+      if (!c.confirmar) return lanzar(c);
+      confirmando = confirmando === c.id ? null : c.id;
+      pintarFila(c);
+    } });
+
+  let confirma = null;
+  if (confirmando === c.id) {
+    const escribir = c.confirmar !== 'SI' ? el('input', { type: 'text', placeholder: 'Escribe ' + c.confirmar, oninput: (e) => { si.disabled = e.target.value.trim() !== c.confirmar; } }) : null;
+    const si = el('button', { class: 'rojo', textContent: 'Si, ejecutar', disabled: c.confirmar !== 'SI', onclick: () => lanzar(c, c.confirmar) });
+    confirma = el('div', { class: 'confirma', role: 'group' },
+      el('p', { textContent: c.peligro || 'Esto no se deshace.' }), escribir,
+      el('div', { class: 'botones' }, el('button', { class: 'suave', textContent: 'Cancelar', onclick: () => { confirmando = null; pintarFila(c); } }), si));
+  }
+
+  return el('li', { class: 'fila', 'data-id': c.id },
+    el('div', {}, el('h3', { textContent: c.titulo }), el('p', { class: 'explica', textContent: c.explica }), campos,
+      el('code', { class: 'cmd' + (v && !v.ok ? ' malo' : ''), textContent: v?.texto ?? '' }),
+      mensajes[c.id] ? el('p', { class: 'mensaje', role: 'alert', textContent: mensajes[c.id] }) : null),
+    el('div', { class: 'acciones' }, copiar, ejecutar), confirma);
+}
+
+function pintarLista() {
+  $('lista').replaceChildren(...catalogo.filter((c) => c.grupo === grupo).map(fila));
+  for (const b of $('pestanas').children) b.classList.toggle('activa', b.textContent === grupo);
+}
+
+// ------------------------------------------------------------ salida
+let siguiente = 0, idActual = null, sondeo = null;
+const ETIQUETA = { corriendo: 'En curso', ok: 'Termino bien', fallo: 'Fallo', parado: 'Parado' };
+
+function pintarTrabajo(j) {
+  const caja = $('salida-caja');
+  if (!j.hay) { caja.replaceChildren(); return false; }
+  if (j.id !== idActual) { idActual = j.id; siguiente = 0; caja.replaceChildren(); }
+  let t = caja.querySelector('.terminal');
+  if (!t) {
+    t = el('div', { class: 'terminal', role: 'region', 'aria-label': 'Salida del comando' },
+      el('div', { class: 'barra' }, el('div', { class: 'que' }, el('strong'), el('span', { class: 'sello' }), el('span', { class: 'tiempo' })), el('div', { class: 'botones' }, el('button'))),
+      el('pre'));
+    caja.append(t);
+  }
+  t.querySelector('strong').textContent = j.titulo;
+  const sello = t.querySelector('.sello'); sello.className = 'sello ' + j.estado; sello.textContent = ETIQUETA[j.estado];
+  t.querySelector('.tiempo').textContent = j.segundos + ' s';
+  const boton = t.querySelector('.barra button');
+  boton.textContent = j.estado === 'corriendo' ? 'Parar' : 'Cerrar';
+  boton.onclick = j.estado === 'corriendo' ? () => api('/api/parar', {}).catch((e) => alert(e.message)) : () => { caja.replaceChildren(); idActual = null; };
+  const pre = t.querySelector('pre');
+  if (j.lineas.length) {
+    const pegado = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 40;
+    pre.textContent += j.lineas.join('\n') + '\n';
+    if (pegado) pre.scrollTop = pre.scrollHeight;
+  }
+  siguiente = j.siguiente;
+  const antes = corriendo; corriendo = j.estado === 'corriendo';
+  if (antes !== corriendo) pintarLista();
+  return corriendo;
+}
+
+async function sondear() {
+  try {
+    const j = await api('/api/trabajo?desde=' + siguiente);
+    if (!pintarTrabajo(j)) { clearInterval(sondeo); sondeo = null; pintarServicios(); }
+  } catch { /* se reintenta */ }
+}
+function seguir() { siguiente = 0; idActual = null; if (!sondeo) sondeo = setInterval(sondear, 800); sondear(); }
+
+async function lanzar(c, confirmacion) {
+  try {
+    await api('/api/ejecutar', { id: c.id, valores: valores[c.id], confirmacion });
+    confirmando = null; seguir();
+    setTimeout(() => $('salida-caja').scrollIntoView({ block: 'nearest' }), 200);
+  } catch (e) { mensajes[c.id] = e.message; pintarFila(c); }
+}
+
+// ------------------------------------------------------------ arranque
+(async () => {
+  catalogo = await api('/api/catalogo');
+  const grupos = [...new Set(catalogo.map((c) => c.grupo))];
+  grupo = grupos[0];
+  for (const c of catalogo) valores[c.id] = Object.fromEntries(c.campos.map((f) => [f.nombre, String(f.defecto ?? (f.tipo === 'opcion' ? f.opciones[0] : ''))]));
+  $('cuantas').textContent = catalogo.length + ' comandos'; $('cuantas').hidden = false;
+  $('pestanas').replaceChildren(...grupos.map((g) => el('button', { type: 'button', role: 'tab', textContent: g, onclick: () => { grupo = g; confirmando = null; pintarLista(); } })));
+  pintarLista();
+  await Promise.all(catalogo.map(vista));
+  pintarServicios(); setInterval(pintarServicios, 8000);
+  // Si se recarga con algo corriendo, se engancha a su salida (lo ya terminado no se ensena)
+  try { const j = await api('/api/trabajo?desde=0'); if (j.hay && j.estado === 'corriendo') seguir(); } catch {}
+})();
+</script>
+</body>
+</html>

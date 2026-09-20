@@ -79,6 +79,21 @@ export const ID_ROL_VENDEDOR = 2;
  */
 export const CORREO_TIENDA = 'tienda@mesh.com';
 
+/**
+ * Las cuentas de desarrollo: `desarrollador1@mesh.com`, `desarrollador2@...` y
+ * asi. Las crean `demo-anillo-resenas.ps1` y el bloque Anillo de la pestana Demo
+ * con el prefijo `desarrollador`. En el backend son vendedores comunes, no hay
+ * un rol aparte.
+ *
+ * Solo decide si se PINTA la pestana Comandos del panel. No da ningun permiso:
+ * los comandos los ejecuta un servidor local (`panel-comandos.ps1`) que solo
+ * escucha en 127.0.0.1 y lleva su propio token, asi que esconder o mostrar
+ * esto en la pagina no abre ni cierra nada.
+ */
+export function esCuentaDesarrollador(correo: string | null | undefined): boolean {
+	return /^desarrollador\d*@mesh\.com$/i.test(correo ?? '');
+}
+
 export function guardarSesion(correo: string) {
 	if (!browser) return;
 	localStorage.setItem(LLAVE, correo);

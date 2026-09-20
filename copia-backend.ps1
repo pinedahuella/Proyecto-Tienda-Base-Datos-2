@@ -86,6 +86,64 @@ function Arrancar-CopiaBackend {
     return $null
 }
 
+# --- La red de la U y el tunel -------------------------------------------------
+# cloudflared sale SIEMPRE por el puerto 7844, y el firewall de la U lo bloquea
+# por puerto (medido el 2026-08-06 y el 2026-08-25, el sintoma es "el tunel no
+# levanto" o el error 1033). La salida es WARP, el cliente de Cloudflare, en modo
+# MASQUE: mete ese trafico dentro de HTTPS. Es la misma solucion de LEDKID, ahi la
+# hace arrancar-todo-cloudflare.ps1.
+#
+# Solo se toca WARP si el 7844 esta bloqueado de verdad. En casa, o en una red sin
+# ese bloqueo, no se cambia nada. Devuelve $true si el tunel puede salir.
+
+function Probar-Puerto([string]$servidor, [int]$puerto, [int]$segundos = 4) {
+    try {
+        $c = New-Object Net.Sockets.TcpClient
+        $t = $c.ConnectAsync($servidor, $puerto)
+        $abierto = $t.Wait($segundos * 1000) -and $c.Connected
+        $c.Close()
+        return $abierto
+    } catch { return $false }
+}
+
+function Asegurar-SalidaTunel {
+    $edge = 'region1.v2.argotunnel.com'
+    if (Probar-Puerto $edge 7844) {
+        Write-Host "   El puerto 7844 sale libre, no hace falta WARP" -ForegroundColor Green
+        return $true
+    }
+    Write-Host "   El puerto 7844 esta bloqueado (red de la U); se usa WARP" -ForegroundColor Yellow
+    if (-not (Get-Command warp-cli -ErrorAction SilentlyContinue)) {
+        Write-Host "   No encuentro WARP (warp-cli). Instalalo o conectate a otra red; sin eso el tunel no va a subir." -ForegroundColor Red
+        return $false
+    }
+    $estado = (warp-cli status 2>&1) -join ' '
+    if ($estado -match 'Connected') {
+        # Si ya esta conectado NO se desconecta: el tunel de LEDKID cuelga de el, y
+        # LEDKID lo deja siempre en MASQUE. Solo se espera y se vuelve a probar.
+        Write-Host "   WARP ya estaba conectado, no se toca" -ForegroundColor Yellow
+    } else {
+        # MASQUE en mayusculas: 'masque' lo rechaza.
+        warp-cli tunnel protocol set MASQUE *> $null
+        warp-cli connect *> $null
+        for ($i = 0; $i -lt 20; $i++) {
+            Start-Sleep 2
+            if (((warp-cli status 2>&1) -join ' ') -match 'Connected') { break }
+        }
+    }
+    # Se vuelve a probar el puerto: contar conexiones de cloudflared no sirve, sale en
+    # QUIC (UDP) y ese contador solo mira TCP.
+    for ($i = 0; $i -lt 10; $i++) {
+        if (Probar-Puerto $edge 7844 3) {
+            Write-Host "   WARP conectado, el 7844 ya sale" -ForegroundColor Green
+            return $true
+        }
+        Start-Sleep 2
+    }
+    Write-Host "   WARP quedo conectado pero el 7844 sigue cerrado; el tunel puede fallar." -ForegroundColor Red
+    return $false
+}
+
 # Vuelve a levantar el backend normal en 3000, sin ventana, y espera a que conteste.
 function Arrancar-BackendNormal([string]$repo) {
     if (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue) { return $true }

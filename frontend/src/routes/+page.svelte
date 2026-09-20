@@ -1172,7 +1172,6 @@
 			<section class="mas-vendidos" aria-labelledby="t-mas-vendidos">
 				<div class="cab-estante">
 					<h2 id="t-mas-vendidos">Lo mas vendido ahora</h2>
-					<p>Se recalcula cada 10 minutos con las compras mas recientes.</p>
 				</div>
 				<div class="estante">
 					{#each masVendidos as p, i (p._id)}
@@ -2270,11 +2269,6 @@
 
 	.cab-estante h2 {
 		font-size: var(--f-lg);
-	}
-
-	.cab-estante p {
-		font-size: var(--f-ms);
-		color: var(--gris);
 	}
 
 	/* Una sola fila que se desliza, no una segunda rejilla: ocho tarjetas en

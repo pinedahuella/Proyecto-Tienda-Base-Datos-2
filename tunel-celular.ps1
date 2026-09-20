@@ -108,6 +108,10 @@ if (-not $arriba) { Mal "El frontend no paso /api al backend. Mira $MeshDemoTmp\
 Ok "Frontend y proxy /api respondiendo"
 
 # --- el tunel ---
+# En la red de la U el puerto 7844 esta bloqueado y hace falta WARP; ver
+# Asegurar-SalidaTunel en copia-backend.ps1. Fuera de la U no cambia nada.
+Paso "Comprobando que el tunel pueda salir"
+if (-not (Asegurar-SalidaTunel)) { Write-Host "   Sigo, pero es probable que el tunel no levante." -ForegroundColor Yellow }
 Paso "Abriendo el tunel"
 $tun = Abrir-Tunel 'http://127.0.0.1:5173' '/api/productos?limite=1' 'tunel-celular'
 if (-not $tun) { Mal "El tunel no levanto. Mira $MeshDemoTmp\tunel-celular.err"; $pids | ForEach-Object { Stop-Process -Id $_ -Force -ErrorAction SilentlyContinue }; exit 1 }

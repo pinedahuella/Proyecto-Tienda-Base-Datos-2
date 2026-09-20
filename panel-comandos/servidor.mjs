@@ -1,0 +1,521 @@
+// servidor.mjs
+// Panel de comandos de Mesh. Una pagina con botones que lanzan de verdad los
+// comandos de comandos.txt (arrancar.ps1, las semillas, las demos de fraude).
+//
+//   node panel-comandos/servidor.mjs        o        .\panel-comandos.ps1
+//   http://127.0.0.1:5199
+//
+// No lleva dependencias: solo Node. Vive APARTE de la aplicacion a proposito.
+// Los botones de arrancar hacen falta justo cuando el backend y el frontend
+// estan apagados, y una pestana dentro de la app no existiria en ese momento.
+//
+// Que lo hace seguro de dejar corriendo:
+//   1. Escucha solo en 127.0.0.1, nadie de la red lo ve.
+//   2. Solo ejecuta lo que esta en CATALOGO. No hay ruta que reciba un comando
+//      libre, y cada valor se valida contra un patron antes de armar nada.
+//   3. Cada peticion trae un token que solo esta en la pagina que sirve este
+//      mismo servidor. Otra pagina abierta en el navegador no puede leerlo, asi
+//      que no puede disparar comandos.
+//   4. Se rechaza cualquier Host que no sea 127.0.0.1 o localhost con este
+//      puerto, contra el rebinding de DNS.
+//   5. Los comandos que borran piden confirmacion, y la exige el SERVIDOR: un
+//      fetch armado a mano sin la confirmacion tambien se rechaza.
+
+import http from 'node:http';
+import net from 'node:net';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { StringDecoder } from 'node:string_decoder';
+import { fileURLToPath } from 'node:url';
+
+const AQUI = path.dirname(fileURLToPath(import.meta.url));
+const RAIZ = path.resolve(AQUI, '..');
+const PUERTO = Number(process.env.PANEL_PUERTO || 5199);
+const TOKEN = randomBytes(24).toString('hex');
+// Los unicos origenes de frontend que pueden hablarle a este servidor y pedirle el
+// token. Ver el comentario de CORS mas abajo.
+const FRONTENDS_OK = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+
+// ---------------------------------------------------------------------------
+// El catalogo. Todo lo que el panel puede hacer esta aqui y en ningun otro lado.
+// La pagina arma sus formularios leyendo esta lista, asi que agregar un comando
+// es agregar una entrada, sin tocar el HTML.
+//
+//   script      ruta relativa a la raiz del repo
+//   campos      lo que se le pide a quien usa el panel, cada uno validado
+//   confirmar   null, 'SI' (una casilla) o un texto que hay que escribir igual
+//   construir   recibe los valores ya validados y devuelve los argumentos
+// ---------------------------------------------------------------------------
+
+const ARRANCAR = 'arrancar.ps1';
+const SERVICIOS = 'panel-comandos/servicios.ps1';
+
+const CATALOGO = [
+  // --- Arrancar y parar ---------------------------------------------------
+  {
+    id: 'todo', grupo: 'Arrancar y parar', titulo: 'Levantar todo',
+    explica: 'Las bases, el backend y el frontend, en ese orden. Es el de todos los dias y no borra nada. Tarda unos tres minutos.',
+    script: SERVICIOS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'todo'],
+  },
+  {
+    id: 'estado', grupo: 'Arrancar y parar', titulo: 'Ver que esta corriendo',
+    explica: 'Puertos del backend y del frontend, contenedores y memoria libre.',
+    script: SERVICIOS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'estado'],
+  },
+  {
+    id: 'bases', grupo: 'Arrancar y parar', titulo: 'Solo las bases de datos',
+    explica: 'Arranca Docker si esta apagado, levanta los contenedores y aplica las migraciones que falten. No borra datos.',
+    script: ARRANCAR, campos: [], confirmar: null,
+    construir: () => [],
+  },
+  {
+    id: 'backend', grupo: 'Arrancar y parar', titulo: 'Reiniciar el backend',
+    explica: 'Lo compila otra vez y lo vuelve a levantar en el 3000. Usalo despues de cambiar codigo del backend.',
+    script: SERVICIOS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'backend'],
+  },
+  {
+    id: 'frontend', grupo: 'Arrancar y parar', titulo: 'Reiniciar el frontend',
+    explica: 'Lo compila otra vez y lo sirve en el 5173. Usalo despues de cambiar codigo de la tienda.',
+    script: SERVICIOS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'frontend'],
+  },
+  {
+    id: 'parar-backend', grupo: 'Arrancar y parar', titulo: 'Parar el backend',
+    explica: 'Solo el proceso de Mesh. No toca las bases ni otros proyectos.',
+    script: SERVICIOS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'parar-backend'],
+  },
+  {
+    id: 'parar-frontend', grupo: 'Arrancar y parar', titulo: 'Parar el frontend',
+    explica: 'Solo el proceso de Mesh. No toca las bases ni otros proyectos.',
+    script: SERVICIOS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'parar-frontend'],
+  },
+
+  // --- Productos de prueba ------------------------------------------------
+  {
+    id: 'productos', grupo: 'Productos de prueba', titulo: 'Generar productos con semilla',
+    explica: 'Agrega productos inventados con sus variantes, imagenes y ofertas. No borra lo que ya hay. La misma semilla da siempre el mismo lote.',
+    script: ARRANCAR, confirmar: null,
+    campos: [
+      { nombre: 'cantidad', etiqueta: 'Cuantos', tipo: 'entero', min: 1, max: 9999, defecto: 100 },
+      { nombre: 'semilla', etiqueta: 'Semilla, vacio elige una libre', tipo: 'entero', min: 0, max: 999999999, opcional: true },
+    ],
+    construir: (v) => ['-Productos', v.cantidad, ...(v.semilla ? ['-Semilla', v.semilla] : [])],
+  },
+  {
+    id: 'borrar-lote', grupo: 'Productos de prueba', titulo: 'Borrar productos generados',
+    explica: 'Borra los mas nuevos de los generados, o todos. Con semilla borra solo el lote de esa semilla. No toca el catalogo curado.',
+    script: ARRANCAR, confirmar: 'SI',
+    peligro: 'Borra productos de PostgreSQL y de MongoDB. No se deshace.',
+    campos: [
+      { nombre: 'cuantos', etiqueta: 'Cuantos, o la palabra todos', tipo: 'texto', patron: '^(\\d{1,5}|todos)$', defecto: 'todos' },
+      { nombre: 'semilla', etiqueta: 'Solo de esta semilla, opcional', tipo: 'entero', min: 0, max: 999999999, opcional: true },
+    ],
+    construir: (v) => ['-Borrar', v.cuantos, ...(v.semilla ? ['-Semilla', v.semilla] : [])],
+  },
+  {
+    id: 'productos-mongo', grupo: 'Productos de prueba', titulo: 'Generar productos que viven solo en MongoDB',
+    explica: 'Como los que crea un vendedor desde su panel. Van a MongoDB y no a PostgreSQL.',
+    script: ARRANCAR, confirmar: null,
+    campos: [
+      { nombre: 'cantidad', etiqueta: 'Cuantos', tipo: 'entero', min: 1, max: 9999, defecto: 50 },
+      { nombre: 'semilla', etiqueta: 'Semilla, opcional', tipo: 'entero', min: 0, max: 999999999, opcional: true },
+    ],
+    construir: (v) => ['-ProductosMongo', v.cantidad, ...(v.semilla ? ['-Semilla', v.semilla] : [])],
+  },
+  {
+    id: 'borrar-mongo', grupo: 'Productos de prueba', titulo: 'Borrar un lote de MongoDB',
+    explica: 'Borra el lote de esa semilla en las dos bases.',
+    script: ARRANCAR, confirmar: 'SI',
+    peligro: 'Borra el lote de las dos bases. No se deshace.',
+    campos: [{ nombre: 'semilla', etiqueta: 'Semilla del lote', tipo: 'entero', min: 0, max: 999999999 }],
+    construir: (v) => ['-BorrarMongo', v.semilla],
+  },
+  {
+    id: 'etl', grupo: 'Productos de prueba', titulo: 'Volver a migrar catalogo y grafo',
+    explica: 'Copia el catalogo de PostgreSQL a MongoDB y las reseñas a Neo4j. Solo suma, no borra.',
+    script: ARRANCAR, campos: [], confirmar: null,
+    construir: () => ['-Etl'],
+  },
+
+  // --- Reconstruir bases --------------------------------------------------
+  {
+    id: 'reiniciar-grafo', grupo: 'Reconstruir bases', titulo: 'Rehacer el grafo de Neo4j',
+    explica: 'Vacia el grafo y lo reconstruye desde PostgreSQL. Arregla nodos de producto sobrantes. Se pierde cualquier cosa sembrada a mano en Neo4j.',
+    script: ARRANCAR, confirmar: 'SI',
+    peligro: 'Vacia Neo4j antes de reconstruirlo.',
+    campos: [],
+    construir: () => ['-ReiniciarGrafo'],
+  },
+  {
+    id: 'reiniciar-mongo', grupo: 'Reconstruir bases', titulo: 'Rehacer MongoDB',
+    explica: 'Rehace solo MongoDB y no toca PostgreSQL. Los productos que vivian solo en Mongo se pierden.',
+    script: ARRANCAR, confirmar: 'SI',
+    peligro: 'Borra MongoDB entero.',
+    campos: [],
+    construir: () => ['-ReiniciarMongo'],
+  },
+  {
+    id: 'reiniciar-todo', grupo: 'Reconstruir bases', titulo: 'Borrar todo y empezar de cero',
+    explica: 'Borra las seis bases y las vuelve a construir desde los archivos del repositorio. Se van pedidos, cuentas creadas, reseñas y carritos, incluidas las cuentas desarrollador. Tarda unos dos minutos.',
+    script: ARRANCAR, confirmar: 'BORRAR TODO',
+    peligro: 'Esto no se deshace. Se pierde todo lo que se hizo a mano.',
+    campos: [],
+    construir: () => ['-Reiniciar'],
+  },
+
+  // --- Demos de fraude ----------------------------------------------------
+  {
+    id: 'demo-evento', grupo: 'Demos de fraude', titulo: 'Disparar una senal de login',
+    explica: 'Peticiones directas al backend que cruzan el umbral de una sola senal y la confirman en la base. Abre el panel de fraude al final. Si corres varias en menos de cinco minutos los contadores se acumulan.',
+    script: 'demo-evento-fraude.ps1', confirmar: null,
+    campos: [
+      { nombre: 'tipo', etiqueta: 'Senal', tipo: 'opcion', opciones: ['fuerza_bruta_cuenta', 'fuerza_bruta_ip', 'multi_cuenta_ip'], defecto: 'fuerza_bruta_cuenta' },
+      { nombre: 'cuenta', etiqueta: 'Cuenta objetivo, no aplica a multi_cuenta_ip', tipo: 'texto', patron: '^[A-Za-z0-9._-]{1,40}@[A-Za-z0-9.-]{1,40}$', defecto: 'ventas.norte@mesh.com' },
+    ],
+    construir: (v) => ['-Tipo', v.tipo, ...(v.tipo === 'multi_cuenta_ip' ? [] : ['-Cuenta', v.cuenta])],
+  },
+  {
+    id: 'demo-anillo', grupo: 'Demos de fraude', titulo: 'Armar un anillo de reseñas',
+    explica: 'Crea cuentas que se compran y se califican entre si en circulo, con compras reales, y el detector las encuentra en unos segundos. Las cuentas quedan como prefijo1, prefijo2 y asi, con la contrasena Desarrollo123!.',
+    script: 'demo-anillo-resenas.ps1', confirmar: 'SI',
+    peligro: 'Deja pedidos y movimientos de inventario reales. No hay como deshacerlo.',
+    campos: [
+      { nombre: 'cuentas', etiqueta: 'Cuantas cuentas', tipo: 'opcion', opciones: ['2', '3', '4'], defecto: '3' },
+      { nombre: 'prefijo', etiqueta: 'Prefijo de las cuentas', tipo: 'texto', patron: '^[A-Za-z0-9]{1,20}$', defecto: 'desarrollador' },
+    ],
+    construir: (v) => ['-Cuentas', v.cuentas, '-Prefijo', v.prefijo],
+  },
+  {
+    id: 'demo-pais-precalentar', grupo: 'Demos de fraude', titulo: 'Precalentar la demo de otro pais',
+    explica: 'Hazlo antes de la clase. Comprueba que el tunel pueda salir (en la U conecta WARP), construye la imagen de Tor, compila la copia del backend y deja Tor con salida en el pais. No apaga nada de Mesh. Despues la demo tarda mucho menos. Tor queda corriendo, unos 50 MB.',
+    script: 'demo-fraude-pais.ps1', confirmar: null,
+    campos: [
+      { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },
+    ],
+    construir: (v) => ['-Precalentar', '-Pais', v.pais],
+  },
+  {
+    id: 'demo-pais', grupo: 'Demos de fraude', titulo: 'Login desde otro pais',
+    explica: 'Usa Tor de verdad para intentar entrar desde la IP de otro pais y dispara viaje imposible y rotacion de IP. Para el backend normal un rato y pausa ClickHouse y Neo4j, y al final los devuelve. Necesita internet. Si hiciste el precalentado, tarda mucho menos.',
+    script: 'demo-fraude-pais.ps1', confirmar: null,
+    campos: [
+      { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },
+    ],
+    construir: (v) => ['-Pais', v.pais],
+  },
+  {
+    id: 'demo-pais-limpiar', grupo: 'Demos de fraude', titulo: 'Borrar lo que sembro la demo de pais',
+    explica: 'Quita la alerta de PostgreSQL, Mongo y Elastic.',
+    script: 'demo-fraude-pais.ps1', confirmar: 'SI',
+    peligro: 'Borra las alertas de esa demo.',
+    campos: [],
+    construir: () => ['-Limpiar'],
+  },
+];
+
+// ---------------------------------------------------------------------------
+// Validacion y armado del comando
+// ---------------------------------------------------------------------------
+
+class ErrorDeUso extends Error {}
+
+function validarCampo(campo, crudo) {
+  const vacio = crudo === undefined || crudo === null || String(crudo).trim() === '';
+  if (vacio) {
+    if (campo.opcional) return '';
+    throw new ErrorDeUso(`Falta ${campo.etiqueta}`);
+  }
+  const valor = String(crudo).trim();
+  if (campo.tipo === 'entero') {
+    if (!/^\d{1,10}$/.test(valor)) throw new ErrorDeUso(`${campo.etiqueta} tiene que ser un numero`);
+    const n = Number(valor);
+    if (n < campo.min || n > campo.max) throw new ErrorDeUso(`${campo.etiqueta} va de ${campo.min} a ${campo.max}`);
+    return String(n);
+  }
+  if (campo.tipo === 'opcion') {
+    if (!campo.opciones.includes(valor)) throw new ErrorDeUso(`${campo.etiqueta} no es una opcion valida`);
+    return valor;
+  }
+  if (campo.tipo === 'texto') {
+    if (!new RegExp(campo.patron).test(valor)) throw new ErrorDeUso(`${campo.etiqueta} no tiene el formato esperado`);
+    return valor;
+  }
+  throw new ErrorDeUso('Tipo de campo desconocido');
+}
+
+/** Devuelve { comando, script, args } o lanza ErrorDeUso. Nada se interpreta con shell. */
+function armar(id, valoresCrudos) {
+  const c = CATALOGO.find((x) => x.id === id);
+  if (!c) throw new ErrorDeUso('Ese comando no existe');
+  const v = {};
+  for (const campo of c.campos) v[campo.nombre] = validarCampo(campo, valoresCrudos?.[campo.nombre]);
+  const args = c.construir(v).map(String);
+  const ruta = c.script.replaceAll('/', '\\');
+  // Los valores ya pasaron por un patron cerrado, asi que las comillas simples bastan.
+  const texto = args.map((a) => (/^-[A-Za-z]+$/.test(a) ? a : `'${a.replaceAll("'", "''")}'`)).join(' ');
+  return {
+    c,
+    // Lo que se muestra y se copia, tal como se escribiria en la terminal
+    comando: `.\\${ruta}${texto ? ' ' + texto.replaceAll("'", '') : ''}`,
+    // Lo que se ejecuta. UTF-8 para que las tildes de los scripts lleguen bien
+    ps: `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; & '.\\${ruta}' ${texto}; exit $LASTEXITCODE`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// El trabajo en curso. Uno a la vez: arrancar.ps1, docker y las demos no se
+// llevan bien corriendo juntos, y dos salidas mezcladas no se entienden.
+// ---------------------------------------------------------------------------
+
+let trabajo = null;
+const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
+
+// Marca de "hay un comando corriendo". Apagar este servidor a mitad de un comando
+// lo mata (el comando escribe a un pipe que ya no existe) y deja las bases a medias:
+// paso con la demo de otro pais, que habia parado ClickHouse, Neo4j y el backend.
+// panel-comandos.ps1 -Parar mira este archivo y se niega si el proceso sigue vivo.
+const MARCA = path.join(tmpdir(), 'mesh-logs', 'panel-trabajo.json');
+function ponerMarca(t) {
+  try {
+    mkdirSync(path.dirname(MARCA), { recursive: true });
+    writeFileSync(MARCA, JSON.stringify({ pid: t.proc.pid, titulo: t.titulo, inicio: t.inicio }));
+  } catch { /* la marca es una ayuda, no debe tumbar el comando */ }
+}
+function quitarMarca() {
+  try { rmSync(MARCA, { force: true }); } catch { /* idem */ }
+}
+
+function lanzar(armado) {
+  const t = {
+    id: randomBytes(4).toString('hex'),
+    titulo: armado.c.titulo,
+    comando: armado.comando,
+    estado: 'corriendo',
+    codigo: null,
+    inicio: Date.now(),
+    fin: null,
+    lineas: [],
+    proc: null,
+  };
+  const proc = spawn(
+    'powershell.exe',
+    ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', armado.ps],
+    { cwd: RAIZ, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] },
+  );
+  t.proc = proc;
+
+  const juntar = (flujo) => {
+    const dec = new StringDecoder('utf8');
+    let resto = '';
+    flujo.on('data', (buf) => {
+      resto += dec.write(buf);
+      const partes = resto.split(/\r?\n/);
+      resto = partes.pop();
+      for (const l of partes) t.lineas.push(l.replace(ANSI, ''));
+    });
+    flujo.on('end', () => {
+      resto += dec.end();
+      if (resto) t.lineas.push(resto.replace(ANSI, ''));
+    });
+  };
+  juntar(proc.stdout);
+  juntar(proc.stderr);
+
+  proc.on('error', (e) => {
+    t.lineas.push(`No se pudo lanzar PowerShell, ${e.message}`);
+    t.estado = 'fallo';
+    t.fin = Date.now();
+    quitarMarca();
+  });
+  proc.on('close', (codigo) => {
+    t.codigo = codigo;
+    if (t.estado === 'corriendo') t.estado = codigo === 0 ? 'ok' : 'fallo';
+    t.fin = Date.now();
+    quitarMarca();
+  });
+  ponerMarca(t);
+  trabajo = t;
+  return t;
+}
+
+function parar() {
+  if (!trabajo || trabajo.estado !== 'corriendo') return false;
+  trabajo.estado = 'parado';
+  trabajo.lineas.push('--- Parado desde el panel ---');
+  spawn('taskkill', ['/PID', String(trabajo.proc.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+  return true;
+}
+
+// ---------------------------------------------------------------------------
+// Estado de los servicios, sin ejecutar nada: solo se prueba si el puerto abre
+// ---------------------------------------------------------------------------
+
+function puertoAbierto(puerto) {
+  return new Promise((resolver) => {
+    // 'localhost' y no 127.0.0.1: vite preview escucha solo en IPv6 ([::1]) y con
+    // 127.0.0.1 la tienda salia apagada estando arriba.
+    const s = net.connect({ port: puerto, host: 'localhost', timeout: 800 });
+    s.on('connect', () => { s.destroy(); resolver(true); });
+    s.on('timeout', () => { s.destroy(); resolver(false); });
+    s.on('error', () => resolver(false));
+  });
+}
+
+const SERVICIOS_VIGILADOS = [
+  { nombre: 'Backend', puerto: 3000 },
+  { nombre: 'Tienda', puerto: 5173 },
+  { nombre: 'PostgreSQL', puerto: 5432 },
+  { nombre: 'MongoDB', puerto: 27018 },
+  { nombre: 'Redis', puerto: 6379 },
+  { nombre: 'Neo4j', puerto: 7687 },
+  { nombre: 'ClickHouse', puerto: 8123 },
+  { nombre: 'Elasticsearch', puerto: 9200 },
+];
+
+// ---------------------------------------------------------------------------
+// HTTP
+// ---------------------------------------------------------------------------
+
+const HOSTS_OK = new Set([`127.0.0.1:${PUERTO}`, `localhost:${PUERTO}`]);
+const ORIGENES_OK = new Set([`http://127.0.0.1:${PUERTO}`, `http://localhost:${PUERTO}`, ...FRONTENDS_OK]);
+
+// El frontend de Mesh (pestana Comandos del panel) le habla a este servidor
+// directamente desde el navegador, asi que es el UNICO origen al que se le
+// concede CORS y al que se le entrega el token (GET /api/token). Otra pagina,
+// aunque este abierta en la misma maquina, recibe 403 y ademas el navegador no le
+// deja leer la respuesta. El navegador no permite falsificar la cabecera Origin.
+//
+// Antes esa pestana era un iframe a esta misma pagina, para que el token no saliera
+// de aqui. Se cambio porque un iframe no hereda el tema, ni el tamano, ni las
+// fuentes de Mesh, y se veia como un cuerpo extrano. El costo es que un XSS en
+// Mesh podria pedir el token; Mesh no usa {@html} en ningun sitio, y lo destructivo
+// sigue pidiendo confirmacion aqui en el servidor.
+// (FRONTENDS_OK esta declarada arriba, junto a las otras constantes.)
+
+function responder(res, estado, cuerpo, tipo = 'application/json; charset=utf-8') {
+  res.writeHead(estado, {
+    'Content-Type': tipo,
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff',
+    // Esta pagina propia no debe poder enmarcarse en ningun sitio.
+    'Content-Security-Policy': "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; frame-ancestors 'none'",
+  });
+  res.end(typeof cuerpo === 'string' ? cuerpo : JSON.stringify(cuerpo));
+}
+
+function leerJson(req) {
+  return new Promise((resolver, rechazar) => {
+    let n = 0;
+    const partes = [];
+    req.on('data', (b) => {
+      n += b.length;
+      if (n > 16_000) { rechazar(new ErrorDeUso('Cuerpo demasiado grande')); req.destroy(); return; }
+      partes.push(b);
+    });
+    req.on('end', () => {
+      try { resolver(partes.length ? JSON.parse(Buffer.concat(partes).toString('utf8')) : {}); }
+      catch { rechazar(new ErrorDeUso('JSON invalido')); }
+    });
+  });
+}
+
+const servidor = http.createServer(async (req, res) => {
+  try {
+    if (!HOSTS_OK.has(req.headers.host ?? '')) return responder(res, 403, { error: 'Host no permitido' });
+    const url = new URL(req.url, `http://${req.headers.host}`);
+
+    // CORS: solo para el frontend de Mesh. Cualquier otro origen no recibe estas
+    // cabeceras y el navegador le oculta la respuesta.
+    const origen = req.headers.origin;
+    if (origen && FRONTENDS_OK.includes(origen)) {
+      res.setHeader('Access-Control-Allow-Origin', origen);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Headers', 'x-token, content-type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+      res.setHeader('Access-Control-Max-Age', '600');
+    }
+    if (req.method === 'OPTIONS') {
+      // Preflight: se contesta sin cuerpo, y solo a quien tiene permiso.
+      res.writeHead(origen && FRONTENDS_OK.includes(origen) ? 204 : 403);
+      return res.end();
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/token') {
+      // Solo el frontend de Mesh puede pedirlo. Sin cabecera Origin (curl, un
+      // script) tampoco: no hay nada que comprobar y no se entrega.
+      if (!origen || !FRONTENDS_OK.includes(origen)) return responder(res, 403, { error: 'Origen no permitido' });
+      return responder(res, 200, { token: TOKEN });
+    }
+
+    if (req.method === 'GET' && url.pathname === '/') {
+      const html = readFileSync(path.join(AQUI, 'index.html'), 'utf8').replace('__TOKEN__', TOKEN);
+      return responder(res, 200, html, 'text/html; charset=utf-8');
+    }
+
+    if (!url.pathname.startsWith('/api/')) return responder(res, 404, { error: 'No existe' });
+    if (req.headers['x-token'] !== TOKEN) return responder(res, 401, { error: 'Falta el token, recarga la pagina' });
+    if (origen && !ORIGENES_OK.has(origen)) return responder(res, 403, { error: 'Origen no permitido' });
+
+    if (req.method === 'GET' && url.pathname === '/api/catalogo') {
+      return responder(res, 200, CATALOGO.map(({ construir, script, ...publico }) => publico));
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/estado') {
+      const estados = await Promise.all(SERVICIOS_VIGILADOS.map(async (s) => ({ ...s, arriba: await puertoAbierto(s.puerto) })));
+      return responder(res, 200, estados);
+    }
+
+    if (req.method === 'GET' && url.pathname === '/api/trabajo') {
+      if (!trabajo) return responder(res, 200, { hay: false });
+      const desde = Math.max(0, Number(url.searchParams.get('desde')) || 0);
+      return responder(res, 200, {
+        hay: true, id: trabajo.id, titulo: trabajo.titulo, comando: trabajo.comando,
+        estado: trabajo.estado, codigo: trabajo.codigo,
+        segundos: Math.round(((trabajo.fin ?? Date.now()) - trabajo.inicio) / 1000),
+        lineas: trabajo.lineas.slice(desde), siguiente: trabajo.lineas.length,
+      });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/vista') {
+      const b = await leerJson(req);
+      return responder(res, 200, { comando: armar(b.id, b.valores).comando });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/ejecutar') {
+      const b = await leerJson(req);
+      const armado = armar(b.id, b.valores);
+      if (armado.c.confirmar && b.confirmacion !== armado.c.confirmar) {
+        throw new ErrorDeUso('Falta la confirmacion');
+      }
+      if (trabajo && trabajo.estado === 'corriendo') {
+        return responder(res, 409, { error: `Ya hay algo corriendo, ${trabajo.titulo}. Espera o pulsa Parar.` });
+      }
+      const t = lanzar(armado);
+      return responder(res, 200, { id: t.id });
+    }
+
+    if (req.method === 'POST' && url.pathname === '/api/parar') {
+      return responder(res, 200, { parado: parar() });
+    }
+
+    return responder(res, 404, { error: 'No existe' });
+  } catch (e) {
+    if (e instanceof ErrorDeUso) return responder(res, 400, { error: e.message });
+    console.error(e);
+    return responder(res, 500, { error: 'Error interno del panel' });
+  }
+});
+
+servidor.on('error', (e) => {
+  console.error(e.code === 'EADDRINUSE' ? `El puerto ${PUERTO} ya esta ocupado. Probablemente el panel ya esta corriendo.` : e.message);
+  process.exit(1);
+});
+servidor.listen(PUERTO, '127.0.0.1', () => console.log(`Panel de comandos en http://127.0.0.1:${PUERTO}`));
