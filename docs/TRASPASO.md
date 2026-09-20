@@ -3,7 +3,25 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-19, madrugada**.
+Ultima actualizacion: **2026-09-20**.
+
+**Lo del 2026-09-20, para Jose David: la alerta de viaje imposible no podia saltar y ya salta. No tienes que cambiar
+nada.** Las consultas de `fraude-login/*.service.ts` (viaje imposible, toma de cuenta y las retrospectivas) piden
+`id_usuario.keyword`, `tipo.keyword`, `resultado.keyword`, `ip.keyword`... y el indice
+`mesh_eventos_autenticacion` tenia esos campos como `keyword` puro (y `ip` como tipo `ip`), asi que devolvian CERO
+resultados sin ningun error. Se vio con un login real desde Singapur y otro desde Alemania: los dos estaban en el
+indice, con su pais, y la consulta exacta del servicio daba 0. La plantilla `elastic/002_eventos_autenticacion.json`
+es ahora version 2 y le pone un subcampo `.keyword` a esos campos (probado antes en un indice aparte); las consultas
+sin `.keyword` siguen funcionando. **Al correr `.\arrancar.ps1` despues de jalar esto, tu indice se rehace solo desde
+Mongo** (los eventos se vuelven a copiar, unos segundos). Con eso saltaron `viaje_imposible` (9943 km, 52 550 km/h) y
+`toma_cuenta`. El detalle y las alertas estan en `docs/DEMO-OTRO-PAIS.md` y `elastic/README.md`. Lo mismo de otra
+manera, si prefieres quitar el `.keyword` de tus consultas, vale y los subcampos sobran sin estorbar.
+Ademas: `demo-entrar-otro-pais.ps1` (una ventana de Chrome por Tor para iniciar sesion desde otro pais), la demo de
+otro pais que ya no apaga el backend, y el panel de comandos (`.\panel-comandos.ps1`, ver `comandos.txt`).
+**Mesh tiene direccion publica: https://mesh.ledkid.com** (`.\mesh-publico.ps1`), por un tunel de Cloudflare nuevo y
+aparte del de LEDKID, con su config en `~\.cloudflared\config-mesh.yml` (no va al repo). Solo publica la tienda; las
+visitas se registran con su IP real. Va con las cuentas de prueba tal como estan (admin incluido), a proposito para
+demostrar: ciérrala cuando no se use (`-Accion apagar`). La pestana Comandos del panel es solo para cuentas `desarrollador*`.
 
 **Lo de la madrugada del 2026-09-19: el informe de la Entrega 2, el ER y el diagrama de arquitectura.**
 Se corrieron `bash pruebas/etl_mongo.sh` (21 OK) y `.\arrancar.ps1` (termina en Listo). El informe se

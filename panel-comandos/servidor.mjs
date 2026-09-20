@@ -57,7 +57,7 @@ const CATALOGO = [
   // --- Arrancar y parar ---------------------------------------------------
   {
     id: 'todo', grupo: 'Arrancar y parar', titulo: 'Levantar todo',
-    explica: 'Las bases, el backend y el frontend, en ese orden. Es el de todos los dias y no borra nada. Tarda unos tres minutos.',
+    explica: 'Las bases, el backend y el frontend, en ese orden, y al final abre https://mesh.ledkid.com si esta configurada. Es el de todos los dias y no borra nada. Tarda unos tres minutos.',
     script: SERVICIOS, campos: [], confirmar: null,
     construir: () => ['-Accion', 'todo'],
   },
@@ -96,6 +96,18 @@ const CATALOGO = [
     explica: 'Solo el proceso de Mesh. No toca las bases ni otros proyectos.',
     script: SERVICIOS, campos: [], confirmar: null,
     construir: () => ['-Accion', 'parar-frontend'],
+  },
+  {
+    id: 'publicar', grupo: 'Arrancar y parar', titulo: 'Abrir mesh.ledkid.com',
+    explica: 'Publica la tienda en https://mesh.ledkid.com para que cualquiera pueda entrar y registrarse, con su IP real. Es un tunel aparte del de LEDKID, que no se toca. Ojo: quien conozca las cuentas de prueba entra con ellas, admin incluido.',
+    script: SERVICIOS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'publico'],
+  },
+  {
+    id: 'despublicar', grupo: 'Arrancar y parar', titulo: 'Cerrar mesh.ledkid.com',
+    explica: 'Cierra la direccion publica. La tienda sigue en local, y ledkid.com no se toca.',
+    script: SERVICIOS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'despublicar'],
   },
 
   // --- Productos de prueba ------------------------------------------------
@@ -173,6 +185,27 @@ const CATALOGO = [
 
   // --- Demos de fraude ----------------------------------------------------
   {
+    id: 'entrar-pais', grupo: 'Demos de fraude', titulo: 'Entrar a Mesh desde otro pais',
+    explica: 'Abre una ventana de Chrome que sale a internet por ese pais y muestra la tienda real. Inicia sesion tu mismo con una cuenta. Para el viaje imposible, entra con la misma cuenta desde otro pais: vuelve a pulsar Ejecutar con otro pais y se abre otra ventana. Tus otras ventanas no cambian.',
+    script: 'demo-entrar-otro-pais.ps1', confirmar: null,
+    campos: [
+      { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },
+    ],
+    construir: (v) => ['-Pais', v.pais],
+  },
+  {
+    id: 'entrar-pais-estado', grupo: 'Demos de fraude', titulo: 'Ver desde donde salgo',
+    explica: 'Muestra el contenedor de Tor en Docker, la IP y el pais con los que sale, y si la ventana y el tunel siguen abiertos.',
+    script: 'demo-entrar-otro-pais.ps1', campos: [], confirmar: null,
+    construir: () => ['-Estado'],
+  },
+  {
+    id: 'entrar-pais-cerrar', grupo: 'Demos de fraude', titulo: 'Cerrar la ventana de otro pais',
+    explica: 'Cierra la ventana de Chrome, el tunel y Tor. Tus otras ventanas no se tocan.',
+    script: 'demo-entrar-otro-pais.ps1', campos: [], confirmar: null,
+    construir: () => ['-Cerrar'],
+  },
+  {
     id: 'demo-evento', grupo: 'Demos de fraude', titulo: 'Disparar una senal de login',
     explica: 'Peticiones directas al backend que cruzan el umbral de una sola senal y la confirman en la base. Abre el panel de fraude al final. Si corres varias en menos de cinco minutos los contadores se acumulan.',
     script: 'demo-evento-fraude.ps1', confirmar: null,
@@ -195,7 +228,7 @@ const CATALOGO = [
   },
   {
     id: 'demo-pais-precalentar', grupo: 'Demos de fraude', titulo: 'Precalentar la demo de otro pais',
-    explica: 'Hazlo antes de la clase. Comprueba que el tunel pueda salir (en la U conecta WARP), construye la imagen de Tor, compila la copia del backend y deja Tor con salida en el pais. No apaga nada de Mesh. Despues la demo tarda mucho menos. Tor queda corriendo, unos 50 MB.',
+    explica: 'Hazlo antes de la clase. Comprueba que el tunel pueda salir (en la U conecta WARP), construye la imagen de Tor y deja Tor con salida en el pais. No apaga nada de Mesh. Despues la demo arranca mas rapido. Tor queda corriendo, unos 50 MB.',
     script: 'demo-fraude-pais.ps1', confirmar: null,
     campos: [
       { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },
@@ -204,7 +237,7 @@ const CATALOGO = [
   },
   {
     id: 'demo-pais', grupo: 'Demos de fraude', titulo: 'Login desde otro pais',
-    explica: 'Usa Tor de verdad para intentar entrar desde la IP de otro pais y dispara viaje imposible y rotacion de IP. Para el backend normal un rato y pausa ClickHouse y Neo4j, y al final los devuelve. Necesita internet. Si hiciste el precalentado, tarda mucho menos.',
+    explica: 'Usa Tor de verdad para intentar entrar desde la IP de otro pais y confirma en las bases que salto la alerta. Mesh sigue funcionando todo el rato: el tunel va al backend real y no se apaga nada. Necesita internet y el backend arriba.',
     script: 'demo-fraude-pais.ps1', confirmar: null,
     campos: [
       { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },
@@ -312,6 +345,7 @@ function lanzar(armado) {
   );
   t.proc = proc;
 
+  const vaciadores = [];
   const juntar = (flujo) => {
     const dec = new StringDecoder('utf8');
     let resto = '';
@@ -321,10 +355,18 @@ function lanzar(armado) {
       resto = partes.pop();
       for (const l of partes) t.lineas.push(l.replace(ANSI, ''));
     });
-    flujo.on('end', () => {
+    // Suelta la ultima linea si no termino en salto. Se llama al cerrar el flujo o,
+    // si no cierra nunca (ver 'exit' abajo), cuando el comando ya termino.
+    let vaciado = false;
+    const vaciar = () => {
+      if (vaciado) return;
+      vaciado = true;
       resto += dec.end();
       if (resto) t.lineas.push(resto.replace(ANSI, ''));
-    });
+      resto = '';
+    };
+    flujo.on('end', vaciar);
+    vaciadores.push(vaciar);
   };
   juntar(proc.stdout);
   juntar(proc.stderr);
@@ -335,11 +377,23 @@ function lanzar(armado) {
     t.fin = Date.now();
     quitarMarca();
   });
-  proc.on('close', (codigo) => {
-    t.codigo = codigo;
-    if (t.estado === 'corriendo') t.estado = codigo === 0 ? 'ok' : 'fallo';
-    t.fin = Date.now();
-    quitarMarca();
+  // Se da por terminado cuando el PROCESO sale ('exit'), no cuando se cierran sus
+  // pipes ('close'). Un comando que deja un proceso vivo detras (la demo de otro pais
+  // relanzaba el backend con `npm run start`; "Levantar todo" hace lo mismo) le pasa
+  // los pipes al hijo, y 'close' no llega hasta que ese hijo muere: el panel se
+  // quedaba en "corriendo" para siempre, con todos los botones apagados y sin dejar
+  // apagar el panel. Se espera un momento para leer lo ultimo que escribio.
+  proc.on('exit', (codigo) => {
+    setTimeout(() => {
+      for (const v of vaciadores) v();
+      t.codigo = codigo;
+      if (t.estado === 'corriendo') t.estado = codigo === 0 ? 'ok' : 'fallo';
+      t.fin = Date.now();
+      quitarMarca();
+      // Soltar los pipes: el hijo que sigue vivo ya no tiene a quien escribirle
+      proc.stdout.destroy();
+      proc.stderr.destroy();
+    }, 400);
   });
   ponerMarca(t);
   trabajo = t;

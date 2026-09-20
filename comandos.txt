@@ -23,7 +23,8 @@ Los que borran piden confirmar, y borrar todo pide escribir BORRAR TODO. Esa
 confirmacion la exige tambien el servidor, no solo la pagina.
 
 Tambien sale DENTRO de Mesh, en la pestana Comandos del panel (/panel?s=comandos),
-para el admin y para las cuentas desarrollador1, desarrollador2 y asi. Es la version
+solo para las cuentas desarrollador1, desarrollador2 y asi (el admin NO la tiene: es
+una herramienta de quien desarrolla, no de quien administra la tienda). Es la version
 de todos los dias: usa el mismo diseno de Mesh (tarjeta, pildoras, modo oscuro), los
 comandos van agrupados en cuatro pildoras y cada fila trae su comando, Copiar y
 Ejecutar. Lo peligroso abre una confirmacion en la misma fila. La salida sale encima
@@ -42,6 +43,29 @@ Para apagarlo:   .\panel-comandos.ps1 -Parar
 Se NIEGA si hay un comando corriendo. Apagarlo a mitad de uno lo corta y puede dejar
 las bases a medias (paso con la demo de otro pais: dejo Tor arriba, ClickHouse, Neo4j
 y el backend parados). Para apagarlo igual:   .\panel-comandos.ps1 -Parar -Forzar
+
+Para que CUALQUIERA pueda entrar a Mesh desde internet, en https://mesh.ledkid.com:
+  .\mesh-publico.ps1 -Accion encender     abre la direccion (tambien: "Abrir mesh.ledkid.com")
+  .\mesh-publico.ps1 -Accion apagar       la cierra
+  .\mesh-publico.ps1 -Accion estado
+"Levantar todo" la abre sola al final, si el tunel esta configurado. Es un tunel de
+Cloudflare NUEVO y aparte, llamado mesh, que no comparte ni toca el de LEDKID (el servicio
+Cloudflared) ni el de ENKID: ledkid.com no tiene ningun riesgo por esto. Solo publica la
+tienda (el 5173, que le pasa /api al backend); el panel de comandos, pgAdmin, DbGate,
+RedisInsight y las bases siguen solo en esta maquina. Las visitas se registran con su IP
+real (trustProxy). OJO: publica la tienda tal como esta, con sus cuentas de prueba; quien
+conozca admin@mesh.com entra como admin. Se cierra con el boton o con -Accion apagar.
+El config del tunel esta en %USERPROFILE%\.cloudflared\config-mesh.yml, fuera del repo,
+junto a sus credenciales (tunel mesh, id 3f0267e6-ea95-4114-86b4-21b8d10470d8). En la red de
+la U el tunel necesita WARP (mesh-publico.ps1 lo conecta si el 7844 esta cerrado).
+
+Para iniciar sesion TU MISMO desde otro pais, con el frontend de verdad (viaje imposible
+y toma de cuenta), en el panel: "Entrar a Mesh desde otro pais". O:
+  .\demo-entrar-otro-pais.ps1 -Pais sg     abre una ventana de Chrome que sale por ese pais
+  .\demo-entrar-otro-pais.ps1 -Estado      desde donde sales, y si sigue abierto
+  .\demo-entrar-otro-pais.ps1 -Cerrar      cierra la ventana, el tunel y Tor
+Ver que es real:  docker ps --filter name=mesh-tor-demo
+Detalle en docs/DEMO-OTRO-PAIS.md.
 
 Antes de la clase, la demo de otro pais se puede dejar lista:
   .\demo-fraude-pais.ps1 -Precalentar -Pais sg

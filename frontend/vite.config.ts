@@ -93,7 +93,9 @@ export default defineConfig({
 			}
 		},
 		// Sin esto Vite contesta "Blocked request" a todo lo que llega por un
-		// tunel rapido, porque el Host no es localhost.
-		allowedHosts: ['.trycloudflare.com']
+		// tunel, porque el Host no es localhost. Los .trycloudflare.com son los
+		// tuneles rapidos de las demos; mesh.ledkid.com es la direccion publica
+		// fija de Mesh (mesh-publico.ps1).
+		allowedHosts: ['.trycloudflare.com', 'mesh.ledkid.com']
 	}
 });

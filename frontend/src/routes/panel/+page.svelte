@@ -56,12 +56,14 @@
 	let esVendedor = $derived(perfil?.id_rol_usuario === ID_ROL_VENDEDOR);
 
 	/**
-	 * Las cuentas `desarrollador*` ven la pestana Comandos, igual que el admin.
+	 * Solo las cuentas `desarrollador*` ven la pestana Comandos. El admin NO: es una
+	 * herramienta de quien desarrolla, y el panel de administracion es para gestionar
+	 * la tienda (pedido de Meme, 2026-09-20).
 	 * En el backend son vendedores comunes: esto solo decide que se pinta, ver
 	 * `esCuentaDesarrollador` en sesion.ts.
 	 */
 	let esDesarrollador = $derived(esCuentaDesarrollador(perfil?.correo_electronico));
-	let veComandos = $derived(esAdmin || esDesarrollador);
+	let veComandos = $derived(esDesarrollador);
 	const COMANDOS: Seccion = {
 		id: 'comandos',
 		nombre: 'Comandos',
@@ -139,7 +141,6 @@
 				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo e intentos de entrada sospechosos' },
 				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Lo mas visto, comprado y buscado en los ultimos dias' },
 				{ id: 'demo', nombre: 'Demo', pie: 'Disparar ataques y anillos de prueba para la defensa' },
-				COMANDOS,
 				// Distinta de "Fraude": esa es EN VIVO contra el grafo y solo la ve
 				// un admin; esta es "a mi cuenta le paso algo" y la ve cualquiera --
 				// GET /perfil/alertas-fraude, filtrado a la sesion de quien pregunta.

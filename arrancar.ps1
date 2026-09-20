@@ -1297,6 +1297,21 @@ function Leer-TipoGeoPuntoEventos {
     return $primero.Value.mappings.geo_punto.mapping.geo_punto.type
 }
 
+# La plantilla version 2 le puso a tipo, resultado, motivo, id_usuario, huella_cliente,
+# identificador_intentado e ip un subcampo .keyword. Es lo que piden las consultas del
+# backend (fraude-login/*.service.ts: 'id_usuario.keyword', 'tipo.keyword'...) y el
+# mapeo de antes no lo tenia, asi que ViajeImposible, TomaCuenta y las senales
+# retrospectivas devolvian CERO resultados sin dar ningun error: la alerta de viaje
+# imposible no podia saltar nunca. Medido el 2026-09-20: la misma consulta daba 0 en el
+# indice y 2 con el subcampo. Se mira id_usuario.keyword como marca de la version.
+# $true si el subcampo existe en el indice.
+function Leer-SubcampoKeywordEventos {
+    $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/id_usuario.keyword" -TimeoutSec 20
+    $primero = @($m.PSObject.Properties)[0]
+    if ($null -eq $primero) { return $false }
+    return [bool]$primero.Value.mappings.'id_usuario.keyword'
+}
+
 # Un numero de mongosh, o $null si no contesto. Mismo criterio que
 # Contar-Nodos: no se inventa un cero.
 function Numero-Mongo($expresion) {
@@ -1324,6 +1339,7 @@ function Preparar-IndiceEventos {
         try {
             $tipoIp = Leer-TipoIpEventos
             $tipoGeoPunto = Leer-TipoGeoPuntoEventos
+            $tieneKeyword = Leer-SubcampoKeywordEventos
         } catch {
             $respuesta = $_.Exception.Response
             if ($respuesta -and [int]$respuesta.StatusCode -eq 404) {
@@ -1336,10 +1352,11 @@ function Preparar-IndiceEventos {
 
         $rehecho = $false
         $creado  = -not $existe
-        if ($existe -and ($tipoIp -ne 'ip' -or $tipoGeoPunto -ne 'geo_point')) {
+        if ($existe -and ($tipoIp -ne 'ip' -or $tipoGeoPunto -ne 'geo_point' -or -not $tieneKeyword)) {
             $vistoIp = if ($tipoIp) { $tipoIp } else { 'sin mapear' }
             $vistoGeo = if ($tipoGeoPunto) { $tipoGeoPunto } else { 'sin mapear' }
-            Aviso "$ES_INDICE_EVENTOS no nacio de la plantilla actual (ip es '$vistoIp', geo_punto es '$vistoGeo')."
+            $vistoKw = if ($tieneKeyword) { 'si' } else { 'no' }
+            Aviso "$ES_INDICE_EVENTOS no nacio de la plantilla actual (ip es '$vistoIp', geo_punto es '$vistoGeo', tiene .keyword: $vistoKw)."
             Aviso "   Se borra y se rehace; los eventos se vuelven a copiar desde Mongo."
             Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_EVENTOS" -TimeoutSec 30 | Out-Null
             $existe  = $false
@@ -1361,12 +1378,13 @@ function Preparar-IndiceEventos {
 
             $tipoIp = Leer-TipoIpEventos
             $tipoGeoPunto = Leer-TipoGeoPuntoEventos
-            if ($tipoIp -ne 'ip' -or $tipoGeoPunto -ne 'geo_point') {
-                Aviso "$ES_INDICE_EVENTOS se creo pero ip quedo como '$tipoIp' y geo_punto como '$tipoGeoPunto'. Revisa la plantilla."
+            $tieneKeyword = Leer-SubcampoKeywordEventos
+            if ($tipoIp -ne 'ip' -or $tipoGeoPunto -ne 'geo_point' -or -not $tieneKeyword) {
+                Aviso "$ES_INDICE_EVENTOS se creo pero ip quedo como '$tipoIp', geo_punto como '$tipoGeoPunto' y .keyword como '$tieneKeyword'. Revisa la plantilla."
                 return $false
             }
         } else {
-            Ok "$ES_INDICE_EVENTOS ya estaba, con ip de tipo ip y geo_punto de tipo geo_point"
+            Ok "$ES_INDICE_EVENTOS ya estaba, con ip de tipo ip, geo_punto de tipo geo_point y los subcampos .keyword"
         }
 
         # Se marca TAMBIEN cuando el indice simplemente no existia, y no solo

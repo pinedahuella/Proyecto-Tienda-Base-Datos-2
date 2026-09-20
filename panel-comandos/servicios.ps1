@@ -8,6 +8,8 @@
 #   .\panel-comandos\servicios.ps1 -Accion todo           (arrancar.ps1 + backend + frontend)
 #   .\panel-comandos\servicios.ps1 -Accion parar-backend
 #   .\panel-comandos\servicios.ps1 -Accion parar-frontend
+#   .\panel-comandos\servicios.ps1 -Accion publico        (abre https://mesh.ledkid.com)
+#   .\panel-comandos\servicios.ps1 -Accion despublicar    (la cierra)
 #
 # Por que se sirve el build y no el modo watch (nest --watch, vite dev): el
 # proyecto vive dentro de OneDrive, y cada toque de sincronizacion dispara una
@@ -20,7 +22,7 @@
 
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('estado', 'backend', 'frontend', 'todo', 'parar-backend', 'parar-frontend')]
+    [ValidateSet('estado', 'backend', 'frontend', 'todo', 'parar-backend', 'parar-frontend', 'publico', 'despublicar')]
     [string]$Accion
 )
 
@@ -118,6 +120,9 @@ function Mostrar-Estado {
     Paso 'Contenedores'
     $d = docker ps --format '{{.Names}}  {{.Status}}' 2>$null
     if ($LASTEXITCODE -ne 0 -or -not $d) { Ok 'Docker no responde, o no hay contenedores' } else { $d | ForEach-Object { Ok $_ } }
+    Paso 'Direccion publica (mesh.ledkid.com)'
+    $mp = Get-CimInstance Win32_Process -Filter "Name='cloudflared.exe'" | Where-Object { $_.CommandLine -and $_.CommandLine.Contains('config-mesh.yml') }
+    if ($mp) { Ok 'ABIERTA, el tunel mesh esta corriendo' } else { Ok 'cerrada' }
     Paso 'Memoria'
     Ok ("libres {0} MB" -f [int]((Get-CimInstance Win32_OperatingSystem).FreePhysicalMemory / 1024))
 }
@@ -128,12 +133,21 @@ switch ($Accion) {
     'frontend'       { Iniciar-Frontend }
     'parar-backend'  { Parar 'backend' }
     'parar-frontend' { Parar 'frontend' }
+    'publico'        { & (Join-Path $raiz 'mesh-publico.ps1') -Accion encender; exit $LASTEXITCODE }
+    'despublicar'    { & (Join-Path $raiz 'mesh-publico.ps1') -Accion apagar; exit $LASTEXITCODE }
     'todo' {
         Paso 'Bases de datos, arrancar.ps1'
         & (Join-Path $raiz 'arrancar.ps1')
         if ($LASTEXITCODE -ne 0) { Mal "arrancar.ps1 fallo, codigo $LASTEXITCODE"; exit 1 }
         Iniciar-Backend
         Iniciar-Frontend
+        # Si el tunel 'mesh' esta configurado (mesh-publico.ps1), tambien se abre la direccion
+        # publica. Un fallo aqui no tumba lo demas: la tienda ya quedo arriba en local.
+        if (Test-Path (Join-Path $env:USERPROFILE '.cloudflaredconfig-mesh.yml')) {
+            Paso 'Direccion publica, mesh.ledkid.com'
+            & (Join-Path $raiz 'mesh-publico.ps1') -Accion encender
+            if ($LASTEXITCODE -ne 0) { Mal 'No se pudo abrir la direccion publica; la tienda sigue en local.' }
+        }
         Paso 'Todo arriba'
         Ok 'Tienda en http://localhost:5173'
     }

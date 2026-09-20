@@ -1,7 +1,7 @@
 {
   "index_patterns": ["mesh_eventos_autenticacion*"],
   "priority": 200,
-  "version": 1,
+  "version": 2,
   "_meta": {
     "descripcion": "Mapeo del indice de eventos de autenticacion. Lo llena EventosAutenticacionSyncService desde la coleccion eventos_autenticacion de MongoDB. Ver elastic/README.md"
   },
@@ -25,16 +25,17 @@
       "dynamic": false,
 
       "properties": {
-        "tipo": { "type": "keyword" },
-        "resultado": { "type": "keyword" },
-        "motivo": { "type": "keyword" },
-        "id_usuario": { "type": "keyword" },
-        "huella_cliente": { "type": "keyword" },
+        "tipo": { "type": "keyword", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
+        "resultado": { "type": "keyword", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
+        "motivo": { "type": "keyword", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
+        "id_usuario": { "type": "keyword", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
+        "huella_cliente": { "type": "keyword", "fields": { "keyword": { "type": "keyword", "ignore_above": 256 } } },
 
         "identificador_intentado": {
           "type": "keyword",
           "ignore_above": 256,
           "fields": {
+            "keyword": { "type": "keyword", "ignore_above": 256 },
             "minusculas": {
               "type": "keyword",
               "normalizer": "minusculas",
@@ -45,7 +46,10 @@
 
         "ip": {
           "type": "ip",
-          "ignore_malformed": true
+          "ignore_malformed": true,
+          "fields": {
+            "keyword": { "type": "keyword", "ignore_above": 64 }
+          }
         },
 
         "user_agent": {

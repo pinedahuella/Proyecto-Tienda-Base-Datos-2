@@ -181,9 +181,9 @@ el orden entre el backend y `arrancar.ps1` deja de importar.
 
 ```
 tipo, resultado, motivo,
-id_usuario, huella_cliente   keyword
-identificador_intentado      keyword, y .minusculas con un normalizer lowercase
-ip                           ip, con ignore_malformed
+id_usuario, huella_cliente   keyword, y .keyword (version 2 de la plantilla, 2026-09-20)
+identificador_intentado      keyword, y .keyword y .minusculas con un normalizer lowercase
+ip                           ip, con ignore_malformed, y .keyword (version 2)
 user_agent                   keyword, ignore_above 512
 fecha                        date, con ignore_malformed
 geo_punto                    geo_point (agregado 2026-09-18)
@@ -191,6 +191,22 @@ geo_pais, geo_ciudad         text con .keyword, ignore_above 256 (agregado 2026-
 dynamic                      false
 ```
 
+- **Los `.keyword` de la version 2** (2026-09-20). Las consultas del backend
+  (`fraude-login/viaje-imposible.service.ts`, `toma-cuenta.service.ts` y los servicios
+  retrospectivo y de exploracion) piden `id_usuario.keyword`, `tipo.keyword`,
+  `resultado.keyword`, `ip.keyword`, `huella_cliente.keyword` e
+  `identificador_intentado.keyword`. Con el mapeo de antes esos campos no existian
+  (eran `keyword` puros), asi que las consultas daban CERO resultados sin ningun
+  error, y por eso la alerta de viaje imposible no podia saltar nunca. Se vio con un
+  login real desde Singapur y otro desde Alemania a los dos minutos: los dos estaban
+  en el indice, con su pais y su punto, y la consulta exacta del servicio devolvia 0.
+  Probado en un indice aparte: con los subcampos devuelve los dos. Los campos sin
+  `.keyword` siguen funcionando igual (`term tipo = login`, `term ip = 1.2.3.4`), asi
+  que quien consulte de cualquiera de las dos maneras acierta. El arreglo es de este
+  lado y no de las consultas para no tocar `backend/`; si Jose David prefiere quitar el
+  `.keyword` de sus consultas tambien vale, y los subcampos sobran sin estorbar.
+  `arrancar.ps1` detecta un indice sin `id_usuario.keyword`, lo rehace desde la
+  plantilla y vuelve a copiar los eventos desde Mongo, igual que con `ip` o `geo_punto`.
 - **`ip` es de tipo `ip` y no `keyword`**: acepta rangos CIDR
   (`127.0.0.0/8`) y deja la puerta abierta a geoip. Medido: `::ffff:127.0.0.1`
   entra y se encuentra buscando `127.0.0.1`, y `null` entra sin error.
