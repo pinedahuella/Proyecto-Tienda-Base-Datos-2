@@ -7,10 +7,31 @@
 # QUE PRUEBA
 #
 #   Parte 0  que el backend conteste y que las dos cuentas entren.
-#   Parte 1  GET /vendedor/ofertas/paginado como ventas.norte@mesh.com.
+#   Parte 1  GET /vendedor/ofertas/paginado como ventas.norte@mesh.com, con su
+#            filtro `estado` medido estado por estado contra la lista completa y
+#            contra PostgreSQL.
 #   Parte 2  GET /vendedor/ofertas/pendientes/paginado como la tienda, y como
 #            un vendedor cualquiera que no la puede ver.
 #   Parte 3  cuanto pesa la lista entera contra una pagina de 20. Solo imprime.
+#
+# EL FILTRO CAMBIO EL 2026-09-19: `activo` YA NO EXISTE. Jose David lo reemplazo
+# por `estado` (uno de pendiente, activa, pausada, retirada, rechazada). `activo`
+# era un booleano que separaba "activa" de "todo lo demas junto"; con `estado`
+# se puede pedir cada uno por separado, y por eso el panel ya puede contar cada
+# estado con una peticion de limite=1 y leer total_ofertas. Lo que mide esta
+# parte ahora:
+#
+#   - cada uno de los cinco estados: su total_ofertas contra la lista completa Y
+#     contra un count directo en PostgreSQL, y que ninguna oferta de la pagina
+#     sea de otro estado;
+#   - que los cinco sumen el total sin filtro (si suman menos, hay un estado que
+#     el filtro no conoce);
+#   - estado=lateral da 400 y el mensaje lista los cinco; estado vacio es "sin
+#     filtro";
+#   - una pagina fuera de rango CON filtro da lista vacia y el total de ESE estado;
+#   - activo=true se IGNORA (200 con todas, no 400): un parametro que la ruta no
+#     conoce no avisa. Queda medido para que nadie crea que el filtro viejo sigue
+#     vivo.
 #
 # LA REFERENCIA ES LA RUTA VIEJA. Las dos rutas sin paginar se quedaron tal
 # cual y ya las usa el frontend, asi que son la verdad contra la que se mide la
@@ -83,7 +104,7 @@ CUERPO=".mesh-ofertas-cuerpo.txt"
 COMPLETA=".mesh-ofertas-completa.txt"
 RECORRIDO=".mesh-ofertas-recorrido.txt"
 
-limpiar() { rm -f "$TARRO_VENDEDOR" "$TARRO_TIENDA" "$CUERPO" "$COMPLETA" "$RECORRIDO" "$RECORRIDO.ref" "$RECORRIDO.despues"; }
+limpiar() { rm -f "$TARRO_VENDEDOR" "$TARRO_TIENDA" "$CUERPO" "$COMPLETA" "$COMPLETA.vendedor" "$RECORRIDO" "$RECORRIDO.ref" "$RECORRIDO.despues"; }
 
 # SIN MEDIR no es ni OK ni FALLA, y no entra en ninguna de las dos cuentas: es
 # una comprobacion que salio bien sin haber tenido con que fallar. Contarla
@@ -381,6 +402,9 @@ print(sum(1 for o in json.load(open(sys.argv[1], encoding='utf-8'))['payload'] i
 PY
 )
 NO_ACTIVAS=$((N - ACTIVAS))
+# La lista completa del vendedor se guarda aparte: $COMPLETA se sobreescribe cada vez que
+# recorrer_y_comparar vuelve a pedirla, y el filtro por estado la necesita como referencia.
+cp "$COMPLETA" "$COMPLETA.vendedor"
 echo "  (la lista completa trae $N ofertas: $ACTIVAS activas y $NO_ACTIVAS en otro estado)"
 if [ $((N % LIMITE_RECORRIDO)) = 0 ]; then
     echo "  (aviso) $LIMITE_RECORRIDO divide a $N: la ultima pagina sale llena y no mide el borde."
@@ -407,45 +431,128 @@ informar_recorrido "/vendedor/ofertas" \
     "recorridas, dan exactamente los mismos ${R_COMPARAR#IGUAL } id_oferta, sin repetir ni faltar, y en el mismo orden"
 rm -f "$RECORRIDO.ref" "$RECORRIDO.despues"
 
-# El filtro, por los dos lados. Cada lado se cuenta contra la lista completa,
-# y ademas se mira que lo que trae sea de verdad de ese lado.
-filtro() {
+# El filtro `estado`, uno por uno. Cada estado se cuenta por DOS lados que no
+# dependen de la ruta que se esta midiendo: la lista completa (la referencia de
+# siempre) y PostgreSQL directo. Y ademas se mira que lo que trae sea de verdad
+# de ese estado. Desde el 2026-09-19 esto reemplaza al filtro `activo`, que solo
+# distinguia "activa" de "todo lo demas junto".
+ESTADOS="pendiente activa pausada retirada rechazada"
+
+# Cuantas ofertas de un estado trae la lista completa que se guardo arriba.
+cuenta_lista() {
+    python - "$COMPLETA.vendedor" "$1" <<'PY'
+import sys, json
+d = json.load(open(sys.argv[1], encoding='utf-8'))['payload']
+print(sum(1 for o in d if o['estado'] == sys.argv[2]))
+PY
+}
+
+# "<total_ofertas> <cuantas de la pagina NO son de ese estado>".
+filtro_estado() {
     python - "$CUERPO" "$1" <<'PY'
 import sys, json
 d = json.load(open(sys.argv[1], encoding='utf-8'))['payload']
-quiero_activa = sys.argv[2] == 'true'
-malas = [o['id_oferta'] for o in d['ofertas'] if (o['estado'] == 'activa') != quiero_activa]
+malas = [o['id_oferta'] for o in d['ofertas'] if o['estado'] != sys.argv[2]]
 print('%s %d' % (d['total_ofertas'], len(malas)))
 PY
 }
-C=$(pedir "/vendedor/ofertas/paginado?activo=true&limite=100" "$TARRO_VENDEDOR")
-R=$(filtro true)
-if [ "$C" = "200" ] && [ "$R" = "$ACTIVAS 0" ]; then
-    OK "activo=true cuenta lo mismo que las activas de la lista completa (= $ACTIVAS), y todas lo son"
+
+# Lo que dice PostgreSQL de este vendedor, sin pasar por el backend. Vacio si
+# docker o la base no contestan.
+cuenta_pg() {
+    sql "SELECT count(*) FROM oferta o
+           JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+           JOIN usuarios u ON u.id_usuario = o.id_usuario
+          WHERE u.correo_electronico = '$VENDEDOR_USUARIO'
+            AND eo.estado_oferta_nombre = '$1'"
+}
+
+SUMA=0; VACIOS=""
+for e in $ESTADOS; do
+    C=$(pedir "/vendedor/ofertas/paginado?estado=$e&limite=100" "$TARRO_VENDEDOR")
+    R=$(filtro_estado "$e")
+    EN_LISTA=$(cuenta_lista "$e")
+    EN_PG=$(cuenta_pg "$e")
+    TOTAL_E="${R%% *}"
+    SUMA=$((SUMA + ${TOTAL_E:-0}))
+    if [ "$C" = "200" ] && [ "$R" = "$EN_LISTA 0" ]; then
+        OK "estado=$e cuenta lo mismo que la lista completa (= $EN_LISTA), y ninguna de las que trae es de otro estado"
+    else
+        FALLA "estado=$e: HTTP $C, total y fuera de estado '$R', se esperaba '$EN_LISTA 0'"
+    fi
+    if [ -z "$EN_PG" ]; then
+        SIN_MEDIR "estado=$e contra PostgreSQL: docker no contesto"
+    elif [ "$EN_PG" = "$TOTAL_E" ]; then
+        OK "estado=$e cuadra con PostgreSQL directo (= $EN_PG)"
+    else
+        FALLA "estado=$e dice total_ofertas '$TOTAL_E' y PostgreSQL cuenta $EN_PG"
+    fi
+    [ "$EN_LISTA" = "0" ] && VACIOS="$VACIOS $e"
+done
+
+if [ "$SUMA" = "$N" ]; then
+    OK "la suma de los cinco estados es igual al total sin filtro (= $SUMA)"
 else
-    FALLA "activo=true: HTTP $C, total y fuera de lado '$R', se esperaba '$ACTIVAS 0'"
+    FALLA "los cinco estados suman $SUMA y sin filtro son $N: hay ofertas en un estado que el filtro no conoce"
 fi
-C=$(pedir "/vendedor/ofertas/paginado?activo=false&limite=100" "$TARRO_VENDEDOR")
-R=$(filtro false)
-if [ "$C" = "200" ] && [ "$R" = "$NO_ACTIVAS 0" ]; then
-    OK "activo=false cuenta el resto (= $NO_ACTIVAS), y ninguna de las que trae esta activa"
-else
-    FALLA "activo=false: HTTP $C, total y fuera de lado '$R', se esperaba '$NO_ACTIVAS 0'"
-fi
-if [ "$ACTIVAS" = "0" ] || [ "$NO_ACTIVAS" = "0" ]; then
-    echo "  (aviso) uno de los dos lados esta vacio en esta cuenta: ese lado no midio nada."
+if [ -n "$VACIOS" ]; then
+    echo "  (aviso) sin ofertas en esta cuenta para:$VACIOS. Esos estados solo miden que cuenten cero."
 fi
 
-# Vacio es "sin filtro", como en validarFiltroActivo. Medido.
-C=$(pedir "/vendedor/ofertas/paginado?activo=" "$TARRO_VENDEDOR")
+# Vacio es "sin filtro", como en validarFiltroEstadoOferta. Medido.
+C=$(pedir "/vendedor/ofertas/paginado?estado=" "$TARRO_VENDEDOR")
 T=$(campo payload.total_ofertas < "$CUERPO")
 if [ "$C" = "200" ] && [ "$T" = "$N" ]; then
-    OK "activo vacio es lo mismo que no mandarlo (= $T)"
+    OK "estado vacio es lo mismo que no mandarlo (= $T)"
 else
-    FALLA "activo vacio da HTTP $C y total '$T', se esperaba 200 y $N"
+    FALLA "estado vacio da HTTP $C y total '$T', se esperaba 200 y $N"
 fi
 
-for q in "activo=basura" "activo=1" "limite=0" "limite=-5" "limite=abc" "pagina=0" "pagina=abc"; do
+# El filtro viejo YA NO EXISTE. Un parametro que la ruta no conoce se ignora: no
+# da 400, da todas. Se deja medido para que nadie lo tome por un filtro vivo: el
+# frontend que mande `activo` recibiria la lista entera sin ningun aviso.
+C=$(pedir "/vendedor/ofertas/paginado?activo=true" "$TARRO_VENDEDOR")
+T=$(campo payload.total_ofertas < "$CUERPO")
+if [ "$C" = "200" ] && [ "$T" = "$N" ]; then
+    OK "activo=true ya no filtra: se ignora y trae todas (= $T), como cualquier parametro desconocido"
+else
+    FALLA "activo=true da HTTP $C y total '$T'; el filtro viejo se quito y se esperaba 200 y $N (todas)"
+fi
+
+# Un estado que no existe da 400, y el mensaje lista los cinco validos. Es
+# sensible a mayusculas (Activa no es activa): se mide, no se supone.
+C=$(pedir "/vendedor/ofertas/paginado?estado=lateral" "$TARRO_VENDEDOR")
+M=$(campo mensaje < "$CUERPO")
+CONOCIDOS="si"
+for e in $ESTADOS; do
+    case "$M" in *"$e"*) ;; *) CONOCIDOS="no" ;; esac
+done
+if [ "$C" = "400" ] && [ "$CONOCIDOS" = "si" ]; then
+    OK "estado=lateral da 400 y el mensaje lista los cinco estados ('$M')"
+else
+    FALLA "estado=lateral da HTTP $C y mensaje '$M'; se esperaba 400 con los cinco estados"
+fi
+
+# Una pagina fuera de rango CON filtro: lista vacia y el total real de ese
+# estado, no el general.
+for e in activa pausada; do
+    EN_LISTA=$(cuenta_lista "$e")
+    C=$(pedir "/vendedor/ofertas/paginado?estado=$e&limite=$LIMITE_RECORRIDO&pagina=999999" "$TARRO_VENDEDOR")
+    R=$(python - "$CUERPO" <<'PY'
+import sys, json
+try: d = json.load(open(sys.argv[1], encoding='utf-8'))['payload']
+except Exception: print('ilegible'); sys.exit()
+print('%d %s' % (len(d['ofertas']), d['total_ofertas']))
+PY
+)
+    if [ "$C" = "200" ] && [ "$R" = "0 $EN_LISTA" ]; then
+        OK "estado=$e, pagina fuera de rango: 200 con lista vacia y el total de ese estado (= $EN_LISTA)"
+    else
+        FALLA "estado=$e, pagina fuera de rango da HTTP $C y '$R' (ofertas, total); se esperaba '0 $EN_LISTA'"
+    fi
+done
+
+for q in "estado=basura" "estado=Activa" "estado=true" "limite=0" "limite=-5" "limite=abc" "pagina=0" "pagina=abc"; do
     C=$(pedir "/vendedor/ofertas/paginado?$q" "$TARRO_VENDEDOR")
     if [ "$C" = "400" ]; then
         OK "$q da 400 ('$(campo mensaje < "$CUERPO")')"

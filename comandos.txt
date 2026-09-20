@@ -512,3 +512,65 @@ asi que borrar "todo lo que parezca generado" seria una suposicion sobre el
 trabajo de otro.
 
 Detalle completo en mongo/lote/README.md.
+
+LOS DIAGRAMAS (se generan, no se dibujan a mano)
+==================================================
+Desde la raiz del proyecto. El .png sale solo si draw.io esta instalado
+(C:\Program Files\draw.io). El ER lee la base viva, asi que mesh-postgres
+tiene que estar arriba.
+
+  python docs/generar-er.py
+      el ER de las 50 tablas, en docs/diagrama-general.drawio y .png. Falla
+      si una tabla no tiene caja, si una llave no tiene linea o si dos cajas
+      se pisan
+  python docs/generar-er.py --modulo fraude --salida docs/informe-entrega2/er-fraude.drawio
+      la vista recortada que va en el informe
+  python docs/generar-arquitectura.py
+      la arquitectura de los seis motores, en docs/diagrama-arquitectura.drawio
+  python docs/generar-arquitectura.py --informe --salida docs/informe-entrega2/arquitectura.drawio
+      la variante compacta, con la letra legible en una hoja de Word
+  python docs/generar-arquitectura.py --grafo --salida docs/informe-entrega2/grafo-modelo.drawio
+      el modelo del grafo de Neo4j y un anillo de tres cuentas
+
+Los diagramas de la Entrega 1 y del 2026-09-03 se conservan con su fecha en el
+nombre (diagrama-general-entrega1.*, diagrama-arquitectura-2026-09-03.drawio).
+
+
+EL INFORME DE LA ENTREGA 2 (necesita Word instalado)
+==================================================
+Desde la raiz. Son DOS pasadas y el orden importa: python-docx no sabe paginar,
+asi que Word mide y la segunda pasada escribe los numeros del indice.
+
+  python generar-reporte-entrega2.py       primera pasada, indice con guiones
+  .\medir-paginas-entrega2.ps1              Word abre el .docx y apunta las paginas
+  python generar-reporte-entrega2.py       segunda pasada, indice con numeros
+  .\medir-paginas-entrega2.ps1              comprobar que la paginacion no cambio
+
+El texto vive en contenido-entrega2.json (una lista de bloques, ver la cabecera
+del generador) y las figuras en docs/informe-entrega2/. El generador se NIEGA a
+escribir el Word si el texto lleva dos puntos, punto y coma, comillas angulares,
+rayas largas o puntos suspensivos fuera de un bloque de codigo.
+
+Las capturas docs/informe-entrega2/pantalla-*.png se tomaron con Chrome sin
+ventana, manejado por el protocolo de depuracion desde Node. Ese script no esta
+en el repo porque llevaba las contrasenas de las cuentas de prueba; si hay que
+repetirlas, se toma cada pantalla con la sesion de la cuenta que corresponde.
+
+DEMOSTRACIONES PARA LA DEFENSA
+==================================================
+Version visual: entra como admin y abre /panel?s=demo. Dispara los ataques de
+login y crea las cuentas de un anillo desde botones, sin tocar la terminal.
+
+Version de terminal:
+
+  .\demo-evento-fraude.ps1 -Tipo fuerza_bruta_cuenta -Cuenta ventas.norte@mesh.com
+  .\demo-evento-fraude.ps1 -Tipo fuerza_bruta_ip
+  .\demo-evento-fraude.ps1 -Tipo multi_cuenta_ip
+
+  .\demo-anillo-resenas.ps1                          anillo de 3 cuentas
+  .\demo-anillo-resenas.ps1 -Cuentas 2                par mutuo sobre el mismo producto
+  .\demo-anillo-resenas.ps1 -Cuentas 4 -Prefijo otro  anillo de 4, con otro prefijo de cuentas
+
+NO SON REVERSIBLES. El anillo hace compras reales (checkout de verdad, deja
+pedidos y kardex) y deja las cuentas de demostracion en el catalogo para
+siempre, igual que anillo.uno/dos/tres de la semilla.

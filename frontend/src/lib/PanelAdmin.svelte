@@ -128,6 +128,41 @@
 		if (lista.ok && lista.payload) usuarios = lista.payload;
 	}
 
+	/**
+	 * El buscador general. Filtra en el navegador sobre la lista que ya se trajo,
+	 * asi que responde al teclear y no pide nada.
+	 *
+	 * Busca en TODO lo que la tabla enseña: usuario, correo, nombre y apellido,
+	 * rol, estado e id. Sin importar mayusculas ni tildes, y con varias palabras
+	 * se piden todas a la vez ("norte vendedor" encuentra a un vendedor con
+	 * "norte" en el nombre, sin importar en que columna esta cada cosa).
+	 */
+	let q = $state('');
+
+	const limpio = (t: string) =>
+		t
+			.normalize('NFD')
+			.replace(/[\u0300-\u036f]/g, '')
+			.toLowerCase();
+
+	function pajar(u: UsuarioSesion): string {
+		const rol = roles.find((r) => r.id_rol_usuario === u.id_rol_usuario)?.rol_usuario_nombre ?? '';
+		const estado =
+			estados.find((e) => e.id_estado_usuario === u.id_estado_usuario)?.estado_usuario_nombre ?? '';
+		return limpio(
+			[u.usuario, u.correo_electronico, u.nombre, u.apellido ?? '', rol, estado, u.id_usuario].join(' ')
+		);
+	}
+
+	let visibles = $derived.by(() => {
+		const palabras = limpio(q).split(/\s+/).filter(Boolean);
+		if (palabras.length === 0) return usuarios;
+		return usuarios.filter((u) => {
+			const texto = pajar(u);
+			return palabras.every((p) => texto.includes(p));
+		});
+	});
+
 	function nombreCompleto(u: UsuarioSesion): string {
 		return u.apellido ? `${u.nombre} ${u.apellido}` : u.nombre;
 	}
@@ -147,8 +182,12 @@
 		<h2>Cuentas</h2>
 		{#if !cargando && !error}
 			<span class="cuantas">
-				{usuarios.length}
-				{usuarios.length === 1 ? 'cuenta' : 'cuentas'}
+				{#if q.trim() !== ''}
+					{visibles.length} de {usuarios.length}
+				{:else}
+					{usuarios.length}
+					{usuarios.length === 1 ? 'cuenta' : 'cuentas'}
+				{/if}
 			</span>
 		{/if}
 	</div>
@@ -165,6 +204,22 @@
 		     aunque exista su propia cuenta -->
 		<p class="gris">Todavia no hay otras cuentas registradas.</p>
 	{:else}
+		<div class="buscar">
+			<input
+				type="search"
+				placeholder="Buscar por usuario, correo, nombre, rol o estado"
+				aria-label="Buscar cuentas"
+				autocomplete="off"
+				bind:value={q}
+			/>
+			{#if q !== ''}
+				<button type="button" onclick={() => (q = '')}>Limpiar</button>
+			{/if}
+		</div>
+
+		{#if visibles.length === 0}
+			<p class="gris">Ninguna cuenta coincide con "{q.trim()}".</p>
+		{:else}
 		<div class="tabla">
 			<table>
 				<thead>
@@ -178,7 +233,7 @@
 					</tr>
 				</thead>
 				<tbody>
-					{#each usuarios as usuario (usuario.id_usuario)}
+					{#each visibles as usuario (usuario.id_usuario)}
 						{@const esTienda = usuario.correo_electronico === CORREO_TIENDA}
 						<tr class:protegida={esTienda}>
 							<td class="fuerte">{usuario.usuario}</td>
@@ -223,9 +278,6 @@
 							</td>
 							<td class="gris">
 								{fecha(usuario.fecha_creacion)}
-								{#if esTienda}
-									<span class="nota-tienda">la cuenta de la tienda no se edita</span>
-								{/if}
 							</td>
 						</tr>
 						{#if mensajes[usuario.id_usuario]?.texto}
@@ -239,6 +291,8 @@
 				</tbody>
 			</table>
 		</div>
+
+		{/if}
 
 		<p class="nota">
 			Tu propia cuenta no aparece en la lista: no se edita desde aqui.
@@ -387,9 +441,32 @@
 		background: var(--panel);
 	}
 
-	.nota-tienda {
-		display: block;
-		font-size: var(--f-xs);
-		color: var(--gris);
+	.buscar {
+		display: flex;
+		gap: var(--e2);
+		margin-bottom: var(--e4);
+	}
+
+	.buscar input {
+		flex: 1 1 auto;
+		max-width: 520px;
+		padding: 10px 14px;
+		font-family: inherit;
+		font-size: var(--f-base);
+		color: var(--tinta);
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+	}
+
+	.buscar button {
+		padding: 8px 16px;
+		font-family: inherit;
+		font-size: var(--f-base);
+		color: var(--tinta);
+		background: none;
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		cursor: pointer;
 	}
 </style>

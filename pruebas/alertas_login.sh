@@ -570,10 +570,21 @@ fi
 # las alertas saldrian con el tipo equivocado sin ningun error.
 TIPOS=$(sql "SELECT string_agg(id_tipo_alerta_fraude||'='||tipo_alerta_fraude_nombre, ' ' ORDER BY id_tipo_alerta_fraude) FROM tipo_alerta_fraude")
 ESTADOS=$(sql "SELECT string_agg(id_estado_alerta_fraude||'='||estado_alerta_fraude_nombre, ' ' ORDER BY id_estado_alerta_fraude) FROM estado_alerta_fraude")
-if [ "$TIPOS" = "1=fuerza_bruta_ip 2=fuerza_bruta_cuenta 3=multi_cuenta_ip" ]; then
-    OK "tipo_alerta_fraude tiene sus 3 filas con los ids del backend ($TIPOS)"
+# Los ids esperados se LEEN del modelo del backend y no se copian aqui. Estaban
+# copiados (los tres del primer dia) y el 2026-09-18 David amplio el catalogo a
+# nueve senales: el arnes se paro en el terreno diciendo que la base estaba mal,
+# cuando el viejo era el arnes. Cada constante ID_TIPO_ALERTA_FRAUDE_<NOMBRE> = <n>
+# es un tipo, y su nombre es el sufijo en minusculas.
+ESPERADOS=$(grep -oE "ID_TIPO_ALERTA_FRAUDE_[A-Z_]+ = [0-9]+" "$RAIZ/backend/src/models/alerta-fraude.ts" \
+    | sed -E 's/ID_TIPO_ALERTA_FRAUDE_([A-Z_]+) = ([0-9]+)/\2=\1/' | tr 'A-Z' 'a-z' \
+    | sort -t= -k1,1n | paste -sd' ')
+if [ -z "$ESPERADOS" ]; then
+    FALLA "no se pudieron leer los ids de los tipos de alerta de backend/src/models/alerta-fraude.ts"
+fi
+if [ -n "$ESPERADOS" ] && [ "$TIPOS" = "$ESPERADOS" ]; then
+    OK "tipo_alerta_fraude tiene las $(echo "$ESPERADOS" | wc -w) filas con los ids del backend ($TIPOS)"
 else
-    FALLA "tipo_alerta_fraude dice '$TIPOS', se esperaba 1=fuerza_bruta_ip 2=fuerza_bruta_cuenta 3=multi_cuenta_ip"
+    FALLA "tipo_alerta_fraude dice '$TIPOS', el backend espera '$ESPERADOS'"
 fi
 if [ "$ESTADOS" = "1=pendiente 2=revisada 3=descartada" ]; then
     OK "estado_alerta_fraude tiene sus 3 filas con los ids del backend ($ESTADOS)"

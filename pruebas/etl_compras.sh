@@ -116,9 +116,16 @@ titulo "3. La fecha es el mismo instante, al milisegundo"
 # ============================================================
 # Sobre los pedidos que copio el ETL, no los del backend: el backend escribe su
 # propia hora, unos milisegundos despues de la del movimiento.
+#
+# Los pedidos del backend NO son solo el 121. Cualquier compra hecha por el carrito
+# mientras la base esta viva deja filas con la IP de quien compro, y esta prueba
+# fallaba en cuanto alguien compraba algo (2026-09-19: dos ventas nuevas). Se sacan
+# de ClickHouse: son los pedidos reales cuya fila NO lleva la IP comodin '::'.
+DEL_BACKEND="$(ch "SELECT arrayStringConcat(arrayMap(x -> toString(x), groupUniqArray(id_pedido)), ',') FROM compra_producto WHERE lote = 'real' AND ip != toIPv6('::')")"
+DEL_BACKEND="${DEL_BACKEND:-0}"
 igual "instante maximo de las ventas copiadas (ms desde la epoca)" \
-    "$(pg "SELECT max(round(extract(epoch FROM sm.fecha_movimiento) * 1000)::bigint) $PG_LINEAS 'venta' AND sm.id_pedido != $PEDIDO_COLISION")" \
-    "$(ch "SELECT max(toUnixTimestamp64Milli(fecha)) FROM compra_producto WHERE lote = 'real' AND ip = toIPv6('::') AND id_pedido != $PEDIDO_COLISION")"
+    "$(pg "SELECT max(round(extract(epoch FROM sm.fecha_movimiento) * 1000)::bigint) $PG_LINEAS 'venta' AND sm.id_pedido NOT IN ($DEL_BACKEND)")" \
+    "$(ch "SELECT max(toUnixTimestamp64Milli(fecha)) FROM compra_producto WHERE lote = 'real' AND ip = toIPv6('::') AND id_pedido NOT IN ($DEL_BACKEND)")"
 igual "ninguna venta cae en el futuro" 0 "$(ch "SELECT countIf(fecha > now() + INTERVAL 1 MINUTE) FROM compra_producto WHERE lote = 'real'")"
 
 # ============================================================

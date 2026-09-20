@@ -1229,7 +1229,7 @@
 								puede entregar el pedido.
 							</p>
 							<p class="menor">
-								Agregala aqui abajo, o desde <a href="/panel">tu panel</a>.
+								Agregala aqui abajo, o desde <a href="/panel?s=cuenta">tu perfil</a>.
 							</p>
 						</div>
 					{/if}

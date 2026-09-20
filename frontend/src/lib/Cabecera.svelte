@@ -208,9 +208,16 @@
 		     catalogo; la diferencia esta explicada en el propio componente.
 
 		     Va envuelto porque cuanto sitio le toca es cosa de la barra: aqui
-		     se sabe con quien lo comparte, y dentro del componente no. -->
+		     se sabe con quien lo comparte, y dentro del componente no.
+
+		     Es el MISMO buscador para todos, admin incluido: solo trae lo activo
+		     y registra la busqueda y el clic en ClickHouse. Antes el admin
+		     usaba la ruta que trae tambien lo retirado y no registraba nada, y
+		     por eso sus busquedas no aparecian en Tendencias. Lo especializado
+		     del admin, buscar tambien lo pausado o rechazado, vive en el
+		     panel de Catalogo y no aqui. -->
 		<div class="busca">
-			<BuscadorCabecera verTodo={soyAdmin} />
+			<BuscadorCabecera />
 		</div>
 
 		<div class="cuenta">
@@ -245,9 +252,14 @@
 				     carrito, que es LA accion de una tienda. -->
 				<nav class="fila">
 					<a class="navegar" href="/pedidos">Mis pedidos</a>
-					<!-- Sin esto, desde el catalogo no habia forma de volver al panel
-					     mas que escribiendo la direccion a mano. -->
-					<a class="navegar" href="/panel">Mi perfil</a>
+					<!-- "Admin" y "Mi perfil" son DOS cosas y antes eran una sola pantalla
+					     mezclada. Admin lleva a lo de administrar el sistema (reportes,
+					     cuentas, fraude, tendencias) y solo sale en cuentas de admin. Mi
+					     perfil lleva a lo personal, que es igual para todos los roles. -->
+					{#if soyAdmin}
+						<a class="navegar admin" href="/panel?s=reportes">Admin</a>
+					{/if}
+					<a class="navegar" href="/panel?s=cuenta">Mi perfil</a>
 					<button type="button" class="navegar" onclick={alSalir ?? salirPorMiCuenta}>
 						Salir
 					</button>
@@ -281,7 +293,10 @@
 
 					<div id="menu-cuenta" class="menu" class:abierto={menuAbierto}>
 						<a class="opcion" href="/pedidos" onclick={() => cerrarMenu()}>Mis pedidos</a>
-						<a class="opcion" href="/panel" onclick={() => cerrarMenu()}>Mi perfil</a>
+						{#if soyAdmin}
+							<a class="opcion" href="/panel?s=reportes" onclick={() => cerrarMenu()}>Admin</a>
+						{/if}
+						<a class="opcion" href="/panel?s=cuenta" onclick={() => cerrarMenu()}>Mi perfil</a>
 						<button type="button" class="opcion" onclick={salirDesdeMenu}>Salir</button>
 					</div>
 				</div>
@@ -359,6 +374,11 @@
 		transition:
 			background var(--t),
 			color var(--t);
+	}
+
+	.navegar.admin {
+		font-weight: 600;
+		color: var(--indigo);
 	}
 
 	.navegar:hover {

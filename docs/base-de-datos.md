@@ -38,6 +38,13 @@ mudo a MongoDB".
 El diagrama esta en `diagrama-general.png` de esta misma carpeta. El archivo
 editable es `diagrama-general.drawio`, se abre en https://app.diagrams.net
 
+**Desde el 2026-09-19 ese dibujo tiene las 50 tablas de la base (migraciones 001
+a 019) y se genera, no se dibuja a mano**: `python docs/generar-er.py` lo lee de
+la base viva y falla si una tabla o una llave foranea se queda sin dibujo. El
+ER de la Entrega 1, con sus notas de la migracion a MongoDB, se conserva en
+`diagrama-general-entrega1.drawio`. Lo que se dice arriba de "42 tablas" es la
+foto de la Entrega 1.
+
 Version en Drive:
 https://drive.google.com/file/d/1obLn5lAiQ4xzDM1OWzVNyqCENhTJoH6_/view?usp=sharing
 

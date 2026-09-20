@@ -23,7 +23,7 @@
 #   ventana        compra_producto de las ultimas 24 horas; si no hay ninguna
 #                  compra, de los ultimos 7 dias; si tampoco, NO toca Redis y
 #                  deja el ranking anterior aunque ya este viejo
-#   metrica        sum(cantidad) por id_producto, sin filtrar por lote
+#   metrica        sum(cantidad) por id_producto, SOLO filas con lote = 'real'
 #   tope           20 productos, aunque la ruta muestre 8
 #   reemplazo      se arma en una clave temporal y se publica con RENAME, que es
 #                  atomico: nadie lee un ranking a medio reconstruir
@@ -32,10 +32,11 @@
 # EN SILENCIO, antes de escribir el script lee del backend el nombre de la clave
 # y el tope, y se niega a seguir si ya no coinciden con los de aqui.
 #
-# Sin filtrar por lote es a proposito y es lo mismo que hace el worker: si hay
-# compras sembradas por un generador, entran al ranking. Es la misma limitacion
-# de los seis rankings de /admin/eventos/*, pedida a Jose David en
-# docs/BACKEND-PENDIENTE.md.
+# SOLO CUENTA lote = 'real', igual que el worker desde el 2026-09-19. Es decision
+# de Jose David y no tiene parametro: las compras sembradas por un generador
+# (lote 'generado-N') nunca entran al ranking, ni a los seis de /admin/eventos/*.
+# Antes de esa fecha si entraban, y este script las contaba tambien. El candado de
+# abajo lee del backend que la consulta siga trayendo ese filtro.
 #
 # No instala nada: docker y las contrasenas del .env de la raiz.
 
@@ -102,6 +103,13 @@ if [ ! -f "$SERVICIO" ]; then
 fi
 clave_backend=$(grep -o "CLAVE_RANKING = '[^']*'" "$SERVICIO" | sed "s/.*= '//; s/'//")
 tope_backend=$(grep -o "TOPE_ALMACENADO = [0-9]*" "$SERVICIO" | sed 's/.*= //')
+# El filtro por lote real. Si el worker lo pierde, este script seguiria contando lo
+# sembrado y el ranking que arma dejaria de parecerse al que arma el backend.
+if ! grep -qF "lote = 'real'" "$SERVICIO"; then
+    echo "El worker del backend ya no filtra por lote = 'real'." >&2
+    echo "Este script si lo hace: revisalo antes de escribir nada." >&2
+    exit 1
+fi
 if [ "$clave_backend" != "$CLAVE" ] || [ "$tope_backend" != "$TOPE" ]; then
     echo "El worker del backend ya no coincide con este script." >&2
     echo "  clave  backend: ${clave_backend:-?}   aqui: $CLAVE" >&2
@@ -113,6 +121,7 @@ fi
 consulta() { # ventana, ej: "24 HOUR"
     ch "SELECT id_producto, sum(cantidad) AS total FROM compra_producto
          WHERE fecha >= now() - INTERVAL $1
+           AND lote = 'real'
          GROUP BY id_producto ORDER BY total DESC LIMIT $TOPE FORMAT TSV"
 }
 
