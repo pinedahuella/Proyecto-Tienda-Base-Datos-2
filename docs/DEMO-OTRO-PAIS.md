@@ -45,8 +45,8 @@ pais, Ver desde donde salgo y Cerrar la ventana de otro pais.
 .\demo-entrar-otro-pais.ps1 -Cerrar      # cierra la ventana, el tunel y Tor
 ```
 
-Como funciona: Tor en Docker con salida en el pais (`mesh-tor-demo`, con su SOCKS
-publicado solo en `127.0.0.1:9051`), un tunel de Cloudflare a la tienda (el 5173, que
+Como funciona: Tor en Docker con salida en el pais (`mesh-tor-sg`, `mesh-tor-de`..., con su SOCKS
+publicado solo en `127.0.0.1`, puertos 9061 a 9068), un tunel de Cloudflare a la tienda (el 5173, que
 le pasa `/api` al backend con la IP de quien llego) y un Chrome con perfil aparte y
 limpio que usa ese Tor como proxy SOCKS5. Para la tienda esa ventana esta en otro
 pais; tus otras ventanas no cambian. Chrome manda los nombres de host al proxy, asi
@@ -55,8 +55,8 @@ que el DNS tambien sale por Tor.
 Como se ve que es real, en Docker:
 
 ```powershell
-docker ps --filter name=mesh-tor-demo
-docker exec mesh-tor-demo curl -s --socks5-hostname 127.0.0.1:9050 https://api.ipify.org
+docker ps --filter name=mesh-tor-
+docker exec mesh-tor-sg curl -s --socks5-hostname 127.0.0.1:9050 https://api.ipify.org
 ```
 
 **Para la alerta de viaje imposible** hacen falta DOS logins exitosos de la MISMA
@@ -78,41 +78,74 @@ Limites: la salida de Tor cambia de IP dentro del pais (mismo pais, otra IP), y 
 desde Tor puede ir lento. Cada pais es un Tor: para cambiar de pais se rehace el
 contenedor, unos 50 segundos con el tunel ya abierto.
 
-## El link con el nombre del pais, para abrirlo en cualquier navegador
+## Los links por pais, varios a la vez, para abrirlos en cualquier navegador
 
 `https://mesh-singapur.ledkid.com`, `mesh-alemania`, `mesh-japon`, `mesh-eeuu`,
 `mesh-holanda`, `mesh-francia`, `mesh-reinounido` y `mesh-canada`, todos en
 `.ledkid.com`. Es la tienda real, pero cualquier persona que abra el link de un pais
 aparece para el backend en ESE pais, sin instalar nada y desde el navegador o el celular
-que quiera. Lo dan los dos botones: **Login desde otro pais** (al final de la demo con
-curl) y **Entrar a Mesh desde otro pais**. Se cierra con **Cerrar la ventana de otro pais**
-o `.\demo-entrar-otro-pais.ps1 -Cerrar`.
+que quiera. **Puedes tener abiertos varios paises a la vez, y escoger cuales.**
 
-Como funciona: `panel-comandos/pais-proxy.mjs` recibe lo que llega a ese nombre y lo
-reenvia a `https://mesh.ledkid.com` SALIENDO POR TOR del pais (SOCKS5 en
-`127.0.0.1:9051`, el Tor de Docker). Para el backend, la IP es la de la salida de Tor y su
-pais sale de geoip. No reenvia quien es el visitante (`X-Forwarded-For`, `CF-*`), porque
-si lo hiciera el backend veria la IP real de quien abre el link. Solo reenvia a
-`mesh.ledkid.com`, solo contesta al nombre de SU pais y solo escucha en `127.0.0.1`;
-llega hasta el por el tunel `mesh`.
+En el panel de comandos (Demos de fraude), tres botones:
+- **Abrir varios paises a la vez**: casillas con los ocho paises, y "Todos" y "Ninguno".
+  Abre EXACTAMENTE los que marques (cierra los otros) y da un link por cada uno.
+- **Entrar a Mesh desde otro pais**: agrega UN pais, con su link y una ventana de Chrome ya
+  puesta en ese pais. No cierra los que ya tengas abiertos.
+- **Login desde otro pais**: la demo con curl; al final deja abierto el link de ese pais,
+  tambien sin cerrar los demas.
+- **Ver desde donde salgo**: cuales estan abiertos, con que IP y pais sale cada uno, y si su
+  link contesta.
+- **Acabar el tour: cerrar todos los paises**: cierra todo lo de arriba de golpe.
 
-Probado el 2026-09-20 con un Chrome normal, sin proxy y con la IP real de esta maquina:
-login por el link de Singapur y luego por el de Alemania, con la misma cuenta. El backend
-registro `SG` y despues `DE`, y salto `viaje_imposible` (9933 km en 0.02 h) y
-`toma_cuenta`. La IP real del visitante no aparece en ningun registro.
+En la terminal es lo mismo:
+
+```powershell
+.\demo-entrar-otro-pais.ps1 -Paises sg,de,jp   # abre exactamente esos tres
+.\demo-entrar-otro-pais.ps1 -Paises todos      # los ocho
+.\demo-entrar-otro-pais.ps1 -Pais sg           # agrega Singapur, con una ventana de Chrome
+.\demo-entrar-otro-pais.ps1 -Estado
+.\demo-entrar-otro-pais.ps1 -Cerrar            # acaba el tour
+```
+
+Como funciona: cada pais es su propio Tor de Docker (`mesh-tor-sg`, `mesh-tor-de`...), con su
+SOCKS publicado solo en `127.0.0.1` (puertos 9061 a 9068). Un solo programa,
+`panel-comandos/pais-proxy.mjs`, atiende a todos: lee cada peticion, mira a que nombre llego,
+y la reenvia a `https://mesh.ledkid.com` SALIENDO POR EL TOR de ese pais. Que paises estan abiertos
+lo dice un archivo (`paises-activos.json`) que el proxy relee en cada peticion, asi que abrir o
+cerrar un pais no reinicia nada ni toca el tunel. No reenvia quien es el visitante
+(`X-Forwarded-For`, `CF-*`), porque si lo hiciera el backend veria la IP real de quien abre el
+link. Solo reenvia a `mesh.ledkid.com`, solo contesta a los nombres abiertos y solo escucha en
+`127.0.0.1`; llega hasta el por el tunel `mesh`. Un pais que no esta abierto contesta 503 con la
+lista de los que si.
+
+**El pais lo decide el backend, no Tor ni ipinfo.** Las tres bases de datos no coinciden en algunas
+salidas: `46.250.243.29` es Singapur para Tor, Australia para ipinfo y Reino Unido para el
+`geoip-lite` del backend (medido el 2026-09-20). Como lo que se guarda en el evento y dispara el
+viaje imposible es lo que dice el backend, una salida solo se acepta si `geoip-lite` la ubica en el
+pais pedido (`panel-comandos/geo-pais.mjs`, el mismo geoip-lite del backend). Ademas la salida se
+verifica POR EL MISMO CAMINO que usa el proxy (desde el PC, por el puerto publicado y con la etiqueta
+del circuito como usuario SOCKS), porque Tor separa circuitos tambien por la direccion de quien se
+conecta; y los circuitos duran una hora (`MaxCircuitDirtiness 3600`), no diez minutos. Probado con
+tres paises a la vez y tres rondas: cada link sale siempre por la misma IP y el backend la ubica en
+su pais (SG, DE, JP).
+
+Probado el 2026-09-20 con un Chrome normal, sin proxy y con la IP real de esta maquina: login por el
+link de Japon y luego por el de Singapur, con la misma cuenta. El backend registro `JP` y despues
+`SG`, y salto `viaje_imposible` (5322 km en 0.01 h) y `toma_cuenta`. La IP real del visitante no
+aparece en ningun registro. Con los ocho abiertos a la vez, los ocho links contestan cada uno con su IP.
 
 Lo que hay que saber:
 - **Es mas lento** que la tienda normal, porque cada conexion nueva pasa por Tor.
-- **Necesita la direccion publica abierta** (`mesh.ledkid.com`): el proxy le habla a ella.
-  Si esta cerrada, el link la abre. Publicar Mesh es publicarlo con sus cuentas de prueba.
-- **Uno a la vez**: hay un solo Tor, asi que solo esta abierto el link del ultimo pais que
-  se pidio. Los otros nombres contestan 502 mientras no esten abiertos.
-- **Se prepara UNA vez** por cuenta de Cloudflare: `.\mesh-publico.ps1 -Accion paises`
-  agrega un registro DNS nuevo por pais en `ledkid.com` (solo altas, no cambia ninguno
-  existente) y los nombres al ingress del tunel `mesh`. El tunel de LEDKID no se toca.
-- Los nombres son de un solo nivel (`mesh-singapur.ledkid.com`, no
-  `singapur.mesh.ledkid.com`): el certificado gratuito de Cloudflare cubre `*.ledkid.com`
-  y no los de dos niveles.
+- **Memoria**: cada pais es un Tor de casi 100 MB reales (con los ocho, unos 400 a 800 MB). El tope del
+  contenedor es 192 MB: con 96 MB, tres arrancando a la vez se estrangularon y uno se quedo parado a
+  mitad de cargar la lista de relés. Para ensenar bastan dos o tres.
+- **Necesita la direccion publica abierta** (`mesh.ledkid.com`): el proxy le habla a ella. Si esta cerrada,
+  abrir un pais la abre. Publicar Mesh es publicarlo con sus cuentas de prueba.
+- **Se prepara UNA vez** por cuenta de Cloudflare: `.\mesh-publico.ps1 -Accion paises` agrega un
+  registro DNS nuevo por pais en `ledkid.com` (solo altas, no cambia ninguno existente) y los nombres al
+  ingress del tunel `mesh`. El tunel de LEDKID no se toca.
+- Los nombres son de un solo nivel (`mesh-singapur.ledkid.com`, no `singapur.mesh.ledkid.com`): el
+  certificado gratuito de Cloudflare cubre `*.ledkid.com` y no los de dos niveles.
 
 ## Precalentar, para que en clase no tarde
 
@@ -125,8 +158,8 @@ Lo lento no se ve y se puede hacer antes:
 Comprueba que el tunel pueda salir, construye UNA vez la imagen de Tor
 (`mesh-tor-demo:local`, unos 60 MB; antes cada corrida instalaba `tor` y `curl`
 en un alpine pelado, delante de todos) y deja Tor corriendo con salida en el pais,
-comprobada. Tor caliente pesa unos 50 MB y se suelta con
-`docker rm -f mesh-tor-demo`.
+comprobada. Tor caliente pesa casi 100 MB y se suelta con
+`docker rm -f mesh-tor-<pais>`.
 
 La demo lo detecta sola: si hay un Tor corriendo con la etiqueta del mismo pais lo
 reutiliza, y si es de otro pais lo rehace. Sin precalentar sigue funcionando igual,

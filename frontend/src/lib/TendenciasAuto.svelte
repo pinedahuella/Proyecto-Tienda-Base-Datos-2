@@ -382,11 +382,69 @@
 		return `${(f.veces ?? 0).toFixed(1)} veces`;
 	}
 
-	function ancho(f: Fila, filas: Fila[]): number {
-		const tope = Math.max(1, ...filas.map((x) => x.total));
-		return Math.round((f.total / tope) * 100);
+	/** El ancho de una barra, en porcentaje del mayor valor que se dibuja. */
+	function pct(valor: number, tope: number): number {
+		return Math.max(0, Math.min(100, (valor / tope) * 100));
+	}
+
+	/** El texto que sale al pasar el cursor por una fila, con el nombre completo. */
+	function detalle(f: Fila, comparar: boolean, m: Medida): string {
+		if (comparar) return `${f.titulo}, ${f.antes ?? 0} en el periodo anterior y ${f.total} ahora`;
+		return `${f.titulo}, ${f.total} ${f.total === 1 ? m.unidad[0] : m.unidad[1]}`;
 	}
 </script>
+
+<!--
+	Las filas de un ranking, una sola vez para las tarjetas de fabrica y para la
+	vista previa del constructor.
+
+	La barra mide contra el MAYOR valor que se dibuja en esa tarjeta, asi que se
+	comparan entre si y no contra un tope inventado. Una barra de cero no existe,
+	pero una de uno junto a una de cuarenta y cinco se queda con un minimo para
+	que se vea.
+
+	En "en ascenso" la barra es el periodo actual y la marca vertical es donde
+	estaba el periodo anterior: de un vistazo se ve cuanto se movio cada producto.
+	Un producto nuevo no tiene marca, porque antes no vendia nada.
+-->
+{#snippet ranking(filas: Fila[], comparar: boolean, m: Medida)}
+	{@const tope = Math.max(1, ...filas.map((x) => Math.max(x.total, x.antes ?? 0)))}
+	<ol class="filas">
+		{#each filas as f, i (f.id)}
+			<li title={detalle(f, comparar, m)}>
+				<span class="puesto" class:podio={i < 3}>{i + 1}</span>
+				{#if f.enlace}
+					<a href={f.enlace} class="nombre">{f.titulo}</a>
+				{:else}
+					<span class="nombre">{f.titulo}</span>
+				{/if}
+				{#if comparar}
+					<span class="cifra">
+						<strong>{f.antes} a {f.total}</strong>
+						<small class="chip" class:nuevo={(f.antes ?? 0) === 0}>{veces(f)}</small>
+					</span>
+				{:else}
+					<span class="cifra">
+						<strong>{f.total}</strong>
+						<small>{f.total === 1 ? m.unidad[0] : m.unidad[1]}</small>
+					</span>
+				{/if}
+				<span class="pista" aria-hidden="true">
+					<span class="ahora" style="width: {pct(f.total, tope)}%"></span>
+					{#if comparar && (f.antes ?? 0) > 0}
+						<span class="antes" style="left: {pct(f.antes ?? 0, tope)}%"></span>
+					{/if}
+				</span>
+			</li>
+		{/each}
+	</ol>
+	{#if comparar}
+		<p class="leyenda">
+			<span class="muestra-ahora"></span> periodo actual
+			<span class="muestra-antes"></span> periodo anterior
+		</p>
+	{/if}
+{/snippet}
 
 <div class="auto">
 	<div class="cabeza">
@@ -426,30 +484,7 @@
 							: 'Sin eventos reales en esta ventana.'}
 					</p>
 				{:else}
-					<ol class="filas">
-						{#each res.filas as f, i (f.id)}
-							<li>
-								<span class="puesto">{i + 1}</span>
-								{#if f.enlace}
-									<a href={f.enlace} class="nombre">{f.titulo}</a>
-								{:else}
-									<span class="nombre">{f.titulo}</span>
-								{/if}
-								{#if c.comparar}
-									<span class="cifra">
-										<strong>{f.antes} a {f.total}</strong>
-										<small>{veces(f)}</small>
-									</span>
-								{:else}
-									<span class="cifra">
-										<strong>{f.total}</strong>
-										<small>{f.total === 1 ? m.unidad[0] : m.unidad[1]}</small>
-									</span>
-								{/if}
-								<span class="barra" aria-hidden="true"><span style="width: {ancho(f, res.filas)}%"></span></span>
-							</li>
-						{/each}
-					</ol>
+					{@render ranking(res.filas, c.comparar, m)}
 					{#if res.nota}
 						<p class="pie">{res.nota}</p>
 					{/if}
@@ -530,24 +565,7 @@
 				{:else if bResultado.filas.length === 0}
 					<p class="gris">Sin resultados en esta ventana.</p>
 				{:else}
-					<ol class="filas">
-						{#each bResultado.filas as f, i (f.id)}
-							<li>
-								<span class="puesto">{i + 1}</span>
-								{#if f.enlace}
-									<a href={f.enlace} class="nombre">{f.titulo}</a>
-								{:else}
-									<span class="nombre">{f.titulo}</span>
-								{/if}
-								{#if bConsulta.comparar}
-									<span class="cifra"><strong>{f.antes} a {f.total}</strong><small>{veces(f)}</small></span>
-								{:else}
-									<span class="cifra"><strong>{f.total}</strong><small>{f.total === 1 ? m.unidad[0] : m.unidad[1]}</small></span>
-								{/if}
-								<span class="barra" aria-hidden="true"><span style="width: {ancho(f, bResultado.filas)}%"></span></span>
-							</li>
-						{/each}
-					</ol>
+					{@render ranking(bResultado.filas, bConsulta.comparar, m)}
 					{#if bResultado.nota}<p class="pie">{bResultado.nota}</p>{/if}
 				{/if}
 
@@ -636,17 +654,44 @@
 
 	.filas li {
 		display: grid;
-		grid-template-columns: 22px 1fr auto;
+		grid-template-columns: 24px minmax(0, 1fr) auto;
 		grid-template-areas: 'p n c' '. b b';
-		align-items: baseline;
-		column-gap: 8px;
-		row-gap: 4px;
+		align-items: center;
+		column-gap: 10px;
+		row-gap: 6px;
+		/* El relleno y el margen negativo dejan la fila con aire para el
+		   resaltado al pasar el cursor sin correr el texto de la tarjeta. */
+		padding: 6px 8px;
+		margin: 0 -8px;
+		border-radius: var(--r);
+		transition: background var(--t);
 	}
 
+	.filas li:hover {
+		background: var(--off);
+	}
+
+	/* El puesto es una insignia redonda. Los tres primeros van tenidos de indigo,
+	   el resto queda en gris: el podio se lee sin gastar un color mas. */
 	.puesto {
 		grid-area: p;
+		display: grid;
+		place-items: center;
+		width: 24px;
+		height: 24px;
+		border-radius: 50%;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
 		color: var(--gris);
-		font-size: var(--f-sm);
+		background: var(--off);
+		border: 1px solid var(--linea);
+	}
+
+	.puesto.podio {
+		color: var(--indigo);
+		background: var(--indigo-cl);
+		border-color: transparent;
 	}
 
 	.nombre {
@@ -664,28 +709,116 @@
 
 	.cifra {
 		grid-area: c;
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
 		text-align: right;
 		white-space: nowrap;
 	}
 
+	.cifra strong {
+		font-variant-numeric: tabular-nums;
+		color: var(--tinta);
+	}
+
 	.cifra small {
-		margin-left: 6px;
 		color: var(--gris);
 	}
 
-	.barra {
-		grid-area: b;
-		display: block;
-		height: 5px;
-		background: var(--fondo, #f3f2ee);
-		border-radius: 3px;
-		overflow: hidden;
+	/* "2.3 veces" o "nuevo" como una etiqueta chica. Va tenida de indigo y no
+	   de verde: el verde de estado esta reservado para lo que es bueno o malo,
+	   y que un producto suba no siempre lo es. */
+	.cifra .chip {
+		padding: 1px 8px;
+		border-radius: 999px;
+		font-size: var(--f-xs);
+		color: var(--indigo);
+		background: var(--indigo-cl);
 	}
 
-	.barra span {
+	.cifra .chip.nuevo {
+		color: var(--sobre-indigo);
+		background: var(--indigo);
+	}
+
+	/* La pista de la barra es del mismo indigo pero casi transparente, asi se
+	   ve en claro y en oscuro sin una variable nueva. */
+	.pista {
+		grid-area: b;
+		position: relative;
+		display: block;
+		height: 8px;
+		border-radius: 4px;
+		background: color-mix(in srgb, var(--indigo) 12%, transparent);
+	}
+
+	/* Ancla en el cero, la punta del dato redondeada. El minimo de 4px es para
+	   que un 1 junto a un 45 no desaparezca. */
+	.ahora {
 		display: block;
 		height: 100%;
+		min-width: 4px;
+		border-radius: 4px;
 		background: var(--indigo);
+		transition: width 0.5s ease;
+	}
+
+	/* La marca del periodo anterior. Sobresale de la pista para verse aunque
+	   caiga dentro de la barra, y lleva un borde del color de la tarjeta para
+	   separarse de ella. */
+	.antes {
+		position: absolute;
+		top: -3px;
+		bottom: -3px;
+		width: 3px;
+		margin-left: -1px;
+		border-radius: 2px;
+		background: var(--tinta);
+		box-shadow: 0 0 0 1px var(--blanco);
+	}
+
+	.leyenda {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px 14px;
+		margin: 2px 0 0;
+		font-size: var(--f-xs);
+		color: var(--gris);
+	}
+
+	.muestra-ahora,
+	.muestra-antes {
+		display: inline-block;
+		vertical-align: middle;
+		margin-right: 4px;
+	}
+
+	.muestra-ahora {
+		width: 16px;
+		height: 8px;
+		border-radius: 4px;
+		background: var(--indigo);
+	}
+
+	.muestra-antes {
+		width: 3px;
+		height: 14px;
+		border-radius: 2px;
+		background: var(--tinta);
+	}
+
+	/* La tarjeta ancha (compras en ascenso) reparte sus filas en columnas: a
+	   1100 px de ancho una sola columna deja el nombre en un extremo y la cifra
+	   en el otro, y obliga a bajar por la pagina. */
+	.tarjeta.destacada .filas {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+		gap: 4px 32px;
+	}
+
+	.tarjeta.destacada {
+		background: linear-gradient(180deg, var(--indigo-cl), var(--blanco) 90px);
 	}
 
 	.fallo {

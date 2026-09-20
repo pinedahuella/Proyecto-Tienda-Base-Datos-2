@@ -63,11 +63,14 @@ Para iniciar sesion TU MISMO desde otro pais, con el frontend de verdad (viaje i
 y toma de cuenta), en el panel: "Login desde otro pais" o "Entrar a Mesh desde otro pais".
 Los dos te dan un LINK CON EL NOMBRE DEL PAIS, por ejemplo https://mesh-singapur.ledkid.com/entrar,
 que abres en cualquier navegador o en el celular y en el que quien inicie sesion aparece en ese
-pais. Se prepara una sola vez con  .\mesh-publico.ps1 -Accion paises  (ya hecho). O:
-  .\demo-entrar-otro-pais.ps1 -Pais sg     abre una ventana de Chrome que sale por ese pais
-  .\demo-entrar-otro-pais.ps1 -Estado      desde donde sales, y si sigue abierto
-  .\demo-entrar-otro-pais.ps1 -Cerrar      cierra la ventana, el tunel y Tor
-Ver que es real:  docker ps --filter name=mesh-tor-demo
+pais. Puedes tener VARIOS paises abiertos a la vez y escoger cuales ("Abrir varios paises a la vez",
+con casillas y Todos), y acabar el tour de golpe con "Acabar el tour: cerrar todos los paises".
+Se prepara una sola vez con  .\mesh-publico.ps1 -Accion paises  (ya hecho). O:
+  .\demo-entrar-otro-pais.ps1 -Pais sg              agrega Singapur (link y ventana de Chrome)
+  .\demo-entrar-otro-pais.ps1 -Paises sg,de,jp      abre EXACTAMENTE esos, a la vez (o -Paises todos)
+  .\demo-entrar-otro-pais.ps1 -Estado               cuales estan abiertos, con que IP y si contestan
+  .\demo-entrar-otro-pais.ps1 -Cerrar               ACABA EL TOUR: cierra todos
+Ver que es real:  docker ps --filter name=mesh-tor-
 Detalle en docs/DEMO-OTRO-PAIS.md.
 
 Antes de la clase, la demo de otro pais se puede dejar lista:

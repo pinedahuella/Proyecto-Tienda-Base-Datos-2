@@ -75,6 +75,12 @@
     min-width: 0; padding: 7px 10px; font: inherit; font-size: var(--f-base); color: var(--tinta);
     background: var(--blanco); border: 1px solid var(--linea); border-radius: var(--r);
   }
+  .grupo { display: flex; flex-direction: column; gap: var(--e2); font-size: var(--f-sm); color: var(--gris); }
+  .opciones { display: flex; flex-wrap: wrap; gap: var(--e2) var(--e5); }
+  .campos .marca { flex-direction: row; align-items: center; gap: var(--e2); font-size: var(--f-base); color: var(--texto); cursor: pointer; }
+  .marca input { width: 16px; height: 16px; padding: 0; accent-color: var(--indigo); cursor: pointer; }
+  .atajos { display: flex; gap: var(--e3); }
+  button.texto { padding: 0; font-size: var(--f-sm); color: var(--indigo); background: none; border: 0; text-decoration: underline; }
   .campos input[type=number] { width: 130px; }
   .campos input[type=text] { width: 250px; max-width: 100%; }
   select { cursor: pointer; }
@@ -196,6 +202,22 @@ function alCambiar(c, campo, v) {
 }
 
 // ------------------------------------------------------------ filas
+
+// Varias opciones con casillas (los paises). El valor viaja como "sg,de,jp".
+function campoMultiple(c, f) {
+  const marcadas = new Set((valores[c.id][f.nombre] || '').split(',').filter(Boolean));
+  const opciones = el('div', { class: 'opciones' }, ...f.opciones.map((o) =>
+    el('label', { class: 'marca' },
+      el('input', { type: 'checkbox', checked: marcadas.has(o), onchange: (e) => {
+        if (e.target.checked) marcadas.add(o); else marcadas.delete(o);
+        alCambiar(c, f, f.opciones.filter((x) => marcadas.has(x)).join(','));
+      } }),
+      ' ' + ((f.rotulos && f.rotulos[o]) || o))));
+  const atajo = (texto, lista) => el('button', { type: 'button', class: 'texto', textContent: texto, onclick: () => { alCambiar(c, f, lista.join(',')); pintarFila(c); } });
+  return el('div', { class: 'grupo', role: 'group', 'aria-label': f.etiqueta },
+    el('span', { textContent: f.etiqueta }), opciones,
+    el('div', { class: 'atajos' }, atajo('Todos', f.opciones), atajo('Ninguno', [])));
+}
 function pintarFila(c) {
   const ant = document.querySelector(`[data-id="${c.id}"]`);
   if (ant) ant.replaceWith(fila(c));
@@ -204,6 +226,7 @@ function pintarFila(c) {
 function fila(c) {
   const v = vistas[c.id];
   const campos = c.campos.length ? el('div', { class: 'campos' }, ...c.campos.map((f) => {
+    if (f.tipo === 'multiple') return campoMultiple(c, f);
     let entrada;
     if (f.tipo === 'opcion') {
       entrada = el('select', { onchange: (e) => alCambiar(c, f, e.target.value) }, ...f.opciones.map((o) => el('option', { value: o, textContent: o })));

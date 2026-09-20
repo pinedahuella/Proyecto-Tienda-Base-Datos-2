@@ -24,10 +24,12 @@
 	interface Campo {
 		nombre: string;
 		etiqueta: string;
-		tipo: 'entero' | 'texto' | 'opcion';
+		tipo: 'entero' | 'texto' | 'opcion' | 'multiple';
 		min?: number;
 		max?: number;
 		opciones?: string[];
+		/** Como se llama cada opcion en pantalla (sg -> Singapur), para los campos de varias opciones */
+		rotulos?: Record<string, string>;
 		defecto?: string | number;
 		opcional?: boolean;
 	}
@@ -157,6 +159,19 @@
 		} catch (e) {
 			comandos[c.id] = { texto: (e as Error).message, ok: false };
 		}
+	}
+
+	/** Las opciones marcadas de un campo de varias opciones (el valor es "sg,de,jp") */
+	function elegidas(id: string, nombre: string): string[] {
+		return (valores[id]?.[nombre] ?? '').split(',').filter(Boolean);
+	}
+
+	function alternar(c: Comando, f: Campo, opcion: string, marcada: boolean) {
+		const actuales = new Set(elegidas(c.id, f.nombre));
+		if (marcada) actuales.add(opcion);
+		else actuales.delete(opcion);
+		// En el orden de la lista, no en el orden en que se fueron marcando
+		alCambiar(c, f, (f.opciones ?? []).filter((o) => actuales.has(o)).join(','));
 	}
 
 	function alCambiar(c: Comando, campo: Campo, valor: string) {
@@ -363,6 +378,27 @@
 						{#if c.campos.length}
 							<div class="campos">
 								{#each c.campos as f (f.nombre)}
+									{#if f.tipo === 'multiple'}
+										<div class="grupo" role="group" aria-label={f.etiqueta}>
+											<span>{f.etiqueta}</span>
+											<div class="opciones">
+												{#each f.opciones ?? [] as o (o)}
+													<label class="marca">
+														<input
+															type="checkbox"
+															checked={elegidas(c.id, f.nombre).includes(o)}
+															onchange={(e) => alternar(c, f, o, e.currentTarget.checked)}
+														/>
+														{f.rotulos?.[o] ?? o}
+													</label>
+												{/each}
+											</div>
+											<div class="atajos">
+												<button type="button" class="texto" onclick={() => alCambiar(c, f, (f.opciones ?? []).join(','))}>Todos</button>
+												<button type="button" class="texto" onclick={() => alCambiar(c, f, '')}>Ninguno</button>
+											</div>
+										</div>
+									{:else}
 									<label>
 										<span>{f.etiqueta}</span>
 										{#if f.tipo === 'opcion'}
@@ -385,6 +421,7 @@
 											/>
 										{/if}
 									</label>
+									{/if}
 								{/each}
 							</div>
 						{/if}
@@ -649,6 +686,56 @@
 		background: var(--blanco);
 		border: 1px solid var(--linea);
 		border-radius: var(--r);
+	}
+
+	.grupo {
+		display: flex;
+		flex-direction: column;
+		gap: var(--e2);
+		font-size: var(--f-sm);
+		color: var(--gris);
+	}
+
+	.opciones {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--e2) var(--e5);
+	}
+
+	/* Mas especifico que `.campos label` (columna): estas van en fila, casilla y nombre */
+	.campos .marca {
+		flex-direction: row;
+		align-items: center;
+		gap: var(--e2);
+		font-size: var(--f-base);
+		color: var(--texto);
+		cursor: pointer;
+	}
+
+	/* Con este selector y no \`.marca input\`: \`.campos input:not([type='number'])\` (250 px de ancho,
+	   relleno y borde de los campos de texto) tambien las alcanzaba y las dejaba lejos de su nombre. */
+	.campos .marca input[type='checkbox'] {
+		flex: none;
+		width: 16px;
+		height: 16px;
+		padding: 0;
+		accent-color: var(--indigo);
+		cursor: pointer;
+	}
+
+	.atajos {
+		display: flex;
+		gap: var(--e3);
+	}
+
+	.texto {
+		padding: 0;
+		font-size: var(--f-sm);
+		color: var(--indigo);
+		background: none;
+		border: 0;
+		text-decoration: underline;
+		cursor: pointer;
 	}
 
 	.campos input[type='number'] {

@@ -283,24 +283,38 @@
 		descartada: 'Descartada'
 	};
 
-	/** Para el select de tipo. El orden es el mismo de la tabla del profesor: Redis primero, luego Elasticsearch. */
-	const FILTROS_TIPO: FiltroTipo[] = [
-		'todos',
-		'fuerza_bruta_ip',
-		'fuerza_bruta_cuenta',
-		'multi_cuenta_ip',
-		'ip_rotacion_cuenta',
-		'toma_cuenta',
-		'viaje_imposible',
-		'fuerza_bruta_cuenta_lenta',
-		'multi_cuenta_ip_lenta',
-		'ip_rotacion_cuenta_lenta'
-	];
-
 	const NOMBRE_FILTRO_TIPO: Record<FiltroTipo, string> = {
 		todos: 'Todos los tipos',
 		...QUE_PASO
 	};
+
+	/**
+	 * Las nueve senales agrupadas por lo que miran, para el select de tipo. El
+	 * backend filtra por UN tipo a la vez, asi que la clasificacion es del
+	 * select (optgroup) y no un filtro de familia.
+	 */
+	const GRUPOS_TIPO: { nombre: string; tipos: Exclude<FiltroTipo, 'todos'>[] }[] = [
+		{ nombre: 'Por IP', tipos: ['fuerza_bruta_ip', 'multi_cuenta_ip', 'multi_cuenta_ip_lenta'] },
+		{
+			nombre: 'Por cuenta',
+			tipos: [
+				'fuerza_bruta_cuenta',
+				'fuerza_bruta_cuenta_lenta',
+				'ip_rotacion_cuenta',
+				'ip_rotacion_cuenta_lenta'
+			]
+		},
+		{ nombre: 'Ubicacion y acceso', tipos: ['toma_cuenta', 'viaje_imposible'] }
+	];
+
+	/** Las dos vistas de Fraude, una a la vez, para no tener que bajar por toda la pagina. */
+	type PestanaFraude = 'entradas' | 'resenas';
+	/** `/panel?s=fraude&t=resenas` abre directo en los anillos: la campana del admin y la demo lo usan. */
+	let pestanaFraude = $state<PestanaFraude>(
+		typeof location !== 'undefined' && new URLSearchParams(location.search).get('t') === 'resenas'
+			? 'resenas'
+			: 'entradas'
+	);
 
 	/** Cuantas por pagina. El mismo 20 que el resto de las listas del panel. */
 	const POR_PAGINA = 20;
@@ -881,6 +895,32 @@
 	no espera a los anillos ni los hace esperar. Ver el bloque "intentos de
 	entrada" del script.
 -->
+<div class="pestanas pestanas-fraude" role="tablist" aria-label="Vista de fraude">
+	<button
+		type="button"
+		role="tab"
+		class="pestana"
+		class:elegida={pestanaFraude === 'entradas'}
+		aria-selected={pestanaFraude === 'entradas'}
+		onclick={() => (pestanaFraude = 'entradas')}
+	>
+		Intentos de entrada
+	</button>
+	<button
+		type="button"
+		role="tab"
+		class="pestana"
+		class:elegida={pestanaFraude === 'resenas'}
+		aria-selected={pestanaFraude === 'resenas'}
+		onclick={() => (pestanaFraude = 'resenas')}
+	>
+		Resenas en anillo
+	</button>
+</div>
+
+<!-- Las dos vistas siguen montadas y solo se esconde la que no toca: asi
+     cada una conserva su filtro, su pagina y no vuelve a pedir al cambiar. -->
+<div hidden={pestanaFraude !== 'entradas'}>
 <section class="fraude" aria-labelledby="titulo-entradas">
 	<div class="titulo">
 		<h2 id="titulo-entradas">Intentos de entrada sospechosos</h2>
@@ -935,8 +975,13 @@
 				value={filtroTipoAlertas}
 				onchange={(e) => cambiarFiltroTipo(e.currentTarget.value as FiltroTipo)}
 			>
-				{#each FILTROS_TIPO as t (t)}
-					<option value={t}>{NOMBRE_FILTRO_TIPO[t]}</option>
+				<option value="todos">{NOMBRE_FILTRO_TIPO.todos}</option>
+				{#each GRUPOS_TIPO as g (g.nombre)}
+					<optgroup label={g.nombre}>
+						{#each g.tipos as t (t)}
+							<option value={t}>{NOMBRE_FILTRO_TIPO[t]}</option>
+						{/each}
+					</optgroup>
 				{/each}
 			</select>
 		</label>
@@ -1097,6 +1142,7 @@
 		{/if}
 	{/if}
 </section>
+</div>
 
 <!--
 	Manipulacion de resenas: los anillos mutuo/ciclo/reiterado que detecto y
@@ -1104,6 +1150,7 @@
 	admin los trabaje como cola. Ver el bloque "manipulacion de resenas" del
 	script para el porque del panel EN VIVO que este reemplazo el 2026-09-18.
 -->
+<div hidden={pestanaFraude !== 'resenas'}>
 <section class="fraude" aria-labelledby="titulo-anillos-p">
 	<div class="titulo">
 		<h2 id="titulo-anillos-p">Manipulacion de resenas</h2>
@@ -1335,6 +1382,7 @@
 		{/if}
 	{/if}
 </section>
+</div>
 
 <style>
 	.fraude {

@@ -5,8 +5,9 @@
 	import BotonTema from './BotonTema.svelte';
 	import BuscadorCabecera from './BuscadorCabecera.svelte';
 	import NotificacionesFraude from './NotificacionesFraude.svelte';
+	import NotificacionesAdmin from './NotificacionesAdmin.svelte';
 	import { pedir } from './api';
-	import { cerrarSesion, ID_ROL_ADMIN, leerSesion, verificarSesion } from './sesion';
+	import { cerrarSesion, esCuentaDesarrollador, ID_ROL_ADMIN, leerSesion, verificarSesion } from './sesion';
 	import { carrito } from './estadoCarrito.svelte';
 
 	/**
@@ -75,6 +76,14 @@
 
 	/** La prop manda si viene; si no, lo que averigüe yo. */
 	let correo = $derived(sesion !== undefined ? sesion : propia);
+
+	/**
+	 * Las cuentas `desarrollador*` tienen su propio boton, "Desarrollador", igual que el admin tiene
+	 * "Admin": abre SOLO los comandos, separados de "Mi perfil" (alertas y cuenta). Sale del correo,
+	 * que ya se conoce en cualquier pagina, asi que no hace falta otra consulta ni otra prop. Solo
+	 * decide que se pinta: los comandos los valida el programa local, no esta pagina.
+	 */
+	let soyDesarrollador = $derived(esCuentaDesarrollador(correo));
 
 	onMount(async () => {
 		// Si me la pasan, no pregunto: el panel ya hizo esa consulta.
@@ -241,6 +250,12 @@
 				     y no solo estar disponible si alguien la va a buscar. -->
 				<NotificacionesFraude />
 
+				<!-- La del admin es otra, aparte de la general: solo aparece con
+				     sesion de admin y avisa de lo que hay que revisar en el panel. -->
+				{#if soyAdmin}
+					<NotificacionesAdmin />
+				{/if}
+
 				<!-- En pantalla grande, la fila de siempre.
 
 				     El correo NO va aqui: ocupaba el sitio de una accion y no es una.
@@ -258,6 +273,9 @@
 					     perfil lleva a lo personal, que es igual para todos los roles. -->
 					{#if soyAdmin}
 						<a class="navegar admin" href="/panel?s=reportes">Admin</a>
+					{/if}
+					{#if soyDesarrollador}
+						<a class="navegar admin" href="/panel?s=comandos">Desarrollador</a>
 					{/if}
 					<a class="navegar" href="/panel?s=cuenta">Mi perfil</a>
 					<button type="button" class="navegar" onclick={alSalir ?? salirPorMiCuenta}>
@@ -295,6 +313,9 @@
 						<a class="opcion" href="/pedidos" onclick={() => cerrarMenu()}>Mis pedidos</a>
 						{#if soyAdmin}
 							<a class="opcion" href="/panel?s=reportes" onclick={() => cerrarMenu()}>Admin</a>
+						{/if}
+						{#if soyDesarrollador}
+							<a class="opcion" href="/panel?s=comandos" onclick={() => cerrarMenu()}>Desarrollador</a>
 						{/if}
 						<a class="opcion" href="/panel?s=cuenta" onclick={() => cerrarMenu()}>Mi perfil</a>
 						<button type="button" class="opcion" onclick={salirDesdeMenu}>Salir</button>

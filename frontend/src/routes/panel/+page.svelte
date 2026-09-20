@@ -140,7 +140,6 @@
 				// entrada sospechosos, y nadie los iria a buscar bajo ese nombre.
 				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo e intentos de entrada sospechosos' },
 				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Lo mas visto, comprado y buscado en los ultimos dias' },
-				{ id: 'demo', nombre: 'Demo', pie: 'Disparar ataques y anillos de prueba para la defensa' },
 				// Distinta de "Fraude": esa es EN VIVO contra el grafo y solo la ve
 				// un admin; esta es "a mi cuenta le paso algo" y la ve cualquiera --
 				// GET /perfil/alertas-fraude, filtrado a la sesion de quien pregunta.
@@ -190,10 +189,20 @@
 	const PERSONALES = new Set(['alertas', 'cuenta']);
 	let enPerfil = $derived(esAdmin && PERSONALES.has(seccion));
 
+	/**
+	 * El ambito "Desarrollador", como Admin y Mi perfil en el admin: la cuenta de desarrollo tiene su
+	 * propio boton en la cabecera y ese boton abre SOLO los comandos, sin Alertas ni Mi cuenta (pedido
+	 * de Meme, 2026-09-20). El resto del panel (ofertas, propuestas, alertas y cuenta) es el de
+	 * cualquier vendedor, y ahi ya no sale Comandos.
+	 */
+	let enDesarrollo = $derived(esDesarrollador && seccion === 'comandos');
+
 	let secciones = $derived(
 		esAdmin
 			? todasLasSecciones.filter((s) => PERSONALES.has(s.id) === enPerfil)
-			: todasLasSecciones
+			: esDesarrollador
+				? todasLasSecciones.filter((s) => (s.id === 'comandos') === enDesarrollo)
+				: todasLasSecciones
 	);
 
 	/**
@@ -266,7 +275,9 @@
 	 * vende dos docenas fue exactamente el fallo anterior.
 	 */
 	let saludo = $derived(
-		esAdmin
+		enDesarrollo
+			? 'Herramientas para desarrollar y ensenar Mesh: arrancar el sistema, cargar productos con semilla y lanzar las demos. Tus ofertas, tus alertas y tu cuenta estan en Mi perfil.'
+			: esAdmin
 			? enPerfil
 				? 'Tus datos, tus direcciones y los avisos de seguridad de tu cuenta. Lo de administrar el sistema esta en el boton Admin de arriba.'
 				: 'Desde aqui gestionas las cuentas y los catalogos del sistema. Tus datos personales estan en Mi perfil.'
@@ -558,6 +569,8 @@
 			<div class="saludo">
 				{#if esAdmin}
 					<p class="ambito">{enPerfil ? 'Mi perfil' : 'Administracion'}</p>
+				{:else if enDesarrollo}
+					<p class="ambito">Desarrollador</p>
 				{/if}
 				<h1>Hola, {perfil.nombre}</h1>
 				<!-- Uno por rol. Antes era un texto fijo -- "Tu tienda esta lista.

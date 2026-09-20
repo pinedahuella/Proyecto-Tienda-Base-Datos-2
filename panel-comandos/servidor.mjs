@@ -186,7 +186,7 @@ const CATALOGO = [
   // --- Demos de fraude ----------------------------------------------------
   {
     id: 'entrar-pais', grupo: 'Demos de fraude', titulo: 'Entrar a Mesh desde otro pais',
-    explica: 'Te da un link con el nombre del pais (mesh-singapur.ledkid.com) que abre la tienda real vista desde ese pais, en cualquier navegador o en el celular, y ademas abre una ventana de Chrome ya puesta en ese pais. Inicia sesion tu mismo. Para el viaje imposible, entra con la misma cuenta desde otro pais: vuelve a pulsar Ejecutar con otro pais. Tus otras ventanas no cambian.',
+    explica: 'Agrega un pais: te da un link con su nombre (mesh-singapur.ledkid.com) que abre la tienda real vista desde ese pais, en cualquier navegador o en el celular, y ademas abre una ventana de Chrome ya puesta en ese pais. No cierra los otros paises que ya tengas abiertos. Para el viaje imposible entra con la misma cuenta desde dos paises.',
     script: 'demo-entrar-otro-pais.ps1', confirmar: null,
     campos: [
       { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },
@@ -194,14 +194,27 @@ const CATALOGO = [
     construir: (v) => ['-Pais', v.pais],
   },
   {
+    id: 'entrar-paises', grupo: 'Demos de fraude', titulo: 'Abrir varios paises a la vez',
+    explica: 'Marca los paises y se abre un link por cada uno, todos a la vez, para ensenar que tu escoges desde donde se entra. Abre exactamente los que marques y cierra los otros. Cada pais es un Tor de casi 100 MB: con los ocho la maquina puede ir lenta, para ensenar bastan dos o tres.',
+    script: 'demo-entrar-otro-pais.ps1', confirmar: null,
+    campos: [
+      {
+        nombre: 'paises', etiqueta: 'Paises', tipo: 'multiple', defecto: 'sg,de',
+        opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'],
+        rotulos: { sg: 'Singapur', de: 'Alemania', jp: 'Japon', us: 'EE. UU.', nl: 'Holanda', fr: 'Francia', gb: 'Reino Unido', ca: 'Canada' },
+      },
+    ],
+    construir: (v) => ['-Paises', v.paises],
+  },
+  {
     id: 'entrar-pais-estado', grupo: 'Demos de fraude', titulo: 'Ver desde donde salgo',
-    explica: 'Muestra el contenedor de Tor en Docker, la IP y el pais con los que sale, y si la ventana y el tunel siguen abiertos.',
+    explica: 'Muestra que paises estan abiertos: su contenedor de Tor en Docker, la IP y el pais con los que sale, y si su link contesta.',
     script: 'demo-entrar-otro-pais.ps1', campos: [], confirmar: null,
     construir: () => ['-Estado'],
   },
   {
-    id: 'entrar-pais-cerrar', grupo: 'Demos de fraude', titulo: 'Cerrar la ventana de otro pais',
-    explica: 'Cierra el link por pais, la ventana de Chrome, el tunel y Tor. Tus otras ventanas no se tocan, y mesh.ledkid.com sigue como estaba.',
+    id: 'entrar-pais-cerrar', grupo: 'Demos de fraude', titulo: 'Acabar el tour: cerrar todos los paises',
+    explica: 'Cierra TODOS los paises abiertos: sus links, sus Tor y la ventana de Chrome. Tus otras ventanas no se tocan, y mesh.ledkid.com sigue como estaba.',
     script: 'demo-entrar-otro-pais.ps1', campos: [], confirmar: null,
     construir: () => ['-Cerrar'],
   },
@@ -228,7 +241,7 @@ const CATALOGO = [
   },
   {
     id: 'demo-pais-precalentar', grupo: 'Demos de fraude', titulo: 'Precalentar la demo de otro pais',
-    explica: 'Hazlo antes de la clase. Comprueba que el tunel pueda salir (en la U conecta WARP), construye la imagen de Tor y deja Tor con salida en el pais. No apaga nada de Mesh. Despues la demo arranca mas rapido. Tor queda corriendo, unos 50 MB.',
+    explica: 'Hazlo antes de la clase. Comprueba que el tunel pueda salir (en la U conecta WARP), construye la imagen de Tor y deja Tor con salida en el pais. No apaga nada de Mesh. Despues la demo arranca mas rapido. Tor queda corriendo, casi 100 MB.',
     script: 'demo-fraude-pais.ps1', confirmar: null,
     campos: [
       { nombre: 'pais', etiqueta: 'Pais', tipo: 'opcion', opciones: ['sg', 'de', 'jp', 'us', 'nl', 'fr', 'gb', 'ca'], defecto: 'sg' },
@@ -276,6 +289,15 @@ function validarCampo(campo, crudo) {
   if (campo.tipo === 'opcion') {
     if (!campo.opciones.includes(valor)) throw new ErrorDeUso(`${campo.etiqueta} no es una opcion valida`);
     return valor;
+  }
+  if (campo.tipo === 'multiple') {
+    // Varias opciones separadas por coma ("sg,de,jp"): cada una tiene que estar en la lista
+    const partes = [...new Set(valor.split(',').map((x) => x.trim()).filter(Boolean))];
+    if (partes.length === 0) throw new ErrorDeUso(`Elige al menos una opcion en ${campo.etiqueta}`);
+    for (const p of partes) {
+      if (!campo.opciones.includes(p)) throw new ErrorDeUso(`${campo.etiqueta} trae una opcion que no existe`);
+    }
+    return partes.join(',');
   }
   if (campo.tipo === 'texto') {
     if (!new RegExp(campo.patron).test(valor)) throw new ErrorDeUso(`${campo.etiqueta} no tiene el formato esperado`);

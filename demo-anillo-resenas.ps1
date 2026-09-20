@@ -219,6 +219,6 @@ Ok "  listo"
 Write-Host ""
 Write-Host "=============================================================="
 Write-Host " Anillo armado: $($miembros.Correo -join ' -> ') -> $($miembros[0].Correo)" -ForegroundColor Yellow
-Write-Host " Panel: $Frontend/panel?s=fraude" -ForegroundColor Yellow
+Write-Host " Panel: $Frontend/panel?s=fraude&t=resenas" -ForegroundColor Yellow
 Write-Host "=============================================================="
-Start-Process "$Frontend/panel?s=fraude"
+Start-Process "$Frontend/panel?s=fraude&t=resenas"

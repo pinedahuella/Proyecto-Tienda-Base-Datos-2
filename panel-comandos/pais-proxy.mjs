@@ -1,15 +1,19 @@
 // pais-proxy.mjs
-// El link de Mesh "visto desde otro pais". Todo lo que llega a mesh-<pais>.ledkid.com se
-// reenvia a https://mesh.ledkid.com SALIENDO POR TOR de ese pais. Para el backend, quien
-// abre ese link (desde tu navegador de siempre, o desde un celular) esta en Singapur,
-// Alemania, etc.: su IP es la de la salida de Tor, y la alerta de viaje imposible salta
-// con un login normal. Lo lanza demo-entrar-otro-pais.ps1 (via pais-enlace.ps1).
+// Los links de Mesh "vistos desde otro pais". Todo lo que llega a mesh-<pais>.ledkid.com se
+// reenvia a https://mesh.ledkid.com SALIENDO POR EL TOR de ESE pais. Para el backend, quien
+// abre el link (desde el navegador que sea, o un celular) esta en Singapur, Alemania, etc.: su
+// IP es la de la salida de Tor de ese pais, y la alerta de viaje imposible salta con un login
+// normal. Lo lanza pais-enlace.ps1.
 //
-//   node pais-proxy.mjs        con PAIS_HOST, PAIS_NOMBRE y TOR_SOCKS_PUERTO en el entorno
+//   node pais-proxy.mjs        con PAIS_TABLA (y opcionalmente PAIS_PROXY_PUERTO) en el entorno
+//
+// UN solo programa atiende a TODOS los paises abiertos. Que paises hay se lee de un archivo
+// (PAIS_TABLA, paises-activos.json) EN CADA PETICION: abrir o cerrar un pais es escribir ese
+// archivo, sin reiniciar nada ni tocar el tunel. Cada pais lleva el puerto SOCKS de su Tor.
 //
 // Que lo hace seguro de dejar corriendo:
 //   1. Solo hay UN destino, mesh.ledkid.com. No es un proxy abierto: no reenvia a otro sitio.
-//   2. Solo contesta al Host de su pais (PAIS_HOST). Cualquier otro Host recibe un aviso.
+//   2. Solo contesta a los Host que estan en la tabla. Cualquier otro recibe un aviso.
 //   3. Escucha solo en 127.0.0.1; a el llega cloudflared, que ya esta en esta maquina.
 //   4. NO reenvia quien es el visitante (X-Forwarded-For, CF-*, Forwarded...): si lo pasara,
 //      el backend veria la IP real de quien abre el link y no la de Tor, y no serviria.
@@ -18,30 +22,53 @@
 // Va mas lento que la tienda normal: cada conexion nueva pasa por Tor. Se reusan las
 // conexiones (keep-alive) para no pagar el saludo de Tor en cada archivo.
 
+import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import net from 'node:net';
 import tls from 'node:tls';
 
 const PUERTO = Number(process.env.PAIS_PROXY_PUERTO || 5299);
-const HOST_PAIS = (process.env.PAIS_HOST || '').toLowerCase();
-const NOMBRE = process.env.PAIS_NOMBRE || 'otro pais';
-const SOCKS = { host: '127.0.0.1', port: Number(process.env.TOR_SOCKS_PUERTO || 9051) };
+const TABLA = process.env.PAIS_TABLA || '';
 const DESTINO = 'mesh.ledkid.com';
 
-if (!HOST_PAIS) { console.error('Falta PAIS_HOST'); process.exit(1); }
+if (!TABLA) { console.error('Falta PAIS_TABLA'); process.exit(1); }
+
+// --- La tabla de paises abiertos, releida cuando cambia el archivo ---
+let cache = { mtime: 0, porHost: new Map(), porCodigo: new Map() };
+function tabla() {
+  try {
+    const st = fs.statSync(TABLA);
+    if (st.mtimeMs === cache.mtime) return cache;
+    const j = JSON.parse(fs.readFileSync(TABLA, 'utf8').replace(/^﻿/, ''));
+    const porHost = new Map();
+    const porCodigo = new Map();
+    for (const [codigo, e] of Object.entries(j.paises || {})) {
+      const entrada = { codigo, nombre: e.nombre, host: String(e.host).toLowerCase(), socks: Number(e.socks), usuario: e.usuario ? String(e.usuario) : '' };
+      porHost.set(entrada.host, entrada);
+      porCodigo.set(codigo, entrada);
+    }
+    cache = { mtime: st.mtimeMs, porHost, porCodigo };
+  } catch {
+    // Sin archivo o a medio escribir: se sigue con lo que habia
+    if (!fs.existsSync(TABLA)) cache = { mtime: 0, porHost: new Map(), porCodigo: new Map() };
+  }
+  return cache;
+}
 
 // --- SOCKS5 sin dependencias: CONNECT por nombre, sin autenticacion. Tor resuelve el DNS. ---
-function conectarPorSocks(host, puerto) {
+function conectarPorSocks(socksPuerto, host, puerto, usuario = '') {
   return new Promise((resolver, rechazar) => {
-    const s = net.connect(SOCKS.port, SOCKS.host);
+    const s = net.connect(socksPuerto, '127.0.0.1');
     s.setTimeout(45000);
     const falla = (e) => { s.destroy(); rechazar(e); };
     s.once('error', falla);
     s.once('timeout', () => falla(new Error('Tor no contesto a tiempo')));
-    s.once('connect', () => s.write(Buffer.from([5, 1, 0])));
-    s.once('data', (d) => {
-      if (d[0] !== 5 || d[1] !== 0) return falla(new Error('Tor rechazo el saludo SOCKS'));
+    // Con `usuario` (la etiqueta de un circuito, c3) se pide autenticacion usuario/clave: Tor da un
+    // circuito distinto por cada usuario, asi que todas las conexiones de este pais usan el MISMO
+    // circuito, el que se verifico con el backend, y no uno cualquiera de los que arma Tor.
+    const conAuth = Boolean(usuario);
+    const pedirDestino = () => {
       const h = Buffer.from(host);
       s.write(Buffer.concat([Buffer.from([5, 1, 0, 3, h.length]), h, Buffer.from([puerto >> 8, puerto & 255])]));
       s.once('data', (r) => {
@@ -50,17 +77,30 @@ function conectarPorSocks(host, puerto) {
         s.removeListener('error', falla);
         resolver(s);
       });
+    };
+    s.once('connect', () => s.write(Buffer.from(conAuth ? [5, 1, 2] : [5, 1, 0])));
+    s.once('data', (d) => {
+      if (d[0] !== 5 || d[1] !== (conAuth ? 2 : 0)) return falla(new Error('Tor rechazo el saludo SOCKS'));
+      if (!conAuth) return pedirDestino();
+      const u = Buffer.from(usuario);
+      const clave = Buffer.from('x');
+      s.write(Buffer.concat([Buffer.from([1, u.length]), u, Buffer.from([clave.length]), clave]));
+      s.once('data', (a) => {
+        if (a[1] !== 0) return falla(new Error('Tor rechazo el usuario del circuito'));
+        pedirDestino();
+      });
     });
   });
 }
 
-// Un agente por destino: las conexiones se abren por Tor y se reusan.
+// Un agente por (destino, Tor de un pais): las conexiones se abren por ESE Tor y se reusan.
 const agentes = new Map();
-function agenteHacia(destino) {
-  if (agentes.has(destino)) return agentes.get(destino);
+function agenteHacia(destino, socksPuerto, usuario = '') {
+  const clave = `${destino}@${socksPuerto}#${usuario}`;
+  if (agentes.has(clave)) return agentes.get(clave);
   const agente = new https.Agent({ keepAlive: true, maxSockets: 8, keepAliveMsecs: 30000 });
   agente.createConnection = (_opciones, cb) => {
-    conectarPorSocks(destino, 443)
+    conectarPorSocks(socksPuerto, destino, 443, usuario)
       .then((sock) => {
         const t = tls.connect({ socket: sock, servername: destino, ALPNProtocols: ['http/1.1'] });
         t.once('secureConnect', () => cb(null, t));
@@ -68,7 +108,7 @@ function agenteHacia(destino) {
       })
       .catch((e) => cb(e));
   };
-  agentes.set(destino, agente);
+  agentes.set(clave, agente);
   return agente;
 }
 
@@ -91,22 +131,30 @@ function json(res, cuerpo) {
 const servidor = http.createServer((req, res) => {
   const host = (req.headers.host || '').toLowerCase().split(':')[0];
   const esLocal = host === '127.0.0.1' || host === 'localhost';
+  const t = tabla();
+  const entrada = t.porHost.get(host);
+  const url = new URL(req.url, 'http://x');
 
-  // Comprobaciones de este mismo programa. Solo por loopback o por el host de este pais.
-  if (req.url === '/__pais/estado' && (esLocal || host === HOST_PAIS)) {
-    return json(res, { pais: NOMBRE, host: HOST_PAIS, destino: DESTINO, socks: SOCKS.port });
+  // Comprobaciones de este mismo programa: solo por loopback, o por el host de un pais abierto.
+  if (url.pathname === '/__pais/estado' && (esLocal || entrada)) {
+    return json(res, { destino: DESTINO, paises: [...t.porCodigo.values()].map((e) => ({ codigo: e.codigo, nombre: e.nombre, host: e.host, socks: e.socks })) });
   }
-  if (req.url === '/__pais/ip' && (esLocal || host === HOST_PAIS)) {
-    // La IP con la que Tor sale a internet, para comprobar que el link si es de ese pais
-    https.get({ agent: agenteHacia('api.ipify.org'), host: 'api.ipify.org', path: '/', headers: { host: 'api.ipify.org' } }, (r) => {
-      let t = ''; r.on('data', (d) => (t += d)); r.on('end', () => json(res, { ip: t.trim(), pais: NOMBRE }));
-    }).on('error', (e) => pagina(res, 502, 'Sin salida por Tor', e.message));
+  if (url.pathname === '/__pais/ip' && (esLocal || entrada)) {
+    // La IP con la que sale el Tor de ese pais: ?pais=sg por loopback, o el pais del propio host
+    const e = entrada || t.porCodigo.get(url.searchParams.get('pais') || '');
+    if (!e) return pagina(res, 404, 'Pais no abierto', 'Ese pais no esta abierto.');
+    https.get({ agent: agenteHacia('api.ipify.org', e.socks, e.usuario), host: 'api.ipify.org', path: '/', headers: { host: 'api.ipify.org' } }, (r) => {
+      let txt = ''; r.on('data', (d) => (txt += d)); r.on('end', () => json(res, { ip: txt.trim(), pais: e.nombre, codigo: e.codigo }));
+    }).on('error', (err) => pagina(res, 502, 'Sin salida por Tor', err.message));
     return;
   }
 
-  if (host !== HOST_PAIS) {
+  if (!entrada) {
+    const abiertos = [...t.porHost.keys()];
     return pagina(res, 503, 'Esta direccion no esta abierta',
-      `Mesh visto desde ${NOMBRE} vive en <b>${HOST_PAIS}</b>. Esta otra direccion no esta activa ahora.`);
+      abiertos.length
+        ? `Ahora estan abiertos: <b>${abiertos.join('</b>, <b>')}</b>.`
+        : 'No hay ningun pais abierto ahora. Se abren desde el panel de comandos de Mesh.');
   }
 
   const cab = {};
@@ -117,14 +165,14 @@ const servidor = http.createServer((req, res) => {
   cab.host = DESTINO;
   // El origen de la peticion tiene que ser el destino real, o Mesh la toma por ajena
   if (cab.origin) cab.origin = `https://${DESTINO}`;
-  if (cab.referer) cab.referer = cab.referer.replace(`https://${HOST_PAIS}`, `https://${DESTINO}`);
+  if (cab.referer) cab.referer = cab.referer.replace(`https://${entrada.host}`, `https://${DESTINO}`);
 
   const salida = https.request(
-    { agent: agenteHacia(DESTINO), host: DESTINO, port: 443, method: req.method, path: req.url, headers: cab },
+    { agent: agenteHacia(DESTINO, entrada.socks, entrada.usuario), host: DESTINO, port: 443, method: req.method, path: req.url, headers: cab },
     (r) => {
       const h = { ...r.headers };
       // Las redirecciones y las cookies tienen que quedarse en ESTE host, no saltar a mesh.ledkid.com
-      if (h.location) h.location = h.location.replace(`https://${DESTINO}`, `https://${HOST_PAIS}`);
+      if (h.location) h.location = h.location.replace(`https://${DESTINO}`, `https://${entrada.host}`);
       if (h['set-cookie']) h['set-cookie'] = h['set-cookie'].map((c) => c.replace(/;\s*domain=[^;]*/i, ''));
       delete h['strict-transport-security'];
       res.writeHead(r.statusCode, h);
@@ -133,7 +181,7 @@ const servidor = http.createServer((req, res) => {
   );
   salida.setTimeout(90000, () => salida.destroy(new Error('Mesh no contesto por Tor a tiempo')));
   salida.on('error', (e) => {
-    if (!res.headersSent) pagina(res, 502, 'No llego a Mesh', `La salida por Tor de ${NOMBRE} fallo (${e.message}). Intenta de nuevo en unos segundos.`);
+    if (!res.headersSent) pagina(res, 502, 'No llego a Mesh', `La salida por Tor de ${entrada.nombre} fallo (${e.message}). Intenta de nuevo en unos segundos.`);
     else res.destroy();
   });
   req.pipe(salida);
@@ -141,4 +189,4 @@ const servidor = http.createServer((req, res) => {
 
 servidor.requestTimeout = 0;
 servidor.on('error', (e) => { console.error(e.code === 'EADDRINUSE' ? `El puerto ${PUERTO} ya esta ocupado.` : e.message); process.exit(1); });
-servidor.listen(PUERTO, '127.0.0.1', () => console.log(`Mesh desde ${NOMBRE}: ${HOST_PAIS} -> ${DESTINO} por Tor (socks ${SOCKS.port}), escuchando en 127.0.0.1:${PUERTO}`));
+servidor.listen(PUERTO, '127.0.0.1', () => console.log(`Links por pais -> ${DESTINO} por Tor, tabla ${TABLA}, escuchando en 127.0.0.1:${PUERTO}`));

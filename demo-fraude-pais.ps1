@@ -18,7 +18,7 @@
 # tunel pueda salir (en la U hace falta WARP), construye una vez la imagen de Tor
 # (la demo ya no instala paquetes en vivo) y deja Tor corriendo con salida en el
 # pais y comprobada. Con -ConCopia tambien compila la copia. Tor caliente pesa unos
-# 50 MB; para soltarlo: docker rm -f mesh-tor-demo
+# 100 MB; para soltarlo: docker rm -f mesh-tor-<pais>
 #
 # Paises probados: sg (Singapur), de (Alemania), jp (Japon), us (EE.UU.),
 # nl (Holanda), fr (Francia), gb (Reino Unido), ca (Canada).
@@ -92,17 +92,6 @@ if ($Limpiar) {
 . (Join-Path $repo 'tor-demo.ps1')
 . (Join-Path $repo 'pais-enlace.ps1')
 
-# Si hay una ventana abierta desde otro pais (demo-entrar-otro-pais.ps1), el Tor es de
-# ella. Cambiarle el pais por debajo le rompe la sesion, asi que se pide cerrarla antes.
-function Comprobar-SesionPais {
-    $sesion = Join-Path $MeshDemoTmp 'entrar-pais.json'
-    if (-not (Test-Path $sesion)) { return }
-    $s = Get-Content $sesion -Raw | ConvertFrom-Json
-    if ($s.pais -ne $Pais) {
-        Mal "Hay una ventana abierta desde '$($s.pais)'. Cierrala primero (.\demo-entrar-otro-pais.ps1 -Cerrar) o usa -Pais $($s.pais)."
-        exit 1
-    }
-}
 
 # --- -Precalentar: lo lento, hecho antes y sin tocar lo que se ve ---
 if ($Precalentar) {
@@ -118,16 +107,15 @@ if ($Precalentar) {
         Ok "Copia lista"
     }
     Paso "Tor con salida en '$Pais'"
-    Comprobar-SesionPais
-    if (-not (Levantar-Tor $Pais)) { Mal "Tor no arranco a tiempo."; docker rm -f mesh-tor-demo *> $null; exit 1 }
+    if (-not (Levantar-Tor $Pais)) { Mal "Tor no arranco a tiempo."; Quitar-Tor $Pais; exit 1 }
     $sal = Buscar-SalidaTor $Pais
-    if (-not $sal) { Mal "No consegui una salida en '$Pais'. Prueba otro pais."; docker rm -f mesh-tor-demo *> $null; exit 1 }
+    if (-not $sal) { Mal "No consegui una salida en '$Pais'. Prueba otro pais."; Quitar-Tor $Pais; exit 1 }
     Ok "Salida comprobada, IP $($sal.Ip) ($($Pais.ToUpper()))"
     Write-Host "`n=============================================================="
     Write-Host " LISTO. Todo lo lento ya esta hecho para $($Pais.ToUpper())." -ForegroundColor Green
     Write-Host " Cuando quieras la demo:   .\demo-fraude-pais.ps1 -Pais $Pais" -ForegroundColor Yellow
-    Write-Host " Tor queda corriendo (unos 50 MB). Para soltarlo:"
-    Write-Host "   docker rm -f mesh-tor-demo"
+    Write-Host " Tor queda corriendo (casi 100 MB). Para soltarlo:"
+    Write-Host "   docker rm -f mesh-tor-$Pais"
     Write-Host "=============================================================="
     exit 0
 }
@@ -144,8 +132,8 @@ $pausadas = $false; $pCopia = $null; $tun = $null
 function Limpiar-Demo {
     if ($tun)    { Stop-Process -Id $tun.Proceso.Id -Force -ErrorAction SilentlyContinue }
     if ($pCopia) { Stop-Process -Id $pCopia.Id -Force -ErrorAction SilentlyContinue; Arrancar-BackendNormal $repo | Out-Null }
-    # Si hay una ventana abierta desde otro pais (demo-entrar-otro-pais.ps1), ese Tor es suyo
-    if (-not (Test-Path (Join-Path $MeshDemoTmp 'entrar-pais.json'))) { docker rm -f mesh-tor-demo *> $null }
+    # Si el link de este pais quedo abierto (Abrir-EnlacePais), ese Tor se queda para el
+    if (-not (Pais-Activo $Pais)) { Quitar-Tor $Pais }
     if ($pausadas) { docker start mesh-clickhouse mesh-neo4j *> $null }
 }
 function Salir-Demo([int]$codigo) { Limpiar-Demo; exit $codigo }
@@ -180,7 +168,6 @@ if ($ConCopia) {
 
 # --- Tor en el pais elegido, con un circuito que de verdad salga de ahi ---
 Paso "Levantando Tor con salida en '$Pais'"
-Comprobar-SesionPais
 if (-not (Levantar-Tor $Pais)) { Mal "Tor no arranco a tiempo."; Salir-Demo 1 }
 $salida = Buscar-SalidaTor $Pais
 if (-not $salida) { Mal "No consegui una salida en '$Pais'. Prueba otro pais."; Salir-Demo 1 }
@@ -219,7 +206,7 @@ $desde = (Get-Date).ToUniversalTime().AddSeconds(-5).ToString('yyyy-MM-ddTHH:mm:
     1..4 | ForEach-Object {
         $json = '{"identificador":"demo.' + $Pais + $_ + '@mesh.test","contrasena":"mala"}'
         $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
-        $codigos += (docker exec mesh-tor-demo sh -c "echo $b64 | base64 -d | curl -s -m 40 --socks5-hostname $socks -o /dev/null -w '%{http_code}' -A $marca -H 'Content-Type: application/json' --data-binary @- $url/usuario/login" 2>$null)
+        $codigos += (docker exec (Nombre-Tor $Pais) sh -c "echo $b64 | base64 -d | curl -s -m 40 --socks5-hostname $socks -o /dev/null -w '%{http_code}' -A $marca -H 'Content-Type: application/json' --data-binary @- $url/usuario/login" 2>$null)
     }
 }
 Start-Sleep 7
@@ -270,12 +257,9 @@ Ok "Alertas: $alertas"
 $enlace = $null
 if (-not $ConCopia) {
     Paso "El link de $($TituloPais[$Pais]), para entrar tu mismo"
-    $enlace = Abrir-EnlacePais $Pais
+    $enlace = Abrir-EnlacePais $Pais $ipSalida $salida.Usuario
     if ($enlace) {
         Ok "Listo: $enlace"
-        New-Item -ItemType Directory -Force $MeshDemoTmp | Out-Null
-        @{ pais = $Pais; url = $enlace; tunelPid = $null; ip = $ipSalida; enlace = $enlace; desde = (Get-Date -Format 's') } |
-            ConvertTo-Json | Set-Content (Join-Path $MeshDemoTmp 'entrar-pais.json') -Encoding ascii
     } else {
         Write-Host "   Sin link por pais; la demo termina como siempre." -ForegroundColor Yellow
     }
@@ -295,7 +279,7 @@ if ($enlace) {
     Write-Host " Ahora entra TU MISMO desde $($TituloPais[$Pais]). Abre este link en CUALQUIER navegador (tambien el celular):" -ForegroundColor Green
     Write-Host "   $enlace/entrar" -ForegroundColor Yellow
     Write-Host " Quien lo abra aparece en $($TituloPais[$Pais]) para la tienda, y su login queda con esa IP. Va mas lento: sale por Tor."
-    Write-Host " Para cerrar el link:   .\demo-entrar-otro-pais.ps1 -Cerrar" -ForegroundColor Yellow
+    Write-Host " Para ver o cerrar los paises abiertos:   .\demo-entrar-otro-pais.ps1 -Estado   /   -Cerrar" -ForegroundColor Yellow
     Write-Host ""
 }
 Write-Host " Para borrar la alerta de demostracion cuando termines:"
