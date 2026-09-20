@@ -2,9 +2,9 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 113 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 114 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
-Las líneas son las del commit 740d984 de main. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
+Las líneas son las del código en main al 20 de septiembre de 2026. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
 
 ## Lo que pide el profesor, en corto
 
@@ -20,10 +20,10 @@ Las líneas son las del commit 740d984 de main. Si el código cambia después, l
 - [Parte 2. Catálogo documental en MongoDB](#parte-2-catálogo-documental-en-mongodb), preguntas 17 a 31
 - [Parte 3. Carrito y oferta limitada en Redis](#parte-3-carrito-y-oferta-limitada-en-redis), preguntas 32 a 46
 - [Parte 4. Grafo de reseñas en Neo4j y tendencias en ClickHouse](#parte-4-grafo-de-reseñas-en-neo4j-y-tendencias-en-clickhouse), preguntas 47 a 61
-- [Parte 5. Buscador en Elasticsearch y consistencia del checkout](#parte-5-buscador-en-elasticsearch-y-consistencia-del-checkout), preguntas 62 a 77
-- [Parte 6. Fraude de login y de IP](#parte-6-fraude-de-login-y-de-ip), preguntas 78 a 96
-- [Parte 7. Arquitectura, seguridad y entrega final](#parte-7-arquitectura-seguridad-y-entrega-final), preguntas 97 a 110
-- [Parte 8. Entrega final, lo que hoy hay en el repositorio](#parte-8-entrega-final-lo-que-hoy-hay-en-el-repositorio), preguntas 111 a 113
+- [Parte 5. Buscador en Elasticsearch y consistencia del checkout](#parte-5-buscador-en-elasticsearch-y-consistencia-del-checkout), preguntas 62 a 78
+- [Parte 6. Fraude de login y de IP](#parte-6-fraude-de-login-y-de-ip), preguntas 79 a 97
+- [Parte 7. Arquitectura, seguridad y entrega final](#parte-7-arquitectura-seguridad-y-entrega-final), preguntas 98 a 111
+- [Parte 8. Entrega final, lo que hoy hay en el repositorio](#parte-8-entrega-final-lo-que-hoy-hay-en-el-repositorio), preguntas 112 a 114
 
 ---
 
@@ -644,6 +644,13 @@ Usa la imagen 8.15.3 en un solo nodo. El heap se fija en 512 megas con mínimo y
 - Lo que pide el profesor. Entrega 3, componente de búsqueda en la arquitectura, con Elasticsearch como opción de referencia. El enunciado pide documentar las decisiones (sección 5.3).
 - Por qué así. Con la 8.x la seguridad viene encendida y genera credenciales nuevas en cada reinicio. Apagarla es una decisión de desarrollo escrita en el propio archivo, y ahí mismo dice que es la primera línea a quitar fuera de desarrollo.
 
+### 78. ¿Cómo se inspecciona el índice de Elasticsearch desde una interfaz gráfica?
+Con Kibana, en la misma versión que Elasticsearch, la 8.15.3. Es un servicio más del docker compose, abre en el puerto 5601 solo en localhost y se conecta a Elasticsearch por su nombre de servicio. Un contenedor de un solo uso crea solo las vistas de datos de Productos y de Eventos de autenticación, así que en Discover ya se ven los documentos, con un rango de tiempo por defecto de 60 días.
+
+- Dónde se ve. `docker-compose.yml` lineas 295 a 334, el servicio kibana con su tope de memoria. `docker-compose.yml` lineas 336 a 361, el contenedor que crea las vistas. `docker/kibana/vistas.sh` lineas 1 a 24, qué hace y por qué existe. `arrancar.ps1` lineas 3371 a 3398, el paso que espera y cuenta el resultado.
+- Lo que pide el profesor. El enunciado no pide una interfaz gráfica. Sirve para enseñar en vivo el mapping construido a propósito y los documentos del índice, que es lo que la Entrega 3 pide justificar en el buscador (5 pts).
+- Por qué así. Kibana lleva un tope de memoria de 640 MB porque la máquina va justa, y solo escucha en localhost porque Elasticsearch corre con la seguridad apagada.
+
 
 ---
 
@@ -660,133 +667,133 @@ Archivos que más se usan en esta parte.
 - `migrations/018_notificacion_fraude.sql`
 - `frontend/src/lib/PanelFraude.svelte`
 
-### 78. ¿Qué detecta el módulo de fraude de login y cuántas señales tiene?
+### 79. ¿Qué detecta el módulo de fraude de login y cuántas señales tiene?
 Detecta intentos sospechosos de entrar a una cuenta. Tiene nueve señales. Cuatro se cuentan en Redis dentro del propio login (fuerza bruta por IP, fuerza bruta por cuenta, multi cuenta por IP y rotación de IP). Cinco se consultan en Elasticsearch (toma de cuenta, viaje imposible y tres versiones lentas de 24 horas).
 
 - Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 119 a 150, las cuatro revisiones de Redis corriendo juntas. `backend/src/models/alerta-fraude.ts` lineas 20 a 28, los nueve ids de tipo. `migrations/017_alertas_fraude_extendidas.sql` lineas 47 a 58, los seis tipos que se suman a los tres de la 016.
 - Lo que pide el profesor. El enunciado no pide fraude de login, es valor extra del grupo. Se apoya en la Entrega 2 (10 puntos, almacén clave-valor con operaciones atómicas) y en la Entrega 3 (15 puntos, agregaciones del motor de búsqueda). También sirve al panel administrativo del alcance funcional, que consume varias fuentes.
 - Por qué así. Lo rápido se cuenta en Redis para no frenar el login, y lo lento se mira en Elasticsearch sobre el historial.
 
-### 79. ¿Qué umbrales y ventanas tienen los contadores de Redis?
+### 80. ¿Qué umbrales y ventanas tienen los contadores de Redis?
 Fuerza bruta por IP salta con 8 fallos en 60 segundos. Fuerza bruta por cuenta salta con 5 fallos en 60 segundos. Multi cuenta por IP salta con 4 cuentas distintas en 300 segundos. Rotación de IP salta con 4 IPs distintas contra una cuenta en 300 segundos.
 
 - Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 99 a 113, las seis constantes de ventana y umbral.
 - Lo que pide el profesor. Entrega 2, almacén clave-valor con tiempo de expiración configurado de forma explícita. Aquí es la misma idea que el carrito, pero aplicada a ventanas de conteo.
 - Por qué así. Las ventanas son cortas, por eso los umbrales son bajos. Las versiones lentas de 24 horas usan umbrales más altos, 15, 8 y 5, en `backend/src/services/fraude-login/fraude-login-retrospectivo.service.ts` lineas 68 a 70.
 
-### 80. ¿Cómo cuenta Redis en tiempo real y para qué sirven INCR, EXPIRE NX, SADD y SCARD?
+### 81. ¿Cómo cuenta Redis en tiempo real y para qué sirven INCR, EXPIRE NX, SADD y SCARD?
 En fuerza bruta se hace INCR sobre una clave por IP o por cuenta. En multi cuenta y rotación se hace SADD a un conjunto y SCARD dice cuántos elementos distintos hay. Después de cada uno se pone EXPIRE con NX para que el conteo se borre solo al terminar la ventana.
 
 - Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 159 a 165, INCR y EXPIRE con NX. Lineas 212 a 219, SADD, EXPIRE y SCARD. Lineas 90 a 93, el comentario que explica el NX.
 - Lo que pide el profesor. Entrega 2, operaciones atómicas del almacén clave-valor sin bloqueos a nivel de aplicación.
 - Por qué así. INCR es atómico, así que dos intentos a la vez no se pisan. NX pone el tiempo de vida solo al crear la clave, y así la ventana no se alarga con cada intento nuevo. El conjunto no repite elementos, por eso SCARD cuenta distintos.
 
-### 81. ¿Por qué Redis para contar en tiempo real y Elasticsearch para los patrones de 24 horas?
+### 82. ¿Por qué Redis para contar en tiempo real y Elasticsearch para los patrones de 24 horas?
 Redis responde en el mismo intento de login, sin esperar a ningún worker, pero solo recuerda ventanas de uno a cinco minutos. Un ataque repartido en horas nunca cruza esos umbrales cortos. Elasticsearch guarda el historial de eventos y con agregaciones puede mirar las últimas 24 horas completas.
 
 - Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 55 a 62, el comentario que separa Redis del índice de Elasticsearch. `backend/src/services/fraude-login/fraude-login-retrospectivo.service.ts` lineas 22 a 26 y 33 a 38, por qué se re-evalúan 24 horas. Lineas 156 a 200, la agregación con terms, cardinality y bucket_selector.
 - Lo que pide el profesor. Entrega 3, agregaciones del motor de búsqueda. Entrega 2, almacén clave-valor.
 - Por qué así. Cada base hace lo que mejor sabe. Redis para contar rápido con expiración, Elasticsearch para agrupar mucho historial. El worker no decide a quién mirar, Elasticsearch ya devuelve filtrada la lista de sospechosos.
 
-### 82. ¿Cómo detecta que una IP prueba muchas cuentas distintas?
+### 83. ¿Cómo detecta que una IP prueba muchas cuentas distintas?
 En cada intento, bueno o malo, se agrega lo que se tecleó a un conjunto de Redis con clave por IP. Si el conjunto llega a 4 elementos dentro de 300 segundos, se crea la alerta multi cuenta por IP. La alerta guarda hasta 20 identificadores como evidencia. Cuentan también las entradas buenas y los correos inventados.
 
 - Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 205 a 237, la revisión completa. Línea 135, se llama sin importar si el intento falló. Línea 233, el tope de 20 identificadores.
 - Lo que pide el profesor. No es un requisito literal, es parte del valor extra sobre Entrega 2 con Redis.
 - Por qué así. Es el patrón de credential stuffing, una sola IP probando muchas cuentas. El tope de 20 evita guardar un jsonb enorme si el ataque es de miles de correos.
 
-### 83. ¿Qué es la rotación de IP por cuenta y en qué se distingue de multi cuenta por IP?
+### 84. ¿Qué es la rotación de IP por cuenta y en qué se distingue de multi cuenta por IP?
 Es el espejo de multi cuenta. En vez de agrupar por IP y contar cuentas, agrupa por cuenta y cuenta IPs distintas. Si una misma cuenta es probada desde 4 IPs distintas en 300 segundos, alguien está cambiando de IP para esquivar un bloqueo por IP.
 
 - Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 239 a 280, el método completo con SADD, EXPIRE NX y SCARD. Lineas 112 a 113, ventana y umbral.
 - Lo que pide el profesor. Nada literal, es valor extra sobre Entrega 2.
 - Por qué así. Usa el mismo mecanismo con la clave armada al revés, así que no hace falta código nuevo de conteo. Su versión lenta en Elasticsearch usa 5 IPs en 24 horas.
 
-### 84. ¿Cómo funciona el viaje imposible y cómo se calcula la velocidad?
+### 85. ¿Cómo funciona el viaje imposible y cómo se calcula la velocidad?
 Cada login exitoso se compara con el login exitoso anterior de la misma cuenta, buscado en Elasticsearch. Con la fórmula de haversine se saca la distancia en kilómetros entre las dos ubicaciones. Se divide entre las horas transcurridas y, si la velocidad pasa de 800 km/h, se crea la alerta.
 
 - Dónde se ve. `backend/src/services/fraude-login/viaje-imposible.service.ts` lineas 70 a 84, la consulta del login anterior con geo. Lineas 93 a 130, el cálculo y la alerta. Lineas 139 a 149, haversine. La ubicación sale de `backend/src/helpers/contexto-peticion.ts` lineas 67 a 87, con geoip-lite en memoria.
 - Lo que pide el profesor. Nada literal, es valor extra que usa el Elasticsearch de la Entrega 3.
 - Por qué así. 800 km/h es más rápido que un vuelo comercial. Un usuario con VPN da un falso positivo, y el código lo deja escrito como limitación aceptada en las lineas 43 a 47. Una IP local como 127.0.0.1 no tiene ubicación y no se evalúa, lineas 60 a 65 del helper.
 
-### 85. ¿Cómo detecta la toma de cuenta por IP nueva?
+### 86. ¿Cómo detecta la toma de cuenta por IP nueva?
 Solo corre en login exitoso. Pregunta a Elasticsearch las IPs desde las que esa cuenta ya entró bien. Si la IP actual no está entre ellas, crea la alerta y anota si la huella del cliente también es nueva. Si la cuenta tiene menos de 3 logins exitosos previos, no evalúa nada.
 
 - Dónde se ve. `backend/src/services/fraude-login/toma-cuenta.service.ts` lineas 51 a 83, la consulta con agregaciones de IPs y huellas. Lineas 90 a 99, el mínimo de historial y la comparación. Línea 33, el mínimo de 3.
 - Lo que pide el profesor. Nada literal, es valor extra sobre la Entrega 3, agregaciones en el motor de búsqueda.
 - Por qué así. El mínimo evita marcar como sospechoso el primer login de una cuenta nueva, que siempre tendría IP nueva. Los contadores de Redis no pueden ver esto porque solo recuerdan minutos.
 
-### 86. ¿Cada cuánto corren los patrones lentos y hay que esperar a que corran?
+### 87. ¿Cada cuánto corren los patrones lentos y hay que esperar a que corran?
 Un worker corre cada 15 minutos y revisa las últimas 24 horas con tres señales. Son fallos contra una cuenta con umbral 15, cuentas distintas desde una IP con umbral 8 y IPs distintas contra una cuenta con umbral 5. Además, después de cada login se corre una versión acotada solo a esa cuenta y esa IP, para no esperar los 15 minutos.
 
 - Dónde se ve. `backend/src/services/fraude-login/fraude-login-retrospectivo.service.ts` lineas 64 a 70, intervalo, ventana y umbrales. Lineas 77 a 100, el worker. Lineas 293 a 321, la evaluación inmediata. `backend/src/controllers/usuario.controller.ts` lineas 88 a 108, donde se encadena tras cada login.
 - Lo que pide el profesor. Entrega 3, agregaciones del motor de búsqueda, aquí con terms, min_doc_count y bucket_selector.
 - Por qué así. El disparo inmediato y el worker usan el mismo tipo y la misma hora, así que se juntan en una sola alerta y no se duplican. El worker queda de respaldo si Elasticsearch estaba caído en ese instante.
 
-### 87. ¿Cómo se guarda una alerta sin duplicarla y qué es la llave de conflicto?
+### 88. ¿Cómo se guarda una alerta sin duplicarla y qué es la llave de conflicto?
 La alerta se guarda con un INSERT con ON CONFLICT sobre las columnas tipo, clave y ventana de inicio. Si la misma señal vuelve a cruzar el umbral dentro de la misma ventana, no crea otra fila y solo suma uno al contador. La ventana es el minuto para Redis y la hora para los patrones lentos.
 
 - Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` lineas 67 a 85, el UPSERT. Lineas 15 a 23, el comentario de la llave. `migrations/016_alerta_fraude.sql` línea 177, el UNIQUE de esas tres columnas, y lineas 263 a 279, el candado que falla la migración si falta. Las ventanas salen de `backend/src/services/fraude-login/fraude-login.service.ts` lineas 294 a 296 y de `backend/src/services/fraude-login/fraude-login-retrospectivo.service.ts` lineas 473 a 477.
 - Lo que pide el profesor. Nada literal, es decisión de diseño sobre PostgreSQL relacional.
 - Por qué así. Sin la llave, un ataque de mil intentos dejaría mil filas. Al pasar a la ventana siguiente nace una fila nueva a propósito, y el conflicto no toca el estado, así que una alerta ya revisada no se reabre sola.
 
-### 88. ¿Cuándo se crea una notificación y cómo se sabe que la alerta acaba de nacer?
+### 89. ¿Cuándo se crea una notificación y cómo se sabe que la alerta acaba de nacer?
 Cada alerta puede tener varias cuentas afectadas. La tabla notificacion_fraude guarda una fila por alerta y por cuenta, con su propia fecha de lectura. Las filas se crean solo cuando la alerta nace, no cuando el conflicto solo suma el contador. Se sabe porque en una fila recién insertada xmax vale 0.
 
 - Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` línea 76, el xmax igual a 0. Lineas 90 a 104, el bucle que inserta las notificaciones. Lineas 25 a 30, el porqué. `migrations/018_notificacion_fraude.sql` lineas 35 a 53, la tabla con UNIQUE por alerta y usuario.
 - Lo que pide el profesor. Entrega final, panel administrativo que consume varias fuentes. La migración anota que el profesor pidió que también el usuario afectado vea sus alertas.
 - Por qué así. Una columna en alerta_fraude no puede apuntar a varias cuentas, una tabla sí, lineas 17 a 23 de la migración. Todo va en una sola transacción, así no queda una alerta a medio notificar.
 
-### 89. ¿Cómo decide el sistema a qué cuentas les llega una alerta?
+### 90. ¿Cómo decide el sistema a qué cuentas les llega una alerta?
 Depende de la forma de la alerta. Si trae una cuenta resuelta, le llega a esa cuenta. Si trae una lista de identificadores, como multi cuenta por IP, se busca cada uno por usuario o por correo y le llega a todas las cuentas reales. Si no trae ninguna de las dos, como fuerza bruta por IP, no le llega a nadie y queda solo para el panel del admin.
 
 - Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` lineas 119 a 146, la función resolverCuentasDestino. Lineas 32 a 47, el comentario con los tres casos.
 - Lo que pide el profesor. Nada literal, es la parte de notificar del pedido del profesor sobre el fraude de login.
 - Por qué así. Un correo inventado no genera fila porque no hay cuenta a quien avisar. Mira la forma de detalle y no el nombre del tipo, así una señal nueva con la misma forma queda cubierta sin tocar el archivo.
 
-### 90. ¿Qué ve el usuario afectado y qué no se le enseña?
+### 91. ¿Qué ve el usuario afectado y qué no se le enseña?
 Ve una campana en la cabecera con el número de alertas sin leer y una pestaña Alertas en su panel. Solo ve las de su propia cuenta y las puede marcar como leídas. En multi cuenta se le quita la lista de las demás cuentas probadas y solo se le deja el conteo.
 
 - Dónde se ve. `frontend/src/lib/NotificacionesFraude.svelte` lineas 5 a 19 y línea 72, la campana y su consulta. `frontend/src/lib/AlertasFraudeUsuario.svelte` lineas 5 a 20, la pestaña. `backend/src/controllers/perfil.controller.ts` lineas 87 a 119, GET y PATCH de alertas-fraude. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 579 a 598, cómo se quitan los identificadores ajenos.
 - Lo que pide el profesor. Se pidió que el usuario también vea sus alertas, según el encabezado de `migrations/018_notificacion_fraude.sql` lineas 4 a 7.
 - Por qué así. El id de la cuenta sale siempre de la sesión y nunca de un parámetro, y marcar leída tiene el chequeo de dueño dentro del UPDATE, lineas 501 a 527 del servicio. Así nadie se entera de quiénes fueron las otras víctimas.
 
-### 91. ¿Por qué nadie se bloquea solo y para qué sirve el botón Bloquear?
+### 92. ¿Por qué nadie se bloquea solo y para qué sirve el botón Bloquear?
 El sistema solo avisa, nunca frena el login. Cruzar un umbral deja una alerta para que un admin la revise. Si el admin decide actuar, pulsa Bloquear junto a la cuenta afectada. Pide una confirmación y suspende la cuenta, y se puede deshacer.
 
-- Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 63 a 71, el comentario de que es best-effort y solo alerta. `backend/src/controllers/usuario.controller.ts` lineas 178 a 183, se llama sin await. `frontend/src/lib/BloquearCuenta.svelte` lineas 22 a 36 y 57 a 78, el botón. `frontend/src/lib/PanelFraude.svelte` línea 997 del commit, donde se pone junto a cada cuenta afectada. Una cuenta suspendida no entra, `backend/src/services/usuario.service.ts` lineas 153 a 155.
+- Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 63 a 71, el comentario de que es best-effort y solo alerta. `backend/src/controllers/usuario.controller.ts` lineas 178 a 183, se llama sin await. `frontend/src/lib/BloquearCuenta.svelte` lineas 22 a 36 y 57 a 78, el botón. `frontend/src/lib/PanelFraude.svelte` línea 1042 del commit, donde se pone junto a cada cuenta afectada. Una cuenta suspendida no entra, `backend/src/services/usuario.service.ts` lineas 153 a 155.
 - Lo que pide el profesor. No es requisito del enunciado, es decisión del equipo escrita en el comentario del servicio.
 - Por qué así. Una regla automática bloquearía a un usuario legítimo con VPN o a todo el equipo probando desde la misma máquina. Un fallo de Redis tampoco debe tumbar el login. El humano decide con la evidencia a la vista.
 
-### 92. ¿Cómo se ve cada alerta desglosada en el panel del admin?
+### 93. ¿Cómo se ve cada alerta desglosada en el panel del admin?
 Cada alerta es una tarjeta con qué pasó y su estado. Muestra la IP o la cuenta intentada, las cuentas afectadas con un punto que dice si ya la leyeron, y lo que se vio en una frase. Muestra cuántas veces saltó en ese minuto, cuándo fue, y la lista de correos o usuarios tecleados o de IPs vistas. En viaje imposible añade de dónde a dónde.
 
-- Dónde se ve. `frontend/src/lib/PanelFraude.svelte` lineas 971 a 1025, los campos de la tarjeta. Lineas 1027 a 1046, la lista de tecleados. El backend la arma en `backend/src/services/fraude-login/fraude-login.service.ts` lineas 381 a 396, con las cuentas afectadas de las lineas 44 a 53. La ruta es `backend/src/controllers/fraude/fraude.controller.ts` lineas 22 a 37, solo admin.
+- Dónde se ve. `frontend/src/lib/PanelFraude.svelte` lineas 1016 a 1070, los campos de la tarjeta. Lineas 1072 a 1091, la lista de tecleados. El backend la arma en `backend/src/services/fraude-login/fraude-login.service.ts` lineas 381 a 396, con las cuentas afectadas de las lineas 44 a 53. La ruta es `backend/src/controllers/fraude/fraude.controller.ts` lineas 22 a 37, solo admin.
 - Lo que pide el profesor. Entrega final, panel administrativo que consume múltiples fuentes. Este panel junta PostgreSQL, Redis y Elasticsearch.
 - Por qué así. Las alertas se leen de PostgreSQL porque ahí quedan todas, vengan de Redis o de Elasticsearch. Los textos tecleados se recortan a 80 caracteres y se pintan escapados, porque los escribe cualquiera.
 
-### 93. ¿Qué estados tiene una alerta y cómo pasa de pendiente a revisada o descartada?
+### 94. ¿Qué estados tiene una alerta y cómo pasa de pendiente a revisada o descartada?
 Tiene tres estados, pendiente, revisada y descartada. Nace pendiente. El admin pulsa Marcar revisada o Descartar y solo se permite el cambio desde pendiente. Si la alerta ya no está pendiente el backend contesta 409, y si no existe contesta 404.
 
-- Dónde se ve. `migrations/016_alerta_fraude.sql` lineas 109 a 122, el catálogo de estados. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 58 a 73, el PATCH. `backend/src/services/fraude-login/fraude-login-exploracion.service.ts` lineas 236 a 284, el UPDATE con condición y la distinción entre 404 y 409. `frontend/src/lib/PanelFraude.svelte` lineas 1048 a 1067, los botones.
+- Dónde se ve. `migrations/016_alerta_fraude.sql` lineas 109 a 122, el catálogo de estados. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 58 a 73, el PATCH. `backend/src/services/fraude-login/fraude-login-exploracion.service.ts` lineas 236 a 284, el UPDATE con condición y la distinción entre 404 y 409. `frontend/src/lib/PanelFraude.svelte` lineas 1093 a 1112, los botones.
 - Lo que pide el profesor. Nada literal, es el triage del panel administrativo.
 - Por qué así. La condición de estado pendiente va dentro del propio UPDATE, así dos admins a la vez no se pisan y el segundo recibe el 409. Los estados son una tabla catálogo y no un texto libre.
 
-### 94. ¿Cómo se muestran las señales de fraude en clase sin esperar un ataque real?
+### 95. ¿Cómo se muestran las señales de fraude en clase sin esperar un ataque real?
 Hay dos scripts. `demo-evento-fraude.ps1` manda peticiones HTTP directas y dispara una sola señal por corrida, la que se elija con el parámetro Tipo, y luego abre el panel. `demo-fraude-login.ps1` abre un Chrome que escribe solo, para una escena más teatral. Ninguno cubre viaje imposible, rotación de IP ni toma de cuenta porque necesitan una IP distinta.
 
 - Dónde se ve. `demo-evento-fraude.ps1` lineas 12 a 24, qué dispara cada tipo con sus umbrales. Línea 46, los tres tipos permitidos. Lineas 25 a 33, lo que no cubre. `demo-fraude-login.ps1` lineas 1 a 8 y línea 82, los 8 intentos por defecto.
 - Lo que pide el profesor. Entrega final, presentación del proyecto ante el curso.
 - Por qué así. La versión sin ventanas es la que hay que usar si el tiempo es corto, porque no depende del foco de Windows. Los contadores de multi cuenta se acumulan durante 5 minutos, así que conviene esperar entre corridas, lineas 35 a 42 del script.
 
-### 95. ¿Cómo se simulan IPs de otros países con Tor?
-Se levanta Tor en un contenedor de Docker obligado a salir por el país elegido. Para el backend, los intentos llegan con la IP de la salida de Tor y su país sale de geoip. Con eso se ven las alertas de rotación de IP, toma de cuenta y viaje imposible. Para viaje imposible hay que entrar con la misma cuenta desde dos países seguidos.
+### 96. ¿Cómo se simulan IPs de otros países con Tor?
+Se levanta un Tor de Docker por país, obligado a salir por ese país. Cada país tiene su propio link, por ejemplo mesh-singapur.ledkid.com, que se abre en cualquier navegador, también en el celular. Un proxy pequeño reenvía ese link a la dirección pública de Mesh saliendo por el Tor de ese país, así que el backend ve la IP de la salida de Tor y su país sale de geoip. Con eso se ven rotación de IP, toma de cuenta y viaje imposible, entrando con la misma cuenta desde dos países seguidos.
 
-- Dónde se ve. `tor-demo.ps1` lineas 57 a 63, el docker run con ExitNodes y StrictNodes. `demo-fraude-pais.ps1` lineas 1 a 10 y línea 261, los 8 intentos con 4 correos. `demo-entrar-otro-pais.ps1` lineas 11 a 23, cómo entrar tú mismo con Chrome por Tor. `docs/DEMO-OTRO-PAIS.md` lineas 48 a 53 y 62 a 66, cómo funciona y qué hace falta para el viaje imposible.
+- Dónde se ve. `tor-demo.ps1` lineas 1 a 4 y línea 21, un Tor por país y el puerto de cada uno. `tor-demo.ps1` líneas 62 a 65, el comando de tor con ExitNodes y StrictNodes. `pais-enlace.ps1` lineas 1 a 12, el link por país y el proxy que reenvía. `demo-entrar-otro-pais.ps1` lineas 1 a 26, cómo abrir países, ver el estado y cerrar. `docs/DEMO-OTRO-PAIS.md` lineas 62 a 66, qué hace falta para el viaje imposible.
 - Lo que pide el profesor. Entrega final, presentación del proyecto. No es requisito del enunciado, es la forma de demostrar la señal sin gente real en otros países.
-- Por qué así. Desde una sola máquina el origen siempre es el mismo, así que sin Tor esas tres señales no se pueden mostrar. La demo no para el backend ni las bases. Limitación, la salida de Tor cambia de IP dentro del mismo país.
+- Por qué así. Desde una sola máquina el origen siempre es el mismo, así que sin Tor esas tres señales no se pueden mostrar. La demo no para el backend ni las bases. Cada país es un Tor de casi 100 MB, con los ocho a la vez la máquina va lenta y bastan dos o tres. La salida de Tor cambia de IP dentro del mismo país.
 
-### 96. ¿Por qué correr la demo de anillos de reseñas también dispara la alerta multi cuenta por IP?
+### 97. ¿Por qué correr la demo de anillos de reseñas también dispara la alerta multi cuenta por IP?
 Porque el script entra con admin y con las cuentas del anillo, todas desde la misma máquina y la misma IP. Con 3 cuentas del anillo más el admin son 4 identificadores distintos, que es justo el umbral de multi cuenta. No es un error, es la señal funcionando bien. Los intentos buenos también cuentan.
 
 - Dónde se ve. `demo-anillo-resenas.ps1` lineas 127 a 131, el login del admin. Lineas 135 a 137, un login por cada cuenta del anillo. Lineas 152 a 153, un login más de cada cuenta para refrescar el rol. `backend/src/services/fraude-login/fraude-login.service.ts` líneas 106 y 135, el umbral de 4 y el conteo en cada intento.
@@ -809,98 +816,98 @@ Archivos que más se usan en esta parte.
 - `backend/src/services/usuario.service.ts`
 - `docs/TRASPASO.md`
 
-### 97. ¿Cuál es la arquitectura completa y qué hace cada base de datos?
+### 98. ¿Cuál es la arquitectura completa y qué hace cada base de datos?
 Son seis motores y cada uno tiene un trabajo. PostgreSQL es la fuente de verdad con usuarios, pedidos, pagos, ofertas y stock. MongoDB guarda el catálogo, su historial y el log de login. Redis lleva el carrito, las reservas y los contadores de fraude, Neo4j las relaciones entre cuentas y reseñas, Elasticsearch la búsqueda y ClickHouse los eventos con fecha.
 
 - Dónde se ve. `docs/ARQUITECTURA.md` lineas 128 a 137, tabla de qué guarda cada motor, y lineas 27 a 67, el diagrama. `docker-compose.yml` declara los motores en las lineas 7 a 26 (PostgreSQL), 55 a 83 (MongoDB), 119 a 137 (Redis), 183 a 218 (Neo4j), 231 a 292 (Elasticsearch) y 315 a 408 (ClickHouse).
 - Lo que pide el profesor. Entrega final, diagrama de arquitectura que refleje todos los componentes de persistencia y sus relaciones (3 pts). La sección 3 del enunciado da el reparto por módulo.
 - Por qué así. Cada base responde una pregunta que las otras hacen mal, como transacción, atributos variables, expiración atómica, varios saltos, texto difuso y eventos en el tiempo.
 
-### 98. ¿Por qué una arquitectura políglota y no todo en PostgreSQL?
+### 99. ¿Por qué una arquitectura políglota y no todo en PostgreSQL?
 Porque ninguna base sola cubre bien todos los patrones de acceso. PostgreSQL se quedó con lo que necesita transacción e integridad, como la compra y el descuento de stock. El catálogo pasó a MongoDB porque los atributos cambian por categoría. Y no se migró todo, las ofertas y lo social se quedaron en PostgreSQL con su argumento escrito.
 
 - Dónde se ve. `docs/base-de-datos.md` linea 561 (ADR-1, catálogo a MongoDB), linea 571 (ADR-2, ofertas se quedan) y linea 990 (ADR-5, lo social se queda). `docs/ARQUITECTURA.md` lineas 175 a 186, la regla de producto en Mongo y ofertas en PostgreSQL.
 - Lo que pide el profesor. Secciones 1 y 5.5 del enunciado, justificar mantener un componente relacional con el mismo nivel de exigencia que una migración. También cuenta en la presentación (4 pts).
 - Por qué así. El descuento de stock no puede vender dos veces la última unidad, y eso lo garantiza una transacción relacional.
 
-### 99. ¿Qué autenticación hay configurada en cada base NoSQL?
+### 100. ¿Qué autenticación hay configurada en cada base NoSQL?
 Cuatro de las cinco piden usuario y contraseña. MongoDB crea su usuario root al arrancar, Redis usa requirepass, Neo4j usa NEO4J_AUTH y ClickHouse crea un usuario propio. Elasticsearch tiene la seguridad apagada a propósito, porque solo escucha en localhost y no guarda nada que no esté en PostgreSQL. Todas las contraseñas salen del `.env`.
 
 - Dónde se ve. `docker-compose.yml` lineas 59 a 63 (MongoDB), 123 a 126 (Redis), 188 (Neo4j), 324 a 326 (ClickHouse) y 240 a 248 (Elasticsearch sin seguridad). El backend entra con esas credenciales en `backend/src/database/mongo.ts` linea 16, `backend/src/database/redis.ts` lineas 31 a 36, `backend/src/database/neo4j.ts` lineas 29 a 34 y `backend/src/database/clickhouse.ts` lineas 25 a 32.
 - Lo que pide el profesor. Entrega final, autenticación y autorización configuradas explícitamente en al menos un componente NoSQL (4 pts).
 - Por qué así. Un Redis sin contraseña acepta a cualquiera que alcance el puerto 6379, y en la red de la universidad eso es un riesgo real. El comentario está en `docker-compose.yml` lineas 110 a 114.
 
-### 100. ¿Cómo funciona el inicio de sesión, la contraseña y la expiración de 2 horas?
+### 101. ¿Cómo funciona el inicio de sesión, la contraseña y la expiración de 2 horas?
 Al iniciar sesión el backend compara la contraseña contra su hash y firma un JWT con el id y el rol. El token viaja en la cookie mesh_token, httpOnly y sameSite lax, y vence a las 2 horas. La contraseña se guarda con scrypt de Node y un salt al azar por usuario. Un comentario de usuario.service dice bcrypt pero el código usa scrypt.
 
 - Dónde se ve. `backend/src/helpers/token.ts` lineas 6 a 30 (HS256, 2 horas y opciones de la cookie) y 48 a 54 (firma). `backend/src/helpers/contrasena.ts` lineas 9 a 21 (hash) y 23 a 48 (comparación con timingSafeEqual). `backend/src/services/usuario.service.ts` lineas 113 a 165, iniciarSesion. `backend/src/controllers/usuario.controller.ts` linea 166, donde se pone la cookie.
 - Lo que pide el profesor. Fase inicial, registro y autenticación con roles de comprador, vendedor y administrador. Entrega final, control de acceso (4 pts).
 - Por qué así. Un solo número de 2 horas sirve para el token y para la cookie y no se pueden desincronizar. La cookie httpOnly impide que JavaScript robe el token, y los tres fallos de login dan el mismo mensaje para no revelar qué cuentas existen.
 
-### 101. ¿Cómo se protege una ruta y cómo funcionan los roles comprador, vendedor y admin?
+### 102. ¿Cómo se protege una ruta y cómo funcionan los roles comprador, vendedor y admin?
 Se pone SesionGuard en el controller y, si hace falta, Roles con los ids de rol. El guard revisa la cookie y el token (401), revisa que la cuenta siga activa en la base (401) y compara el rol contra la lista (403). Los ids son 1 comprador, 2 vendedor y 3 admin. Las rutas de admin llevan Roles de admin en la clase, las de vendedor admiten vendedor y admin, y carrito y pedidos solo piden sesión.
 
 - Dónde se ve. `backend/src/guards/sesion.guard.ts` lineas 41 a 98. `backend/src/decorators/roles.decorator.ts` lineas 3 a 18. `backend/src/models/rol-usuario.ts` lineas 11 a 13. `backend/src/controllers/admin/admin-usuarios.controller.ts` lineas 20 a 22, y el mismo patrón en `backend/src/controllers/admin/admin-reportes.controller.ts` lineas 22 a 24. Para vendedor, `backend/src/controllers/vendedores/productos.controller.ts` lineas 37 a 38.
 - Lo que pide el profesor. Entrega final, control de acceso con autorización por rol (4 pts). Fase inicial, roles de comprador, vendedor y administrador.
 - Por qué así. El token vale 2 horas aunque suspendan la cuenta, por eso el guard consulta la base en cada petición con estaActivo, en `backend/src/services/usuario.service.ts` linea 206.
 
-### 102. ¿Cómo consume el panel administrativo varias fuentes de datos?
+### 103. ¿Cómo consume el panel administrativo varias fuentes de datos?
 El panel es una sola pantalla con pestañas para el admin y cada pestaña llama rutas de admin del backend que leen una base distinta. Reportes y Cuentas leen PostgreSQL y Tendencias lee ClickHouse. Fraude junta alertas de PostgreSQL, el log de login de Elasticsearch y el detalle de anillos de Neo4j. Esconder una pestaña no protege nada, el backend responde 403.
 
-- Dónde se ve. `frontend/src/routes/panel/+page.svelte` lineas 132 a 149 (pestañas del admin), 815 a 834 (Cuentas y Fraude) y 842 a 850 (Tendencias). `backend/src/controllers/admin/admin-tendencias.controller.ts` lineas 30 a 32, y `backend/src/services/admin/admin-tendencias.service.ts` linea 2, cliente de ClickHouse. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 44 a 48, ruta del log de Elasticsearch. `frontend/src/lib/sesion.ts` lineas 50 a 62, donde se explica que el rol solo decide qué se pinta.
+- Dónde se ve. `frontend/src/routes/panel/+page.svelte` lineas 132 a 148 (pestañas del admin), 815 a 834 (Cuentas y Fraude) y 842 a 850 (Tendencias). `backend/src/controllers/admin/admin-tendencias.controller.ts` lineas 30 a 32, y `backend/src/services/admin/admin-tendencias.service.ts` linea 2, cliente de ClickHouse. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 44 a 48, ruta del log de Elasticsearch. `frontend/src/lib/sesion.ts` lineas 50 a 62, donde se explica que el rol solo decide qué se pinta.
 - Lo que pide el profesor. Panel administrativo, componente transversal que consume múltiples fuentes. Entrega 2 pide los paneles de fraude y de tendencias.
 - Por qué así. Cada pestaña usa la base que mejor contesta su pregunta, y el navegador nunca sabe de cuál sale el dato porque toda respuesta trae ok, mensaje y payload.
 
-### 103. ¿Dónde está el diagrama de arquitectura final y cómo se generó?
+### 104. ¿Dónde está el diagrama de arquitectura final y cómo se generó?
 Está en docs/diagrama-arquitectura.drawio con su PNG. Dibuja los seis motores, lo que hace el backend con cada uno y ocho rutas de datos entre motores. Lo genera un script de Python que al final comprueba que cada flecha nombre cajas que existen. No trae una caja vectorial porque ese componente no existe todavía.
 
 - Dónde se ve. `docs/generar-arquitectura.py` lineas 1 a 18. `docs/ARQUITECTURA.md` lineas 3 a 14. El diagrama entidad relación es otro archivo, `docs/diagrama-general.drawio`, que dibuja `docs/generar-er.py` leyendo la base viva, lineas 1 a 19.
 - Lo que pide el profesor. Entrega final, diagrama de arquitectura completo y correcto (3 pts). Las entregas 2 y 3 también piden actualizarlo.
 - Por qué así. El ER se genera de la base porque el dibujado a mano se quedó en 42 cajas cuando ya había 50 tablas.
 
-### 104. ¿Dónde está el registro de decisiones arquitectónicas y qué estructura tiene?
+### 105. ¿Dónde está el registro de decisiones arquitectónicas y qué estructura tiene?
 Está repartido en docs. base-de-datos.md trae cinco ADR sobre catálogo, ofertas, imágenes, proponente y lo social. DECISION-GRAFOS-VS-COLUMNAR.md sigue los campos que pide el enunciado y además dice cuándo estaría justificada la alternativa no elegida. La consistencia del checkout tiene su propio documento. No hay ADR escrito para el control de acceso ni para el componente vectorial.
 
 - Dónde se ve. `docs/base-de-datos.md` lineas 561, 571, 581, 591 y 990, encabezados de ADR-1 a ADR-5. `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 14 (contexto), 66 (alternativas) y 256 (consecuencias). `docs/CONSISTENCIA-CHECKOUT.md` linea 122, los puntos de falla.
 - Lo que pide el profesor. Sección 5.3, un registro breve con contexto, alternativas (al menos dos, incluida no cambiar), decisión, justificación y consecuencias.
 - Por qué así. El enunciado califica la calidad del análisis y no la cantidad de tecnologías, por eso hay ADR de decisiones de no migrar.
 
-### 105. ¿Cómo está estructurado el backend en NestJS?
+### 106. ¿Cómo está estructurado el backend en NestJS?
 Es NestJS sobre Fastify en el puerto 3000. El archivo app.module registra cada controller y cada servicio, y si una clase no está ahí su ruta no existe. El controller recibe la petición y traduce errores a HTTP, el service tiene la lógica y el SQL a mano, dto define la forma de las peticiones y database tiene un cliente por base.
 
 - Dónde se ve. `backend/src/app.module.ts` lineas 76 a 151. `backend/src/main.ts` lineas 32 a 35 y 54, servidor Fastify y puerto. `backend/src/database/postgres.ts` lineas 16 a 22 y `backend/src/database/redis.ts` lineas 33 a 40, dos de los seis clientes.
 - Lo que pide el profesor. Sección 5.2, backend a elección del equipo. Entrega final, repositorio completo del sistema.
 - Por qué así. Cada cliente lleva tiempos límite propios, así una base caída da un 503 rápido y no una petición colgada. La explicación está en `backend/src/database/redis.ts` lineas 17 a 28.
 
-### 106. ¿Cómo se manejan los errores en el backend?
+### 107. ¿Cómo se manejan los errores en el backend?
 Los servicios lanzan errores de dominio y un solo helper los traduce a HTTP. Validación es 400, conflicto 409, sesión 401, no encontrado 404, pago 402 y conexión 503. Lo que no se reconoce sale como 500 con un mensaje genérico y el detalle va al log. Toda respuesta, buena o mala, trae ok, mensaje y payload.
 
 - Dónde se ve. `backend/src/helpers/errores.ts` lineas 10 a 49. `backend/src/helpers/manejar-error-http.ts` lineas 18 a 48. `backend/src/helpers/manejar-error-db.ts` lineas 14 a 22 y 39 a 59, que decide si un fallo de PostgreSQL es de conexión. `backend/src/helpers/respuesta.ts` lineas 12 a 30.
 - Lo que pide el profesor. Entrega 3, manejo explícito de fallos parciales con un comportamiento definido y comunicado al usuario. La consistencia del checkout vale 5 pts y la prueba de falla 4 pts.
 - Por qué así. El mismo mapeo sirve a controllers y guards y vive en un solo lugar. Cada base tiene su propio manejador, por ejemplo `backend/src/helpers/manejar-error-redis.ts` lineas 11 a 14.
 
-### 107. ¿Dónde se guardan las contraseñas de las bases y cómo se evita subirlas al repositorio?
+### 108. ¿Dónde se guardan las contraseñas de las bases y cómo se evita subirlas al repositorio?
 Están en el `.env` de la raíz y en `backend/.env`, que git ignora. Solo se sube `.env.example` con valores de relleno. Si falta una variable Docker Compose se detiene con un mensaje, y el backend tampoco arranca. El secreto del JWT sale del mismo archivo.
 
 - Dónde se ve. `.gitignore` lineas 4 a 6. `docker-compose.yml` lineas 1 a 3. `backend/src/helpers/entorno.ts` lineas 9 a 17. `backend/.env.example` lineas 57 a 61, el JWT_SECRET.
 - Lo que pide el profesor. Entrega final, autenticación configurada de forma explícita. Sección 5.4, documentación con las instrucciones para poner el sistema en marcha.
 - Por qué así. Una contraseña con valor por defecto escrito en el código queda para siempre en el historial de git. Es mejor que el sistema no arranque a que arranque con una credencial publicada.
 
-### 108. ¿Cómo se prueba el sistema y cómo se corren los arneses de prueba?
+### 109. ¿Cómo se prueba el sistema y cómo se corren los arneses de prueba?
 Hay arneses en shell que prueban contra el sistema vivo. Se corren con bash y la ruta, por ejemplo bash pruebas/carrito.sh. Los dos más importantes son redis/prueba_concurrencia.sh, que lanza más solicitudes que unidades con redis-benchmark y cuenta que no haya sobreventa, y pruebas/falla_checkout.sh, que para un contenedor con docker stop y mide qué pasa en el checkout. El backend tiene jest configurado pero no hay archivos de prueba unitaria.
 
 - Dónde se ve. `redis/prueba_concurrencia.sh` lineas 12 a 19. `pruebas/falla_checkout.sh` lineas 1 a 8. `docs/TRASPASO.md` lineas 313 a 321, la lista de los quince arneses. `backend/package.json` linea 16, el script de jest.
 - Lo que pide el profesor. Entrega 2, evidencia de la oferta limitada bajo concurrencia sin bloqueos de aplicación (3 pts). Entrega 3, prueba de falla simulada del checkout (4 pts).
 - Por qué así. El código puede estar bien escrito y sobrevender igual, y solo lanzarle más gente de la que cabe lo demuestra.
 
-### 109. ¿Cómo se arranca todo el sistema y qué es el panel de comandos?
+### 110. ¿Cómo se arranca todo el sistema y qué es el panel de comandos?
 Desde la raíz se corre .\arrancar.ps1, que levanta los nueve contenedores, corre las migraciones que faltan y comprueba los ETL. Después se arrancan el backend en el puerto 3000 y el frontend en el 5173. Con .\panel-comandos.ps1 se abre una página de botones en el puerto 5199 que ejecuta esos mismos comandos. Ese panel solo escucha en 127.0.0.1, solo corre una lista fija de comandos y exige un token, y borrar todo pide escribir BORRAR TODO.
 
-- Dónde se ve. `ARRANCAR.txt` lineas 8 a 31 y 64 a 70. `arrancar.ps1` lineas 1 a 9, las opciones. `comandos.txt` lineas 4 a 20 (el panel) y 84 a 88 (seguridad). `panel-comandos/servidor.mjs` lineas 12 a 23, por qué es seguro, y linea 575, donde escucha solo en 127.0.0.1.
+- Dónde se ve. `ARRANCAR.txt` lineas 8 a 31 y 64 a 70. `arrancar.ps1` lineas 1 a 9, las opciones. `comandos.txt` lineas 4 a 20 (el panel) y 84 a 88 (seguridad). `panel-comandos/servidor.mjs` lineas 12 a 23, por qué es seguro, y linea 597, donde escucha solo en 127.0.0.1.
 - Lo que pide el profesor. Sección 5.4, archivo de documentación con las instrucciones para poner en funcionamiento el sistema completo.
 - Por qué así. Los botones de arrancar hacen falta justo cuando el backend y el frontend están apagados, por eso el panel vive aparte de la aplicación. Está explicado en `panel-comandos/servidor.mjs` lineas 8 a 10.
 
-### 110. ¿Cómo se organizó el equipo y cómo se trabajó con el backend?
+### 111. ¿Cómo se organizó el equipo y cómo se trabajó con el backend?
 El equipo es de tres y cada uno tiene su área. Uno lleva el frontend, los datos y las migraciones, otro lleva el backend y el tercero apoya en lo que haga falta. Lo que el resto necesita del backend se escribe en un archivo de pendientes. Cada cambio ya construido deja una nota fechada en backend/cambio_propuestas con su contexto y sus pruebas, que solo se agrega y no se reescribe.
 
 - Dónde se ve. `docs/TRASPASO.md` lineas 348 a 349 (el equipo) y 302 a 305 (las reglas de trabajo). `docs/BACKEND-PENDIENTE.md` lineas 1 a 4. `backend/elementos Generales/README.md` lineas 29 a 31, qué es cambio_propuestas. `backend/cambio_propuestas/2026-09-18_0015-anillos-fraude-persistencia.md` lineas 1 a 12, un ejemplo del formato.
@@ -916,21 +923,21 @@ El equipo es de tres y cada uno tiene su área. Uno lleva el frontend, los datos
 
 Estas preguntas piden cosas de la entrega final. Cada respuesta dice con claridad qué existe hoy y dónde.
 
-### 111. ¿Hay roles y permisos acotados por servicio en algún componente NoSQL, y hay evidencia de que un usuario sin permisos sea rechazado?
+### 112. ¿Hay roles y permisos acotados por servicio en algún componente NoSQL, y hay evidencia de que un usuario sin permisos sea rechazado?
 Hoy no. Todas las conexiones del backend usan una sola cuenta con todos los permisos, el root de MongoDB, la contraseña única de Redis y el usuario de ClickHouse. Hay autenticación pero no se crearon roles con alcance limitado ni existe una prueba de un usuario rechazado. La documentación lo reconoce tal cual.
 
-- Dónde se ve. `docs/ARQUITECTURA.md` lineas 232 a 234, donde dice que el control de acceso no está configurado más allá del usuario y contraseña de arranque. `docker-compose.yml` lineas 328 a 333, ClickHouse crea su usuario con permiso de administrar accesos. `clickhouse/users.d/limites-consulta.xml` lineas 28 a 43 solo pone un tope de memoria por consulta.
+- Dónde se ve. `docs/ARQUITECTURA.md` lineas 232 a 234, donde dice que el control de acceso no está configurado más allá del usuario y contraseña de arranque. `docker-compose.yml` lineas 397 a 402, ClickHouse crea su usuario con permiso de administrar accesos. `clickhouse/users.d/limites-consulta.xml` lineas 28 a 43 solo pone un tope de memoria por consulta.
 - Lo que pide el profesor. Entrega final, roles y permisos acotados según el servicio, con evidencia de que quien no tiene permiso no puede operar fuera de su alcance (4 pts).
 - Por qué así. Lo que sí funciona hoy es la autorización por rol en la API, con 401 y 403, en `backend/src/guards/sesion.guard.ts` lineas 41 a 98. Esa se aplica en el backend y no dentro de la base.
 
-### 112. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
+### 113. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
 No está implementado. Solo existe la imagen de PostgreSQL con pgvector ya incluida en el compose. No hay migración que cree la extensión, ni columna de embeddings, ni ruta del backend, ni pantalla de recomendaciones. La documentación solo anota que la imagen se eligió para no tener que cambiarla después.
 
 - Dónde se ve. `docker-compose.yml` linea 8, imagen pgvector de PostgreSQL 18. `docs/ARQUITECTURA.md` lineas 265 a 269 y `docs/GUIA-PRESENTACION.txt` lineas 952 a 953, donde se explica por qué la imagen es pgvector.
 - Lo que pide el profesor. Entrega final, recomendación por similitud semántica de la descripción con representaciones vectoriales (5 pts). La sección 5.2 da como referencia una extensión vectorial sobre PostgreSQL.
 - Por qué así. La imagen trae la extensión incluida, así que crearla no exige cambiar de contenedor. Con eso solo está la base preparada.
 
-### 113. ¿Qué decisiones de arquitectura se sostendrían y cuáles se replantearían? (retrospectiva)
+### 114. ¿Qué decisiones de arquitectura se sostendrían y cuáles se replantearían? (retrospectiva)
 No hay un documento de retrospectiva en el repositorio. Lo que sí hay son piezas escritas en ARQUITECTURA.md. Ahí se explica que se rechazó la base columnar Cassandra el 3 de septiembre con dos números medidos y que el 6 de septiembre entró ClickHouse porque el dato cambió. También lista lo que el diagrama no esconde, como dos repartidores de id de producto que no se hablan y que todo corre en una sola máquina.
 
 - Dónde se ve. `docs/ARQUITECTURA.md` lineas 139 a 152 (la columnar y el cambio) y 219 a 234 (lo que el diagrama no esconde). `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 256, consecuencias.
