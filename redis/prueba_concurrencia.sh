@@ -1,5 +1,12 @@
 #!/usr/bin/env bash
 #
+# AVISO, ESTE ARNES NO PASA POR LAS RUTAS DEL BACKEND. Le manda 1000 solicitudes con
+# redis-benchmark directo al script redis/inventario_limitado.lua, que es el MISMO
+# archivo que carga el backend, asi que prueba la decision atomica a una escala que
+# el HTTP no alcanza. Pero se salta la ruta, el servicio y las cuentas. La prueba
+# con cuentas reales por HTTP, 60 compradores sobre 20 unidades, es
+# pruebas/oferta_limitada.sh.
+#
 # prueba_concurrencia.sh -- la evidencia de que la oferta de inventario
 # limitado NO se sobrevende, con muchas mas solicitudes que unidades y sin un
 # solo bloqueo a nivel de aplicacion.

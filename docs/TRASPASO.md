@@ -41,7 +41,7 @@ demo-redis-sin-ttl   .ps1 con -Accion crear, ver o borrar. Crea mesh:demo:sin_tt
                      TTL de 600 s). ver lista todas las mesh:* con tipo y TTL, borrar solo quita las mesh:demo:*.
                      Son tres comandos nuevos del grupo Demo de Redis: el panel de comandos tiene 29 en cinco
                      grupos (comandos.txt)
-PREGUNTAS-SUSTENTACION.md  En la raiz. 115 preguntas y respuestas para la sustentacion, con el archivo y las
+PREGUNTAS-SUSTENTACION.md  En la raiz. 118 preguntas y respuestas para la sustentacion, con el archivo y las
                      lineas de cada cosa
 ```
 
@@ -361,14 +361,21 @@ las nueve senales de hoy, pero el razonamiento de fondo no cambio).
 >   SQL va en ASCII puro.
 > - Ninguna contrasena real en un archivo que se suba. Salen del `.env`.
 >
-> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene QUINCE arneses:
+> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene DIECIOCHO arneses:
 > `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`, `bash pruebas/notas.sh`,
 > `bash pruebas/busqueda.sh`, `bash pruebas/eventos.sh`,
 > `bash pruebas/alertas_login.sh`, `bash pruebas/ofertas_paginadas.sh`,
 > `bash pruebas/tendencias.sh`, `bash pruebas/etl_mongo.sh`, `bash pruebas/etl_compras.sh`,
 > `bash pruebas/falla_checkout.sh`, `bash redis/prueba_carrito.sh`,
 > `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`,
-> `.\mongo\demostracion_indices.ps1`.
+> `.\mongo\demostracion_indices.ps1`, y los tres que PASAN POR EL BACKEND (20 de
+> septiembre), `bash pruebas/carrito_vencimiento.sh`, `bash pruebas/oferta_limitada.sh`
+> y `bash pruebas/anillos.sh`.
+>
+> De los que prueban Redis y Neo4j, `redis/prueba_carrito.sh`,
+> `redis/prueba_concurrencia.sh` y `neo4j/correr_fraude.sh` NO pasan por el backend,
+> hablan directo con las bases, y cada uno lo dice en su cabecera con el que si pasa.
+> `oferta_limitada.sh` y `anillos.sh` crean cuentas y `anillos.sh` deja compras reales.
 >
 > Los dos nuevos tambien van de uno en uno, y los dos lo dicen en su cabecera:
 > `alertas_login.sh` mide contadores por IP, y en local la IP es la misma para

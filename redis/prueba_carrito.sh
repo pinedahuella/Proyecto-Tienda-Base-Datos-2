@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 #
+# AVISO, ESTE ARNES NO PASA POR EL BACKEND. Prueba redis/carrito.lua, un diseno con
+# script Lua que el backend todavia no usa (cero referencias en backend/src, el
+# servicio real hace HSET y EXPIRE por separado). Demuestra el diseno y no lo que
+# corre. El vencimiento del carrito REAL, con el backend en marcha, lo mide
+# pruebas/carrito_vencimiento.sh, y las cuatro rutas las mide pruebas/carrito.sh.
+#
 # prueba_carrito.sh -- la evidencia de que el carrito vence por INACTIVIDAD.
 #
 # No comprueba que el codigo "corre": comprueba las tres afirmaciones que el

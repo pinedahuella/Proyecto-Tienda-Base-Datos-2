@@ -41,13 +41,13 @@
          "Carrito sobre el almacén clave-valor, con expiración justificada",
          "1.5",
          "2",
-         "`pruebas/carrito.sh` con 25 OK y `redis/prueba_carrito.sh` con el TTL medido antes y después de tocar"
+         "`pruebas/carrito.sh` con 25 OK, `pruebas/carrito_vencimiento.sh` con 20 OK y el vencimiento medido por el backend, y `redis/prueba_carrito.sh` con el diseño Lua"
         ],
         [
          "Oferta de inventario limitado con operaciones atómicas, validada bajo concurrencia",
          "3",
          "3",
-         "`redis/prueba_concurrencia.sh` con 61 OK, y 5000 solicitudes con 200 clientes sobre 250 unidades sin sobreventa"
+         "`pruebas/oferta_limitada.sh` con 31 OK, 60 cuentas reales por HTTP sobre 20 unidades, y `redis/prueba_concurrencia.sh` con 61 OK y 5000 solicitudes con 200 clientes sobre 250 unidades sin sobreventa"
         ],
         [
          "Evaluación comparativa de las familias de grafos y columnar",
@@ -59,7 +59,7 @@
          "Implementación de la familia seleccionada con su reto específico",
          "3",
          "5 y 6",
-         "`neo4j/correr_fraude.sh` con 10 OK y cinco consultas, `pruebas/tendencias.sh` con 50 OK y la consulta de ascenso en ClickHouse"
+         "`pruebas/anillos.sh` con 27 OK, un anillo real detectado por el backend, `neo4j/correr_fraude.sh` con 10 OK y cinco consultas, y `pruebas/tendencias.sh` con 50 OK y la consulta de ascenso en ClickHouse"
         ],
         [
          "Calidad del informe y actualización del diagrama de arquitectura",
@@ -301,7 +301,7 @@
     "titulo": "2.4. Evidencia de funcionamiento",
     "bloques": [
      {
-      "p": "La evidencia del vencimiento la da `redis/prueba_carrito.sh`, que tarda poco más de un minuto porque hay que esperar de verdad a que la clave venza. Corre con un TTL de 15 segundos, esperas de 6 segundos y tres toques seguidos. El mecanismo es el mismo con 15 segundos que con 86400, y con las 24 horas de producción no habría forma de comprobarlo dentro de una prueba. La salida que sigue es del 19 de septiembre de 2026, con Redis 8.10.1 en el contenedor `mesh-redis`."
+      "p": "Hay dos arneses del vencimiento y conviene decir qué mide cada uno. `redis/prueba_carrito.sh` prueba el diseño con script Lua de `redis/carrito.lua`, que el backend todavía no usa, y por eso no pasa por el backend. El que sí pasa por el backend es `pruebas/carrito_vencimiento.sh`, que se describe más abajo. La evidencia del vencimiento del diseño con Lua la da `redis/prueba_carrito.sh`, que tarda poco más de un minuto porque hay que esperar de verdad a que la clave venza. Corre con un TTL de 15 segundos, esperas de 6 segundos y tres toques seguidos. El mecanismo es el mismo con 15 segundos que con 86400, y con las 24 horas de producción no habría forma de comprobarlo dentro de una prueba. La salida que sigue es del 19 de septiembre de 2026, con Redis 8.10.1 en el contenedor `mesh-redis`."
      },
      {
       "p": "Tres líneas cargan con el argumento entero. El carrito recién creado tiene TTL 14 y no -1, o sea que el vencimiento está puesto y no heredado. Tras 6 segundos quieto el TTL bajó a 7, y tras el toque volvió a 14, que es la renovación. Y el carrito sobrevivió 18 segundos con un TTL de 15, que es la comprobación que separa las dos políticas, porque con un plazo fijo desde la creación ahí ya no estaría."
@@ -322,6 +322,13 @@
      {
       "codigo": "2. Agregar y quitar NO tocan PostgreSQL\n  OK    no nacio ningun pedido (47 antes y despues)\n  OK    no nacio ninguna linea de pedido\n  OK    agregar NO reservo stock (20) -> caducar no libera nada\n\n3. El TTL, puesto a proposito y RENOVADO en cada toque\n  OK    el carrito tiene TTL (86399 s). Sin EXPIRE seria -1\n  OK    un GET lo renovo: 99 s -> 86399 s\n  OK    un PUT tambien lo renovo: 100 s -> 86399 s\n\n5. El precio es el de AHORA, no el de cuando se agrego\n  OK    el precio sale de oferta, en vivo (5840.00)\n  OK    en Redis solo hay id_oferta -> cantidad, sin precios\n\n  25 OK, 0 FALLA",
       "leyenda": "Tramos de pruebas/carrito.sh del 19 de septiembre de 2026 que sostienen la expiración y que el carrito no toca PostgreSQL."
+     },
+     {
+      "p": "El tercero pasa por el backend de punta a punta. `pruebas/carrito_vencimiento.sh` hace toda acción por las rutas HTTP y solo mira Redis y PostgreSQL. Lo único que toca a mano es el reloj, porque el TTL real de 24 horas no se puede esperar, así que baja el TTL de la clave con `EXPIRE` y de ahí en adelante todo lo hacen Redis y el backend. Comprueba que quien sigue tocando el carrito no lo pierde, porque a los 6 segundos con el TTL en 10 un `GET /carrito` lo devuelve entero y lo renueva de 3 a 86399 segundos, y la clave sigue viva 13 segundos después. Comprueba que quien se va lo pierde, porque sin tocarlo la clave desaparece sola y su TTL pasa a -2. Y comprueba que al vencer no hay nada que liberar. `POST /carrito/comprar` con el carrito vencido contesta 409, y ni los 19 pedidos de la cuenta, ni sus 63 líneas, ni las 20 unidades de la oferta cambiaron. Dio 20 OK y 0 FALLA el 20 de septiembre."
+     },
+     {
+      "codigo": "2. Quien sigue ahi NO pierde el carrito\n  OK    tras 6 s quieto el TTL bajo a 3 s\n  OK    GET /carrito lo devolvio entero (1 linea)\n  OK    y ese toque lo renovo: 3 s -> 86399 s\n  OK    sigue viva 13 s despues de haber bajado el TTL a 10, porque alguien la siguio tocando\n\n3. Quien se va, pierde el carrito: vence solo\n  OK    la clave desaparecio sola\n  OK    TTL = -2, Redis dice que no existe\n  OK    GET /carrito contesta 0 lineas\n\n4. Al vencer no hay nada que liberar\n  OK    POST /carrito/comprar con el carrito vencido contesta 409\n  OK    pedidos de la cuenta, 19 antes y 19 despues\n  OK    lineas de pedido de la cuenta, 63 antes y 63 despues\n  OK    stock de la oferta 3, 20 antes y 20 despues\n\n  20 OK, 0 FALLA",
+      "leyenda": "Salida de pruebas/carrito_vencimiento.sh del 20 de septiembre de 2026, recortada a las comprobaciones del vencimiento."
      },
      {
       "p": "El carrito también se ve. La pantalla que sigue es el cajón del carrito de `compradora.norte@mesh.com` con una línea de la Laptop Ambar Campus 14, y el propio texto de la pantalla le dice a quien compra lo que esta sección demuestra, que el carrito vive en Redis y no en la base relacional, que caduca a las 24 horas sin tocarlo y que el reloj vuelve a empezar cada vez que se abre o se cambia. También avisa que los precios son los de ahora y no los de cuando se agregó, que es la decisión de guardar solo la intención. La línea se agregó con la ruta real y se quitó al terminar la captura."
@@ -465,6 +472,9 @@
      {
       "codigo": "carga:  1000 solicitudes, 50 clientes a la vez, 100 unidades, 1 unidad por solicitud\n\n  evalsha 9d9638d2... reservar __rand_int__ 1 0: 17241.38 requests per second, p50=1.447 msec\n  stock final      0\n  reservado        100\n  tickets dados    100\n  reservas vivas   100   (ZCARD, contador independiente)\n  rechazos         900\n\n  OK    la carga abrio 50 conexiones simultaneas (se pidieron 50): concurrencia real\n  OK    reservas entregadas = 100\n  OK    unidades reservadas = 100\n  OK    stock final = 0\n  OK    rechazos = 900\n  OK    ZCARD contra contador de tickets = 100\n  OK    conservacion: stock + reservado = 100\n  OK    sin sobreventa: el stock nunca bajo de 0\n  OK    solicitudes contestadas (reservas + rechazos) = 1000\n\nmismo arnes, 3 unidades por solicitud sobre 100\n\n  stock final      1\n  reservas vivas   33\n  rechazos         967\n  OK    unidades reservadas = 99\n  OK    stock final = 1\n\ncarga pesada, UNIDADES=250 SOLICITUDES=5000 CLIENTES=200\n\n  OK    la carga abrio 200 conexiones simultaneas (se pidieron 200): concurrencia real\n  OK    reservas entregadas = 250\n  OK    stock final = 0\n  OK    rechazos = 4750\n  OK    solicitudes contestadas (reservas + rechazos) = 5000",
       "leyenda": "Salida de redis/prueba_concurrencia.sh del 19 de septiembre de 2026 sobre Redis 8.10.1, recortada a una ronda de cada carga."
+     },
+     {
+      "p": "La prueba anterior habla directo con Redis, y por eso el 20 de septiembre se agregó `pruebas/oferta_limitada.sh`, que pasa por el backend. Sesenta cuentas reales, registradas y con su sesión, piden una unidad cada una y todas a la vez con `PUT /carrito/lineas/:idOferta` sobre una oferta de 20 unidades que un vendedor abrió con `POST /vendedor/ofertas/:id/venta-limitada`. Ganaron exactamente 20 y los otros 40 recibieron 409. Redis quedó con el stock en 0, 20 unidades reservadas y 20 tickets, y PostgreSQL siguió en 20, porque reservar no es comprar. Los ganadores soltaron su reserva con `DELETE`, el stock volvió a 20, y una segunda ola dio otra vez exactamente 20. Dio 31 OK y 0 FALLA. Esta prueba no llega a la escala de las 1000 solicitudes de la otra, porque cada comprador necesita una cuenta, pero sí demuestra que la ruta real, con su servicio y sin candados de la aplicación, no sobrevende."
      }
     ]
    },
@@ -973,6 +983,9 @@
      },
      {
       "p": "La idempotencia del ETL está medida. Correr `etl/cargar_grafo.sh` tres veces seguidas imprime los mismos conteos las tres veces, comprobado con `diff` entre la segunda y la tercera salida, y reconstruir con `--limpiar` da esos mismos números. El modo incremental está medido con la misma honestidad. Baja el Cypher generado de 22 055 a 4 958 bytes, pero el script entero tarda lo mismo, 21.8 segundos contra 22.6, porque esos segundos son casi todos arranques de la JVM de `cypher-shell`. Su valor es que es el único modo que aplica las bajas."
+     },
+     {
+      "p": "El arnés de las consultas, `neo4j/correr_fraude.sh`, corre los archivos de `neo4j/consultas` directo contra Neo4j, y el detector del backend tiene sus propias copias de esas consultas dentro del código, así que aquel arnés prueba las consultas del repositorio y no las que corren. Por eso el 20 de septiembre se agregó `pruebas/anillos.sh`, que pasa por el backend. Registra cuatro cuentas nuevas, deja a tres como vendedoras con una oferta cada una, hace compras y reseñas reales por el checkout de siempre, con la cuarta como control, una cuenta que compra y reseña pero a la que nadie le compra, y espera al detector. Al primer segundo apareció un ciclo con las tres cuentas en `GET /admin/fraude/alertas-resenas`, con sus tres reseñas guardadas en PostgreSQL y su detalle leído de Neo4j por `detalle-grafo`. La cuenta de control no salió en ningún anillo. El caso se marcó revisado con `PATCH` y moverlo otra vez dio 409. Dio 27 OK y 0 FALLA, y deja compras reales, por eso el anillo queda revisado y no suma pendientes."
      }
     ]
    }
@@ -1545,7 +1558,7 @@
     "titulo": "7.5. Los arneses de verificación",
     "bloques": [
      {
-      "p": "El proyecto tiene quince arneses y ninguno pide creer nada. Cada uno imprime línea por línea qué comprobó, con el número medido al lado, y termina con la cuenta de OK y de FALLA. La corrida completa en serie del 19 de septiembre sumó 322 comprobaciones contadas y 0 FALLA, con los tres arneses que no imprimen un número, dos de Redis y el de Neo4j, también en verde. Para este informe se volvieron a correr ocho de ellos, los de esta entrega, y dieron lo mismo. El 20 de septiembre se corrieron otra vez, uno por uno, los seis que sostienen esta entrega, el carrito por la API y sobre Redis, la oferta limitada bajo concurrencia, las consultas de fraude sobre Neo4j, las reseñas y las tendencias, y pasaron todos sin un solo FALLA."
+      "p": "El proyecto tiene dieciocho arneses y ninguno pide creer nada. Cada uno imprime línea por línea qué comprobó, con el número medido al lado, y termina con la cuenta de OK y de FALLA. La corrida completa en serie del 19 de septiembre sumó 322 comprobaciones contadas y 0 FALLA, con los tres arneses que no imprimen un número, dos de Redis y el de Neo4j, también en verde. Para este informe se volvieron a correr ocho de ellos, los de esta entrega, y dieron lo mismo. El 20 de septiembre se corrieron otra vez, uno por uno, los seis que sostienen esta entrega, el carrito por la API y sobre Redis, la oferta limitada bajo concurrencia, las consultas de fraude sobre Neo4j, las reseñas y las tendencias, y pasaron todos sin un solo FALLA. Ese mismo día se agregaron tres arneses, `pruebas/carrito_vencimiento.sh`, `pruebas/oferta_limitada.sh` y `pruebas/anillos.sh`, porque los tres de esta entrega que hablaban directo con Redis o con Neo4j no pasaban por el backend. Los nuevos hacen toda acción por las rutas HTTP y solo miran las bases, y dieron 20, 31 y 27 OK, todos sin un solo FALLA."
      },
      {
       "p": "La regla que seguimos con todos es la misma. Antes de creerle a un arnés, rompemos el código a propósito y comprobamos que falla. En la demostración de índices de Mongo quitamos un índice a mano y 6 de las 12 comprobaciones se pusieron en rojo. En `pruebas/notas.sh` se rompe el problema antes de medirlo, para que la prueba no apruebe con un ETL que no hace nada. En `pruebas/etl_mongo.sh` hay un mutante, una copia del ETL con la regla apagada, y la prueba tiene que ponerse en rojo con ella. Un arnés que nunca se ha visto fallar no está midiendo nada."
@@ -1575,19 +1588,37 @@
          "`redis/prueba_carrito.sh`",
          "Verde",
          "20 de septiembre",
-         "Que al vencer no queda nada que liberar"
+         "El diseño Lua del carrito, directo en Redis y sin pasar por el backend"
         ],
         [
          "`redis/prueba_concurrencia.sh`",
          "61 OK",
          "20 de septiembre",
-         "1000 solicitudes sobre 100 unidades, y una carga de 5000"
+         "1000 solicitudes sobre 100 unidades, y una carga de 5000, directo en Redis y sin pasar por las rutas"
         ],
         [
          "`neo4j/correr_fraude.sh`",
          "10 OK",
          "20 de septiembre",
-         "Las cinco consultas sobre el grafo real y sobre uno sembrado"
+         "Las cinco consultas del repositorio sobre el grafo real y sobre uno sembrado, no las del backend"
+        ],
+        [
+         "`pruebas/carrito_vencimiento.sh`",
+         "20 OK",
+         "20 de septiembre",
+         "El vencimiento real del carrito, por el backend"
+        ],
+        [
+         "`pruebas/oferta_limitada.sh`",
+         "31 OK",
+         "20 de septiembre",
+         "60 cuentas reales sobre 20 unidades, por HTTP"
+        ],
+        [
+         "`pruebas/anillos.sh`",
+         "27 OK",
+         "20 de septiembre",
+         "Un anillo real, detectado y trabajado por el backend"
         ],
         [
          "`pruebas/tendencias.sh`",

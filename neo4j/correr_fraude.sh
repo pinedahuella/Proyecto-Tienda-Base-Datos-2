@@ -1,5 +1,11 @@
 #!/usr/bin/env bash
 #
+# AVISO, ESTE ARNES NO PASA POR EL BACKEND. Corre los archivos neo4j/consultas/A*.cypher
+# contra Neo4j. El detector del backend (anillos-detector.service.ts) tiene sus
+# propias copias de esas consultas dentro del codigo, asi que esto prueba las del
+# repositorio y no las que corren. El camino completo, con compras y resenas
+# reales y el detector del backend, es pruebas/anillos.sh.
+#
 # correr_fraude.sh -- las consultas que senalan conjuntos de cuentas con un
 # patron de interaccion anomalo. Son los 3 puntos mas grandes de la Entrega 2.
 #
