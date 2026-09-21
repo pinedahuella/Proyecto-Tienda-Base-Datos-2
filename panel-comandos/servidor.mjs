@@ -265,6 +265,29 @@ const CATALOGO = [
     campos: [],
     construir: () => ['-Limpiar'],
   },
+
+  // --- Demo de Redis ------------------------------------------------------
+  {
+    id: 'redis-sin-ttl', grupo: 'Demo de Redis', titulo: 'Dejar llaves sin TTL para explicarlas',
+    explica: 'Deja en Redis dos llaves que no vencen nunca (TTL -1, en RedisInsight dice No limit) y una que si vence en 10 minutos y cuenta hacia atras, para ensenar la diferencia. Estan bajo mesh:demo y no tocan nada real. Al final imprime lo que hay que explicar.',
+    script: 'demo-redis-sin-ttl.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Accion', 'crear'],
+  },
+  {
+    id: 'redis-ver-ttl', grupo: 'Demo de Redis', titulo: 'Ver las llaves de Mesh y su TTL',
+    explica: 'Lista todas las llaves mesh:* con su tipo y cuanto les queda de vida. Sirve para ver bajar el TTL de la llave que vence, o para ver cuales llaves reales no tienen TTL.',
+    script: 'demo-redis-sin-ttl.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Accion', 'ver'],
+  },
+  {
+    id: 'redis-borrar-demo', grupo: 'Demo de Redis', titulo: 'Quitar las llaves de la demo',
+    explica: 'Borra solo las que empiezan con mesh:demo. El carrito, los contadores de fraude y las ofertas no se tocan.',
+    script: 'demo-redis-sin-ttl.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Accion', 'borrar'],
+  },
 ];
 
 // ---------------------------------------------------------------------------
