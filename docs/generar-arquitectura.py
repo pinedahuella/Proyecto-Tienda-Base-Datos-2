@@ -293,11 +293,11 @@ def construir():
     y += 14
     L.texto(x0, y, 1800, 22,
             "Herramientas de inspección que no son parte del sistema, pgAdmin 5050, DbGate 3001, RedisInsight 5540, "
-            "Neo4j Browser 7474 y ClickHouse play 8123.", 11, gris=True)
+            "Kibana 5601, Neo4j Browser 7474 y ClickHouse play 8123.", 11, gris=True)
     y += 24
     L.texto(x0, y, 1800, 22,
-            "Todo corre en una sola máquina, en nueve contenedores de un mismo Docker. Cada motor guarda lo que le "
-            "corresponde por la forma de la pregunta que va a recibir.", 11, gris=True)
+            "Todo corre en una sola máquina, en diez contenedores de un mismo Docker, más uno de un solo uso que prepara las "
+            "vistas de Kibana. Cada motor guarda lo que le corresponde por la forma de la pregunta que va a recibir.", 11, gris=True)
     return L
 
 

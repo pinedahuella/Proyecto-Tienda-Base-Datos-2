@@ -9,7 +9,7 @@
       "p": "Mesh es una tienda en línea con varios vendedores sobre un mismo catálogo, y es la implementación de TiendaYa, el escenario que plantea el enunciado del curso. Un producto describe una cosa del mundo y no es de nadie. Quién lo vende, a qué precio y con cuántas unidades es una fila de la tabla `oferta`, y la cuenta `tienda@mesh.com` tiene oferta de todo. El catálogo curado que carga `arrancar.ps1` son 102 productos en 17 categorías hoja y 202 variantes, escritos por `migrations/datos/generador.js` con semilla fija. La base de desarrollo de estos días suma lotes generados y llegó a 1105 productos."
      },
      {
-      "p": "Todo el trabajo vive en un único repositorio de git, `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 212 commits entre el 15 de agosto y el 19 de septiembre de 2026 sobre la rama `main`. El repositorio trae el esquema y las migraciones, los ETL, los scripts de cada base, los arneses de prueba, el código de la aplicación y la documentación, incluidas las instrucciones para levantar el sistema completo."
+      "p": "Todo el trabajo vive en un único repositorio de git, `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 228 commits entre el 15 de agosto y el 20 de septiembre de 2026 sobre la rama `main`. El repositorio trae el esquema y las migraciones, los ETL, los scripts de cada base, los arneses de prueba, el código de la aplicación y la documentación, incluidas las instrucciones para levantar el sistema completo."
      },
      {
       "p": "La Entrega 1 dejó a PostgreSQL como fuente de verdad y a MongoDB con el catálogo y su historial. Esta entrega pide tres cosas nuevas. Un carrito sobre un almacén clave-valor con expiración explícita, una oferta de inventario limitado que no sobrevenda bajo solicitudes concurrentes, y una evaluación razonada entre bases de grafos y columnares para dos análisis, con la familia elegida implementada. Los motores nuevos son Redis, Neo4j y ClickHouse."
@@ -21,7 +21,7 @@
       "p": "Para cada tecnología seguimos el mismo camino. Primero la necesidad concreta que aparece en el sistema, después lo que ofrece el mercado, después las alternativas que evaluamos incluida la de no cambiar nada, y al final una medición contra nuestros propios datos antes de decidir. Cada decisión queda en un registro con los cinco campos que pide el enunciado, contexto, alternativas, decisión, justificación y consecuencias. Hay un registro por cada componente que entró y uno por el que se descartó, y cada uno está dentro de la sección donde se toma la decisión."
      },
      {
-      "p": "Los documentos vivos de esta entrega están en `docs/`. `docs/DECISION-GRAFOS-VS-COLUMNAR.md` guarda la evaluación comparativa, `docs/ARQUITECTURA.md` y `docs/diagrama-arquitectura.drawio` el diagrama de arquitectura, `docs/diagrama-general.drawio` el diagrama entidad relación con las 50 tablas de PostgreSQL, y `docs/instalacion.md` con `ARRANCAR.txt` explican cómo poner todo en marcha. Los dos diagramas se generan con `docs/generar-arquitectura.py` y `docs/generar-er.py`, y el segundo lee el esquema de la base viva para que el dibujo no pueda quedarse atrás de las migraciones."
+      "p": "Los documentos vivos de esta entrega están en `docs/`. `docs/DECISION-GRAFOS-VS-COLUMNAR.md` guarda la evaluación comparativa, `docs/ARQUITECTURA.md` y `docs/diagrama-arquitectura.drawio` el diagrama de arquitectura, `docs/diagrama-general.drawio` el diagrama entidad relación con las 50 tablas de PostgreSQL, y `docs/instalacion.md` con `ARRANCAR.txt` explican cómo poner todo en marcha. Los dos diagramas se generan con `docs/generar-arquitectura.py` y `docs/generar-er.py`, y el segundo lee el esquema de la base viva para que el dibujo no pueda quedarse atrás de las migraciones. `PREGUNTAS-SUSTENTACION.md`, en la raíz, reúne preguntas y respuestas cortas para la sustentación, y cada respuesta dice en qué archivo y en qué líneas se ve lo que afirma."
      }
     ]
    },
@@ -124,7 +124,7 @@
       "p": "José Manuel González Corado lleva `frontend/`, `migrations/`, `etl/`, `mongo/`, `neo4j/`, `redis/`, `clickhouse/`, `pruebas/`, `docs/` y `arrancar.ps1`. José David Navichoque Pineda lleva `backend/`, y José Manuel no lo toca, ni siquiera un comentario. La regla se lee como una imposición, pero fue lo que permitió que dos personas trabajaran en paralelo sin pisarse durante cinco semanas."
      },
      {
-      "p": "El historial confirma esa frontera. Son 212 commits en total, 125 de José Manuel González Corado, 82 del usuario pinedahuella, que es José David Navichoque Pineda, y 5 de zapatoazul. Contando cambios de archivo por carpeta, los 82 commits de José David se reparten 785 cambios en `backend/` y apenas 10 fuera de ahí. Los de José Manuel se reparten sobre todo en `frontend/` con 213 cambios, `docs/` con 137, `migrations/` con 79 y `etl/` con 70."
+      "p": "El historial confirma esa frontera. Al 20 de septiembre, en el commit 3a8939d, son 228 commits en total, 138 de José Manuel González Corado, 85 del usuario pinedahuella, que es José David Navichoque Pineda, y 5 de zapatoazul. Contando cambios de archivo por carpeta, los 85 commits de José David se reparten 788 cambios en `backend/` y apenas 10 fuera de ahí. Los de José Manuel se reparten sobre todo en `frontend/` con 237 cambios, `docs/` con 167, `migrations/` con 79 y `etl/` con 70."
      },
      {
       "p": "La frontera no existió desde el principio. José Manuel acumula 48 cambios de archivo dentro de `backend/`, 47 anteriores al 26 de agosto y uno ese mismo día, que es la fecha de su último commit sobre esa carpeta. A partir de ahí el reparto se respeta sin excepción. El acoplamiento entre las dos mitades se resolvió por escrito en vez de por edición cruzada. Cuando el frontend necesita algo del backend, el contrato se deja en `docs/BACKEND-PENDIENTE.md`, y cuando el backend propone un cambio lo deja en `backend/cambio_propuestas/` con su fecha en el nombre."
@@ -333,6 +333,9 @@
        "ancho": 6.2,
        "horizontal": false
       }
+     },
+     {
+      "p": "Para enseñar el vencimiento en vivo, sin esperar a que caduque un carrito de verdad, el panel de comandos trae desde el 20 de septiembre una demostración de Redis. Un botón deja tres llaves bajo `mesh:demo`. `mesh:demo:sin_ttl:contador` es un texto con el valor 42 y `mesh:demo:sin_ttl:configuracion` es un hash, y las dos quedan con TTL -1, que RedisInsight muestra como No limit, o sea que no vencen nunca. La tercera, `mesh:demo:con_ttl:carrito_de_prueba`, es un hash con la forma del carrito y un TTL de 600 segundos que se ve bajar hasta que Redis la borra sola. Otro botón lista todas las llaves de Mesh con su tipo y su TTL, y un tercero quita solo las de la demostración. Se probó el 20 de septiembre por la misma ruta del panel que usa el botón, con código de salida 0 en los tres comandos, y el borrado dejó intacta la llave real `mesh:productos:mas_vendidos`, que tampoco lleva TTL porque un worker la reescribe cada 10 minutos."
      },
      {
       "p": "La prueba de falla del checkout cubre el carrito desde afuera. `pruebas/falla_checkout.sh` corre el mismo checkout cinco veces parando Redis, MongoDB y PostgreSQL de uno en uno. En la corrida completa del 19 de septiembre dio 31 OK y 0 FALLA, y con Redis parado no se compró, PostgreSQL quedó con los mismos pedidos, pagos y stock que antes y el carrito quedó entero. El detalle está en `docs/CONSISTENCIA-CHECKOUT.md` y pertenece a la Entrega 3, así que aquí solo se cita por su efecto sobre el carrito."
@@ -890,6 +893,12 @@
       "p": "La pantalla es `frontend/src/lib/PanelFraude.svelte` y vive en `/panel?s=fraude`. Debajo de los casos de reseñas enseña una línea tomada de `GET /admin/grafo/conciliacion` que dice de cuándo son los datos que se acaban de analizar. En gris cuando el grafo cuadra con PostgreSQL y en rojo, con fondo, cuando no cuadra, avisando de que el análisis puede estar incompleto. Esa petición va aparte y sin bloquear el panel, porque es información sobre el análisis, y un fallo ahí no pinta nada en vez de pintar un error que asustaría más de lo que informa. Se probó borrando un nodo `:Resena` a mano y viendo aparecer el aviso rojo. El mismo panel muestra también las alertas del inicio de sesión, que salen de contadores de Redis y de Elasticsearch y no del grafo, y que quedan fuera de este informe."
      },
      {
+      "p": "Desde el 20 de septiembre la pantalla se reparte en dos pestañas, Intentos de entrada y Reseñas en anillo, para no tener que bajar por una página larga. Se ve una a la vez, pero las dos siguen cargadas y cada una conserva su filtro y su página. El enlace `/panel?s=fraude&t=resenas` abre directo en los anillos, y es el que abre `demo-anillo-resenas.ps1` al terminar. En la pestaña de las alertas de inicio de sesión, el selector de tipo agrupa las nueve señales en tres familias, por IP, por cuenta, y ubicación y acceso. El backend sigue filtrando un solo tipo a la vez, así que el agrupado es solo del selector y no cambió ninguna ruta."
+     },
+     {
+      "p": "La cabecera tiene ahora dos campanas distintas. La de siempre, `NotificacionesFraude.svelte`, es de todas las cuentas y avisa de las alertas de inicio de sesión de la propia cuenta. La segunda, `NotificacionesAdmin.svelte`, se dibuja con un escudo y solo aparece cuando la sesión es de un administrador. Avisa de los anillos de reseñas pendientes, que lee de la misma ruta `GET /admin/fraude/alertas-resenas` filtrada por estado pendiente, y cada aviso trae las cuentas del anillo y un enlace que abre la pestaña de anillos. A las cuentas del anillo nunca se les avisa, por la razón de siempre, y por eso el aviso es del administrador y no de una cuenta afectada. No tiene botón de marcar leída propio, porque un anillo deja de contar cuando el administrador lo marca como revisado o descartado. Un estado de lectura por administrador pediría una tabla nueva en el backend, y quedó anotado como pedido en `docs/BACKEND-PENDIENTE.md`."
+     },
+     {
       "p": "`alertas-resenas` no se llenaba sola al principio, y hay que decir por qué. El anillo de demostración que siembra el conjunto de datos, las cuentas `anillo.uno`, `anillo.dos` y `anillo.tres`, tiene reseñas de marzo de 2026, fuera de la ventana de 60 días del detector. Para probar la ruta con ese anillo se ensanchó la ventana solo en el script de prueba, sin tocar el código, y el detalle quedó anotado en la documentación del backend. Para ver el detector funcionando con la ventana normal, sin tocar nada, se armó `demo-anillo-resenas.ps1`, que registra cuentas nuevas, les publica una oferta aprobada sobre un producto del catálogo compartido, hace una compra real entre ellas con el checkout de siempre y las deja calificarse en círculo. Corrido dos veces el 19 de septiembre, un ciclo de tres cuentas y un par mutuo de dos sobre el mismo producto, el detector los encontró los dos, en menos de 10 segundos cada uno y sin ensanchar ninguna ventana. La demostración de que las cinco consultas encuentran un anillo sembrado a mano, sin pasar por la aplicación, sigue siendo `neo4j/correr_fraude.sh`, que corre sobre todo el grafo sin ventana."
      },
      {
@@ -902,7 +911,7 @@
      {
       "figura": {
        "archivo": "pantalla-fraude-resenas.png",
-       "leyenda": "Sección de manipulación de reseñas del panel de fraude. Sin anillos pendientes, con la ventana de 60 días del detector y la línea que dice que el grafo está al día con PostgreSQL.",
+       "leyenda": "Sección de manipulación de reseñas del panel de fraude. Sin anillos pendientes, con la ventana de 60 días del detector y la línea que dice que el grafo está al día con PostgreSQL. Captura del 19 de septiembre, cuando el panel todavía no tenía pestañas.",
        "ancho": 6.2,
        "horizontal": false
       }
@@ -1163,7 +1172,7 @@
      {
       "figura": {
        "archivo": "pantalla-tendencias-auto.png",
-       "leyenda": "Panel de Tendencias al abrir. Las consultas automáticas se calculan solas, con las compras contra el periodo anterior arriba y los seis rankings de 30 días debajo.",
+       "leyenda": "Panel de Tendencias al abrir. Las consultas automáticas se calculan solas, con las compras contra el periodo anterior arriba y los seis rankings de 30 días debajo. Captura del 19 de septiembre, anterior al rediseño de las filas que se describe más abajo.",
        "ancho": 5.9,
        "horizontal": false
       }
@@ -1184,6 +1193,9 @@
      },
      {
       "p": "Debajo de las consultas automáticas hay un constructor de consultas propias. El administrador elige qué medir, cuántos días, cuántos resultados, en qué orden y si compara contra el periodo anterior, ve el resultado y puede guardarla como automática, con lo que se calcula sola desde entonces. Las consultas guardadas viven en el navegador y no en la base. Todo sale de las seis rutas que ya existen, porque una consulta libre en SQL mandada desde el navegador a ClickHouse sería abrir un agujero y porque el backend no es de este lado. La pestaña Rankings conserva la pantalla de antes, con sus seis pestañas y sus mandos."
+     },
+     {
+      "p": "El 20 de septiembre se rehízo la presentación de esos rankings sin tocar el backend. Cada fila lleva una insignia con su puesto, con los tres primeros teñidos, el nombre en una sola línea con el texto completo al pasar el cursor, la cifra y una barra redondeada que mide contra el mayor valor de esa tarjeta. La unidad, por ejemplo sesiones distintas, va una vez en el subtítulo de la tarjeta y no en cada fila, porque en una tarjeta angosta le quitaba el sitio al nombre del producto. En las compras en ascenso la barra es el periodo actual y una marca vertical señala dónde estaba el periodo anterior, con una etiqueta que dice nuevo o cuántas veces creció, y la leyenda solo aparece si alguna fila tiene esa marca. Hoy todas las filas dicen nuevo, porque ningún producto tiene compras en los 30 días anteriores, y eso es lo que dicen los datos y no un fallo del gráfico. Se revisó en el navegador el 20 de septiembre, y `pruebas/tendencias.sh`, que mide los datos que alimentan estas filas, sigue en 50 OK."
      },
      {
       "p": "La consulta de ascenso que lee del resumen diario de ClickHouse, y que sí compara vistas, se sigue corriendo en la consola de ClickHouse. Está anotada como pendiente en `docs/BACKEND-PENDIENTE.md`, porque una ruta es trabajo del backend."
@@ -1509,17 +1521,23 @@
       "p": "Todo el sistema se levanta con un solo script de PowerShell. `arrancar.ps1` sube los contenedores, aplica las migraciones, siembra los datos, corre los ETL y comprueba al final que cada base quedó como debía. El detalle largo, con las trampas del entorno, está en `docs/TRASPASO.md`, y las instrucciones de instalación en `docs/instalacion.md` y `ARRANCAR.txt`, que es lo que el lineamiento 5.4 pide."
      },
      {
-      "p": "`docker-compose.yml` define nueve servicios. Seis son los motores de persistencia y tres son ventanas de inspección que no forman parte del sistema, pgAdmin, dbgate y RedisInsight. Neo4j y ClickHouse traen su propia consola en el mismo contenedor, en 7474 y en 8123/play. El 19 de septiembre `.\\arrancar.ps1` se corrió sobre la base existente y terminó en Listo con los nueve contenedores arriba, y `.\\arrancar.ps1 -ReiniciarGrafo` reconstruyó el grafo desde PostgreSQL y verificó cada conteo."
+      "p": "`docker-compose.yml` define once servicios. Seis son los motores de persistencia, cuatro son ventanas de inspección que no forman parte del sistema, pgAdmin, dbgate, RedisInsight y Kibana, y uno es un contenedor de un solo uso que prepara las vistas de Kibana y termina. Neo4j y ClickHouse traen su propia consola en el mismo contenedor, en 7474 y en 8123/play. El 19 de septiembre `.\\arrancar.ps1` se corrió sobre la base existente y terminó en Listo con los nueve contenedores que había entonces arriba, y `.\\arrancar.ps1 -ReiniciarGrafo` reconstruyó el grafo desde PostgreSQL y verificó cada conteo."
+     },
+     {
+      "p": "Kibana es la ventana de Elasticsearch. Abre en el puerto 5601 y solo en la máquina local, porque Elasticsearch corre con la seguridad apagada, y trae la misma versión que el motor, la 8.15.3, con un tope de memoria de 1 GB. Sirve para enseñar el mapping y los documentos de los índices de productos y de eventos de autenticación sin escribir consultas. El contenedor `mesh-kibana-vistas` corre una sola vez en cada arranque. Espera a que Kibana abra y a que existan los índices, crea las vistas de datos de productos y de eventos de autenticación y deja el rango de Discover en 60 días, y `arrancar.ps1` lo espera en su paso 9c y cuenta qué pasó. Las vistas viven en el volumen de Elasticsearch y no en el repositorio, por eso se crean solas, y un `-Reiniciar` que borra el volumen las vuelve a crear."
      },
      {
       "p": "Para verificar desde cero, que es lo que conviene hacer en la máquina donde se presente, `.\\arrancar.ps1 -Reiniciar` borra todos los volúmenes y reconstruye las bases desde los archivos del repositorio. El estado que queda es siempre el mismo, salga de la máquina que salga, porque sale de esos archivos y no de lo que cada quien haya hecho."
      },
      {
-      "p": "Solo hay dos cosas que instalar en una máquina nueva, Node.js 24 LTS y Docker Desktop, más Git para clonar. Ninguna base se instala aparte. Las contraseñas no viajan en el repositorio, así que hay que crear dos archivos `.env` a partir de sus plantillas, el de la raíz para los contenedores y `backend/.env` para la aplicación, y los dos deben llevar el mismo usuario y la misma contraseña. MongoDB sale por el 27018 y no por el 27017 a propósito, porque Windows puede tener un MongoDB de servicio ocupando el puerto de siempre, y ese contestaría primero con una base vacía. La máquina de desarrollo tiene 15.7 GB de memoria y Docker recibe 7.6 GiB, y con los nueve contenedores arriba quedan pocos gigas libres, por lo que las tres ventanas de inspección se pueden apagar con `docker stop` sin afectar al sistema."
+      "p": "El panel de comandos, que se abre con `.\\panel-comandos.ps1`, junta en botones lo que de otro modo se escribiría en la terminal, 29 comandos en cinco grupos, arrancar y parar, productos de prueba, reconstruir bases, demostraciones de fraude y la demostración de Redis. Escucha solo en la máquina local, ejecuta una lista fija de comandos y valida cada valor antes de armar nada. Las cuentas de desarrollo lo ven en la pestaña Comandos del panel, y hay una página de emergencia en el puerto 5199 para cuando Mesh está apagado."
      },
      {
-      "codigo": ".\\arrancar.ps1                            los contenedores, migraciones, semilla y ETL\n.\\arrancar.ps1 -Reiniciar                 desde cero, borra los volúmenes\n.\\arrancar.ps1 -Etl                       solo vuelve a correr las copias\n.\\arrancar.ps1 -Productos 300 -Semilla 7  lote de productos reproducible\n\ncd backend  ; npm run start:dev           :3000\ncd frontend ; npm run dev                 :5173\n\nPUERTOS\n  PostgreSQL      5432          pgAdmin en 5050\n  MongoDB         27018         dbgate en 3001\n  Redis           6379          RedisInsight en 5540\n  Neo4j           7687 bolt     Browser en 7474\n  Elasticsearch   9200          sin contraseña, solo en local\n  ClickHouse      8123 HTTP     consola en 8123/play, 9010 nativo\n  backend         3000\n  frontend        5173",
-      "leyenda": "Los comandos de arranque y los puertos de los nueve servicios del compose."
+      "p": "Solo hay dos cosas que instalar en una máquina nueva, Node.js 24 LTS y Docker Desktop, más Git para clonar. Ninguna base se instala aparte. Las contraseñas no viajan en el repositorio, así que hay que crear dos archivos `.env` a partir de sus plantillas, el de la raíz para los contenedores y `backend/.env` para la aplicación, y los dos deben llevar el mismo usuario y la misma contraseña. MongoDB sale por el 27018 y no por el 27017 a propósito, porque Windows puede tener un MongoDB de servicio ocupando el puerto de siempre, y ese contestaría primero con una base vacía. La máquina de desarrollo tiene 15.7 GB de memoria y Docker recibe 7.6 GiB, y con los diez contenedores arriba quedan pocos gigas libres, por lo que las cuatro ventanas de inspección se pueden apagar con `docker stop` sin afectar al sistema."
+     },
+     {
+      "codigo": ".\\arrancar.ps1                            los contenedores, migraciones, semilla y ETL\n.\\arrancar.ps1 -Reiniciar                 desde cero, borra los volúmenes\n.\\arrancar.ps1 -Etl                       solo vuelve a correr las copias\n.\\arrancar.ps1 -Productos 300 -Semilla 7  lote de productos reproducible\n\ncd backend  ; npm run start:dev           :3000\ncd frontend ; npm run dev                 :5173\n\nPUERTOS\n  PostgreSQL      5432          pgAdmin en 5050\n  MongoDB         27018         dbgate en 3001\n  Redis           6379          RedisInsight en 5540\n  Neo4j           7687 bolt     Browser en 7474\n  Elasticsearch   9200          Kibana en 5601, sin contraseña, solo en local\n  ClickHouse      8123 HTTP     consola en 8123/play, 9010 nativo\n  backend         3000\n  frontend        5173",
+      "leyenda": "Los comandos de arranque y los puertos de los servicios del compose."
      }
     ]
    },
@@ -1527,7 +1545,7 @@
     "titulo": "7.5. Los arneses de verificación",
     "bloques": [
      {
-      "p": "El proyecto tiene quince arneses y ninguno pide creer nada. Cada uno imprime línea por línea qué comprobó, con el número medido al lado, y termina con la cuenta de OK y de FALLA. La corrida completa en serie del 19 de septiembre sumó 322 comprobaciones contadas y 0 FALLA, con los tres arneses que no imprimen un número, dos de Redis y el de Neo4j, también en verde. Para este informe se volvieron a correr ocho de ellos, los de esta entrega, y dieron lo mismo."
+      "p": "El proyecto tiene quince arneses y ninguno pide creer nada. Cada uno imprime línea por línea qué comprobó, con el número medido al lado, y termina con la cuenta de OK y de FALLA. La corrida completa en serie del 19 de septiembre sumó 322 comprobaciones contadas y 0 FALLA, con los tres arneses que no imprimen un número, dos de Redis y el de Neo4j, también en verde. Para este informe se volvieron a correr ocho de ellos, los de esta entrega, y dieron lo mismo. El 20 de septiembre se corrieron otra vez, uno por uno, los seis que sostienen esta entrega, el carrito por la API y sobre Redis, la oferta limitada bajo concurrencia, las consultas de fraude sobre Neo4j, las reseñas y las tendencias, y pasaron todos sin un solo FALLA."
      },
      {
       "p": "La regla que seguimos con todos es la misma. Antes de creerle a un arnés, rompemos el código a propósito y comprobamos que falla. En la demostración de índices de Mongo quitamos un índice a mano y 6 de las 12 comprobaciones se pusieron en rojo. En `pruebas/notas.sh` se rompe el problema antes de medirlo, para que la prueba no apruebe con un ETL que no hace nada. En `pruebas/etl_mongo.sh` hay un mutante, una copia del ETL con la regla apagada, y la prueba tiene que ponerse en rojo con ella. Un arnés que nunca se ha visto fallar no está midiendo nada."
@@ -1550,49 +1568,49 @@
         [
          "`pruebas/carrito.sh`",
          "25 OK",
-         "Hoy",
+         "20 de septiembre",
          "Las cuatro rutas y el TTL por inactividad"
         ],
         [
          "`redis/prueba_carrito.sh`",
          "Verde",
-         "Hoy",
+         "20 de septiembre",
          "Que al vencer no queda nada que liberar"
         ],
         [
          "`redis/prueba_concurrencia.sh`",
          "61 OK",
-         "Hoy",
+         "20 de septiembre",
          "1000 solicitudes sobre 100 unidades, y una carga de 5000"
         ],
         [
          "`neo4j/correr_fraude.sh`",
          "10 OK",
-         "Hoy",
+         "20 de septiembre",
          "Las cinco consultas sobre el grafo real y sobre uno sembrado"
         ],
         [
          "`pruebas/tendencias.sh`",
          "50 OK",
-         "Hoy",
+         "20 de septiembre",
          "Los seis rankings y el estante de lo más vendido"
         ],
         [
          "`pruebas/etl_compras.sh`",
          "22 OK",
-         "Hoy",
+         "19 de septiembre",
          "La copia de compras y devoluciones a ClickHouse"
         ],
         [
          "`pruebas/etl_mongo.sh`",
          "21 OK",
-         "Hoy",
+         "19 de septiembre",
          "Que el ETL de Mongo no deshaga lo editado en la aplicación"
         ],
         [
          "`pruebas/resenas.sh`",
          "15 OK",
-         "Hoy",
+         "20 de septiembre",
          "Las rutas de reseñas, comentarios y likes"
         ],
         [
@@ -1692,6 +1710,11 @@
          "Ninguna ruta consulta Elasticsearch para agregar sobre los eventos de login",
          "José David",
          "Puntos 14 y 15 de `docs/PENDIENTES.md`, de la Entrega 3"
+        ],
+        [
+         "Estado de lectura propio en la campana del administrador",
+         "José David",
+         "Pedido en `docs/BACKEND-PENDIENTE.md`. Hoy el aviso cuenta los anillos pendientes y deja de contar cuando se revisan"
         ]
        ],
        "leyenda": "Lo que queda pendiente al cierre de la entrega y quién lo tiene.",
