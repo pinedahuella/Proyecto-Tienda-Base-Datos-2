@@ -85,7 +85,10 @@ es el backend, que responde 403 o 404.
 | `src/routes/registro/+page.svelte` | crear cuenta |
 | `src/routes/panel/+page.svelte` | panel |
 | `src/lib/PanelAdmin.svelte` | gestion de usuarios, dentro del panel |
-| `src/lib/PanelFraude.svelte` | los anillos de manipulacion de resenas, y si el grafo esta al dia |
+| `src/lib/PanelFraude.svelte` | fraude, en dos pestanas: intentos de entrada sospechosos y anillos de manipulacion de resenas, con si el grafo esta al dia |
+| `src/lib/NotificacionesFraude.svelte` | la campana general de la cabecera, de todas las cuentas: las alertas de login de la propia cuenta |
+| `src/lib/NotificacionesAdmin.svelte` | la campana del admin, con escudo: los anillos de resenas pendientes |
+| `src/lib/TendenciasAuto.svelte` | las tarjetas de rankings de Tendencias, con barras |
 | `src/lib/PanelReportes.svelte` | los dos reportes de admin, ventas y reservaciones |
 | `src/lib/CarritoRedis.svelte` | el carrito lateral sobre Redis, con la insignia de venta relampago |
 | `src/lib/Resenas.svelte` | las resenas de un producto, con su promedio, votos y respuestas |
@@ -1030,3 +1033,50 @@ llenas hay que contarlas para saber si son 3 de 5 o 3 de 4.
 
 No hizo falta ninguna libreria, que es lo que decia el comentario anterior para
 justificar el texto. Es un poligono de cinco puntas.
+
+## Las dos campanas de la cabecera (2026-09-20)
+
+Hay dos, y no son la misma.
+
+- **La general**, `NotificacionesFraude.svelte`, es de todas las cuentas. Muestra
+  las alertas de login de la propia cuenta (`GET /perfil/alertas-fraude`) y cada
+  una se puede pasar a leida con **Marcar leida**.
+- **La del admin**, `NotificacionesAdmin.svelte`, con un escudo en vez de campana y
+  el titulo **Avisos de admin**. `Cabecera.svelte` la pinta solo cuando la sesion
+  es de un admin. Lista los anillos de resenas pendientes
+  (`GET /admin/fraude/alertas-resenas?estado=pendiente`) con sus cuentas y un
+  enlace **Revisar** a `/panel?s=fraude&t=resenas`. **No tiene Marcar leida
+  propio**: un anillo deja de contar cuando se marca revisado o descartado en el
+  panel.
+
+El backend no cambio. Que cada admin tenga su propio estado de lectura pide una
+tabla nueva del lado del backend, y esta pedido en `docs/BACKEND-PENDIENTE.md`.
+
+## El panel de fraude, en dos pestanas (2026-09-20)
+
+`PanelFraude.svelte` tiene ahora dos pestanas, **Intentos de entrada** y
+**Resenas en anillo**. Se ve una a la vez, pero las dos siguen montadas y cada una
+conserva su filtro y su pagina al cambiar de una a otra.
+
+- El select de tipo de las alertas de login esta agrupado en **Por IP**, **Por
+  cuenta** y **Ubicacion y acceso**. Es solo del select: el backend sigue
+  filtrando un solo tipo a la vez.
+- `/panel?s=fraude&t=resenas` abre directo en los anillos. `demo-anillo-resenas.ps1`
+  abre ese enlace, y la campana del admin tambien lo usa.
+- **Se quito la pestana Demo del panel del admin.** Las demos viven en la pestana
+  Comandos del panel de las cuentas desarrollador (ver `comandos.txt`).
+
+## Las graficas de Tendencias (2026-09-20)
+
+En `TendenciasAuto.svelte` cada fila de un ranking lleva:
+
+- una insignia de puesto, con los tres primeros tenidos de color;
+- el nombre en una sola linea, con el texto completo al pasar el cursor;
+- la cifra;
+- una barra redondeada que mide contra el mayor valor de esa misma tarjeta.
+
+La unidad va en el subtitulo de la tarjeta, por ejemplo "en sesiones distintas", y
+no repetida en cada fila. En **Compras en ascenso** la barra es el periodo actual y
+una marca vertical es el periodo anterior, con la etiqueta **nuevo** o **N veces**.
+La leyenda solo sale si alguna fila tiene marca. La tarjeta ancha reparte sus filas
+en columnas, dos en pantalla ancha. No hay ruta nueva en el backend.

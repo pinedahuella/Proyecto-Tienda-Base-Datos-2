@@ -1885,3 +1885,22 @@ septiembre el producto inflado sale primero con 270 veces y 6 personas, y el asc
 periodo anterior por su cuenta (pide la ventana de N y la de 2N y resta, lo que solo es exacto cuando el total
 SUMA), pero las **vistas** no se pueden restar porque cuentan sesiones distintas: para eso hace falta esta
 consulta, que lee del resumen diario. Cuando exista, `TendenciasAuto.svelte` la agrega a las automaticas.
+
+---
+
+## LO NUEVO DEL 2026-09-20: una campana del admin con estado de lectura por admin
+
+Para Jose David. El frontend ya tiene una campana del admin, aparte de la general: `NotificacionesAdmin.svelte`,
+con un escudo y el titulo "Avisos de admin", que `Cabecera.svelte` muestra solo cuando la sesion es de un admin.
+Lista los anillos de resenas pendientes con `GET /admin/fraude/alertas-resenas?estado=pendiente` (las cuentas y un
+enlace "Revisar" a `/panel?s=fraude&t=resenas`), y **el backend no cambio para esto**.
+
+Lo que no puede tener es "marcar leida" propio. Hoy un anillo deja de contar cuando se marca revisado o
+descartado en el panel, y eso es el estado del anillo, no de quien lo mira: si un admin lo revisa, para los demas
+tambien desaparece. La campana general de las demas cuentas si tiene lectura propia, porque
+`notificacion_fraude` guarda una fila por cuenta afectada con su `fecha_lectura`
+(`GET`/`PATCH /perfil/alertas-fraude`).
+
+Lo que se pide es que cada admin tenga su propio estado de lectura de los avisos. Eso necesita una **tabla nueva**
+en el backend, una fila por aviso y por admin, con su fecha de lectura, y las rutas para listar los avisos de un
+admin y marcarlos leidos. Sin la tabla la campana del admin no puede distinguir "lo vi yo" de "lo reviso otro".

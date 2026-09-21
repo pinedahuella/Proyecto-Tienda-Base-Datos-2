@@ -10,9 +10,9 @@ Como dejar Mesh corriendo en una PC nueva.
 | Docker Desktop | ultima | https://www.docker.com/products/docker-desktop |
 | Git | ultima | https://git-scm.com/downloads |
 
-Nada mas. Ninguna de las cuatro bases se instala -- ni PostgreSQL, ni MongoDB, ni
-Redis, ni Neo4j -- y tampoco sus tres ventanas: los siete contenedores estan en
-el `docker-compose.yml` y Docker los baja solos.
+Nada mas. Ninguna de las seis bases se instala -- ni PostgreSQL, ni MongoDB, ni
+Redis, ni Neo4j, ni Elasticsearch, ni ClickHouse -- y tampoco sus ventanas: los
+once contenedores estan en el `docker-compose.yml` y Docker los baja solos.
 
 Si la PC ya tiene PostgreSQL instalado, hay que detener su servicio antes de
 empezar. Usa el puerto 5432 y se pelea con el contenedor. En PowerShell como
@@ -63,8 +63,9 @@ En Windows, un solo comando deja las bases listas:
 .\arrancar.ps1
 ```
 
-El script arranca Docker si esta apagado, levanta los siete contenedores, espera
-a que **los cuatro motores** respondan -- PostgreSQL, MongoDB, Redis y Neo4j --,
+El script arranca Docker si esta apagado, levanta los once contenedores, espera
+a que **los seis motores** respondan -- PostgreSQL, MongoDB, ClickHouse,
+Elasticsearch, Redis y Neo4j --,
 corre las migraciones pendientes y carga lo que les falte a las dos bases
 derivadas: el catalogo de MongoDB y el grafo de Neo4j. Se puede correr las veces
 que quieras.
@@ -147,7 +148,9 @@ entra una vez".
 
 ## Contenedores
 
-Son **siete**: cuatro motores y tres ventanas para mirarlos.
+Son **once**: seis motores, cuatro ventanas para mirarlos y un contenedor de un
+solo uso. Diez se quedan corriendo; `mesh-kibana-vistas` termina en `Exited (0)`,
+que es lo esperado.
 
 | Servicio | Contenedor | Imagen | Puerto | Para que |
 |---|---|---|---|---|
@@ -158,9 +161,15 @@ Son **siete**: cuatro motores y tres ventanas para mirarlos.
 | Redis | mesh-redis | redis:8-alpine | 6379 | Entrega 2: el carrito con expiracion y la oferta de inventario limitado |
 | RedisInsight | mesh-redisinsight | redis/redisinsight:latest | 5540 | la ventana de Redis, con el TTL contando hacia atras |
 | Neo4j | mesh-neo4j | neo4j:5-community | 7474 y 7687 | Entrega 2: el grafo de cuentas, resenas y productos |
+| Elasticsearch | mesh-elastic | elasticsearch:8.15.3 | 9200 | Entrega 3: el indice del buscador y el de eventos de autenticacion |
+| Kibana | mesh-kibana | kibana:8.15.3 | 5601, solo en `127.0.0.1` | la ventana de Elasticsearch |
+| Vistas de Kibana | mesh-kibana-vistas | kibana:8.15.3 | -- | de un solo uso: crea las vistas de datos de Kibana y termina |
+| ClickHouse | mesh-clickhouse | clickhouse/clickhouse-server:25.3 | 8123 y 9010 | los eventos en el tiempo, con su consola en `/play` |
 
-Las tres ultimas filas son de la Entrega 2 y estan explicadas mas abajo, cada una
-en su seccion.
+Las filas de Redis y Neo4j son de la Entrega 2 y estan explicadas mas abajo, cada
+una en su seccion. Las imagenes de Elasticsearch y Kibana son
+`docker.elastic.co/elasticsearch/elasticsearch` y `docker.elastic.co/kibana/kibana`,
+y llevan la misma version a proposito.
 
 Apagar todo:
 
@@ -170,7 +179,7 @@ docker compose down
 
 Con `-v` ademas borra los datos de la base.
 
-**Tres carpetas del repositorio van montadas dentro de su contenedor**, para
+**Cuatro carpetas del repositorio van montadas dentro de su contenedor**, para
 poder correr los scripts sin copiarlos a mano:
 
 | Carpeta | Contenedor | Ruta adentro | Que hay ahi |
@@ -178,6 +187,7 @@ poder correr los scripts sin copiarlos a mano:
 | `migrations/` | mesh-postgres | `/migrations` | el esquema y los conjuntos de datos |
 | `mongo/` | mesh-mongo | `/mongo` | los scripts que crean las colecciones |
 | `neo4j/` | mesh-neo4j | `/neo4j` | el esquema del grafo y las consultas de fraude |
+| `docker/kibana/` | mesh-kibana-vistas | `/init` | `vistas.sh`, el que crea las vistas de datos de Kibana |
 
 Redis no tiene carpeta montada, y no es un olvido: sus dos scripts Lua se cargan
 por la entrada estandar (`redis-cli -x SCRIPT LOAD < redis/carrito.lua`), asi que
@@ -361,6 +371,33 @@ bash neo4j/correr_fraude.sh
 El detalle esta en [neo4j/README.md](../neo4j/README.md) y en
 [etl/README.md](../etl/README.md).
 
+## Kibana: la ventana de Elasticsearch
+
+No es una base, es el visor de Elasticsearch, igual que pgAdmin lo es de PostgreSQL:
+http://localhost:5601, sin usuario ni contrasena. Sirve para mirar `mesh_productos`
+y `mesh_eventos_autenticacion` con el buscador (Discover), los campos y las
+agregaciones, sin escribir `curl`. Mesh funciona igual sin el.
+
+- **Misma version que Elasticsearch, 8.15.3.** Kibana se niega a hablar con un
+  Elasticsearch de otra version mayor.
+- **Solo en local.** El puerto es `127.0.0.1:5601`: Elasticsearch corre con la
+  seguridad apagada y Kibana puede leer y borrar sus indices.
+- **Memoria acotada.** `NODE_OPTIONS` con tope de 640 MB y `mem_limit` de 1 GB. Gasta
+  cerca de 0.7 GB reales.
+
+Las dos vistas de datos las crea solo `mesh-kibana-vistas`, un contenedor de un solo
+uso que corre `docker/kibana/vistas.sh` cada vez que se hace `docker compose up`.
+Espera a Kibana y a que existan los indices, crea **Productos** (`mesh_productos`)
+y **Eventos de autenticacion** (`mesh_eventos_autenticacion`, con el campo de fecha
+`fecha`), y deja el rango por defecto de Discover en 60 dias. Termina en
+`Exited (0)`, que es lo esperado, y se puede repetir sin miedo: una vista que ya
+existe no se duplica.
+
+`arrancar.ps1` tiene el paso 9c, "Vistas de Kibana", que espera hasta 3 minutos a
+ese contenedor y muestra su log. Las vistas viven en el volumen de Elasticsearch y
+no en el repositorio, asi que `.\arrancar.ps1 -Reiniciar` las borra y se recrean
+solas.
+
 ## Accesos de desarrollo
 
 | Servicio | Donde entra | Usuario | Contrasena |
@@ -372,6 +409,9 @@ El detalle esta en [neo4j/README.md](../neo4j/README.md) y en
 | Redis | `localhost:6379` | no lleva usuario (`requirepass`) | `REDIS_PASSWORD` del .env |
 | RedisInsight | http://localhost:5540 | sin usuario ni contrasena | |
 | Neo4j | http://localhost:7474 y bolt `localhost:7687` | `neo4j`, fijo | `NEO4J_PASSWORD` del .env |
+| Elasticsearch | `localhost:9200` | sin usuario ni contrasena, solo en local | |
+| Kibana | http://localhost:5601 | sin usuario ni contrasena, solo desde esta maquina | |
+| ClickHouse | `localhost:8123`, consola en `/play` | `CLICKHOUSE_USER` del .env | `CLICKHOUSE_PASSWORD` del .env |
 
 Las dos variables que agrego la Entrega 2 al `.env` son **`REDIS_PASSWORD`** y
 **`NEO4J_PASSWORD`**. Ya estan en `.env.example`: quien tenga un `.env` de antes

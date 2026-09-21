@@ -14,8 +14,9 @@ falta que nada de Mesh este corriendo: sirve justo para levantarlo.
   Productos de prueba  generar y borrar lotes con semilla, en las dos bases
   Reconstruir bases    rehacer el grafo, rehacer Mongo, borrar todo y empezar de cero
   Demos de fraude      una senal de login, el anillo de resenas, el login desde otro pais
+  Demo de Redis        llaves sin TTL y una con TTL, para explicar el tiempo de vida
 
-Cada tarjeta muestra el comando exacto que va a correr y tiene un boton Copiar,
+Son 29 comandos en cinco grupos. Cada tarjeta muestra el comando exacto que va a correr y tiene un boton Copiar,
 por si prefieres pegarlo en la terminal. Abajo va saliendo lo que imprime, con
 un boton Parar. Solo corre un comando a la vez.
 
@@ -26,7 +27,7 @@ Tambien sale DENTRO de Mesh, en la pestana Comandos del panel (/panel?s=comandos
 solo para las cuentas desarrollador1, desarrollador2 y asi (el admin NO la tiene: es
 una herramienta de quien desarrolla, no de quien administra la tienda). Es la version
 de todos los dias: usa el mismo diseno de Mesh (tarjeta, pildoras, modo oscuro), los
-comandos van agrupados en cuatro pildoras y cada fila trae su comando, Copiar y
+comandos van agrupados en cinco pildoras y cada fila trae su comando, Copiar y
 Ejecutar. Lo peligroso abre una confirmacion en la misma fila. La salida sale encima
 de la lista.
 
@@ -82,7 +83,15 @@ Backend y frontend se sirven compilados (npm run build), no en modo watch. El
 proyecto vive en OneDrive y cada sincronizacion dispara recargas sin parar, que
 dejan al backend reiniciandose y al login diciendo "el servidor se esta
 reiniciando". Despues de editar codigo hay que usar Reiniciar el backend o
-Reiniciar el frontend. Los logs quedan en %TEMP%\mesh-logs.
+Reiniciar el frontend (o  .\panel-comandos\servicios.ps1 -Accion frontend). Los logs
+quedan en %TEMP%\mesh-logs.
+
+El propio panel tambien se carga en memoria: despues de editar
+panel-comandos/servidor.mjs hay que apagarlo y encenderlo otra vez,
+  .\panel-comandos.ps1 -Parar
+  .\panel-comandos.ps1
+Y la pestana Comandos guarda la lista de comandos al abrirse, asi que despues de eso
+hay que recargar la pagina completa para ver los comandos nuevos.
 
 Seguridad, por si lo van a dejar corriendo. Escucha solo en 127.0.0.1, solo
 ejecuta la lista fija de comandos de panel-comandos/servidor.mjs (cada valor se
@@ -158,6 +167,10 @@ Que hace:
    9. migra el catalogo a MongoDB con el ETL, si Mongo tiene menos productos
       que PostgreSQL
   10. imprime el resumen y las URLs
+
+Antes del resumen esta el paso 9c, "Vistas de Kibana": espera hasta 3 minutos a que el
+contenedor mesh-kibana-vistas termine y muestra su log. Ese contenedor es de un solo uso
+y queda en Exited (0), que es lo esperado, no un fallo. Ver LAS CONSOLAS WEB, mas abajo.
 
 Se puede correr las veces que quieras. Si una migracion ya estaba aplicada lo
 avisa y sigue.
@@ -303,6 +316,37 @@ COMPROBAR QUE TODO SIRVE
 
 pgAdmin: http://localhost:5050
 El servidor Mesh ya viene registrado y conectado.
+
+
+LAS CONSOLAS WEB
+--------------------------------------------------
+  pgAdmin        http://localhost:5050         PostgreSQL
+  DbGate         http://localhost:3001         MongoDB
+  RedisInsight   http://localhost:5540         Redis, con el TTL contando
+  Kibana         http://localhost:5601         Elasticsearch, solo desde esta maquina
+  Neo4j          http://localhost:7474         el grafo, lo dibuja
+  ClickHouse     http://localhost:8123/play    consola de los eventos
+  Panel de comandos  http://127.0.0.1:5199     los botones de este archivo, solo desde esta maquina
+
+Kibana es la misma version que Elasticsearch (8.15.3) y gasta cerca de 0.7 GB reales
+(tope de 640 MB para Node y mem_limit de 1 GB). Las dos vistas de datos, Productos
+(mesh_productos) y Eventos de autenticacion (mesh_eventos_autenticacion, con el campo
+fecha), las crea solo el contenedor mesh-kibana-vistas, que corre docker/kibana/vistas.sh
+cada vez que se hace docker compose up. Deja tambien el rango por defecto de Discover en
+60 dias. Se puede repetir sin miedo: una vista que ya existe no se duplica. Las vistas
+viven en el volumen de Elasticsearch, asi que .\arrancar.ps1 -Reiniciar las borra y se
+vuelven a crear solas.
+
+La Demo de Redis, para explicar el TTL:
+
+  .\demo-redis-sin-ttl.ps1                  crea las llaves y las muestra
+  .\demo-redis-sin-ttl.ps1 -Accion ver      lista todas las llaves mesh:* con tipo y TTL
+  .\demo-redis-sin-ttl.ps1 -Accion borrar   quita solo las mesh:demo:*
+
+Crea mesh:demo:sin_ttl:contador (string con 42, TTL -1, en RedisInsight dice No limit),
+mesh:demo:sin_ttl:configuracion (hash con modo demo y version 1, sin TTL) y
+mesh:demo:con_ttl:carrito_de_prueba (hash con producto Laptop y cantidad 2, con TTL de
+600 segundos que va bajando). Son los tres comandos del grupo Demo de Redis del panel.
 
 
 ENTRAR A POSTGRES POR TERMINAL
@@ -652,8 +696,10 @@ repetirlas, se toma cada pantalla con la sesion de la cuenta que corresponde.
 
 DEMOSTRACIONES PARA LA DEFENSA
 ==================================================
-Version visual: entra como admin y abre /panel?s=demo. Dispara los ataques de
-login y crea las cuentas de un anillo desde botones, sin tocar la terminal.
+Version visual: el grupo Demos de fraude de la pestana Comandos, en el panel de una
+cuenta desarrollador, o en http://127.0.0.1:5199. Dispara los ataques de login y arma
+el anillo desde botones, sin tocar la terminal. La pestana Demo del panel del admin
+(/panel?s=demo) ya no existe.
 
 Version de terminal:
 
@@ -664,6 +710,7 @@ Version de terminal:
   .\demo-anillo-resenas.ps1                          anillo de 3 cuentas
   .\demo-anillo-resenas.ps1 -Cuentas 2                par mutuo sobre el mismo producto
   .\demo-anillo-resenas.ps1 -Cuentas 4 -Prefijo otro  anillo de 4, con otro prefijo de cuentas
+                                                     al final abre /panel?s=fraude&t=resenas
 
 NO SON REVERSIBLES. El anillo hace compras reales (checkout de verdad, deja
 pedidos y kardex) y deja las cuentas de demostracion en el catalogo para

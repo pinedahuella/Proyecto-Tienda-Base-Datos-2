@@ -949,6 +949,10 @@ POR QUE 7 CONTENEDORES     [AL DIA 30-AGO: eran 4, la Entrega 2 sumo 3]
   redisinsight  redis/redisinsight       5540    ventana de Redis     (E2)
 Solo CUATRO son bases. pgAdmin, DbGate y RedisInsight no los usa la
 aplicacion (Neo4j trae su propia ventana en :7474, sin contenedor aparte).
+[AL DIA 20-SEP: hoy son 11 contenedores. Se sumaron elasticsearch,
+clickhouse, kibana (ventana de Elasticsearch, :5601, solo en local) y
+kibana-vistas, de un solo uso, que crea las vistas de datos de Kibana y
+termina en Exited (0). Son SEIS bases. Ver docs/instalacion.md.]
 La imagen es pgvector y no postgres:18 porque trae la extension de
 vectores ya incluida, que la entrega final pide para busqueda semantica.
 Mongo publica el 27018 y no el 27017 porque Windows puede tener un
@@ -1173,6 +1177,20 @@ id_precio_historial DENTRO de p_linea y lo use en vez del vigente.
   http://localhost:7474         Neo4j Browser, para dibujar el grafo
   http://localhost:5540         RedisInsight, ensena el TTL del carrito
                                 contando hacia atras
+  [AL DIA 20-SEP, lo que se sumo para ensenar en vivo]
+  http://localhost:5601         Kibana, con las vistas Productos y Eventos de
+                                autenticacion ya creadas
+  http://127.0.0.1:5199         panel de comandos, 29 comandos en cinco grupos
+                                (tambien en la pestana Comandos de una cuenta
+                                desarrollador)
+  .\demo-redis-sin-ttl.ps1      llaves sin TTL (-1, No limit en RedisInsight) y
+                                una con TTL de 600 s que baja. -Accion ver las
+                                lista, -Accion borrar quita las mesh:demo:*
+  /panel?s=fraude&t=resenas     abre directo en los anillos de resenas. La
+                                campana con escudo de la cabecera (solo admin)
+                                lleva ahi. La pestana Demo del panel del admin
+                                ya no existe: las demos estan en Comandos
+  PREGUNTAS-SUSTENTACION.md     preguntas y respuestas con archivo y lineas
 
   ARNESES, por si piden pruebas:
     bash pruebas/carrito.sh            25 OK

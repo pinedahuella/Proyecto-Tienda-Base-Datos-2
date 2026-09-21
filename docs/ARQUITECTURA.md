@@ -1,6 +1,6 @@
 # Arquitectura de Mesh
 
-**Al 2026-09-19.** Es el diagrama de arquitectura que pide el enunciado, y **no
+**Al 2026-09-20.** Es el diagrama de arquitectura que pide el enunciado, y **no
 es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 50 tablas de
 PostgreSQL y sus llaves y lo genera `python docs/generar-er.py` desde la base
 viva; este dibuja los **seis** motores de persistencia, quien escribe en cada
@@ -62,7 +62,7 @@ flowchart TB
     CH -. "worker de mas vendidos, cada 10 min<br/>ZSET" .-> RD
 
     subgraph herramientas[INSPECCION, no son parte del sistema]
-        H["pgAdmin :5050 · dbgate :3001 · RedisInsight :5540<br/>Neo4j Browser :7474 · ClickHouse play :8123/play"]
+        H["pgAdmin :5050 · dbgate :3001 · RedisInsight :5540 · Kibana :5601<br/>Neo4j Browser :7474 · ClickHouse play :8123/play"]
     end
 ```
 
@@ -117,7 +117,11 @@ admin la revisa y la lee `GET /admin/fraude/alertas-login`.
 **Una flecha que falta a proposito: ninguna ruta lee `mesh_eventos_autenticacion`.**
 El indice se llena y nadie lo consulta; las rutas de agregacion son de
 `backend/` y estan en `docs/BACKEND-PENDIENTE.md`. Por eso la flecha del
-backend a Elasticsearch solo dice "buscador".
+backend a Elasticsearch solo dice "buscador". Lo que si lo mira es Kibana, a mano:
+tiene una vista de datos sobre `mesh_eventos_autenticacion` (campo de fecha
+`fecha`) y otra sobre `mesh_productos`, que crea solo el contenedor
+`mesh-kibana-vistas` al levantar. Kibana es una ventana de inspeccion y no forma
+parte del flujo.
 
 **Y la flecha de PostgreSQL a ClickHouse quedo sin agua.** Copia `log_login`,
 que desde el 2026-09-10 ya no recibe filas porque el log se mudo a Mongo. Esta
@@ -225,7 +229,9 @@ en PostgreSQL, el maximo `_id` de Mongo que usa el panel del vendedor, y la
 secuencia estaba en 1126 con el maximo en 1105, un hueco de 21. Esta entero en
 el pendiente 5 de `docs/PENDIENTES.md`.
 
-**Todo corre en una sola maquina**, en nueve contenedores del mismo Docker. Eso
+**Todo corre en una sola maquina**, en once contenedores del mismo Docker: diez que se quedan corriendo (seis
+motores y cuatro ventanas, pgAdmin, DbGate, RedisInsight y Kibana) y uno de un
+solo uso, `mesh-kibana-vistas`, que termina en `Exited (0)`. Eso
 importa para cualquier discusion sobre escalar: una base distribuida en un solo
 nodo se queda con todos sus costes y ninguna de sus ventajas.
 
@@ -238,7 +244,7 @@ anotado como tal.
 ## Como se levanta todo esto
 
 ```powershell
-.\arrancar.ps1              # los 7 contenedores, migraciones, semilla y ETL
+.\arrancar.ps1              # los 11 contenedores, migraciones, semilla y ETL
 ```
 
 Y despues, en dos terminales:
@@ -260,8 +266,9 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **Entrega 2 (2026-09-03)** | Se suman **Redis** (carrito, venta relampago y candado de checkout) y **Neo4j** (grafo de fraude, con su ETL). Se decide **no** incorporar una base columnar |
 | **Entrega 3 (2026-09-04)** | Entra **Elasticsearch** con su indice, su ETL, su cola con worker y sus dos rutas. Se escribe el documento de consistencia del checkout. **Falta** la faceta con agregaciones y la prueba de falla simulada |
 | **2026-09-06** | Entra **ClickHouse**, la sexta base, con las tres tablas de eventos, su ETL incremental desde PostgreSQL y su generador de lotes. Cambia la decision de la Entrega 2 sobre la columnar, y el porque esta arriba |
-| **2026-09-10 y 11** | El log de login se muda a **MongoDB** (`eventos_autenticacion`) y un worker lo copia a un segundo indice de **Elasticsearch**. Tres contadores de **Redis** dejan alertas en `alerta_fraude` de **PostgreSQL** (migracion 016). La copia de logueos a ClickHouse queda congelada. Solo en el Mermaid; el `.drawio` falta |
+| **2026-09-10 y 11** | El log de login se muda a **MongoDB** (`eventos_autenticacion`) y un worker lo copia a un segundo indice de **Elasticsearch**. Tres contadores de **Redis** dejan alertas en `alerta_fraude` de **PostgreSQL** (migracion 016). La copia de logueos a ClickHouse queda congelada. Ya esta en el Mermaid y en `docs/diagrama-arquitectura.drawio` y su `.png`, que se regeneraron ese dia con Kibana en la nota de herramientas de inspeccion |
 | **2026-09-18 y 19** | Seis eventos de producto y buscador en ClickHouse, con su resumen diario y los rankings de tendencias. Un worker cada 10 minutos cachea lo mas vendido en un ZSET de Redis. El detector de anillos (cada 15 minutos) guarda en PostgreSQL lo que encuentra en Neo4j. `etl/cargar_compras.sh` copia compras y devoluciones a ClickHouse. El `.drawio` de arquitectura se rehizo entero y el ER se genera desde la base viva |
+| **2026-09-20** | Entra **Kibana** 8.15.3, la misma version que Elasticsearch, como ventana de inspeccion (`127.0.0.1:5601`, tope de memoria de 1 GB), y el contenedor de un solo uso `mesh-kibana-vistas`, que crea sus dos vistas de datos en cada `docker compose up`. Solo en el Mermaid; el `.drawio` falta |
 | Entrega final | entrara el componente vectorial y el control de acceso |
 
 El `pgvector` de la Entrega final, por cierto, **ya viene en la imagen**: el

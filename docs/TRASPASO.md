@@ -5,6 +5,57 @@ Son cinco minutos y te ahorra el dia.
 
 Ultima actualizacion: **2026-09-20**.
 
+**Tambien el 2026-09-20: Kibana, dos campanas, el panel de fraude en pestanas, graficas de Tendencias, la demo de
+Redis y el archivo de preguntas.** Nada de esto toca `backend/`.
+
+```
+Kibana               Servicio `kibana` 8.15.3 en docker-compose.yml, la misma version que Elasticsearch. Puerto
+                     127.0.0.1:5601 (solo en local), NODE_OPTIONS con tope de 640 MB y mem_limit de 1 GB (gasta
+                     cerca de 0.7 GB reales). Ahora son 11 contenedores: 10 corriendo y mesh-kibana-vistas.
+mesh-kibana-vistas   Contenedor de un solo uso (servicio kibana-vistas) que corre docker/kibana/vistas.sh en cada
+                     docker compose up: espera a Kibana y a los indices, crea las vistas de datos Productos
+                     (mesh_productos) y Eventos de autenticacion (mesh_eventos_autenticacion, campo fecha) y
+                     deja el rango de Discover en 60 dias. Termina en Exited (0), es lo esperado. Es idempotente.
+                     arrancar.ps1 tiene el paso 9c "Vistas de Kibana" (espera hasta 3 min y muestra su log) y el
+                     resumen final imprime http://localhost:5601. Las vistas viven en el volumen de
+                     Elasticsearch: `-Reiniciar` las borra y se recrean solas
+Dos campanas         La general, NotificacionesFraude.svelte, es de todas las cuentas: alertas de login de la
+                     propia cuenta (GET /perfil/alertas-fraude, con Marcar leida). La del admin,
+                     NotificacionesAdmin.svelte (escudo, "Avisos de admin"), solo sale con sesion de admin: lista
+                     los anillos de resenas pendientes (GET /admin/fraude/alertas-resenas?estado=pendiente) con
+                     enlace Revisar a /panel?s=fraude&t=resenas. No tiene Marcar leida: un anillo deja de contar
+                     al marcarlo revisado o descartado. Leida por admin pide una tabla nueva, pedida en
+                     docs/BACKEND-PENDIENTE.md
+PanelFraude.svelte   Dos pestanas, Intentos de entrada y Resenas en anillo. Se ve una a la vez, las dos siguen
+                     montadas y conservan filtro y pagina. El select de tipo esta agrupado en Por IP, Por cuenta
+                     y Ubicacion y acceso (el backend sigue filtrando un solo tipo). /panel?s=fraude&t=resenas
+                     abre directo en los anillos, y demo-anillo-resenas.ps1 abre ese enlace. Se quito la pestana
+                     Demo del panel del admin (la de DemoFraude.svelte, mas abajo): las demos estan en la pestana
+                     Comandos de las cuentas desarrollador
+TendenciasAuto       Cada fila lleva insignia de puesto (los tres primeros tenidos), nombre en una linea con el
+                     texto completo al pasar el cursor, cifra y barra medida contra el mayor de la tarjeta. La
+                     unidad va en el subtitulo. En Compras en ascenso la barra es el periodo actual y una marca
+                     vertical el anterior, con "nuevo" o "N veces". Sin ruta nueva
+demo-redis-sin-ttl   .ps1 con -Accion crear, ver o borrar. Crea mesh:demo:sin_ttl:contador (string 42, TTL -1),
+                     mesh:demo:sin_ttl:configuracion (hash, sin TTL) y mesh:demo:con_ttl:carrito_de_prueba (hash,
+                     TTL de 600 s). ver lista todas las mesh:* con tipo y TTL, borrar solo quita las mesh:demo:*.
+                     Son tres comandos nuevos del grupo Demo de Redis: el panel de comandos tiene 29 en cinco
+                     grupos (comandos.txt)
+PREGUNTAS-SUSTENTACION.md  En la raiz. 115 preguntas y respuestas para la sustentacion, con el archivo y las
+                     lineas de cada cosa
+```
+
+**Al editar.** `panel-comandos/servidor.mjs` se carga en memoria: despues de editarlo, `.\panel-comandos.ps1 -Parar` y
+luego `.\panel-comandos.ps1`, y recargar la pagina completa (la pestana guarda la lista al abrirse). El frontend se sirve
+compilado: despues de editar un `.svelte`, Reiniciar el frontend en el panel o
+`panel-comandos\servicios.ps1 -Accion frontend`.
+
+**Verificado el 2026-09-20**, uno por uno y todos pasan: `pruebas/carrito.sh` (25 OK, 0 FALLA),
+`redis/prueba_carrito.sh` (todo bien), `redis/prueba_concurrencia.sh` (1000 solicitudes con 50 clientes sobre 100
+unidades, sin sobreventa), `neo4j/correr_fraude.sh` (10 OK), `pruebas/resenas.sh` (15 OK) y `pruebas/tendencias.sh`
+(50 OK). Corridos con la API viva, las pruebas de login desde la misma IP subieron las alertas de multi cuenta por IP
+del panel: es un efecto conocido, no un fallo.
+
 **Lo del 2026-09-20, para Jose David: la alerta de viaje imposible no podia saltar y ya salta. No tienes que cambiar
 nada.** Las consultas de `fraude-login/*.service.ts` (viaje imposible, toma de cuenta y las retrospectivas) piden
 `id_usuario.keyword`, `tipo.keyword`, `resultado.keyword`, `ip.keyword`... y el indice

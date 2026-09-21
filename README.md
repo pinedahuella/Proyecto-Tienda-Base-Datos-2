@@ -83,6 +83,7 @@ nueva -- sin ella no se puede entregar un pedido.
 | [migrations/README.md](migrations/README.md) | Como se nombran y se corren las migraciones |
 | [etl/README.md](etl/README.md) | Como se migra el catalogo de PostgreSQL a MongoDB |
 | [comandos.txt](comandos.txt) | Todos los comandos, con lo que hace cada uno |
+| [PREGUNTAS-SUSTENTACION.md](PREGUNTAS-SUSTENTACION.md) | Preguntas y respuestas para la sustentacion, con el archivo y las lineas de cada cosa |
 | [backend/elementos Generales/cambios-multivendedor.md](backend/elementos%20Generales/cambios-multivendedor.md) | Que cambia en el backend con el modelo multi-vendedor |
 
 ## Arranque rapido
@@ -95,6 +96,10 @@ cd frontend ; npm run dev          # http://localhost:5173
 ```
 
 pgAdmin queda en http://localhost:5050 con el servidor ya conectado, y DbGate
-en http://localhost:3001 para MongoDB.
+en http://localhost:3001 para MongoDB. RedisInsight queda en
+http://localhost:5540 y Kibana, la ventana de Elasticsearch, en
+http://localhost:5601 (solo desde esta maquina, con sus vistas de datos ya
+creadas). El panel de comandos, con un boton por comando, abre con
+`.\panel-comandos.ps1` en http://127.0.0.1:5199.
 
 Detalle completo en [docs/instalacion.md](docs/instalacion.md).
