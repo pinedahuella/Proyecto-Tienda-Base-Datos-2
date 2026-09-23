@@ -57,6 +57,7 @@ import {
 } from '../../dto/producto-con-mis-ofertas';
 import { ProductosService } from '../productos/productos.service';
 import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
+import { RegistroOfertasRedisService } from './registro-ofertas-redis.service';
 import { CORREO_TIENDA } from '../../helpers/constantes';
 
 const REGEX_ID = /^\d+$/;
@@ -113,6 +114,7 @@ export class OfertasVendedorService {
   constructor(
     private readonly productosService: ProductosService,
     private readonly inventarioLimitado: InventarioLimitadoService,
+    private readonly registroOfertasRedis: RegistroOfertasRedisService,
   ) {}
 
   /**
@@ -615,6 +617,7 @@ export class OfertasVendedorService {
     }
 
     await this.productosService.recalcularCamposCalculados([idProductoMongo]);
+    await this.registroOfertasRedis.sincronizar(idOferta);
     return this.armarOfertaPropia(
       await this.obtenerFilaPropia(idOferta, idUsuario),
     );
@@ -697,6 +700,7 @@ export class OfertasVendedorService {
     }
 
     await this.productosService.recalcularCamposCalculados([idProductoMongo]);
+    await this.registroOfertasRedis.sincronizar(idOferta);
     return this.armarOfertaPropia(
       await this.obtenerFilaPropia(idOferta, idUsuario),
     );

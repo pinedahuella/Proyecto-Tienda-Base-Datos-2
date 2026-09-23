@@ -1,17 +1,21 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { redis } from '../../database/redis';
 import { manejarErrorRedis } from '../../helpers/manejar-error-redis';
-import { Producto } from '../../models/producto';
-import { MasVendidosSyncService } from './mas-vendidos-sync.service';
+import {
+  MasVendidosSyncService,
+  ProductoTarjetaMasVendido,
+} from './mas-vendidos-sync.service';
 
 /**
  * Lee el ranking de "productos mas vendidos" y su detalle, las dos
  * estructuras de Redis que mantiene `MasVendidosSyncService` -- desde el
- * 2026-09-23, esta ruta ya no toca MongoDB: el worker trae el documento de
- * cada producto UNA vez por corrida (cada 10 min) y lo deja cacheado en un
- * HASH. El detalle puede estar hasta 10 minutos desactualizado (nombre,
- * precio, imagen, o incluso que ya no este `activo`); es el mismo trato que
- * ya tiene el propio ranking, ahora extendido al detalle.
+ * 2026-09-23, esta ruta ya no toca MongoDB: el worker trae la version
+ * acotada (`ProductoTarjetaMasVendido`, no el documento completo -- ver
+ * `mas-vendidos-sync.service.ts`) de cada producto UNA vez por corrida
+ * (cada 10 min) y la deja cacheada en un HASH. El detalle puede estar hasta
+ * 10 minutos desactualizado (nombre, precio, imagen, o incluso que ya no
+ * este `activo`); es el mismo trato que ya tiene el propio ranking, ahora
+ * extendido al detalle.
  */
 @Injectable()
 export class MasVendidosService {
@@ -33,7 +37,7 @@ export class MasVendidosService {
    * `activo` entonces) simplemente se salta, en vez de romper toda la
    * respuesta.
    */
-  async obtener(): Promise<Producto[]> {
+  async obtener(): Promise<ProductoTarjetaMasVendido[]> {
     const idsOrdenados = await this.leerRankingRedis();
     if (idsOrdenados.length === 0) {
       return [];
@@ -67,20 +71,22 @@ export class MasVendidosService {
    * escribe siempre `JSON.stringify` del lado del worker) se descarta en
    * silencio, mismo criterio que el carrito con una linea de Redis rota.
    */
-  private async leerDetalleRedis(ids: number[]): Promise<Producto[]> {
+  private async leerDetalleRedis(
+    ids: number[],
+  ): Promise<ProductoTarjetaMasVendido[]> {
     try {
       const valores = await redis.hmget(
         MasVendidosSyncService.CLAVE_DETALLE,
         ...ids.map(String),
       );
 
-      const productos: Producto[] = [];
+      const productos: ProductoTarjetaMasVendido[] = [];
       for (const valor of valores) {
         if (valor == null) {
           continue;
         }
         try {
-          productos.push(JSON.parse(valor) as Producto);
+          productos.push(JSON.parse(valor) as ProductoTarjetaMasVendido);
         } catch {
           // Campo corrupto -- se ignora, no tumba el resto del ranking.
         }

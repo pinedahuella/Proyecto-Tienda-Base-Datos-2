@@ -2973,6 +2973,79 @@ en ningún caso, solo la columna booleana.
 
 ---
 
+## El registro de ofertas con descuento/venta relámpago en Redis (agregado 2026-09-23)
+
+No son rutas HTTP propias de este archivo (la lectura pública vive en
+`GET /productos/ofertas/descuento` y `GET /productos/ofertas/venta-relampago`,
+documentadas en `endpoints-productos.md`) — esto es la parte que las
+mantiene al día: `RegistroOfertasRedisService` y `RegistroOfertasSyncService`
+(`src/services/vendedores/registro-ofertas-redis.service.ts` y
+`registro-ofertas-sync.service.ts`).
+
+**Dos `HASH` en Redis, mutuamente excluyentes**, mismo criterio de "tarjeta
+representativa, no la fila cruda" que `mesh:productos:mas_vendidos:detalle`:
+
+```
+mesh:ofertas:descuento         HASH { id_oferta: <detalle en JSON> }
+mesh:ofertas:venta_relampago   HASH { id_oferta: <detalle en JSON> }
+```
+
+Un campo de hash (no un `SET` de ids sueltos) porque hacía falta guardar
+más que el id — nombre, imagen, precio, vendedor, stock — y un `HASH`
+también garantiza "nunca duplicados" (`HSET` sobre un campo existente lo
+reemplaza, nunca lo repite). Una oferta vive en una llave o en la otra,
+nunca en las dos: una oferta en venta relámpago siempre tiene descuento
+(ver la sección de arriba), pero se cuenta ahí, no en la de "solo
+descuento".
+
+**`RegistroOfertasRedisService.sincronizar(idOferta)`** decide, leyendo el
+estado ACTUAL de la oferta en PostgreSQL (nunca lo que el llamador cree que
+cambió): sin descuento → la saca de las dos llaves; con descuento y sin
+venta relámpago → `mesh:ofertas:descuento`; en venta relámpago →
+`mesh:ofertas:venta_relampago` (y la saca de la otra). Nunca lanza — un
+fallo de Postgres, Mongo o Redis se loguea como warning, para no tumbar la
+operación de negocio que ya se comiteó; el worker de reconciliación lo
+corrige después.
+
+**Quién la llama, reactivo, al instante:**
+- `OfertasVendedorService.aplicarDescuento` / `quitarDescuento`.
+- `VentasLimitadasService.abrir` / `cerrar`.
+- `InventarioLimitadoService.revisarVencidas()` — cuando una venta
+  relámpago vence sola por TTL (no por un `DELETE` manual), justo después
+  de apagar `es_inventario_limitado` en Postgres. Antes de esto, una venta
+  que vencía sola se quedaba en `mesh:ofertas:venta_relampago` hasta que la
+  agarrara el worker de reconciliación (hasta 10 min); ahora es inmediato,
+  igual que cerrarla a mano.
+
+**`RegistroOfertasSyncService`** (worker `@Interval`, cada 10 min): red de
+seguridad, no la fuente principal. Compara cada `HASH` contra PostgreSQL
+(`porcentaje_descuento IS NOT NULL AND NOT es_inventario_limitado` para la
+de descuento; `es_inventario_limitado AND porcentaje_descuento IS NOT NULL`
+para la de venta relámpago — **la misma condición que usa `sincronizar()`
+para decidir**, a propósito, ver el bug de abajo) y corrige: lo que sobra
+se borra con `HDEL`, lo que falta se repara llamando a `sincronizar()`.
+
+### Probado en vivo el 23 de septiembre de 2026
+
+Contra el servidor y las bases reales (`ventas_norte`, ofertas 549 y 18).
+
+| Caso | Resultado |
+|---|---|
+| Aplicar descuento → `mesh:ofertas:descuento` | aparece con el detalle correcto (nombre, imagen, precio, vendedor, stock) |
+| Abrir venta relámpago → se mueve | desaparece de `descuento`, aparece — sola — en `venta_relampago` |
+| Cerrar venta relámpago manual → vuelve | reaparece en `descuento`, desaparece de `venta_relampago` |
+| Quitar el descuento → sale de las dos | `HGET` de las dos llaves da `nil` |
+| Venta relámpago vencida por TTL (`duracion_segundos: 5`) | al siguiente tick de `revisarVencidas()` (≤ 60 s): `es_inventario_limitado` en `false` en Postgres, la oferta sale sola de `venta_relampago` y vuelve a `descuento` — sin `DELETE` manual, confirmado en Postgres y Redis |
+| Reconciliación: simular una escritura perdida (`HDEL` a mano) + una llave sobrante (`HSET` de basura) en cada `HASH`, correr el worker | repara las dos: agrega la que faltaba con detalle fresco, borra la sobrante |
+| **Bug encontrado y corregido en esta misma ronda:** la consulta original del worker para `venta_relampago` no exigía `porcentaje_descuento IS NOT NULL` | contaba como "faltante" la oferta 6 (venta relámpago heredada de antes de la regla de descuento obligatorio, sin descuento) y el log decía "agregada" aunque `sincronizar()` la descartaba en silencio por no tener descuento — corregido para que la consulta del worker coincida exactamente con la condición de `sincronizar()` |
+| `npx tsc --noEmit` y `eslint` sobre los archivos nuevos/tocados | limpios |
+
+Detalle completo (decisiones de diseño) en los comentarios de los propios
+archivos — no hay `plan pendiente/` para esto, se decidió y se hizo en la
+misma conversación.
+
+---
+
 ## Pruebas — venta relámpago del vendedor (2026-09-03)
 
 `test-ventas-limitadas.sh`, contra el servidor y las bases reales (no va al

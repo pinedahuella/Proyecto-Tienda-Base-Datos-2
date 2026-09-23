@@ -32,6 +32,8 @@ import { OfertasVendedorController } from './controllers/vendedores/ofertas.cont
 import { OfertasVendedorService } from './services/vendedores/ofertas.service';
 import { VentasLimitadasController } from './controllers/vendedores/ventas-limitadas.controller';
 import { VentasLimitadasService } from './services/vendedores/ventas-limitadas.service';
+import { RegistroOfertasRedisService } from './services/vendedores/registro-ofertas-redis.service';
+import { RegistroOfertasSyncService } from './services/vendedores/registro-ofertas-sync.service';
 import { PedidosCompradorController } from './controllers/compradores/pedidos.controller';
 import { PedidosCompradorService } from './services/compradores/pedidos.service';
 import { ResenasController } from './controllers/resenas/resenas.controller';
@@ -66,6 +68,8 @@ import { AdminTendenciasService } from './services/admin/admin-tendencias.servic
 import { MasVendidosSyncService } from './services/productos/mas-vendidos-sync.service';
 import { MasVendidosController } from './controllers/productos/mas-vendidos.controller';
 import { MasVendidosService } from './services/productos/mas-vendidos.service';
+import { OfertasDestacadasController } from './controllers/productos/ofertas-destacadas.controller';
+import { OfertasDestacadasService } from './services/productos/ofertas-destacadas.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -108,6 +112,7 @@ import { MasVendidosService } from './services/productos/mas-vendidos.service';
     EventosController,
     AdminTendenciasController,
     MasVendidosController,
+    OfertasDestacadasController,
   ],
   providers: [
     InicioService,
@@ -126,6 +131,8 @@ import { MasVendidosService } from './services/productos/mas-vendidos.service';
     ProductosVendedorService,
     OfertasVendedorService,
     VentasLimitadasService,
+    RegistroOfertasRedisService,
+    RegistroOfertasSyncService,
     PedidosCompradorService,
     ResenasService,
     CarritoService,
@@ -147,6 +154,7 @@ import { MasVendidosService } from './services/productos/mas-vendidos.service';
     AdminTendenciasService,
     MasVendidosSyncService,
     MasVendidosService,
+    OfertasDestacadasService,
   ],
 })
 export class AppModule {}

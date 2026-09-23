@@ -534,17 +534,38 @@ nunca mezcla con datos sembrados por un script. Ver
 > Mongo con `$in` **en cada request** — un cache que para responder
 > necesita ir a preguntarle a otra base no está cacheando nada. Ahora el
 > propio worker, en la misma corrida de cada 10 minutos, consulta Mongo
-> **una sola vez** por todos los ids ganadores y guarda el documento
-> completo de cada uno en un HASH nuevo, `mesh:productos:mas_vendidos:detalle`
-> (`{ id_producto: <documento Producto en JSON> }`, mismo reemplazo atómico
-> vía clave temporal + `RENAME` que ya usaba el ZSET). Esta ruta ahora lee
-> las dos estructuras de Redis y ya — **ni Postgres ni Mongo**. Solo se
-> cachea el detalle de productos `activo` (mismo criterio de visibilidad de
-> siempre); a cambio de no depender de Mongo, esa comprobación de
-> visibilidad pasó de ser en vivo (en cada request) a solo cada 10 minutos
-> — un producto que se desactiva a mitad de esa ventana puede seguir
-> apareciendo aquí hasta la próxima corrida del worker. Mismo principio que
-> el rediseño del carrito ese mismo día (ver `endpoints-carrito.md`).
+> **una sola vez** por todos los ids ganadores y guarda el detalle de cada
+> uno en un HASH nuevo, `mesh:productos:mas_vendidos:detalle`
+> (`{ id_producto: <detalle en JSON> }`, mismo reemplazo atómico vía clave
+> temporal + `RENAME` que ya usaba el ZSET). Esta ruta ahora lee las dos
+> estructuras de Redis y ya — **ni Postgres ni Mongo**. Solo se cachea el
+> detalle de productos `activo` (mismo criterio de visibilidad de siempre);
+> a cambio de no depender de Mongo, esa comprobación de visibilidad pasó de
+> ser en vivo (en cada request) a solo cada 10 minutos — un producto que se
+> desactiva a mitad de esa ventana puede seguir apareciendo aquí hasta la
+> próxima corrida del worker. Mismo principio que el rediseño del carrito
+> ese mismo día (ver `endpoints-carrito.md`).
+
+> **Cambio (2026-09-23, más tarde el mismo día): el detalle es una versión
+> acotada, no el documento completo.** Al principio el HASH guardaba el
+> documento `Producto` tal cual (variantes completas, con su propio precio,
+> stock y características por variante, más `caracteristicas_adicionales`/
+> `caracteristicas_personalizadas` de la raíz) — pero esta vitrina solo
+> pinta una tarjeta (foto, nombre, precio, calificación); nunca necesita
+> mostrar variantes. `MasVendidosSyncService.consultarProductosMongo` ahora
+> pide una proyección de Mongo con solo los campos de la tarjeta
+> (`ProductoTarjetaMasVendido`: `_id`, `nombre`, `imagen`, `precio_tienda`,
+> `precio_desde`, `hay_descuento`, `resenas_promedio`, `resenas_total`,
+> `stock_total`) más `variantes.imagenes` (Mongo no deja combinar un
+> `$slice` sobre `variantes` con una subruta de esa misma proyección en un
+> `find` — "path collision" — así que vienen las imágenes de todas las
+> variantes, cada una sin el resto de sus campos, y en JS se toma solo la
+> primera imagen de la primera variante). Bajó de 2405 a 418 bytes por
+> producto cacheado (mismo producto de prueba de la sección de abajo) — un
+> **83% menos**, tanto en el HASH de Redis como en la respuesta HTTP de esta
+> ruta. Distinto del resto de rutas de listado (`GET /productos`,
+> `GET /productos/:id`), que sí siguen devolviendo el documento completo —
+> aquí se justifica el recorte porque esta vitrina nunca necesita variantes.
 
 Esta ruta (`MasVendidosService.obtener()`) lee los primeros 8 ids del ZSET
 (`ZREVRANGE`, ya en orden de más a menos vendido) y pide ese mismo detalle
@@ -556,15 +577,26 @@ en silencio, sin romper la respuesta.
 
 ### 200
 
-Mismo documento completo que `GET /productos/:id` (Mongo tal cual, sin
-recortar), en un array ordenado de más a menos vendido:
+La versión acotada de cada producto (no el documento completo que devuelve
+`GET /productos/:id` — ver el cambio del 2026-09-23 más arriba), en un
+array ordenado de más a menos vendido:
 
 ```json
 {
   "ok": true,
   "mensaje": "Productos mas vendidos obtenidos",
   "payload": [
-    { "_id": 1, "nombre": "Laptop Ambar Campus 14", "...": "..." }
+    {
+      "_id": 1,
+      "nombre": "Laptop Ambar Campus 14",
+      "imagen": "https://.../laptop.png",
+      "precio_tienda": { "$numberDecimal": "4750.00" },
+      "precio_desde": { "$numberDecimal": "4269.00" },
+      "hay_descuento": false,
+      "resenas_promedio": 4,
+      "resenas_total": 3,
+      "stock_total": 115
+    }
   ]
 }
 ```
@@ -619,6 +651,121 @@ como lo dispara `@Interval` en producción.
 **Teardown:** el producto de prueba quedó reactivado (`estado: "activo"`) y
 el worker se corrió una última vez para dejar el ranking/detalle
 reflejando los datos reales, sin residuos de las pruebas sintéticas.
+
+## Pruebas — detalle acotado, no el documento completo (2026-09-23)
+
+Contra el servidor y los contenedores reales. El worker se disparó a mano
+(mismo mecanismo que la ronda de pruebas de arriba: un script en el
+scratchpad que instancia `MasVendidosSyncService` y llama `recalcular()`
+directo).
+
+| Caso | Resultado |
+|---|---|
+| Primer intento de proyección, `variantes: { $slice: 1 }` + `'variantes.imagenes': 1` juntos | el worker lanzó `Path collision at variantes.imagenes remaining portion imagenes` y se saltó la corrida (logueado como warning, ranking anterior intacto) — confirma que Mongo no deja combinar un `$slice` sobre un array con una subruta de esa misma proyección en un `find` |
+| Corregido a solo `'variantes.imagenes': 1` (sin el `$slice`) | worker corre limpio: `"ranking recalculado con 1 producto(s) ..., 1 con detalle cacheado"` |
+| `HGET mesh:productos:mas_vendidos:detalle 1` en Redis | JSON con exactamente `_id, nombre, imagen, precio_tienda, precio_desde, hay_descuento, resenas_promedio, resenas_total, stock_total` — sin `variantes`, `categoria`, `descripcion`, `caracteristicas_adicionales`/`caracteristicas_personalizadas`, `stock_tienda`, `total_ofertas`, `fecha_creacion` ni `estado` |
+| Tamaño del detalle cacheado | 418 bytes, contra 2405 bytes del documento completo que se cacheaba antes (mismo producto) — **83% menos** |
+| `GET /productos/mas-vendidos` | `200`, `payload` con exactamente esos mismos 9 campos — confirma que la ruta HTTP devuelve la versión acotada, no solo el HASH interno |
+| `npx tsc --noEmit` y `eslint` sobre los dos archivos tocados | limpios |
+
+---
+
+## GET /productos/ofertas/descuento y GET /productos/ofertas/venta-relampago
+
+**Públicas, sin sesión** — vitrina, mismo criterio que `GET /productos/mas-vendidos`: controlador separado
+(`OfertasDestacadasController`), que no consulta Postgres ni Mongo con los
+filtros de siempre. Estas dos leen directo, y nada más, los dos `HASH` de
+Redis que mantiene `RegistroOfertasRedisService`
+(`src/services/vendedores/registro-ofertas-redis.service.ts`):
+
+```
+GET /productos/ofertas/descuento
+GET /productos/ofertas/venta-relampago
+```
+
+**De dónde salen los datos:** `mesh:ofertas:descuento` (ofertas con un
+descuento activo, sin venta relámpago) y `mesh:ofertas:venta_relampago`
+(ofertas en venta relámpago — que, por la regla de negocio del 2026-09-23,
+siempre tienen descuento) — un `HASH` cada una, campo = `id_oferta`, valor
+= un JSON representativo (nombre, imagen, precio, vendedor, stock — nunca
+la fila cruda de `oferta`). Las dos llaves son mutuamente excluyentes: una
+oferta vive en una o la otra, nunca en las dos.
+
+Quién las mantiene al día — **ninguna de las dos rutas de abajo escribe
+nada**, solo leen:
+- Los 4 escritos que pueden cambiar el estado: `POST`/`DELETE
+  .../:id/descuento` y `POST`/`DELETE .../:id/venta-limitada`
+  (`OfertasVendedorService`/`VentasLimitadasService`) — al instante, justo
+  después de comitear.
+- `InventarioLimitadoService.revisarVencidas()` — cuando una venta
+  relámpago vence sola por su TTL de Redis (no por un `DELETE` manual), esa
+  misma corrida mueve la oferta de vuelta a `mesh:ofertas:descuento`, sin
+  esperar al worker de reconciliación.
+- `RegistroOfertasSyncService` (worker cada 10 min) — red de seguridad:
+  repara un escrito reactivo que se perdió o una llave que se corrompió.
+
+Detalle completo de las tres piezas de arriba en `endpoints-vendedores.md`
+y en los comentarios de `registro-ofertas-redis.service.ts`/
+`registro-ofertas-sync.service.ts`.
+
+**Sin querys ni cuerpo.** Tres segmentos (`productos/ofertas/descuento`),
+así que no chocan con `GET /productos/ofertas/:id/historial` (tres
+segmentos, pero el del medio es `:id`, no un literal) ni con
+`GET /productos/:id` (un solo segmento).
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Ofertas con descuento obtenidas",
+  "payload": [
+    {
+      "id_oferta": 18,
+      "id_producto": 4,
+      "id_producto_variante": 8,
+      "nombre_producto": "Laptop Lienzo 15",
+      "nombre_variante": "32 GB / 1 TB",
+      "imagen": "https://.../laptop.jpeg",
+      "precio": "6509.00",
+      "porcentaje_descuento": "5.00",
+      "precio_final": "6183.55",
+      "vendedor_usuario": "ventas_norte",
+      "vendedor_nombre": "Carlos Ramirez",
+      "stock": 13
+    }
+  ]
+}
+```
+
+`GET .../venta-relampago` responde con la misma forma, filas de
+`mesh:ofertas:venta_relampago`. Sin ninguna oferta en ese estado, `payload`
+sale como array vacío — nunca un error. Sin orden particular: Redis no
+promete ningún orden estable en un `HGETALL`, y no se pidió ninguno (a
+diferencia de `mas-vendidos`, que sí tiene un criterio — el ranking por
+unidades vendidas).
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
+```
+
+Ninguna de las dos toca Postgres ni Mongo, así que ese es el único caso de
+error posible.
+
+## Pruebas — hechas el 2026-09-23
+
+Contra el servidor y los contenedores reales (`ventas_norte`, ofertas 18 y
+549).
+
+| Caso | Resultado |
+|---|---|
+| Los dos `GET` sin ninguna oferta con descuento | `200`, `payload: []` en los dos |
+| Aplicar descuento a la oferta 549, después a la 18 | `GET .../descuento` trae las dos, con el detalle representativo esperado |
+| Abrir venta relámpago en la 549 | desaparece de `GET .../descuento` y aparece — sola — en `GET .../venta-relampago`; la 18 se queda donde estaba |
+| Cerrar la venta relámpago y quitar los dos descuentos | los dos `GET` vuelven a `payload: []` |
+| `npx tsc --noEmit` y `eslint` sobre los archivos nuevos | limpios |
 
 ---
 

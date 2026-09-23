@@ -11,6 +11,7 @@ import {
 } from '../../helpers/errores';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorRedis } from '../../helpers/manejar-error-redis';
+import { RegistroOfertasRedisService } from '../vendedores/registro-ofertas-redis.service';
 
 /**
  * El script vive en redis/inventario_limitado.lua, en la RAIZ del repo (lo
@@ -156,11 +157,19 @@ export interface EstadoVentaLimitada {
  * `es_inventario_limitado` solo cuando la venta relampago vence por su
  * propio TTL de Redis en vez de por un `revertir()` manual -- si no, esa
  * columna se queda en `true` para siempre y el panel del vendedor sigue
- * anunciando una venta relampago que ya termino.
+ * anunciando una venta relampago que ya termino. Desde 2026-09-23 tambien
+ * llama a `RegistroOfertasRedisService.sincronizar()` por cada oferta que
+ * apaga, para que `mesh:ofertas:venta_relampago` (ver ese archivo) la
+ * mueva de vuelta a `mesh:ofertas:descuento` al instante -- no solo cuando
+ * la cierran con `DELETE .../venta-limitada` manual.
  */
 @Injectable()
 export class InventarioLimitadoService {
   private readonly logger = new Logger(InventarioLimitadoService.name);
+
+  constructor(
+    private readonly registroOfertasRedis: RegistroOfertasRedisService,
+  ) {}
 
   private clave(idOferta: number): string {
     return `mesh:oferta:${idOferta}`;
@@ -370,6 +379,12 @@ export class InventarioLimitadoService {
             [idOferta],
           );
           apagadas++;
+          // sincronizar() nunca lanza (ver registro-ofertas-redis.service.ts)
+          // -- un problema de Redis aca no debe tumbar esta revision, que ya
+          // logro lo que le importa (apagar la columna en Postgres). Si
+          // falla, el worker de reconciliacion (RegistroOfertasSyncService)
+          // lo corrige en su proxima corrida.
+          await this.registroOfertasRedis.sincronizar(idOferta);
         } catch (error) {
           this.logger.warn(
             `revision de ventas limitadas vencidas: no se pudo apagar la oferta ${idOferta} (${(error as Error)?.message ?? error})`,

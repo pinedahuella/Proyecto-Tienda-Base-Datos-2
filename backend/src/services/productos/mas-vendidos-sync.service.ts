@@ -1,10 +1,46 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
+import { Decimal128 } from 'mongodb';
 import { clickhouse } from '../../database/clickhouse';
 import { redis } from '../../database/redis';
 import { mongoDb } from '../../database/mongo';
 import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
 import { Producto } from '../../models/producto';
+
+/**
+ * La version acotada de un producto que cachea este worker y lee
+ * `MasVendidosService`: solo los campos que una tarjeta de "mas vendidos"
+ * pinta -- nombre, una imagen representativa, precio, si tiene descuento,
+ * calificacion y si sigue con existencias. Sin `variantes[]`, sin
+ * `categoria`, sin `caracteristicas_adicionales`/`caracteristicas_personalizadas`:
+ * esta vitrina nunca necesita mostrar eso (ver el comentario de la clase).
+ */
+export interface ProductoTarjetaMasVendido {
+  _id: number;
+  nombre: string;
+  /** La primera imagen de la primera variante, o `null` si no tiene ninguna. */
+  imagen: string | null;
+  precio_tienda: Decimal128 | null;
+  precio_desde: Decimal128 | null;
+  hay_descuento: boolean;
+  resenas_promedio: number;
+  resenas_total: number;
+  /** Unidades activas entre todos los vendedores. `0` = agotado en todos lados. */
+  stock_total: number;
+}
+
+/** Forma cruda que devuelve la proyeccion de Mongo, antes de aplanar la imagen. */
+interface FilaProductoProyectado {
+  _id: number;
+  nombre: string;
+  precio_tienda: Decimal128 | null;
+  precio_desde: Decimal128 | null;
+  hay_descuento: boolean;
+  resenas_promedio: number;
+  resenas_total: number;
+  stock_total: number;
+  variantes: { imagenes: string[] }[];
+}
 
 /**
  * Worker que recalcula el ranking de "productos mas vendidos" a partir de
@@ -32,13 +68,27 @@ import { Producto } from '../../models/producto';
  *
  * **Detalle de cada producto (2026-09-23):** ademas del ZSET con el
  * ranking, este worker consulta Mongo UNA vez por corrida (no en cada
- * request) y guarda el documento completo de cada producto ganador en un
- * HASH -- mismo principio que se aplico al carrito: `GET
- * /productos/mas-vendidos` ya no toca Mongo, lee las dos estructuras de
- * Redis y ya. Solo se cachean productos `activo` (mismo filtro de
- * visibilidad que el resto del catalogo publico), asi que uno que se
- * desactive a mitad de los 10 minutos puede seguir apareciendo hasta la
- * proxima corrida -- antes esa comprobacion era en vivo, en cada `GET`.
+ * request) y guarda el documento de cada producto ganador en un HASH --
+ * mismo principio que se aplico al carrito: `GET /productos/mas-vendidos`
+ * ya no toca Mongo, lee las dos estructuras de Redis y ya. Solo se cachean
+ * productos `activo` (mismo filtro de visibilidad que el resto del
+ * catalogo publico), asi que uno que se desactive a mitad de los 10
+ * minutos puede seguir apareciendo hasta la proxima corrida -- antes esa
+ * comprobacion era en vivo, en cada `GET`.
+ *
+ * **Version acotada, no el documento completo (2026-09-23):** esta vitrina
+ * solo pinta una tarjeta (foto, nombre, precio, calificacion) -- no hace
+ * falta el arreglo `variantes[]` entero (con precio/stock/caracteristicas
+ * por variante) ni `caracteristicas_adicionales`/`caracteristicas_personalizadas`,
+ * que es la mayor parte del peso de un documento `Producto`. Por eso la
+ * consulta a Mongo pide una proyeccion (`ProductoTarjetaMasVendido`, mas
+ * abajo) en vez de traer el documento entero: menos bytes en el HASH de
+ * Redis y en la respuesta HTTP de `GET /productos/mas-vendidos`, que
+ * ademas es la ruta de vitrina/home, la mas visitada del catalogo publico.
+ * Distinto del resto de rutas de listado (`GET /productos`,
+ * `GET /productos/:id`), que si devuelven el documento completo -- aqui se
+ * justifica el recorte porque esta vitrina nunca necesita mostrar
+ * variantes.
  *
  * El reemplazo de las dos estructuras es atomico: se arman en una llave
  * temporal cada una y se publican con `RENAME` (atomico en Redis), para
@@ -56,7 +106,7 @@ export class MasVendidosSyncService {
   static readonly CLAVE_RANKING = 'mesh:productos:mas_vendidos';
   private static readonly CLAVE_TEMPORAL = `${MasVendidosSyncService.CLAVE_RANKING}:tmp`;
 
-  /** HASH `{ id_producto: <documento Producto en JSON> }`. */
+  /** HASH `{ id_producto: <ProductoTarjetaMasVendido en JSON> }`. */
   static readonly CLAVE_DETALLE = 'mesh:productos:mas_vendidos:detalle';
   private static readonly CLAVE_DETALLE_TEMPORAL = `${MasVendidosSyncService.CLAVE_DETALLE}:tmp`;
 
@@ -158,17 +208,53 @@ export class MasVendidosSyncService {
   }
 
   /**
-   * El documento completo de cada producto ganador, tal como lo devuelve
-   * `GET /productos/mas-vendidos` -- misma forma que antes traia
-   * `MasVendidosService` en vivo. Solo `activo`: un producto que se
-   * desactivo no debe quedar cacheado como si se pudiera mostrar (ver el
-   * comentario de la clase sobre la ventana de hasta 10 min que esto abre).
+   * La version acotada (`ProductoTarjetaMasVendido`) de cada producto
+   * ganador -- no el documento completo (ver el comentario de la clase).
+   * La proyeccion pide solo los campos de la tarjeta, mas
+   * `variantes.imagenes` (Mongo no deja combinar un `$slice` sobre
+   * `variantes` con una subruta de esa misma proyeccion en un `find` --
+   * "path collision" -- asi que vienen las imagenes de TODAS las variantes,
+   * cada una sin el resto de sus campos, y en JS se toma solo la primera
+   * imagen de la primera variante); el resto de cada variante (precio,
+   * stock, caracteristicas) nunca viaja desde Mongo. Solo `activo`: un
+   * producto que se desactivo no debe quedar cacheado como si se pudiera
+   * mostrar (ver el comentario de la clase sobre la ventana de hasta 10 min
+   * que esto abre).
    */
-  private async consultarProductosMongo(ids: number[]): Promise<Producto[]> {
-    return mongoDb
+  private async consultarProductosMongo(
+    ids: number[],
+  ): Promise<ProductoTarjetaMasVendido[]> {
+    const filas = await mongoDb
       .collection<Producto>('productos')
-      .find({ _id: { $in: ids }, estado: ESTADO_PRODUCTO_VISIBLE })
+      .find<FilaProductoProyectado>(
+        { _id: { $in: ids }, estado: ESTADO_PRODUCTO_VISIBLE },
+        {
+          projection: {
+            _id: 1,
+            nombre: 1,
+            precio_tienda: 1,
+            precio_desde: 1,
+            hay_descuento: 1,
+            resenas_promedio: 1,
+            resenas_total: 1,
+            stock_total: 1,
+            'variantes.imagenes': 1,
+          },
+        },
+      )
       .toArray();
+
+    return filas.map((fila) => ({
+      _id: fila._id,
+      nombre: fila.nombre,
+      imagen: fila.variantes[0]?.imagenes[0] ?? null,
+      precio_tienda: fila.precio_tienda,
+      precio_desde: fila.precio_desde,
+      hay_descuento: fila.hay_descuento,
+      resenas_promedio: fila.resenas_promedio,
+      resenas_total: fila.resenas_total,
+      stock_total: fila.stock_total,
+    }));
   }
 
   /**
@@ -178,7 +264,9 @@ export class MasVendidosSyncService {
    * nada que renombrar -- se borra la clave directo en vez de armar un
    * `RENAME` sobre una clave temporal vacia (Redis lo rechaza).
    */
-  private async reemplazarDetalle(productos: Producto[]): Promise<void> {
+  private async reemplazarDetalle(
+    productos: ProductoTarjetaMasVendido[],
+  ): Promise<void> {
     if (productos.length === 0) {
       await redis.del(MasVendidosSyncService.CLAVE_DETALLE);
       return;

@@ -9,6 +9,7 @@ import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { CORREO_TIENDA } from '../../helpers/constantes';
 import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
+import { RegistroOfertasRedisService } from './registro-ofertas-redis.service';
 import { AbrirVentaLimitadaPeticion } from '../../dto/abrir-venta-limitada';
 import { VentaLimitadaAbierta } from '../../models/oferta';
 
@@ -40,6 +41,7 @@ export class VentasLimitadasService {
 
   constructor(
     private readonly inventarioLimitadoService: InventarioLimitadoService,
+    private readonly registroOfertasRedis: RegistroOfertasRedisService,
   ) {}
 
   /**
@@ -80,6 +82,7 @@ export class VentasLimitadasService {
       idOferta,
       duracion,
     );
+    await this.registroOfertasRedis.sincronizar(idOferta);
 
     return { id_oferta: String(idOferta), stock_sembrado };
   }
@@ -116,6 +119,7 @@ export class VentasLimitadasService {
     }
 
     await this.inventarioLimitadoService.revertir(idOferta);
+    await this.registroOfertasRedis.sincronizar(idOferta);
   }
 
   // ---------------------------------------------------------------------
