@@ -624,8 +624,12 @@ export class OfertasVendedorService {
    * Quita el descuento activo de una oferta propia. `oferta.precio` no se
    * toca -- nunca lo estuvo -- solo se limpia `porcentaje_descuento`.
    * Rechaza con 409 si la oferta **no tiene** ningun descuento activo.
-   * Mismo patron de transaccion + `FOR UPDATE` + chequeo de dueno que
-   * `aplicarDescuento()`.
+   * Rechaza tambien con 409 si la oferta esta en una venta relampago
+   * (`es_inventario_limitado`): la venta relampago exige un descuento
+   * activo (ver `VentasLimitadasService.abrir`), asi que quitarlo por
+   * separado la dejaria en un estado sin sentido de negocio -- hay que
+   * cerrar la venta relampago primero. Mismo patron de transaccion +
+   * `FOR UPDATE` + chequeo de dueno que `aplicarDescuento()`.
    */
   async quitarDescuento(
     idUsuarioToken: string,
@@ -648,9 +652,10 @@ export class OfertasVendedorService {
 
       const bloqueo = await cliente.query<{
         porcentaje_descuento: string | null;
+        es_inventario_limitado: boolean;
         id_producto_mongo: string;
       }>(
-        `SELECT porcentaje_descuento, id_producto_mongo
+        `SELECT porcentaje_descuento, es_inventario_limitado, id_producto_mongo
            FROM oferta
           WHERE id_oferta = $1 AND id_usuario = $2
           FOR UPDATE`,
@@ -663,6 +668,11 @@ export class OfertasVendedorService {
       if (fila.porcentaje_descuento == null) {
         throw new ErrorConflicto(
           'Esta oferta no tiene ningun descuento activo',
+        );
+      }
+      if (fila.es_inventario_limitado) {
+        throw new ErrorConflicto(
+          `La oferta ${idOferta} esta en una venta relampago: cierra la venta relampago (DELETE /vendedor/ofertas/${idOferta}/venta-limitada) antes de quitar el descuento`,
         );
       }
       idProductoMongo = Number(fila.id_producto_mongo);

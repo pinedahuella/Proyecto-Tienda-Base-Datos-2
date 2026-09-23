@@ -2637,12 +2637,17 @@ La oferta no existe **o no es tuya** (mismo mensaje para las dos cosas).
 ```json
 { "ok": false, "mensaje": "La oferta 3 no esta activa (esta pausada), no se puede abrir una venta limitada", "payload": null }
 { "ok": false, "mensaje": "La oferta 3 ya esta en modo venta limitada -- sembrar de nuevo borraria sus reservas vivas", "payload": null }
+{ "ok": false, "mensaje": "La oferta 3 necesita un descuento activo antes de abrir una venta relampago: aplicalo primero con POST /vendedor/ofertas/3/descuento", "payload": null }
 ```
 
-Dos casos que el panel distingue: la oferta no está `activa` (está
-`pausada`/`retirada`/`pendiente`/`rechazada`), o **ya** está en venta
-relámpago — este último es lo que impide que un segundo clic vuelva a
-sembrar y borre las reservas que ya tomaron los compradores.
+Tres casos que el panel distingue: la oferta no está `activa` (está
+`pausada`/`retirada`/`pendiente`/`rechazada`), **ya** está en venta
+relámpago (esto impide que un segundo clic vuelva a sembrar y borre las
+reservas que ya tomaron los compradores), o **todavía no tiene un
+descuento activo** (2026-09-23) — una venta relámpago sin descuento no
+tiene sentido de negocio, así que `VentasLimitadasService.abrir()` exige
+`oferta.porcentaje_descuento` no `NULL` antes de sembrar Redis (chequeo en
+`VentasLimitadasService`, no en Redis ni en `activar()`).
 
 ### 503 / 500
 
@@ -2807,6 +2812,13 @@ inconsistente.
 lo estuvo. Mismo patrón de transacción + `FOR UPDATE` + autorización que
 el `POST`.
 
+**Rechaza con 409 si la oferta está en una venta relámpago** (2026-09-23,
+`es_inventario_limitado`): como abrir una venta relámpago ya exige un
+descuento activo (ver `POST .../venta-limitada` más arriba), quitarlo por
+separado dejaría la venta relámpago sin el descuento que la justifica. Hay
+que cerrar la venta relámpago primero
+(`DELETE .../venta-limitada`) — recién ahí se puede quitar el descuento.
+
 ### 200
 
 ```json
@@ -2839,7 +2851,13 @@ La oferta no existe o no es tuya.
 
 ```json
 { "ok": false, "mensaje": "Esta oferta no tiene ningun descuento activo", "payload": null }
+{ "ok": false, "mensaje": "La oferta 3 esta en una venta relampago: cierra la venta relampago (DELETE /vendedor/ofertas/3/venta-limitada) antes de quitar el descuento", "payload": null }
 ```
+
+El primer chequeo (sin descuento) va antes que el de venta relámpago: si
+la oferta no tiene descuento, ese es el mensaje que sale, aunque además
+estuviera en venta relámpago (no debería poder pasar, ya que abrirla exige
+el descuento).
 
 ### 503 / 500
 
@@ -2872,6 +2890,42 @@ Ambar Campus 14, Q5840.00).
 
 Detalle completo, con la lista de archivos y decisiones de diseño, en
 `plan pendiente/descuentos-oferta.md`.
+
+---
+
+## Venta relámpago exige descuento activo (agregado 2026-09-23)
+
+Regla de negocio nueva, sobre los dos endpoints de arriba: una venta
+relámpago **siempre** tiene que traer un descuento aplicado, y mientras
+esté abierta **no se puede quitar el descuento por separado** — hay que
+cerrar la venta relámpago primero. La idea: el descuento es lo que
+justifica el mecanismo, así que abrir sin descuento o quitarlo a mitad de
+la venta dejaría la oferta en un estado que no tiene sentido de negocio.
+
+- **`POST /vendedor/ofertas/:id/venta-limitada`** (`VentasLimitadasService.abrir`)
+  ahora exige `oferta.porcentaje_descuento` no `NULL` antes de sembrar
+  Redis — 409 si falta (ver el nuevo caso en la sección de arriba).
+- **`DELETE /vendedor/ofertas/:id/descuento`** (`OfertasVendedorService.quitarDescuento`)
+  ahora rechaza con 409 si `oferta.es_inventario_limitado` es `true` (ver
+  el nuevo caso en la sección de arriba). `POST .../descuento` (aplicar un
+  descuento nuevo) no cambia.
+
+### Probado en vivo el 23 de septiembre de 2026
+
+Contra el servidor y las bases reales (`ventas_norte`, oferta 549 = Eau de
+parfum Bruma, Q1081.00, sin descuento ni venta relámpago al empezar).
+
+| Caso | Resultado |
+|---|---|
+| Abrir venta relámpago sin descuento | 409, `"...necesita un descuento activo antes de abrir una venta relampago..."` |
+| Aplicar 15% de descuento | 201, `precio_final: "918.85"` |
+| Abrir venta relámpago con el descuento ya aplicado | 201, `stock_sembrado: 24` |
+| Quitar el descuento con la venta relámpago abierta | 409, `"...esta en una venta relampago: cierra la venta relampago..."` |
+| Cerrar la venta relámpago | 200 |
+| Quitar el descuento ya cerrada la venta relámpago | 200, `porcentaje_descuento: null` |
+
+La oferta quedó exactamente como al empezar (sin descuento, sin venta
+relámpago). `npx tsc --noEmit` sobre el backend completo, limpio.
 
 ---
 

@@ -47,6 +47,11 @@ export class VentasLimitadasService {
    * que la oferta tiene AHORA en PostgreSQL y marca
    * `oferta.es_inventario_limitado`.
    *
+   * Exige que la oferta ya tenga un descuento activo
+   * (`oferta.porcentaje_descuento`) -- una venta relampago sin descuento no
+   * tiene sentido de negocio (409 si falta, pidiendo aplicarlo primero con
+   * `POST .../descuento`).
+   *
    * `activar()` hace el resto y lanza los dos 409 que el panel distingue:
    * la oferta no esta `activa`, o ya esta en modo venta relampago (un
    * segundo clic no puede volver a sembrar: borraria las reservas vivas).
@@ -60,7 +65,16 @@ export class VentasLimitadasService {
     const idOferta = this.validarIdOferta(idOfertaParametro);
     const duracion = this.validarDuracion(datos.duracion_segundos);
 
-    await this.exigirOfertaPropia(idOferta, idUsuarioToken, idRolUsuario);
+    const fila = await this.exigirOfertaPropia(
+      idOferta,
+      idUsuarioToken,
+      idRolUsuario,
+    );
+    if (fila.porcentaje_descuento == null) {
+      throw new ErrorConflicto(
+        `La oferta ${idOferta} necesita un descuento activo antes de abrir una venta relampago: aplicalo primero con POST /vendedor/ofertas/${idOferta}/descuento`,
+      );
+    }
 
     const { stock_sembrado } = await this.inventarioLimitadoService.activar(
       idOferta,
@@ -138,22 +152,28 @@ export class VentasLimitadasService {
    * Una oferta ajena o inexistente da el MISMO 404 generico que usa el
    * resto del panel -- nunca se confirma que exista.
    *
-   * Devuelve la marca `es_inventario_limitado` de paso, que `cerrar()`
-   * necesita.
+   * Devuelve la marca `es_inventario_limitado` (que `cerrar()` necesita) y
+   * `porcentaje_descuento` (que `abrir()` necesita).
    */
   private async exigirOfertaPropia(
     idOferta: number,
     idUsuarioToken: string,
     idRolUsuario: number,
-  ): Promise<{ es_inventario_limitado: boolean }> {
+  ): Promise<{
+    es_inventario_limitado: boolean;
+    porcentaje_descuento: string | null;
+  }> {
     try {
       const idDueno =
         idRolUsuario === ID_ROL_ADMIN
           ? await this.obtenerIdTienda()
           : idUsuarioToken;
 
-      const resultado = await pool.query<{ es_inventario_limitado: boolean }>(
-        `SELECT o.es_inventario_limitado
+      const resultado = await pool.query<{
+        es_inventario_limitado: boolean;
+        porcentaje_descuento: string | null;
+      }>(
+        `SELECT o.es_inventario_limitado, o.porcentaje_descuento
            FROM oferta o
           WHERE o.id_oferta = $1 AND o.id_usuario = $2`,
         [idOferta, idDueno],
