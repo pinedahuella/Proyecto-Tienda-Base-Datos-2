@@ -35,6 +35,7 @@ import { Producto } from '../../models/producto';
 import { ProductosService } from '../productos/productos.service';
 import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
 import { EventosService } from '../eventos/eventos.service';
+import { expresionPrecioFinal } from '../../helpers/precio-descuento';
 
 const REGEX_ID = /^\d+$/;
 
@@ -56,7 +57,11 @@ interface FilaOferta {
   id_oferta: string;
   id_producto_mongo: string;
   id_producto_variante_mongo: string;
+  /** El precio de LISTA, sin descuento -- ver `precio_final`. */
   precio: string;
+  porcentaje_descuento: string | null;
+  /** El precio que de verdad se cobra/muestra, ya calculado por la consulta. */
+  precio_final: string;
   stock: number;
   estado_oferta_nombre: string;
   vendedor_usuario: string;
@@ -76,6 +81,32 @@ interface ProductoLigero {
 }
 
 /**
+ * Lo que se guarda por linea DENTRO del HASH de Redis, como JSON (campo =
+ * `id_oferta`, valor = esto serializado). Es una FOTO tomada la ultima vez
+ * que se hizo `PUT /carrito/lineas/:idOferta` -- no se refresca sola, ni
+ * siquiera al ver el carrito. `disponible`/`motivo` tambien quedan
+ * congelados con esa foto (salvo la excepcion de inventario limitado, que
+ * SI se revisa en vivo contra Redis -- ver `verCarrito`).
+ */
+interface LineaCarritoRedis {
+  cantidad: number;
+  id_producto: number;
+  id_producto_variante: number;
+  nombre_producto: string;
+  nombre_variante: string;
+  imagen: string | null;
+  /** El precio que de verdad se cobra/muestra -- YA con el descuento aplicado, si tenia uno al tomar la foto. */
+  precio: string;
+  /** El % de descuento que tenia la oferta al tomar la foto, o `null` -- solo informativo (badge), `precio` ya lo tiene aplicado. */
+  porcentaje_descuento: string | null;
+  vendedor_usuario: string;
+  vendedor_nombre: string;
+  stock_disponible: number;
+  disponible: boolean;
+  motivo: MotivoNoDisponible | null;
+}
+
+/**
  * El carrito de compra, que vive SOLO en Redis (Entrega 2). Reemplaza al
  * carrito viejo, que era una fila de `pedido` en estado `pendiente` en
  * PostgreSQL.
@@ -85,23 +116,32 @@ interface ProductoLigero {
  * ============================================================
  * Una sola clave por cuenta, un HASH:
  *
- *     mesh:carrito:<id_usuario>   HASH   { <id_oferta>: cantidad, ... }
+ *     mesh:carrito:<id_usuario>   HASH   { <id_oferta>: <linea JSON>, ... }
  *
- * El carrito es literalmente un `Map<id_oferta, cantidad>`: la INTENCION
- * ("quiero N de la oferta X"), nada mas. El nombre, el precio, el stock y
- * la imagen NO se guardan aca -- viven en `oferta` (PostgreSQL) y en
- * `productos` (MongoDB), cambian, y una copia en Redis se desactualizaria
- * en segundos. Se resuelven al vuelo en `GET /carrito` o al pagar.
+ * Cada campo guarda la cantidad JUNTO con una foto de nombre, precio,
+ * imagen, vendedor y stock (`LineaCarritoRedis`), tomada de PostgreSQL/Mongo
+ * la ultima vez que se agrego o se cambio la cantidad de esa linea. Es a
+ * proposito: el profesor pidio que el carrito "resista por si solo", es
+ * decir que verlo (`GET /carrito`) nunca dependa de que Postgres o Mongo
+ * esten arriba -- a cambio, lo que se ve ahi puede estar desactualizado
+ * hasta por las 24 h de vida del carrito (el nombre pudo cambiar, el precio
+ * tambien). El checkout es la excepcion: paga con datos en vivo, nunca con
+ * esta foto (ver `verCarritoEnVivo`).
  *
  *
  * Que toca PostgreSQL/Mongo y que no
  * ============================================================
- *   PUT / DELETE /carrito/lineas/:idOferta   -> Redis puro (HSET/HDEL +
- *       EXPIRE). Sin una sola consulta a PostgreSQL. Devuelven un resumen
- *       calculado solo con Redis.
- *   GET /carrito                             -> HGETALL + DOS consultas en
- *       lote (una a `oferta`, una a `productos` de Mongo) para todo el
- *       carrito de una. Es la vista, no el camino de agregar.
+ *   PUT /carrito/lineas/:idOferta            -> SI toca Postgres + Mongo,
+ *       una vez, para tomar la foto de esa UNA linea (`construirSnapshot`).
+ *       Es la unica escritura que consulta afuera.
+ *   DELETE /carrito/lineas/:idOferta, DELETE /carrito -> Redis puro
+ *       (HDEL/DEL + EXPIRE). Devuelven un resumen calculado solo con Redis.
+ *   GET /carrito                             -> Redis puro (HGETALL). Nunca
+ *       consulta Postgres ni Mongo -- lee las fotos ya guardadas.
+ *   POST /carrito/comprar                    -> consulta en vivo (igual que
+ *       antes de este cambio) para el error itemizado por linea y el aviso
+ *       de cambio de precio, ANTES de cobrar (`verCarritoEnVivo`). El cobro
+ *       en si mismo siempre fue autoridad de `comprar_carrito()`.
  *
  *
  * Como nace y como muere -- sin un paso de "crear"
@@ -138,16 +178,111 @@ export class CarritoService {
   }
 
   /**
-   * El carrito completo, enriquecido: cada linea con su nombre, precio
-   * actual, stock, subtotal y si se puede comprar. Renueva el TTL (mirar el
-   * carrito cuenta como actividad).
+   * El carrito completo, tal como esta GUARDADO en Redis -- nunca toca
+   * Postgres ni Mongo (pedido del profesor: `GET /carrito` tiene que
+   * resistir aunque las otras bases esten caidas). Nombre, precio, imagen,
+   * vendedor y stock son la foto que tomo el `PUT` que agrego o cambio cada
+   * linea (`LineaCarritoRedis`), no el dato de ahora mismo. Renueva el TTL
+   * (mirar el carrito cuenta como actividad).
    *
-   * Dos consultas en lote, sin importar cuantas lineas: una a `oferta` y
-   * una a `productos` de Mongo.
+   * La UNICA excepcion es la disponibilidad de una linea de inventario
+   * limitado: `ticketVigente` es tambien Redis puro (consulta la clave de
+   * la reserva, no Postgres), asi que se revisa en vivo igual que antes.
    */
   async verCarrito(idUsuario: string): Promise<Carrito> {
-    const { cantidades: crudo, tickets } =
-      await this.leerHashCompleto(idUsuario);
+    const { lineas: crudo, tickets } = await this.leerHashCompleto(idUsuario);
+    const idsOferta = Object.keys(crudo).map(Number);
+
+    if (idsOferta.length === 0) {
+      return { lineas: [], total: '0.00', total_lineas: 0, total_items: 0 };
+    }
+
+    await this.renovarTtl(idUsuario);
+
+    // Async por linea (no un .map sincrono): las lineas de inventario
+    // limitado necesitan una consulta a Redis (ticketVigente) para saber si
+    // la reserva que las respalda sigue viva.
+    const lineas: CarritoLinea[] = await Promise.all(
+      idsOferta.map(async (idOferta) => {
+        const snapshot = crudo[idOferta];
+        const ticket = tickets[idOferta] ?? null;
+        const esInventarioLimitado = ticket != null;
+
+        let { disponible, motivo } = snapshot;
+        // Ver el comentario de `verCarrito` en la clase: la reserva de una
+        // venta relampago puede vencer sola dentro de las 24 h que dura el
+        // carrito, sin que nadie vuelva a tocar esta linea -- por eso esto
+        // SI se revisa en vivo (contra Redis, no contra Postgres) en vez de
+        // confiar en la foto.
+        if (esInventarioLimitado && disponible) {
+          const vigente = await this.inventarioLimitadoService.ticketVigente(
+            idOferta,
+            ticket,
+          );
+          if (!vigente) {
+            disponible = false;
+            motivo = 'reserva_vencida';
+          }
+        }
+
+        const subtotal = (Number(snapshot.precio) * snapshot.cantidad).toFixed(
+          2,
+        );
+
+        return {
+          id_oferta: idOferta,
+          cantidad: snapshot.cantidad,
+          id_producto: snapshot.id_producto,
+          id_producto_variante: snapshot.id_producto_variante,
+          nombre_producto: snapshot.nombre_producto,
+          nombre_variante: snapshot.nombre_variante,
+          imagen: snapshot.imagen,
+          precio: snapshot.precio,
+          porcentaje_descuento: snapshot.porcentaje_descuento,
+          subtotal,
+          vendedor: {
+            usuario: snapshot.vendedor_usuario,
+            nombre: snapshot.vendedor_nombre,
+          },
+          stock_disponible: snapshot.stock_disponible,
+          disponible,
+          motivo,
+          es_inventario_limitado: esInventarioLimitado,
+        };
+      }),
+    );
+
+    const total = lineas
+      .reduce((suma, linea) => suma + Number(linea.subtotal), 0)
+      .toFixed(2);
+    const totalItems = idsOferta.reduce(
+      (suma, id) => suma + crudo[id].cantidad,
+      0,
+    );
+
+    return {
+      lineas,
+      total,
+      total_lineas: lineas.length,
+      total_items: totalItems,
+    };
+  }
+
+  /**
+   * La misma forma que `verCarrito`, pero EN VIVO contra Postgres/Mongo --
+   * usada solo por el checkout (`ejecutarCompraCarrito`), nunca por
+   * `GET /carrito`. Es deliberadamente la logica que `verCarrito` tenia
+   * antes de guardar la foto en Redis: el checkout ya tiene que tocar
+   * Postgres para cobrar, asi que aprovecha para dar el error itemizado por
+   * linea y detectar si el precio cambio desde la ultima foto que vio el
+   * cliente -- eso no se puede saber sin consultar el dato real.
+   *
+   * Dos consultas en lote, sin importar cuantas lineas: una a `oferta` y
+   * una a `productos` de Mongo. Renueva el TTL, igual que `verCarrito`
+   * (intentar pagar tambien cuenta como actividad).
+   */
+  private async verCarritoEnVivo(idUsuario: string): Promise<Carrito> {
+    const { lineas: crudo, tickets } = await this.leerHashCompleto(idUsuario);
     const idsOferta = Object.keys(crudo).map(Number);
 
     if (idsOferta.length === 0) {
@@ -162,12 +297,9 @@ export class CarritoService {
     ];
     const productos = await this.consultarProductos(idsProducto);
 
-    // Async por linea (no un .map sincrono): las lineas de inventario
-    // limitado necesitan una consulta mas a Redis (ticketVigente) para
-    // saber si la reserva que las respalda sigue viva.
     const lineas: CarritoLinea[] = await Promise.all(
       idsOferta.map(async (idOferta) => {
-        const cantidad = crudo[idOferta];
+        const cantidad = crudo[idOferta].cantidad;
         const oferta = ofertas.get(idOferta);
         const ticket = tickets[idOferta] ?? null;
         const esInventarioLimitado = ticket != null;
@@ -185,6 +317,7 @@ export class CarritoService {
             nombre_variante: '(oferta no encontrada)',
             imagen: null,
             precio: '0.00',
+            porcentaje_descuento: null,
             subtotal: '0.00',
             vendedor: { usuario: '', nombre: '' },
             stock_disponible: 0,
@@ -201,7 +334,7 @@ export class CarritoService {
           (v) => v.id_producto_variante === idVariante,
         );
 
-        const subtotal = (Number(oferta.precio) * cantidad).toFixed(2);
+        const subtotal = (Number(oferta.precio_final) * cantidad).toFixed(2);
         let { disponible, motivo } = this.evaluarDisponibilidad(
           oferta,
           cantidad,
@@ -235,7 +368,8 @@ export class CarritoService {
           nombre_variante:
             variante?.nombre_variante ?? '(variante no encontrada)',
           imagen: variante?.imagenes[0] ?? null,
-          precio: oferta.precio,
+          precio: oferta.precio_final,
+          porcentaje_descuento: oferta.porcentaje_descuento,
           subtotal,
           vendedor: {
             usuario: oferta.vendedor_usuario,
@@ -252,7 +386,10 @@ export class CarritoService {
     const total = lineas
       .reduce((suma, linea) => suma + Number(linea.subtotal), 0)
       .toFixed(2);
-    const totalItems = idsOferta.reduce((suma, id) => suma + crudo[id], 0);
+    const totalItems = idsOferta.reduce(
+      (suma, id) => suma + crudo[id].cantidad,
+      0,
+    );
 
     return {
       lineas,
@@ -266,19 +403,21 @@ export class CarritoService {
    * Fija la cantidad ABSOLUTA de una oferta en el carrito (no un +1/-1). Si
    * la clave del carrito no existe, `HSET` la crea. Renueva el TTL.
    *
-   * Para una oferta NORMAL sigue siendo Redis puro, sin una sola consulta
-   * a PostgreSQL -- el stock se comprueba al pintar el carrito y al pagar,
-   * como siempre.
+   * A diferencia de antes, esto SI consulta Postgres + Mongo -- una vez, y
+   * solo para ESTA linea (`construirSnapshot`) -- para tomar la foto
+   * (nombre, precio, imagen, vendedor, stock, disponibilidad) que
+   * `GET /carrito` va a servir despues sin volver a preguntar. Es la unica
+   * escritura del carrito que toca algo fuera de Redis; se acepta ese costo
+   * en el agregar para que el ver sea 100% Redis.
    *
    * Para una oferta de INVENTARIO LIMITADO (se detecta con
-   * `existeVentaLimitada`, una sola consulta a Redis, `EXISTS`, tampoco
-   * toca Postgres) es la UNICA excepcion a "agregar nunca reserva nada":
-   * llama a `redimensionar` (acredita el ticket viejo si esta linea ya
-   * tenia uno, y pide la cantidad nueva, las dos cosas en un solo paso
-   * atomico -- ver `plan pendiente/redimensionar-reserva.lua`). Si no
-   * alcanza, 409 de una vez, ANTES de tocar el carrito -- a diferencia de
-   * una oferta normal, que se deja agregar siempre y se avisa recien en
-   * `GET /carrito`.
+   * `existeVentaLimitada`, una sola consulta a Redis, `EXISTS`) sigue siendo
+   * la UNICA excepcion a "agregar nunca reserva nada": llama a
+   * `redimensionar` (acredita el ticket viejo si esta linea ya tenia uno, y
+   * pide la cantidad nueva, las dos cosas en un solo paso atomico -- ver
+   * `plan pendiente/redimensionar-reserva.lua`). Si no alcanza, 409 de una
+   * vez, ANTES de tocar el carrito -- a diferencia de una oferta normal, que
+   * se deja agregar siempre y se avisa recien en `GET /carrito`.
    */
   async definirCantidad(
     idUsuario: string,
@@ -290,6 +429,7 @@ export class CarritoService {
 
     const esInventarioLimitado =
       await this.inventarioLimitadoService.existeVentaLimitada(idOferta);
+    const snapshot = await this.construirSnapshot(idOferta, cantidad);
 
     if (esInventarioLimitado) {
       const ticketViejo = await this.leerTicket(idUsuario, idOferta);
@@ -320,7 +460,7 @@ export class CarritoService {
         await redis.hset(
           clave,
           String(idOferta),
-          String(cantidad),
+          JSON.stringify(snapshot),
           this.campoTicket(idOferta),
           String(resultado.ticket),
         );
@@ -340,7 +480,7 @@ export class CarritoService {
 
     try {
       const clave = this.clave(idUsuario);
-      await redis.hset(clave, String(idOferta), String(cantidad));
+      await redis.hset(clave, String(idOferta), JSON.stringify(snapshot));
       // Si esta linea arrastraba un ticket de una venta relampago que ya
       // cerro (`existeVentaLimitada` dio false porque la clave Redis de la
       // oferta ya no existe -> no hay ninguna reserva viva que soltar), se
@@ -445,8 +585,9 @@ export class CarritoService {
    * deja ni pedido ni lineas a medias.
    *
    * Orden:
-   *   1. `verCarrito()` -> lineas enriquecidas (nombre, precio, stock,
-   *      disponibilidad). Carrito vacio -> 409.
+   *   1. `verCarritoEnVivo()` -> lineas enriquecidas EN VIVO (nombre,
+   *      precio, stock, disponibilidad, distinto de la foto que sirve
+   *      `GET /carrito`). Carrito vacio -> 409.
    *   2. Si alguna linea no se puede comprar (oferta pausada, variante
    *      desactivada, sin stock, o un id inventado) -> 409 con la lista,
    *      SIEMPRE (no hay forma de saltarse esto). Segun el interruptor
@@ -456,9 +597,10 @@ export class CarritoService {
    *      chequeo previo para dar un buen mensaje; la verdad la vuelve a
    *      comprobar `comprar_carrito()` dentro de su transaccion, con
    *      `FOR UPDATE`.
-   *   3. Si no hay bloqueantes, se compara el `precio_visto` que mando el
-   *      cliente (por linea, en `lineas_precio_visto`) contra el precio
-   *      actual. Si alguno discrepa y `confirmar_cambios` no vino en
+   *   3. Si no hay bloqueantes, se compara el precio GUARDADO en la foto de
+   *      Redis de cada linea (lo que `GET /carrito` le mostro al cliente,
+   *      no algo que el cliente tenga que mandar de vuelta) contra el
+   *      precio actual. Si alguno discrepa y `confirmar_cambios` no vino en
    *      `true` -> se devuelve `{comprado: false, avisos}` (sin tocar
    *      nada); reenviar con `confirmar_cambios: true` deja pasar la
    *      compra al precio de hoy. Mismo criterio que
@@ -494,7 +636,7 @@ export class CarritoService {
     }
     const idDireccion = this.resolverIdDireccion(datos.id_direccion);
 
-    const carrito = await this.verCarrito(idUsuario);
+    const carrito = await this.verCarritoEnVivo(idUsuario);
     if (carrito.lineas.length === 0) {
       throw new ErrorConflicto('El carrito esta vacio');
     }
@@ -530,10 +672,8 @@ export class CarritoService {
       throw new ErrorConflicto(mensaje);
     }
 
-    const avisos = this.detectarAvisosPrecio(
-      carrito.lineas,
-      datos.lineas_precio_visto,
-    );
+    const { lineas: guardado } = await this.leerHashCompleto(idUsuario);
+    const avisos = this.compararPrecios(carrito.lineas, guardado);
     if (avisos.length > 0 && datos.confirmar_cambios !== true) {
       return { comprado: false, avisos };
     }
@@ -681,24 +821,32 @@ export class CarritoService {
 
   /** El HASH del carrito como `{ id_oferta: cantidad }`, filtrando basura. */
   private async leerHash(idUsuario: string): Promise<Record<number, number>> {
-    const { cantidades } = await this.leerHashCompleto(idUsuario);
+    const { lineas } = await this.leerHashCompleto(idUsuario);
+    const cantidades: Record<number, number> = {};
+    for (const [id, linea] of Object.entries(lineas)) {
+      cantidades[Number(id)] = linea.cantidad;
+    }
     return cantidades;
   }
 
   /**
-   * El HASH del carrito completo, separado en dos mapas: las cantidades
-   * normales (`<id_oferta>: cantidad`) y los tickets de inventario
-   * limitado (`t:<id_oferta>: ticket`). Son campos DEL MISMO hash de
-   * Redis -- mismo truco que usa `inventario_limitado.lua` para no
-   * necesitar una clave nueva por cada reserva (ver ese archivo).
+   * El HASH del carrito completo, separado en dos mapas: las lineas
+   * normales (`<id_oferta>: <foto JSON>`, parseada a `LineaCarritoRedis`) y
+   * los tickets de inventario limitado (`t:<id_oferta>: ticket`). Son
+   * campos DEL MISMO hash de Redis -- mismo truco que usa
+   * `inventario_limitado.lua` para no necesitar una clave nueva por cada
+   * reserva (ver ese archivo). Un campo que no parsea como JSON valido se
+   * descarta en silencio (mismo criterio que antes con numeros invalidos):
+   * es basura de una version vieja del carrito, no algo que deba tumbar el
+   * `GET`.
    */
   private async leerHashCompleto(idUsuario: string): Promise<{
-    cantidades: Record<number, number>;
+    lineas: Record<number, LineaCarritoRedis>;
     tickets: Record<number, number>;
   }> {
     try {
       const crudo = await redis.hgetall(this.clave(idUsuario));
-      const cantidades: Record<number, number> = {};
+      const lineas: Record<number, LineaCarritoRedis> = {};
       const tickets: Record<number, number> = {};
 
       for (const [campo, valor] of Object.entries(crudo)) {
@@ -711,19 +859,89 @@ export class CarritoService {
           continue;
         }
         const id = Number(campo);
-        const cantidad = Number(valor);
-        if (
-          Number.isInteger(id) &&
-          Number.isInteger(cantidad) &&
-          cantidad > 0
-        ) {
-          cantidades[id] = cantidad;
+        if (!Number.isInteger(id)) {
+          continue;
+        }
+        try {
+          const linea = JSON.parse(valor) as LineaCarritoRedis;
+          if (Number.isInteger(linea.cantidad) && linea.cantidad > 0) {
+            lineas[id] = linea;
+          }
+        } catch {
+          // Campo corrupto o de un formato viejo del carrito -- se ignora,
+          // no tumba el resto del carrito.
         }
       }
-      return { cantidades, tickets };
+      return { lineas, tickets };
     } catch (error) {
       manejarErrorRedis(this.logger, error);
     }
+  }
+
+  /**
+   * Arma la foto de una linea (`LineaCarritoRedis`) consultando Postgres +
+   * Mongo UNA vez, para guardarla en el carrito de Redis. Es el unico lugar
+   * donde `definirCantidad` toca algo fuera de Redis.
+   *
+   * Si la oferta no existe (id inventado en el `PUT`), igual arma una foto
+   * -- con nombres de relleno y `disponible: false` -- en vez de rechazar
+   * el `PUT`: mismo criterio de siempre, un id invalido se guarda igual y
+   * se avisa al verlo, no al agregarlo.
+   */
+  private async construirSnapshot(
+    idOferta: number,
+    cantidad: number,
+  ): Promise<LineaCarritoRedis> {
+    const ofertas = await this.consultarOfertas([idOferta]);
+    const oferta = ofertas.get(idOferta);
+
+    if (oferta == null) {
+      return {
+        cantidad,
+        id_producto: 0,
+        id_producto_variante: 0,
+        nombre_producto: '(oferta no encontrada)',
+        nombre_variante: '(oferta no encontrada)',
+        imagen: null,
+        precio: '0.00',
+        porcentaje_descuento: null,
+        vendedor_usuario: '',
+        vendedor_nombre: '',
+        stock_disponible: 0,
+        disponible: false,
+        motivo: 'oferta_no_existe',
+      };
+    }
+
+    const idProducto = Number(oferta.id_producto_mongo);
+    const idVariante = Number(oferta.id_producto_variante_mongo);
+    const productos = await this.consultarProductos([idProducto]);
+    const producto = productos.get(idProducto);
+    const variante = producto?.variantes.find(
+      (v) => v.id_producto_variante === idVariante,
+    );
+
+    const { disponible, motivo } = this.evaluarDisponibilidad(
+      oferta,
+      cantidad,
+      variante?.estado,
+    );
+
+    return {
+      cantidad,
+      id_producto: idProducto,
+      id_producto_variante: idVariante,
+      nombre_producto: producto?.nombre ?? '(producto no encontrado)',
+      nombre_variante: variante?.nombre_variante ?? '(variante no encontrada)',
+      imagen: variante?.imagenes[0] ?? null,
+      precio: oferta.precio_final,
+      porcentaje_descuento: oferta.porcentaje_descuento,
+      vendedor_usuario: oferta.vendedor_usuario,
+      vendedor_nombre: oferta.vendedor_nombre,
+      stock_disponible: oferta.stock,
+      disponible,
+      motivo,
+    };
   }
 
   /** El nombre del campo companero (dentro del mismo HASH del carrito) que guarda el ticket de una linea de inventario limitado. */
@@ -884,27 +1102,23 @@ export class CarritoService {
   }
 
   /**
-   * Compara el `precio_visto` que mando el cliente por linea (lo que le
-   * mostro el ultimo `GET /carrito`) contra el precio actual de esa misma
-   * linea. Texto contra texto (los dos `numeric(12,2)` formateados igual
-   * por PostgreSQL) -- exacto, sin el redondeo binario de comparar como
-   * numero de JavaScript. Una linea que el cliente no menciono en
-   * `lineas_precio_visto` no genera aviso: no hay nada que comparar.
+   * Compara el precio GUARDADO en la foto de Redis de cada linea (lo que
+   * `GET /carrito` le mostro al cliente la ultima vez) contra el precio
+   * actual EN VIVO de esa misma linea. El cliente no manda nada de precios
+   * -- no hay como, y no haria falta: el carrito ya sabe lo que le mostro.
+   * Texto contra texto (los dos `numeric(12,2)` formateados igual por
+   * PostgreSQL) -- exacto, sin el redondeo binario de comparar como numero
+   * de JavaScript. Una linea que no esta en la foto guardada (no deberia
+   * pasar: `guardado` sale del mismo HASH que produjo `lineas`) no genera
+   * aviso, no hay nada que comparar.
    */
-  private detectarAvisosPrecio(
+  private compararPrecios(
     lineas: CarritoLinea[],
-    lineasVisto: ComprarCarritoPeticion['lineas_precio_visto'],
+    guardado: Record<number, LineaCarritoRedis>,
   ): AvisoPrecioCarrito[] {
-    if (lineasVisto == null || lineasVisto.length === 0) {
-      return [];
-    }
-    const precioVistoPorOferta = new Map(
-      lineasVisto.map((linea) => [linea.id_oferta, linea.precio_visto]),
-    );
-
     const avisos: AvisoPrecioCarrito[] = [];
     for (const linea of lineas) {
-      const precioVisto = precioVistoPorOferta.get(linea.id_oferta);
+      const precioVisto = guardado[linea.id_oferta]?.precio;
       if (precioVisto != null && precioVisto !== linea.precio) {
         avisos.push({
           id_oferta: linea.id_oferta,
@@ -955,7 +1169,9 @@ export class CarritoService {
     try {
       const resultado = await pool.query<FilaOferta>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-                o.precio, o.stock, eo.estado_oferta_nombre,
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, eo.estado_oferta_nombre,
                 u.usuario AS vendedor_usuario,
                 u.nombre || COALESCE(' ' || u.apellido, '') AS vendedor_nombre
            FROM oferta o

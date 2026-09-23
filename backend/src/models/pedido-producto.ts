@@ -38,8 +38,15 @@ export interface PedidoProducto {
  * PedidosCompradorService.obtener().
  */
 export interface DetallePedido extends PedidoProducto {
-  /** El precio congelado al agregar esta linea al carrito. numeric(12,2) de Postgres: string. */
+  /**
+   * El precio que de verdad se cobro por esta linea, congelado al
+   * agregarla al carrito -- YA con el descuento aplicado, si la oferta
+   * tenia uno vigente en ese momento (ver `porcentaje_descuento_aplicado`
+   * y `helpers/precio-descuento.ts`). numeric(12,2) de Postgres: string.
+   */
   precio_unitario: string;
+  /** El % de descuento que tenia la oferta cuando se congelo este precio, o `null` -- solo informativo, `precio_unitario` ya lo tiene aplicado. */
+  porcentaje_descuento_aplicado: string | null;
   id_oferta: string;
   id_usuario_vendedor: string;
   /**

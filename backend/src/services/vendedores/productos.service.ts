@@ -185,6 +185,7 @@ export class ProductosVendedorService {
         stock_tienda: 0,
         stock_total: 0,
         total_ofertas: 0,
+        hay_descuento: false,
         resenas_promedio: 0,
         resenas_total: 0,
         // Nace pendiente de sincronizar con el buscador: el indice de
@@ -296,6 +297,7 @@ export class ProductosVendedorService {
         stock_tienda: 0,
         stock_total: 0,
         total_ofertas: 0,
+        hay_descuento: false,
         resenas_promedio: 0,
         resenas_total: 0,
         // Nace pendiente de sincronizar con el buscador, igual que en
@@ -1016,6 +1018,7 @@ export class ProductosVendedorService {
         stock_tienda: existente?.stock_tienda ?? 0,
         stock_total: existente?.stock_total ?? 0,
         total_ofertas: existente?.total_ofertas ?? 0,
+        hay_descuento: existente?.hay_descuento ?? false,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
         }),

@@ -87,3 +87,33 @@ export function validarRazonRechazo(valor: unknown): string {
   }
   return valor.trim();
 }
+
+/**
+ * Reglas de `POST /vendedor/ofertas/:id/descuento`: el % de descuento a
+ * aplicar.
+ */
+
+/** Hasta 2 decimales, como el precio -- ver `REGEX_PRECIO` en validaciones-crear-producto.ts. */
+const REGEX_PORCENTAJE = /^\d+(\.\d{1,2})?$/;
+
+/**
+ * Entre 1 y 90, hasta 2 decimales. 0 no es un descuento (para eso esta
+ * `DELETE .../descuento`); 90 es un limite de sanidad de negocio, mas
+ * estricto que el `CHECK` de la base (que solo exige < 100) -- 100 dejaria
+ * el precio final en 0, y un descuento tan grande sin mas contexto huele a
+ * error de tipeo, no a una promocion real.
+ */
+export function validarPorcentajeDescuento(valor: unknown): string {
+  if (
+    typeof valor !== 'number' ||
+    !Number.isFinite(valor) ||
+    !REGEX_PORCENTAJE.test(String(valor)) ||
+    valor < 1 ||
+    valor > 90
+  ) {
+    throw new ErrorValidacion(
+      'El porcentaje_descuento debe ser un numero entre 1 y 90, con hasta 2 decimales',
+    );
+  }
+  return String(valor);
+}

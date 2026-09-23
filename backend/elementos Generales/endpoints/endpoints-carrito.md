@@ -9,11 +9,31 @@ PostgreSQL con el `id_pedido` en `localStorage`.
 > `DELETE /carrito/lineas/:idOferta`, `DELETE /carrito` (43 comprobaciones)
 > y `POST /carrito/comprar` (29 comprobaciones), 0 fallos — ver "Pruebas".
 >
-> **2026-09-03:** chequeo de precio al pagar (`lineas_precio_visto`) +
-> reconocimiento de ofertas de inventario limitado en `PUT`/`DELETE`/`GET`
-> + **paso 4**: `POST /carrito/comprar` y `DELETE /carrito` conectan
-> `confirmar`/`devolver` de la venta relámpago. Ver las secciones de
-> "Pruebas" con fecha 2026-09-03.
+> **2026-09-03:** chequeo de precio al pagar + reconocimiento de ofertas de
+> inventario limitado en `PUT`/`DELETE`/`GET` + **paso 4**:
+> `POST /carrito/comprar` y `DELETE /carrito` conectan `confirmar`/`devolver`
+> de la venta relámpago. Ver las secciones de "Pruebas" con fecha 2026-09-03.
+>
+> **2026-09-23 — REDISEÑO pedido por el profesor: "el carrito debe resistir
+> por sí solo".** `GET /carrito` ya no consulta PostgreSQL ni MongoDB — lee
+> una FOTO (nombre, precio, imagen, vendedor, stock, disponibilidad) que se
+> guarda en el propio HASH de Redis. A cambio, `PUT /carrito/lineas/:idOferta`
+> pasó a consultar esas dos bases (antes no lo hacía) para tomar esa foto.
+> El checkout sigue verificando en vivo antes de cobrar, pero el chequeo de
+> precio dejó de depender de que el frontend mande nada: ahora compara la
+> foto guardada contra el precio real, los dos del lado del servidor — se
+> quitó `lineas_precio_visto` del cuerpo de `POST /carrito/comprar`. Ver "El
+> modelo" (reescrito) y "Pruebas — rediseño 2026-09-23".
+>
+> **Hallazgo pendiente, sin resolver todavía:** aunque `GET /carrito` ya no
+> toca Postgres/Mongo, la petición completa SÍ sigue dependiendo de Postgres
+> — `SesionGuard` (protege TODAS las rutas con sesión, no solo el carrito)
+> consulta `usuarios` en cada petición para confirmar que la cuenta sigue
+> activa. Con Postgres caído, `GET /carrito` todavía responde 503 antes de
+> llegar a `CarritoService`. No se tocó porque es un cambio que afecta a
+> cualquier ruta autenticada del backend, no solo al carrito — pendiente de
+> decidir cómo (cachear "cuenta activa" en Redis con un TTL, o algo
+> similar).
 
 Código: `src/controllers/carrito/carrito.controller.ts` +
 `src/services/carrito/carrito.service.ts`. Cliente Redis:
@@ -26,28 +46,32 @@ Código: `src/controllers/carrito/carrito.controller.ts` +
 Una sola clave por cuenta, un **HASH**:
 
 ```
-mesh:carrito:<id_usuario>   HASH   { <id_oferta>: cantidad, ... }
+mesh:carrito:<id_usuario>   HASH   { <id_oferta>: <linea en JSON>, ... }
 ```
 
-El carrito es literalmente un `Map<id_oferta, cantidad>` — la **intención**
-("quiero N de la oferta X"), nada más. El nombre, el precio, el stock y la
-imagen **no se guardan acá**: viven en `oferta` (PostgreSQL) y en
-`productos` (MongoDB), cambian, y una copia en Redis se desactualizaría en
-segundos. Se resuelven al vuelo en `GET /carrito` y al pagar.
+Cada campo guarda la cantidad **junto con una foto** de nombre, precio,
+imagen, vendedor, stock y disponibilidad (`LineaCarritoRedis`), tomada de
+PostgreSQL/Mongo la última vez que se agregó o se cambió la cantidad de esa
+línea. Es a propósito, pedido explícito del profesor (2026-09-23): el
+carrito tiene que "resistir por sí solo" — que **verlo** nunca dependa de
+que Postgres o Mongo estén arriba. A cambio, lo que se ve puede estar
+desactualizado hasta por las 24 h que dura el carrito (el nombre pudo
+cambiar, el precio también) — el checkout es la única excepción, paga
+siempre con datos en vivo, nunca con esta foto.
 
 ### Qué toca cada base
 
 | Ruta | Redis | PostgreSQL / Mongo |
 |---|---|---|
-| `PUT /carrito/lineas/:idOferta` | `HSET` + `EXPIRE` | **nada** |
+| `PUT /carrito/lineas/:idOferta` | `HSET` + `EXPIRE` | **SÍ, una vez**: 1 consulta a `oferta` + 1 a `productos` (Mongo), solo para ESA línea, para armar la foto que se guarda |
 | `DELETE /carrito/lineas/:idOferta` | `HDEL` + `EXPIRE` | **nada** |
 | `DELETE /carrito` | `DEL` | **nada** |
-| `GET /carrito` | `HGETALL` + `EXPIRE` | 1 consulta a `oferta` + 1 a `productos` (Mongo), **en lote**, para todo el carrito de una |
-| `POST /carrito/comprar` | `HGETALL`, `DEL` al final (y `HDEL` de las líneas bloqueantes si el bloqueo fue por disponibilidad y el interruptor `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR` está en `true`) | el `GET` de arriba + `resolverDireccionHistorial` + `comprar_carrito()` (una transacción) + recálculo de campos calculados en Mongo |
+| `GET /carrito` | `HGETALL` + `EXPIRE` | **nada** — lee las fotos ya guardadas |
+| `POST /carrito/comprar` | `HGETALL` (x2: fotos guardadas + tickets), `DEL` al final (y `HDEL` de las líneas bloqueantes si el bloqueo fue por disponibilidad y el interruptor `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR` está en `true`) | 1 consulta EN VIVO a `oferta` + 1 a `productos` (Mongo, en lote) + `resolverDireccionHistorial` + `comprar_carrito()` (una transacción) + recálculo de campos calculados en Mongo |
 
-Agregar / cambiar cantidad / quitar es **Redis puro**: ni una consulta a
-PostgreSQL. El stock no se comprueba al agregar — nunca fue una reserva —
-se comprueba al pintar el carrito y de forma bloqueante al pagar.
+Quitar una línea / vaciar sigue siendo **Redis puro**. El stock no se
+comprueba al agregar — nunca fue una reserva — se comprueba (con datos en
+vivo) al pintar el carrito y de forma bloqueante al pagar.
 
 ### Cómo nace y cómo muere
 
@@ -102,8 +126,9 @@ reserva vence sola a los 15 minutos si nadie la confirma
 
 ## GET /carrito
 
-El carrito completo, cada línea enriquecida con nombre, precio **actual**,
-stock, subtotal, vendedor y si se puede comprar. Renueva el TTL.
+El carrito completo, cada línea con nombre, precio, stock, subtotal,
+vendedor y disponibilidad **tal como quedaron guardados en Redis** — no en
+vivo (ver "El modelo"). Renueva el TTL. **No toca PostgreSQL ni Mongo.**
 
 ```
 GET /carrito
@@ -126,6 +151,7 @@ GET /carrito
         "nombre_variante": "16 GB / 512 GB",
         "imagen": "https://.../laptop.png",
         "precio": "5840.00",
+        "porcentaje_descuento": null,
         "subtotal": "58400.00",
         "vendedor": { "usuario": "ventas_norte", "nombre": "Carlos Ramirez" },
         "stock_disponible": 24,
@@ -152,8 +178,13 @@ GET /carrito
 }
 ```
 
-- **`precio`** es el de la oferta **ahora** (no el que se vio al agregar —
-  el carrito no guarda precios). `subtotal` = `precio` × `cantidad`.
+- **`precio`** es el que quedó GUARDADO cuando esta línea se agregó o se le
+  cambió la cantidad por última vez — no necesariamente el de la oferta
+  ahora mismo (ver "El modelo"). Ya viene con el descuento aplicado si la
+  oferta tenía uno en ese momento (2026-09-23, ver
+  `plan pendiente/descuentos-oferta.md`); `porcentaje_descuento` es solo
+  informativo (para un badge), `precio` ya lo tiene aplicado. `subtotal` =
+  `precio` × `cantidad`.
 - **`total`** = suma de todos los subtotales. `total_lineas` = ofertas
   distintas; `total_items` = suma de cantidades.
 - **`disponible`** — `true` si la línea se puede comprar tal cual. Si no,
@@ -207,11 +238,14 @@ PUT /carrito/lineas/3
 | --- | --- | --- |
 | `cantidad` | Sí | Entero de **1 a 1000**. Para quitar la línea → `DELETE /carrito/lineas/:idOferta`, no `cantidad: 0`. El límite real es el stock, que **no se comprueba acá para una oferta normal** (se ve en `GET /carrito` y bloquea al pagar); el 1000 es solo un tope de sanidad |
 
-`:idOferta` tiene que ser un entero. **Para una oferta normal, no se valida
-que exista** — un id inventado se guarda igual y aparece en `GET /carrito`
-con `motivo: "oferta_no_existe"`, y `comprar_carrito()` lo rechaza al
-pagar. **Redis puro** — ni una consulta a PostgreSQL — para este caso, el
-de siempre.
+`:idOferta` tiene que ser un entero. **No se valida que exista para
+rechazar el `PUT`** — pero sí se consulta (para armar la foto): un id
+inventado se guarda igual, con nombres de relleno `"(oferta no
+encontrada)"` y `motivo: "oferta_no_existe"` ya congelados en la foto, y
+`comprar_carrito()` lo rechaza al pagar de todos modos. Este `PUT` es la
+**única** escritura del carrito que toca Postgres/Mongo (una consulta a
+cada una, solo por esta línea) — el resto de las rutas de escritura siguen
+siendo Redis puro.
 
 ### Si la oferta es de inventario limitado (venta relámpago)
 
@@ -270,8 +304,13 @@ previa, sigue intacta.
 
 ```json
 { "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
 { "ok": false, "mensaje": "No se pudo actualizar el carrito", "payload": null }
 ```
+
+Los dos de en medio son nuevos desde el rediseño (2026-09-23): antes `PUT`
+no tocaba ni Postgres ni Mongo, así que no podían fallar por su culpa.
 
 ---
 
@@ -361,11 +400,7 @@ POST /carrito/comprar
 ```json
 {
   "id_direccion": 2,
-  "metodo_pago": "efectivo contra entrega",
-  "lineas_precio_visto": [
-    { "id_oferta": 7, "precio_visto": "5840.00" },
-    { "id_oferta": 11, "precio_visto": "10958.00" }
-  ]
+  "metodo_pago": "efectivo contra entrega"
 }
 ```
 
@@ -374,34 +409,38 @@ POST /carrito/comprar
 | `id_direccion` | Sí | El id normal (el que da `GET /direccion-usuario`), number o string. El backend resuelve su versión vigente en `direccion_historial` y exige que sea **de la cuenta** |
 | `metodo_pago` | Sí | `"tarjeta"`, `"transferencia"` o `"efectivo contra entrega"` |
 | `tarjeta` | Solo si `metodo_pago` es `"tarjeta"` | `{ numero, vencimiento (MM/AA), cvv, titular }` — se valida y "cobra" el mock (`helpers/validaciones-tarjeta.ts`) |
-| `lineas_precio_visto` | No | `[{ id_oferta, precio_visto }]` — el precio que el **frontend** vio y guardó de su lado (no en Redis) la última vez que mostró el carrito. Ver "El chequeo de precio" abajo |
-| `confirmar_cambios` | No | `true` para seguir con la compra al precio de **hoy** aunque `lineas_precio_visto` haya marcado una diferencia |
+| `confirmar_cambios` | No | `true` para seguir con la compra al precio de **hoy** aunque el chequeo de precio haya marcado una diferencia |
+
+> **Cambio (2026-09-23): ya no existe `lineas_precio_visto`.** El cliente
+> nunca manda nada sobre precios — no hace falta, ni sería seguro: el
+> carrito de Redis YA guarda el precio que le mostró el último
+> `GET /carrito` (la foto de cada línea), así que el backend compara esa
+> foto contra el precio real él solo, sin depender de lo que diga el
+> cliente. Si el frontend todavía manda `lineas_precio_visto` de una
+> versión vieja, el backend simplemente lo ignora (no hay validación que lo
+> rechace, pero tampoco hace nada con él) — es seguro dejar de mandarlo
+> cuando se actualice el frontend.
 
 **El precio que se cobra es siempre el del momento de pagar** (el mismo que
-devuelve `comprar_carrito()`), nunca `precio_visto` — ese campo es solo
-para *detectar* el cambio, no para fijar el precio. El carrito de Redis
-sigue sin guardar ningún precio: sigue siendo el `Map<id_oferta, cantidad>`
-de siempre.
+devuelve `comprar_carrito()`), nunca la foto de Redis — esa foto es solo
+para *detectar* el cambio, no para fijar el precio.
 
 ### El chequeo de precio (sin `confirmar_cambios`)
 
-Como el carrito de Redis no guarda el precio que se vio, el **frontend** es
-quien tiene que acordárselo — guardar en su lado (`localStorage` o
-similar) el `precio` que le devolvió el último `GET /carrito` por cada
-línea — y mandarlo de vuelta en `lineas_precio_visto` al pagar. El backend
-compara cada uno contra el precio actual de esa oferta:
+Es enteramente del lado del servidor, en dos pasos:
 
-- Si **todos coinciden** (o no se mandó `lineas_precio_visto`): sigue con
-  la compra normal, sin pedir nada más.
+1. Lee la foto de cada línea guardada en el HASH de Redis (el `precio` que
+   `GET /carrito` le mostró al cliente la última vez).
+2. La compara contra el precio real de esa oferta, consultado en vivo a
+   Postgres (`verCarritoEnVivo`).
+
+- Si **todos coinciden**: sigue con la compra normal, sin pedir nada más.
 - Si **alguno no coincide** y `confirmar_cambios` no vino en `true`: no se
   compra nada — la respuesta sale con `comprado: false` y la lista de
   `avisos`, para que el frontend le muestre al usuario (un popup o
   similar) qué cambió antes de seguir.
-- Si el frontend reenvía la **misma petición** con `confirmar_cambios: true`:
+- Si el cliente reenvía la **misma petición** con `confirmar_cambios: true`:
   la compra sigue al precio de hoy (el de `avisos[].precio_actual`).
-
-Una línea que no se manda en `lineas_precio_visto` no genera aviso — no hay
-nada con qué compararla.
 
 **Esto es independiente del bloqueo por disponibilidad** (agotado, oferta
 pausada, etc. — ver 409 abajo): eso siempre rechaza la compra, con o sin
@@ -752,3 +791,53 @@ se hizo con cada uno está justo abajo.
    apagado a mitad de sesión → `503` "No se pudo conectar con PostgreSQL"
    (antes: `500`); recuperación automática al volver Postgres, sin
    reiniciar el server.
+
+---
+
+## Pruebas — rediseño "el carrito resiste por sí solo" (2026-09-23)
+
+Pedido del profesor, relayado por el usuario: arreglar Redis para que el
+carrito "nunca haga un GET a nada más, solo a sí mismo" — guardar ahí
+nombre, precio y demás. Contra el servidor real y los contenedores
+(`comprador_sur`, id 3; oferta 3 = Laptop Ambar Campus 14, `ventas_norte`,
+5840.00; oferta 7 = misma laptop otra variante, `mesh_tienda`, 4750.00).
+
+| Caso | Resultado |
+|---|---|
+| `PUT /carrito/lineas/3` `{cantidad:2}` | `HGET` del campo `3` en Redis sale como JSON completo: `cantidad, id_producto, id_producto_variante, nombre_producto, nombre_variante, imagen, precio, vendedor_usuario, vendedor_nombre, stock_disponible, disponible, motivo` |
+| `GET /carrito` inmediatamente después | Devuelve exactamente esos datos, mismo shape de siempre (`CarritoLinea`) |
+| `PUT /carrito/lineas/999999` (id inventado) | 200 — se guarda con foto de relleno: `nombre_producto: "(oferta no encontrada)"`, `precio: "0.00"`, `disponible: false`, `motivo: "oferta_no_existe"` — igual que antes del rediseño, pero ahora es la FOTO la que trae ese relleno, no un cálculo al vuelo |
+| **`docker stop mesh-postgres mesh-mongo`**, después `GET /carrito` con una línea válida en el carrito | **503** "No se pudo conectar con PostgreSQL" — **no** por `CarritoService` (que ya no toca ninguna de las dos), sino por `SesionGuard` (ver el hallazgo pendiente en el banner de arriba). `docker start` de las dos, recuperación automática sin reiniciar el server |
+| `POST /carrito/comprar` con la línea inventada (999999) en el carrito | 409 `"(oferta no encontrada)" ya no existe` — el chequeo itemizado en vivo sigue funcionando igual que siempre, sin cobrar nada |
+| `UPDATE oferta SET precio = 5900.00` directo en Postgres (simula que el vendedor cambió el precio) **sin tocar Redis**, después `GET /carrito` | Sigue mostrando `"precio": "5840.00"` — la foto vieja, tal como se diseñó |
+| `POST /carrito/comprar` sin mandar nada de precios en el body (`{metodo_pago, id_direccion}` nomás) | `comprado: false`, `avisos: [{id_oferta:3, precio_visto:"5840.00", precio_actual:"5900.00"}]` — el aviso salió **sin que el cliente mandara nada sobre precios**: el backend comparó la foto de Redis contra Postgres él solo |
+| Misma petición + `confirmar_cambios: true` | **201**, `comprado: true`, `total: "5900.00"` (pedido real `id_pedido: 30`) — se cobró el precio **de hoy** (5900.00), no el congelado en la foto (5840.00); verificado contra `precio_historial` (`pedido_producto` → `precio_historial.precio = 5900.00`) |
+| Regresión — carrito con oferta 7 sin ningún cambio de precio, `POST /carrito/comprar` | **201** directo, `comprado: true` de una — sin pedir confirmación, igual que siempre cuando no hay discrepancia (pedido real `id_pedido: 31`) |
+| `npx tsc --noEmit` y `eslint` sobre los archivos tocados | limpios |
+
+**Teardown:** `oferta.precio`/`oferta.stock` de las dos ofertas de prueba
+devueltos a sus valores originales (5840.00/24 y 33); los campos
+calculados de Mongo (`stock_total`/`stock_tienda` del producto 1 y sus dos
+variantes) resincronizados a mano tras los `UPDATE` directos de teardown
+— mismo criterio que las pruebas de 2026-08-29/09-03. **Los pedidos 30 y
+31 quedan como registro permanente** (la cadena `ON DELETE RESTRICT` no
+permite borrarlos), igual que en las rondas de prueba anteriores.
+
+**Inventario limitado / venta relámpago con el `PUT` nuevo** (que ahora
+también arma la foto para estas líneas): probado aparte, oferta 2
+(`ventas_sur`, sembrada con 3 unidades vía `POST /vendedor/ofertas/2/venta-limitada`).
+`PUT /carrito/lineas/2` `{cantidad:2}` reservó de verdad en
+`mesh:oferta:2` (`reservado: 2`) **y** guardó la foto completa en el campo
+`2` del carrito **y** el ticket en el campo compañero `t:2` — los dos
+campos del mismo `HSET`, como siempre. `GET /carrito` mostró
+`es_inventario_limitado: true` con la foto completa. `DELETE
+/carrito/lineas/2` soltó la reserva (`stock` volvió a 3, `reservado` a 0)
+antes de quitar la línea. Cerrada la venta después
+(`DELETE /vendedor/ofertas/2/venta-limitada`), sin dejar ninguna clave
+`mesh:oferta:*` huérfana.
+
+**Lo que NO se probó en esta ronda** (no debería estar roto por este
+cambio, pero tampoco se re-verificó): la batería completa de estrés/
+concurrencia de la reserva (grupos I–O más abajo) y la redimensión de una
+reserva ya existente (`PUT` dos veces sobre la misma línea limitada). Si
+se vuelve a tocar `carrito.service.ts`, vale la pena correr esas de nuevo.

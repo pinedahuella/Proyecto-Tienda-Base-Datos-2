@@ -70,6 +70,13 @@ export interface ProductoVariante {
   stock_total: number;
   /** Cuantos vendedores distintos la tienen activa. Copia calculada. */
   total_ofertas: number;
+  /**
+   * `true` si CUALQUIER oferta activa de esta variante (de cualquier
+   * vendedor, no solo la tienda) tiene un descuento vigente ahora mismo.
+   * Copia calculada, mismo criterio y misma fuente que los demas campos de
+   * esta lista -- ver `elementos Generales/plan pendiente/descuentos-oferta.md`.
+   */
+  hay_descuento: boolean;
   /** Opcional: caracteristicas de esta variante, del catalogo de la app. */
   caracteristicas_adicionales?: EntradaCaracteristica[];
   /**
@@ -123,6 +130,15 @@ export interface Producto {
   resenas_promedio: number;
   /** Cuantas resenas tiene el producto en total. `0` si ninguna. Copia calculada, misma fuente y reglas que `resenas_promedio`. */
   resenas_total: number;
+  /**
+   * `true` si CUALQUIER oferta activa de este producto (de cualquier
+   * variante, de cualquier vendedor) tiene un descuento vigente ahora
+   * mismo -- `bool_or` de `variantes[].hay_descuento`. Copia calculada,
+   * misma fuente y reglas que `precio_tienda`/`stock_total`. Pensado para
+   * que el catalogo (paginado/scroll) pueda pintar el badge sin traer las
+   * ofertas reales de cada producto.
+   */
+  hay_descuento: boolean;
   /**
    * Bandera de sincronizacion con el buscador (Elasticsearch, Entrega 3).
    * Patron "cola sin cola": solo EXISTE (y solo puede valer `true`, nunca

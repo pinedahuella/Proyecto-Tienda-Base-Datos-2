@@ -31,8 +31,21 @@ export interface OfertaVendedor {
    * con `POST /vendedor/ofertas/:id/venta-limitada`.
    */
   es_inventario_limitado: boolean;
-  /** numeric(12,2) de Postgres: string, para no perder centavos por el redondeo binario. */
+  /** numeric(12,2) de Postgres: string, para no perder centavos por el redondeo binario. El precio de LISTA, sin descuento -- ver `precio_final`. */
   precio: string;
+  /**
+   * El % de descuento vigente (1-90), o `null` si no hay ninguno. `precio`
+   * nunca se toca por esto -- ver `precio_final` para el monto real a
+   * cobrar/mostrar (`elementos Generales/plan pendiente/descuentos-oferta.md`).
+   */
+  porcentaje_descuento: string | null;
+  /**
+   * El precio que de verdad se cobra/muestra: `precio` tal cual si
+   * `porcentaje_descuento` es `null`, o `precio` con el descuento aplicado
+   * y redondeado a 2 decimales si no. Siempre calculado en la consulta,
+   * nunca guardado.
+   */
+  precio_final: string;
   stock: number;
   /**
    * Unidades que quedan AHORA, leidas del contador de Redis (operacion
@@ -71,8 +84,12 @@ export interface AprobadorOferta {
  */
 export interface OfertaPropiaResumen {
   id_oferta: string;
-  /** numeric(12,2) de Postgres: string. */
+  /** numeric(12,2) de Postgres: string. El precio de LISTA, sin descuento -- ver `precio_final`. */
   precio: string;
+  /** El % de descuento vigente (1-90), o `null` si no hay ninguno. */
+  porcentaje_descuento: string | null;
+  /** El precio que de verdad se cobra/muestra -- ver `OfertaVendedor.precio_final`. */
+  precio_final: string;
   stock: number;
   /**
    * Unidades que quedan AHORA segun el contador de Redis (operacion
@@ -138,8 +155,12 @@ export interface OfertaPendiente {
   nombre_variante: string;
   /** La primera imagen de la variante, o null si no tiene ninguna. */
   imagen: string | null;
-  /** numeric(12,2) de Postgres: string. */
+  /** numeric(12,2) de Postgres: string. El precio de LISTA, sin descuento -- ver `precio_final`. */
   precio: string;
+  /** El % de descuento vigente (1-90), o `null` si no hay ninguno. */
+  porcentaje_descuento: string | null;
+  /** El precio que de verdad se cobra/muestra -- ver `OfertaVendedor.precio_final`. */
+  precio_final: string;
   stock: number;
   /** Desde cuándo espera revisión. La cola se ordena por esto, ascendente. */
   fecha_creacion: Date;
@@ -177,6 +198,8 @@ export interface FilaOfertaPropia {
   id_producto_mongo: string;
   id_producto_variante_mongo: string;
   precio: string;
+  porcentaje_descuento: string | null;
+  precio_final: string;
   stock: number;
   estado_oferta_nombre: string;
   /** NULL mientras la tienda no la haya aprobado (ver flujo de aprobacion de ofertas). */
@@ -202,6 +225,8 @@ export interface FilaOfertaPendiente {
   id_producto_mongo: string;
   id_producto_variante_mongo: string;
   precio: string;
+  porcentaje_descuento: string | null;
+  precio_final: string;
   stock: number;
   fecha_creacion: Date;
   id_usuario: string;

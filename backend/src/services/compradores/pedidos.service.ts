@@ -37,6 +37,7 @@ import { DetallePedido } from '../../models/pedido-producto';
 import { MetodoPago, METODO_PAGO_TARJETA } from '../../models/metodo-pago';
 import { ProductosService } from '../productos/productos.service';
 import { EventosService } from '../eventos/eventos.service';
+import { expresionPrecioFinal } from '../../helpers/precio-descuento';
 
 const REGEX_ID = /^\d+$/;
 
@@ -395,7 +396,7 @@ export class PedidosCompradorService {
     try {
       const resultado = await pool.query<PedidoResumen>(
         `SELECT p.id_pedido, p.fecha_creacion, p.id_estado_pedido, ep.estado_pedido_nombre,
-                COALESCE(SUM(ph.precio * pp.cantidad), 0)::text AS total,
+                COALESCE(SUM(${expresionPrecioFinal('ph')} * pp.cantidad), 0)::text AS total,
                 COUNT(pp.id_pedido_producto)::int AS cantidad_lineas,
                 mp.metodo_nombre AS metodo_pago,
                 epa.estado_pago_nombre AS estado_pago,
@@ -484,7 +485,9 @@ export class PedidosCompradorService {
         `SELECT pp.id_pedido_producto, pp.id_pedido, pp.id_precio_historial,
                 pp.id_producto_mongo, pp.id_producto_variante_mongo, pp.cantidad,
                 pp.nombre_producto, pp.nombre_variante, pp.nombre_vendedor,
-                ph.precio AS precio_unitario, ph.id_oferta,
+                ${expresionPrecioFinal('ph')}::text AS precio_unitario,
+                ph.porcentaje_descuento AS porcentaje_descuento_aplicado,
+                ph.id_oferta,
                 o.id_usuario AS id_usuario_vendedor,
                 (
                   SELECT r.id_resena FROM resena r
@@ -865,8 +868,9 @@ export class PedidosCompradorService {
     }>(
       `SELECT pp.id_pedido_producto, pp.nombre_producto, pp.nombre_variante, pp.cantidad,
               pp.id_producto_mongo, pp.id_producto_variante_mongo,
-              ph.precio AS precio_congelado, o.precio AS precio_actual, o.stock,
-              eo.estado_oferta_nombre
+              ${expresionPrecioFinal('ph')}::text AS precio_congelado,
+              ${expresionPrecioFinal('o')}::text AS precio_actual,
+              o.stock, eo.estado_oferta_nombre
        FROM pedido_producto pp
        JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
        JOIN oferta o ON o.id_oferta = ph.id_oferta

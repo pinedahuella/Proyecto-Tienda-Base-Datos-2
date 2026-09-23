@@ -2,19 +2,23 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { clickhouse } from '../../database/clickhouse';
 import { redis } from '../../database/redis';
+import { mongoDb } from '../../database/mongo';
+import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
+import { Producto } from '../../models/producto';
 
 /**
  * Worker que recalcula el ranking de "productos mas vendidos" a partir de
- * `compra_producto` (ClickHouse) y lo deja listo en un ZSET de Redis para
- * lectura rapida -- sin este worker, cada consulta tendria que agregar el
- * evento en vivo contra ClickHouse en vez de leer un resultado ya calculado.
+ * `compra_producto` (ClickHouse) y lo deja listo en Redis para lectura
+ * rapida -- sin este worker, cada consulta tendria que agregar el evento en
+ * vivo contra ClickHouse (y antes del 2026-09-23, tambien traer el detalle
+ * en vivo desde Mongo) en vez de leer un resultado ya calculado.
  *
  * Ventana: ultimas 24 horas. Si no hubo NINGUNA compra en ese lapso (un
  * bache normal de trafico, no un error), cae a los ultimos 7 dias para no
  * dejar el ranking en blanco por algo tan corto. Si tampoco hay nada en 7
- * dias, el ZSET de Redis NO se toca -- se deja el ultimo calculo valido
- * (aunque ya este viejo) en vez de vaciarlo; mostrar algo desactualizado es
- * mejor que no mostrar nada.
+ * dias, Redis NO se toca -- se deja el ultimo calculo valido (aunque ya
+ * este viejo) en vez de vaciarlo; mostrar algo desactualizado es mejor que
+ * no mostrar nada.
  *
  * Solo cuenta `lote = 'real'` -- nunca mezcla con datos sembrados
  * (`lote = 'generado-<semilla>'`), sin excepcion ni parametro para pedir lo
@@ -24,16 +28,26 @@ import { redis } from '../../database/redis';
  * Guarda mas productos de los que el catalogo va a mostrar
  * (`TOPE_ALMACENADO`): si mañana cambia cuantos se pintan en la pagina, no
  * hace falta tocar este worker ni la consulta a ClickHouse, solo el
- * `ZREVRANGE` que lo lee.
+ * `ZREVRANGE`/`HMGET` que lo lee.
  *
- * El reemplazo del ZSET es atomico: se arma en una llave temporal y se
- * publica con `RENAME` (atomico en Redis), para que nadie lea el ranking a
- * medio reconstruir.
+ * **Detalle de cada producto (2026-09-23):** ademas del ZSET con el
+ * ranking, este worker consulta Mongo UNA vez por corrida (no en cada
+ * request) y guarda el documento completo de cada producto ganador en un
+ * HASH -- mismo principio que se aplico al carrito: `GET
+ * /productos/mas-vendidos` ya no toca Mongo, lee las dos estructuras de
+ * Redis y ya. Solo se cachean productos `activo` (mismo filtro de
+ * visibilidad que el resto del catalogo publico), asi que uno que se
+ * desactive a mitad de los 10 minutos puede seguir apareciendo hasta la
+ * proxima corrida -- antes esa comprobacion era en vivo, en cada `GET`.
+ *
+ * El reemplazo de las dos estructuras es atomico: se arman en una llave
+ * temporal cada una y se publican con `RENAME` (atomico en Redis), para
+ * que nadie lea el ranking o el detalle a medio reconstruir.
  *
  * Mismo patron que `BuscadorSyncService`/`GrafoSyncService`: `@Interval`
  * con una bandera para que una corrida lenta no se pise con la siguiente,
- * y nunca lanza -- un fallo de ClickHouse o Redis se loguea y se reintenta
- * en la proxima corrida, sin tumbar nada mas.
+ * y nunca lanza -- un fallo de ClickHouse, Mongo o Redis se loguea y se
+ * reintenta en la proxima corrida, sin tumbar nada mas.
  */
 @Injectable()
 export class MasVendidosSyncService {
@@ -41,6 +55,10 @@ export class MasVendidosSyncService {
 
   static readonly CLAVE_RANKING = 'mesh:productos:mas_vendidos';
   private static readonly CLAVE_TEMPORAL = `${MasVendidosSyncService.CLAVE_RANKING}:tmp`;
+
+  /** HASH `{ id_producto: <documento Producto en JSON> }`. */
+  static readonly CLAVE_DETALLE = 'mesh:productos:mas_vendidos:detalle';
+  private static readonly CLAVE_DETALLE_TEMPORAL = `${MasVendidosSyncService.CLAVE_DETALLE}:tmp`;
 
   private static readonly INTERVALO_MS = 10 * 60 * 1000; // 10 minutos
 
@@ -73,9 +91,13 @@ export class MasVendidosSyncService {
         return;
       }
 
+      const ids = filas.map((fila) => Number(fila.id_producto));
+      const productos = await this.consultarProductosMongo(ids);
+
       await this.reemplazarRanking(filas);
+      await this.reemplazarDetalle(productos);
       this.logger.log(
-        `worker de mas vendidos: ranking recalculado con ${filas.length} producto(s) (${ventana})`,
+        `worker de mas vendidos: ranking recalculado con ${filas.length} producto(s) (${ventana}), ${productos.length} con detalle cacheado`,
       );
     } catch (error) {
       this.logger.warn(
@@ -132,6 +154,49 @@ export class MasVendidosSyncService {
     await redis.rename(
       MasVendidosSyncService.CLAVE_TEMPORAL,
       MasVendidosSyncService.CLAVE_RANKING,
+    );
+  }
+
+  /**
+   * El documento completo de cada producto ganador, tal como lo devuelve
+   * `GET /productos/mas-vendidos` -- misma forma que antes traia
+   * `MasVendidosService` en vivo. Solo `activo`: un producto que se
+   * desactivo no debe quedar cacheado como si se pudiera mostrar (ver el
+   * comentario de la clase sobre la ventana de hasta 10 min que esto abre).
+   */
+  private async consultarProductosMongo(ids: number[]): Promise<Producto[]> {
+    return mongoDb
+      .collection<Producto>('productos')
+      .find({ _id: { $in: ids }, estado: ESTADO_PRODUCTO_VISIBLE })
+      .toArray();
+  }
+
+  /**
+   * Reemplazo atomico del HASH de detalle -- mismo patron `RENAME` que
+   * `reemplazarRanking`. Si ningun producto del ranking quedo `activo`
+   * (caso raro: los mas vendidos son justo los que se desactivaron), no hay
+   * nada que renombrar -- se borra la clave directo en vez de armar un
+   * `RENAME` sobre una clave temporal vacia (Redis lo rechaza).
+   */
+  private async reemplazarDetalle(productos: Producto[]): Promise<void> {
+    if (productos.length === 0) {
+      await redis.del(MasVendidosSyncService.CLAVE_DETALLE);
+      return;
+    }
+
+    const camposValores: string[] = [];
+    for (const producto of productos) {
+      camposValores.push(String(producto._id), JSON.stringify(producto));
+    }
+
+    await redis.del(MasVendidosSyncService.CLAVE_DETALLE_TEMPORAL);
+    await redis.hset(
+      MasVendidosSyncService.CLAVE_DETALLE_TEMPORAL,
+      ...camposValores,
+    );
+    await redis.rename(
+      MasVendidosSyncService.CLAVE_DETALLE_TEMPORAL,
+      MasVendidosSyncService.CLAVE_DETALLE,
     );
   }
 }

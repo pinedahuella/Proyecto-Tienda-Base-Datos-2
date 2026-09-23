@@ -1,8 +1,11 @@
 /**
  * Los tipos de las rutas de `/carrito`. El carrito vive solo en Redis como
- * un HASH `mesh:carrito:<id_usuario>` de `id_oferta -> cantidad`. Todo lo
- * demas (nombre, precio, stock, imagen) se resuelve al vuelo desde
- * PostgreSQL y MongoDB cuando se pinta el carrito.
+ * un HASH `mesh:carrito:<id_usuario>` de `id_oferta -> <linea en JSON>`.
+ * Nombre, precio, imagen y vendedor se toman de PostgreSQL/MongoDB UNA vez,
+ * al agregar o cambiar la cantidad, y quedan guardados ahi mismo -- `GET
+ * /carrito` ya no consulta nada mas que Redis (ver `CarritoService`). El
+ * checkout (`POST /carrito/comprar`) es la excepcion: sigue verificando en
+ * vivo antes de cobrar.
  */
 
 /** Por que una linea no se puede comprar tal como esta. */
@@ -24,8 +27,10 @@ export interface CarritoLinea {
   nombre_variante: string;
   /** La primera imagen de la variante, o null. */
   imagen: string | null;
-  /** El precio ACTUAL de la oferta (numeric(12,2) -> string). */
+  /** El precio a pagar -- YA con el descuento aplicado, si la oferta tenia uno (numeric(12,2) -> string). */
   precio: string;
+  /** El % de descuento que tenia la oferta, o `null` -- solo informativo (badge), `precio` ya lo tiene aplicado. */
+  porcentaje_descuento: string | null;
   /** `precio` * `cantidad`, como texto. */
   subtotal: string;
   vendedor: { usuario: string; nombre: string };

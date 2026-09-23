@@ -1,18 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { redis } from '../../database/redis';
-import { mongoDb } from '../../database/mongo';
 import { manejarErrorRedis } from '../../helpers/manejar-error-redis';
-import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
-import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
 import { Producto } from '../../models/producto';
 import { MasVendidosSyncService } from './mas-vendidos-sync.service';
 
 /**
- * Lee el ranking de "productos mas vendidos" (el ZSET de Redis que
- * mantiene `MasVendidosSyncService`) y trae el detalle real de esos
- * productos desde MongoDB -- igual que el resto del catalogo publico
- * (`ProductosService.listar`): Redis solo guarda el id y el orden, nunca
- * nombre/precio/imagen, para no tener otra copia que desincronizar.
+ * Lee el ranking de "productos mas vendidos" y su detalle, las dos
+ * estructuras de Redis que mantiene `MasVendidosSyncService` -- desde el
+ * 2026-09-23, esta ruta ya no toca MongoDB: el worker trae el documento de
+ * cada producto UNA vez por corrida (cada 10 min) y lo deja cacheado en un
+ * HASH. El detalle puede estar hasta 10 minutos desactualizado (nombre,
+ * precio, imagen, o incluso que ya no este `activo`); es el mismo trato que
+ * ya tiene el propio ranking, ahora extendido al detalle.
  */
 @Injectable()
 export class MasVendidosService {
@@ -26,12 +25,13 @@ export class MasVendidosService {
   private static readonly LIMITE_MOSTRADO = 8;
 
   /**
-   * El ranking completo: primero los ids en orden desde Redis, luego el
-   * detalle de esos productos desde Mongo, reordenado para que coincida
-   * con ese ranking (Mongo con `$in` no respeta el orden de la lista de
-   * ids que se le manda). Un id del ranking sin producto visible en Mongo
-   * (se desactivo, se borro, o esta en revision) simplemente se salta, en
-   * vez de romper toda la respuesta.
+   * El ranking completo: primero los ids en orden desde el ZSET, luego el
+   * detalle de esos productos desde el HASH de Redis, ya en el orden
+   * correcto (a diferencia del `$in` de Mongo que se usaba antes, `HMGET`
+   * respeta el orden de los ids que se le piden). Un id del ranking sin
+   * detalle cacheado (no gano en la ultima corrida del worker, o no era
+   * `activo` entonces) simplemente se salta, en vez de romper toda la
+   * respuesta.
    */
   async obtener(): Promise<Producto[]> {
     const idsOrdenados = await this.leerRankingRedis();
@@ -39,12 +39,7 @@ export class MasVendidosService {
       return [];
     }
 
-    const productos = await this.leerProductosMongo(idsOrdenados);
-    const productoPorId = new Map(productos.map((p) => [p._id, p]));
-
-    return idsOrdenados
-      .map((id) => productoPorId.get(id))
-      .filter((producto): producto is Producto => producto != null);
+    return this.leerDetalleRedis(idsOrdenados);
   }
 
   /**
@@ -66,18 +61,33 @@ export class MasVendidosService {
   }
 
   /**
-   * Solo productos `activo` -- mismo criterio de visibilidad que
-   * `GET /productos` y `GET /productos/:id`: un producto que se desactivo
-   * despues de venderse mucho no debe seguir apareciendo aqui.
+   * `HMGET` de un id por cada miembro del ranking (en vez de `HGETALL` +
+   * filtrar): as[i] es el detalle del producto ids[i], o `null` si ese
+   * campo no existe en el HASH. Un valor corrupto (no deberia pasar, lo
+   * escribe siempre `JSON.stringify` del lado del worker) se descarta en
+   * silencio, mismo criterio que el carrito con una linea de Redis rota.
    */
-  private async leerProductosMongo(ids: number[]): Promise<Producto[]> {
+  private async leerDetalleRedis(ids: number[]): Promise<Producto[]> {
     try {
-      return await mongoDb
-        .collection<Producto>('productos')
-        .find({ _id: { $in: ids }, estado: ESTADO_PRODUCTO_VISIBLE })
-        .toArray();
+      const valores = await redis.hmget(
+        MasVendidosSyncService.CLAVE_DETALLE,
+        ...ids.map(String),
+      );
+
+      const productos: Producto[] = [];
+      for (const valor of valores) {
+        if (valor == null) {
+          continue;
+        }
+        try {
+          productos.push(JSON.parse(valor) as Producto);
+        } catch {
+          // Campo corrupto -- se ignora, no tumba el resto del ranking.
+        }
+      }
+      return productos;
     } catch (error) {
-      manejarErrorConexionMongo(this.logger, error);
+      manejarErrorRedis(this.logger, error);
     }
   }
 }

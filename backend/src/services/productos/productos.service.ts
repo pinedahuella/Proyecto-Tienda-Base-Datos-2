@@ -30,6 +30,7 @@ import { Producto, ProductoConOfertas } from '../../models/producto';
 import { OfertaVendedor, OfertaHistorial } from '../../models/oferta';
 import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
 import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
+import { expresionPrecioFinal } from '../../helpers/precio-descuento';
 
 /** Fila cruda que devuelve la consulta de ofertas, antes de agrupar el vendedor. */
 interface FilaOferta {
@@ -42,18 +43,24 @@ interface FilaOferta {
   es_tienda: boolean;
   es_inventario_limitado: boolean;
   precio: string;
+  porcentaje_descuento: string | null;
+  precio_final: string;
   stock: number;
   fecha_actualizacion: Date;
 }
 
-/** Los cinco numeros calculados de una variante, ya agregados por Postgres. */
+/** Los campos calculados de una variante, ya agregados por Postgres. */
 interface FilaCalculoVariante {
   id_producto_variante_mongo: string;
+  /** Con el descuento de la tienda ya aplicado, si tiene uno. */
   precio_tienda: string | null;
+  /** Con el descuento de cada oferta ya aplicado antes de tomar el minimo. */
   precio_desde: string | null;
   stock_tienda: number;
   stock_total: number;
   total_ofertas: number;
+  /** `true` si alguna oferta activa de esta variante (cualquier vendedor) tiene un descuento vigente. */
+  hay_descuento: boolean;
 }
 
 /**
@@ -481,8 +488,12 @@ export class ProductosService {
    * cuantas unidades, con el vendedor ya resuelto (JOIN a usuarios). Solo
    * las activas -- una pausada o retirada no se puede comprar, y ensenarla
    * en la ficha publica confundiria a quien compra. Ordenadas por variante
-   * y despues por precio (la mas barata primero): el indice
-   * idx_oferta_catalogo_precio de 005_ofertas.sql ya viene en ese orden.
+   * y despues por precio FINAL (con descuento aplicado si lo hay) -- la
+   * mas barata primero es la que de verdad se paga menos, no la que tiene
+   * el precio de lista mas bajo. El indice `idx_oferta_catalogo_precio` de
+   * `005_ofertas.sql` sigue sirviendo para el `WHERE`, pero ya no para
+   * este `ORDER BY` (es una expresion, no la columna cruda) -- sin
+   * consecuencia real con el tamano de catalogo actual.
    */
   private async obtenerOfertasReales(
     idProducto: number,
@@ -493,13 +504,15 @@ export class ProductosService {
                 u.usuario, u.nombre, u.apellido,
                 (u.correo_electronico = $2) AS es_tienda,
                 o.es_inventario_limitado,
-                o.precio, o.stock, o.fecha_actualizacion
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, o.fecha_actualizacion
          FROM oferta o
          JOIN usuarios u ON u.id_usuario = o.id_usuario
          JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
          WHERE o.id_producto_mongo = $1
            AND eo.estado_oferta_nombre = 'activa'
-         ORDER BY o.id_producto_variante_mongo, o.precio`,
+         ORDER BY o.id_producto_variante_mongo, ${expresionPrecioFinal('o')}`,
         [idProducto, CORREO_TIENDA],
       );
 
@@ -515,6 +528,8 @@ export class ProductosService {
         es_tienda: fila.es_tienda,
         es_inventario_limitado: fila.es_inventario_limitado,
         precio: fila.precio,
+        porcentaje_descuento: fila.porcentaje_descuento,
+        precio_final: fila.precio_final,
         stock: fila.stock,
         stock_disponible: null,
         fecha_actualizacion: fila.fecha_actualizacion,
@@ -583,16 +598,18 @@ export class ProductosService {
            SELECT
              o.id_producto_variante_mongo,
              MAX(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
-                      THEN o.precio END)::text AS precio_tienda,
+                      THEN ${expresionPrecioFinal('o')} END)::text AS precio_tienda,
              MIN(CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
-                      THEN o.precio END)::text AS precio_desde,
+                      THEN ${expresionPrecioFinal('o')} END)::text AS precio_desde,
              COALESCE(SUM(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
                                AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
                           THEN o.stock ELSE 0 END), 0)::int AS stock_tienda,
              COALESCE(SUM(CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
                           THEN o.stock ELSE 0 END), 0)::int AS stock_total,
              COUNT(DISTINCT CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
-                             THEN o.id_usuario END)::int AS total_ofertas
+                             THEN o.id_usuario END)::int AS total_ofertas,
+             bool_or(o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                     AND o.porcentaje_descuento IS NOT NULL) AS hay_descuento
            FROM oferta o
            WHERE o.id_producto_mongo = $1
            GROUP BY o.id_producto_variante_mongo`,
@@ -661,6 +678,12 @@ export class ProductosService {
         (total, fila) => total + fila.stock_total,
         0,
       );
+      // El producto tiene descuento si CUALQUIER variante lo tiene -- mismo
+      // criterio "cualquiera" que ya pidio el usuario para el campo, ahora
+      // subido de variante a producto.
+      const hayDescuentoRaiz = porVariante.rows.some(
+        (fila) => fila.hay_descuento,
+      );
 
       const conjuntoSet: Record<string, unknown> = {
         precio_tienda:
@@ -674,6 +697,7 @@ export class ProductosService {
         stock_tienda: stockTiendaRaiz,
         stock_total: stockTotalRaiz,
         total_ofertas: totalEnRaiz.rows[0]?.total_ofertas ?? 0,
+        hay_descuento: hayDescuentoRaiz,
         resenas_promedio: resenasPromedio,
         resenas_total: resenasTotal,
         pendiente_busqueda: true,
@@ -695,6 +719,8 @@ export class ProductosService {
         conjuntoSet[`variantes.$[${marcador}].stock_total`] = fila.stock_total;
         conjuntoSet[`variantes.$[${marcador}].total_ofertas`] =
           fila.total_ofertas;
+        conjuntoSet[`variantes.$[${marcador}].hay_descuento`] =
+          fila.hay_descuento;
         arrayFilters.push({
           [`${marcador}.id_producto_variante`]: Number(
             fila.id_producto_variante_mongo,

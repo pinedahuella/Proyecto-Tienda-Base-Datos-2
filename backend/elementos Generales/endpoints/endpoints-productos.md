@@ -293,16 +293,26 @@ nadie) ni `porcentaje_comision` (salió del alcance), y las variantes ya no
 traen `precio` ni `stock` propios — eso es de cada oferta, que vive solo
 en PostgreSQL (ver `docs/base-de-datos.md`). Lo que sí trae, sin tener que
 pedirlo con ningún query param, son números ya calculados:
-`precio_tienda`, `precio_desde`, `stock_tienda`, `stock_total` y
-`total_ofertas` van tanto en la raíz como dentro de cada variante (en la
-raíz, los dos de stock son la SUMA de las variantes); `resenas_promedio`
+`precio_tienda`, `precio_desde`, `stock_tienda`, `stock_total`,
+`total_ofertas` y `hay_descuento` van tanto en la raíz como dentro de cada
+variante (en la raíz, los dos de stock son la SUMA de las variantes, y
+`hay_descuento` es `true` si CUALQUIER variante lo tiene); `resenas_promedio`
 (nota media, 1 a 5) y `resenas_total` van **solo en la raíz** (una reseña
 apunta a producto + vendedor, nunca a una variante), y valen `0` mientras
 el producto no tenga ninguna reseña. Todos son una copia (se recalculan
-cuando una oferta cambia de precio / unidades / estado, o cuando se publica
-una reseña), no la verdad: la ficha completa, con las ofertas reales de
-cada vendedor, está en `GET /productos/:id`, y la nota media autoritativa
-(calculada en vivo desde PostgreSQL) está en `GET /productos/:id/resenas`.
+cuando una oferta cambia de precio / descuento / unidades / estado, o
+cuando se publica una reseña), no la verdad: la ficha completa, con las
+ofertas reales de cada vendedor (`precio` de lista, `porcentaje_descuento`
+y `precio_final` de cada una), está en `GET /productos/:id`, y la nota
+media autoritativa (calculada en vivo desde PostgreSQL) está en
+`GET /productos/:id/resenas`.
+
+**Descuentos (2026-09-23, ver `plan pendiente/descuentos-oferta.md`):**
+`precio_tienda`/`precio_desde` ya salen con el descuento aplicado cuando
+la oferta correspondiente lo tiene — no es el precio de lista de esa
+oferta, es lo que de verdad se cobraría. `hay_descuento` es la bandera
+rápida para pintar un badge "en oferta" en la tarjeta del catálogo sin
+tener que consultar las ofertas reales.
 
 `siguiente_cursor` es `null` cuando esa tanda ya trajo el último producto
 del catálogo (o de lo que quedaba despues de aplicar los filtros).
@@ -399,22 +409,12 @@ Ejemplo real (`GET /productos/1`):
     "stock_tienda": 22,
     "stock_total": 43,
     "total_ofertas": 3,
+    "hay_descuento": true,
     "resenas_promedio": 4.5,
     "resenas_total": 2,
     "variantes": [ "... misma forma que en GET /productos ..." ],
     "caracteristicas_adicionales": [ "..." ],
     "ofertas": [
-      {
-        "id_oferta": "1",
-        "id_producto_variante_mongo": "1",
-        "vendedor": { "id_usuario": "1", "usuario": "ventas_poniente", "nombre": "Paola", "apellido": "Guzman" },
-        "es_tienda": false,
-        "es_inventario_limitado": false,
-        "precio": "3856.00",
-        "stock": 7,
-        "stock_disponible": null,
-        "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
-      },
       {
         "id_oferta": "2",
         "id_producto_variante_mongo": "1",
@@ -422,8 +422,23 @@ Ejemplo real (`GET /productos/1`):
         "es_tienda": false,
         "es_inventario_limitado": true,
         "precio": "4029.00",
+        "porcentaje_descuento": "10.00",
+        "precio_final": "3626.10",
         "stock": 14,
         "stock_disponible": 3,
+        "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
+      },
+      {
+        "id_oferta": "1",
+        "id_producto_variante_mongo": "1",
+        "vendedor": { "id_usuario": "1", "usuario": "ventas_poniente", "nombre": "Paola", "apellido": "Guzman" },
+        "es_tienda": false,
+        "es_inventario_limitado": false,
+        "precio": "3856.00",
+        "porcentaje_descuento": null,
+        "precio_final": "3856.00",
+        "stock": 7,
+        "stock_disponible": null,
         "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
       },
       {
@@ -433,6 +448,8 @@ Ejemplo real (`GET /productos/1`):
         "es_tienda": true,
         "es_inventario_limitado": false,
         "precio": "4100.00",
+        "porcentaje_descuento": null,
+        "precio_final": "4100.00",
         "stock": 22,
         "stock_disponible": null,
         "fecha_actualizacion": "2026-08-25T13:38:51.071Z"
@@ -447,6 +464,15 @@ como texto: son `bigint` de PostgreSQL, y el driver los devuelve como
 string para no perder precisión (el mismo motivo por el que `id_usuario`
 es string en el resto del backend). Si un producto no tiene ninguna oferta
 activa, `ofertas` sale como un array vacío, no falta el campo.
+
+**Descuentos (2026-09-23).** `precio` es siempre el precio de LISTA de esa
+oferta, nunca cambia por un descuento. `porcentaje_descuento` es el % (o
+`null`) y `precio_final` es lo que de verdad se cobra/muestra — ver
+`plan pendiente/descuentos-oferta.md`. **El orden del array es por
+`precio_final`, no por `precio`** (dentro de cada variante): en el
+ejemplo de arriba, la oferta 2 tiene el precio de lista más alto de las
+tres (Q4029) pero con el 10% de descuento queda primera (Q3626.10 es
+menos que Q3856).
 
 ### 400
 
@@ -497,21 +523,36 @@ GET /productos/mas-vendidos
 (`src/services/productos/mas-vendidos-sync.service.ts`) recalcula cada 10
 minutos, agregando `compra_producto` de ClickHouse de las últimas 24h (o
 de los últimos 7 días si no hubo ninguna compra en 24h; si tampoco hay
-nada en 7 días, deja el ranking anterior sin tocar), y publica hasta 20
-ids en el ZSET `mesh:productos:mas_vendidos`. **Solo cuenta `lote = 'real'`**
+nada en 7 días, deja lo anterior sin tocar), y publica hasta 20 ids en el
+ZSET `mesh:productos:mas_vendidos`. **Solo cuenta `lote = 'real'`**
 (agregado el 2026-09-19), sin ningún parámetro para pedir lo contrario --
 nunca mezcla con datos sembrados por un script. Ver
 `elementos Generales/plan pendiente/eventos-clickhouse.md`.
 
-Esta ruta (`MasVendidosService.obtener()`) lee los primeros 8 de ese ZSET
-(`ZREVRANGE`, ya en orden de más a menos vendido) y trae el detalle real
-de esos productos a MongoDB con `$in` — Redis nunca guarda nombre, precio
-ni imagen, solo el id y el orden. Mongo con `$in` no respeta el orden de
-la lista de ids: el resultado se reordena en el backend para que coincida
-con el ranking real. Solo trae productos `activo` (mismo criterio de
-visibilidad que el resto del catálogo público) — un id del ranking sin
-producto visible (se desactivó, se borró) se salta en silencio, sin
-romper la respuesta.
+> **Cambio (2026-09-23): esta ruta ya NO toca MongoDB.** Antes,
+> `MasVendidosService.obtener()` leía el ZSET y traía el detalle real a
+> Mongo con `$in` **en cada request** — un cache que para responder
+> necesita ir a preguntarle a otra base no está cacheando nada. Ahora el
+> propio worker, en la misma corrida de cada 10 minutos, consulta Mongo
+> **una sola vez** por todos los ids ganadores y guarda el documento
+> completo de cada uno en un HASH nuevo, `mesh:productos:mas_vendidos:detalle`
+> (`{ id_producto: <documento Producto en JSON> }`, mismo reemplazo atómico
+> vía clave temporal + `RENAME` que ya usaba el ZSET). Esta ruta ahora lee
+> las dos estructuras de Redis y ya — **ni Postgres ni Mongo**. Solo se
+> cachea el detalle de productos `activo` (mismo criterio de visibilidad de
+> siempre); a cambio de no depender de Mongo, esa comprobación de
+> visibilidad pasó de ser en vivo (en cada request) a solo cada 10 minutos
+> — un producto que se desactiva a mitad de esa ventana puede seguir
+> apareciendo aquí hasta la próxima corrida del worker. Mismo principio que
+> el rediseño del carrito ese mismo día (ver `endpoints-carrito.md`).
+
+Esta ruta (`MasVendidosService.obtener()`) lee los primeros 8 ids del ZSET
+(`ZREVRANGE`, ya en orden de más a menos vendido) y pide ese mismo detalle
+al HASH con `HMGET` — a diferencia del `$in` de Mongo que se usaba antes,
+`HMGET` sí respeta el orden de los ids que se le piden, así que ya no hace
+falta reordenar nada a mano. Un id del ranking sin detalle cacheado (no
+ganó en la última corrida del worker, o no era `activo` entonces) se salta
+en silencio, sin romper la respuesta.
 
 ### 200
 
@@ -537,8 +578,11 @@ ranking, `payload` sale como array vacío — nunca un error.
 
 ```json
 { "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
-{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
 ```
+
+Desde el 2026-09-23 **ya no puede salir un 503 de Mongo** en esta ruta — no
+la toca. Si Mongo está caído, el peor caso es que el detalle cacheado
+tenga hasta 10 minutos (lo que tarda el worker en volver a intentar).
 
 ## Pruebas — hechas el 2026-09-18
 
@@ -553,6 +597,28 @@ Contra el servidor, Redis y MongoDB reales, sin sesión.
 | Un id inexistente (`99999`) insertado a mano al frente del ZSET | `200`, ese id se salta en silencio, solo sale el producto real — confirma el filtro de visibilidad/reordenado sin romper nada |
 
 `npx tsc --noEmit` y `eslint` limpios sobre los archivos nuevos.
+
+## Pruebas — rediseño "el cache no debe necesitar a nadie más" (2026-09-23)
+
+Contra el servidor y los contenedores reales. El worker se disparó a mano
+(en vez de esperar los 10 min) con un script en el scratchpad que
+instancia `MasVendidosSyncService` y llama `recalcular()` directo — el
+worker no tiene dependencias inyectadas (usa los clientes de
+`database/*.ts` tal cual), así que correrlo fuera de Nest es idéntico a
+como lo dispara `@Interval` en producción.
+
+| Caso | Resultado |
+|---|---|
+| Worker corrido con datos reales del día (1 producto con compras reales) | `HASH mesh:productos:mas_vendidos:detalle` queda con el campo `1` = el documento `Producto` completo en JSON (2405 bytes); `GET /productos/mas-vendidos` lo devuelve idéntico a `GET /productos/1` — mismo `precio_tienda`/`precio_desde` como `{"$numberDecimal": "..."}` (confirmado: el doble viaje por Redis, `JSON.stringify` en el worker → `JSON.parse` en el servicio → `JSON.stringify` de la respuesta HTTP, produce el mismo texto en el wire que un solo viaje — `Decimal128.toJSON()` es idempotente sobre su propio resultado) |
+| Ranking sintético de 3 ids con detalle cacheado solo para 2 | Los 2 con detalle salen en el **orden correcto** del ranking (`HMGET` respeta el orden pedido, a diferencia del `$in` de Mongo que se usaba antes); el tercero se salta sin romper nada |
+| **`docker stop mesh-postgres mesh-mongo`**, después `GET /productos/mas-vendidos` | **200 normal**, con el producto completo — la ruta no tocó ninguna de las dos bases. `docker start` de las dos, sin necesidad de reiniciar el server |
+| El único producto del ranking se desactiva en Mongo (`estado: "inactivo"`), se corre el worker | El worker cachea `0 con detalle` (se filtró por `activo`) y **borra** `mesh:productos:mas_vendidos:detalle` (no intenta un `RENAME` sobre una clave temporal vacía, que Redis rechaza); el ZSET del ranking **sigue** con ese id (no se filtra ahí); `GET /productos/mas-vendidos` responde `200` con `payload: []`, sin error |
+| Producto reactivado, worker corrido de nuevo | Vuelve a aparecer normal |
+| `npx tsc --noEmit` y `eslint` sobre los dos archivos tocados | limpios |
+
+**Teardown:** el producto de prueba quedó reactivado (`estado: "activo"`) y
+el worker se corrió una última vez para dejar el ranking/detalle
+reflejando los datos reales, sin residuos de las pruebas sintéticas.
 
 ---
 

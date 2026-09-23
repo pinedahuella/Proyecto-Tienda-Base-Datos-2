@@ -2224,7 +2224,11 @@ mano desde esta ruta:
 
 - **`precio`** — un `UPDATE` sobre `oferta.precio`. El trigger
   `trg_oferta_registrar_precio` (`005_ofertas.sql`) escribe solo la fila
-  nueva en `precio_historial`.
+  nueva en `precio_historial`. **Funciona igual con un descuento activo**
+  (`porcentaje_descuento` no `NULL`, ver `POST .../:id/descuento` más
+  abajo): las dos cosas son independientes, el precio de lista cambia y el
+  `precio_final` de la respuesta se recalcula sobre el precio nuevo, sin
+  ninguna restricción ni aviso especial.
 - **`estado`** — un `UPDATE` sobre `oferta.id_estado_oferta`. Depende de
   si la oferta **ya fue aprobada** alguna vez (`fecha_aprobacion` no NULL):
   - **Aprobada** (`activa`/`pausada`/`retirada` que pasó por revisión): sin
@@ -2294,6 +2298,8 @@ Al menos uno de los tres tiene que venir.
     "nombre_variante": "Cable 3 m",
     "imagen": null,
     "precio": "550.00",
+    "porcentaje_descuento": null,
+    "precio_final": "550.00",
     "stock": 6,
     "stock_disponible": null,
     "estado": "activa",
@@ -2316,8 +2322,12 @@ real tras el cambio (puede ser `pendiente` si la oferta no estaba
 aprobada). `fecha_aprobacion` / `aprobado_por` traen quién y cuándo la
 aprobó la tienda, con el mismo significado que en `GET /vendedor/ofertas`;
 editar la oferta no los toca (una oferta ya aprobada que se edita sigue
-mostrando a su aprobador). Deja al día en Mongo los cinco campos
-calculados del producto y la variante afectados.
+mostrando a su aprobador). Deja al día en Mongo los seis campos
+calculados del producto y la variante afectados (agosto: `precio_tienda`,
+`precio_desde`, `stock_tienda`, `stock_total`, `total_ofertas`;
+2026-09-23: `hay_descuento`). `porcentaje_descuento` (2026-09-23, ver
+`POST .../:id/descuento` más abajo) es `null` salvo que la oferta tenga un
+descuento activo; `precio_final` es lo que de verdad se cobra/muestra.
 
 Probado en vivo el 25 de agosto de 2026 (aprobadas) y el 28 de agosto de
 2026 (flujo de aprobación) contra la base real:
@@ -2696,6 +2706,172 @@ se comprueba igual.
 
 Igual que el `POST` (`No se pudo cerrar la venta relampago` como mensaje
 por defecto).
+
+---
+
+## POST /vendedor/ofertas/:id/descuento
+
+**Aplica un % de descuento** a una oferta propia (2026-09-23, ver
+`plan pendiente/descuentos-oferta.md`). `:id` es `id_oferta`. A diferencia
+de la venta relámpago, esto **no** tiene controlador/servicio propio: vive
+en `OfertasVendedorController`/`OfertasVendedorService`, junto al resto
+del CRUD de la oferta — es Postgres puro, sin ningún cliente nuevo de por
+medio.
+
+**`oferta.precio` NUNCA se toca por esto.** Sigue siendo el precio de
+lista; el % vigente vive aparte en `oferta.porcentaje_descuento`, y el
+precio real a cobrar/mostrar (`precio_final`, en las respuestas de
+`GET`/`PATCH` de ofertas y en la ficha pública) se calcula en cada
+consulta, nunca se guarda — decisión explícita del equipo, ver el plan
+para el porqué y la lista completa de consultas que aplican la fórmula.
+
+**Autorización:** la oferta tiene que ser **tuya** — mismo 404 genérico
+que el resto de `/vendedor/ofertas/:id/*`. Un admin actúa como la tienda.
+
+### Cuerpo
+
+```json
+{ "porcentaje_descuento": 20 }
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `porcentaje_descuento` | Sí | Número entre **1 y 90**, hasta 2 decimales. `0` no es un descuento (para eso está el `DELETE`); `90` es un límite de sanidad de negocio (más estricto que el `CHECK` de la base, que solo exige `< 100`) — un descuento mayor sin más contexto huele a error de tipeo. |
+
+### 201
+
+```json
+{
+  "ok": true,
+  "mensaje": "Descuento aplicado",
+  "payload": {
+    "id_oferta": "3",
+    "precio": "5840.00",
+    "porcentaje_descuento": "25.00",
+    "precio_final": "4380.00",
+    "...": "el resto de los campos de OfertaPropia, sin cambios"
+  }
+}
+```
+
+`precio` no cambió; `precio_final` es lo que de verdad se cobra/muestra
+(`ROUND(precio * (1 - porcentaje_descuento/100), 2)`).
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+{ "ok": false, "mensaje": "El porcentaje_descuento debe ser un numero entre 1 y 90, con hasta 2 decimales", "payload": null }
+```
+
+`0`, `100`, `91`, negativo, con más de 2 decimales, o texto en vez de
+número — los seis casos dan este mismo 400.
+
+### 401 / 403
+
+Sin sesión → `401`. Rol comprador → `403`.
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
+```
+
+La oferta no existe o no es tuya.
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "Esta oferta ya tiene un descuento activo", "payload": null }
+```
+
+Hay que quitar el descuento actual antes de poner otro — no se
+reemplaza/apila silenciosamente. Comprobado dentro de una transacción con
+`SELECT ... FOR UPDATE`, mismo patrón que `PATCH .../:id/revision`: dos
+peticiones concurrentes sobre la misma oferta nunca dejan un estado
+inconsistente.
+
+### 503 / 500
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo aplicar el descuento", "payload": null }
+```
+
+---
+
+## DELETE /vendedor/ofertas/:id/descuento
+
+**Quita el descuento activo** de una oferta propia: limpia
+`oferta.porcentaje_descuento` a `NULL`. `oferta.precio` no se toca — nunca
+lo estuvo. Mismo patrón de transacción + `FOR UPDATE` + autorización que
+el `POST`.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Descuento retirado",
+  "payload": {
+    "id_oferta": "3",
+    "precio": "5840.00",
+    "porcentaje_descuento": null,
+    "precio_final": "5840.00",
+    "...": "..."
+  }
+}
+```
+
+`precio` vuelve a ser el que ya era — **exacto, sin arrastre de
+redondeo**, porque nunca cambió. `precio_final` pasa a coincidir con
+`precio`.
+
+### 400 / 401 / 403
+
+Igual que el `POST`.
+
+### 404
+
+La oferta no existe o no es tuya.
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "Esta oferta no tiene ningun descuento activo", "payload": null }
+```
+
+### 503 / 500
+
+Igual que el `POST` (`No se pudo quitar el descuento` como mensaje por
+defecto).
+
+---
+
+## Pruebas — descuentos en ofertas (2026-09-23)
+
+Contra el servidor y las bases reales (`ventas_norte`, oferta 3 = Laptop
+Ambar Campus 14, Q5840.00).
+
+| Caso | Resultado |
+|---|---|
+| Aplicar 25% | 201; `precio` sigue en 5840.00, `porcentaje_descuento: "25.00"`, `precio_final: "4380.00"` |
+| Aplicar un segundo descuento sobre la misma oferta | 409 |
+| `PATCH /vendedor/ofertas/:id` con `precio` mientras el descuento está activo | 200, funciona sin restricción; `precio_final` se recalcula sobre el precio nuevo (probado: Q6000 + 25% → `precio_final: "4500.00"`) |
+| `90` exacto (límite inclusivo) | 201 |
+| `0` / `100` / `91` / `-5` / `15.505` (3 decimales) / `"20"` (texto) | 400 en los seis casos |
+| Quitar el descuento | 200; `precio` vuelve exacto, `porcentaje_descuento: null` |
+| Quitar de nuevo (ya no tiene) | 409 |
+| Aplicar/quitar sobre oferta ajena | 404 genérico |
+| Oferta inexistente / sin sesión | 404 / 401 |
+| `GET /productos/:id` (ficha), con el descuento activo | la oferta aparece a `precio_final`, **ordenada por precio final** (con el descuento se adelantó a una oferta con precio de lista más barato) |
+| `GET /productos`, `GET /productos/:id` | `hay_descuento: true` en la variante y la raíz con el descuento activo; `false` en las demás |
+| Carrito → checkout con la oferta descontada | la foto de Redis guarda el precio final; `POST /carrito/comprar` cobra ese monto — verificado contra `precio_historial` (`precio` de lista + `porcentaje_descuento` guardados por separado) y `pago.monto` |
+| `GET /admin/reportes/ventas` | el monto por estado aplica la fórmula (verificado contra un cálculo manual sin la fórmula: discrepancia exacta al descuento otorgado) |
+| `npx tsc --noEmit` y `eslint` sobre los 14 archivos tocados | limpios |
+
+Detalle completo, con la lista de archivos y decisiones de diseño, en
+`plan pendiente/descuentos-oferta.md`.
 
 ---
 

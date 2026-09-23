@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -17,6 +18,7 @@ import type { TokenUsuario } from '../../dto/token-usuario';
 import type { CrearOfertaPeticion } from '../../dto/crear-oferta';
 import type { EditarOfertaPeticion } from '../../dto/editar-oferta';
 import type { RevisarOfertaPeticion } from '../../dto/revisar-oferta';
+import type { AplicarDescuentoPeticion } from '../../dto/aplicar-descuento';
 import type {
   PaginarOfertasPendientesQuery,
   PaginarOfertasQuery,
@@ -206,6 +208,47 @@ export class OfertasVendedorController {
       return exito(oferta, mensaje);
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo revisar la oferta');
+    }
+  }
+
+  // POST /vendedor/ofertas/:id/descuento
+  // Aplica un % de descuento a una oferta propia. Segmento "descuento"
+  // literal, va antes de :id.
+  @Post(':id/descuento')
+  async aplicarDescuento(
+    @Param('id') id: string,
+    @Body() datos: AplicarDescuentoPeticion,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const oferta = await this.ofertasVendedorService.aplicarDescuento(
+        usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
+        id,
+        datos,
+      );
+      return exito(oferta, 'Descuento aplicado');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo aplicar el descuento');
+    }
+  }
+
+  // DELETE /vendedor/ofertas/:id/descuento
+  // Quita el descuento activo de una oferta propia.
+  @Delete(':id/descuento')
+  async quitarDescuento(
+    @Param('id') id: string,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      const oferta = await this.ofertasVendedorService.quitarDescuento(
+        usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
+        id,
+      );
+      return exito(oferta, 'Descuento retirado');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo quitar el descuento');
     }
   }
 

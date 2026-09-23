@@ -24,8 +24,10 @@ import {
   validarDecisionRevision,
   validarEstadoOferta,
   validarFiltroEstadoOferta,
+  validarPorcentajeDescuento,
   validarRazonRechazo,
 } from '../../helpers/validaciones-oferta';
+import { expresionPrecioFinal } from '../../helpers/precio-descuento';
 import {
   AprobadorOferta,
   FilaOfertaNueva,
@@ -42,6 +44,7 @@ import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { CrearOfertaPeticion } from '../../dto/crear-oferta';
 import { EditarOfertaPeticion } from '../../dto/editar-oferta';
 import { RevisarOfertaPeticion } from '../../dto/revisar-oferta';
+import { AplicarDescuentoPeticion } from '../../dto/aplicar-descuento';
 import {
   OfertasPendientesPaginadas,
   OfertasPropiasPaginadas,
@@ -346,6 +349,10 @@ export class OfertasVendedorService {
       nombre_variante: variante.nombre_variante,
       imagen: variante.imagenes[0] ?? null,
       precio: filaOferta.precio,
+      // Recien creada nunca tiene descuento -- se aplica aparte, con
+      // POST /vendedor/ofertas/:id/descuento.
+      porcentaje_descuento: null,
+      precio_final: filaOferta.precio,
       stock: stockFinal,
       // Recien creada nunca esta en venta relampago: no hay contador de
       // Redis, el numero real es `stock`.
@@ -531,6 +538,161 @@ export class OfertasVendedorService {
   }
 
   /**
+   * Aplica un descuento a una oferta propia. `oferta.precio` NUNCA se
+   * toca por esto -- sigue siendo el precio de lista; el % vigente vive
+   * aparte en `oferta.porcentaje_descuento`, y el precio final se calcula
+   * en cada consulta (ver `helpers/precio-descuento.ts` y
+   * `elementos Generales/plan pendiente/descuentos-oferta.md`).
+   *
+   * Rechaza con 409 si la oferta **ya tiene** un descuento activo -- hay
+   * que quitarlo primero (`DELETE .../descuento`), no se reemplaza
+   * silenciosamente. El chequeo va dentro de una transaccion con
+   * `SELECT ... FOR UPDATE`, mismo patron que `revisar()`: si dos
+   * peticiones caen a la vez sobre la misma oferta, la segunda espera y ve
+   * el descuento ya puesto, y responde 409 en vez de pisarlo.
+   *
+   * Solo el dueno de la oferta -- una ajena da el mismo 404 generico de
+   * siempre. Si quien la aplica es admin, "dueno" se resuelve como la
+   * cuenta de la tienda (ver `resolverIdEfectivo()`).
+   */
+  async aplicarDescuento(
+    idUsuarioToken: string,
+    idRolUsuario: number,
+    idOfertaParametro: string,
+    datos: AplicarDescuentoPeticion,
+  ): Promise<OfertaPropia> {
+    const idUsuario = await this.resolverIdEfectivo(
+      idUsuarioToken,
+      idRolUsuario,
+    );
+    if (!REGEX_ID.test(idOfertaParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idOferta = Number(idOfertaParametro);
+    const porcentaje = validarPorcentajeDescuento(datos.porcentaje_descuento);
+
+    let idProductoMongo: number;
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
+
+      const bloqueo = await cliente.query<{
+        porcentaje_descuento: string | null;
+        id_producto_mongo: string;
+      }>(
+        `SELECT porcentaje_descuento, id_producto_mongo
+           FROM oferta
+          WHERE id_oferta = $1 AND id_usuario = $2
+          FOR UPDATE`,
+        [idOferta, idUsuario],
+      );
+      const fila = bloqueo.rows[0];
+      if (fila == null) {
+        throw new ErrorNoEncontrado('No existe una oferta con ese id');
+      }
+      if (fila.porcentaje_descuento != null) {
+        throw new ErrorConflicto('Esta oferta ya tiene un descuento activo');
+      }
+      idProductoMongo = Number(fila.id_producto_mongo);
+
+      await cliente.query(
+        'UPDATE oferta SET porcentaje_descuento = $1 WHERE id_oferta = $2',
+        [porcentaje, idOferta],
+      );
+
+      await cliente.query('COMMIT');
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      if (
+        error instanceof ErrorConflicto ||
+        error instanceof ErrorNoEncontrado
+      ) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
+    }
+
+    await this.productosService.recalcularCamposCalculados([idProductoMongo]);
+    return this.armarOfertaPropia(
+      await this.obtenerFilaPropia(idOferta, idUsuario),
+    );
+  }
+
+  /**
+   * Quita el descuento activo de una oferta propia. `oferta.precio` no se
+   * toca -- nunca lo estuvo -- solo se limpia `porcentaje_descuento`.
+   * Rechaza con 409 si la oferta **no tiene** ningun descuento activo.
+   * Mismo patron de transaccion + `FOR UPDATE` + chequeo de dueno que
+   * `aplicarDescuento()`.
+   */
+  async quitarDescuento(
+    idUsuarioToken: string,
+    idRolUsuario: number,
+    idOfertaParametro: string,
+  ): Promise<OfertaPropia> {
+    const idUsuario = await this.resolverIdEfectivo(
+      idUsuarioToken,
+      idRolUsuario,
+    );
+    if (!REGEX_ID.test(idOfertaParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idOferta = Number(idOfertaParametro);
+
+    let idProductoMongo: number;
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
+
+      const bloqueo = await cliente.query<{
+        porcentaje_descuento: string | null;
+        id_producto_mongo: string;
+      }>(
+        `SELECT porcentaje_descuento, id_producto_mongo
+           FROM oferta
+          WHERE id_oferta = $1 AND id_usuario = $2
+          FOR UPDATE`,
+        [idOferta, idUsuario],
+      );
+      const fila = bloqueo.rows[0];
+      if (fila == null) {
+        throw new ErrorNoEncontrado('No existe una oferta con ese id');
+      }
+      if (fila.porcentaje_descuento == null) {
+        throw new ErrorConflicto(
+          'Esta oferta no tiene ningun descuento activo',
+        );
+      }
+      idProductoMongo = Number(fila.id_producto_mongo);
+
+      await cliente.query(
+        'UPDATE oferta SET porcentaje_descuento = NULL WHERE id_oferta = $1',
+        [idOferta],
+      );
+
+      await cliente.query('COMMIT');
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      if (
+        error instanceof ErrorConflicto ||
+        error instanceof ErrorNoEncontrado
+      ) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
+    }
+
+    await this.productosService.recalcularCamposCalculados([idProductoMongo]);
+    return this.armarOfertaPropia(
+      await this.obtenerFilaPropia(idOferta, idUsuario),
+    );
+  }
+
+  /**
    * Revisa una oferta pendiente: la aprueba (pasa a `activa`, le pone
    * `fecha_aprobacion` y guarda en `id_usuario_aprobo` quien la reviso) o
    * la rechaza (pasa a `rechazada` y guarda el motivo en `rechazo_oferta`).
@@ -681,6 +843,8 @@ export class OfertasVendedorService {
       nombre_variante: variante?.nombre_variante ?? '(variante no encontrada)',
       imagen: variante?.imagenes[0] ?? null,
       precio: fila.precio,
+      porcentaje_descuento: fila.porcentaje_descuento,
+      precio_final: fila.precio_final,
       stock: fila.stock,
       stock_disponible: await this.stockDisponibleLimitado(
         fila.id_oferta,
@@ -845,6 +1009,8 @@ export class OfertasVendedorService {
             variante?.nombre_variante ?? '(variante no encontrada)',
           imagen: variante?.imagenes[0] ?? null,
           precio: fila.precio,
+          porcentaje_descuento: fila.porcentaje_descuento,
+          precio_final: fila.precio_final,
           stock: fila.stock,
           stock_disponible: await this.stockDisponibleLimitado(
             fila.id_oferta,
@@ -934,6 +1100,8 @@ export class OfertasVendedorService {
           ? {
               id_oferta: fila.id_oferta,
               precio: fila.precio,
+              porcentaje_descuento: fila.porcentaje_descuento,
+              precio_final: fila.precio_final,
               stock: fila.stock,
               stock_disponible: fila.es_inventario_limitado
                 ? (stockLimitadoPorOferta.get(fila.id_oferta) ?? null)
@@ -1021,7 +1189,9 @@ export class OfertasVendedorService {
     try {
       const resultado = await pool.query<FilaOfertaPendiente>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-                o.precio, o.stock, o.fecha_creacion,
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, o.fecha_creacion,
                 u.id_usuario, u.usuario, u.nombre, u.apellido
          FROM oferta o
          JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
@@ -1118,6 +1288,8 @@ export class OfertasVendedorService {
           variante?.nombre_variante ?? '(variante no encontrada)',
         imagen: variante?.imagenes[0] ?? null,
         precio: fila.precio,
+        porcentaje_descuento: fila.porcentaje_descuento,
+        precio_final: fila.precio_final,
         stock: fila.stock,
         fecha_creacion: fila.fecha_creacion,
         vendedor: {
@@ -1136,7 +1308,9 @@ export class OfertasVendedorService {
     try {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-                o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
                 o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,
@@ -1161,7 +1335,9 @@ export class OfertasVendedorService {
     try {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-                o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
                 o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,
@@ -1225,7 +1401,9 @@ export class OfertasVendedorService {
 
       const pagina = await cliente.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-                o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
                 o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,
@@ -1276,7 +1454,9 @@ export class OfertasVendedorService {
 
       const pagina = await cliente.query<FilaOfertaPendiente>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-                o.precio, o.stock, o.fecha_creacion,
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, o.fecha_creacion,
                 u.id_usuario, u.usuario, u.nombre, u.apellido
            FROM oferta o
            JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
@@ -1344,7 +1524,9 @@ export class OfertasVendedorService {
     try {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-                o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
                 o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,
@@ -1379,7 +1561,9 @@ export class OfertasVendedorService {
     try {
       const resultado = await pool.query<FilaOfertaPropia>(
         `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-                o.precio, o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
+                o.precio, o.porcentaje_descuento,
+                ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, eo.estado_oferta_nombre, o.fecha_aprobacion,
                 o.id_usuario_aprobo, o.es_inventario_limitado,
                 ua.usuario AS aprobo_usuario, ua.nombre AS aprobo_nombre,
                 ua.apellido AS aprobo_apellido,

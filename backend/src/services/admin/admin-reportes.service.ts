@@ -1,6 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { pool } from '../../database/postgres';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
+import { expresionPrecioFinal } from '../../helpers/precio-descuento';
 import {
   LineaPorEstadoPago,
   LineaPorEstadoPedido,
@@ -19,11 +20,14 @@ import {
  *                    metodo, e ingresos / reembolsos / ticket promedio.
  *
  * El total de un pedido NO se guarda en ninguna tabla (`pedido` no lleva
- * total, a proposito): se suma de `precio_historial.precio * cantidad` de
+ * total, a proposito): se suma del precio FINAL (con descuento aplicado si
+ * lo tenia, ver `helpers/precio-descuento.ts`) de `precio_historial` de
  * cada linea -- el precio congelado de cada una, que es tambien el que se
  * cobra. `pago.monto` si es una columna, y NO siempre coincide con esa suma
  * (un reembolso deja la suma igual y el monto no), por eso los ingresos se
- * leen de `pago.monto` y no de las lineas.
+ * leen de `pago.monto` y no de las lineas -- ese monto ya sale correcto sin
+ * tocar nada aqui, porque lo escribe `comprar_pedido()` aplicando la misma
+ * formula.
  *
  * Todos los montos se devuelven como texto con dos decimales
  * (`::numeric(12,2)::text`): son `numeric` de Postgres y no deben pasar por
@@ -48,7 +52,7 @@ export class AdminReportesService {
                 dh.ciudad, dh.departamento,
                 COUNT(pp.id_pedido_producto)::int AS cantidad_lineas,
                 COALESCE(SUM(pp.cantidad), 0)::int AS unidades,
-                COALESCE(SUM(ph.precio * pp.cantidad), 0)::numeric(12,2)::text AS total
+                COALESCE(SUM(${expresionPrecioFinal('ph')} * pp.cantidad), 0)::numeric(12,2)::text AS total
            FROM pedido p
            JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
            JOIN usuarios u ON u.id_usuario = p.id_usuario
@@ -220,7 +224,7 @@ function sumarMontos(montos: string[]): string {
 const CONSULTA_PEDIDOS_POR_ESTADO = `
 SELECT ep.estado_pedido_nombre AS estado,
        COUNT(DISTINCT p.id_pedido)::int AS cantidad,
-       COALESCE(SUM(ph.precio * pp.cantidad), 0)::numeric(12,2)::text AS monto
+       COALESCE(SUM(${expresionPrecioFinal('ph')} * pp.cantidad), 0)::numeric(12,2)::text AS monto
   FROM estado_pedido ep
   LEFT JOIN pedido p ON p.id_estado_pedido = ep.id_estado_pedido
   LEFT JOIN pedido_producto pp ON pp.id_pedido = p.id_pedido
