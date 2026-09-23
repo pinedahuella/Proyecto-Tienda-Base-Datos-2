@@ -70,6 +70,8 @@ import { MasVendidosController } from './controllers/productos/mas-vendidos.cont
 import { MasVendidosService } from './services/productos/mas-vendidos.service';
 import { OfertasDestacadasController } from './controllers/productos/ofertas-destacadas.controller';
 import { OfertasDestacadasService } from './services/productos/ofertas-destacadas.service';
+import { ReglasDescuentoAutomaticoController } from './controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller';
+import { ReglasDescuentoAutomaticoService } from './services/reglas-descuento-automatico/reglas-descuento-automatico.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -113,6 +115,7 @@ import { OfertasDestacadasService } from './services/productos/ofertas-destacada
     AdminTendenciasController,
     MasVendidosController,
     OfertasDestacadasController,
+    ReglasDescuentoAutomaticoController,
   ],
   providers: [
     InicioService,
@@ -155,6 +158,7 @@ import { OfertasDestacadasService } from './services/productos/ofertas-destacada
     MasVendidosSyncService,
     MasVendidosService,
     OfertasDestacadasService,
+    ReglasDescuentoAutomaticoService,
   ],
 })
 export class AppModule {}

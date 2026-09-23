@@ -53,6 +53,10 @@ de restricción, y no son lo mismo:
 | `PATCH /vendedor/ofertas/:id/revision` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `POST /vendedor/ofertas/:id/venta-limitada` | vendedor **o** admin (2 o 3) | solo sobre **su propia** oferta; un admin, sobre cualquier oferta **de la tienda** |
 | `DELETE /vendedor/ofertas/:id/venta-limitada` | vendedor **o** admin (2 o 3) | igual que el `POST` |
+| `POST /vendedor/reglas-descuento` | vendedor **o** admin (2 o 3) | solo sobre **su propia** oferta; un admin, sobre cualquier oferta **de la tienda** |
+| `GET /vendedor/reglas-descuento` | vendedor **o** admin (2 o 3) | solo las **suyas** |
+| `GET /vendedor/reglas-descuento/paginado` | vendedor **o** admin (2 o 3) | solo las **suyas** (idéntico a `GET /vendedor/reglas-descuento`) |
+| `PATCH /vendedor/reglas-descuento/:id` | vendedor **o** admin (2 o 3) | solo sobre **su propia** regla; un admin, sobre cualquier regla **de la tienda** |
 
 **`/vendedor/productos` es el panel de administración del catálogo
 completo, no "mis productos".** Con el giro a multi-vendedor, un producto
@@ -3085,3 +3089,128 @@ cosecha).
 
 Sin migración: es lectura de Redis desde el backend.
 `cambio_propuestas/2026-09-03_2359-stock-disponible-ofertas.md`.
+
+---
+
+## Reglas de descuento automático (agregado 2026-09-23)
+
+**Solo el CRUD de la configuración.** El disparo real -- un worker que
+consulte ClickHouse (unidades vendidas de una oferta en una ventana de
+tiempo), compare contra el umbral configurado y, si se cumple, active el
+descuento o abra la venta relámpago -- **todavía no existe**. Esto es
+nada más la tabla y las cuatro rutas para que un vendedor cree, liste,
+pagine y edite sus reglas.
+
+**Tabla nueva:** `regla_descuento_automatico` (Postgres, aplicada solo en
+local por ahora -- sin migración real todavía, sin `plan pendiente/` para
+esto, se diseñó y se creó en la misma conversación). Una fila por oferta
+como máximo (`UNIQUE(id_oferta)`, `FK` a `oferta` con `ON DELETE CASCADE`):
+
+| Columna | Qué es |
+|---|---|
+| `id_regla_descuento_automatico` | PK propia |
+| `id_oferta` | `UNIQUE`, `FK → oferta` |
+| `umbral_unidades` | Unidades vendidas que disparan la regla (entero > 0) |
+| `ventana_minutos` | La ventana de tiempo, en minutos, en la que esas unidades tienen que venderse (entero > 0) |
+| `es_venta_relampago` | `true` = al dispararse abre una venta relámpago completa (descuento + inventario limitado); `false` = solo aplica el descuento normal |
+| `duracion_segundos` | Cuánto dura lo que se active (entero > 0 -- a diferencia de `POST .../venta-limitada`, aquí `0` no es válido: la regla siempre tiene que vencer sola) |
+| `porcentaje_descuento` | El % a aplicar cuando dispare (`numeric(5,2)`, `> 0 AND < 100` a nivel de base; `1`-`90` es el límite de negocio, igual que en `POST .../descuento`) |
+| `activa` | Para pausar la regla sin borrarla |
+| `fecha_creacion` / `fecha_actualizacion` | De siempre; `fecha_actualizacion` se toca sola con el trigger genérico `oferta_tocar_fecha()`, reutilizado tal cual |
+
+Controlador y servicio en su propia carpeta, fuera de `vendedores/`:
+`src/controllers/reglas-descuento-automatico/` y
+`src/services/reglas-descuento-automatico/` (mismo criterio que
+`carrito/`/`inventario-limitado/`: una carpeta propia para un dominio
+autocontenido, aunque las rutas sigan bajo el prefijo `/vendedor`).
+
+**Autorización, igual que el resto de `/vendedor/ofertas`:** cualquier
+vendedor o admin; un admin actúa como la cuenta de la tienda
+(`resolverIdEfectivo()`, misma duplicación de siempre, no compartida entre
+servicios). Una regla ajena o inexistente da el mismo 404 genérico de
+siempre.
+
+### POST /vendedor/reglas-descuento
+
+Crea la regla de una oferta propia. Rechaza con 409 si esa oferta **ya
+tiene** una regla (`UNIQUE(id_oferta)`) -- no se pueden duplicar, hay que
+editar la existente.
+
+```json
+{
+  "id_oferta": 549,
+  "umbral_unidades": 10,
+  "ventana_minutos": 60,
+  "es_venta_relampago": true,
+  "duracion_segundos": 3600,
+  "porcentaje_descuento": 20
+}
+```
+
+Todos los campos son obligatorios. `porcentaje_descuento` usa
+`validarPorcentajeDescuento` de `validaciones-oferta.ts` tal cual -- mismo
+rango (1-90) y mismo mensaje que `POST .../descuento`, no una copia.
+
+201 con la fila creada (`activa: true` de por sí). 400 si algún campo no
+cumple su rango; 404 si `id_oferta` no existe o no es tuya; 409 si ya tiene
+regla.
+
+### GET /vendedor/reglas-descuento y GET /vendedor/reglas-descuento/paginado
+
+Las reglas de tus propias ofertas -- nunca las de otro vendedor. La
+paginada es por número de página, sin filtros (no hay un "estado" que
+filtrar aquí, solo `activa`, y no se pidió ese filtro), mismo criterio que
+`GET /vendedor/ofertas/paginado`.
+
+```
+GET /vendedor/reglas-descuento
+GET /vendedor/reglas-descuento/paginado?pagina=1&limite=20
+```
+
+200 con el array (la sin paginar) o `{ reglas, pagina, limite, total_reglas, total_paginas }` (la paginada). Array/lista vacía si no tienes ninguna, nunca un error.
+
+### PATCH /vendedor/reglas-descuento/:id
+
+Edita una o más columnas de una regla propia -- **incluye `activa`**, así
+que pausar/reactivarla es la misma ruta que editar los números, no una
+ruta aparte:
+
+```json
+{ "activa": false }
+```
+
+```json
+{ "umbral_unidades": 25, "porcentaje_descuento": 30 }
+```
+
+Cualquier subconjunto de `umbral_unidades`, `ventana_minutos`,
+`es_venta_relampago`, `duracion_segundos`, `porcentaje_descuento`,
+`activa` -- al menos uno es obligatorio (400 `"Debes enviar al menos un
+campo para actualizar"` si no viene ninguno, mismo mensaje que
+`PATCH /vendedor/ofertas/:id`). 200 con la fila ya actualizada. 404 si la
+regla no existe o es de otro vendedor.
+
+### Probado en vivo el 23 de septiembre de 2026
+
+Contra el servidor y la base real (`ventas_norte` y `ventas_sur`, ofertas
+549 y 18 de `ventas_norte`).
+
+| Caso | Resultado |
+|---|---|
+| Crear regla sobre oferta propia (549) | 201, `activa: true` |
+| Crear una segunda regla sobre la misma oferta | 409 `"Esta oferta ya tiene una regla de descuento automatico"` |
+| Crear sobre oferta ajena (id 1, de otro vendedor) | 404 genérico |
+| `porcentaje_descuento: 95` (fuera de 1-90) | 400, mismo mensaje que `POST .../descuento` |
+| Crear una segunda regla sobre otra oferta propia (18) | 201 |
+| `GET /vendedor/reglas-descuento` | trae las dos, orden `fecha_actualizacion DESC` |
+| `GET .../paginado?limite=1&pagina=1` | 1 regla, `total_reglas: 2`, `total_paginas: 2` |
+| `PATCH .../1` con `{ "activa": false }` | 200, pausada; `fecha_actualizacion` se tocó sola |
+| `PATCH .../1` con `{ "umbral_unidades": 25, "porcentaje_descuento": 30 }` | 200, los dos campos cambiaron, el resto intacto |
+| `PATCH .../1` con `{}` | 400 `"Debes enviar al menos un campo para actualizar"` |
+| `PATCH .../999` (inexistente) | 404 |
+| Otro vendedor (`ventas_sur`) intenta `PATCH` sobre la regla 1 (ajena) | 404 genérico |
+| Otro vendedor lista las suyas | `payload: []` -- no ve las de `ventas_norte` |
+| `npx tsc --noEmit` y `eslint` sobre los 8 archivos nuevos | limpios |
+
+Teardown: las dos reglas de prueba se borraron a mano de Postgres, la tabla
+quedó vacía otra vez.
