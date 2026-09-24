@@ -83,6 +83,7 @@ nueva -- sin ella no se puede entregar un pedido.
 | [migrations/README.md](migrations/README.md) | Como se nombran y se corren las migraciones |
 | [etl/README.md](etl/README.md) | Como se migra el catalogo de PostgreSQL a MongoDB |
 | [comandos.txt](comandos.txt) | Todos los comandos, con lo que hace cada uno |
+| [docs/fraude-entrega3/](docs/fraude-entrega3/README.md) | Propuesta para aprobar, consultas de patrones de resenas en Neo4j, reglas para agrupar y priorizar alertas, y consultas de ClickHouse para recomendaciones y tendencias |
 | [PREGUNTAS-SUSTENTACION.md](PREGUNTAS-SUSTENTACION.md) | Preguntas y respuestas para la sustentacion, con el archivo y las lineas de cada cosa |
 | [backend/elementos Generales/cambios-multivendedor.md](backend/elementos%20Generales/cambios-multivendedor.md) | Que cambia en el backend con el modelo multi-vendedor |
 

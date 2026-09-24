@@ -1,0 +1,46 @@
+# parametros.txt -- LOS UMBRALES DE LAS CONSULTAS DE clickhouse/consultas/, EN UN SOLO LUGAR
+#
+# Las consultas usan parametros de ClickHouse, {nombre:Tipo}. Es el mismo
+# formato que recibe el driver de Node del backend (query_params), asi que el
+# backend puede copiar el texto de cada .sql sin tocarlo. Aqui van los valores
+# que se proponen; el arnes (clickhouse/correr_consultas.sh) los pasa como
+# --param_nombre=valor.
+#
+# Una linea por parametro: nombre=valor. Las que empiezan con # no cuentan.
+# Los que dependen de QUIEN pregunta (usuario, sesion, producto, candidatos) no
+# van aqui: los pone el backend en cada llamada, y el arnes en cada prueba.
+
+# Que lote se lee. 'real' es lo que mando el portal; los datos inventados de
+# clickhouse/lote llevan 'generado-N' y NUNCA se mezclan con lo real.
+lote=real
+
+# R. Recomendaciones
+dias_historial=30
+limite=10
+semillas=5
+vida_media_horas=72
+min_sesiones_en_comun=2
+
+# T. Tendencias
+dias_recientes=7
+dias_base=21
+min_vistas=20
+min_crecimiento=1.5
+min_sesiones_embudo=20
+max_conversion=0.02
+min_tasa_devolucion=0.3
+min_sesiones_busqueda=3
+
+# F. Operaciones sospechosas
+dias_ventana=30
+min_vistas_por_sesion=20
+minutos_rafaga=15
+min_pedidos_rafaga=5
+min_cuentas_por_ip=4
+ips_de_confianza=['::1','::ffff:127.0.0.1']
+min_unidades_acaparadas=20
+max_tasa_compra_acaparador=0.2
+min_devoluciones=3
+min_tasa_devolucion_cuenta=0.5
+minutos_registro=60
+min_registros_por_ip=5

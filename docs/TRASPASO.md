@@ -5,6 +5,19 @@ Son cinco minutos y te ahorra el dia.
 
 Ultima actualizacion: **2026-09-23**.
 
+**El 2026-09-23 en la noche: propuesta de patrones de fraude, reglas de alertas y consultas de ClickHouse.** Todo en
+`docs/fraude-entrega3/`, para aprobar. Nada toca `backend/` ni `migrations/`.
+
+```
+Neo4j                neo4j/consultas/B0..B7 (cadena abierta, satelites, persistente, anillo en el tiempo, favor
+                     devuelto, coordinados, reputacion expres). Arnes bash neo4j/correr_patrones.sh, que compara cada
+                     consulta contra su version SQL (neo4j/pruebas/equivalentes.sql) con datos reales y con una
+                     siembra que se deshace con ROLLBACK. Verde el 2026-09-23
+ClickHouse           clickhouse/consultas/R1..R4, T1..T3, F1..F6. Arnes bash clickhouse/correr_consultas.sh, siembra
+                     en una base aparte que se borra. Verde el 2026-09-23
+Hallazgo             el detector del backend (ventana de 60 dias) ya no ve el anillo anillo.uno/dos/tres de marzo
+```
+
 **El 2026-09-23 en la tarde: vitrinas de ofertas y reglas de descuento automatico.** Llegan con 565aca1 y 56ce5f8
 de David (solo `backend/`).
 
