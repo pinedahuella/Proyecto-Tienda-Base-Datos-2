@@ -4,6 +4,112 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-23 EN LA TARDE: vitrinas de ofertas y reglas de descuento
+
+Lo de 565aca1 y 56ce5f8 ya esta conectado fuera de `backend/`. La portada
+tiene las vitrinas "Ventas relampago" y "Ofertas con descuento", el estante de
+mas vendidos lee la tarjeta corta nueva, el panel tiene la pestana "Reglas", la
+tabla tiene su migracion (021) y `pruebas/reglas_descuento.sh` pasa 34 de 34.
+
+### 1. Las vitrinas y el estante salen viejos los primeros 10 minutos
+
+`RegistroOfertasSyncService` y el worker de mas vendidos corren por primera
+vez a los 10 minutos de arrancar. Medido el 2026-09-23 al levantar el backend
+recien compilado:
+
+- `mesh:productos:mas_vendidos:detalle` seguia con el documento COMPLETO de
+  antes de 565aca1, sin `imagen` suelta. La portada lo aguanta (saca la foto de
+  la primera variante), pero la forma de la respuesta no es la documentada.
+- Los descuentos que ya estaban en PostgreSQL no salen en
+  `GET /productos/ofertas/descuento` hasta esa primera corrida. Los que se ponen
+  con `POST .../descuento` si salen al instante.
+
+**Lo que pido:** llamar `reconciliar()` de los dos una vez al arrancar
+(`onApplicationBootstrap`), ademas del intervalo.
+
+### 2. La tabla `regla_descuento_automatico` ya tiene migracion
+
+La creaste a mano y no dejaste SQL, asi que la escribimos desde el modelo y tu
+tabla de `endpoints-vendedores.md`: `migrations/021_regla_descuento_automatico.sql`.
+Va con `IF NOT EXISTS`, asi que en tu base no rompe nada. Si tu tabla tiene algo
+distinto (otro nombre de CHECK o de trigger, otro tipo), avisa y la igualamos.
+El trigger lo llamamos `trg_regla_descuento_tocar_fecha` y usa tu
+`oferta_tocar_fecha()`.
+
+### 3. No hay forma de borrar una regla
+
+Solo se puede pausar (`PATCH` con `activa: false`). No bloquea nada, pero el
+arnes tiene que borrar su regla de prueba con un `DELETE` directo a
+PostgreSQL, igual que hiciste tu en el teardown. Si quieres un
+`DELETE /vendedor/reglas-descuento/:id`, el panel ya tiene donde ponerle el
+boton.
+
+### 4. El disparo
+
+Lo sabemos, esta en tu doc. El panel lo dice en pantalla ("por ahora la regla
+solo se guarda") para que nadie crea que ya cambia precios.
+
+---
+
+## LO NUEVO DEL 2026-09-23: cuatro cosas chicas que dejaron los descuentos
+
+Lo de e7f1e02 y c317197 ya esta conectado fuera de `backend/`: la migracion 020,
+el ETL con `hay_descuento`, el panel del vendedor, el carrito con su foto y
+`pruebas/descuentos.sh`. Nada de esto bloquea; son bordes que se vieron al
+conectarlo.
+
+### 1. El estante de mas vendidos tarda hasta 10 minutos en ver un descuento
+
+`GET /productos/mas-vendidos` lee el detalle de
+`mesh:productos:mas_vendidos:detalle`, y ese HASH solo lo escribe el worker de
+`mas-vendidos-sync.service.ts` cada 10 minutos. Las rutas de descuento y de
+precio recalculan Mongo (`ofertas.service.ts`), pero no tocan ese HASH.
+
+Lo que se ve: en la portada el mismo producto sale con el precio nuevo y la
+etiqueta de descuento en el catalogo, y con el viejo y sin etiqueta en el
+estante, hasta la siguiente vuelta del worker.
+
+**Lo que pido, una de dos:** que las rutas que recalculan un producto
+reescriban tambien su entrada en ese HASH si esta (un `HEXISTS` y un `HSET` con
+el documento recien recalculado), o dejarlo asi y lo documentamos como ventana
+aceptada.
+
+### 2. `hay_descuento` no llega al indice de Elasticsearch
+
+`aDocumentoIndice` de `buscador-sync.service.ts` hace `index(...)`, que
+reemplaza el documento entero. Si el campo lo pusiera solo el ETL, se borraria
+en la siguiente sincronizacion, asi que no lo pusimos. Los PRECIOS del buscador
+si van con descuento, porque salen de Mongo; falta solo la etiqueta en
+`/buscar` y en el buscador de la cabecera.
+
+**Si algun dia hace falta:** en `aDocumentoIndice`, agregar
+`hay_descuento: producto.hay_descuento ?? false,`. Nosotros ponemos lo mismo en
+`etl/extraer_busqueda.js` y `"hay_descuento": {"type": "boolean"}` en
+`elastic/001_indice.json`.
+
+### 3. `GET /productos/ofertas/:id/historial` no trae el %
+
+`reconstruirOfertaEnFecha` hace `SELECT precio FROM precio_historial`, sin
+`porcentaje_descuento`. "Mis pedidos" ensena el precio publicado de ese dia y lo
+compara con lo cobrado; hoy lo compensa con el `porcentaje_descuento_aplicado`
+de la linea, pero no puede saber si ese dia el % era otro. **Lo que pido:**
+devolver tambien `porcentaje_descuento` y `precio_final` (la misma formula de
+`helpers/precio-descuento.ts`).
+
+### 4. Dos mensajes de 409 llevan la ruta dentro
+
+- `ventas-limitadas.service.ts`: "...aplicalo primero con POST
+  /vendedor/ofertas/3/descuento".
+- `ofertas.service.ts`: "...cierra la venta relampago (DELETE
+  /vendedor/ofertas/3/venta-limitada) antes de quitar el descuento".
+
+El panel explica las dos reglas antes de dejar intentarlo, pero si alguno se
+cuela la persona ve la ruta tal cual. **Si te parece:** "Esta oferta necesita un
+descuento antes de abrir una venta relampago" y "Cierra la venta relampago
+antes de quitar el descuento". Es solo texto.
+
+---
+
 ## LO NUEVO DEL 2026-09-15: una sola linea para que el login salga con la IP real
 
 > **RESUELTO EL 2026-09-19.** Jose David agrego `trustProxy: 'loopback'` en `backend/src/main.ts`, con
@@ -1656,7 +1762,8 @@ como aviso en la fila, igual que los otros 409.
 
 **Los otros dos campos NO los bloquees:**
 
-- `precio` ya esta cubierto por `lineas_precio_visto`.
+- `precio` ya esta cubierto: al pagar comparas la foto del carrito en Redis
+  contra el precio de hoy (antes era `lineas_precio_visto`, que ya no existe).
 - `estado` no, porque un vendedor tiene que poder pausar. Si acaso, que pausar
   cierre la venta relampago primero.
 

@@ -131,7 +131,9 @@ comprar_y_resenar() {
     local b=$1 v=$2
     llamar PUT "/carrito/lineas/${OFERTA[$v]}" "${COOKIE[$b]}" '{"cantidad":1}' >/dev/null
     local c; c=$(llamar POST "/carrito/comprar" "${COOKIE[$b]}" "{\"id_direccion\":${DIRE[$b]},\"metodo_pago\":\"efectivo contra entrega\"}")
-    if [ "$(echo "$c" | campo ok)" = "True" ]; then
+    # `ok` sale true tambien cuando no compro porque el precio cambio desde la
+    # foto del carrito (comprado false, con avisos). Lo que cuenta es comprado.
+    if [ "$(echo "$c" | campo payload.comprado)" = "True" ]; then
         OK "$PREF$b le compro a $PREF$v con el checkout real"
     else
         FALLA "$PREF$b no pudo comprarle a $PREF$v, $(echo "$c" | campo mensaje)"; return

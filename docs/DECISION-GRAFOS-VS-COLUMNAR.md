@@ -178,13 +178,15 @@ sobre el `WITH RECURSIVE` vuelve a poner en juego esas cuatro trampas.
 ### 4.2 El analisis B ya lo resuelve PostgreSQL, y la consulta no llega a 17 ms
 
 El panel de tendencias es una agregacion por franja de tiempo. Hoy se escribe
-asi, y esto es `EXPLAIN (ANALYZE, BUFFERS)` contra la base viva:
+asi, y esto es `EXPLAIN (ANALYZE, BUFFERS)` contra la base viva. Desde la
+migracion 020 el ingreso lleva el descuento de la fila de historial; la medicion
+de abajo es de antes, con `ph.precio` solo:
 
 ```sql
 SELECT date_trunc('month', p.fecha_creacion) AS mes,
        pp.id_producto_mongo,
        sum(pp.cantidad) AS unidades,
-       sum(pp.cantidad * ph.precio) AS ingreso
+       sum(pp.cantidad * ROUND(ph.precio * (1 - COALESCE(ph.porcentaje_descuento, 0) / 100), 2)) AS ingreso
   FROM pedido p
   JOIN pedido_producto pp ON pp.id_pedido = p.id_pedido
   JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial

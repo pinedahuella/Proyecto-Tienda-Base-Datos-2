@@ -771,11 +771,13 @@ leyendo el modelo.
 
 ```sql
 -- los productos donde alguien vende mas barato que la tienda
+-- (precio final, con el descuento de la migracion 020; o.precio es el de lista)
 WITH t AS (SELECT id_usuario FROM usuarios WHERE correo_electronico = 'tienda@mesh.com')
 SELECT count(*) FROM (
   SELECT o.id_producto_mongo,
-         min(o.precio) FILTER (WHERE o.id_usuario = (SELECT id_usuario FROM t)) AS precio_tienda,
-         min(o.precio) AS precio_desde
+         min(ROUND(o.precio * (1 - COALESCE(o.porcentaje_descuento, 0) / 100), 2))
+           FILTER (WHERE o.id_usuario = (SELECT id_usuario FROM t)) AS precio_tienda,
+         min(ROUND(o.precio * (1 - COALESCE(o.porcentaje_descuento, 0) / 100), 2)) AS precio_desde
   FROM oferta o JOIN estado_oferta eo USING (id_estado_oferta)
   WHERE eo.estado_oferta_nombre = 'activa'
   GROUP BY 1
@@ -1183,6 +1185,29 @@ por tipo y resultado, por identificador y por huella) los pide el plan del
 backend y hoy no los usa ninguna ruta.
 
 ---
+
+## Las reglas de descuento automatico (migracion 021)
+
+`regla_descuento_automatico` guarda, por oferta, "si se venden
+`umbral_unidades` en `ventana_minutos`, aplicar `porcentaje_descuento` durante
+`duracion_segundos`", o abrir una venta relampago si `es_venta_relampago`.
+
+- **Una por oferta.** `UNIQUE(id_oferta)`, y el backend convierte el choque en
+  un 409. Por eso no es una columna mas de `oferta`: una oferta sin regla no
+  tiene cinco columnas en NULL, simplemente no tiene fila.
+- **Se va con su oferta.** `ON DELETE CASCADE`: una regla sin oferta no se
+  refiere a nada.
+- **Los CHECK solo descartan lo absurdo.** Enteros mayores que 0 y un
+  porcentaje entre 0 y 100 sin incluirlos, el mismo de `oferta` en la 020. Los
+  topes de negocio (1 a 90 %, una semana) viven en el backend.
+- **La duracion no admite 0.** En la venta limitada 0 es "sin vencimiento", aqui
+  la regla siempre tiene que apagarse sola.
+- **`activa` en vez de borrar.** El backend no tiene ruta para borrar una regla,
+  solo para pausarla.
+- `fecha_actualizacion` la mueve el mismo `oferta_tocar_fecha()` de la 005.
+
+Es solo configuracion. El proceso que mire ClickHouse y la dispare todavia no
+existe en el backend.
 
 ## Los historiales no llevan estado
 

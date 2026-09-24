@@ -180,8 +180,16 @@ titulo "LIMPIEZA"
 curl -s -X DELETE "$API/carrito" -H "Cookie: $C" >/dev/null
 if [ -n "$ANTES" ]; then
     n=0
-    while IFS=$'\t' read -r of cant; do
+    # Cada linea del HASH es un JSON con la cantidad adentro (desde el
+    # 2026-09-23). Se devuelve por la API, que vuelve a tomar la foto; los
+    # campos t:<id> de una venta relampago se saltan.
+    while IFS=$'\t' read -r of linea; do
         case "$of" in ''|*[!0-9]*) continue ;; esac
+        cant=$(printf '%s' "$linea" | python -c "
+import sys,json
+try: print(int(json.loads(sys.stdin.read())['cantidad']))
+except Exception: print('')")
+        [ -n "$cant" ] || continue
         curl -s -X PUT "$API/carrito/lineas/$of" -H "Content-Type: application/json" -H "Cookie: $C" -d "{\"cantidad\":$cant}" >/dev/null
         n=$((n+1))
     done <<< "$ANTES"

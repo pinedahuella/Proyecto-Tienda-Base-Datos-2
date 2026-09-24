@@ -30,9 +30,15 @@ const FECHA = new Date((typeof corte !== 'undefined') ? corte : Date.now());
 // precio" que reconstruir, tiene tantos como vendedores, y cada uno vive en
 // precio_historial, en PostgreSQL:
 //
-//   SELECT precio FROM precio_historial
+//   SELECT precio, porcentaje_descuento,
+//          ROUND(precio * (1 - COALESCE(porcentaje_descuento, 0) / 100), 2)
+//              AS precio_final
+//   FROM precio_historial
 //   WHERE id_oferta = ? AND fecha_creacion <= ?
 //   ORDER BY fecha_creacion DESC LIMIT 1;
+//
+// precio es el de lista; lo que se cobraba ese dia es precio_final, con el
+// descuento que tuviera la oferta entonces (NULL si no tenia).
 //
 // La disponibilidad de esa fecha sale del kardex, tambien en PostgreSQL:
 //

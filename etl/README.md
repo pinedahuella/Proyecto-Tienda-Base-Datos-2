@@ -273,24 +273,51 @@ al ordenarlas, porque en un arreglo la posicion ya es el orden.
 
 **NO va el vendedor, ni el precio, ni el stock por vendedor.** Dejaron de ser
 del producto al volverse multi-vendedor: son de cada oferta. Lo unico que queda
-de ellas son cinco numeros calculados, que son los que la LISTA del catalogo
-necesita en cada tarjeta:
+de ellas son cinco numeros calculados y una bandera, que son los que la LISTA
+del catalogo necesita en cada tarjeta:
 
 | Campo | Que es |
 |---|---|
 | `precio_tienda` | el precio de la tienda, que es el que se ensena |
-| `precio_desde` | el mas barato al que se ofrece, de cualquier vendedor |
+| `precio_desde` | el mas barato al que se ofrece, de cualquier vendedor activo |
 | `stock_tienda` | unidades de la tienda |
 | `stock_total` | unidades entre todos los vendedores activos |
 | `total_ofertas` | cuantos vendedores lo tienen activo |
+| `hay_descuento` | true si alguna oferta activa tiene un descuento puesto |
 
-Los tres primeros estan tambien dentro de cada variante. **En el padre los dos
-de stock son SUMAS** de sus variantes, porque la tarjeta ensena un producto y no
-una variante. Y los dos cuentan **solo ofertas activas**: una pausada tiene
-unidades y no se puede comprar.
+Todos estan tambien dentro de cada variante. **En el padre los dos de stock son
+SUMAS** de sus variantes, porque la tarjeta ensena un producto y no una
+variante, y `hay_descuento` es true si alguna variante lo tiene. Los de stock y
+la bandera cuentan **solo ofertas activas**: una pausada tiene unidades y no se
+puede comprar.
 
-Son una **copia** y hay que recalcularlos cuando una oferta cambie de precio, se
-quede sin unidades o se pause. Si no, la tarjeta dice un precio y la ficha otro.
+**Los dos precios ya van con el descuento aplicado.** `oferta.precio` es el de
+lista y `oferta.porcentaje_descuento` el % (NULL si no hay). El precio que se
+paga no se guarda: se calcula con
+
+```sql
+ROUND(o.precio * (1 - COALESCE(o.porcentaje_descuento, 0) / 100), 2)
+```
+
+que es la misma expresion que arma el backend (`expresionPrecioFinal` en
+`backend/src/helpers/precio-descuento.ts`), con los mismos filtros que
+`ProductosService.recalcularCamposCalculados`. Tienen que coincidir letra por
+letra: el backend recalcula estos campos en cada venta o cambio de oferta y el
+ETL en cada arranque, y si difirieran en un centavo el precio de la tarjeta
+cambiaria segun quien escribio el documento la ultima vez. `precio_desde` toma
+el minimo DESPUES del descuento: la mas barata es la que de verdad se paga
+menos.
+
+Son una **copia** y hay que recalcularlos cuando una oferta cambie de precio o
+de descuento, se quede sin unidades o se pause. Si no, la tarjeta dice un precio
+y la ficha otro. En un producto editado desde la aplicacion el ETL solo refresca
+estos seis (`AGREGADOS` en `cargar.js`).
+
+`hay_descuento` **no va al buscador**. El documento de Elasticsearch lo arma el
+worker `BuscadorSyncService` del backend con `index`, que lo reemplaza entero;
+si solo `extraer_busqueda.js` lo escribiera, el campo apareceria con cada carga
+completa y desapareceria con la siguiente sincronizacion del worker. Los precios
+del buscador si quedan con descuento, porque los dos lados los copian de Mongo.
 
 **Las caracteristicas** van en `caracteristicas_adicionales`, en la raiz del
 producto y en cada variante, como un arreglo de `{ nombre, valor, unidad }`. Tres
@@ -460,8 +487,11 @@ categoria estaba el producto ese dia.
 ### El precio y la disponibilidad se preguntan del otro lado
 
 ```sql
--- a como estaba esta oferta el 3 de marzo
-SELECT precio FROM precio_historial
+-- a como estaba esta oferta el 3 de marzo: el de lista, el descuento de ese
+-- dia (NULL si no tenia) y lo que de verdad se cobraba
+SELECT precio, porcentaje_descuento,
+       ROUND(precio * (1 - COALESCE(porcentaje_descuento, 0) / 100), 2) AS precio_final
+FROM precio_historial
 WHERE id_oferta = 42 AND fecha_creacion <= '2026-03-03'
 ORDER BY fecha_creacion DESC LIMIT 1;
 

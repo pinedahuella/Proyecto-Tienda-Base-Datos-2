@@ -56,10 +56,10 @@ documento entero.
 
 ```
 1  candado         SET carrito:lock:<usuario> 1 EX 30 NX
-2  verCarrito      lee Redis + Mongo (nombres) + PostgreSQL (precio y stock)
+2  verCarritoEnVivo  lee Redis + Mongo (nombres) + PostgreSQL (precio y stock)
 3  leerLineasConReserva   lee los tickets vivos ANTES de tocar nada
 4  bloqueantes     lineas que ya no se pueden comprar
-5  precio          compara lineas_precio_visto contra el precio de hoy
+5  precio          compara la foto de Redis contra el precio de hoy
 6  COMPRA          SELECT comprar_carrito(...)      <-- la unica transaccion
 7a fallo           devolverReservas       (compensacion)
 7b exito           confirmarReservas      (best-effort)
@@ -127,7 +127,7 @@ pide el enunciado.
 | # | Que puede pasar | Que se hace | Categoria |
 |---|---|---|---|
 | 1 | Doble clic en Pagar, dos peticiones identicas | candado en Redis, 30 s, por cuenta | reintento idempotente |
-| 2 | El precio cambio entre ver y pagar | se compara `lineas_precio_visto` y se rechaza pidiendo confirmacion | rechazo explicito |
+| 2 | El precio cambio entre ver y pagar | se compara la foto guardada en Redis y se rechaza pidiendo confirmacion | rechazo explicito |
 | 3 | Se acabo el stock entre ver y pagar | `comprar_pedido` lanza excepcion, no se escribe nada | todo o nada |
 | 4 | Falla la compra con reservas tomadas | `devolverReservas` las suelta ya, sin esperar el TTL | **compensacion** |
 | 5 | La compra sale bien y falla Redis al confirmar | se sigue, la venta esta cerrada | ventana aceptada |
@@ -179,11 +179,15 @@ PostgreSQL.
 El precio **no se congela al agregar al carrito**, se congela al pagar. Es una
 decision con costo conocido y esta en `docs/PENDIENTES.md`, punto 1.
 
-Lo que si se hace es no cobrarlo en silencio. El cliente manda con el checkout
-el precio que tenia en pantalla, por linea (`lineas_precio_visto`,
-`migrations/013_precio_del_carrito.sql`). El backend lo compara con el precio de
-hoy **dentro de la misma peticion que cobra**, y si alguno cambio contesta sin
-cobrar. La compra pasa solo si se reenvia con `confirmar_cambios: true`.
+Lo que si se hace es no cobrarlo en silencio. Desde el 2026-09-23 cada linea
+del HASH `mesh:carrito:<id>` es una foto en JSON (`id_oferta -> {cantidad,
+precio, porcentaje_descuento, nombre, imagen, vendedor...}`), y `GET /carrito`
+solo lee esa foto. El precio de la foto ya lleva el descuento de la oferta, si
+tenia uno. Al pagar, el backend compara la foto con el precio de hoy **dentro
+de la misma peticion que cobra**, y si alguno cambio contesta `comprado:false`
+con `avisos`, sin cobrar. El cliente ya no manda precios (`lineas_precio_visto`
+se quito). La compra pasa solo si se reenvia con `confirmar_cambios: true`, y
+entonces se cobra el precio final de hoy.
 
 O sea que la garantia no es "pagaras lo que viste", es **"no se te cobra un
 precio distinto del que viste sin que lo aceptes"**. Son cosas distintas y la

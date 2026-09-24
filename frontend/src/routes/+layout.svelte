@@ -170,6 +170,15 @@
 		--rojo: #b3352c;
 		--rojo-cl: #fbeceb;
 
+		/* La etiqueta de descuento ("Producto con descuento", "-25%"). Verde y
+		   no rojo: el rojo es de lo que no se puede comprar, y un descuento es
+		   una buena noticia. Va aqui y no en cada componente porque la misma
+		   etiqueta sale en el catalogo, la ficha, el carrito, el panel del
+		   vendedor y los pedidos, y cinco verdes distintos serian cinco cosas. */
+		--descuento-tinta: #1d6b3a;
+		--descuento-fondo: #e3f4e8;
+		--descuento-linea: #a8d9b8;
+
 		/* El texto que va ENCIMA del indigo. En claro el indigo es oscuro y
 		   lleva letra blanca; en oscuro el indigo se aclara para verse sobre
 		   el fondo, asi que la letra tiene que oscurecerse o el boton
@@ -260,6 +269,10 @@
 
 		--rojo: #e08b81;
 		--rojo-cl: #2e1b1a;
+
+		--descuento-tinta: #8fd6a6;
+		--descuento-fondo: #12301f;
+		--descuento-linea: #25583a;
 
 		/* Se invierten: aqui el indigo y el rojo son claros. */
 		--sobre-indigo: #10142a;

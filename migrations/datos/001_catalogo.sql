@@ -4580,10 +4580,56 @@ END
 $anillo_resenas$;
 
 -- ============================================================
+-- Descuentos: 13 ofertas de la tienda
+-- ============================================================
+-- oferta.precio NO se toca: sigue siendo el de lista, y el precio con
+-- descuento se calcula en cada consulta (ver 020_descuentos_oferta.sql).
+-- Cada descuento deja su fila en precio_historial con el mismo precio y el
+-- %, que es lo que haria el trigger si estuviera encendido. Se escribe a
+-- mano por lo mismo que el resto del historial: la fecha.
+--
+-- La fecha va despues de cualquier otro precio del conjunto (el ultimo
+-- cambio cae en agosto), asi que la fila del descuento es la vigente.
+--
+-- La guardia: solo se pone donde no hay ninguno. Si el vendedor ya puso o
+-- cambio el suyo, se respeta el de el.
+
+WITH puestos AS (
+    UPDATE oferta o
+    SET porcentaje_descuento = v.porcentaje
+    FROM (VALUES
+        ('tienda@mesh.com', 'Laptop Vireo Air 12', '8 GB / 128 GB', 10.00),
+        ('tienda@mesh.com', 'Audifonos Sereno ANC', 'Negro', 15.00),
+        ('tienda@mesh.com', 'Monitor Panorama 34', '100 Hz', 20.00),
+        ('tienda@mesh.com', 'Hervidor electrico Vapor 1.7', 'Acero', 25.00),
+        ('tienda@mesh.com', 'Silla de comedor Vara', 'Natural', 30.00),
+        ('tienda@mesh.com', 'Camisa de lino manga larga', 'M azul', 10.00),
+        ('tienda@mesh.com', 'Pantalon cargo Vereda', '34 arena', 15.00),
+        ('tienda@mesh.com', 'Sandalia de cuero Litoral', '41 cafe', 20.00),
+        ('tienda@mesh.com', 'Bomba de piso Piston', 'Estandar', 25.00),
+        ('tienda@mesh.com', 'Pesa rusa Yunque', '12 kg', 30.00),
+        ('tienda@mesh.com', 'Antologia del ruido', 'Pasta blanda', 10.00),
+        ('tienda@mesh.com', 'Crema hidratante nocturna Alba', '50 ml', 15.00),
+        ('tienda@mesh.com', 'Set descubrimiento Nocturno', 'Coleccion noche', 20.00)
+    ) AS v(correo, producto, variante, porcentaje)
+    JOIN usuarios            u  ON u.correo_electronico = v.correo
+    JOIN productos           p  ON p.nombre = v.producto
+    JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_variante = v.variante
+    WHERE o.id_producto_mongo = p.id_producto
+      AND o.id_producto_variante_mongo = pv.id_producto_variante
+      AND o.id_usuario = u.id_usuario
+      AND o.porcentaje_descuento IS NULL
+    RETURNING o.id_oferta, o.precio, o.porcentaje_descuento, o.id_usuario
+)
+INSERT INTO precio_historial (id_oferta, precio, porcentaje_descuento, id_usuario_modifico, fecha_creacion)
+SELECT id_oferta, precio, porcentaje_descuento, id_usuario, '2026-09-01 09:00:00-06'::timestamptz
+FROM puestos;
+
+-- ============================================================
 -- El trigger vuelve, y el conjunto se comprueba a si mismo
 -- ============================================================
 -- Un conjunto de datos que no se verifica es un conjunto de datos que
--- miente en silencio. Estas doce comprobaciones fallan la migracion entera
+-- miente en silencio. Estas trece comprobaciones fallan la migracion entera
 -- si algo no cuadra, en vez de dejar la base torcida y que alguien lo
 -- descubra tres semanas despues.
 
@@ -4840,7 +4886,25 @@ BEGIN
         RAISE EXCEPTION 'No quedo ni un circulo cerrado de calificaciones: el panel de fraude vuelve a salir vacio';
     END IF;
 
-    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones, direcciones, las compras que respaldan las resenas, la parte social y el circulo del anillo cuadran';
+    -- 13. El descuento de cada oferta es el de la ultima fila de su
+    --     historial, igual que el precio en la 2. Si la fila del descuento
+    --     no quedara como la vigente, comprar_pedido() cobraria el precio
+    --     de lista mientras la ficha ensena el rebajado. IS DISTINCT FROM
+    --     y no <>, porque "sin descuento" es NULL de los dos lados.
+    SELECT count(*) INTO v_mal
+    FROM oferta o
+    JOIN LATERAL (
+        SELECT porcentaje_descuento FROM precio_historial ph
+        WHERE ph.id_oferta = o.id_oferta
+        ORDER BY ph.fecha_creacion DESC, ph.id_precio_historial DESC LIMIT 1
+    ) ultimo ON true
+    WHERE o.porcentaje_descuento IS DISTINCT FROM ultimo.porcentaje_descuento;
+
+    IF v_mal > 0 THEN
+        RAISE EXCEPTION '% ofertas tienen un descuento distinto al de la ultima fila de su historial', v_mal;
+    END IF;
+
+    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, descuentos, ofertas de la tienda, aprobaciones, direcciones, las compras que respaldan las resenas, la parte social y el circulo del anillo cuadran';
 END
 $verificar$;
 

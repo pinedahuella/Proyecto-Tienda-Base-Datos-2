@@ -2,6 +2,7 @@
 	import { untrack } from 'svelte';
 	import { conJson, pedir, type RespuestaApi } from './api';
 	import Autocompletar from './Autocompletar.svelte';
+	import { textoPorcentaje, tieneDescuento } from './descuento';
 	import {
 		cargarPaises,
 		ciudadesDeDepartamento,
@@ -1013,35 +1014,20 @@
 
 		cobrando = true;
 
-		// EL PRECIO QUE SE VIO VIAJA CON LA COMPRA, y esto cambio hace poco.
+		// EL PRECIO QUE SE VIO YA NO VIAJA CON LA COMPRA (cambio del
+		// 2026-09-23, commit e7f1e02 del backend).
 		//
-		// El carrito de Redis guarda `id_oferta -> cantidad` y nada mas: no
-		// guarda el precio, a proposito, porque el precio no es del carrito,
-		// es de la oferta. La consecuencia era un cobro incorrecto silencioso:
-		// esta pantalla ensenaba un total, la persona decidia con ese numero, y
-		// si el vendedor lo movia antes del clic se le cobraba otro sin que
-		// nadie se enterara.
+		// Antes el carrito de Redis guardaba solo `id_oferta -> cantidad`, y
+		// para no cobrar un precio distinto del que se enseno, esta pantalla
+		// mandaba de vuelta `lineas_precio_visto`. Ahora cada linea del HASH
+		// guarda una FOTO con el precio que enseno `GET /carrito` (ya con el
+		// descuento, si la oferta tenia), asi que el backend compara esa foto
+		// contra el precio de hoy el solo, dentro de la misma peticion que
+		// cobra. Aqui no hay nada que acordarse.
 		//
-		// La solucion NO fue guardar el precio en Redis. Es que se acuerde
-		// quien lo enseno: el frontend manda de vuelta lo que puso en pantalla,
-		// y el backend compara contra el precio de hoy DENTRO de la misma
-		// peticion que cobra. Ahi esta la gracia, y es lo que una comprobacion
-		// hecha aqui antes de llamar no puede dar: entre mirar y cobrar no
-		// queda ninguna ventana, porque son el mismo viaje.
-		//
-		// Si algo no cuadra, el backend no cobra nada -- ni Redis, ni Postgres,
-		// ni Mongo -- y contesta `comprado: false` con los `avisos`. La segunda
-		// pulsacion manda `confirmar_cambios: true` y acepta el precio de hoy.
-		//
-		// `confirmar_cambios` SI viaja ahora en modo carrito. Antes no, y aqui
-		// habia escrito que no era un olvido sino que no habia con que
-		// comparar. Eso dejo de ser cierto en cuanto existio
-		// `lineas_precio_visto`.
-		//
-		// El precio se manda TAL CUAL vino, como texto. Son decimales de
-		// PostgreSQL y el backend los compara como tales: pasarlos por Number
-		// aqui podria convertir 4269.00 en 4269 y hacer que dos precios iguales
-		// parezcan distintos.
+		// Si algo no cuadra, el backend no cobra nada y contesta
+		// `comprado: false` con los `avisos`. La segunda pulsacion manda
+		// `confirmar_cambios: true` y acepta el precio de hoy.
 		const r =
 			modo === 'carrito'
 				? await pedir<ResultadoCompra>(
@@ -1050,10 +1036,6 @@
 							id_direccion: idElegida,
 							metodo_pago: cuerpo.metodo_pago,
 							...(cuerpo.tarjeta ? { tarjeta: cuerpo.tarjeta } : {}),
-							lineas_precio_visto: lineas.map((l) => ({
-								id_oferta: Number(l.id_oferta),
-								precio_visto: l.precio_unitario
-							})),
 							...(confirmarCambios ? { confirmar_cambios: true } : {})
 						})
 					)
@@ -1093,9 +1075,9 @@
 			//
 			// Los nombres distintos no son un descuido de nadie: describen cosas
 			// distintas. En el pedido el precio esta CONGELADO y el aviso dice
-			// "esto vale otra cosa hoy, pero te cobro el tuyo". En el carrito no
-			// hay nada congelado: el aviso dice "esto ya no vale lo que viste, y
-			// si sigues te cobro el de hoy". Son avisos opuestos.
+			// "esto vale otra cosa hoy, pero te cobro el tuyo". En el carrito la
+			// foto de Redis no congela nada: el aviso dice "esto ya no vale lo
+			// que viste, y si sigues te cobro el de hoy". Son avisos opuestos.
 			//
 			// Se traducen al tipo del pedido porque es el que pinta la tabla, y
 			// la tabla ya distingue los dos casos por el modo. Meter aqui un
@@ -1401,6 +1383,9 @@
 									</span>
 									<span class="menor">
 										{l.cantidad} × {quetzales(Number(l.precio_unitario))}
+										{#if tieneDescuento(l.porcentaje_descuento_aplicado)}
+											<span class="descuento">-{textoPorcentaje(l.porcentaje_descuento_aplicado)}</span>
+										{/if}
 									</span>
 								</span>
 								<strong class="importe">{quetzales(subtotal(l))}</strong>
@@ -1416,21 +1401,19 @@
 					     y saberla antes evita la sorpresa de ver otro precio en la
 					     ficha del producto.
 
-					     Y el texto DEPENDE DEL MODO, porque hoy la regla no es la
-					     misma en los dos. En modo pedido el precio se congelo de
-					     verdad al agregar la linea, que es lo que decia esta nota.
-					     En modo carrito NO: el carrito de Redis guarda intencion
-					     (`id_oferta -> cantidad`) y el precio se resuelve al pagar,
-					     asi que prometer aqui un precio congelado es prometer algo
-					     que el sistema todavia no hace -- y sobre dinero. Es el
-					     pendiente #1: la migracion 013 ya deja congelarlo, pero
-					     falta que el carrito guarde el `id_precio_historial`.
-					     Cuando eso exista, las dos ramas dicen lo mismo y esto se
-					     vuelve una sola linea otra vez. -->
+					     Y el texto DEPENDE DEL MODO, porque la regla no es la misma
+					     en los dos. En modo pedido el precio se congelo de verdad al
+					     agregar la linea. En modo carrito, Redis guarda una foto de
+					     cada linea (`id_oferta -> JSON` con precio y descuento), y el
+					     total de arriba sale de esa foto. Al pagar, el backend la
+					     compara con el precio de hoy: si cambio, responde
+					     `comprado:false` con avisos y solo cobra el nuevo cuando la
+					     persona confirma. Por eso aqui no se promete el precio de
+					     ahora sino el aviso. Es la misma frase que en CarritoRedis. -->
 					{#if modo === 'carrito'}
 						<p class="menor nota">
-							Se cobra el precio de <strong>ahora</strong>. Si el vendedor lo cambio
-							mientras el carrito esperaba, el total de arriba ya es el nuevo.
+							Ves el precio de cuando agregaste cada producto. Si cambia antes de
+							pagar, te avisamos antes de cobrar.
 						</p>
 					{:else}
 						<p class="menor nota">
@@ -1562,16 +1545,15 @@
 						En modo pedido el precio SI esta congelado: se cobra el que se
 						guardo al agregar la linea, y el de hoy es solo informacion.
 
-						En modo carrito NO hay nada congelado todavia: se cobra el de
-						HOY, que es justo el problema que el pendiente 1 arregla. Aqui
-						la pantalla enseno un numero y el cobro va a ser otro, asi que
-						el aviso tiene que decir cual de los dos manda.
+						En modo carrito lo guardado es solo una FOTO del precio que se
+						vio al agregar: no obliga a nadie, y si sigues se cobra el de
+						HOY. Aqui la pantalla enseno un numero y el cobro va a ser
+						otro, asi que el aviso tiene que decir cual de los dos manda.
 					-->
 					{#if modo === 'carrito'}
 						<p class="menor">
-							Todavia no se compro nada. El precio cambio desde que abriste esta
-							pantalla, y en el carrito NO se congela: si sigues, se te cobra el
-							precio de hoy.
+							Todavia no se compro nada. El precio cambio desde que lo agregaste: si
+							sigues, se te cobra el precio de hoy.
 						</p>
 					{:else}
 						<p class="menor">
@@ -1697,6 +1679,18 @@
 {/if}
 
 <style>
+	/* El % de descuento de una linea. Colores del layout. */
+	.descuento {
+		margin-left: 4px;
+		padding: 0.1rem 0.4rem;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		border-radius: 999px;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
+	}
+
 	.capa {
 		position: fixed;
 		inset: 0;

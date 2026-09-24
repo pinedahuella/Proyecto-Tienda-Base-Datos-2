@@ -3,6 +3,7 @@
 	import { fade, fly } from 'svelte/transition';
 	import { conJson, mensajeUtil, pedir } from './api';
 	import type { LineaPedido } from './pedido';
+	import { textoPorcentaje, tieneDescuento } from './descuento';
 
 	/**
 	 * El carrito de la Entrega 2, sobre Redis.
@@ -22,14 +23,18 @@
 	 *
 	 * LO QUE HAY QUE ENTENDER DEL MODELO, QUE NO ES OBVIO
 	 * ---------------------------------------------------------------
-	 * En Redis el carrito es SOLO un mapa `id_oferta -> cantidad`. La
-	 * intencion, nada mas. El nombre, el precio, el stock y la foto NO estan
-	 * ahi: viven en `oferta` (PostgreSQL) y en el catalogo (MongoDB), cambian
-	 * solos, y una copia en Redis se desactualizaria en segundos.
+	 * En Redis cada linea es `id_oferta -> linea en JSON`: una FOTO con la
+	 * cantidad, el nombre, la imagen, el vendedor y el precio de cuando se
+	 * agrego o se cambio la cantidad por ultima vez. `GET /carrito` lee solo
+	 * Redis (cambio del backend del 2026-09-23, commit e7f1e02).
 	 *
 	 * Consecuencia directa, y es la que hay que decirle a quien mira: el precio
-	 * que se ve aqui es el de AHORA, no el de cuando se agrego. Si el vendedor
-	 * lo sube mientras el carrito espera, sube aqui.
+	 * que se ve aqui es el de la foto. Si el vendedor lo mueve mientras el
+	 * carrito espera, no cambia aqui: el backend lo compara al pagar y, si no
+	 * cuadra, no cobra y avisa (ver Checkout.svelte).
+	 *
+	 * `precio` ya viene con el descuento aplicado. `porcentaje_descuento` es
+	 * solo para la etiqueta: aqui no se recalcula nada con el.
 	 *
 	 *
 	 * LAS RUTAS
@@ -72,7 +77,10 @@
 		nombre_producto: string;
 		nombre_variante: string;
 		imagen: string | null;
+		/** Ya con el descuento aplicado, si la oferta tenia uno. */
 		precio: string;
+		/** "25.00" o null. Solo para la etiqueta: `precio` ya lo trae aplicado. */
+		porcentaje_descuento: string | null;
 		subtotal: string;
 		vendedor: { usuario: string; nombre: string };
 		stock_disponible: number;
@@ -284,6 +292,7 @@
 			id_oferta: String(l.id_oferta),
 			id_usuario_vendedor: '',
 			precio_unitario: l.precio,
+			porcentaje_descuento_aplicado: l.porcentaje_descuento,
 			cantidad: l.cantidad
 		}));
 	}
@@ -335,11 +344,11 @@
 		y el reloj vuelve a empezar cada vez que lo abres o lo cambias.
 	</p>
 
-	<!-- El precio no se congela al agregar. Decirlo aqui y no en el checkout:
+	<!-- El precio es el de cuando agregaste. Decirlo aqui y no en el checkout:
 	     es donde la persona mira los numeros y decide. -->
 	<p class="nota-precio">
-		Los precios son los de ahora, no los de cuando agregaste: el carrito guarda lo que
-		quieres, no cuanto costaba.
+		Ves el precio de cuando agregaste cada producto. Si cambia antes de pagar, te avisamos
+		antes de cobrar.
 	</p>
 
 	{#if cargando}
@@ -460,6 +469,9 @@
 					<div class="precios">
 						<span class="subtotal">{quetzales(l.subtotal)}</span>
 						<span class="gris unitario">{quetzales(l.precio)} c/u</span>
+						{#if tieneDescuento(l.porcentaje_descuento)}
+							<span class="descuento">-{textoPorcentaje(l.porcentaje_descuento)}</span>
+						{/if}
 						<button
 							type="button"
 							class="quitar"
@@ -742,6 +754,19 @@
 		color: #7c3a00;
 		background: #ffe8cc;
 		border: 1px solid #ffc98a;
+	}
+
+	/* El % de descuento de la linea. Los colores salen del layout, igual en
+	   todas las pantallas que pintan un descuento. */
+	.descuento {
+		font-size: var(--f-xs);
+		font-weight: 600;
+		line-height: 1.2;
+		padding: 0.15rem 0.45rem;
+		border-radius: 999px;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
 	}
 
 	.motivo {

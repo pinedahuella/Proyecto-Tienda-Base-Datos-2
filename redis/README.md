@@ -31,6 +31,18 @@ Todas las claves que las pruebas crean empiezan con `prueba:` y se borran al
 terminar. Se comprueba con un `--scan` al final, porque "ya limpie" sin medirlo
 es como no haberlo dicho.
 
+**Ojo con cual carrito se mide.** `carrito.lua` y `prueba_carrito.sh` son el
+diseno de esta carpeta, y el backend NO los usa. El carrito que corre de verdad
+tiene otro formato (ver "El carrito que corre en el backend", mas abajo) y se
+mide por HTTP con los arneses de `pruebas/`:
+
+```
+bash pruebas/carrito.sh               # las 4 rutas, el TTL y la foto de cada linea
+bash pruebas/carrito_vencimiento.sh   # que vence de verdad, unos 40 segundos
+bash pruebas/descuentos.sh            # el precio con descuento en la foto y en el cobro (compra de verdad)
+bash pruebas/oferta_limitada.sh       # la venta relampago con cuentas reales
+```
+
 
 ---
 
@@ -197,15 +209,63 @@ La segunda hace falta porque la primera sola no prueba nada: un
 
 ### Lo que sigue faltando, y vive en `backend/`
 
-Que el carrito de Redis mande ese id al comprar. Hoy el hash es
-`id_oferta -> cantidad` y el id no llega a `comprar_carrito()`, asi que el
-precio se sigue congelando en el momento de pagar.
+Que el carrito de Redis mande ese id al comprar. El id de `precio_historial`
+sigue sin llegar a `comprar_carrito()`, asi que el precio se congela en el
+momento de pagar.
 
-Mientras tanto el backend cubre el hueco por otro camino, y esta bien que sea
-otro: `POST /carrito/comprar` acepta `lineas_precio_visto` con el precio que el
-frontend enseno, compara contra el de hoy DENTRO de la misma peticion que cobra,
-y si no cuadra no cobra nada y contesta con los avisos. Eso no congela el
-precio, pero cierra la ventana entre ver y pagar, que era el dano real.
+El backend cubre el hueco por otro camino, y esta bien que sea otro. Desde el
+2026-09-23 cada linea del carrito guarda la foto del precio que se le enseno a
+la persona (ver la seccion siguiente), y `POST /carrito/comprar` la compara
+contra el precio de hoy DENTRO de la misma peticion que cobra. Si no cuadra no
+cobra nada y contesta `comprado: false` con los avisos; reenviar con
+`confirmar_cambios: true` cobra el precio de hoy. Eso no congela el precio, pero
+cierra la ventana entre ver y pagar, que era el dano real. Antes de esa fecha
+el precio visto lo tenia que mandar el frontend en `lineas_precio_visto`; ese
+campo ya no existe.
+
+## El carrito que corre en el backend
+
+**Al dia el 2026-09-23.** Es el formato que escribe
+`backend/src/services/carrito/carrito.service.ts`, no el de `carrito.lua`:
+
+```
+mesh:carrito:<id_usuario>        HASH, TTL 86400 s renovado en cada toque
+    <id_oferta>     la linea en JSON: la cantidad y una FOTO de la oferta
+    t:<id_oferta>   el ticket de la reserva, solo si la oferta esta en venta relampago
+```
+
+Una linea guardada se ve asi:
+
+```
+{"cantidad":1,"id_producto":1,"id_producto_variante":1,
+ "nombre_producto":"Laptop Nimbo 13","nombre_variante":"variante 1",
+ "imagen":"https://...","precio":"3626.10","porcentaje_descuento":"10.00",
+ "vendedor_usuario":"ventas_sur","vendedor_nombre":"Lucia Morales",
+ "stock_disponible":14,"disponible":true,"motivo":null}
+```
+
+- **`PUT /carrito/lineas/:idOferta` toma la foto.** Consulta PostgreSQL y
+  MongoDB una vez, solo para esa linea, y la guarda entera en el campo. Es la
+  unica escritura del carrito que sale de Redis.
+- **`GET /carrito` solo lee Redis.** Devuelve la foto tal cual, aunque el
+  vendedor haya cambiado el precio despues, y funciona con PostgreSQL y MongoDB
+  caidos. La unica comprobacion en vivo es la reserva de una venta relampago,
+  que tambien vive en Redis.
+- **`precio` ya lleva el descuento.** Es el precio final de la oferta al tomar
+  la foto, `ROUND(precio * (1 - porcentaje_descuento / 100), 2)`, y
+  `porcentaje_descuento` va aparte solo para ensenar la etiqueta. `subtotal` y
+  `total` se calculan con ese precio.
+- **`POST /carrito/comprar` es la excepcion.** Vuelve a consultar en vivo,
+  compara el `precio` de la foto contra el precio final de hoy y, si no cuadra,
+  avisa sin cobrar (ver arriba).
+- **Una linea que no parsea como JSON se ignora.** Es basura de un formato
+  viejo del carrito (`id_oferta -> cantidad`, hasta el 2026-09-23) y no tumba el
+  `GET`. Un carrito viejo en ese formato se ve vacio y vence solo.
+
+Quien escriba a mano en este HASH tiene que respetar el formato. Los arneses de
+`pruebas/` que guardan el carrito de una cuenta y lo devuelven al final lo
+hacen por la API (`PUT` por linea, leyendo la cantidad del JSON), o copiando
+cada campo tal cual.
 
 ## De regalo: el carrito de invitado
 
@@ -417,15 +477,30 @@ escribe y como se comprueba.
 ## La clave
 
 ```
-mesh:productos:mas_vendidos       ZSET
+mesh:productos:mas_vendidos           ZSET
     miembro   el id de producto
     puntaje   las unidades vendidas en la ventana
+
+mesh:productos:mas_vendidos:detalle   HASH   (desde el 2026-09-23)
+    <id_producto>   el documento completo del producto, en JSON
 ```
 
-Redis guarda SOLO el id y el orden. El nombre, el precio y la foto no estan
-aqui: `GET /productos/mas-vendidos` lee los primeros 8 con `ZREVRANGE` y trae el
-documento de Mongo con un `$in`, que no respeta el orden y por eso el backend lo
-reordena. Es la regla de todo el proyecto, un dato vive en un solo sitio.
+**Cambio del 2026-09-23: el detalle tambien vive en Redis.** Antes Redis
+guardaba solo el id y el orden, y `GET /productos/mas-vendidos` traia el
+documento de Mongo con un `$in` en cada visita. Un cache que para contestar
+tiene que preguntarle a otra base no esta cacheando nada. Ahora el worker, en la
+misma corrida de cada 10 minutos, consulta Mongo UNA vez por todos los ids del
+ranking y guarda el documento de cada uno en el HASH. La ruta lee los primeros
+8 del ZSET con `ZREVRANGE`, pide su detalle con `HMGET` (que si respeta el orden
+de los ids pedidos) y salta el id que no tenga detalle. **No toca ni MongoDB ni
+PostgreSQL**, y la forma de la respuesta no cambio: el mismo documento de
+siempre, en un arreglo de mas a menos vendido.
+
+El precio de ese detalle es el de la ultima corrida del worker. `precio_desde` y
+`precio_tienda` ya salen con el descuento de la oferta, porque asi los guarda
+Mongo desde el mismo dia, pero un descuento o un precio nuevo tarda hasta 10
+minutos en verse en el estante. Solo se cachean productos `activo`; uno que se
+desactiva puede seguir en el estante hasta la corrida siguiente.
 
 ## Quien la escribe, y como
 
@@ -439,8 +514,10 @@ ClickHouse (`sum(cantidad)` por producto, tope 20, **solo filas con `lote = 'rea
 ```
 
 El reemplazo es atomico: se arma en `mesh:productos:mas_vendidos:tmp` y se
-publica con `RENAME`, asi que nadie lee un ranking a medio construir. **No lleva
-`EXPIRE`**, a proposito. Un ranking viejo que se muestra es mejor que un
+publica con `RENAME`, asi que nadie lee un ranking a medio construir. El HASH de
+detalle hace lo mismo con `mesh:productos:mas_vendidos:detalle:tmp`; si ningun
+producto del ranking esta `activo`, se borra en vez de renombrar una clave
+vacia. **Ninguna de las dos lleva `EXPIRE`**, a proposito. Un ranking viejo que se muestra es mejor que un
 estante vacio, y si tuviera vencimiento, un fin de semana sin compras lo
 vaciaria.
 
@@ -474,8 +551,14 @@ bash redis/mas_vendidos.sh --reconstruir    # lo recalcula desde ClickHouse, ya
 `--reconstruir` ejecuta la misma consulta y el mismo `RENAME` que el worker, para
 no esperar los 10 minutos en una demo. **No lo reemplaza**: en produccion el
 unico camino es el worker. Como son dos copias de una misma regla, el script lee
-del backend el nombre de la clave y el tope, y se niega a escribir si ya no
-coinciden con los suyos, o si el worker dejo de filtrar por `lote = 'real'`.
+del backend el nombre de las dos claves y el tope, y se niega a escribir si ya
+no coinciden con los suyos, o si el worker dejo de filtrar por `lote = 'real'`.
+
+**`--reconstruir` solo rehace el ZSET, no el detalle.** El HASH es una copia del
+documento de Mongo tal como lo serializa el backend, y el script no tiene como
+producir el mismo texto. Si el ranking reconstruido trae un producto que el
+worker no cacheo en su ultima corrida, la ruta lo salta hasta la corrida
+siguiente. La vista del script marca esos productos con "sin detalle cacheado".
 
 Medido el 2026-09-18 con el backend y las bases vivas, con filas sembradas en
 `compra_producto` (lote `prueba-mas-vendidos`, borradas al terminar):

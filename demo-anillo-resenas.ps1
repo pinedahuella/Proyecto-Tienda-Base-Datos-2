@@ -192,7 +192,7 @@ for ($i = 0; $i -lt $Cuentas; $i++) {
         id_direccion = $idDireccion; metodo_pago = 'efectivo contra entrega'
     } $comprador.Sesion @(409)
     if ($compra -and $compra.payload.comprado -eq $false) {
-        Av "  $($comprador.Correo) -> $($vendedor.Correo): el carrito ya no tenia nada que comprar (compra anterior)"
+        Av "  $($comprador.Correo) -> $($vendedor.Correo): el precio cambio entre agregar y pagar, no compro"
     } elseif ($compra) {
         Ok "  $($comprador.Correo) le compro $($vendedor.Producto.nombre) a $($vendedor.Correo)"
     } else {

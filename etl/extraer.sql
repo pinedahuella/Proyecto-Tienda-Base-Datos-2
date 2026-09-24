@@ -20,7 +20,8 @@
 -- El producto ya NO trae vendedor ni precio ni stock, porque dejaron de ser
 -- suyos: son de cada oferta, y las ofertas viven en su propia coleccion.
 --
--- Lo unico que se queda embebido de las ofertas son cinco numeros calculados:
+-- Lo unico que se queda embebido de las ofertas son cinco numeros calculados
+-- y una bandera:
 --
 --   precio_tienda   el precio de la tienda, que es el que se ensena en la
 --                   pagina. Lo pidio el profesor: el primero siempre es el de
@@ -32,10 +33,28 @@
 --   stock_tienda    unidades que tiene la tienda
 --   stock_total     unidades entre TODOS los vendedores activos
 --   total_ofertas   cuantos vendedores distintos la tienen activa
+--   hay_descuento   true si alguna oferta activa, de cualquier vendedor, tiene
+--                   un descuento puesto. Es lo que pinta la etiqueta de
+--                   "con descuento" en la tarjeta sin traer las ofertas.
+--
+-- LOS DOS PRECIOS YA VAN CON EL DESCUENTO APLICADO. oferta.precio es el precio
+-- de LISTA y oferta.porcentaje_descuento el % (NULL si no hay). El precio que
+-- se paga no se guarda en ningun lado: se calcula en cada consulta con
+--
+--   ROUND(o.precio * (1 - COALESCE(o.porcentaje_descuento, 0) / 100), 2)
+--
+-- que es LA MISMA expresion que arma el backend en
+-- backend/src/helpers/precio-descuento.ts (expresionPrecioFinal). Tiene que
+-- ser la misma letra por letra: el backend recalcula estos campos en cada
+-- venta (ProductosService.recalcularCamposCalculados) y este archivo en cada
+-- arranque, y si las dos cuentas difirieran en un centavo el precio de la
+-- tarjeta cambiaria segun quien escribio el documento la ultima vez. Sin
+-- descuento da el precio de lista tal cual, con sus dos decimales.
 --
 -- Los tres primeros van tambien dentro de cada variante. En el padre son
 -- SUMAS de sus variantes: la tarjeta del catalogo ensena un producto, no una
--- variante.
+-- variante. hay_descuento tambien va en cada variante, y el del padre es true
+-- si alguna de sus variantes lo tiene.
 --
 -- Se embeben porque la LISTA del catalogo los necesita en cada tarjeta, y sin
 -- ellos habria que consultar la coleccion de ofertas una vez por producto de
@@ -43,9 +62,9 @@
 -- obligaria a reescribir el documento entero del producto cada vez que alguien
 -- compra. Ver el apartado de embeber o referenciar en docs/base-de-datos.md.
 --
--- Son una COPIA y hay que recalcularlas: si un vendedor cambia su precio o se
--- queda sin unidades, los cinco quedan viejos hasta la proxima corrida del ETL
--- o hasta que el backend los actualice.
+-- Son una COPIA y hay que recalcularlas: si un vendedor cambia su precio, pone
+-- o quita un descuento o se queda sin unidades, los seis quedan viejos hasta
+-- la proxima corrida del ETL o hasta que el backend los actualice.
 
 -- Las fechas salen con la zona del cliente. Fijandola aqui, el mismo producto
 -- extraido desde dos maquinas da el mismo texto, y las comparaciones que hace
@@ -89,9 +108,10 @@ SELECT jsonb_build_object(
     ),
 
     -- El precio de la pagina: el de la tienda. Si el producto tiene varias
-    -- variantes, el menor de los suyos, que es el que va en la tarjeta.
+    -- variantes, el menor de los suyos, que es el que va en la tarjeta. Con el
+    -- descuento de la tienda aplicado, si tiene uno.
     'precio_tienda', (
-        SELECT min(o.precio)::text
+        SELECT min(ROUND(o.precio * (1 - COALESCE(o.porcentaje_descuento, 0) / 100), 2))::text
         FROM oferta o
         JOIN productos_variantes pv2 ON pv2.id_producto        = o.id_producto_mongo
                                     AND pv2.id_producto_variante = o.id_producto_variante_mongo
@@ -113,9 +133,13 @@ SELECT jsonb_build_object(
     -- stock_tienda. Cada filtro contesta UNA pregunta y se combinan; mezclarlos
     -- deja al buscador escondiendo resultados por un motivo que no se ve.
     --
+    -- El minimo se toma DESPUES de aplicar el descuento de cada oferta: la mas
+    -- barata es la que de verdad se paga menos, no la de precio de lista mas
+    -- bajo.
+    --
     -- Sale NULL solo cuando el producto no tiene ninguna oferta activa.
     'precio_desde', (
-        SELECT min(o.precio)::text
+        SELECT min(ROUND(o.precio * (1 - COALESCE(o.porcentaje_descuento, 0) / 100), 2))::text
         FROM oferta o
         WHERE o.id_producto_mongo = p.id_producto
           AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
@@ -157,6 +181,23 @@ SELECT jsonb_build_object(
         JOIN productos_variantes pv2 ON pv2.id_producto        = o.id_producto_mongo
                                     AND pv2.id_producto_variante = o.id_producto_variante_mongo
         WHERE pv2.id_producto = p.id_producto
+          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+    ),
+
+    -- Si alguna oferta activa del producto tiene descuento. Mismo bool_or que
+    -- el backend, con la misma condicion (activa y con porcentaje puesto), y
+    -- sin mirar el stock ni quien vende: una oferta de otro vendedor con
+    -- descuento tambien cuenta. En el backend el de la raiz es "alguna
+    -- variante lo tiene"; aqui se pregunta de una sobre todas las ofertas del
+    -- producto, que da lo mismo.
+    --
+    -- bool_or sobre cero filas da NULL, no false. El coalesce lo deja en
+    -- false: un producto sin ofertas no tiene descuento, y el campo es un
+    -- booleano, no uno de tres valores.
+    'hay_descuento', (
+        SELECT coalesce(bool_or(o.porcentaje_descuento IS NOT NULL), false)
+        FROM oferta o
+        WHERE o.id_producto_mongo = p.id_producto
           AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
     ),
 
@@ -320,7 +361,8 @@ SELECT jsonb_build_object(
                    'estado',               ev.estado_variante_nombre,
 
                    'precio_tienda', (
-                       SELECT o.precio::text FROM oferta o
+                       SELECT ROUND(o.precio * (1 - COALESCE(o.porcentaje_descuento, 0) / 100), 2)::text
+                       FROM oferta o
                        WHERE o.id_producto_mongo          = p.id_producto
                          AND o.id_producto_variante_mongo = pv.id_producto_variante
                          AND o.id_usuario = (SELECT id_usuario FROM tienda)
@@ -329,7 +371,8 @@ SELECT jsonb_build_object(
                    -- el UNIQUE de oferta garantiza que la tienda tiene a lo
                    -- sumo una por variante.
                    'precio_desde', (
-                       SELECT min(o.precio)::text FROM oferta o
+                       SELECT min(ROUND(o.precio * (1 - COALESCE(o.porcentaje_descuento, 0) / 100), 2))::text
+                       FROM oferta o
                        WHERE o.id_producto_mongo          = p.id_producto
                          AND o.id_producto_variante_mongo = pv.id_producto_variante
                          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
@@ -349,6 +392,13 @@ SELECT jsonb_build_object(
                    ),
                    'total_ofertas', (
                        SELECT count(*) FROM oferta o
+                       WHERE o.id_producto_mongo          = p.id_producto
+                         AND o.id_producto_variante_mongo = pv.id_producto_variante
+                         AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                   ),
+                   'hay_descuento', (
+                       SELECT coalesce(bool_or(o.porcentaje_descuento IS NOT NULL), false)
+                       FROM oferta o
                        WHERE o.id_producto_mongo          = p.id_producto
                          AND o.id_producto_variante_mongo = pv.id_producto_variante
                          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)

@@ -18,6 +18,7 @@
 		type ProductoEnFecha,
 		type ResumenPedido
 	} from './pedido';
+	import { textoPorcentaje, tieneDescuento } from './descuento';
 
 	/**
 	 * El historial de pedidos de quien esta logueado.
@@ -818,6 +819,9 @@
 													<div class="cuentas">
 														<span class="menor">
 															{dinero(l.precio_unitario)} x {l.cantidad}
+															{#if tieneDescuento(l.porcentaje_descuento_aplicado)}
+																<span class="descuento">-{textoPorcentaje(l.porcentaje_descuento_aplicado)}</span>
+															{/if}
 														</span>
 														<strong>{quetzales(subtotal(l))}</strong>
 													</div>
@@ -907,7 +911,12 @@
 					</div>
 					<div class="ficha">
 						<dt>Precio unitario</dt>
-						<dd>{dinero(l.precio_unitario)}</dd>
+						<dd>
+							{dinero(l.precio_unitario)}
+							{#if tieneDescuento(l.porcentaje_descuento_aplicado)}
+								<span class="descuento">-{textoPorcentaje(l.porcentaje_descuento_aplicado)}</span>
+							{/if}
+						</dd>
 					</div>
 					<div class="ficha">
 						<dt>Cantidad</dt>
@@ -933,6 +942,15 @@
 					<p class="menor">{falloOferta[claveO]}</p>
 				{:else if oferta}
 					{@const cambioPrecio = Number(oferta.precio) !== Number(l.precio_unitario)}
+					<!-- Si la linea llevaba descuento, el precio de lista del dia con ese
+					     descuento tiene que dar lo cobrado. Si no da, ademas cambio el
+					     precio ese dia, y eso se dice aparte. -->
+					{@const soloDescuento =
+						tieneDescuento(l.porcentaje_descuento_aplicado) &&
+						Math.abs(
+							Number(oferta.precio) * (1 - Number(l.porcentaje_descuento_aplicado) / 100) -
+								Number(l.precio_unitario)
+						) < 0.006}
 					<dl class="fichas">
 						<div class="ficha">
 							<dt>Precio publicado</dt>
@@ -946,7 +964,15 @@
 							</dd>
 						</div>
 					</dl>
-					{#if cambioPrecio}
+					{#if cambioPrecio && soloDescuento}
+						<!-- El historial da el precio de LISTA; la linea, el que se cobro con
+						     el descuento. Que difieran es lo normal y no un cambio de precio. -->
+						<p class="menor">
+							El precio publicado es sin descuento. Tu compra llevaba
+							{textoPorcentaje(l.porcentaje_descuento_aplicado)} de descuento y se te cobro
+							{dinero(l.precio_unitario)}.
+						</p>
+					{:else if cambioPrecio}
 						<!-- Los dos numeros salen de sitios distintos y por eso pueden
 						     diferir: el de la linea es el que se congelo al comprar, y
 						     el reconstruido es el ultimo precio del DIA. Un cambio de
@@ -1115,6 +1141,21 @@
 {/if}
 
 <style>
+	/* El % de descuento que llevaba la linea. Colores del layout. */
+	.descuento {
+		display: inline-block;
+		margin-left: 4px;
+		padding: 1px 7px;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		line-height: 1.2;
+		white-space: nowrap;
+		border-radius: 999px;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
+	}
+
 	.mis-pedidos {
 		margin-top: 2rem;
 	}

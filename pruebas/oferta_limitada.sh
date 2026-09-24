@@ -20,8 +20,10 @@
 # ============================================================
 #   1. Deja listos 1 vendedor y N compradores (carga01..cargaNN@mesh.com), por
 #      la API. Si ya existen de una corrida anterior se reusan.
-#   2. El vendedor tiene una oferta con STOCK unidades y abre la venta
-#      relampago con POST /vendedor/ofertas/:id/venta-limitada.
+#   2. El vendedor tiene una oferta con STOCK unidades, le pone un descuento
+#      con POST /vendedor/ofertas/:id/descuento (desde el 2026-09-23 una venta
+#      relampago sin descuento da 409) y abre la venta relampago con
+#      POST /vendedor/ofertas/:id/venta-limitada.
 #   3. OLA 1. Los N compradores piden 1 unidad cada uno, TODOS A LA VEZ.
 #      Tiene que ganar exactamente STOCK y ser rechazado el resto, con 409.
 #      Se mira en Redis que el stock quedo en 0, que lo reservado es STOCK, que
@@ -29,7 +31,9 @@
 #   4. Los ganadores sueltan su reserva con DELETE. El stock tiene que volver.
 #   5. OLA 2, lo mismo otra vez. Si soltar y volver a tomar dejara el contador
 #      torcido, la segunda ola ganaria mas o menos que la primera.
-#   6. Se cierra la venta y se retira la oferta.
+#   6. Se cierra la venta, DESPUES se quita el descuento (con la venta abierta
+#      el backend no deja quitarlo) y se retira la oferta. Si el arnes muere a
+#      la mitad, un trap cierra la venta y quita el descuento en ese orden.
 #
 # NO hay candados en la aplicacion ni reintentos. Lo que decide quien gana es
 # una sola operacion atomica dentro de Redis, y esta prueba la mira desde
@@ -52,6 +56,7 @@ STOCK="${STOCK:-20}"
 PRODUCTO="${PRODUCTO:-83}"
 VARIANTE="${VARIANTE:-166}"
 CLAVE_CARGA="${CLAVE_CARGA:-Desarrollo123!}"
+DESCUENTO="${DESCUENTO:-20}"
 
 export MSYS_NO_PATHCONV=1
 
@@ -68,7 +73,29 @@ if [ "$N" -le "$STOCK" ]; then
 fi
 
 TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
+
+# Lo que el arnes abrio y todavia no cerro. El trap lo deshace por la API si
+# la corrida muere a medias, y en este orden: primero la venta y despues el
+# descuento, porque con la venta abierta DELETE .../descuento da 409.
+VENTA_ABIERTA=0
+DESCUENTO_PUESTO=0
+limpiar() {
+    if [ "$VENTA_ABIERTA" = "1" ]; then
+        curl -s -o /dev/null -X DELETE "$API/vendedor/ofertas/$OFERTA/venta-limitada" -H "Cookie: $VEND"
+        VENTA_ABIERTA=0
+    fi
+    if [ "$DESCUENTO_PUESTO" = "1" ]; then
+        curl -s -o /dev/null -X DELETE "$API/vendedor/ofertas/$OFERTA/descuento" -H "Cookie: $VEND"
+        DESCUENTO_PUESTO=0
+    fi
+    rm -rf "$TMP"
+}
+trap limpiar EXIT
+# En el bash de Git el trap de EXIT NO corre si al arnes lo matan con una
+# senal (timeout, Ctrl+C, cerrar la terminal): se probo el 2026-09-23 y una
+# corrida cortada por timeout dejo la oferta con su descuento puesto. Con la
+# senal atrapada, el exit de aqui abajo si pasa por limpiar.
+trap 'exit 130' INT TERM HUP
 
 ok=0; fallo=0
 OK()    { echo "  OK    $1"; ok=$((ok+1)); }
@@ -149,6 +176,20 @@ STOCK_PG=$(sql "SELECT stock FROM oferta WHERE id_oferta=$OFERTA;")
 
 # Si una corrida anterior murio a medias, la venta puede seguir abierta.
 curl -s -o /dev/null -X DELETE "$API/vendedor/ofertas/$OFERTA/venta-limitada" -H "Cookie: $VEND"
+
+# Una venta relampago exige un descuento activo. Si una corrida anterior dejo
+# uno puesto se reusa (un segundo POST daria 409); si no, se pone ahora.
+DESCUENTO_PUESTO=1
+if [ -n "$(sql "SELECT porcentaje_descuento FROM oferta WHERE id_oferta=$OFERTA;")" ]; then
+    OK "la oferta ya tenia un descuento de una corrida anterior, se reusa"
+else
+    r=$(put_json POST "/vendedor/ofertas/$OFERTA/descuento" "$VEND" "{\"porcentaje_descuento\":$DESCUENTO}")
+    [ "$(echo "$r" | campo ok)" = "True" ] \
+        && OK "descuento del $DESCUENTO% puesto con POST /vendedor/ofertas/$OFERTA/descuento" \
+        || { echo "  No se pudo poner el descuento, $(echo "$r" | campo mensaje)"; exit 1; }
+fi
+
+VENTA_ABIERTA=1
 r=$(put_json POST "/vendedor/ofertas/$OFERTA/venta-limitada" "$VEND" '{}')
 [ "$(echo "$r" | campo ok)" = "True" ] && OK "venta relampago abierta con POST /vendedor/ofertas/$OFERTA/venta-limitada" || { echo "  No abrio, $(echo "$r" | campo mensaje)"; exit 1; }
 
@@ -246,11 +287,14 @@ revisar_ola "ola 2"
 soltar
 
 
-titulo "6. Se cierra la venta y se retira la oferta"
+titulo "6. Se cierra la venta, se quita el descuento y se retira la oferta"
 
 r=$(curl -s -X DELETE "$API/vendedor/ofertas/$OFERTA/venta-limitada" -H "Cookie: $VEND")
-[ "$(echo "$r" | campo ok)" = "True" ] && OK "venta relampago cerrada por la API" || FALLA "no cerro, $(echo "$r" | campo mensaje)"
+[ "$(echo "$r" | campo ok)" = "True" ] && { OK "venta relampago cerrada por la API"; VENTA_ABIERTA=0; } || FALLA "no cerro, $(echo "$r" | campo mensaje)"
 [ "$(R EXISTS "$CLAVE_R")" = "0" ] && OK "las claves de Redis de la oferta desaparecieron" || FALLA "las claves de Redis siguen ahi"
+# Recien con la venta cerrada el backend deja quitar el descuento.
+r=$(curl -s -X DELETE "$API/vendedor/ofertas/$OFERTA/descuento" -H "Cookie: $VEND")
+[ "$(echo "$r" | campo ok)" = "True" ] && { OK "descuento quitado por la API, despues de cerrar la venta"; DESCUENTO_PUESTO=0; } || FALLA "no se quito el descuento, $(echo "$r" | campo mensaje)"
 put_json PATCH "/vendedor/ofertas/$OFERTA" "$VEND" '{"estado":"retirada"}' >/dev/null
 [ "$(sql "SELECT eo.estado_oferta_nombre FROM oferta o JOIN estado_oferta eo USING(id_estado_oferta) WHERE o.id_oferta=$OFERTA;")" = "retirada" ] \
     && OK "la oferta quedo retirada, no ensucia el catalogo" || FALLA "la oferta no quedo retirada"

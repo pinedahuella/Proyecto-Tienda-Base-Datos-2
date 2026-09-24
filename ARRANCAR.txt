@@ -4,6 +4,15 @@ LOS DOS COMANDOS
 Se corren desde la RAIZ del proyecto (esta carpeta), en PowerShell.
 El .\ del principio es obligatorio.
 
+Antes de correrlos, abre Docker Desktop. Todas las bases de Mesh viven
+dentro de Docker, asi que no hace falta prender nada mas.
+
+Desde el 2026-09-23 las bases instaladas en Windows (MySQL de XAMPP, MariaDB,
+MongoDB y PostgreSQL 18) estan apagadas y en Manual para ahorrar memoria.
+Mesh no usa ninguna, su Postgres es el del 5432 y su Mongo el del 27018, los
+dos de Docker. Si algun dia hacen falta, estan en C:\Proyectos\LEDKID,
+BASES-DE-DATOS.txt y bases-prender.ps1.
+
 
 1) ARRANCAR, SIN BORRAR NADA
 --------------------------------------------------

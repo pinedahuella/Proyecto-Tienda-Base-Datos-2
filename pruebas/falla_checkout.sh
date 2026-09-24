@@ -94,12 +94,14 @@
 #    se saca de la cabecera Set-Cookie como en pruebas/carrito.sh, y el codigo
 #    HTTP viaja pegado al cuerpo con un separador, sin `-o`.
 #
-# 2. EL PRECIO SE MANDA COMO TEXTO. `lineas_precio_visto` lleva el precio que
-#    se vio en pantalla y el backend lo compara con el de hoy dentro de la misma
-#    peticion que cobra. Pasarlo por un numero convierte "4269.00" en 4269, el
-#    backend cree que el precio se movio y contesta ok con comprado false SIN
-#    COBRAR. El arnes leeria eso como "la falla impidio la compra" cuando fue un
-#    bug del arnes. Nunca toca el precio, va tal cual vino.
+# 2. EL PRECIO YA NO SE MANDA. Hasta el 2026-09-23 la compra llevaba
+#    `lineas_precio_visto` con el precio de la pantalla, y pasarlo por un numero
+#    ("4269.00" -> 4269) hacia que el backend contestara comprado false SIN
+#    COBRAR. Esa lista ya no existe: cada linea del carrito guarda en Redis la
+#    foto del precio que se vio, y el backend la compara el solo contra el de
+#    hoy. El arnes solo manda direccion y metodo de pago. Si aun asi sale
+#    comprado false, es que el precio de la oferta de verdad se movio entre
+#    preparar el carrito y pagar, y `clasificar` lo separa de una caida.
 #
 # 3. POST /carrito/comprar TIENE CUATRO FINALES y solo uno es un fallo. Mirar
 #    solo el booleano `ok` confunde "no compre porque el precio cambio" con "no
@@ -347,14 +349,13 @@ CARRITO_PREVIO=""
 # Pide la compra y deja el codigo HTTP en CODIGO y el cuerpo entero en CUERPO.
 #
 # El codigo viaja PEGADO al cuerpo con un separador en vez de salir por
-# `-o /dev/null -w`, por la trampa 1 de la cabecera. Y el precio entra tal cual
-# llego, sin pasar por ninguna aritmetica, por la trampa 2.
+# `-o /dev/null -w`, por la trampa 1 de la cabecera. Sin precios en el cuerpo,
+# por la trampa 2: el backend compara con la foto que guardo en Redis.
 CODIGO=""
 CUERPO=""
 comprar() {
-    _pv="$1"
-    _extra="${2:-}"
-    _peticion="{\"id_direccion\":\"$DIRECCION\",\"metodo_pago\":\"$METODO\",\"lineas_precio_visto\":[{\"id_oferta\":$OFERTA,\"precio_visto\":\"$_pv\"}]$_extra}"
+    _extra="${1:-}"
+    _peticion="{\"id_direccion\":\"$DIRECCION\",\"metodo_pago\":\"$METODO\"$_extra}"
     _todo=$(curl -s -m "$ESPERA" -w $'\n@@@%{http_code}' \
         -X POST "$API/carrito/comprar" \
         -H 'Content-Type: application/json' -H "Cookie: $SESION" \
@@ -405,9 +406,12 @@ foto() {
 # Deja el carrito con una sola linea de la oferta de trabajo y devuelve por
 # pantalla el precio que el backend acaba de ensenar.
 #
-# El precio se lee AQUI, con todo vivo, y no dentro del escenario: leerlo con
-# MongoDB caido no daria ninguno, porque GET /carrito arma el nombre del
-# producto contra Mongo.
+# El carrito se arma AQUI, con todo vivo, y no dentro del escenario: el PUT
+# toma la foto de la linea (precio, nombre, imagen) contra PostgreSQL y
+# MongoDB, asi que con una de las dos caida no se podria ni agregar. Desde el
+# 2026-09-23 el GET ya no pregunta a nadie mas que a Redis; el precio que
+# devuelve es el de esa foto, y solo sirve para mostrarlo y para saber que el
+# carrito quedo listo.
 preparar_carrito() {
     curl -s -m 20 -X DELETE "$API/carrito" -H "Cookie: $SESION" >/dev/null 2>&1
     curl -s -m 20 -X PUT "$API/carrito/lineas/$OFERTA" \
@@ -529,12 +533,12 @@ if [ -z "$PRECIO" ]; then
     exit 1
 fi
 echo "  precio que se vio en pantalla   $PRECIO"
-echo "  se manda tal cual, como texto. Ver la trampa 2 de la cabecera."
+echo "  no se manda: el backend lo compara con la foto de Redis. Ver la trampa 2."
 
 foto; mostrar_foto "antes  "
 BASE_PEDIDOS="$F_PEDIDOS"; BASE_PAGOS="$F_PAGOS"; BASE_MOV="$F_MOV"; BASE_STOCK="$F_STOCK"
 
-comprar "$PRECIO"
+comprar
 clasificar
 BASE_FINAL="$FINAL"
 mostrar_respuesta
@@ -616,7 +620,7 @@ escenario() {
         return
     fi
 
-    comprar "$_precio"
+    comprar
     clasificar
     _final="$FINAL"
     mostrar_respuesta
@@ -783,7 +787,7 @@ else
     _p0="$F_PEDIDOS"; _g0="$F_PAGOS"; _s0="$F_STOCK"
     mostrar_foto "antes  "
 
-    comprar "$PRECIO"
+    comprar
     clasificar
     mostrar_respuesta
     foto; mostrar_foto "despues"

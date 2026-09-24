@@ -4,6 +4,7 @@
 	import Pie from '$lib/Pie.svelte';
 	import Autocompletar from '$lib/Autocompletar.svelte';
 	import { pedir } from '$lib/api';
+	import { textoPorcentaje } from '$lib/descuento';
 
 	/**
 	 * El catalogo. Es la pagina de inicio y es publica: GET /productos no pide
@@ -74,6 +75,8 @@
 		stock_tienda: number;
 		stock_total: number;
 		total_ofertas: number;
+		/** Si alguna oferta activa de esta variante tiene descuento. Copia calculada. */
+		hay_descuento?: boolean;
 		caracteristicas_adicionales?: Caracteristica[];
 	}
 
@@ -107,6 +110,52 @@
 		stock_total: number;
 		/** Cuantos vendedores distintos lo tienen activo. */
 		total_ofertas: number;
+		/**
+		 * Si alguna oferta activa del producto tiene descuento. Copia calculada
+		 * como las de arriba, y por eso precio_tienda y precio_desde ya vienen
+		 * con el descuento aplicado. Opcional: los documentos de antes del
+		 * cambio no la traen.
+		 */
+		hay_descuento?: boolean;
+	}
+
+	/**
+	 * Lo que devuelve GET /productos/mas-vendidos desde 565aca1. Ya no es el
+	 * documento de Mongo sino una tarjeta corta que el worker deja en un HASH de
+	 * Redis cada 10 minutos. No trae variantes, ni categoria, ni descripcion, ni
+	 * total_ofertas, y la imagen viene suelta. Los precios siguen llegando como
+	 * { $numberDecimal }.
+	 */
+	interface TarjetaMasVendido {
+		_id: number;
+		nombre: string;
+		imagen: string | null;
+		precio_tienda: Decimal | null;
+		precio_desde: Decimal | null;
+		hay_descuento: boolean;
+		resenas_promedio: number;
+		resenas_total: number;
+		stock_total: number;
+	}
+
+	/**
+	 * Una fila de GET /productos/ofertas/descuento o /venta-relampago. Es una
+	 * OFERTA (un vendedor, una variante), no un producto. Los precios son texto
+	 * de PostgreSQL y precio_final ya trae el descuento aplicado.
+	 */
+	interface OfertaDestacada {
+		id_oferta: number;
+		id_producto: number;
+		id_producto_variante: number;
+		nombre_producto: string;
+		nombre_variante: string;
+		imagen: string | null;
+		precio: string;
+		porcentaje_descuento: string;
+		precio_final: string;
+		vendedor_usuario: string;
+		vendedor_nombre: string;
+		stock: number;
 	}
 
 	interface Tanda {
@@ -293,15 +342,28 @@
 	/**
 	 * Lo mas vendido, de GET /productos/mas-vendidos. Es publica y no recibe
 	 * filtros: el backend lee un ranking que un worker recalcula cada 10 minutos
-	 * desde ClickHouse y trae de Mongo el mismo documento de siempre, asi que las
-	 * tarjetas son las del catalogo.
+	 * desde ClickHouse. Desde 565aca1 ya no trae el documento de Mongo sino una
+	 * tarjeta corta cacheada en Redis (ver TarjetaMasVendido), asi que se pinta
+	 * con su propio snippet y no con el del catalogo, que lee variantes y
+	 * categoria y se caeria.
 	 *
 	 * Una lista vacia NO es un error. El backend la devuelve asi cuando todavia
 	 * no hay ranking (nadie ha comprado, o el worker no ha corrido), y en ese caso
 	 * el estante simplemente no sale. Por eso tampoco hay caja roja si falla: es
 	 * un adorno encima del catalogo y el catalogo sigue funcionando sin el.
 	 */
-	let masVendidos = $state<Producto[]>([]);
+	let masVendidos = $state<TarjetaMasVendido[]>([]);
+
+	/**
+	 * Las dos vitrinas de ofertas, de GET /productos/ofertas/descuento y
+	 * /productos/ofertas/venta-relampago. Mismo trato que lo mas vendido: son
+	 * adorno, una lista vacia o un fallo solo esconden el estante.
+	 *
+	 * Las lee el backend de dos HASH de Redis que se reconcilian cada 10
+	 * minutos. Un descuento recien sembrado puede tardar eso en salir aqui.
+	 */
+	let ofertasDescuento = $state<OfertaDestacada[]>([]);
+	let ventasRelampago = $state<OfertaDestacada[]>([]);
 
 	/**
 	 * Si lo ultimo que fallo fue traer la SIGUIENTE tanda, no la busqueda.
@@ -867,15 +929,48 @@
 	);
 
 	async function cargarMasVendidos() {
-		const r = await pedir<Producto[]>('/productos/mas-vendidos');
+		const r = await pedir<TarjetaMasVendido[]>('/productos/mas-vendidos');
 		// Los dos lados: ok con payload que no es lista se ha visto, y una sola
 		// tarjeta mal formada tumbaria el pintado de la portada entera.
-		masVendidos = r.ok && Array.isArray(r.payload) ? r.payload : [];
+		masVendidos = r.ok && Array.isArray(r.payload) ? r.payload.map(aTarjeta) : [];
+	}
+
+	/**
+	 * Justo despues de actualizar el backend el HASH de Redis todavia guarda el
+	 * documento completo de antes, sin `imagen` suelta, hasta que el worker
+	 * vuelve a correr (cada 10 minutos). Medido el 2026-09-23. Se saca la foto
+	 * de la primera variante en ese caso para que el estante no salga sin
+	 * imagenes durante ese rato.
+	 */
+	function aTarjeta(p: TarjetaMasVendido & { variantes?: { imagenes?: string[] }[] }): TarjetaMasVendido {
+		const imagen = p.imagen ?? p.variantes?.find((v) => v.imagenes?.length)?.imagenes?.[0] ?? null;
+		return { ...p, imagen };
+	}
+
+	/**
+	 * Redis no promete orden en un HGETALL, asi que se ordena aqui para que la
+	 * vitrina no baraje las tarjetas en cada visita. Primero el descuento mas
+	 * grande. Las agotadas se quitan, no se puede comprar lo que se anuncia.
+	 */
+	function ordenarOfertas(lista: OfertaDestacada[]): OfertaDestacada[] {
+		return lista
+			.filter((o) => o.stock > 0)
+			.sort((a, b) => Number(b.porcentaje_descuento) - Number(a.porcentaje_descuento) || a.id_oferta - b.id_oferta);
+	}
+
+	async function cargarOfertasDestacadas() {
+		const [d, v] = await Promise.all([
+			pedir<OfertaDestacada[]>('/productos/ofertas/descuento'),
+			pedir<OfertaDestacada[]>('/productos/ofertas/venta-relampago')
+		]);
+		ofertasDescuento = d.ok && Array.isArray(d.payload) ? ordenarOfertas(d.payload) : [];
+		ventasRelampago = v.ok && Array.isArray(v.payload) ? ordenarOfertas(v.payload) : [];
 	}
 
 	onMount(() => {
 		cargarCategorias();
 		cargarMasVendidos();
+		cargarOfertasDestacadas();
 		buscar();
 	});
 
@@ -895,6 +990,15 @@
 
 	function quetzales(n: number): string {
 		return 'Q' + n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+	}
+
+	/**
+	 * Si la tarjeta lleva la etiqueta de descuento. Se mira tambien en las
+	 * variantes por si un documento viejo trae la marca en ellas y no en la
+	 * raiz; el backend calcula la de la raiz a partir de las de las variantes.
+	 */
+	function conDescuento(p: Producto): boolean {
+		return p.hay_descuento === true || p.variantes.some((v) => v.hay_descuento === true);
 	}
 
 	/**
@@ -1010,6 +1114,11 @@
 			{#if puesto}
 				<span class="puesto-vendido" title="Puesto {puesto} entre los mas vendidos">{puesto}</span>
 			{/if}
+					<!-- Sobre la foto y no en el pie: el pie tiene que quedar de una
+					     linea para que los precios de la fila sigan alineados. -->
+					{#if conDescuento(p)}
+						<span class="con-descuento">Producto con descuento</span>
+					{/if}
 					<!-- Una portada que no carga se trata igual que no tenerla.
 					     Las urls son de fuera (Wikimedia), y cuando una se cae el
 					     navegador deja su icono de imagen rota con el texto alt al
@@ -1100,6 +1209,90 @@
 		</article>
 {/snippet}
 
+<!--
+	La tarjeta de lo mas vendido. Es la misma caja que la del catalogo para que
+	el estante no desentone, pero con lo que trae la tarjeta corta de Redis: sin
+	categoria, sin descripcion, sin rasgos y sin conteo de variantes. En su
+	lugar va la nota de las resenas, que si viene.
+-->
+{#snippet tarjetaVendido(p: TarjetaMasVendido, puesto: number)}
+	{@const tienda = aNumero(p.precio_tienda)}
+	{@const desde = aNumero(p.precio_desde)}
+	<article class="tarjeta">
+		<a class="cara" href="/producto/{p._id}?origen=catalogo">
+			<div class="foto">
+				<span class="puesto-vendido" title="Puesto {puesto} entre los mas vendidos">{puesto}</span>
+				{#if p.hay_descuento}
+					<span class="con-descuento">Producto con descuento</span>
+				{/if}
+				{#if p.imagen && !rotas.includes(p._id)}
+					<img src={p.imagen} alt={p.nombre} loading="lazy" onerror={() => marcarRota(p._id)} />
+				{:else}
+					<span class="sin-foto">Sin imagen</span>
+				{/if}
+			</div>
+			<div class="cuerpo">
+				<h2>{p.nombre}</h2>
+				<div class="base">
+					<div class="pie-tarjeta">
+						<strong class="precio">{tienda > 0 ? quetzales(tienda) : 'Sin precio'}</strong>
+						{#if p.resenas_total > 0}
+							<span class="variantes">{p.resenas_promedio.toFixed(1)} de 5, {p.resenas_total} {p.resenas_total === 1 ? 'resena' : 'resenas'}</span>
+						{/if}
+					</div>
+					<p class="meta">
+						{#if desde > 0 && (tienda <= 0 || desde < tienda)}
+							<span class="desde">desde <strong>{quetzales(desde)}</strong></span>
+						{/if}
+						{#if p.stock_total === 0}
+							<span class="stock agotado">Agotado</span>
+						{/if}
+					</p>
+				</div>
+			</div>
+		</a>
+	</article>
+{/snippet}
+
+<!--
+	La tarjeta de una oferta de las vitrinas. Es de UN vendedor y UNA variante,
+	por eso lleva los dos nombres y el precio de lista tachado al lado del que se
+	cobra. El precio final lo calcula PostgreSQL, aqui solo se pinta.
+-->
+{#snippet tarjetaOferta(o: OfertaDestacada, relampago: boolean)}
+	{@const clave = -o.id_oferta}
+	<article class="tarjeta">
+		<a class="cara" href="/producto/{o.id_producto}?origen=catalogo&vendedor={encodeURIComponent(o.vendedor_nombre)}">
+			<div class="foto">
+				<span class="con-descuento" class:relampago>
+					{relampago ? 'Venta relampago' : 'Descuento'} {textoPorcentaje(o.porcentaje_descuento)}
+				</span>
+				{#if o.imagen && !rotas.includes(clave)}
+					<img src={o.imagen} alt={o.nombre_producto} loading="lazy" onerror={() => marcarRota(clave)} />
+				{:else}
+					<span class="sin-foto">Sin imagen</span>
+				{/if}
+			</div>
+			<div class="cuerpo">
+				<span class="categoria">{o.vendedor_nombre}</span>
+				<h2>{o.nombre_producto}</h2>
+				<p class="desc">{o.nombre_variante}</p>
+				<div class="base">
+					<div class="pie-tarjeta">
+						<strong class="precio">{quetzales(Number(o.precio_final))}</strong>
+						<s class="variantes">{quetzales(Number(o.precio))}</s>
+					</div>
+					<p class="meta">
+						{#if relampago}
+							<span class="stock agotado">Quedan {o.stock}</span>
+						{/if}
+					</p>
+				</div>
+			</div>
+		</a>
+	</article>
+{/snippet}
+
 
 <Cabecera />
 
@@ -1175,7 +1368,36 @@
 				</div>
 				<div class="estante">
 					{#each masVendidos as p, i (p._id)}
-						{@render tarjeta(p, i + 1)}
+						{@render tarjetaVendido(p, i + 1)}
+					{/each}
+				</div>
+			</section>
+		{/if}
+
+		<!-- Las dos vitrinas de ofertas, con el mismo criterio que lo mas
+		     vendido: solo sin filtros y solo si hay algo que ensenar. La venta
+		     relampago va primero porque es la que se acaba. -->
+		{#if ventasRelampago.length > 0 && !hayFiltro}
+			<section class="mas-vendidos vitrina" aria-labelledby="t-relampago">
+				<div class="cab-estante">
+					<h2 id="t-relampago">Ventas relampago</h2>
+				</div>
+				<div class="estante">
+					{#each ventasRelampago as o (o.id_oferta)}
+						{@render tarjetaOferta(o, true)}
+					{/each}
+				</div>
+			</section>
+		{/if}
+
+		{#if ofertasDescuento.length > 0 && !hayFiltro}
+			<section class="mas-vendidos vitrina" aria-labelledby="t-descuento">
+				<div class="cab-estante">
+					<h2 id="t-descuento">Ofertas con descuento</h2>
+				</div>
+				<div class="estante">
+					{#each ofertasDescuento as o (o.id_oferta)}
+						{@render tarjetaOferta(o, false)}
 					{/each}
 				</div>
 			</section>
@@ -2284,6 +2506,53 @@
 	.estante .tarjeta {
 		flex: 0 0 250px;
 		scroll-snap-align: start;
+	}
+
+	/* La etiqueta de descuento, arriba a la derecha de la foto (arriba a la
+	   izquierda va el puesto de lo mas vendido). Colores del layout. */
+	.con-descuento {
+		position: absolute;
+		top: 8px;
+		right: 8px;
+		z-index: 1;
+		max-width: calc(100% - 50px);
+		padding: 2px 8px;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		line-height: 1.3;
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
+		border-radius: 999px;
+	}
+
+	/* Los mismos colores de venta relampago que el panel de ofertas del vendedor. */
+	.vitrina {
+		--relampago-tinta: #7c3a00;
+		--relampago-fondo: #ffe8cc;
+		--relampago-linea: #ffc98a;
+	}
+
+	:global(html[data-tema='oscuro']) .vitrina {
+		--relampago-tinta: #f0b070;
+		--relampago-fondo: #3a2410;
+		--relampago-linea: #6b4520;
+	}
+
+	/* En las vitrinas la etiqueta va a la izquierda: no hay numero de puesto que esquivar. */
+	.vitrina .con-descuento {
+		left: 8px;
+		right: auto;
+		max-width: calc(100% - 16px);
+	}
+
+	.con-descuento.relampago {
+		color: var(--relampago-tinta, var(--descuento-tinta));
+		background: var(--relampago-fondo, var(--descuento-fondo));
+		border-color: var(--relampago-linea, var(--descuento-linea));
 	}
 
 	.puesto-vendido {

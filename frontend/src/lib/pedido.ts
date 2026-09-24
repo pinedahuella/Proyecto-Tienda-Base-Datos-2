@@ -63,6 +63,13 @@ export interface LineaPedido {
 	id_usuario_vendedor: string;
 	/** Decimal de PostgreSQL: viaja como texto para no perder centavos. */
 	precio_unitario: string;
+	/**
+	 * El % de descuento que tenia la oferta cuando se congelo el precio, o
+	 * null. Solo informativo: `precio_unitario` ya lo trae aplicado. Opcional
+	 * porque solo lo manda el detalle del pedido (y el carrito, al pasar las
+	 * lineas al checkout).
+	 */
+	porcentaje_descuento_aplicado?: string | null;
 	cantidad: number;
 	/** El id de la fila de precio_historial que congelo el precio de esta linea. */
 	id_precio_historial?: string;

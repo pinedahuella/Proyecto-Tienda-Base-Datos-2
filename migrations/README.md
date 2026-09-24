@@ -53,7 +53,7 @@ cualquier otro error corta el arranque con exit 1.
 
 Cada archivo hace una sola cosa y se puede leer solo.
 
-## Los diecinueve archivos de esquema
+## Los veinte archivos de esquema
 
 Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
 "los catorce" con quince en la carpeta. Es la misma trampa que este documento
@@ -87,8 +87,10 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `017_alertas_fraude_extendidas.sql` | amplia `tipo_alerta_fraude` de 3 a 9 filas: las seis senales contra Elasticsearch (`toma_cuenta`, `viaje_imposible` y las tres `_lenta` con su version corta `ip_rotacion_cuenta`) |
 | `018_notificacion_fraude.sql` | `notificacion_fraude`: una fila por cuenta afectada por una alerta, con su propia lectura -- lo que ve el usuario en `/perfil/alertas-fraude`, aparte de la revision del admin |
 | `019_anillo_fraude.sql` | `anillo_fraude`, `anillo_fraude_resena` y su catalogo: persiste los anillos mutuo/ciclo/reiterado que antes solo detectaba y logueaba `AnillosDetectorService` |
+| `020_descuentos_oferta.sql` | `porcentaje_descuento` en `oferta` y en `precio_historial`; el trigger del precio tambien escucha el descuento y `comprar_pedido()` cobra el precio con descuento |
+| `021_regla_descuento_automatico.sql` | `regla_descuento_automatico`: una regla por oferta (si se venden N en M minutos, rebajar X% o abrir venta relampago por S segundos). Solo la configuracion, el disparo aun no existe en el backend |
 
-De la 011 a la 015 son de la Entrega 2, la 016 a la 019 de la Entrega 3, y merecen una
+De la 011 a la 015 son de la Entrega 2, la 016 a la 021 de la Entrega 3, y merecen una
 linea mas de la que caben en la tabla.
 
 **La 011 cierra el diagrama.** Con `comentario`, `resena` y `likes` las 42 cajas
@@ -180,6 +182,39 @@ Tres cosas suyas que conviene saber:
 `log_login` y `log_registro` no se borran: guardan el historico y el ETL de
 ClickHouse todavia las lee. Pero desde el 2026-09-10 no reciben filas, y eso se
 dice en el comentario de cada tabla, que es lo que ensenan `\d+` y pgAdmin.
+
+**La 020 reemplaza dos cosas que ya existian, y el orden la salva.** Pone
+`porcentaje_descuento` (`numeric(5,2)`, NULL si no hay, `CHECK` de `0 < x < 100`)
+en `oferta` y en `precio_historial`, y reemplaza el trigger de la 005 y el
+`comprar_pedido()` de la 007. Sale del SQL de referencia del backend
+(`backend/elementos Generales/plan pendiente/descuentos-oferta.sql`) con los
+mismos nombres, porque ese SQL ya se corrio a mano en alguna base.
+
+- **`oferta.precio` no se toca.** Sigue siendo el precio de lista. El precio que
+  se ensena y se cobra no se guarda en ningun lado: cada consulta lo calcula con
+  `ROUND(precio * (1 - COALESCE(porcentaje_descuento, 0) / 100), 2)`.
+- **El trigger escucha `precio` y `porcentaje_descuento`.** Poner o quitar un
+  descuento deja su fila en el historial igual que un cambio de precio, y esa
+  fila guarda el %: una compra vieja con descuento se sigue leyendo bien.
+- **`comprar_pedido()` redondea el precio unitario y despues multiplica** por la
+  cantidad. El % sale de la fila de `precio_historial` a la que apunta la linea,
+  no de la oferta viva.
+- **La 007 se reejecuta en cada arranque** (es todo `CREATE OR REPLACE`) y
+  reinstala el `comprar_pedido()` viejo; la 020 corre despues y lo vuelve a
+  poner. La 005 no llega a su trigger en una base cargada (muere en su primer
+  `CREATE TABLE`). Ninguna posterior toca estas dos funciones. Un candado al
+  final falla la migracion si `comprar_pedido()` no menciona
+  `porcentaje_descuento`, si hay mas de una, o si el trigger no escucha las dos
+  columnas.
+- **Es idempotente de verdad**, como la 016: sale con codigo 0 en cada corrida.
+  Los `CHECK` se agregan solo si faltan, para no revalidar las tablas en cada
+  arranque. Medido sobre una base desechable: esquema nuevo, dos arranques
+  seguidos, una base de antes de la 020 con su catalogo cargado, y una con el
+  SQL de referencia ya corrido a mano. Las cuatro en `EXIT=0`.
+
+La regla de la venta relampago (no se abre sin descuento, y el descuento no se
+quita con la venta abierta) vive en el backend y no aqui: si la venta esta
+abierta solo lo sabe Redis.
 
 **La 012 no reemplaza a la 007: la COMPONE.** `comprar_carrito()` llama por
 dentro a las mismas `crear_pedido`, `agregar_linea` y `comprar_pedido`, en vez
@@ -317,7 +352,7 @@ numeracion entre archivos, porque ya no hay numeracion que coordinar.
 
 ## El conjunto se comprueba a si mismo
 
-`001_catalogo.sql` termina con **once** verificaciones dentro de un `DO`, y cada
+`001_catalogo.sql` termina con **trece** verificaciones dentro de un `DO`, y cada
 una **falla la migracion entera** si no cuadra:
 
 1. el saldo de cada oferta es la suma de su kardex
@@ -331,9 +366,12 @@ una **falla la migracion entera** si no cuadra:
 9. `cantidad_likes` y `cantidad_dislikes` de cada comentario cuadran con `likes`
 10. toda resena tiene detras una compra pagada **a ese vendedor**
 11. ninguna resena esta fechada antes de la compra que la habilita
+12. queda al menos un circulo cerrado de calificaciones (el anillo de fraude)
+13. el descuento de cada oferta es el de la ultima fila de su historial
 
-Las 4, 5 y 6 nacieron con la 010, la 7 con la 008, y las dos que cierran la
-parte social con la **011**. Aqui decia "seis" y listaba seis, pero le faltaban
+Las 4, 5 y 6 nacieron con la 010, la 7 con la 008, las dos que cierran la
+parte social con la **011**, la 12 con el anillo de fraude y la 13 con la
+**020**. Aqui decia "seis" y listaba seis, pero le faltaban
 tres: las dos de la 011 y, desde antes, la 6. Una lista escrita a mano caduca
 sin avisar; el archivo no. Antes de creerle a esta, contalos:
 
@@ -388,6 +426,31 @@ no habria nada que reconstruir y la Entrega 1 se quedaria sin su demostracion.
 
 Por eso el archivo abre con `ALTER TABLE oferta DISABLE TRIGGER`, escribe las
 filas de precio con sus fechas, y lo vuelve a encender al final.
+
+## La tienda arranca con descuentos
+
+Para que la etiqueta de descuento se vea sin entrar al panel, el generador le
+pone descuento a 13 ofertas de la tienda: un producto de cada ocho, empezando
+por el sexto, en la primera variante con unidades, con 10, 15, 20, 25 y 30 por
+ciento rotando. No usa `azar()`, para no correr la secuencia de todo lo demas.
+
+- **Van al final del archivo**, despues de todas las compras, para no cambiar
+  lo que cobraron los pedidos sembrados.
+- **Cada una deja su fila en `precio_historial`** con el mismo precio, el % y
+  fecha 2026-09-01, despues de cualquier otro precio del conjunto. La
+  comprobacion 13 vigila que esa sea la vigente.
+- **Los primeros cinco productos quedan fuera** porque los arneses y las demos
+  eligen la primera oferta activa con stock por `id_oferta`, y asi ensenan el
+  caso base (precio de lista igual a lo cobrado). Los que miran el precio ya
+  usan la formula, asi que no es para que no fallen. Ninguna oferta de `ventas.*@mesh.com` lleva
+  descuento sembrado, y ninguna esta en venta relampago.
+- **Guardia:** solo se pone donde `porcentaje_descuento` es NULL.
+
+Como todo el conjunto, esto solo entra en una base vacia. Una base que ya
+estaba cargada antes de la 020 arranca con cero descuentos, y se ven despues de
+un `.\arrancar.ps1 -Reiniciar` o poniendo uno desde el panel del vendedor. En
+Mongo, `hay_descuento` y los precios rebajados de la tarjeta los escribe el
+ETL (`etl/extraer.sql`), no este archivo.
 
 ## Como correrlas
 

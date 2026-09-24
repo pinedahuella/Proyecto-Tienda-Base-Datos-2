@@ -195,6 +195,10 @@ CREATE INDEX idx_precio_historial_oferta
 -- Quien lo cambio sale de mesh.id_usuario si la aplicacion lo puso en la
 -- transaccion (SET LOCAL mesh.id_usuario = '5'); si no, se atribuye al dueno
 -- de la oferta, que es el caso normal.
+--
+-- Esta es la version de nacimiento, que solo mira `precio`. La 020 la
+-- reemplaza para que tambien escuche `porcentaje_descuento` y lo copie al
+-- historial: la que queda puesta en la base es la de la 020.
 CREATE OR REPLACE FUNCTION oferta_registrar_precio()
 RETURNS trigger
 LANGUAGE plpgsql

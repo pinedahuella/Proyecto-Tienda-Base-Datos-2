@@ -97,6 +97,8 @@
 		 */
 		stock_tienda?: number;
 		stock_total?: number;
+		/** Si alguna oferta activa de esta variante tiene descuento. Calculado. */
+		hay_descuento?: boolean;
 		caracteristicas_adicionales?: CaracteristicaGuardada[];
 		caracteristicas_personalizadas?: CaracteristicaGuardada[];
 	}
@@ -111,6 +113,12 @@
 		variantes: VarianteGuardada[];
 		caracteristicas_adicionales?: CaracteristicaGuardada[];
 		caracteristicas_personalizadas?: CaracteristicaGuardada[];
+		/**
+		 * Si alguna oferta activa del producto tiene descuento. Copia calculada
+		 * del backend, como los precios de las variantes (que ya vienen con el
+		 * descuento aplicado).
+		 */
+		hay_descuento?: boolean;
 	}
 
 	/** Lo que el formulario tiene en pantalla: todo texto, hasta que se envia. */
@@ -912,6 +920,9 @@
 					<article class="fila">
 						<div class="datos">
 							<span class="chip {p.estado}">{p.estado}</span>
+							{#if p.hay_descuento || p.variantes.some((v) => v.hay_descuento)}
+								<span class="con-descuento">Producto con descuento</span>
+							{/if}
 							<h3>{p.nombre}</h3>
 							<p class="menor">
 								{p.categoria.nombre} · {p.variantes.length}
@@ -1572,6 +1583,21 @@
 
 	.quitar:hover {
 		border-color: var(--rojo);
+	}
+
+	/* La misma etiqueta de descuento del catalogo. Colores del layout. */
+	.con-descuento {
+		display: inline-block;
+		margin-left: 4px;
+		padding: 2px 10px;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		line-height: 1.2;
+		white-space: nowrap;
+		border-radius: 999px;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
 	}
 
 	/* ---------- avisos ---------- */

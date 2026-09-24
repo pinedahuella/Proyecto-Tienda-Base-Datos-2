@@ -6,10 +6,20 @@
 #   bash redis/mas_vendidos.sh                 muestra el ranking que hay ahora
 #   bash redis/mas_vendidos.sh --reconstruir   lo recalcula desde ClickHouse, ya
 #
-# La clave es un ZSET, mesh:productos:mas_vendidos: el miembro es el id de
-# producto y el puntaje son las unidades vendidas. Redis guarda SOLO eso, nunca
-# nombre, precio ni foto: eso sale de Mongo cuando GET /productos/mas-vendidos
-# arma la respuesta. Ver la seccion 3 de redis/README.md.
+# Son dos claves. El ranking es un ZSET, mesh:productos:mas_vendidos: el
+# miembro es el id de producto y el puntaje son las unidades vendidas. Desde el
+# 2026-09-23 hay ademas un HASH, mesh:productos:mas_vendidos:detalle, con el
+# documento completo de cada producto del ranking en JSON (id_producto ->
+# documento), que el worker trae de Mongo una vez por corrida. GET
+# /productos/mas-vendidos ya no toca Mongo: lee el ZSET, pide el detalle al HASH
+# y salta el id que no tenga detalle. Ver la seccion 2b de redis/README.md.
+#
+# --reconstruir SOLO rehace el ZSET. El HASH de detalle lo sigue escribiendo
+# unicamente el worker, porque es una copia del documento de Mongo tal como lo
+# serializa el backend y este script no tiene como producir el mismo texto. La
+# consecuencia: si el ranking reconstruido trae un producto que el worker no
+# cacheo en su ultima corrida, la ruta lo salta hasta la corrida siguiente.
+# La vista marca cuales estan en ese caso.
 #
 # QUIEN LA ESCRIBE DE VERDAD. El worker MasVendidosSyncService del backend, cada
 # 10 minutos, y ese es el unico camino de produccion. Este script NO lo
@@ -47,6 +57,7 @@ REDIS="${REDIS:-mesh-redis}"
 CH_CONTENEDOR="${CH_CONTENEDOR:-mesh-clickhouse}"
 CLAVE="mesh:productos:mas_vendidos"
 CLAVE_TMP="${CLAVE}:tmp"
+CLAVE_DETALLE="${CLAVE}:detalle"
 TOPE=20
 SERVICIO="$RAIZ/backend/src/services/productos/mas-vendidos-sync.service.ts"
 
@@ -84,10 +95,22 @@ mostrar() {
         return
     fi
     echo "  $n producto(s), de mas a menos vendido (el puntaje son unidades):"
-    rcli ZREVRANGE "$CLAVE" 0 -1 WITHSCORES | paste - - | awk '{ printf "    %2d. producto %-6s %s unidades\n", NR, $1, $2 }'
+    local pos=0 id total marca
+    while IFS=$'\t' read -r id total; do
+        [ -n "$id" ] || continue
+        pos=$((pos + 1))
+        if [ "$(rcli HEXISTS "$CLAVE_DETALLE" "$id")" = "1" ]; then
+            marca=""
+        else
+            marca="  (sin detalle cacheado, la ruta lo salta)"
+        fi
+        printf "    %2d. producto %-6s %s unidades%s\n" "$pos" "$id" "$total" "$marca"
+    done <<< "$(rcli ZREVRANGE "$CLAVE" 0 -1 WITHSCORES | paste - -)"
     local ttl
     ttl=$(rcli TTL "$CLAVE")
     [ "$ttl" = "-1" ] && echo "  Sin vencimiento: se queda hasta que el worker la reemplace."
+    echo "Clave: $CLAVE_DETALLE"
+    echo "  $(rcli HLEN "$CLAVE_DETALLE") producto(s) con el documento cacheado por el worker."
 }
 
 if [ "${1:-}" != "--reconstruir" ]; then
@@ -102,6 +125,7 @@ if [ ! -f "$SERVICIO" ]; then
     exit 1
 fi
 clave_backend=$(grep -o "CLAVE_RANKING = '[^']*'" "$SERVICIO" | sed "s/.*= '//; s/'//")
+detalle_backend=$(grep -o "CLAVE_DETALLE = '[^']*'" "$SERVICIO" | sed "s/.*= '//; s/'//")
 tope_backend=$(grep -o "TOPE_ALMACENADO = [0-9]*" "$SERVICIO" | sed 's/.*= //')
 # El filtro por lote real. Si el worker lo pierde, este script seguiria contando lo
 # sembrado y el ranking que arma dejaria de parecerse al que arma el backend.
@@ -110,10 +134,12 @@ if ! grep -qF "lote = 'real'" "$SERVICIO"; then
     echo "Este script si lo hace: revisalo antes de escribir nada." >&2
     exit 1
 fi
-if [ "$clave_backend" != "$CLAVE" ] || [ "$tope_backend" != "$TOPE" ]; then
+if [ "$clave_backend" != "$CLAVE" ] || [ "$tope_backend" != "$TOPE" ] \
+   || [ "$detalle_backend" != "$CLAVE_DETALLE" ]; then
     echo "El worker del backend ya no coincide con este script." >&2
-    echo "  clave  backend: ${clave_backend:-?}   aqui: $CLAVE" >&2
-    echo "  tope   backend: ${tope_backend:-?}   aqui: $TOPE" >&2
+    echo "  clave    backend: ${clave_backend:-?}   aqui: $CLAVE" >&2
+    echo "  detalle  backend: ${detalle_backend:-?}   aqui: $CLAVE_DETALLE" >&2
+    echo "  tope     backend: ${tope_backend:-?}   aqui: $TOPE" >&2
     echo "Actualiza redis/mas_vendidos.sh y su seccion del README antes de seguir." >&2
     exit 1
 fi

@@ -37,7 +37,7 @@ const PUERTO = Number(process.env.PANEL_PUERTO || 5199);
 const TOKEN = randomBytes(24).toString('hex');
 // Los unicos origenes de frontend que pueden hablarle a este servidor y pedirle el
 // token. Ver el comentario de CORS mas abajo.
-const FRONTENDS_OK = ['http://localhost:5173', 'http://127.0.0.1:5173'];
+const FRONTENDS_OK = ['http://localhost:5173', 'http://127.0.0.1:5173', 'https://mesh.ledkid.com'];
 
 // ---------------------------------------------------------------------------
 // El catalogo. Todo lo que el panel puede hacer esta aqui y en ningun otro lado.

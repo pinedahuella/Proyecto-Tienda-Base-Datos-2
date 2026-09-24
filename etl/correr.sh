@@ -57,8 +57,10 @@ done
 # Las OFERTAS no se migran: se quedan en PostgreSQL. Precio, stock y estado
 # cambian en cada venta, y copiarlos aqui obligaria a sostenerlos al dia en dos
 # bases a la vez. Lo que si viaja son cinco numeros agregados por producto
-# (precio_tienda, stock_tienda, stock_total, total_ofertas), que los calcula
-# extraer.sql y son los que la LISTA del catalogo necesita en cada tarjeta.
+# (precio_tienda, precio_desde, stock_tienda, stock_total, total_ofertas) y la
+# bandera hay_descuento, que los calcula extraer.sql (los precios ya con el
+# descuento de la oferta) y son los que la LISTA del catalogo necesita en cada
+# tarjeta.
 #
 # Cada consulta devuelve una linea por documento; mezclarlas obligaria a marcar
 # cada linea con su tipo y a separarlas otra vez del otro lado.

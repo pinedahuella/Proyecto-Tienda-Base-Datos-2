@@ -54,8 +54,10 @@ Porque es el ADR-2 y esta medido. El descuento de stock tiene que ser atomico
 para no vender dos veces la ultima unidad, y eso lo sostiene un
 `SELECT ... FOR UPDATE` de PostgreSQL. El documento lleva cinco numeros
 agregados (`precio_tienda`, `precio_desde`, `stock_tienda`, `stock_total`,
-`total_ofertas`) para que la tarjeta del catalogo no tenga que preguntar por
-cada producto de la pagina, pero esos son una **copia para pintar**. Cuanto
+`total_ofertas`) y la bandera `hay_descuento` para que la tarjeta del
+catalogo no tenga que preguntar por cada producto de la pagina, pero esos son
+una **copia para pintar**. Las ofertas del lote nacen sin descuento, asi que
+aqui `hay_descuento` es siempre `false` y los precios son los de lista. Cuanto
 queda de verdad se pregunta en PostgreSQL.
 
 Asi que crear uno de estos son dos escrituras en dos bases, y ningun script

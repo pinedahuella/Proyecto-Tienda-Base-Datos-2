@@ -2877,13 +2877,92 @@ w(``);
 
 
 // ============================================================
+// Descuentos (migracion 020)
+// ============================================================
+// Unas pocas ofertas de la tienda arrancan con descuento, para que la
+// etiqueta del catalogo y el precio tachado de la ficha se vean sin que nadie
+// tenga que entrar al panel a ponerlos.
+//
+// A cuales: un producto de cada ocho, empezando por el sexto, y dentro de el
+// la primera variante cuya oferta de la tienda tenga unidades. Una etiqueta
+// de descuento sobre algo agotado no ensena nada. Los porcentajes van
+// redondos y rotando, 10, 15, 20, 25 y 30, que es lo que pondria una tienda.
+//
+// El sorteo: NINGUNO, por lo mismo que el anillo de arriba. azar() es una
+// secuencia global y meterle una llamada aqui correria la cola de todo lo que
+// viene despues.
+//
+// Los primeros cinco productos quedan fuera a proposito. Los arneses y las
+// demos eligen "la primera oferta activa con stock" por id_oferta, que en la
+// practica cae en el primer producto, y asi ensenan el caso base: precio de
+// lista igual a lo que se cobra. No es para que no fallen (los que miran el
+// precio ya usan la formula del descuento), es para que lo que ensenan sea
+// el caso sencillo y el descuento se vea en pruebas/descuentos.sh.
+//
+// VAN AL FINAL, despues de todas las compras. Las compras de arriba congelan
+// la fila de precio vigente al agregar la linea, y si el descuento ya
+// estuviera puesto cambiaria lo que cobraron los pedidos sembrados, que otros
+// arneses y reportes ya conocen.
+const PORCENTAJES_DESCUENTO = [10, 15, 20, 25, 30];
+const FECHA_DESCUENTO = '2026-09-01 09:00:00-06';
+const DESCUENTOS = [];
+PRODUCTOS.forEach((p, i) => {
+  if (i % 8 !== 5) return;
+  const oferta = OFERTAS.find((o) =>
+    o.correo === TIENDA.correo && o.producto === p.nombre && o.stock > 0);
+  if (!oferta) return;
+  DESCUENTOS.push({
+    correo: oferta.correo, producto: oferta.producto, variante: oferta.variante,
+    porcentaje: PORCENTAJES_DESCUENTO[DESCUENTOS.length % PORCENTAJES_DESCUENTO.length],
+  });
+});
+
+w(`-- ============================================================`);
+w(`-- Descuentos: ${DESCUENTOS.length} ofertas de la tienda`);
+w(`-- ============================================================`);
+w(`-- oferta.precio NO se toca: sigue siendo el de lista, y el precio con`);
+w(`-- descuento se calcula en cada consulta (ver 020_descuentos_oferta.sql).`);
+w(`-- Cada descuento deja su fila en precio_historial con el mismo precio y el`);
+w(`-- %, que es lo que haria el trigger si estuviera encendido. Se escribe a`);
+w(`-- mano por lo mismo que el resto del historial: la fecha.`);
+w(`--`);
+w(`-- La fecha va despues de cualquier otro precio del conjunto (el ultimo`);
+w(`-- cambio cae en agosto), asi que la fila del descuento es la vigente.`);
+w(`--`);
+w(`-- La guardia: solo se pone donde no hay ninguno. Si el vendedor ya puso o`);
+w(`-- cambio el suyo, se respeta el de el.`);
+w(``);
+w(`WITH puestos AS (`);
+w(`    UPDATE oferta o`);
+w(`    SET porcentaje_descuento = v.porcentaje`);
+w(`    FROM (VALUES`);
+w(DESCUENTOS.map((d, i) =>
+  `        (${txt(d.correo)}, ${txt(d.producto)}, ${txt(d.variante)}, ${num(d.porcentaje)}.00)` +
+  (i < DESCUENTOS.length - 1 ? ',' : '')).join('\n'));
+w(`    ) AS v(correo, producto, variante, porcentaje)`);
+w(`    JOIN usuarios            u  ON u.correo_electronico = v.correo`);
+w(`    JOIN productos           p  ON p.nombre = v.producto`);
+w(`    JOIN productos_variantes pv ON pv.id_producto = p.id_producto AND pv.nombre_variante = v.variante`);
+w(`    WHERE o.id_producto_mongo = p.id_producto`);
+w(`      AND o.id_producto_variante_mongo = pv.id_producto_variante`);
+w(`      AND o.id_usuario = u.id_usuario`);
+w(`      AND o.porcentaje_descuento IS NULL`);
+w(`    RETURNING o.id_oferta, o.precio, o.porcentaje_descuento, o.id_usuario`);
+w(`)`);
+w(`INSERT INTO precio_historial (id_oferta, precio, porcentaje_descuento, id_usuario_modifico, fecha_creacion)`);
+w(`SELECT id_oferta, precio, porcentaje_descuento, id_usuario, ${txt(FECHA_DESCUENTO)}::timestamptz`);
+w(`FROM puestos;`);
+w(``);
+
+
+// ============================================================
 // Cierre: encender el trigger y comprobarse a si mismo
 // ============================================================
 w(`-- ============================================================`);
 w(`-- El trigger vuelve, y el conjunto se comprueba a si mismo`);
 w(`-- ============================================================`);
 w(`-- Un conjunto de datos que no se verifica es un conjunto de datos que`);
-w(`-- miente en silencio. Estas doce comprobaciones fallan la migracion entera`);
+w(`-- miente en silencio. Estas trece comprobaciones fallan la migracion entera`);
 w(`-- si algo no cuadra, en vez de dejar la base torcida y que alguien lo`);
 w(`-- descubra tres semanas despues.`);
 w(``);
@@ -3140,7 +3219,25 @@ w(`    IF v_mal = 0 THEN`);
 w(`        RAISE EXCEPTION 'No quedo ni un circulo cerrado de calificaciones: el panel de fraude vuelve a salir vacio';`);
 w(`    END IF;`);
 w(``);
-w(`    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, ofertas de la tienda, aprobaciones, direcciones, las compras que respaldan las resenas, la parte social y el circulo del anillo cuadran';`);
+w(`    -- 13. El descuento de cada oferta es el de la ultima fila de su`);
+w(`    --     historial, igual que el precio en la 2. Si la fila del descuento`);
+w(`    --     no quedara como la vigente, comprar_pedido() cobraria el precio`);
+w(`    --     de lista mientras la ficha ensena el rebajado. IS DISTINCT FROM`);
+w(`    --     y no <>, porque "sin descuento" es NULL de los dos lados.`);
+w(`    SELECT count(*) INTO v_mal`);
+w(`    FROM oferta o`);
+w(`    JOIN LATERAL (`);
+w(`        SELECT porcentaje_descuento FROM precio_historial ph`);
+w(`        WHERE ph.id_oferta = o.id_oferta`);
+w(`        ORDER BY ph.fecha_creacion DESC, ph.id_precio_historial DESC LIMIT 1`);
+w(`    ) ultimo ON true`);
+w(`    WHERE o.porcentaje_descuento IS DISTINCT FROM ultimo.porcentaje_descuento;`);
+w(``);
+w(`    IF v_mal > 0 THEN`);
+w(`        RAISE EXCEPTION '% ofertas tienen un descuento distinto al de la ultima fila de su historial', v_mal;`);
+w(`    END IF;`);
+w(``);
+w(`    RAISE NOTICE 'Conjunto de datos verificado: kardex, precios, descuentos, ofertas de la tienda, aprobaciones, direcciones, las compras que respaldan las resenas, la parte social y el circulo del anillo cuadran';`);
 w(`END`);
 w(`$verificar$;`);
 w(``);
@@ -3188,6 +3285,7 @@ console.log(`  valores      ${filasCar.length} de producto, ${filasCarVar.length
 console.log(`  historial    ${FILAS_HIST.length} filas de producto, ${FILAS_HIST_VAR.length} de variante`);
 console.log(`  ofertas      ${OFERTAS.length}`);
 console.log(`  precios      ${CAMBIOS.length} filas de historial`);
+console.log(`  descuentos   ${DESCUENTOS.length} ofertas de la tienda (${DESCUENTOS.map((d) => `${d.porcentaje}%`).join(', ')})`);
 console.log(`  usuarios     ${USUARIOS.length}`);
 console.log(`  compras      ${PEDIDOS.length} pedidos, ${FILAS_COMPRA.length} lineas (${FILAS_COMPRA.length - RESENAS.length} sin resena, para el arnes)`);
 console.log(`  social       ${RESENAS.length} resenas, ${RESPUESTAS.length} respuestas, ${VOTOS.length} votos`);

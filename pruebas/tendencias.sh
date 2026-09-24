@@ -22,8 +22,10 @@
 #   3. LA VENTANA. Una fila de hace 10 dias sale con dias=30 y NO con dias=7.
 #   4. LOS PARAMETROS. limite recorta, direccion invierte el orden, y un valor
 #      malo da 400 en vez de callarse.
-#   5. EL ESTANTE. Lee el ZSET de Redis, respeta su orden, salta el id que ya no
-#      tiene producto visible y contesta 200 sin sesion.
+#   5. EL ESTANTE. Lee el ZSET de Redis, respeta su orden, salta el id que no
+#      tiene detalle cacheado y contesta 200 sin sesion. Desde el 2026-09-23 el
+#      detalle de cada producto sale de otro HASH de Redis que llena el worker,
+#      mesh:productos:mas_vendidos:detalle, y ya no de MongoDB.
 #   6. QUE LO SEMBRADO NO ENTRA. Desde el 2026-09-19 las seis rutas y el worker
 #      de mas vendidos cuentan SOLO lote = 'real', sin parametro para lo
 #      contrario. Una fila de lote 'generado-...' con un total enorme no puede
@@ -49,16 +51,20 @@
 # que con el id ficticio esas filas son enteramente de la prueba.
 #
 # LO QUE SIEMBRA Y LO QUE LIMPIA. Las filas marcadas en las seis tablas y en el
-# resumen, y la clave mesh:productos:mas_vendidos de Redis, que se GUARDA antes y
-# se RESTAURA al terminar (si no existia, se borra). Al final comprueba que no
-# quedo ni una fila marcada. Hay un trap: si el proceso muere, limpia.
+# resumen, y las dos claves del estante en Redis: el ZSET
+# mesh:productos:mas_vendidos, que se GUARDA antes y se RESTAURA al terminar (si
+# no existia, se borra), y el HASH mesh:productos:mas_vendidos:detalle, que se
+# aparta entero con RENAME a una clave de respaldo y vuelve igual al terminar.
+# Si una corrida anterior murio con el respaldo apartado, se devuelve al
+# empezar. Al final comprueba que no quedo ni una fila marcada. Hay un trap: si
+# el proceso muere, limpia.
 #
 # LO QUE CUESTA CORRERLO. Dos inicios de sesion (admin y comprador), que suman
 # al contador multi_cuenta_ip del fraude de login. Y hay una carrera pequena
-# con el worker de mas vendidos, que reescribe esa clave cada 10 minutos y ahora
-# vera brevemente el id ficticio en compra_producto (lo salta, no tiene producto
-# visible): si cae justo en medio, el paso 5 puede dar un rojo que no es del
-# codigo. Se repite solo. Corre de a uno, con nadie mas tocando eventos.
+# con el worker de mas vendidos, que reescribe esas dos claves cada 10 minutos
+# y ahora vera brevemente el id ficticio en compra_producto (lo salta, no tiene
+# producto visible): si cae justo en medio, el paso 5 puede dar un rojo que no
+# es del codigo. Se repite solo. Corre de a uno, con nadie mas tocando eventos.
 #
 # No instala nada: curl, docker y node, que ya estan.
 
@@ -69,6 +75,10 @@ API="${API:-http://localhost:3000}"
 CH_CONTENEDOR="${CH_CONTENEDOR:-mesh-clickhouse}"
 REDIS="${REDIS:-mesh-redis}"
 CLAVE_RANKING="mesh:productos:mas_vendidos"
+CLAVE_DETALLE="mesh:productos:mas_vendidos:detalle"
+# Donde se aparta el HASH de detalle mientras corre la prueba. Con RENAME, que
+# mueve la clave entera sin copiar valor por valor.
+RESPALDO_DETALLE="mesh:productos:mas_vendidos:detalle:respaldo-tendencias"
 
 # Las cuentas de la semilla, las mismas de ARRANCAR.txt: esto corre contra la
 # base local de desarrollo.
@@ -190,18 +200,34 @@ borrar_marcadas() {
         ch "ALTER TABLE $t DELETE WHERE lote = 'real' AND startsWith(termino, '$PREFIJO_TERMINO') SETTINGS mutations_sync = 2" >/dev/null 2>&1
     done
 }
+# El HASH de detalle vuelve a su sitio. Si no habia nada apartado (no existia
+# antes de la prueba), queda sin detalle, igual que estaba.
+DETALLE_APARTADO=0
+RANKING_RESPALDADO=0
+devolver_detalle() {
+    rcli DEL "$CLAVE_DETALLE" >/dev/null
+    if [ "$(rcli EXISTS "$RESPALDO_DETALLE")" = "1" ]; then
+        rcli RENAME "$RESPALDO_DETALLE" "$CLAVE_DETALLE" >/dev/null
+    fi
+    DETALLE_APARTADO=0
+}
 limpiar() {
     [ "$BORRADO" = 1 ] && return
     BORRADO=1
     borrar_marcadas
-    # Restaura el ZSET tal como estaba.
-    rcli DEL "$CLAVE_RANKING" >/dev/null
-    if [ -s "$RESPALDO_ZSET" ]; then
-        local miembro puntaje
-        while IFS= read -r miembro && IFS= read -r puntaje; do
-            [ -n "$miembro" ] && rcli ZADD "$CLAVE_RANKING" "$puntaje" "$miembro" >/dev/null
-        done < "$RESPALDO_ZSET"
+    # Restaura el ZSET tal como estaba. Solo si ya se habia respaldado: un
+    # trap que salta en el paso 0 (backend caido) no tiene respaldo, y borrar
+    # la clave ahi dejaria el estante vacio sin haberlo tocado.
+    if [ "$RANKING_RESPALDADO" = 1 ]; then
+        rcli DEL "$CLAVE_RANKING" >/dev/null
+        if [ -s "$RESPALDO_ZSET" ]; then
+            local miembro puntaje
+            while IFS= read -r miembro && IFS= read -r puntaje; do
+                [ -n "$miembro" ] && rcli ZADD "$CLAVE_RANKING" "$puntaje" "$miembro" >/dev/null
+            done < "$RESPALDO_ZSET"
+        fi
     fi
+    [ "$DETALLE_APARTADO" = 1 ] && devolver_detalle
     rm -f "$TARRO_ADMIN" "$TARRO_COMPRADOR" "$CUERPO" "$RESPALDO_ZSET"
 }
 trap limpiar EXIT INT TERM
@@ -233,7 +259,21 @@ fi
 OK "sin restos de otra corrida"
 
 rcli ZRANGE "$CLAVE_RANKING" 0 -1 WITHSCORES > "$RESPALDO_ZSET"
+RANKING_RESPALDADO=1
 echo "  (ranking de Redis respaldado, $(($(wc -l < "$RESPALDO_ZSET") / 2)) miembro(s))"
+
+# Un respaldo del detalle que quedo apartado es de una corrida que murio sin
+# su trap: ese es el detalle de verdad, y vuelve antes de apartar nada.
+if [ "$(rcli EXISTS "$RESPALDO_DETALLE")" = "1" ]; then
+    echo "  (habia un detalle apartado por una corrida anterior, se devuelve)"
+    devolver_detalle
+fi
+rcli DEL "$RESPALDO_DETALLE" >/dev/null
+if [ "$(rcli EXISTS "$CLAVE_DETALLE")" = "1" ]; then
+    rcli RENAME "$CLAVE_DETALLE" "$RESPALDO_DETALLE" >/dev/null
+fi
+DETALLE_APARTADO=1
+echo "  (detalle del estante apartado en $RESPALDO_DETALLE)"
 
 # ============================================================
 titulo "1. Quien puede mirar: sin sesion 401, comprador 403, admin 200"
@@ -335,11 +375,41 @@ igual "direccion=lateral da 400" 400 "$(get "/admin/eventos/vista?direccion=late
 titulo "5. El estante de lo mas vendido, sin sesion"
 # ============================================================
 # ZSET de prueba: el 2 primero, el 1 despues y un id que no existe al final.
-rcli DEL "$CLAVE_RANKING" >/dev/null
-rcli ZADD "$CLAVE_RANKING" 30 "$Q" 20 "$P" 10 99999999 >/dev/null
-c=$(get "/productos/mas-vendidos")
+# Y el HASH de detalle con un documento minimo para el 1 y el 2, a proposito
+# en el orden contrario al del ranking: si la ruta siguiera el orden del HASH
+# en vez del ZSET, saldria al reves. El id que no existe no tiene detalle, que
+# es lo que le pasa a un producto que el worker no cacheo. El 3 tiene detalle
+# pero no esta en el ranking, y no puede salir.
+#
+# El worker del backend reescribe las DOS claves cada 10 minutos. Si le toca
+# justo entre la siembra y el GET, la ruta contesta el ranking de verdad y los
+# dos igual de abajo salen en FALLA sin que el codigo este mal (paso el
+# 2026-09-23). Por eso despues del GET se mira si el id inventado sigue en el
+# ZSET: si ya no esta, lo piso el worker, y se siembra y se pregunta otra vez.
+sembrar_estante() {
+    rcli DEL "$CLAVE_RANKING" >/dev/null
+    rcli ZADD "$CLAVE_RANKING" 30 "$Q" 20 "$P" 10 99999999 >/dev/null
+    rcli DEL "$CLAVE_DETALLE" >/dev/null
+    rcli HSET "$CLAVE_DETALLE" \
+        "$P" "{\"_id\":$P,\"nombre\":\"prueba-tendencias $P\"}" \
+        "$Q" "{\"_id\":$Q,\"nombre\":\"prueba-tendencias $Q\"}" \
+        3 "{\"_id\":3,\"nombre\":\"prueba-tendencias 3\"}" >/dev/null
+}
+for intento in 1 2; do
+    sembrar_estante
+    c=$(get "/productos/mas-vendidos")
+    [ -n "$(rcli ZSCORE "$CLAVE_RANKING" 99999999)" ] && break
+    echo "  (el worker de mas vendidos reescribio el ranking en medio, se repite)"
+done
 igual "GET /productos/mas-vendidos sin sesion" 200 "$c"
-igual "sale en el orden del ranking y salta el id que no existe" "$Q,$P" "$(jx 'j.payload.map(p=>p._id).join(",")' < "$CUERPO")"
+igual "sale en el orden del ranking y salta el id sin detalle" "$Q,$P" "$(jx 'j.payload.map(p=>p._id).join(",")' < "$CUERPO")"
+igual "el detalle sale del HASH de Redis, no de MongoDB" "prueba-tendencias $Q" "$(jx 'j.payload[0].nombre' < "$CUERPO")"
+
+# Con ranking pero sin ningun detalle cacheado: 200 y lista vacia.
+rcli DEL "$CLAVE_DETALLE" >/dev/null
+c=$(get "/productos/mas-vendidos")
+igual "ranking sin detalle contesta 200" 200 "$c"
+igual "y no inventa productos" 0 "$(jx 'j.payload.length' < "$CUERPO")"
 
 rcli DEL "$CLAVE_RANKING" >/dev/null
 c=$(get "/productos/mas-vendidos")

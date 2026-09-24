@@ -18,6 +18,7 @@
 	} from '$lib/pedido';
 	import { carrito } from '$lib/estadoCarrito.svelte';
 	import { registrarVista, registrarCarrito, type OrigenVista } from '$lib/eventos';
+	import { textoPorcentaje, tieneDescuento } from '$lib/descuento';
 
 	/**
 	 * La ficha de un producto: la foto arriba y debajo todo lo que la base
@@ -56,6 +57,12 @@
 		stock_tienda: number;
 		stock_total: number;
 		total_ofertas: number;
+		/**
+		 * Si alguna oferta activa de esta presentacion (de cualquier vendedor)
+		 * tiene descuento. Copia calculada del backend; opcional porque los
+		 * documentos de antes del cambio no la traen.
+		 */
+		hay_descuento?: boolean;
 		caracteristicas_adicionales?: Caracteristica[];
 		caracteristicas_personalizadas?: Caracteristica[];
 	}
@@ -75,7 +82,15 @@
 		vendedor: { id_usuario: string; usuario: string; nombre: string; apellido: string | null };
 		/** La oferta de la cuenta de la tienda: es la que se ensena por defecto. */
 		es_tienda: boolean;
+		/** El precio de LISTA, sin descuento. El que se cobra es `precio_final`. */
 		precio: string;
+		/** "25.00" o null. Solo para la etiqueta y el tachado. */
+		porcentaje_descuento: string | null;
+		/**
+		 * El que se cobra: `precio` con el descuento ya aplicado y redondeado
+		 * por PostgreSQL. Aqui no se recalcula (ver $lib/descuento).
+		 */
+		precio_final: string;
 		/**
 		 * Las unidades segun PostgreSQL.
 		 *
@@ -116,6 +131,8 @@
 		stock_tienda: number;
 		stock_total: number;
 		total_ofertas: number;
+		/** Si alguna variante tiene una oferta con descuento. Ver Variante. */
+		hay_descuento?: boolean;
 		/** Las ofertas de verdad, que solo trae esta ruta y no el listado. */
 		ofertas: Oferta[];
 	}
@@ -764,6 +781,9 @@
 					</span>
 					<h1>{producto.nombre}</h1>
 					<p class="precio">{rango(producto)}</p>
+					{#if producto.hay_descuento}
+						<p><span class="con-descuento">Producto con descuento</span></p>
+					{/if}
 					{#if desde(producto)}
 						<p class="desde-p">
 							desde <strong>{desde(producto)}</strong> con otro vendedor
@@ -904,6 +924,9 @@
 								{:else if aNumero(v.precio_desde) > 0}
 									<strong class="precio-v">{quetzales(aNumero(v.precio_desde))}</strong>
 								{/if}
+								{#if v.hay_descuento}
+									<span class="con-descuento">Con descuento</span>
+								{/if}
 								{#if v.total_ofertas === 0}
 									<span class="stock-v sin-dato">Sin vendedores</span>
 								{:else if v.stock_total === 0}
@@ -942,7 +965,13 @@
 										</div>
 
 										<div class="cuanto">
-											<strong class="precio-v">{quetzales(Number(o.precio))}</strong>
+											<!-- Se cobra precio_final. El de lista solo sale, tachado,
+											     cuando hay descuento: con los dos iguales seria ruido. -->
+											<strong class="precio-v">{quetzales(Number(o.precio_final))}</strong>
+											{#if tieneDescuento(o.porcentaje_descuento)}
+												<s class="lista">{quetzales(Number(o.precio))}</s>
+												<span class="descuento">-{textoPorcentaje(o.porcentaje_descuento)}</span>
+											{/if}
 											<!-- El numero sale de unidades(), NUNCA de o.stock. Ver su
 											     comentario: con la venta relampago abierta o.stock esta
 											     congelado y ensenarlo es prometer unidades que no hay. -->
@@ -1570,9 +1599,37 @@
 
 	.cuanto {
 		display: flex;
+		flex-wrap: wrap;
 		align-items: baseline;
 		gap: var(--e2);
 		white-space: nowrap;
+	}
+
+	/* ---------- el descuento ---------- */
+
+	/* Los colores salen del layout (--descuento-*): la misma etiqueta sale en
+	   el catalogo, el carrito, el panel del vendedor y los pedidos. */
+	.lista {
+		font-size: var(--f-sm);
+		color: var(--gris);
+	}
+
+	.descuento,
+	.con-descuento {
+		display: inline-block;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		line-height: 1.2;
+		padding: 1px 7px;
+		border-radius: 999px;
+		white-space: nowrap;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
+	}
+
+	.resumen .con-descuento {
+		margin-top: 0.4rem;
 	}
 
 	/* El formulario de comprar ocupa las dos columnas, debajo */

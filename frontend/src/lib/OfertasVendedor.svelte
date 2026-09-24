@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { pedir, conJson, mensajeUtil, type RespuestaApi } from './api';
 	import Autocompletar from './Autocompletar.svelte';
+	import { textoPorcentaje, tieneDescuento } from './descuento';
 
 	/**
 	 * Las ofertas del vendedor: verlas, editarlas y publicar una nueva.
@@ -19,6 +20,8 @@
 	 *   PATCH  /vendedor/ofertas/:id                precio, estado y/o ajuste de stock
 	 *   POST   /vendedor/ofertas/:id/venta-limitada abrir la venta relampago
 	 *   DELETE /vendedor/ofertas/:id/venta-limitada cerrarla
+	 *   POST   /vendedor/ofertas/:id/descuento      poner un % de descuento
+	 *   DELETE /vendedor/ofertas/:id/descuento      quitarlo
 	 *
 	 * Y una del catalogo publico, `GET /productos?nombre=`, para buscar sobre
 	 * que variante publicar.
@@ -96,8 +99,18 @@
 		nombre_producto: string;
 		nombre_variante: string;
 		imagen: string | null;
-		/** Tambien texto, por lo mismo: es un decimal de PostgreSQL. */
+		/**
+		 * Tambien texto, por lo mismo: es un decimal de PostgreSQL. Es el precio
+		 * de LISTA: un descuento no lo toca. Lo que se cobra es `precio_final`.
+		 */
 		precio: string;
+		/** El % de descuento vigente ("25.00"), o null si no tiene. */
+		porcentaje_descuento: string | null;
+		/**
+		 * `precio` con el descuento aplicado, calculado por PostgreSQL. Sin
+		 * descuento es igual a `precio`. Aqui no se recalcula nunca.
+		 */
+		precio_final: string;
 		stock: number;
 		estado: EstadoOferta;
 		/**
@@ -154,6 +167,9 @@
 		mi_oferta: {
 			id_oferta: string;
 			precio: string;
+			/** Lo mismo que en `Oferta`. */
+			porcentaje_descuento: string | null;
+			precio_final: string;
 			stock: number;
 			estado: EstadoOferta;
 			/**
@@ -234,7 +250,17 @@
 	 */
 	type OfertaRelampago = Pick<
 		Oferta,
-		'id_oferta' | 'stock' | 'estado' | 'es_inventario_limitado'
+		'id_oferta' | 'stock' | 'estado' | 'es_inventario_limitado' | 'porcentaje_descuento'
+	>;
+
+	/**
+	 * Lo minimo para poner o quitar un descuento, por lo mismo que las dos de
+	 * arriba. Lleva `es_inventario_limitado` porque con la venta relampago
+	 * abierta el backend no deja quitar el descuento (409), y se dice antes.
+	 */
+	type OfertaDescuento = Pick<
+		Oferta,
+		'id_oferta' | 'precio' | 'porcentaje_descuento' | 'precio_final' | 'es_inventario_limitado'
 	>;
 
 	/**
@@ -257,7 +283,10 @@
 		nombre_producto: string;
 		nombre_variante: string;
 		imagen: string | null;
+		/** De lista. Ver `Oferta`. */
 		precio: string;
+		porcentaje_descuento: string | null;
+		precio_final: string;
 		stock: number;
 		fecha_creacion: string;
 		vendedor: {
@@ -442,6 +471,17 @@
 	let duracionRelampago = $state('');
 	let relampagoOcupado = $state(false);
 	let errorRelampago = $state('');
+
+	/** El id de la oferta con el panel de descuento abierto, o null. */
+	let descuentoDe = $state<string | null>(null);
+	/**
+	 * El % escrito, como TEXTO. Un input number con bind:value guarda un
+	 * numero (o null si se borra), y .trim() sobre eso revienta; con texto y
+	 * `inputmode` el teclado del telefono sale igual de numerico.
+	 */
+	let porcentajeNuevo = $state('');
+	let descuentoOcupado = $state(false);
+	let errorDescuento = $state('');
 
 	/**
 	 * Lo que se puede elegir en "Cuando cierra".
@@ -958,6 +998,10 @@
 							mi_oferta: {
 								id_oferta: o.id_oferta,
 								precio: o.precio,
+								// Sin copiar estos dos, poner un descuento no se veia
+								// en la tarjeta del catalogo hasta volver a abrirla.
+								porcentaje_descuento: o.porcentaje_descuento,
+								precio_final: o.precio_final,
 								stock: o.stock,
 								estado: o.estado,
 								// Va tambien la fecha de aprobacion, y no es un extra:
@@ -1061,6 +1105,7 @@
 			return;
 		}
 		relampagoDe = o.id_oferta;
+		descuentoDe = null;
 		duracionRelampago = '';
 		aviso = '';
 	}
@@ -1156,6 +1201,13 @@
 			return;
 		}
 
+		// El backend no abre una venta relampago sin descuento (409). El panel
+		// ya no ofrece el boton en ese caso; esto es por si llega igual.
+		if (!tieneDescuento(o.porcentaje_descuento)) {
+			errorRelampago = 'Primero ponle un descuento a esta oferta.';
+			return;
+		}
+
 		// Sin validar el rango: `duracionRelampago` sale de un <select> con la
 		// lista DURACIONES, cuyo tope ES el tope del backend. Lo unico que puede
 		// llegar aqui es una de esas opciones o el vacio.
@@ -1186,7 +1238,7 @@
 			aviso =
 				`Venta abierta con ${r.payload.stock_sembrado} ` +
 				`${r.payload.stock_sembrado === 1 ? 'unidad' : 'unidades'}. ` +
-				(elegido === '' ? 'La cierras vos cuando quieras.' : `Cierra ${cuando.toLowerCase()}.`);
+				(elegido === '' ? 'La cierras tu cuando quieras.' : `Cierra ${cuando.toLowerCase()}.`);
 		} else {
 			// Los tres que el panel tiene que saber distinguir, y el 404 es el
 			// que mas confunde: el backend contesta "No existe una oferta con
@@ -1233,6 +1285,99 @@
 	 */
 	function mensaje404(o: OfertaRelampago): string {
 		return `El servidor no reconoce la oferta ${o.id_oferta} como tuya. Recarga la lista: puede que se haya borrado o que la sesion sea de otra cuenta.`;
+	}
+
+	// -------------------------------------------------------------- descuento
+	/**
+	 * Abre o cierra el panel de descuento de una fila. Cierra el de la venta
+	 * relampago si estaba abierto: los dos paneles cuelgan de la misma fila y
+	 * uno debajo del otro no se sabe cual es cual.
+	 */
+	function alternarDescuento(o: Pick<Oferta, 'id_oferta'>) {
+		errorDescuento = '';
+		if (descuentoDe === o.id_oferta) {
+			descuentoDe = null;
+			return;
+		}
+		descuentoDe = o.id_oferta;
+		relampagoDe = null;
+		porcentajeNuevo = '';
+		aviso = '';
+	}
+
+	/**
+	 * El mismo filtro del backend (validarPorcentajeDescuento): de 1 a 90,
+	 * hasta 2 decimales. Se valida aqui para decirlo sin la vuelta, pero el
+	 * que manda es el de alla.
+	 */
+	function porcentajeValido(texto: string): boolean {
+		if (!/^\d+(\.\d{1,2})?$/.test(texto)) return false;
+		const n = Number(texto);
+		return n >= 1 && n <= 90;
+	}
+
+	/**
+	 * POST /vendedor/ofertas/:id/descuento
+	 *
+	 * El backend contesta la oferta entera ya con `precio_final` recalculado,
+	 * y esa es la que se mete en la fila: el precio con descuento lo redondea
+	 * PostgreSQL y no se adivina aqui.
+	 */
+	async function aplicarDescuento(o: OfertaDescuento) {
+		errorDescuento = '';
+		const texto = String(porcentajeNuevo ?? '').trim().replace(',', '.');
+		if (!porcentajeValido(texto)) {
+			errorDescuento = 'Escribe un numero del 1 al 90, con hasta 2 decimales.';
+			return;
+		}
+
+		descuentoOcupado = true;
+		const r = await pedir<Oferta>(
+			`/vendedor/ofertas/${o.id_oferta}/descuento`,
+			conJson('POST', { porcentaje_descuento: Number(texto) })
+		);
+		descuentoOcupado = false;
+
+		if (expiro(r)) return;
+
+		if (r.ok && r.payload) {
+			guardarEnLista(r.payload);
+			refrescarEnProductoAbierto(r.payload);
+			descuentoDe = null;
+			porcentajeNuevo = '';
+			aviso = `Descuento de ${textoPorcentaje(r.payload.porcentaje_descuento)} puesto. Ahora se vende a ${quetzales(r.payload.precio_final)}.`;
+		} else {
+			errorDescuento = mensajeUtil(r);
+		}
+	}
+
+	/** DELETE /vendedor/ofertas/:id/descuento */
+	async function quitarDescuento(o: OfertaDescuento) {
+		errorDescuento = '';
+
+		// El backend contesta 409 si la venta relampago esta abierta. El panel
+		// ya no ofrece el boton en ese caso; esto es por si llega igual.
+		if (o.es_inventario_limitado) {
+			errorDescuento = 'Cierra primero la venta relampago.';
+			return;
+		}
+
+		descuentoOcupado = true;
+		const r = await pedir<Oferta>(`/vendedor/ofertas/${o.id_oferta}/descuento`, {
+			method: 'DELETE'
+		});
+		descuentoOcupado = false;
+
+		if (expiro(r)) return;
+
+		if (r.ok && r.payload) {
+			guardarEnLista(r.payload);
+			refrescarEnProductoAbierto(r.payload);
+			descuentoDe = null;
+			aviso = `Descuento quitado. Vuelve a venderse a ${quetzales(r.payload.precio)}.`;
+		} else {
+			errorDescuento = mensajeUtil(r);
+		}
 	}
 
 	// ---------------------------------------------------------------- publicar
@@ -1662,6 +1807,23 @@
 			<div class="acciones">
 				<button type="button" onclick={() => (relampagoDe = null)}>Entendido</button>
 			</div>
+		{:else if !tieneDescuento(o.porcentaje_descuento)}
+			<!--
+				Desde el 2026-09-23 el backend no abre una venta relampago sin un
+				descuento activo (409). En vez de ofrecer el boton y dejar que
+				falle, se dice aqui y se lleva al panel del descuento.
+			-->
+			<p class="nota">
+				Una venta relampago tiene que llevar descuento. Ponle uno a esta oferta y despues
+				abre la venta.
+			</p>
+
+			<div class="acciones">
+				<button type="button" class="principal" onclick={() => alternarDescuento(o)}>
+					Poner descuento
+				</button>
+				<button type="button" onclick={() => (relampagoDe = null)}>Cancelar</button>
+			</div>
 		{:else}
 			<p class="nota">
 				Se apartan tus <strong>{o.stock}</strong>
@@ -1719,6 +1881,102 @@
 	</div>
 {/snippet}
 
+<!--
+	El precio de una oferta: el que se cobra grande, y si hay descuento el de
+	lista tachado y el %. Lo usan la lista, el catalogo y la cola de revision.
+-->
+{#snippet precioConDescuento(o: {
+	precio: string;
+	porcentaje_descuento: string | null;
+	precio_final: string;
+})}
+	<strong class="precio">{quetzales(o.precio_final ?? o.precio)}</strong>
+	{#if tieneDescuento(o.porcentaje_descuento)}
+		<span class="con-descuento-linea">
+			<s class="lista">{quetzales(o.precio)}</s>
+			<span class="descuento">-{textoPorcentaje(o.porcentaje_descuento)}</span>
+		</span>
+	{/if}
+{/snippet}
+
+<!--
+	El panel del descuento, colgado de su fila igual que el de la venta
+	relampago. Un snippet por lo mismo que aquel: lo usan las dos vistas.
+-->
+{#snippet panelDescuento(o: OfertaDescuento)}
+	<div class="descuento-panel">
+		{#if tieneDescuento(o.porcentaje_descuento)}
+			<p class="nota">
+				Tiene <strong>{textoPorcentaje(o.porcentaje_descuento)}</strong> de descuento: se vende a
+				<strong>{quetzales(o.precio_final)}</strong> en vez de {quetzales(o.precio)}.
+			</p>
+
+			{#if o.es_inventario_limitado}
+				<!-- El backend contesta 409 si se quita con la venta abierta: la
+				     venta relampago se apoya en este descuento. -->
+				<p class="nota">
+					Esta oferta esta en venta relampago. Para quitar el descuento, cierra primero la
+					venta.
+				</p>
+				<div class="acciones">
+					<button type="button" onclick={() => (descuentoDe = null)}>Entendido</button>
+				</div>
+			{:else}
+				{#if errorDescuento}
+					<p class="malo" role="alert">{errorDescuento}</p>
+				{/if}
+				<div class="acciones">
+					<button
+						type="button"
+						class="principal"
+						onclick={() => quitarDescuento(o)}
+						disabled={descuentoOcupado}
+					>
+						{descuentoOcupado ? 'Quitando...' : 'Quitar descuento'}
+					</button>
+					<button type="button" onclick={() => (descuentoDe = null)} disabled={descuentoOcupado}>
+						Dejarlo
+					</button>
+				</div>
+			{/if}
+		{:else}
+			<div class="campos">
+				<label>
+					Descuento (%)
+					<input
+						type="text"
+						inputmode="decimal"
+						bind:value={porcentajeNuevo}
+						placeholder="Del 1 al 90"
+						maxlength="5"
+					/>
+				</label>
+			</div>
+			<p class="menor nota">
+				Tu precio de {quetzales(o.precio)} no cambia. El comprador ve el precio con el descuento.
+			</p>
+
+			{#if errorDescuento}
+				<p class="malo" role="alert">{errorDescuento}</p>
+			{/if}
+
+			<div class="acciones">
+				<button
+					type="button"
+					class="principal"
+					onclick={() => aplicarDescuento(o)}
+					disabled={descuentoOcupado}
+				>
+					{descuentoOcupado ? 'Aplicando...' : 'Aplicar descuento'}
+				</button>
+				<button type="button" onclick={() => (descuentoDe = null)} disabled={descuentoOcupado}>
+					Cancelar
+				</button>
+			</div>
+		{/if}
+	</div>
+{/snippet}
+
 <section class="ofertas">
 	<div class="titulo">
 		<div>
@@ -1739,7 +1997,7 @@
 					tienda ni se puede comprar. Al rechazar hay que decir por que: el vendedor lo lee
 					y corrige.
 				{:else if vista === 'catalogo'}
-					La tienda oferta todo el catalogo, asi que se entra por el producto: abri uno y
+					La tienda oferta todo el catalogo, asi que se entra por el producto: abre uno y
 					ajusta ahi el precio y las existencias de cada presentacion.
 				{:else if vista === 'lista'}
 					Lo que vendes, a que precio y con cuantas unidades. El producto es del catalogo
@@ -1829,7 +2087,7 @@
 						</div>
 
 						<div class="numeros">
-							<strong class="precio">{quetzales(o.precio)}</strong>
+							{@render precioConDescuento(o)}
 							<span class="menor">{o.stock} unidades</span>
 						</div>
 
@@ -2014,7 +2272,11 @@
 													<strong>{v.nombre_variante}</strong>
 													<span class="menor">
 														{#if mia}
-															{quetzales(mia.precio)} · {mia.stock}
+															{quetzales(mia.precio_final ?? mia.precio)}
+															{#if tieneDescuento(mia.porcentaje_descuento)}
+																<s class="lista">{quetzales(mia.precio)}</s>
+															{/if}
+															· {mia.stock}
 															{mia.stock === 1 ? 'unidad' : 'unidades'}
 														{:else}
 															Todavia no la ofreces
@@ -2028,6 +2290,9 @@
 
 												{#if mia}
 													<span class="chip {mia.estado}">{mia.estado}</span>
+													{#if tieneDescuento(mia.porcentaje_descuento)}
+														<span class="descuento">-{textoPorcentaje(mia.porcentaje_descuento)}</span>
+													{/if}
 													{#if mia.es_inventario_limitado}
 														<span
 															class="relampago"
@@ -2060,6 +2325,14 @@
 																editando === mia.id_oferta ? cerrarEdicion() : abrirEdicion(mia)}
 														>
 															{editando === mia.id_oferta ? 'Cerrar' : 'Editar'}
+														</button>
+														<button
+															type="button"
+															class="descuento-boton"
+															class:puesto={tieneDescuento(mia.porcentaje_descuento)}
+															onclick={() => alternarDescuento(mia)}
+														>
+															{descuentoDe === mia.id_oferta ? 'Cerrar el panel' : 'Descuento'}
 														</button>
 														<!-- El MISMO boton de la lista. Aqui es donde de verdad
 														     hace falta: la tienda y el admin entran por esta
@@ -2102,6 +2375,10 @@
 
 											{#if mia && relampagoDe === mia.id_oferta}
 												{@render panelRelampago(mia)}
+											{/if}
+
+											{#if mia && descuentoDe === mia.id_oferta}
+												{@render panelDescuento(mia)}
 											{/if}
 
 											{#if mia && errorFila && editando !== mia.id_oferta}
@@ -2349,7 +2626,7 @@
 							</div>
 
 							<div class="numeros">
-								<strong class="precio">{quetzales(o.precio)}</strong>
+								{@render precioConDescuento(o)}
 								<!-- Con la venta relampago abierta se ensenan los DOS numeros, y
 								     no solo el real. El vendedor necesita los dos: con cuantas
 								     abrio la venta (el congelado de PostgreSQL) y cuantas le
@@ -2389,6 +2666,14 @@
 								     activa (las demas dan 409) o sobre una que ya la tiene
 								     abierta, que siempre se tiene que poder cerrar aunque la
 								     oferta haya cambiado de estado por otro camino. -->
+								<button
+									type="button"
+									class="descuento-boton"
+									class:puesto={tieneDescuento(o.porcentaje_descuento)}
+									onclick={() => alternarDescuento(o)}
+								>
+									{descuentoDe === o.id_oferta ? 'Cerrar el panel' : 'Descuento'}
+								</button>
 								{#if o.estado === 'activa' || o.es_inventario_limitado}
 									<button
 										type="button"
@@ -2432,7 +2717,7 @@
 											{/each}
 										</ul>
 										<p class="menor">
-											Corregi el precio o las existencias y la oferta vuelve sola a la cola de
+											Corrige el precio o las existencias y la oferta vuelve sola a la cola de
 											revision.
 										</p>
 									{/if}
@@ -2441,6 +2726,10 @@
 
 							{#if relampagoDe === o.id_oferta}
 								{@render panelRelampago(o)}
+							{/if}
+
+							{#if descuentoDe === o.id_oferta}
+								{@render panelDescuento(o)}
 							{/if}
 
 							{#if editando === o.id_oferta}
@@ -2640,7 +2929,7 @@
 						     (el UNIQUE de `oferta`), asi que en vez de dejar
 						     intentarlo y devolver un 409, se dice que ya es tuya. -->
 						{#if tomada && v.mi_oferta}
-							<span class="chip">ya la ofreces · {quetzales(v.mi_oferta.precio)}</span>
+							<span class="chip">ya la ofreces · {quetzales(v.mi_oferta.precio_final ?? v.mi_oferta.precio)}</span>
 						{/if}
 					</label>
 				{/each}
@@ -3011,6 +3300,67 @@
 	   distinguirse del `de N` que va al lado y no se mueve. */
 	.quedan {
 		color: var(--relampago-tinta);
+	}
+
+	/* ---------- el descuento ---------- */
+
+	/* Verde, con los colores del layout (--descuento-*): es la misma etiqueta
+	   del catalogo, la ficha, el carrito y los pedidos. */
+	.descuento {
+		display: inline-block;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		line-height: 1.2;
+		padding: 2px 10px;
+		border-radius: 999px;
+		white-space: nowrap;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
+	}
+
+	.con-descuento-linea {
+		display: inline-flex;
+		align-items: baseline;
+		flex-wrap: wrap;
+		justify-content: flex-end;
+		gap: var(--e1);
+	}
+
+	.lista {
+		font-size: var(--f-sm);
+		color: var(--gris);
+	}
+
+	/* Mismo trato que .relampago-boton: no es el principal de la fila, y se
+	   reconoce por el color. Lleno cuando ya hay un descuento puesto. */
+	.descuento-boton {
+		color: var(--descuento-tinta);
+		border-color: var(--descuento-linea);
+	}
+
+	.descuento-boton.puesto {
+		background: var(--descuento-fondo);
+	}
+
+	/* El mismo patron de panel colgado de su fila que .relampago-panel. */
+	.descuento-panel {
+		flex-basis: 100%;
+		width: 100%;
+		margin-top: 0.6rem;
+		padding: 0.9rem 1rem;
+		border: 1px solid var(--descuento-linea);
+		border-radius: var(--r);
+		background: var(--descuento-fondo);
+		color: var(--descuento-tinta);
+	}
+
+	.descuento-panel .nota {
+		color: inherit;
+	}
+
+	.descuento-panel .malo {
+		color: var(--rojo);
 	}
 
 	/* ---------- editar una fila ---------- */

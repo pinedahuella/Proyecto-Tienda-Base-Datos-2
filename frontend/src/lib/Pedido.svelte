@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { pedir, type RespuestaApi } from './api';
+	import { textoPorcentaje, tieneDescuento } from './descuento';
 	import {
 		agregarLinea,
 		crearPedido,
@@ -343,7 +344,12 @@
 						</div>
 
 						<div class="numeros">
-							<span class="menor">{quetzales(Number(l.precio_unitario))} x {l.cantidad}</span>
+							<span class="menor">
+								{quetzales(Number(l.precio_unitario))} x {l.cantidad}
+								{#if tieneDescuento(l.porcentaje_descuento_aplicado)}
+									<span class="descuento">-{textoPorcentaje(l.porcentaje_descuento_aplicado)}</span>
+								{/if}
+							</span>
 							<strong class="grande">{quetzales(subtotal(l))}</strong>
 						</div>
 
@@ -378,6 +384,21 @@
 </section>
 
 <style>
+	/* El % de descuento que llevaba la linea. Colores del layout. */
+	.descuento {
+		display: inline-block;
+		margin-left: 4px;
+		padding: 1px 7px;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		line-height: 1.2;
+		white-space: nowrap;
+		border-radius: 999px;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
+	}
+
 	.panel {
 		padding: 1.5rem;
 		background: var(--blanco);

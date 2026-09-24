@@ -410,6 +410,11 @@ COMMENT ON FUNCTION cambiar_direccion_pedido(bigint, bigint) IS
 -- Es una sola transaccion: o pasan las cinco cosas o no pasa ninguna. Y el
 -- bloqueo de la fila de oferta es lo unico que impide que dos personas se
 -- lleven la ultima unidad del mismo vendedor.
+--
+-- Esta version cobra el precio de lista. La 020 la reemplaza por una que
+-- aplica el descuento de la fila de precio_historial, y como este archivo se
+-- reejecuta en cada arranque, la 020 la vuelve a poner despues cada vez. La
+-- que rige es la de la 020.
 CREATE OR REPLACE FUNCTION comprar_pedido(
     p_id_pedido    bigint,
     p_metodo_pago  varchar

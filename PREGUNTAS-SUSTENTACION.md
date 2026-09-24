@@ -2,9 +2,9 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 118 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 119 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
-Las líneas son las del código en main al 20 de septiembre de 2026. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
+Las líneas son las del código en main al 20 de septiembre de 2026, salvo las preguntas 32 a 34 y la 119, que están al 23 de septiembre. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
 
 ## Lo que pide el profesor, en corto
 
@@ -293,21 +293,21 @@ Archivos que más se usan en esta parte.
 ### 32. ¿Por qué el carrito vive en Redis y no en PostgreSQL?
 El carrito es un dato transitorio que se lee y se escribe todo el tiempo. Antes era una fila de pedido pendiente que nunca vencía y obligaba a tener cuenta. En Redis nace con el primer producto y muere solo por inactividad. Agregar al carrito tampoco reserva stock, así que al vencer no hay nada que limpiar.
 
-- Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 78 a 121, la explicación de que el carrito vive solo en Redis y reemplaza a la fila de pedido pendiente. `redis/carrito.lua` lineas 4 a 8, los dos problemas del carrito viejo.
+- Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 108 a 129, la explicación de que el carrito vive solo en Redis y reemplaza a la fila de pedido pendiente. `redis/carrito.lua` lineas 4 a 8, los dos problemas del carrito viejo.
 - Lo que pide el profesor. Entrega 2, implementar el carrito sobre un almacén clave-valor con expiración por inactividad, 1.5 pts.
 - Por qué así. Son datos temporales con un patrón de acceso distinto a los datos de negocio permanentes, y Redis trae el vencimiento incorporado.
 
 ### 33. ¿Qué tipo de dato y qué estructura de claves usa el carrito?
-Un hash por cuenta. El campo es el id de la oferta y el valor es la cantidad. Si la línea es de venta relámpago, hay un segundo campo con el ticket de la reserva. No se guarda precio ni nombre, eso se consulta en PostgreSQL y Mongo al ver el carrito.
+Un hash por cuenta. El campo es el id de la oferta y el valor es la línea en JSON, una foto con la cantidad, el precio (ya con descuento), el porcentaje de descuento, el nombre, la imagen y el vendedor. Si la línea es de venta relámpago, hay un segundo campo con el ticket de la reserva. Ver el carrito solo lee Redis. Al pagar, el backend compara la foto con el precio de hoy y avisa si cambió.
 
-- Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 84 a 94, la forma del hash y por qué no guarda precios. Lineas 135 a 138, la clave `mesh:carrito:<id_usuario>`. Lineas 730 a 732, el campo `t:<id_oferta>` del ticket.
+- Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 83 a 107, la línea que se guarda (`LineaCarritoRedis`). Lineas 115 a 129, la forma del hash y por qué guarda una foto. Lineas 175 a 178, la clave `mesh:carrito:<id_usuario>`. Lineas 947 a 950, el campo `t:<id_oferta>` del ticket.
 - Lo que pide el profesor. Entrega 2, carrito sobre almacén clave-valor, 1.5 pts.
-- Por qué así. Con un hash cada línea se cambia sola sin leer y reescribir el carrito entero, y guardar solo la intención de compra evita datos desactualizados.
+- Por qué así. Con un hash cada línea se cambia sola sin leer y reescribir el carrito entero. La foto hace que ver el carrito no dependa de PostgreSQL ni de Mongo; el precio que puede quedar viejo se revisa al pagar.
 
 ### 34. ¿Cuál es el TTL del carrito y dónde está configurado?
 El TTL es de 24 horas, o sea 86400 segundos, de inactividad. Está escrito de forma explícita como una constante estática y se aplica con EXPIRE después de cada escritura. Hay que decir con honestidad que es una constante del código y no una variable de entorno.
 
-- Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 132 a 133, la constante `TTL_SEGUNDOS`. Lineas 341 a 352, el HSET seguido del EXPIRE. `redis/README.md` lineas 82 a 95, la justificación de las 24 horas.
+- Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 172 a 173, la constante `TTL_SEGUNDOS`. Lineas 481 a 492, el HSET seguido del EXPIRE. `redis/README.md` lineas 82 a 95, la justificación de las 24 horas.
 - Lo que pide el profesor. Entrega 2, tiempo de expiración configurado explícitamente y expiración justificada, 1.5 pts.
 - Por qué así. Menos tiempo castiga a quien arma el carrito de noche y paga en la mañana, y más tiempo guarda precios que ya no existen.
 
@@ -972,3 +972,9 @@ No hay un documento de retrospectiva en el repositorio. Lo que sí hay son pieza
 - Lo que pide el profesor. Entrega final, documento de retrospectiva con las decisiones que se sostendrían y las que se replantearían, justificadas en ambos casos (4 pts).
 - Por qué así. El cambio de la columnar muestra el criterio, la decisión se sostuvo con números y se revisó cuando el volumen de eventos cambió.
 
+### 119. ¿Cómo funciona el descuento de una oferta y por qué una venta relámpago lo exige?
+La oferta guarda su precio de lista y aparte un porcentaje de descuento que puede ser nulo. El precio final no se guarda en ninguna columna, se calcula en cada consulta con `ROUND(precio * (1 - COALESCE(porcentaje_descuento, 0) / 100), 2)`. El trigger del historial escucha el precio y el porcentaje, así que cambiar solo el descuento deja una fila nueva en `precio_historial`, y la compra cobra el precio final. Una venta relámpago no se puede abrir sin descuento (409), y el descuento no se puede quitar con la venta abierta (409).
+
+- Dónde se ve. `migrations/020_descuentos_oferta.sql` lineas 109 a 129, las dos columnas. Lineas 196 a 198, el trigger. Lineas 314 a 317, el cobro con descuento. `backend/src/helpers/precio-descuento.ts` lineas 20 a 21, la misma fórmula en el backend. `backend/src/services/vendedores/ventas-limitadas.service.ts` lineas 73 a 77, el 409 al abrir sin descuento. `pruebas/descuentos.sh` lineas 379 a 386 y 471 a 484, los dos 409 medidos por HTTP.
+- Lo que pide el profesor. No es un requisito aparte del enunciado; se apoya en el historial de precios de la fase inicial y en la venta relámpago de la Entrega 2.
+- Por qué así. Guardar el precio final sería una segunda verdad que puede quedar vieja. Con el de lista y el porcentaje, el historial y el pedido saben qué se publicó y qué se cobró.

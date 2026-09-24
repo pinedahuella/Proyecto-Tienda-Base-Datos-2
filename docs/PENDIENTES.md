@@ -2,12 +2,12 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-09-19.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-09-23.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
 |---|---|---|---|---|
-| 1 | El precio se congela al PAGAR, no al agregar | el frontend | -- | **decidido el 2026-09-19: lo maneja el frontend** (guarda el precio que enseno y lo manda al pagar, como ya hace `Checkout.svelte` con `lineas_precio_visto`). No se complica el backend |
+| 1 | El precio se congela al PAGAR, no al agregar | -- | -- | **resuelto de otra forma el 2026-09-23 (commit e7f1e02 de David)**: cada linea del carrito en Redis es una foto en JSON con su precio (ya con descuento), y al pagar el backend compara esa foto con el precio de hoy el solo. `lineas_precio_visto` se quito. Si cambio, contesta `comprado:false` con avisos; con `confirmar_cambios:true` cobra el de hoy. Sigue cobrando el de pagar, pero nunca en silencio |
 | ~~2~~ | ~~La semilla no respalda con compras las 86 resenas~~ | -- | -- | **CERRADO el 2026-08-30** |
 | ~~3~~ | ~~`Carrito.svelte` quedo muerto~~ | -- | -- | **CERRADO el 2026-08-30** |
 | ~~4~~ | ~~El grafo se queda viejo y el ETL relee todo~~ | -- | -- | **CERRADO el 2026-09-04.** La cola (015) es mia, el worker y la conciliacion son de Jose David, y el aviso del panel es mio. El grafo se mantiene solo |
@@ -30,6 +30,9 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~23~~ | ~~Busquedas y clics de busqueda reales en cero~~ | -- | -- | **CERRADO el 2026-09-19.** Ya hay eventos reales (5 busquedas y 2 clics). Con cuenta de ADMIN no subian por diseno: el buscador de la cabecera usaba la ruta de admin, sin `sesion` y sin registrar el clic. Ahora es el mismo buscador para todos (solo lo activo, y registra busqueda y clic); lo especializado del admin vive solo en el panel de Catalogo |
 | ~~18~~ | ~~Las tablas de la 015 a la 019 no estan en el diagrama ER~~ | -- | -- | **CERRADO el 2026-09-19.** `docs/diagrama-general.drawio` se genera ahora con `python docs/generar-er.py` desde la base viva: 50 cajas y 66 lineas, y el script falla si una tabla o una llave no tiene su dibujo. El de la Entrega 1 quedo en `docs/diagrama-general-entrega1.drawio` |
 | ~~19~~ | ~~`trustProxy: 'loopback'` en `backend/src/main.ts`~~ | -- | -- | **CERRADO el 2026-09-19**: David lo agrego. `copia-backend.ps1` ya lo preveia |
+| 24 | El estante de mas vendidos tarda hasta 10 minutos en ver un descuento o un precio nuevo | Jose David | ver `BACKEND-PENDIENTE.md` | baja: el catalogo ya lo ensena al momento; solo el estante de la portada va atrasado |
+| 25 | El buscador no sabe si un producto tiene descuento (`hay_descuento` no va al indice) | Jose David | ver `BACKEND-PENDIENTE.md` | baja: los precios del buscador si van con descuento, falta solo la etiqueta |
+| 26 | El historial de precio de una oferta no trae el % de descuento | Jose David | ver `BACKEND-PENDIENTE.md` | baja: "Mis pedidos" lo compensa con el % que guarda la linea |
 
 ---
 
@@ -516,8 +519,8 @@ reponga y la vuelva a abrir. Tres lineas.
 
 **Los otros dos campos NO hay que bloquearlos:**
 
-- `precio` ya esta cubierto por `lineas_precio_visto`, que compara y avisa
-  dentro de la misma peticion que cobra. Bloquearlo seria resolver dos veces lo
+- `precio` ya esta cubierto: al pagar, el backend compara la foto del carrito
+  en Redis con el precio de hoy y avisa dentro de la misma peticion que cobra. Bloquearlo seria resolver dos veces lo
   mismo.
 - `estado` no, porque un vendedor tiene que poder dejar de vender algo. Lo
   razonable es que **pausar cierre la venta relampago primero**, o que lo avise.
@@ -610,9 +613,11 @@ Jose David no siguio el camino que esta seccion proponia -- guardar el
 `id_precio_historial` en el carrito de Redis -- y eligio otro que resuelve el
 mismo dano sin tocar la forma del carrito:
 
-`POST /carrito/comprar` acepta `lineas_precio_visto`, una lista de
-`{ id_oferta, precio_visto }`. El frontend manda el precio que ENSENO, y el
-backend lo compara contra el de hoy **dentro de la misma peticion que cobra**.
+Primero fue `lineas_precio_visto`, una lista de `{ id_oferta, precio_visto }`
+que mandaba el frontend. **Desde el 2026-09-23 (e7f1e02) ya no hace falta:** el
+carrito de Redis guarda por linea una foto en JSON con el precio que se
+enseno (ya con descuento), y el backend compara esa foto contra el de hoy
+**dentro de la misma peticion que cobra**. El cliente no manda precios.
 Si no cuadra, no cobra nada -- ni Redis, ni PostgreSQL, ni Mongo -- y contesta
 `comprado: false` con la lista de `avisos`. Reenviar con
 `confirmar_cambios: true` acepta el precio de hoy.
@@ -621,8 +626,8 @@ Que la comparacion pase dentro del mismo viaje es lo que la hace valer: entre
 mirar y cobrar no queda ninguna ventana. Una comprobacion hecha desde el
 frontend antes de llamar dejaba milisegundos abiertos.
 
-**La mitad del frontend YA esta** (`Checkout.svelte` manda el campo y pinta los
-avisos, con el texto distinto segun el modo porque en el carrito se cobra el de
+**El frontend YA esta** (`Checkout.svelte` pinta los avisos y reenvia con
+`confirmar_cambios:true`, con el texto distinto segun el modo porque en el carrito se cobra el de
 hoy y en el pedido el congelado). Probado en el navegador: con el checkout
 abierto en Q1,103.62 se sube el precio a Q2,500 y al pagar no cobra, avisa.
 
@@ -681,9 +686,11 @@ sube a Q31,315, se compran 3 unidades -> **cobra Q18,789** (3 x 6,263) en vez de
 Q93,945. Con un precio de otra oferta o un id inventado, levanta excepcion.
 
 **La de Jose David, que es lo que FALTA:** que el carrito de Redis guarde
-tambien el `id_precio_historial` de cada linea -- el hash pasa de
-`id_oferta -> cantidad` a llevar los dos datos -- que `POST /carrito/comprar` lo
-mande, y que mire `precio_cambio` para armar los `avisos`. Los tres pasos estan
+tambien el `id_precio_historial` de cada linea -- desde el 2026-09-23 el hash ya
+es `id_oferta -> JSON` con el precio, pero sin ese id -- que `POST /carrito/comprar`
+lo mande, y que mire `precio_cambio` para armar los `avisos`. Un cambio de descuento
+solo tambien saldria ahi: el trigger de la 020 escribe una fila nueva de
+`precio_historial` cuando cambia el %, y `precio_cambio` compara ids de fila. Los tres pasos estan
 escritos al final de la 013.
 
 **Hasta que eso exista, el precio se sigue congelando al pagar.** La 013 lo

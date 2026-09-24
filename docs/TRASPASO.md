@@ -3,7 +3,53 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-20**.
+Ultima actualizacion: **2026-09-23**.
+
+**El 2026-09-23 en la tarde: vitrinas de ofertas y reglas de descuento automatico.** Llegan con 565aca1 y 56ce5f8
+de David (solo `backend/`).
+
+```
+Vitrinas             GET /productos/ofertas/descuento y /productos/ofertas/venta-relampago, publicas, leen dos HASH
+                     de Redis (mesh:ofertas:descuento y mesh:ofertas:venta_relampago). Cada fila es una OFERTA, no un
+                     producto. La portada las pinta como "Ventas relampago" y "Ofertas con descuento" encima de los
+                     filtros, ordenadas por % y sin las agotadas. Solo salen sin filtros y si hay algo
+Mas vendidos         Desde 565aca1 devuelve una tarjeta corta (sin variantes, categoria ni total_ofertas, con
+                     imagen suelta). La portada tiene su propio snippet, tarjetaVendido. Los primeros 10 min tras
+                     arrancar el HASH puede traer todavia la forma vieja y la portada la acepta
+Reglas               Tabla regla_descuento_automatico, migrations/021 (David no dejo SQL, se escribio desde su
+                     modelo). Una por oferta. Rutas POST, GET, GET paginado y PATCH /vendedor/reglas-descuento.
+                     Pestana "Reglas" del panel, lib/ReglasDescuento.svelte, para vendedor y admin. El DISPARO por
+                     ClickHouse no existe todavia, la pantalla lo avisa. No hay ruta para borrar una regla
+Arneses              pruebas/reglas_descuento.sh, 34 OK. Borra su regla con un DELETE directo, no hay ruta
+Pendiente de David   reconciliar() al arrancar y la ruta de borrar, en BACKEND-PENDIENTE.md
+```
+
+**El 2026-09-23: descuentos en las ofertas, carrito solo en Redis y venta relampago con descuento.** Llegan con los
+commits e7f1e02 y c317197 de David (solo `backend/`); lo de fuera de `backend/` es nuestro.
+
+```
+Descuento            oferta.porcentaje_descuento y precio_historial.porcentaje_descuento, numeric(5,2), nullable, de 0
+                     a 100 sin incluirlos. oferta.precio sigue siendo el de LISTA. El precio final es
+                     ROUND(precio * (1 - COALESCE(pct,0)/100), 2), se calcula en cada consulta y nunca se guarda.
+                     Lo aplica migrations/020_descuentos_oferta.sql (tambien reemplaza el trigger del historial y
+                     comprar_pedido, que cobra el final). El vendedor lo pone y lo quita con
+                     POST/DELETE /vendedor/ofertas/:id/descuento (1 a 90, dos decimales, 409 si ya hay uno o si no hay)
+Semilla              13 ofertas de la tienda nacen con descuento (10 a 30 %), al final de 001_catalogo.sql. Solo se
+                     ven en una base nueva (.\arrancar.ps1 -Reiniciar) o poniendo uno desde el panel
+Mongo y ETL          hay_descuento en la raiz y en cada variante; precio_tienda y precio_desde ya van con descuento.
+                     etl/extraer.sql usa la misma formula que el backend. No va al indice de Elasticsearch
+Carrito              El HASH mesh:carrito:<id> guarda id_oferta -> JSON (foto con cantidad, precio final, % y nombre).
+                     GET /carrito solo lee Redis. POST /carrito/comprar ya no recibe lineas_precio_visto: el backend
+                     compara la foto con el precio de hoy y contesta comprado:false con avisos si cambio
+Mas vendidos         El worker cachea el detalle en mesh:productos:mas_vendidos:detalle (cada 10 min). La respuesta
+                     de GET /productos/mas-vendidos no cambio de forma, pero un descuento tarda hasta 10 min en verse
+                     en el estante (anotado en BACKEND-PENDIENTE)
+Venta relampago      POST .../venta-limitada da 409 si la oferta no tiene descuento, y DELETE .../descuento da 409 si
+                     la venta relampago esta abierta. El panel del vendedor lo explica antes de dejar intentarlo
+Arneses              pruebas/descuentos.sh (nuevo) cubre rutas, 400, los dos 409, historial, Mongo, carrito y compra.
+                     oferta_limitada.sh pone un descuento antes de abrir la venta y lo quita despues de cerrarla
+```
+
 
 **Tambien el 2026-09-20: Kibana, dos campanas, el panel de fraude en pestanas, graficas de Tendencias, la demo de
 Redis y el archivo de preguntas.** Nada de esto toca `backend/`.
@@ -361,7 +407,7 @@ las nueve senales de hoy, pero el razonamiento de fondo no cambio).
 >   SQL va en ASCII puro.
 > - Ninguna contrasena real en un archivo que se suba. Salen del `.env`.
 >
-> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene DIECIOCHO arneses:
+> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene DIECINUEVE arneses:
 > `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`, `bash pruebas/notas.sh`,
 > `bash pruebas/busqueda.sh`, `bash pruebas/eventos.sh`,
 > `bash pruebas/alertas_login.sh`, `bash pruebas/ofertas_paginadas.sh`,
@@ -370,7 +416,9 @@ las nueve senales de hoy, pero el razonamiento de fondo no cambio).
 > `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`,
 > `.\mongo\demostracion_indices.ps1`, y los tres que PASAN POR EL BACKEND (20 de
 > septiembre), `bash pruebas/carrito_vencimiento.sh`, `bash pruebas/oferta_limitada.sh`
-> y `bash pruebas/anillos.sh`.
+> y `bash pruebas/anillos.sh`, y `bash pruebas/descuentos.sh` (23 de septiembre, tambien
+> por el backend, y deja un pedido real). `oferta_limitada.sh` ahora pone un descuento
+> antes de abrir la venta y lo quita despues de cerrarla.
 >
 > De los que prueban Redis y Neo4j, `redis/prueba_carrito.sh`,
 > `redis/prueba_concurrencia.sh` y `neo4j/correr_fraude.sh` NO pasan por el backend,
@@ -1380,10 +1428,11 @@ compra pagada a ese vendedor y 0 fechadas antes de su compra**.
 partirlo dejaria la misma cuenta como dos nodos y **el anillo nunca cerraria**.
 La resena es NODO porque conecta TRES cosas.
 
-**4. El carrito de Redis guarda intencion, no precios.** Es
-`id_oferta -> cantidad` y nada mas. El precio, el stock y el nombre se resuelven
-al leerlo. **Consecuencia: el precio que se cobra es el de pagar.** Es el
-pendiente #1.
+**4. El carrito de Redis guarda una foto de cada linea.** Desde el 2026-09-23
+es `id_oferta -> JSON` (cantidad, precio final con descuento, %, nombre, imagen,
+vendedor), mas `t:<id_oferta>` para los tickets de venta relampago. `GET /carrito`
+solo lee Redis. **Se cobra el precio de pagar**, pero si no coincide con la foto
+el backend avisa y no cobra hasta que se confirme.
 
 **5. La semilla NO es idempotente.** **17 de sus 26** `INSERT` de primer nivel no
 tienen guardia, asi que `001_catalogo.sql` solo carga contra una base vacia. Los
@@ -1483,10 +1532,12 @@ solo es un candado pintado.
 
 ### El precio del carrito ya avisa antes de cobrar
 
-`POST /carrito/comprar` acepta `lineas_precio_visto`: el frontend manda el
-precio que ENSENO y el backend lo compara contra el de hoy **dentro de la misma
-peticion que cobra**. Si no cuadra, no cobra nada y contesta `comprado: false`
-con los avisos; reenviar con `confirmar_cambios: true` acepta el nuevo.
+**Actualizado el 2026-09-23:** `lineas_precio_visto` se quito. El carrito de
+Redis guarda por linea una foto con el precio que se enseno (ya con descuento), y
+el backend compara esa foto contra el de hoy **dentro de la misma peticion que
+cobra**. Si no cuadra, no cobra nada y contesta `comprado: false` con los
+avisos; reenviar con `confirmar_cambios: true` acepta el nuevo. Lo de abajo
+cuenta como era antes, con el campo que mandaba el frontend.
 
 Que la comparacion viaje en la misma peticion es lo que la hace valer: entre
 mirar y cobrar no queda ninguna ventana. Comprobarlo desde el frontend antes de
@@ -1500,12 +1551,10 @@ manda `precio_visto: "1.00"` y contesta `comprado: false` con el aviso que trae
 los dos precios; los pedidos siguen en 32 antes y despues, y el carrito queda
 entero.
 
-Y una condicion que conviene saber, porque la proteccion **es opcional del lado
-del cliente**: `detectarAvisosPrecio` devuelve una lista vacia si
-`lineas_precio_visto` no viene o viene vacia, o sea que quien no mande el campo
-cobra el de hoy en silencio igual que antes. `Checkout.svelte` si lo manda, asi
-que la aplicacion esta cubierta; cualquier otro cliente, y cualquier linea que se
-quede fuera de ese array, no lo esta.
+Antes la proteccion **era opcional del lado del cliente**: quien no mandara
+`lineas_precio_visto` cobraba el de hoy en silencio. Con la foto en Redis eso ya
+no pasa: la comparacion la hace el backend para cualquier cliente y cualquier
+linea.
 
 ## Que falta
 

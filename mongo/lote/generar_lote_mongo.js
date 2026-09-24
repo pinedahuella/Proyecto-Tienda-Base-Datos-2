@@ -336,6 +336,10 @@ for (let n = 0; n < PRODUCTOS; n++) {
     //   stock_tienda    unidades de la tienda
     //   stock_total     unidades entre todos
     //   total_ofertas   cuantos vendedores distintos la tienen
+    //
+    // Y hay_descuento, que aqui es siempre false: las ofertas del lote nacen
+    // sin descuento (el CSV no trae porcentaje), asi que los dos precios son
+    // los de lista y ninguna oferta activa tiene uno puesto.
     const precioDesde = Math.min.apply(null, ofertas.map((o) => o.precio));
     const stockTotal = ofertas.reduce((s, o) => s + o.stock, 0);
 
@@ -353,7 +357,8 @@ for (let n = 0; n < PRODUCTOS; n++) {
         precio_desde: NumberDecimal(precioDesde.toFixed(2)),
         stock_tienda: stockTienda,
         stock_total: stockTotal,
-        total_ofertas: ofertas.length
+        total_ofertas: ofertas.length,
+        hay_descuento: false
     };
     if (varPlantilla.caracteristicas_adicionales) {
         variante.caracteristicas_adicionales = varPlantilla.caracteristicas_adicionales;
@@ -371,6 +376,7 @@ for (let n = 0; n < PRODUCTOS; n++) {
         stock_tienda: stockTienda,
         stock_total: stockTotal,
         total_ofertas: ofertas.length,
+        hay_descuento: false,
         // El piso de las resenas. Va explicito y no se deja ausente: en Mongo
         // un $gte sobre un campo AUSENTE no hace match, asi que un producto sin
         // estos campos DESAPARECE del catalogo en cuanto alguien filtra por

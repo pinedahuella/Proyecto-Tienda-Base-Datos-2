@@ -131,15 +131,20 @@ echo "  comprador $CORREO_COMPRADOR -> id $ID_USUARIO, clave $CARRITO"
 # PostgreSQL no necesitaba: es el precio que la persona esta viendo ahora, y
 # guardarlo aqui es lo que permite cobrarle ese y no el que haya cuando pague.
 # Ver el apartado del precio congelado en README.md.
+#
+# El precio que se ve es el FINAL, con el descuento de esa fila si lo tiene
+# (migracion 020): la misma formula que el backend. ph.precio solo es el de lista.
 OFERTAS=$(PSQL -c "
 SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
-       ph.id_precio_historial, ph.precio, p.nombre
+       ph.id_precio_historial,
+       ROUND(ph.precio * (1 - COALESCE(ph.porcentaje_descuento, 0) / 100), 2),
+       p.nombre
 FROM oferta o
 JOIN usuarios u   ON u.id_usuario = o.id_usuario
 JOIN productos p  ON p.id_producto = o.id_producto_mongo
 JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
 JOIN LATERAL (
-    SELECT id_precio_historial, precio
+    SELECT id_precio_historial, precio, porcentaje_descuento
     FROM precio_historial
     WHERE id_oferta = o.id_oferta
     ORDER BY fecha_creacion DESC, id_precio_historial DESC

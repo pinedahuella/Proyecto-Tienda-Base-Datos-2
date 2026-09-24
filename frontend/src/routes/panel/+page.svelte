@@ -8,6 +8,7 @@
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
+	import ReglasDescuento from '$lib/ReglasDescuento.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
 	import PanelFraude from '$lib/PanelFraude.svelte';
 	import AlertasFraudeUsuario from '$lib/AlertasFraudeUsuario.svelte';
@@ -133,6 +134,7 @@
 			return [
 				{ id: 'reportes', nombre: 'Reportes', pie: 'Como van las ventas y los pedidos' },
 				{ id: 'ofertas', nombre: 'Ofertas', pie: 'Precio, existencias y estado de lo que vende la tienda' },
+				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos cuando una oferta se vende rapido' },
 				{ id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' },
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Lo que otros vendedores quieren meter al catalogo' },
 				{ id: 'cuentas', nombre: 'Cuentas', pie: 'Los usuarios del sistema, su rol y su estado' },
@@ -151,6 +153,7 @@
 		if (esVendedor) {
 			return [
 				{ id: 'ofertas', nombre: 'Ofertas', pie: 'A que precio vendes cada variante y cuantas te quedan' },
+				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos cuando una oferta se vende rapido' },
 				administraLaTienda
 					? { id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' }
 					: { id: 'catalogo', nombre: 'Proponer', pie: 'Mandale al catalogo un producto que falte' },
@@ -810,6 +813,15 @@
 					{/if}
 				</div>
 
+				<div class="hoja" class:oculta={seccionViva !== 'reglas'}>
+					<!-- Las reglas de descuento automatico (56ce5f8, migracion 021).
+					     Mismo candado que las ofertas: vendedor o admin, cada uno las
+					     suyas, el admin las de la tienda. -->
+					{#if visitadas.has('reglas')}
+						<ReglasDescuento alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
 				<div class="hoja" class:oculta={seccionViva !== 'catalogo'}>
 					<!-- El admin administra el catalogo Y gestiona cuentas: desde el
 					     commit `bd12cd4` el backend le abre las mismas rutas que a la
@@ -869,6 +881,15 @@
 					     si es del vendedor. Es lo suyo, asi que va arriba. -->
 					{#if visitadas.has('ofertas')}
 						<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'reglas'}>
+					<!-- Las reglas de descuento automatico (56ce5f8, migracion 021).
+					     Mismo candado que las ofertas: vendedor o admin, cada uno las
+					     suyas, el admin las de la tienda. -->
+					{#if visitadas.has('reglas')}
+						<ReglasDescuento alExpirarSesion={expiro} />
 					{/if}
 				</div>
 

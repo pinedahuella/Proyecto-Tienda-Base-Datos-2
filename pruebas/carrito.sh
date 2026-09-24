@@ -5,7 +5,9 @@
 #
 # Comprueba lo que la rubrica pide demostrar, y no solo que las rutas contesten:
 #
-#   - el carrito vive en Redis y NO toca PostgreSQL al agregar o quitar
+#   - el carrito vive en Redis y NO escribe en PostgreSQL al agregar o quitar
+#   - cada linea guarda una FOTO (precio ya con descuento, nombre, imagen,
+#     vendedor) que GET /carrito sirve sin preguntarle a nadie mas
 #   - tiene un TTL configurado EXPLICITAMENTE
 #   - el TTL se RENUEVA en cada toque -> es expiracion por INACTIVIDAD, que es
 #     lo que pide el enunciado, y no un plazo fijo desde que se creo
@@ -85,10 +87,10 @@ OFERTA=$(sql "SELECT o.id_oferta FROM oferta o JOIN estado_oferta eo USING(id_es
 r=$(curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":2}')
 [ "$(echo "$r" | campo ok)" = "True" ] && OK "PUT crea el carrito con la primera linea" || FALLA "PUT: $(echo "$r" | campo mensaje)"
 [ "$(R EXISTS "$LLAVE")" = "1" ] && OK "la clave $LLAVE existe" || FALLA "no se creo la clave"
-[ "$(R TYPE "$LLAVE")" = "hash" ] && OK "es un HASH (id_oferta -> cantidad)" || FALLA "no es un hash"
+[ "$(R TYPE "$LLAVE")" = "hash" ] && OK "es un HASH (id_oferta -> linea en JSON)" || FALLA "no es un hash"
 
 
-titulo "2. Agregar y quitar NO tocan PostgreSQL"
+titulo "2. Agregar y quitar NO escriben en PostgreSQL"
 
 # Es la mitad del argumento de la entrega: el carrito salio del modelo
 # relacional. Si al agregar se escribiera un pedido, no habria salido.
@@ -156,23 +158,28 @@ r=$(curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/j
 [ "$(echo "$r" | campo ok)" = "False" ] && OK "una cantidad absurda se rechaza: $(echo "$r" | campo mensaje)" || FALLA "acepto cantidad 9999"
 
 
-titulo "5. El precio es el de AHORA, no el de cuando se agrego"
+titulo "5. El precio es una FOTO tomada al agregar, guardada en Redis"
 
-# El carrito guarda intencion, no precios. Es la consecuencia que hay que
-# documentar: si el vendedor sube el precio, el carrito cobra el nuevo.
-precio_real=$(sql "SELECT precio FROM oferta WHERE id_oferta=$OFERTA;")
+# Desde el 2026-09-23 cada linea guarda nombre, precio, imagen y vendedor
+# junto con la cantidad, y GET /carrito sirve eso sin tocar PostgreSQL ni
+# MongoDB. El precio de la foto ya lleva el descuento de la oferta, si tenia.
+# Si el vendedor lo cambia despues, el aviso sale al pagar, no aqui: eso lo
+# mide pruebas/descuentos.sh.
+precio_real=$(sql "SELECT ROUND(precio * (1 - COALESCE(porcentaje_descuento,0)/100), 2) FROM oferta WHERE id_oferta=$OFERTA;")
 precio_api=$(curl -s "$API/carrito" -H "Cookie: $C" | python -c "
 import sys,json
 for l in json.load(sys.stdin)['payload']['lineas']:
     if l['id_oferta']==$OFERTA: print(l['precio'])")
-[ "$precio_real" = "$precio_api" ] && OK "el precio sale de oferta, en vivo ($precio_api)" || FALLA "$precio_real en la base, $precio_api en la API"
+[ "$precio_real" = "$precio_api" ] && OK "el precio es el final de la oferta al agregarla ($precio_api)" || FALLA "$precio_real en la base, $precio_api en la API"
 
-guardado=$(R HGETALL "$LLAVE" | paste - - | head -3)
-if echo "$guardado" | grep -q "\."; then
-    FALLA "Redis esta guardando decimales: el carrito no deberia tener precios"
-else
-    OK "en Redis solo hay id_oferta -> cantidad, sin precios"
-fi
+foto=$(R HGET "$LLAVE" "$OFERTA" | python -c "
+import sys,json
+try: d=json.loads(sys.stdin.read())
+except Exception: print('no-es-json'); sys.exit()
+print('%s|%s|%s' % (d.get('cantidad'), d.get('precio'), 'con-nombre' if d.get('nombre_producto') else 'sin-nombre'))")
+[ "$foto" = "2|$precio_api|con-nombre" ] \
+    && OK "en Redis la linea es un JSON con cantidad 2, precio $precio_api y nombre" \
+    || FALLA "la foto de Redis no cuadra con la API ($foto)"
 
 
 titulo "6. Vaciar"
@@ -200,8 +207,10 @@ R DEL "$LLAVE" >/dev/null
 ID2=$(sql "SELECT id_usuario FROM usuarios WHERE correo_electronico='comprador.sur@mesh.com';")
 R DEL "mesh:carrito:$ID2" >/dev/null
 if [ -n "$ANTES" ]; then
-    while IFS=$'\t' read -r of cant; do
-        [ -n "$of" ] && R HSET "$LLAVE" "$of" "$cant" >/dev/null
+    # Cada campo vuelve tal cual estaba: la linea en JSON, o el ticket t:<id>
+    # de una venta relampago.
+    while IFS=$'\t' read -r of valor; do
+        [ -n "$of" ] && R HSET "$LLAVE" "$of" "$valor" >/dev/null
     done <<< "$ANTES"
     R EXPIRE "$LLAVE" 86400 >/dev/null
     OK "se devolvio el carrito que habia antes"

@@ -19,7 +19,20 @@
 //
 //   precio_tienda es el que se ENSENA (regla del profesor) y precio_desde el
 //   mas barato que se puede PAGAR. Son dos porque contestan dos preguntas: la
-//   tarjeta usa el primero y el filtro del buscador el segundo.
+//   tarjeta usa el primero y el filtro del buscador el segundo. Los dos van YA
+//   con el descuento de la oferta aplicado, si tiene uno.
+//
+//   Y una bandera, hay_descuento, en la raiz y en cada variante: true si
+//   alguna oferta activa tiene un descuento puesto. La escriben el ETL y el
+//   backend con la misma cuenta (ver la cabecera de etl/extraer.sql).
+//
+//   No lleva indice. Hoy nadie filtra por ella en Mongo: solo se lee para
+//   pintar la etiqueta de la tarjeta que ya se trajo. Un indice parcial sobre
+//   hay_descuento: true seria barato, pero sin una consulta que lo use es
+//   costo en cada escritura a cambio de nada. Si algun dia el catalogo gana
+//   un filtro "solo con descuento", ese es el momento de medirlo y ponerlo.
+//   Tampoco hay validador de esquema en la coleccion, asi que el campo entra
+//   sin cambiar el esquema; lo unico que se hace aqui es su piso (abajo).
 //
 // LAS OFERTAS NO ESTAN AQUI, y es LA decision de modelado de esta entrega.
 //
@@ -33,9 +46,9 @@
 // documento: lo contrario de lo que pide la Entrega 2.
 //
 // Lo que si viaja son cinco numeros AGREGADOS dentro del producto
-// (precio_tienda, stock_tienda, stock_total, total_ofertas), para que la LISTA
-// del catalogo se pinte sin salir de aqui. La ficha, que necesita las ofertas
-// de verdad, las pide a PostgreSQL.
+// (precio_tienda, precio_desde, stock_tienda, stock_total, total_ofertas) y la
+// bandera hay_descuento, para que la LISTA del catalogo se pinte sin salir de
+// aqui. La ficha, que necesita las ofertas de verdad, las pide a PostgreSQL.
 //
 // productos_eventos
 //   El historial. Un documento por evento.
@@ -203,6 +216,31 @@ db.productos.createIndex(
         partialFilterExpression: { pendiente_busqueda: true }
     }
 );
+
+// El piso de hay_descuento para los productos que el ETL nunca toca: los
+// nacidos en el panel antes de que el campo existiera. Mismo patron que el
+// piso de resenas de 002_resenas.js: solo a los que les FALTA el campo, asi
+// que en regimen no toca nada, y dentro de un try para no tumbar el arranque.
+//
+// false es seguro y no un invento: un descuento solo se pone por
+// POST /vendedor/ofertas/:id/descuento, y esa ruta ya recalcula el producto y
+// le escribe la bandera de verdad. A un producto que todavia no la tiene
+// nadie le ha puesto un descuento.
+try {
+    const raiz = db.productos.updateMany(
+        { hay_descuento: { $exists: false } },
+        { $set: { hay_descuento: false } }
+    );
+    const variantes = db.productos.updateMany(
+        { variantes: { $elemMatch: { hay_descuento: { $exists: false } } } },
+        { $set: { 'variantes.$[v].hay_descuento': false } },
+        { arrayFilters: [{ 'v.hay_descuento': { $exists: false } }] }
+    );
+    print('productos rellenados con hay_descuento: ' + raiz.modifiedCount +
+          ' (variantes en ' + variantes.modifiedCount + ')');
+} catch (e) {
+    print('OJO: no se pudo rellenar hay_descuento: ' + e.message);
+}
 
 // Si quedo de una version anterior, se va: las ofertas viven en PostgreSQL y
 // una copia vieja aqui es peor que no tenerla, porque parece al dia.

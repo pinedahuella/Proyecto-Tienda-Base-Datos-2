@@ -1093,8 +1093,11 @@ Dos decisiones de modelo que preguntan seguro:
 9.2  REDIS: EL CARRITO      (Entrega 2)
 --------------------------------------------------------------------
 El carrito dejo de ser una fila de pedido y es una clave de Redis con
-expiracion por inactividad. Guarda INTENCION, no precios:
-id_oferta -> cantidad, y nada mas.
+expiracion por inactividad. Cada linea es una FOTO en JSON:
+id_oferta -> {cantidad, precio final, % de descuento, nombre, imagen,
+vendedor}. GET /carrito solo lee Redis. Al pagar, el backend compara la foto
+con el precio de hoy; si cambio, no cobra y avisa (comprado:false) hasta que
+se confirme.
 
 Consecuencia que hay que saber decir: el pedido nace ENTERO al pagar. Por
 eso existe migrations/012_comprar_carrito.sql: comprar_carrito() compone

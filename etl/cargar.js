@@ -38,11 +38,12 @@
 // quedan en PostgreSQL, que es donde ademas se decide si alcanza para vender.
 //
 // Lo unico que viaja de ellas son cinco numeros AGREGADOS por producto
-// (precio_tienda, precio_desde, stock_tienda, stock_total y total_ofertas),
-// que los calcula extraer.sql. La lista tiene que decir los cinco: contarlos
-// mal aqui hace creer que sobra o falta uno al comparar con la consulta. Esos
-// si son copias, pero de un dato agregado y para pintar una tarjeta: si quedan
-// viejos la lista miente un rato, no se vende de mas.
+// (precio_tienda, precio_desde, stock_tienda, stock_total y total_ofertas) y
+// una bandera (hay_descuento), que los calcula extraer.sql. La lista tiene que
+// decir los seis: contarlos mal aqui hace creer que sobra o falta uno al
+// comparar con la consulta. Los dos precios ya llegan con el descuento de la
+// oferta aplicado. Esos si son copias, pero de un dato agregado y para pintar
+// una tarjeta: si quedan viejos la lista miente un rato, no se vende de mas.
 //
 // La ficha del producto, que si necesita las ofertas de verdad, las pide a
 // PostgreSQL.
@@ -78,8 +79,8 @@
 // deriva PostgreSQL (un evento con numero mayor que los que el ETL arma) fue
 // editado desde la aplicacion. Ese producto NO se reemplaza:
 //
-//   - se refrescan solo los agregados que si vienen de las ofertas (los cinco,
-//     tambien dentro de cada variante que ya existia);
+//   - se refrescan solo los agregados que si vienen de las ofertas (los cinco
+//     y hay_descuento, tambien dentro de cada variante que ya existia);
 //   - no se toca ningun evento ajeno;
 //   - se cuenta y se dice al final.
 //
@@ -263,9 +264,12 @@ function documentoDe(producto) {
         categoria:      producto.categoria,
 
         // Los cinco calculados. Son una COPIA de lo que dicen las ofertas, y
-        // hay que recalcularlos cuando una oferta cambie de precio, se quede
-        // sin unidades o se pause. Si no, la tarjeta va a decir un precio y la
-        // ficha otro.
+        // hay que recalcularlos cuando una oferta cambie de precio o de
+        // descuento, se quede sin unidades o se pause. Si no, la tarjeta va a
+        // decir un precio y la ficha otro.
+        //
+        // Los dos precios ya vienen con el descuento aplicado, con la misma
+        // formula que el backend (ver la cabecera de extraer.sql).
         //
         // Los dos de stock van SUMADOS sobre todas las variantes, porque la
         // tarjeta del catalogo ensena un producto y no una variante. Y solo
@@ -276,6 +280,12 @@ function documentoDe(producto) {
         stock_tienda:   producto.stock_tienda,
         stock_total:    producto.stock_total,
         total_ofertas:  producto.total_ofertas,
+
+        // La bandera de descuento: true si alguna oferta activa tiene uno.
+        // Va con los cinco porque se calcula igual y queda vieja igual. Dentro
+        // de cada variante tambien viene, y entra sola con el Object.assign
+        // de abajo.
+        hay_descuento:  producto.hay_descuento,
 
         // Las dos de resenas se quedan FUERA de CAMPOS_DECIMALES, y es a
         // proposito. Esa lista convierte por NOMBRE del campo y solo cuando el
@@ -425,8 +435,11 @@ db.productos_eventos.aggregate([
     { $group: { _id: '$id_producto', ultimo: { $max: '$numero' } } }
 ]).forEach(g => ultimoEvento.set(g._id, g.ultimo));
 
-// Los cinco agregados que viajan de las ofertas, en la raiz y en cada variante.
-const AGREGADOS = ['precio_tienda', 'precio_desde', 'stock_tienda', 'stock_total', 'total_ofertas'];
+// Los seis agregados que viajan de las ofertas, en la raiz y en cada variante.
+// hay_descuento va aqui para que un producto editado desde la aplicacion
+// tambien reciba la bandera al dia; si faltara, un descuento puesto o quitado
+// no la moveria nunca en esos productos.
+const AGREGADOS = ['precio_tienda', 'precio_desde', 'stock_tienda', 'stock_total', 'total_ofertas', 'hay_descuento'];
 
 // String() y no ===: un NumberDecimal es un objeto y dos iguales no son ===.
 // Las dos caras (lo que hay y lo que se va a escribir) pasan por la misma
