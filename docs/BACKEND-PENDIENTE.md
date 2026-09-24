@@ -4,6 +4,32 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-23 EN LA NOCHE: fraude y recomendaciones, para aprobar primero
+
+Esta en `docs/fraude-entrega3/` (commit d82880f). Es una PROPUESTA probada, no
+hay nada que tocar hasta que el grupo la apruebe. Si se aprueba, esto es lo que
+toca en `backend/`.
+
+1. **Las consultas nuevas.** Las 7 de Neo4j (`neo4j/consultas/B1..B7`) y las 13
+   de ClickHouse (`clickhouse/consultas/`). Llevan parametros (`$nombre` y
+   `{nombre:Tipo}`), asi que se copian tal cual y los valores estan en
+   `B0_parametros.cypher` y `parametros.txt`.
+2. **El punto ciego de 60 dias.** `AnillosDetectorService` ya no ve el anillo
+   anillo.uno/dos/tres de marzo. B.3 y B.4 miran la historia entera y conviene
+   correrlas una vez al dia.
+3. **El agrupador de casos.** Hallazgos juntados por cuentas compartidas, puntaje,
+   niveles y las reglas R-CASI-1 a 5. Todo en `02-reglas-backend.md`.
+4. **La migracion 022.** El SQL esta en `02-reglas-backend.md`, seccion 7. No se
+   puso en `migrations/` porque `arrancar.ps1` la aplicaria sola.
+5. **Las rutas.** `GET/PATCH /admin/fraude/casos` y las de recomendaciones
+   (vistos recientemente, tambien vieron, para ti, similares). La tabla de donde
+   sale cada una esta en `03-consultas-clickhouse.md`.
+
+Cuando esten, nosotros hacemos las pantallas y una prueba que pase por HTTP,
+como `pruebas/anillos.sh`.
+
+---
+
 ## LO NUEVO DEL 2026-09-23 EN LA TARDE: vitrinas de ofertas y reglas de descuento
 
 Lo de 565aca1 y 56ce5f8 ya esta conectado fuera de `backend/`. La portada
