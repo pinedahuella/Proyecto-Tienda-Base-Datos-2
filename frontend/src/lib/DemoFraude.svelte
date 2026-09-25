@@ -14,6 +14,7 @@
 	 *
 	 *   demo-evento-fraude.ps1     los tres ataques de login, por HTTP directo
 	 *   demo-anillo-resenas.ps1    el anillo de cuentas que se califican entre si
+ *   demo-patrones-resenas.ps1  cadena, favor devuelto y coordinados (familia B)
 	 *   arrancar.ps1 -Productos    carga un lote de productos con semilla
 	 *
 	 * Los dos primeros SI se disparan desde aqui, con fetch: son peticiones
@@ -197,6 +198,46 @@
 			: `.\\arrancar.ps1 -Productos ${productosCantidad} -Semilla ${productosSemilla.trim()}`
 	);
 
+	// ---------------------------------------------------------------
+	// Bloque 4: patrones de resenas de la familia B (migracion 023).
+	// Mismo mecanismo que el cierre del anillo: comprar de verdad lo hace
+	// `demo-patrones-resenas.ps1` (una pagina no puede entrar con otras
+	// cuentas sin sacar al admin de su sesion), y aqui se arma el comando.
+	// Solo los tres que el backend revisa al llegar cada resena
+	// (`PatronesFraudeDetectorService.detectarInmediato`): B.1, B.5 y B.6.
+	// ---------------------------------------------------------------
+
+	interface PatronB {
+		id: 'cadena' | 'favor' | 'coordinados';
+		nombre: string;
+		explica: string;
+		filtro: string;
+	}
+
+	const PATRONES_B: PatronB[] = [
+		{
+			id: 'cadena',
+			nombre: 'Cadena de calificaciones',
+			explica: 'Tres cuentas nuevas. A le compra a B y le pone 5, B le compra a C y le pone 5. Nadie cierra el circulo.',
+			filtro: 'Cadena de calificaciones'
+		},
+		{
+			id: 'favor',
+			nombre: 'Favor devuelto',
+			explica: 'Dos cuentas se compran una a la otra y se ponen 5 en minutos. El par tambien sale como mutuo.',
+			filtro: 'Se devuelven la nota en horas'
+		},
+		{
+			id: 'coordinados',
+			nombre: 'Cuentas coordinadas',
+			explica: 'Dos compradoras califican los mismos tres productos del mismo vendedor a la vez. El vendedor no entra en el caso.',
+			filtro: 'Califican juntas lo mismo'
+		}
+	];
+
+	const comandoPatron = (id: PatronB['id'] | 'todos') =>
+		id === 'todos' ? '.\\demo-patrones-resenas.ps1' : `.\\demo-patrones-resenas.ps1 -Patron ${id}`;
+
 	let copiado = $state(false);
 	async function copiar(texto: string) {
 		try {
@@ -216,8 +257,8 @@
 	<p class="intro">
 		Para la defensa. Cada bloque dispara una senal de fraude de verdad contra el sistema en
 		ejecucion, con cuentas y compras reales -- no hay boton de deshacer. Son la version visual de
-		<code>demo-evento-fraude.ps1</code>, <code>demo-anillo-resenas.ps1</code> y
-		<code>arrancar.ps1 -Productos</code>.
+		<code>demo-evento-fraude.ps1</code>, <code>demo-anillo-resenas.ps1</code>,
+		<code>demo-patrones-resenas.ps1</code> y <code>arrancar.ps1 -Productos</code>.
 	</p>
 
 	<article class="bloque">
@@ -309,6 +350,43 @@
 				<a class="ver" href="/panel?s=fraude">Abrir Fraude para ver el anillo</a>
 			</div>
 		{/if}
+	</article>
+
+	<article class="bloque">
+		<h3>Patrones de resenas</h3>
+		<p class="pie">
+			Cuentas nuevas en cada corrida, con compras y resenas reales. El sistema los revisa al
+			llegar cada resena y salen en segundos. El script confirma cada caso al final.
+		</p>
+
+		<div class="tarjetas">
+			{#each PATRONES_B as p (p.id)}
+				<div class="tarjeta">
+					<h4>{p.nombre}</h4>
+					<p>{p.explica}</p>
+					<p class="donde">Verlo en Fraude, Resenas en anillo, tipo {p.filtro}.</p>
+					<div class="comando">
+						<code>{comandoPatron(p.id)}</code>
+						<button type="button" onclick={() => copiar(comandoPatron(p.id))}>
+							{copiado ? 'Copiado' : 'Copiar'}
+						</button>
+					</div>
+				</div>
+			{/each}
+		</div>
+
+		<div class="comando todos">
+			<code>{comandoPatron('todos')}</code>
+			<button type="button" onclick={() => copiar(comandoPatron('todos'))}>
+				{copiado ? 'Copiado' : 'Copiar'}
+			</button>
+		</div>
+		<p class="por-que">
+			Los tres a la vez. Tambien estan en Comandos, grupo Demos de fraude. Reputacion en minutos
+			sale sola a los 15 minutos con estas mismas cuentas. Persistente pide resenas de tres meses
+			y no se arma en vivo.
+		</p>
+		<a class="ver" href="/panel?s=fraude&t=resenas">Abrir Fraude para ver los casos</a>
 	</article>
 
 	<article class="bloque">
@@ -496,6 +574,20 @@
 
 	.por-que {
 		color: var(--gris);
+	}
+
+	.tarjeta p.donde {
+		flex: 0;
+		color: var(--tinta);
+	}
+
+	.comando.todos {
+		margin-top: 12px;
+	}
+
+	.bloque > .por-que {
+		margin-top: 10px;
+		font-size: var(--f-sm);
 	}
 
 	.comando {

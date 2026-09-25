@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { pedir, conJson, mensajeUtil, type RespuestaApi } from './api';
 	import Autocompletar from './Autocompletar.svelte';
-	import { textoPorcentaje, tieneDescuento } from './descuento';
+	import { textoConflictoDescuento, textoPorcentaje, tieneDescuento } from './descuento';
 
 	/**
 	 * Las ofertas del vendedor: verlas, editarlas y publicar una nueva.
@@ -480,6 +480,13 @@
 	 * `inputmode` el teclado del telefono sale igual de numerico.
 	 */
 	let porcentajeNuevo = $state('');
+	/**
+	 * Cuanto dura el descuento, en segundos y como texto. Vacio es "sin limite",
+	 * que es como funcionaba antes del 2026-09-24. Con duracion, el backend le
+	 * pone vencimiento a la clave `mesh:oferta:<id>:descuento` y su worker lo
+	 * quita solo al vencer.
+	 */
+	let duracionDescuento = $state('');
 	let descuentoOcupado = $state(false);
 	let errorDescuento = $state('');
 
@@ -507,6 +514,15 @@
 		{ valor: '259200', texto: 'En 3 dias' },
 		{ valor: '604800', texto: 'En 7 dias' }
 	];
+
+	/**
+	 * Lo mismo para el descuento manual. Mismos plazos y mismo tope (el backend
+	 * valida los dos con `validarDuracionVencimiento`, de 0 a 604800), solo
+	 * cambia como se dice el vacio.
+	 */
+	const DURACIONES_DESCUENTO = DURACIONES.map((d) =>
+		d.valor === '' ? { valor: '', texto: 'Sin limite, lo quito yo' } : d
+	);
 
 	// publicar
 	let busqueda = $state('');
@@ -1245,7 +1261,8 @@
 			// ese id" tanto si de verdad no existe como si es de otra persona,
 			// y leer eso dentro de TU propio panel suena a que la pantalla se
 			// rompio. Se traduce.
-			errorRelampago = r.estado === 404 ? mensaje404(o) : mensajeUtil(r);
+			errorRelampago =
+				r.estado === 404 ? mensaje404(o) : (textoConflictoDescuento(r) ?? mensajeUtil(r));
 		}
 	}
 
@@ -1302,6 +1319,7 @@
 		descuentoDe = o.id_oferta;
 		relampagoDe = null;
 		porcentajeNuevo = '';
+		duracionDescuento = '';
 		aviso = '';
 	}
 
@@ -1331,11 +1349,16 @@
 			return;
 		}
 
+		// Sin validar el rango de la duracion: sale de un <select> con los
+		// plazos de DURACIONES_DESCUENTO, cuyo tope es el del backend.
+		const elegido = duracionDescuento;
+		const cuerpo: { porcentaje_descuento: number; duracion_segundos?: number } = {
+			porcentaje_descuento: Number(texto)
+		};
+		if (elegido !== '') cuerpo.duracion_segundos = Number(elegido);
+
 		descuentoOcupado = true;
-		const r = await pedir<Oferta>(
-			`/vendedor/ofertas/${o.id_oferta}/descuento`,
-			conJson('POST', { porcentaje_descuento: Number(texto) })
-		);
+		const r = await pedir<Oferta>(`/vendedor/ofertas/${o.id_oferta}/descuento`, conJson('POST', cuerpo));
 		descuentoOcupado = false;
 
 		if (expiro(r)) return;
@@ -1345,9 +1368,15 @@
 			refrescarEnProductoAbierto(r.payload);
 			descuentoDe = null;
 			porcentajeNuevo = '';
-			aviso = `Descuento de ${textoPorcentaje(r.payload.porcentaje_descuento)} puesto. Ahora se vende a ${quetzales(r.payload.precio_final)}.`;
+			duracionDescuento = '';
+			const cuando = DURACIONES_DESCUENTO.find((d) => d.valor === elegido)?.texto ?? '';
+			aviso =
+				`Descuento de ${textoPorcentaje(r.payload.porcentaje_descuento)} puesto. Ahora se vende a ${quetzales(r.payload.precio_final)}.` +
+				(elegido === '' ? '' : ` Se quita solo ${cuando.toLowerCase()}.`);
 		} else {
-			errorDescuento = mensajeUtil(r);
+			// Un 409 aqui casi siempre es la exclusion: la oferta tiene una regla
+			// automatica o por periodo activa. Se dice cual y que hacer.
+			errorDescuento = textoConflictoDescuento(r) ?? mensajeUtil(r);
 		}
 	}
 
@@ -1950,6 +1979,14 @@
 						placeholder="Del 1 al 90"
 						maxlength="5"
 					/>
+				</label>
+				<label>
+					Hasta cuando
+					<select bind:value={duracionDescuento}>
+						{#each DURACIONES_DESCUENTO as d (d.valor)}
+							<option value={d.valor}>{d.texto}</option>
+						{/each}
+					</select>
 				</label>
 			</div>
 			<p class="menor nota">

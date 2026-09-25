@@ -16,7 +16,18 @@
 
 	interface AnilloPendiente {
 		id_anillo_fraude: string;
-		tipo: 'mutuo' | 'ciclo' | 'reiterado';
+		/** Ver `TipoAnillo` en PanelFraude.svelte: 1 a 3 de la 019, 4 a 10 de la 023. */
+		tipo:
+			| 'mutuo'
+			| 'ciclo'
+			| 'reiterado'
+			| 'cadena_abierta'
+			| 'satelites'
+			| 'persistente'
+			| 'anillo_en_el_tiempo'
+			| 'favor_devuelto'
+			| 'coordinados'
+			| 'reputacion_expres';
 		cuentas: { usuario: string }[];
 		fecha_creacion: string;
 	}
@@ -29,7 +40,14 @@
 	const QUE_PASO: Record<AnilloPendiente['tipo'], string> = {
 		mutuo: 'Anillo de resenas, se califican entre si',
 		ciclo: 'Anillo de resenas en ciclo',
-		reiterado: 'Anillo de resenas sobre los mismos productos'
+		reiterado: 'Anillo de resenas sobre los mismos productos',
+		cadena_abierta: 'Cadena de calificaciones entre cuentas',
+		satelites: 'Cuentas que solo califican a un vendedor',
+		persistente: 'Una cuenta califica siempre al mismo vendedor',
+		anillo_en_el_tiempo: 'Anillo de resenas que vuelve con el tiempo',
+		favor_devuelto: 'Dos cuentas se devuelven la nota en horas',
+		coordinados: 'Dos cuentas califican juntas lo mismo',
+		reputacion_expres: 'Vendedor nuevo con resenas de cuentas nuevas'
 	};
 
 	const LIMITE = 20;

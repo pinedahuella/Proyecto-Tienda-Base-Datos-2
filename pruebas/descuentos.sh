@@ -51,6 +51,15 @@
 #      /comprador/pedidos/:id cuadran con la formula.
 #  12. Quitar el descuento da 200, hay_descuento vuelve a false, y quitarlo
 #      otra vez da 409.
+#  13. La clave de Redis `mesh:oferta:<id>:descuento` (2026-09-24). Un
+#      descuento sin duracion la deja sin vencimiento (TTL -1) y quitarlo la
+#      borra. Es la unica senal que mira el worker de vencimiento: sin ella
+#      el descuento se da por vencido.
+#  14. La expiracion. duracion_segundos -1, 604801 y "60" dan 400. Con 6
+#      segundos la clave nace con TTL de 6 como mucho, y el worker del backend
+#      (cada minuto) quita solo el descuento: porcentaje_descuento vuelve a
+#      NULL, Mongo a hay_descuento false y la clave desaparece. Tarda hasta
+#      ~70 s.
 #
 # LO QUE DEJA COMO ESTABA, aunque falle a la mitad (hay un trap): la venta
 # relampago cerrada, el precio de lista devuelto, el descuento quitado (en ese
@@ -58,7 +67,9 @@
 # de la cuenta compradora como lo tenia. Todo por la API.
 #
 # La oferta se elige sola: activa, aprobada, de una cuenta ventas.*@mesh.com,
-# sin descuento, sin venta relampago, con stock, y de un producto donde
+# sin descuento, sin venta relampago, sin ninguna regla de descuento ACTIVA
+# (automatica o por periodo: desde el 2026-09-24 excluyen el descuento manual
+# con 409), con stock, y de un producto donde
 # NINGUNA oferta tenga descuento (si no, hay_descuento no volveria a false al
 # quitar el nuestro y la prueba mediria otra oferta). Entre las que cumplen,
 # la de la variante con mas ofertas activas, para que el orden de la ficha
@@ -294,6 +305,10 @@ else
           AND NOT o.es_inventario_limitado
           AND o.stock >= 3
           AND u.correo_electronico LIKE 'ventas.%@mesh.com'
+          AND NOT EXISTS (SELECT 1 FROM regla_descuento_automatico ra
+                          WHERE ra.id_oferta = o.id_oferta AND ra.activa)
+          AND NOT EXISTS (SELECT 1 FROM regla_descuento_periodo rp
+                          WHERE rp.id_oferta = o.id_oferta AND rp.activa)
           AND NOT EXISTS (SELECT 1 FROM oferta x
                           WHERE x.id_producto_mongo = o.id_producto_mongo
                             AND x.porcentaje_descuento IS NOT NULL)
@@ -423,6 +438,14 @@ pedir POST "/vendedor/ofertas/$OFERTA/descuento" "$VEND" '{"porcentaje_descuento
 [ "$CODIGO" = "409" ] && OK "un segundo descuento sobre la misma oferta, 409" || FALLA "el segundo descuento contesto $CODIGO"
 [ "$(mismo_num "$(sql "SELECT porcentaje_descuento FROM oferta WHERE id_oferta=$OFERTA;")" "$DESCUENTO")" = "1" ] \
     && OK "y el descuento sigue siendo el primero" || FALLA "el segundo descuento piso al primero"
+
+# La clave que mira el worker de vencimiento. Sin duracion, sin TTL. El
+# backend la escribe sin esperar a Redis (mejor esfuerzo), asi que se le da
+# un segundo.
+CLAVE_DESC="mesh:oferta:$OFERTA:descuento"
+sleep 1
+[ "$(R EXISTS "$CLAVE_DESC")" = "1" ] && OK "Redis tiene $CLAVE_DESC" || FALLA "falta $CLAVE_DESC: el worker quitaria este descuento en su siguiente vuelta"
+[ "$(R TTL "$CLAVE_DESC")" = "-1" ] && OK "y sin vencimiento (TTL -1), porque no se pidio duracion" || FALLA "la clave tiene TTL $(R TTL "$CLAVE_DESC") y el descuento era sin duracion"
 
 
 # ============================================================
@@ -650,6 +673,56 @@ revisar_mongo false
 
 pedir DELETE "/vendedor/ofertas/$OFERTA/descuento" "$VEND"
 [ "$CODIGO" = "409" ] && OK "quitar un descuento que ya no esta, 409" || FALLA "quitarlo otra vez contesto $CODIGO"
+sleep 1
+[ "$(R EXISTS "$CLAVE_DESC")" = "0" ] && OK "quitarlo borro $CLAVE_DESC" || FALLA "$CLAVE_DESC sigue en Redis despues de quitar el descuento"
+
+
+# ============================================================
+titulo "14. Un descuento con duracion se quita solo"
+# ============================================================
+# Lo quita VentasLimitadasService.revisarDescuentosVencidos, un @Interval de
+# 60 s. Se espera hasta 90 s: un minuto del worker y margen para el recalculo
+# de Mongo.
+for malo in -1 604801 '"60"'; do
+    pedir POST "/vendedor/ofertas/$OFERTA/descuento" "$VEND" "{\"porcentaje_descuento\":$DESCUENTO,\"duracion_segundos\":$malo}"
+    [ "$CODIGO" = "400" ] && OK "duracion_segundos $malo, 400" || FALLA "duracion_segundos $malo contesto $CODIGO"
+done
+[ -z "$(sql "SELECT porcentaje_descuento FROM oferta WHERE id_oferta=$OFERTA;")" ] \
+    && OK "ninguna de esas puso descuento" || FALLA "una duracion invalida dejo el descuento puesto"
+
+pedir POST "/vendedor/ofertas/$OFERTA/descuento" "$VEND" "{\"porcentaje_descuento\":$DESCUENTO,\"duracion_segundos\":6}"
+if [ "$CODIGO" = "201" ]; then
+    DESCUENTO_PUESTO=1
+    OK "descuento con duracion_segundos 6, 201"
+    sleep 1
+    ttl=$(R TTL "$CLAVE_DESC")
+    case "$ttl" in
+        [1-6]) OK "la clave nace con TTL $ttl (6 como mucho)" ;;
+        *)     FALLA "la clave tiene TTL '$ttl' y se pidieron 6 segundos" ;;
+    esac
+
+    quitado=0
+    for _ in $(seq 1 18); do
+        sleep 5
+        if [ -z "$(sql "SELECT porcentaje_descuento FROM oferta WHERE id_oferta=$OFERTA;")" ]; then
+            quitado=1; break
+        fi
+    done
+    if [ "$quitado" = "1" ]; then
+        DESCUENTO_PUESTO=0
+        OK "el worker lo quito solo al vencer la clave"
+        [ "$(R EXISTS "$CLAVE_DESC")" = "0" ] && OK "y la clave ya no esta" || FALLA "la clave sigue en Redis"
+        [ "$(sql "SELECT COALESCE(porcentaje_descuento::text, 'null') FROM precio_historial WHERE id_oferta=$OFERTA ORDER BY id_precio_historial DESC LIMIT 1;")" = "null" ] \
+            && OK "precio_historial registra la fila sin descuento" || FALLA "precio_historial no registro el vencimiento"
+        # El recalculo de Mongo va despues del UPDATE, en la misma vuelta del worker.
+        sleep 2
+        revisar_mongo false
+    else
+        FALLA "a los 90 s el descuento sigue puesto. Esta corriendo el backend con el worker de vencimiento?"
+    fi
+else
+    FALLA "el descuento con duracion contesto $CODIGO, $(de_cuerpo mensaje)"
+fi
 
 
 # ============================================================

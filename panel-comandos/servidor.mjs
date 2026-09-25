@@ -240,6 +240,16 @@ const CATALOGO = [
     construir: (v) => ['-Cuentas', v.cuentas, '-Prefijo', v.prefijo],
   },
   {
+    id: 'demo-patrones', grupo: 'Demos de fraude', titulo: 'Patrones de resenas que salen al instante',
+    explica: 'Cuentas nuevas que compran y califican de verdad. cadena: A califica a B y B a C. favor: dos cuentas se ponen 5 una a la otra. coordinados: dos cuentas califican los mismos productos a la vez. Cada caso sale en segundos en Fraude, Resenas en anillo, filtrando por su tipo. A los 15 minutos el worker suma Reputacion en minutos con estas mismas cuentas.',
+    script: 'demo-patrones-resenas.ps1', confirmar: 'SI',
+    peligro: 'Deja cuentas, pedidos y movimientos de inventario reales. No hay como deshacerlo.',
+    campos: [
+      { nombre: 'patron', etiqueta: 'Patron', tipo: 'opcion', opciones: ['todos', 'cadena', 'favor', 'coordinados'], defecto: 'todos' },
+    ],
+    construir: (v) => ['-Patron', v.patron],
+  },
+  {
     id: 'demo-pais-precalentar', grupo: 'Demos de fraude', titulo: 'Precalentar la demo de otro pais',
     explica: 'Hazlo antes de la clase. Comprueba que el tunel pueda salir (en la U conecta WARP), construye la imagen de Tor y deja Tor con salida en el pais. No apaga nada de Mesh. Despues la demo arranca mas rapido. Tor queda corriendo, casi 100 MB.',
     script: 'demo-fraude-pais.ps1', confirmar: null,
@@ -264,6 +274,19 @@ const CATALOGO = [
     peligro: 'Borra las alertas de esa demo.',
     campos: [],
     construir: () => ['-Limpiar'],
+  },
+
+  // --- Demo de descuentos -------------------------------------------------
+  {
+    id: 'demo-descuentos', grupo: 'Demo de descuentos', titulo: 'Descuentos que se activan y se apagan solos',
+    explica: 'Un vendedor nuevo con dos ofertas. regla: tres compras reales cruzan el umbral de una regla y el worker aplica el descuento en menos de un minuto. manual: un descuento con vencimiento corto, con su TTL bajando en Redis; al vencer el worker lo quita y el historial de precio lo anota a nombre de la tienda. Al final borra la regla, retira las ofertas y quita las ventas de ClickHouse. Tarda unos cuatro minutos.',
+    script: 'demo-descuentos-solos.ps1', confirmar: 'SI',
+    peligro: 'Deja cuentas nuevas y, con la regla, tres pedidos reales en PostgreSQL. Eso no se deshace.',
+    campos: [
+      { nombre: 'parte', etiqueta: 'Parte', tipo: 'opcion', opciones: ['todo', 'regla', 'manual'], defecto: 'todo' },
+      { nombre: 'duracion', etiqueta: 'Segundos del descuento manual', tipo: 'entero', min: 30, max: 60, defecto: 45 },
+    ],
+    construir: (v) => ['-Parte', v.parte, '-Duracion', v.duracion],
   },
 
   // --- Demo de Redis ------------------------------------------------------

@@ -19,6 +19,10 @@
 	import { carrito } from '$lib/estadoCarrito.svelte';
 	import { registrarVista, registrarCarrito, type OrigenVista } from '$lib/eventos';
 	import { textoPorcentaje, tieneDescuento } from '$lib/descuento';
+	import EstanteRecomendados, {
+		type ProductoRecomendado,
+		type Recomendado
+	} from '$lib/EstanteRecomendados.svelte';
 
 	/**
 	 * La ficha de un producto: la foto arriba y debajo todo lo que la base
@@ -145,11 +149,31 @@
 	/** Cual de las fotos se ve en grande. Es el indice dentro de galeria(). */
 	let elegida = $state(0);
 
+	/**
+	 * R2, "quienes vieron esto tambien vieron": GET /productos/:id/tambien-vieron.
+	 * Publica, y solo lee Redis: la calcula un worker cada 15 minutos. Un
+	 * producto con pocas vistas contesta [] y el estante no sale.
+	 */
+	let tambienVieron = $state<Recomendado[]>([]);
+
+	async function traerTambienVieron(cual: number) {
+		const r = await pedir<{ producto: ProductoRecomendado | null }[]>(`/productos/${cual}/tambien-vieron`);
+		// Si mientras tanto se navego a otro producto, esta respuesta ya no es de el.
+		if (cual !== id) return;
+		tambienVieron =
+			r.ok && Array.isArray(r.payload)
+				? r.payload
+						.filter((f) => f && f.producto && f.producto._id !== cual)
+						.map((f) => ({ producto: f.producto as ProductoRecomendado }))
+				: [];
+	}
+
 	async function traer(cual: number) {
 		cargando = true;
 		error = '';
 		producto = null;
 		elegida = 0;
+		tambienVieron = [];
 
 		if (!Number.isInteger(cual) || cual < 1) {
 			error = 'Ese no es un numero de producto valido';
@@ -175,6 +199,7 @@
 				? (origenUrl as OrigenVista)
 				: 'enlace_directo';
 			registrarVista(cual, origen);
+			void traerTambienVieron(cual);
 		} else if (r.estado === 404) {
 			error = 'Ese producto no esta en el catalogo publico';
 		} else {
@@ -1145,6 +1170,10 @@
 					alContar={(n) => (totalResenas = n)}
 				/>
 			</div>
+		{/if}
+
+		{#if producto}
+			<EstanteRecomendados id="t-tambien-vieron" titulo="Quienes vieron esto tambien vieron" items={tambienVieron} />
 		{/if}
 	</div>
 </main>

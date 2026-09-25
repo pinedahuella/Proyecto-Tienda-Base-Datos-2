@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { mensajeUtil, pedir } from './api';
 	import TendenciasAuto from './TendenciasAuto.svelte';
+	import TendenciasSenales from './TendenciasSenales.svelte';
 
 	/**
 	 * Panel de tendencias. Es la pantalla de la familia COLUMNAR del proyecto,
@@ -26,6 +27,11 @@
 	 * se publicaron (`/admin/eventos/tendencias` y `/admin/eventos/fraude/ip`) y
 	 * ese dia el backend publico otra cosa: un ranking por tabla. El fraude por IP
 	 * ya no vive aqui, lo cubre la pestana Fraude con las alertas de login.
+	 *
+	 * `/admin/eventos/tendencias` llego al fin el 2026-09-25, junto con el embudo
+	 * y las busquedas sin respuesta (T1, T2 y T3 de docs/fraude-entrega3). Viven
+	 * en su propia vista, "Senales", en TendenciasSenales.svelte: no son rankings
+	 * de una tabla sino cruces entre tablas con umbral, y se leen distinto.
 	 *
 	 *
 	 * LA METRICA NO ES LA MISMA EN LAS SEIS
@@ -157,7 +163,7 @@
 	 * sus seis pestanas y sus mandos, a la que se llega con un clic o desde el
 	 * "Ver completo" de una tarjeta.
 	 */
-	let vista = $state<'auto' | 'rankings'>('auto');
+	let vista = $state<'auto' | 'senales' | 'rankings'>('auto');
 
 	function verRanking(nueva: Clave) {
 		clave = nueva;
@@ -331,6 +337,9 @@
 		<button type="button" class:activa={vista === 'auto'} aria-pressed={vista === 'auto'} onclick={() => (vista = 'auto')}>
 			Automaticas y mis consultas
 		</button>
+		<button type="button" class:activa={vista === 'senales'} aria-pressed={vista === 'senales'} onclick={() => (vista = 'senales')}>
+			Senales
+		</button>
 		<button type="button" class:activa={vista === 'rankings'} aria-pressed={vista === 'rankings'} onclick={() => (vista = 'rankings')}>
 			Rankings
 		</button>
@@ -338,6 +347,8 @@
 
 	{#if vista === 'auto'}
 		<TendenciasAuto {alExpirarSesion} {verRanking} />
+	{:else if vista === 'senales'}
+		<TendenciasSenales {alExpirarSesion} />
 	{:else}
 	<div class="pestanas" role="group" aria-label="Que medir">
 		{#each RANKINGS as r (r.clave)}

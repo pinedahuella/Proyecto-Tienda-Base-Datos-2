@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Dibuja el diagrama entidad relacion de Mesh a partir del esquema VIVO.
 
-    python generar-er.py                  el diagrama completo, las 50 tablas
+    python generar-er.py                  el diagrama completo, las 52 tablas
     python generar-er.py --modulo fraude  solo un modulo, para el informe
 
 Escribe docs/diagrama-general.drawio (editable en diagrams.net) y, si encuentra
@@ -104,7 +104,8 @@ MODULOS = {
                   "producto_variante_caracteristica_variante"]),
     "ofertas": ("Ofertas e inventario", "#FFE6CC", "#D79B00",
                 ["oferta", "estado_oferta", "precio_historial", "stock_movimiento",
-                 "motivo_movimiento", "propuesta_producto", "rechazo_producto", "rechazo_oferta"]),
+                 "motivo_movimiento", "propuesta_producto", "rechazo_producto", "rechazo_oferta",
+                 "regla_descuento_automatico", "regla_descuento_periodo"]),
     "pedidos": ("Pedidos y pagos", "#FFF2CC", "#D6B656",
                 ["pedido", "estado_pedido", "pedido_producto", "pago", "estado_pago", "metodo_pago"]),
     "resenas": ("Resenas", "#E1D5E7", "#9673A6",
@@ -121,7 +122,8 @@ DISPOSICION = [
     ["rol_usuario", "usuarios", "estado_usuario"],
     ["propuesta_producto", "|", "precio_historial", "oferta", "stock_movimiento", "pedido", "|",
      "resena", "comentario", "likes", "|", "alerta_fraude", "notificacion_fraude"],
-    ["rechazo_producto", "|", "estado_oferta", "rechazo_oferta", "motivo_movimiento", "|",
+    ["rechazo_producto", "|", "estado_oferta", "rechazo_oferta", "motivo_movimiento",
+     "regla_descuento_automatico", "regla_descuento_periodo", "|",
      "estado_pedido", "pedido_producto", "pago", "|", "anillo_fraude_resena", "anillo_fraude",
      "|", "tipo_alerta_fraude", "estado_alerta_fraude", "tipo_anillo_fraude", "evento_grafo"],
     ["metodo_pago", "estado_pago"],

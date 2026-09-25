@@ -8,15 +8,27 @@
 	 * oferta como mucho: el backend contesta 409 a la segunda, asi que el
 	 * selector solo ofrece las ofertas que todavia no tienen.
 	 *
-	 * Lo que todavia no existe es el disparo. El backend guarda y edita la
-	 * regla, pero nadie mira ClickHouse para activarla. La pantalla lo dice en
-	 * vez de dejar creer que ya cambia precios.
+	 * El disparo existe desde el 2026-09-25 (DisparadorReglasAutomaticoService,
+	 * cada minuto): mira en ClickHouse cuantas unidades se vendieron en la
+	 * ventana y, si llegan al umbral, pone el descuento con vencimiento. Lo
+	 * quita el mismo worker que quita los descuentos manuales con duracion.
+	 *
+	 * Dos cosas de ese disparo que la pantalla tiene que decir, porque no se
+	 * adivinan (las cuenta el backend en cambio_propuestas/2026-09-25_0700):
+	 *
+	 *   - Si la duracion es MENOR o igual que la ventana, la oferta parpadea: el
+	 *     descuento vence, las mismas ventas siguen dentro de la ventana y se
+	 *     vuelve a prender en el siguiente minuto. Se avisa en el formulario.
+	 *   - Pausar no apaga un descuento que ya se prendio. Termina su duracion.
+	 *
+	 * Una regla activa excluye cualquier otro descuento en la misma oferta (409,
+	 * `textoConflictoDescuento`).
 	 *
 	 * Un admin ve y edita las de la tienda: el backend lo resuelve solo.
 	 */
 	import { onMount } from 'svelte';
 	import { pedir, conJson, mensajeUtil, type RespuestaApi } from './api';
-	import { textoPorcentaje } from './descuento';
+	import { textoConflictoDescuento, textoPorcentaje } from './descuento';
 
 	let { alExpirarSesion }: { alExpirarSesion?: () => void } = $props();
 
@@ -88,7 +100,19 @@
 	let libres = $derived(ofertas.filter((o) => !conRegla.has(o.id_oferta)));
 
 	function vacio(): Borrador {
-		return { umbral: '10', ventana: '60', relampago: false, duracion: '60', porcentaje: '15' };
+		return { umbral: '10', ventana: '60', relampago: false, duracion: '120', porcentaje: '15' };
+	}
+
+	/**
+	 * true si la duracion no pasa de la ventana, el caso que hace parpadear la
+	 * oferta. Las dos se escriben en minutos en el formulario, asi que se
+	 * comparan tal cual. Con un campo vacio no se avisa de nada.
+	 */
+	function parpadea(b: Borrador): boolean {
+		const duracion = Number(b.duracion);
+		const ventana = Number(b.ventana);
+		if (!(duracion > 0) || !(ventana > 0)) return false;
+		return duracion <= ventana;
 	}
 
 	function expiro(r: RespuestaApi<unknown>): boolean {
@@ -162,7 +186,7 @@
 		creando = false;
 		if (expiro(r)) return;
 		if (!r.ok) {
-			errorCrear = mensajeUtil(r) || 'No se pudo guardar la regla.';
+			errorCrear = textoConflictoDescuento(r) ?? (mensajeUtil(r) || 'No se pudo guardar la regla.');
 			return;
 		}
 		idOfertaNueva = '';
@@ -189,7 +213,10 @@
 		guardando = '';
 		if (expiro(r)) return;
 		if (!r.ok || !r.payload) {
-			errorFila = { ...errorFila, [id]: mensajeUtil(r) || 'No se pudo guardar.' };
+			errorFila = {
+				...errorFila,
+				[id]: textoConflictoDescuento(r) ?? (mensajeUtil(r) || 'No se pudo guardar.')
+			};
 			return;
 		}
 		reglas = reglas.map((x) => (x.id_regla_descuento_automatico === id ? r.payload : x));
@@ -215,7 +242,8 @@
 		relampago. Una regla por oferta.
 	</p>
 	<p class="aviso">
-		Por ahora la regla solo se guarda. El sistema todavia no revisa las ventas para activarla.
+		El sistema revisa las ventas cada minuto. Pausar una regla no quita un descuento que ya se
+		activo, ese termina su tiempo.
 	</p>
 
 	<form class="nueva" onsubmit={crear}>
@@ -319,6 +347,12 @@
 		<input id="relampago-{clave}" type="checkbox" bind:checked={b.relampago} />
 		Abrir venta relampago
 	</label>
+	{#if parpadea(b)}
+		<p class="aviso ancho" role="status">
+			Haz que dure mas que la ventana. Si no, el descuento se apaga y las mismas ventas lo vuelven
+			a prender enseguida.
+		</p>
+	{/if}
 {/snippet}
 
 <style>
@@ -413,6 +447,10 @@
 
 	.campos .ancho {
 		grid-column: 1 / -1;
+	}
+
+	.campos .aviso {
+		margin-bottom: 0;
 	}
 
 	.campos .marca {

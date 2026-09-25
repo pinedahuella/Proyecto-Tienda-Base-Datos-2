@@ -27,3 +27,38 @@ export function textoPorcentaje(porcentaje: string | number | null | undefined):
 	const n = Number(porcentaje ?? 0);
 	return n.toLocaleString('es-GT', { maximumFractionDigits: 2 }) + '%';
 }
+
+/**
+ * Lo que se ensena cuando el backend contesta 409 al poner un descuento, abrir
+ * una venta relampago o activar una regla.
+ *
+ * Desde el 2026-09-24 los cuatro mecanismos (descuento manual con su venta
+ * relampago, regla automatica y regla por periodo) se excluyen: una oferta
+ * tiene uno activo como mucho. El backend lo dice asi, en
+ * `helpers/exclusion-mecanismos-descuento.ts`:
+ *
+ *   "Esta oferta ya tiene una regla de descuento por periodo activa: los
+ *    mecanismos de descuento/venta relampago son mutuamente excluyentes,
+ *    hay que desactivar ese primero"
+ *
+ * La primera mitad sirve tal cual. La segunda habla de "mecanismos", que es
+ * vocabulario nuestro, y se cambia por lo que la persona tiene que hacer.
+ * Cualquier otro 409 (el solape entre reglas por periodo, una regla automatica
+ * repetida) ya viene escrito para leerse y pasa sin tocar.
+ *
+ * Devuelve null si no es un 409, para que quien llama use su mensaje de
+ * siempre.
+ */
+export function textoConflictoDescuento(r: { estado: number; mensaje?: string }): string | null {
+	if (r.estado !== 409) return null;
+	// El backend a veces nombra la fila con su id ("activa (id 4)"). Al usuario no le dice nada.
+	const mensaje = (typeof r.mensaje === 'string' ? r.mensaje : '').replace(/\s*\(id \d+\)/gi, '').trim();
+	if (/regla de descuento por periodo activa.*se solapa/i.test(mensaje)) {
+		return 'Ya hay una regla activa para esta oferta en esos dias. Cambia las fechas o pausa la otra.';
+	}
+	const exclusion = /^(Esta oferta ya tiene [^:]+):\s*los mecanismos/i.exec(mensaje);
+	if (exclusion) {
+		return `${exclusion[1]}. Solo puede tener un descuento a la vez. Quitalo o pausa esa regla y vuelve a intentar.`;
+	}
+	return mensaje || 'Esta oferta ya tiene otro descuento activo.';
+}
