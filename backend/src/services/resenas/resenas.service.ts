@@ -29,6 +29,7 @@ import {
 import { ProductosService } from '../productos/productos.service';
 import { GrafoSyncService } from '../grafo/grafo-sync.service';
 import { AnillosDetectorService } from '../fraude/anillos-detector.service';
+import { PatronesFraudeDetectorService } from '../fraude/patrones-fraude-detector.service';
 
 const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
@@ -92,6 +93,7 @@ export class ResenasService {
     private readonly productosService: ProductosService,
     private readonly grafoSyncService: GrafoSyncService,
     private readonly anillosDetectorService: AnillosDetectorService,
+    private readonly patronesFraudeDetectorService: PatronesFraudeDetectorService,
   ) {}
 
   /**
@@ -320,11 +322,11 @@ export class ResenasService {
       // esperar el proximo tick de 10s del worker. El chequeo acotado de
       // anillos va ENCADENADO despues (no en paralelo): necesita que la
       // resena ya este proyectada en Neo4j antes de poder buscarla ahi.
-      void this.grafoSyncService
-        .procesarAhora()
-        .then(() =>
-          this.anillosDetectorService.detectarInmediato(String(fila.id_resena)),
-        );
+      void this.grafoSyncService.procesarAhora().then(() => {
+        const idResena = String(fila.id_resena);
+        void this.anillosDetectorService.detectarInmediato(idResena);
+        void this.patronesFraudeDetectorService.detectarInmediato(idResena);
+      });
       return {
         id_resena: Number(fila.id_resena),
         id_comentario: Number(fila.id_comentario),

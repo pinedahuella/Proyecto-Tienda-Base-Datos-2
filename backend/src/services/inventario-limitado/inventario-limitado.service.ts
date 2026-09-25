@@ -1,5 +1,4 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Interval } from '@nestjs/schedule';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { redis } from '../../database/redis';
@@ -153,15 +152,12 @@ export interface EstadoVentaLimitada {
  * puede llamarla ni con que autorizacion (ver el plan). Se dispara a
  * mano mientras se decide el resto del flujo.
  *
- * Ademas trae un `@Interval` (`revisarVencidas()`, mas abajo) que apaga
- * `es_inventario_limitado` solo cuando la venta relampago vence por su
- * propio TTL de Redis en vez de por un `revertir()` manual -- si no, esa
- * columna se queda en `true` para siempre y el panel del vendedor sigue
- * anunciando una venta relampago que ya termino. Desde 2026-09-23 tambien
- * llama a `RegistroOfertasRedisService.sincronizar()` por cada oferta que
- * apaga, para que `mesh:ofertas:venta_relampago` (ver ese archivo) la
- * mueva de vuelta a `mesh:ofertas:descuento` al instante -- no solo cuando
- * la cierran con `DELETE .../venta-limitada` manual.
+ * El worker que revisa las ventas relampago que vencieron solas por su
+ * propio TTL de Redis (sin pasar por `revertir()`) vive en
+ * `VentasLimitadasService.revisarVencidas()`, no aca -- necesita tambien
+ * `ProductosService` para recalcular Mongo al quitar el descuento, y
+ * `ProductosService` ya inyecta esta clase (para `estado()`), asi que
+ * ponerlo aca habria sido una dependencia circular.
  */
 @Injectable()
 export class InventarioLimitadoService {
@@ -302,102 +298,6 @@ export class InventarioLimitadoService {
       return existe === 1;
     } catch (error) {
       manejarErrorRedis(this.logger, error);
-    }
-  }
-
-  // ---------------------------------------------------------------------
-  // Apagar sola la marca de las que vencieron sin que nadie las cerrara
-  // ---------------------------------------------------------------------
-
-  /** Cada cuanto se revisan las ofertas marcadas en venta limitada. */
-  private static readonly INTERVALO_REVISION_VENCIDAS_MS = 60000;
-
-  /** `true` mientras una revision esta en curso: la siguiente se salta. */
-  private revisandoVencidas = false;
-
-  /**
-   * Cuando una venta relampago tiene `duracion_segundos`, Redis le pone un
-   * `EXPIRE` a `mesh:oferta:<id>` (y `redis/inventario_limitado.lua`
-   * sincroniza el de su ZSET de reservas con el mismo TTL) -- al vencer,
-   * las dos claves desaparecen SOLAS, sin avisarle a nadie. Pero
-   * `oferta.es_inventario_limitado` solo se apaga cuando alguien llama
-   * `DELETE /vendedor/ofertas/:id/venta-limitada` (`revertir()`), asi que
-   * una venta que vence por su cuenta deja esa columna en `true` para
-   * siempre: el panel del vendedor sigue diciendo "en venta relampago" de
-   * una oferta que ya volvio a ser normal. Al comprador no le pasa nada
-   * (Redis ya no tiene nada que reservar, la oferta simplemente se
-   * comporta como una oferta normal) -- lo unico que miente es el panel.
-   *
-   * Cada minuto, este `@Interval` (mismo mecanismo que el worker del
-   * outbox del grafo, `GrafoSyncService`) revisa las ofertas marcadas y,
-   * para cada una, reusa `existeVentaLimitada()` (un `EXISTS` de Redis, sin
-   * tocar nada). Si la clave ya no existe, apaga la columna. Nunca borra
-   * nada en Redis -- si vencio sola, las dos claves ya se fueron solas; si
-   * la revirtieron por `DELETE`, tambien. No relanza si algo falla: es
-   * mantenimiento cosmetico, no debe tumbar nada del resto de la app.
-   */
-  @Interval(
-    'inventario-limitado-vencidas',
-    InventarioLimitadoService.INTERVALO_REVISION_VENCIDAS_MS,
-  )
-  async revisarVencidas(): Promise<void> {
-    if (this.revisandoVencidas) {
-      return;
-    }
-    this.revisandoVencidas = true;
-    try {
-      let ids: number[];
-      try {
-        const { rows } = await pool.query<{ id_oferta: number }>(
-          'SELECT id_oferta FROM oferta WHERE es_inventario_limitado = true',
-        );
-        ids = rows.map((fila) => fila.id_oferta);
-      } catch (error) {
-        this.logger.warn(
-          `revision de ventas limitadas vencidas: no se pudo leer Postgres (${(error as Error)?.message ?? error})`,
-        );
-        return;
-      }
-
-      let apagadas = 0;
-      for (const idOferta of ids) {
-        let sigueViva: boolean;
-        try {
-          sigueViva = await this.existeVentaLimitada(idOferta);
-        } catch (error) {
-          this.logger.warn(
-            `revision de ventas limitadas vencidas: no se pudo leer Redis para la oferta ${idOferta} (${(error as Error)?.message ?? error})`,
-          );
-          continue;
-        }
-        if (sigueViva) {
-          continue;
-        }
-        try {
-          await pool.query(
-            'UPDATE oferta SET es_inventario_limitado = false WHERE id_oferta = $1 AND es_inventario_limitado = true',
-            [idOferta],
-          );
-          apagadas++;
-          // sincronizar() nunca lanza (ver registro-ofertas-redis.service.ts)
-          // -- un problema de Redis aca no debe tumbar esta revision, que ya
-          // logro lo que le importa (apagar la columna en Postgres). Si
-          // falla, el worker de reconciliacion (RegistroOfertasSyncService)
-          // lo corrige en su proxima corrida.
-          await this.registroOfertasRedis.sincronizar(idOferta);
-        } catch (error) {
-          this.logger.warn(
-            `revision de ventas limitadas vencidas: no se pudo apagar la oferta ${idOferta} (${(error as Error)?.message ?? error})`,
-          );
-        }
-      }
-      if (apagadas > 0) {
-        this.logger.log(
-          `revision de ventas limitadas vencidas: ${apagadas} oferta(s) apagada(s) (vencieron solas)`,
-        );
-      }
-    } finally {
-      this.revisandoVencidas = false;
     }
   }
 

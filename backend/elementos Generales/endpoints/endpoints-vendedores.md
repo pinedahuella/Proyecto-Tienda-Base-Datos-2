@@ -57,6 +57,10 @@ de restricción, y no son lo mismo:
 | `GET /vendedor/reglas-descuento` | vendedor **o** admin (2 o 3) | solo las **suyas** |
 | `GET /vendedor/reglas-descuento/paginado` | vendedor **o** admin (2 o 3) | solo las **suyas** (idéntico a `GET /vendedor/reglas-descuento`) |
 | `PATCH /vendedor/reglas-descuento/:id` | vendedor **o** admin (2 o 3) | solo sobre **su propia** regla; un admin, sobre cualquier regla **de la tienda** |
+| `POST /vendedor/reglas-descuento-periodos` | vendedor **o** admin (2 o 3) | solo sobre **su propia** oferta; un admin, sobre cualquier oferta **de la tienda** |
+| `GET /vendedor/reglas-descuento-periodos` | vendedor **o** admin (2 o 3) | solo las **suyas** |
+| `GET /vendedor/reglas-descuento-periodos/paginado` | vendedor **o** admin (2 o 3) | solo las **suyas** (idéntico a `GET /vendedor/reglas-descuento-periodos`) |
+| `PATCH /vendedor/reglas-descuento-periodos/:id` | vendedor **o** admin (2 o 3) | solo sobre **su propia** regla; un admin, sobre cualquier regla **de la tienda** |
 
 **`/vendedor/productos` es el panel de administración del catálogo
 completo, no "mis productos".** Con el giro a multi-vendedor, un producto
@@ -2642,7 +2646,15 @@ La oferta no existe **o no es tuya** (mismo mensaje para las dos cosas).
 { "ok": false, "mensaje": "La oferta 3 no esta activa (esta pausada), no se puede abrir una venta limitada", "payload": null }
 { "ok": false, "mensaje": "La oferta 3 ya esta en modo venta limitada -- sembrar de nuevo borraria sus reservas vivas", "payload": null }
 { "ok": false, "mensaje": "La oferta 3 necesita un descuento activo antes de abrir una venta relampago: aplicalo primero con POST /vendedor/ofertas/3/descuento", "payload": null }
+{ "ok": false, "mensaje": "Esta oferta ya tiene una regla de descuento automatico activa: los mecanismos de descuento/venta relampago son mutuamente excluyentes, hay que desactivar ese primero", "payload": null }
 ```
+
+El último **(agregado 2026-09-24)**: si la oferta tiene una regla de
+descuento automático o por período activa, no se puede abrir una venta
+relámpago manual sobre ella. Ver "Exclusión mutua entre los cuatro
+mecanismos de descuento/venta relámpago" más abajo. El descuento manual
+**no** entra en esta exclusión contra la venta relámpago manual -- al
+revés, es un requisito (la línea de arriba).
 
 Tres casos que el panel distingue: la oferta no está `activa` (está
 `pausada`/`retirada`/`pendiente`/`rechazada`), **ya** está en venta
@@ -2740,12 +2752,13 @@ que el resto de `/vendedor/ofertas/:id/*`. Un admin actúa como la tienda.
 ### Cuerpo
 
 ```json
-{ "porcentaje_descuento": 20 }
+{ "porcentaje_descuento": 20, "duracion_segundos": 3600 }
 ```
 
 | Campo | Obligatorio | Regla |
 | --- | --- | --- |
 | `porcentaje_descuento` | Sí | Número entre **1 y 90**, hasta 2 decimales. `0` no es un descuento (para eso está el `DELETE`); `90` es un límite de sanidad de negocio (más estricto que el `CHECK` de la base, que solo exige `< 100`) — un descuento mayor sin más contexto huele a error de tipeo. |
+| `duracion_segundos` | No (por defecto `0`) | **(agregado 2026-09-24)** Puramente interno -- no aparece en ninguna respuesta, el cliente no tiene por qué saber que existe. Entero entre `0` y `604800` (7 días), mismo campo/mismo mensaje que `POST .../venta-limitada` (`validarDuracionVencimiento()`, compartido). `0` = el descuento no vence solo (comportamiento de siempre). Si es mayor a `0`, el descuento se quita solo pasado ese tiempo -- mismo mecanismo de TTL de Redis + `VentasLimitadasService.revisarVencidas()` que ya usaba la venta relámpago, ver la sección dedicada más abajo. |
 
 ### 201
 
@@ -2771,10 +2784,12 @@ que el resto de `/vendedor/ofertas/:id/*`. Un admin actúa como la tienda.
 ```json
 { "ok": false, "mensaje": "El id no es valido", "payload": null }
 { "ok": false, "mensaje": "El porcentaje_descuento debe ser un numero entre 1 y 90, con hasta 2 decimales", "payload": null }
+{ "ok": false, "mensaje": "La duracion_segundos debe ser un entero entre 0 y 604800 (7 dias); 0 = sin vencimiento", "payload": null }
 ```
 
 `0`, `100`, `91`, negativo, con más de 2 decimales, o texto en vez de
-número — los seis casos dan este mismo 400.
+número — los seis casos de `porcentaje_descuento` dan este mismo 400;
+`duracion_segundos` negativo, mayor a 7 días, o no entero, igual.
 
 ### 401 / 403
 
@@ -2800,6 +2815,16 @@ reemplaza/apila silenciosamente. Comprobado dentro de una transacción con
 peticiones concurrentes sobre la misma oferta nunca dejan un estado
 inconsistente.
 
+**(agregado 2026-09-24)** También 409 si la oferta tiene una regla de
+descuento automático o por período activa:
+
+```json
+{ "ok": false, "mensaje": "Esta oferta ya tiene una regla de descuento automatico activa: los mecanismos de descuento/venta relampago son mutuamente excluyentes, hay que desactivar ese primero", "payload": null }
+```
+
+Ver la sección "Exclusión mutua entre los cuatro mecanismos de
+descuento/venta relámpago" más abajo.
+
 ### 503 / 500
 
 ```json
@@ -2822,6 +2847,11 @@ descuento activo (ver `POST .../venta-limitada` más arriba), quitarlo por
 separado dejaría la venta relámpago sin el descuento que la justifica. Hay
 que cerrar la venta relámpago primero
 (`DELETE .../venta-limitada`) — recién ahí se puede quitar el descuento.
+
+**(agregado 2026-09-24)** Si el `POST` se hizo con `duracion_segundos`,
+este `DELETE` también borra la clave de Redis del TTL -- no se queda
+esperando a que la revisión periódica limpie una clave que ya no tiene
+sentido.
 
 ### 200
 
@@ -2933,36 +2963,66 @@ relámpago). `npx tsc --noEmit` sobre el backend completo, limpio.
 
 ---
 
-## El worker que apaga solas las ventas relámpago vencidas (agregado 2026-09-04)
+## El worker que apaga solas las ventas relámpago vencidas (agregado 2026-09-04, corregido 2026-09-24)
 
-No es una ruta HTTP: es un `@Interval` (`InventarioLimitadoService.revisarVencidas()`,
-cada 60 s, mismo mecanismo que el worker del outbox del grafo).
+No es una ruta HTTP: es un `@Interval` (`VentasLimitadasService.revisarVencidas()`,
+cada 60 s, mismo mecanismo que el worker del outbox del grafo). **Se movió
+de `InventarioLimitadoService` a `VentasLimitadasService` el 2026-09-24**
+(ver el bug corregido abajo) porque la versión corregida necesita
+`ProductosService` para recalcular Mongo, y `ProductosService` ya inyecta
+`InventarioLimitadoService` (para `estado()` en la ficha) — dejarlo ahí
+habría sido una dependencia circular.
 
-**El problema que corrige.** Cuando `POST .../venta-limitada` abre la venta
-con `duracion_segundos`, Redis le pone `EXPIRE` a `mesh:oferta:<id>` (y
-`redis/inventario_limitado.lua` sincroniza el de su ZSET de reservas con
-el mismo TTL). Al vencer, las dos claves **desaparecen solas** en Redis —
-pero `oferta.es_inventario_limitado` en PostgreSQL solo se apagaba antes
-con `DELETE .../venta-limitada` manual. Una venta que vencía sola dejaba
-esa columna en `true` para siempre: el panel del vendedor seguía diciendo
-"en venta relámpago" de una oferta que ya volvió a comportarse normal. Al
-comprador no le afectaba (Redis ya no tenía nada que reservar); lo único
-que mentía era el panel.
+**El problema que corrige, versión original (2026-09-04).** Cuando
+`POST .../venta-limitada` abre la venta con `duracion_segundos`, Redis le
+pone `EXPIRE` a `mesh:oferta:<id>` (y `redis/inventario_limitado.lua`
+sincroniza el de su ZSET de reservas con el mismo TTL). Al vencer, las dos
+claves **desaparecen solas** en Redis — pero `oferta.es_inventario_limitado`
+en PostgreSQL solo se apagaba antes con `DELETE .../venta-limitada` manual.
 
-**Qué hace.** Cada minuto: `SELECT id_oferta FROM oferta WHERE
-es_inventario_limitado = true`, y para cada una un `EXISTS` en Redis
-(reusa `existeVentaLimitada()`, ya existía). Si la clave ya no existe,
-`UPDATE oferta SET es_inventario_limitado = false`. Nunca toca Redis —si
+**Bug encontrado el 2026-09-24, al diseñar los workers de las reglas de
+descuento automático/período:** la corrección de 2026-09-04 solo apagaba
+`es_inventario_limitado` — dejaba `oferta.porcentaje_descuento` pegado
+**para siempre**, porque nada más lo tocaba (`revertir()` tampoco lo toca;
+`quitarDescuento()` de `OfertasVendedorService` ni se puede llamar
+mientras `es_inventario_limitado` sigue en `true`, es un 409). Una venta
+relámpago que vencía sola por TTL dejaba el descuento activo de manera
+permanente, sin que ninguna pantalla lo reflejara como "en venta
+relámpago" ni tampoco como "sin descuento" — un estado que antes no tenía
+ninguna ruta de salida salvo tocar la base a mano. Corregido para que la
+misma revisión apague **las dos columnas en la misma sentencia** y
+recalcule los campos calculados de Mongo (`hay_descuento`/`precio_tienda`/
+`precio_desde`) para las ofertas que tocó, igual que
+`OfertasVendedorService.quitarDescuento()`.
+
+**Qué hace (versión corregida).** Cada minuto: `SELECT id_oferta,
+id_producto_mongo FROM oferta WHERE es_inventario_limitado = true`, y para
+cada una un `EXISTS` en Redis (reusa
+`InventarioLimitadoService.existeVentaLimitada()`). Si la clave ya no
+existe: `UPDATE oferta SET es_inventario_limitado = false,
+porcentaje_descuento = NULL`, `RegistroOfertasRedisService.sincronizar()`
+(saca la oferta de las dos llaves de `mesh:ofertas:*`, ver la sección de
+abajo) y, al final de la corrida, `ProductosService.recalcularCamposCalculados()`
+en lote sobre todas las ofertas que tocó. Nunca toca Redis directamente —si
 venció sola, las dos claves ya se fueron solas; si la cerraron con
-`DELETE`, también. Nunca relanza: es mantenimiento cosmético, un fallo de
-Postgres o Redis en una corrida se loguea como warning y se reintenta en
-la próxima.
+`DELETE`, también. Nunca relanza: un fallo de Postgres, Redis o Mongo en
+una corrida se loguea como warning y se reintenta en la próxima.
 
 **No afecta** una venta sin vencimiento (`duracion_segundos: 0` o
 ausente): su clave nunca expira, así que el `EXISTS` sigue en `1` para
 siempre y el worker no la toca.
 
-### Probado en vivo el 4 de septiembre de 2026
+**Atribución, sin resolver todavía:** el `UPDATE` de este worker sigue
+disparando el trigger `oferta_registrar_precio()`, que guarda una fila
+nueva en `precio_historial` con `id_usuario_modifico` = el dueño de la
+oferta (fallback de `current_setting('mesh.id_usuario')`, que el backend
+nunca setea) — igual que hoy pasa con un admin actuando como la tienda.
+Es decir, esta limpieza automática queda atribuida al vendedor dueño de la
+oferta como si él la hubiera hecho a mano, aunque fue un worker. No es
+parte de este arreglo; queda anotado para cuando se decida la atribución
+de las reglas de descuento automático/período.
+
+### Probado en vivo el 4 de septiembre de 2026 (versión original)
 
 | Caso | Resultado |
 |---|---|
@@ -2970,10 +3030,94 @@ siempre y el worker no la toca.
 | Venta con `duracion_segundos: 0` (sin vencer) | dos ticks completos del worker (2 min) sin tocarla: `es_inventario_limitado` se queda en `true`, sin log |
 | `DELETE .../venta-limitada` manual, antes de que el worker corriera | sigue funcionando igual que siempre — el worker no interfiere |
 
-Sin migración: es lectura del mismo `es_inventario_limitado` que ya
-existía (`014_inventario_limitado.sql`). `stock` de PostgreSQL no se toca
-en ningún caso, solo la columna booleana.
-`cambio_propuestas/2026-09-04_0900-apagar-venta-relampago-vencida.md`.
+### Probado en vivo el 24 de septiembre de 2026 (el bug del descuento pegado)
+
+Contra el servidor y las bases reales (`ventas_norte`, oferta 3).
+
+| Caso | Resultado |
+|---|---|
+| `POST .../3/descuento` (20%) → `POST .../3/venta-limitada` con `duracion_segundos: 6` | 201 los dos; Postgres: `porcentaje_descuento: 20.00`, `es_inventario_limitado: true` |
+| A los 6 s, las dos claves de Redis (`mesh:oferta:3`, `mesh:oferta:3:reservas`) | confirmadas ausentes (`EXISTS` → `0`) |
+| Al siguiente tick del worker (≤ 60 s) | log `"1 oferta(s) apagada(s) y su descuento quitado (vencieron solas)"`; Postgres: `porcentaje_descuento: NULL`, `es_inventario_limitado: false`, `precio`/`stock` sin tocar (`5840.00`/`24`) |
+| `precio_historial` | fila nueva con `porcentaje_descuento: NULL` (el trigger disparó igual que con un `quitarDescuento()` manual) |
+| Mongo (`productos._id: 1`) | `hay_descuento` vuelve a `false`; `precio_tienda`/`precio_desde`/`stock_tienda` sin cambios (otras ofertas de ese producto siguen igual) |
+| `npx tsc --noEmit` y `eslint` sobre los dos archivos tocados | limpios |
+
+Sin migración: es lectura de columnas que ya existían
+(`014_inventario_limitado.sql`, `descuentos-oferta.sql`). `stock` de
+PostgreSQL no se toca en ningún caso.
+`cambio_propuestas/2026-09-04_0900-apagar-venta-relampago-vencida.md` (original) y
+`cambio_propuestas/2026-09-24_2200-bug-ttl-descuento-pegado.md` (esta corrección).
+
+---
+
+## TTL opcional para el descuento manual puro (agregado 2026-09-24)
+
+Pedido explícito del usuario: que el descuento manual (`POST .../descuento`,
+sin venta relámpago) pueda vencer solo, copiando **tal cual** el mismo
+mecanismo que ya tenía `POST .../venta-limitada`. Es **puramente interno**
+-- no aparece en ninguna respuesta ni le importa al cliente, solo al
+backend.
+
+**`duracion_segundos` opcional en el cuerpo** (`0` o ausente = de siempre,
+no vence solo). La validación (`validarDuracionVencimiento()`, en
+`helpers/validaciones-oferta.ts`) se sacó del método privado que tenía
+`VentasLimitadasService` para que los dos endpoints compartan exactamente
+el mismo rango y el mismo mensaje -- no una copia con reglas propias.
+
+**Cómo funciona, mismo patrón que la venta relámpago:**
+`OfertasVendedorService.aplicarDescuento()` siembra
+`mesh:oferta:<id>:descuento` en Redis -- con `EXPIRE duracion_segundos` si
+es mayor a `0`, sin él si es `0` (igual que
+`InventarioLimitadoService.activar()` siembra su propia clave: SIEMPRE se
+crea, con o sin vencimiento, porque la existencia de la clave es la única
+señal que usa el worker para decidir "sigue vivo"). `quitarDescuento()`
+borra esa clave si el vendedor lo quita a mano antes de tiempo.
+
+**El worker.** `VentasLimitadasService.revisarVencidas()` ahora corre DOS
+revisiones cada minuto: la de siempre (venta relámpago) y una nueva,
+`revisarDescuentosVencidos()`, que mira las ofertas con
+`porcentaje_descuento` puesto que NO están en venta relámpago (esas ya las
+cubre la otra revisión) y, si la clave de Redis ya no existe, limpia el
+descuento y recalcula Mongo -- mismo mecanismo, misma forma, un método
+nuevo separado del de venta relámpago (no se fusionaron porque las
+consultas de Postgres y las columnas que tocan son distintas).
+
+**Al vencer una venta relámpago, también se borra la clave del
+descuento** (si tenía una) aunque a esa clave todavía le faltara tiempo --
+si no, un descuento con `duracion_segundos` largo que quedó debajo de una
+venta relámpago que venció primero dejaría esa clave viva en Redis para
+siempre, sin que nada la revise nunca más (la oferta ya no entra en la
+consulta de `revisarDescuentosVencidos()` porque `porcentaje_descuento` ya
+quedó `NULL`).
+
+**Limitación conocida y aceptada:** un descuento puesto por fuera de
+`aplicarDescuento()` (a mano, directo en Postgres) nunca tiene esta clave
+sembrada, así que `revisarDescuentosVencidos()` lo trataría como "vencido"
+en el siguiente tick y lo quitaría. Hoy no hay ningún descuento activo así
+en la base, así que no aplica en la práctica -- queda anotado por si algún
+día se siembra uno directo por SQL.
+
+### Probado en vivo el 24 de septiembre de 2026
+
+Contra el servidor y las bases reales (`ventas_norte`, ofertas 3/18/27).
+
+| Caso | Resultado |
+|---|---|
+| `POST .../3/descuento` con `duracion_segundos: 6` | 201; `TTL mesh:oferta:3:descuento` → `6` |
+| `POST .../18/descuento` sin `duracion_segundos` | 201; la clave existe pero `TTL` → `-1` (sin vencimiento) |
+| Al siguiente tick del worker (≤ 60 s tras vencer los 6 s) | log `"1 descuento(s) quitado(s) (vencieron solos)"`; oferta 3 con `porcentaje_descuento: NULL`, clave de Redis ausente |
+| Oferta 18 (sin duración), mismo tick | sin tocar -- `porcentaje_descuento: 10.00` sigue activo, la clave sigue existiendo |
+| `DELETE .../18/descuento` | 200; la clave de Redis se borra en el acto (`EXISTS` → `0`) |
+| Aplicar descuento con `duracion_segundos: 300` en 27, abrir venta relámpago con `duracion_segundos: 6` encima | 201 los dos; `TTL` de la clave del descuento → `300` |
+| Al vencer la venta relámpago (6 s + el tick del worker) | `porcentaje_descuento: NULL`, `es_inventario_limitado: false`, Y la clave del descuento (que todavía tenía ~294 s de sobra) también quedó borrada |
+| Mongo, en los tres casos | `hay_descuento` recalculado correctamente para cada producto tocado |
+| `npx tsc --noEmit` y `eslint` sobre el repo completo | limpios |
+
+Teardown: ninguno hizo falta -- las tres ofertas volvieron solas a su
+estado original (el mecanismo que se estaba probando es justamente que se
+limpien solas).
+`cambio_propuestas/2026-09-24_2345-ttl-descuento-manual.md`.
 
 ---
 
@@ -3014,12 +3158,15 @@ corrige después.
 **Quién la llama, reactivo, al instante:**
 - `OfertasVendedorService.aplicarDescuento` / `quitarDescuento`.
 - `VentasLimitadasService.abrir` / `cerrar`.
-- `InventarioLimitadoService.revisarVencidas()` — cuando una venta
+- `VentasLimitadasService.revisarVencidas()` (antes vivía en
+  `InventarioLimitadoService`, ver la sección de arriba) — cuando una venta
   relámpago vence sola por TTL (no por un `DELETE` manual), justo después
-  de apagar `es_inventario_limitado` en Postgres. Antes de esto, una venta
-  que vencía sola se quedaba en `mesh:ofertas:venta_relampago` hasta que la
-  agarrara el worker de reconciliación (hasta 10 min); ahora es inmediato,
-  igual que cerrarla a mano.
+  de apagar `es_inventario_limitado` **y** `porcentaje_descuento` en
+  Postgres. Antes de esto, una venta que vencía sola se quedaba en
+  `mesh:ofertas:venta_relampago` hasta que la agarrara el worker de
+  reconciliación (hasta 10 min); ahora es inmediato, igual que cerrarla a
+  mano — y desde el 2026-09-24 sale de las DOS llaves (ya no tiene
+  descuento), no solo se mueve a `mesh:ofertas:descuento`.
 
 **`RegistroOfertasSyncService`** (worker `@Interval`, cada 10 min): red de
 seguridad, no la fuente principal. Compara cada `HASH` contra PostgreSQL
@@ -3039,7 +3186,8 @@ Contra el servidor y las bases reales (`ventas_norte`, ofertas 549 y 18).
 | Abrir venta relámpago → se mueve | desaparece de `descuento`, aparece — sola — en `venta_relampago` |
 | Cerrar venta relámpago manual → vuelve | reaparece en `descuento`, desaparece de `venta_relampago` |
 | Quitar el descuento → sale de las dos | `HGET` de las dos llaves da `nil` |
-| Venta relámpago vencida por TTL (`duracion_segundos: 5`) | al siguiente tick de `revisarVencidas()` (≤ 60 s): `es_inventario_limitado` en `false` en Postgres, la oferta sale sola de `venta_relampago` y vuelve a `descuento` — sin `DELETE` manual, confirmado en Postgres y Redis |
+| Venta relámpago vencida por TTL (`duracion_segundos: 5`, antes del arreglo del 2026-09-24) | al siguiente tick de `revisarVencidas()` (≤ 60 s): `es_inventario_limitado` en `false` en Postgres, la oferta sale sola de `venta_relampago` y vuelve a `descuento` — sin `DELETE` manual, confirmado en Postgres y Redis |
+| Venta relámpago vencida por TTL, **después** del arreglo del 2026-09-24 (`porcentaje_descuento` también se quita) | al siguiente tick: la oferta sale de las DOS llaves de `mesh:ofertas:*` (ya no tiene descuento que mostrar en ninguna) — ver la prueba completa en la sección de arriba |
 | Reconciliación: simular una escritura perdida (`HDEL` a mano) + una llave sobrante (`HSET` de basura) en cada `HASH`, correr el worker | repara las dos: agrega la que faltaba con detalle fresco, borra la sobrante |
 | **Bug encontrado y corregido en esta misma ronda:** la consulta original del worker para `venta_relampago` no exigía `porcentaje_descuento IS NOT NULL` | contaba como "faltante" la oferta 6 (venta relámpago heredada de antes de la regla de descuento obligatorio, sin descuento) y el log decía "agregada" aunque `sincronizar()` la descartaba en silencio por no tener descuento — corregido para que la consulta del worker coincida exactamente con la condición de `sincronizar()` |
 | `npx tsc --noEmit` y `eslint` sobre los archivos nuevos/tocados | limpios |
@@ -3134,7 +3282,11 @@ siempre.
 
 Crea la regla de una oferta propia. Rechaza con 409 si esa oferta **ya
 tiene** una regla (`UNIQUE(id_oferta)`) -- no se pueden duplicar, hay que
-editar la existente.
+editar la existente. **(agregado 2026-09-24)** También 409 si la oferta
+tiene un descuento manual, una venta relámpago manual o una regla de
+período activa -- nace `activa: true`, y los cuatro mecanismos son
+mutuamente excluyentes (ver la sección dedicada más abajo). Lo mismo aplica
+al reactivar una regla pausada con `PATCH { activa: true }`.
 
 ```json
 {
@@ -3214,3 +3366,446 @@ Contra el servidor y la base real (`ventas_norte` y `ventas_sur`, ofertas
 
 Teardown: las dos reglas de prueba se borraron a mano de Postgres, la tabla
 quedó vacía otra vez.
+
+---
+
+## Reglas de descuento por período / calendario (agregado 2026-09-24)
+
+El CRUD de la configuración, igual que `regla_descuento_automatico`
+-- ver esa sección para el criterio de autorización, que es idéntico.
+**El disparador real ya existe** -- ver "El disparador de
+`regla_descuento_periodo`" más abajo, la última sección de este archivo.
+El plan completo de esta feature está en
+`elementos Generales/plan pendiente/reglas-descuento-periodos.md`.
+
+A diferencia de `regla_descuento_automatico` (dispara por umbral de ventas
+en una ventana), esta dispara por **calendario**: un rango de fechas que se
+repite con distinta granularidad según qué campos se omiten.
+
+**Tabla nueva:** `regla_descuento_periodo` (Postgres, aplicada solo en
+local por ahora -- referencia en `plan pendiente/reglas-descuento-periodos.sql`,
+sin migración real todavía). A diferencia de `regla_descuento_automatico`,
+**no tiene `UNIQUE(id_oferta)`**: una misma oferta puede tener varios
+períodos (ej. uno fijo de Black Friday 2026 y uno recurrente mensual).
+
+| Columna | Qué es |
+|---|---|
+| `id_regla_descuento_periodo` | PK propia |
+| `id_oferta` | `FK → oferta`, sin `UNIQUE` |
+| `dia_inicio` / `dia_fin` | Rango de día del mes (1-31), siempre obligatorios |
+| `mes_inicio` / `mes_fin` | Rango de mes (1-12), opcionales -- van siempre juntos (los dos o ninguno) |
+| `anio` | Opcional, no puede venir sin `mes_inicio`/`mes_fin` |
+| `es_venta_relampago` | Igual que en `regla_descuento_automatico` |
+| `porcentaje_descuento` | Igual que en `regla_descuento_automatico` (`numeric(5,2)`, 1-90 de negocio) |
+| `activa` | Para pausar la regla sin borrarla |
+| `fecha_creacion` / `fecha_actualizacion` | `fecha_actualizacion` se toca sola con el mismo trigger `oferta_tocar_fecha()` |
+
+**La cascada** (la ausencia de un campo amplía la repetición, de más
+específico a más general):
+
+1. **Con `anio`** → ocurre una sola vez, en ese año exacto.
+2. **Sin `anio`** (con mes) → se repite cada año, mismo rango de día/mes.
+3. **Sin mes** (y por lo tanto sin `anio`) → se repite en todos los meses de
+   todos los años, usando solo el rango de día.
+
+No hay validación de que `dia_fin`/`mes_fin` sea "posterior" a
+`dia_inicio`/`mes_inicio`: un período puede cruzar el fin de año o de mes
+(ej. del 20 de diciembre al 5 de enero), así que esa comparación queda para
+el disparador real, no para este CRUD.
+
+Controlador y servicio en su propia carpeta:
+`src/controllers/reglas-descuento-periodo/` y
+`src/services/reglas-descuento-periodo/` (mismo criterio que
+`reglas-descuento-automatico/`).
+
+### POST /vendedor/reglas-descuento-periodos
+
+Crea un período de una oferta propia. No hay `UNIQUE(id_oferta)`: una
+oferta puede acumular varios períodos activos a la vez, **siempre que
+ninguno se solape en días con otro ya activo de la misma oferta**
+-- 409 si se solapan (agregado 2026-09-24, ver "Solape entre reglas de
+período de la misma oferta" más abajo). **(agregado 2026-09-24)** También
+da 409 si la oferta tiene un descuento manual, una venta relámpago manual
+o una regla automática activa -- nace `activa: true`, y esos cuatro
+mecanismos son mutuamente excluyentes (ver la sección dedicada más abajo).
+Lo mismo aplica al reactivar un período pausado con `PATCH { activa: true }`,
+para las dos comprobaciones.
+
+```json
+{
+  "id_oferta": 3,
+  "dia_inicio": 20,
+  "dia_fin": 31,
+  "mes_inicio": 12,
+  "mes_fin": 12,
+  "anio": 2026,
+  "es_venta_relampago": true,
+  "porcentaje_descuento": 30
+}
+```
+
+`id_oferta`, `dia_inicio`, `dia_fin`, `es_venta_relampago` y
+`porcentaje_descuento` son obligatorios; `mes_inicio`/`mes_fin`/`anio` son
+opcionales, sujetos a la cascada de arriba. 400 con un mensaje específico si
+`mes_inicio` viene sin `mes_fin` (o viceversa), o si `anio` viene sin mes.
+`porcentaje_descuento` reutiliza `validarPorcentajeDescuento` de
+`validaciones-oferta.ts` tal cual -- mismo rango (1-90) y mismo mensaje que
+en `regla_descuento_automatico`.
+
+201 con la fila creada (`activa: true`). 400 si algún campo no cumple su
+rango o su cascada; 404 si `id_oferta` no existe o no es tuya.
+
+### GET /vendedor/reglas-descuento-periodos y GET .../paginado
+
+Idéntico en forma a `GET /vendedor/reglas-descuento`: solo tus propios
+períodos, la paginada sin filtros.
+
+```
+GET /vendedor/reglas-descuento-periodos
+GET /vendedor/reglas-descuento-periodos/paginado?pagina=1&limite=20
+```
+
+200 con el array (la sin paginar) o `{ reglas, pagina, limite, total_reglas, total_paginas }` (la paginada).
+
+### PATCH /vendedor/reglas-descuento-periodos/:id
+
+Edita una o más columnas de un período propio -- incluye `activa`, así que
+pausar/reactivarlo es la misma ruta que editarle las fechas o el descuento.
+Al menos un campo es obligatorio.
+
+```json
+{ "activa": false }
+```
+
+```json
+{ "dia_inicio": 15, "porcentaje_descuento": 40 }
+```
+
+**La cascada se valida contra el estado final de la fila, no solo contra lo
+que llega en la petición.** Si editas `mes_inicio` de una regla que ya tenía
+`mes_fin` puesto, la combinación final es válida y no hace falta reenviar
+`mes_fin`; si la regla no tenía mes (nivel "todo el mes, todos los años") y
+mandas solo `mes_inicio`, el backend rechaza con 400 porque el estado final
+tendría `mes_inicio` sin `mes_fin` -- el mismo mensaje que en `POST`, aunque
+la petición de `PATCH` nunca haya tocado `mes_fin`.
+
+200 con la fila ya actualizada. 404 si el período no existe o es de otro
+vendedor. 400 `"Debes enviar al menos un campo para actualizar"` si no viene
+ninguno.
+
+### Probado en vivo el 24 de septiembre de 2026
+
+Contra el servidor y la base real (`ventas.norte@mesh.com` oferta 3,
+`ventas.sur@mesh.com` oferta 2 como ajena).
+
+| Caso | Resultado |
+|---|---|
+| Tabla: sin `UNIQUE`, FK `ON DELETE CASCADE`, 8 `CHECK`, trigger de fecha | Los cinco, correctos |
+| Sin sesión / comprador contra `POST` | 401 / 403 |
+| `dia_inicio: 0`, `dia_fin: 32`, `mes_inicio: 13` | 400 cada uno |
+| `mes_inicio` sin `mes_fin`, `anio` sin mes, `anio: 1999` (fuera de rango) | 400 cada uno |
+| `porcentaje_descuento: 95`, falta `dia_fin` | 400 cada uno |
+| Ninguna de esas validaciones dejó fila en Postgres | confirmado |
+| Crear con `anio` (una vez), sin `anio` (recurrente por mes), sin mes (recurrente por día) -- misma oferta | 201 los tres; Postgres guardó exactamente lo enviado; sin 409 al repetir oferta |
+| Crear sobre oferta ajena | 404 |
+| `GET` y `GET .../paginado` | las tres reglas aparecen; `total_reglas`/`total_paginas` cuadran con Postgres |
+| `PATCH .../:id` con `{ "activa": false }` | 200, pausada; `fecha_actualizacion` se tocó sola |
+| `PATCH .../:id` con `{ "dia_inicio": 15, "porcentaje_descuento": 40 }` | 200, esos dos cambiaron, el resto intacto |
+| `PATCH .../:id` con `{}` | 400 |
+| `PATCH .../:id` con `porcentaje_descuento: 91` | 400 |
+| `PATCH` a un id inexistente | 404 |
+| `PATCH { "mes_inicio": 3 }` sobre la regla "sin mes" (recurrente por día) | 400 -- la cascada rechaza el estado final aunque la petición no tocó `mes_fin`; la fila no cambió |
+| `PATCH { "anio": 2027 }` sobre la regla "sin año" (recurrente por mes, ya tenía `mes_inicio`/`mes_fin`) | 200 -- válido porque el estado final ya tenía mes completo |
+| Otro vendedor (`ventas_sur`) intenta `PATCH` sobre una regla ajena | 404 genérico |
+| Otro vendedor lista las suyas | no ve las de `ventas_norte` |
+| `npx tsc --noEmit` y `eslint` sobre los 7 archivos nuevos + `app.module.ts` | limpios |
+
+Teardown: las tres reglas de prueba se borraron a mano de Postgres, la tabla
+quedó vacía otra vez.
+
+---
+
+## Exclusión mutua entre los cuatro mecanismos de descuento/venta relámpago (agregado 2026-09-24)
+
+Decidido con el usuario al diseñar los workers que le faltan a las reglas
+de descuento (automático y por período): los cuatro mecanismos que pueden
+poner un descuento o abrir una venta relámpago en una oferta son
+**mutuamente excluyentes** -- como mucho UNO puede estar activo a la vez
+sobre la misma oferta:
+
+1. Descuento manual (`POST /vendedor/ofertas/:id/descuento`)
+2. Venta relámpago manual (`POST /vendedor/ofertas/:id/venta-limitada`)
+3. Regla de descuento automático (`activa: true`)
+4. Regla de descuento por período (`activa: true`)
+
+**"Activo" para las dos reglas es su columna `activa = true`.** Una regla
+pausada (`activa: false`) no cuenta y no bloquea nada -- confirmado
+explícitamente con el usuario ("un activo en false, significa que no
+está, así que no es excluyente").
+
+**La única excepción, no simétrica a propósito:** descuento manual y venta
+relámpago manual **no** se excluyen entre sí. Una venta relámpago manual
+ya EXIGE un descuento manual puesto (`abrir()` da 409 si falta, ver la
+sección de `POST .../venta-limitada`) -- son la misma "pista manual", no
+dos mecanismos en competencia. Las dos reglas (automática y por período) sí
+excluyen a los cuatro mecanismos restantes, incluida la otra regla y las
+dos manuales.
+
+**Contra su propio tipo, cada regla se comporta distinto** (esto NO es
+parte de esta exclusión, son reglas aparte):
+- `regla_descuento_automatico` ya tenía su propio `UNIQUE(id_oferta)`
+  desde que se creó: nunca puede haber una segunda para la misma oferta.
+- `regla_descuento_periodo` SÍ puede tener varias activas a la vez sobre la
+  misma oferta -- pero solo si sus rangos de días **nunca se solapan**.
+  Esa comprobación es aparte de esta exclusión y está documentada en su
+  propia sección más abajo, "Solape entre reglas de período de la misma
+  oferta".
+
+**Dónde se comprueba: al activar, no al pausar.** Crear una regla nace
+`activa: true`, así que crear ES activar. Reactivar una regla pausada
+(`PATCH { activa: true }`) pasa por el mismo chequeo. Pausar (`activa:
+false`) nunca lo necesita.
+
+**Implementación:** un helper nuevo y compartido,
+`helpers/exclusion-mecanismos-descuento.ts`
+(`exigirSinOtroMecanismoActivo()`), para no repetir la consulta ni el
+mensaje en los cuatro puntos de entrada -- mismo criterio que
+`expresionPrecioFinal()`. Una sola consulta trae los cuatro flags (el
+`porcentaje_descuento`/`es_inventario_limitado` de la oferta, más un
+`EXISTS` por cada tabla de reglas con `activa = true`), y una tabla interna
+(`EXCLUYE`) define contra cuáles choca cada uno al entrar -- la asimetría
+del párrafo de arriba vive ahí. En
+`OfertasVendedorService.aplicarDescuento()` corre DENTRO de la misma
+transacción con `SELECT ... FOR UPDATE` que ya existía (recibe el
+`PoolClient`, no `pool`); en los otros tres puntos (`abrir()`, y los
+`crear()`/`editar()` de las dos reglas) es una consulta suelta con `pool`,
+igual que el resto de esos servicios.
+
+Mensaje uniforme en los cuatro puntos de entrada:
+
+```json
+{ "ok": false, "mensaje": "Esta oferta ya tiene <mecanismo>: los mecanismos de descuento/venta relampago son mutuamente excluyentes, hay que desactivar ese primero", "payload": null }
+```
+
+Con `<mecanismo>` siendo `un descuento manual activo`, `una venta
+relampago activa`, `una regla de descuento automatico activa` o `una
+regla de descuento por periodo activa`, según cuál sea el que ya está
+puesto.
+
+### Probado en vivo el 24 de septiembre de 2026
+
+Contra el servidor y la base real (`ventas_norte`, ofertas 18/27/35/39/42;
+`ventas_sur`, oferta 5).
+
+| Caso | Resultado |
+|---|---|
+| Descuento manual en 18 → crear regla automática sobre 18 | 409 `"...un descuento manual activo..."` |
+| Descuento manual en 18 (sigue activo) → crear regla de período sobre 18 | 409, mismo mensaje |
+| Crear regla automática en 27 → aplicar descuento manual sobre 27 | 409 `"...una regla de descuento automatico activa..."` |
+| Regla automática en 27 (sigue activa) → abrir venta relámpago sobre 27 | 409 -- pero por el chequeo PREVIO ("necesita un descuento activo primero"), no por el nuevo: como nunca hay descuento sin que la exclusión ya lo hubiera bloqueado, ese camino nunca llega al chequeo nuevo en la práctica |
+| `PATCH` la regla automática de 27 a `{ "activa": false }`, luego aplicar descuento manual sobre 27 | 200 y 201 -- una regla pausada **no bloquea**, confirmado explícitamente |
+| Crear regla de período en 35 → crear regla automática sobre 35 | 409 `"...una regla de descuento por periodo activa..."` |
+| Aplicar descuento manual en 39, luego abrir venta relámpago sobre 39 (misma oferta) | 201 los dos -- la única excepción funciona, no se bloquean entre sí |
+| Crear regla de período en 42, pausarla, aplicar descuento manual sobre 42, luego reintentar `PATCH { "activa": true }` sobre esa regla | 409 `"...un descuento manual activo..."` -- la reactivación pasa por el mismo chequeo que crear() |
+| `PATCH { "activa": true }` sobre la regla automática 4 (oferta 27, con descuento manual activo desde el caso de arriba) | 409, mismo mecanismo |
+| `ventas_sur` crea una regla automática sobre su propia oferta 5 (sin nada activo ahí) | 201 -- el chequeo es por oferta, no interfiere entre vendedores |
+| `npx tsc --noEmit` y `eslint` sobre el repo completo | limpios |
+
+Teardown: se cerraron/quitaron todos los descuentos y ventas relámpago de
+prueba (`DELETE .../descuento`, `DELETE .../venta-limitada`) y se borraron
+a mano de Postgres las filas de `regla_descuento_automatico`/
+`regla_descuento_periodo` creadas para la prueba. Las ofertas tocadas
+(5, 18, 27, 35, 39, 42) quedaron en su estado original.
+
+### Lo que queda pendiente, sin resolver todavía
+
+- **El disparador real de `regla_descuento_automatico`** (worker que revise
+  ClickHouse) -- estos chequeos de exclusión son la base para poder
+  construirlo, pero sigue bloqueado por el pendiente de "cuándo se activó"
+  (ver el modelo de esa regla). El de `regla_descuento_periodo` **ya se
+  construyó** -- ver "El disparador de `regla_descuento_periodo`", la
+  última sección de este archivo.
+- **Atribución**, mencionado ya en la sección del bug del TTL más arriba:
+  el disparador de período que ya existe toca estas columnas sin que haya
+  un usuario detrás de la petición, y `precio_historial.id_usuario_modifico`
+  cae en el dueño de la oferta por el mismo motivo (`mesh.id_usuario` nunca
+  se setea) -- sigue sin resolverse.
+`cambio_propuestas/2026-09-24_2300-exclusion-mecanismos-descuento.md`.
+
+---
+
+## Solape entre reglas de período de la misma oferta (agregado 2026-09-24)
+
+La pieza que quedaba pendiente de la sección de arriba: `regla_descuento_periodo`
+permite varias reglas activas a la vez sobre una misma oferta, pero solo si
+sus rangos de días **nunca coinciden en un mismo día real**. Antes de esto,
+nada impedía crear dos reglas de período que sí se pisaran.
+
+**El enfoque:** representar el rango de día/mes de cada regla como una
+máscara de 12×31 casillas (mes 1-12, día 1-31) y comparar máscaras --
+`helpers/solape-regla-descuento-periodo.ts`, `reglasDePeriodoSeSolapan()`.
+Una casilla que no es un día real (30 de febrero) no molesta: la tabla
+tampoco valida que el día exista dentro del mes, así que tratarla como
+cualquier otra del rango es consistente. Dos reglas se solapan si:
+
+1. Sus máscaras comparten al menos una casilla, **y**
+2. Comparten al menos un año en el que las dos puedan ocurrir:
+   - las dos sin `año` (recurrentes) → comparten TODOS los años;
+   - una con `año` y la otra sin → la recurrente también ocurre en el año
+     de la otra;
+   - las dos con `año` → solo si es el MISMO año -- años distintos nunca
+     se solapan, sin importar el rango de día/mes.
+
+**Asunción sobre las reglas "con año":** se asume que no cruzan al año
+siguiente (mismo criterio que el ejemplo del plan original, "del
+2026-12-20 al 2026-12-31") -- solo las reglas recurrentes (sin año) cruzan
+el fin de año libremente (ej. "20 de diciembre al 5 de enero", recurrente).
+
+**Dónde se comprueba:** en `crear()`, siempre (nace `activa: true`). En
+`editar()`, cada vez que la regla queda activa después de la edición --ya
+sea porque se reactiva con `activa: true`, o porque ya estaba activa y solo
+se le cambian las fechas-- se revisa el **rango final** (lo nuevo mezclado
+con lo que ya tenía) contra las demás reglas activas de la misma oferta.
+Esto significa que editar solo `dia_inicio` de una regla ya activa puede
+rechazar con 409 si el nuevo rango choca con otra, aunque la edición nunca
+haya tocado `activa`. Contra sí misma nunca se compara (se excluye por
+`id_regla_descuento_periodo`).
+
+```json
+{ "ok": false, "mensaje": "Esta oferta ya tiene una regla de descuento por periodo activa (id 6) que se solapa en dias con esta", "payload": null }
+```
+
+### Probado -- unitario y en vivo, 24 de septiembre de 2026
+
+**Unitario** (script de scratchpad, 18 casos sobre `reglasDePeriodoSeSolapan()`
+directamente, sin servidor): rangos de solo día con y sin *wrap* (28-3),
+rangos de mes con y sin *wrap* de año (nov-feb), año exacto vs año exacto
+(mismo año se solapan, distinto no), año exacto vs recurrente (la
+recurrente sí aplica en ese año), y combinaciones cruzadas día-solo vs
+mes-rango. Los 18 en verde.
+
+**En vivo**, contra el servidor y la base real (`ventas_norte`, ofertas
+18/27/31/35):
+
+| Caso | Resultado |
+|---|---|
+| Crear regla A (día 1-5) → crear regla B (día 3-10, se solapan en 3-5) | 201, luego 409 |
+| Crear regla C (día 10-15, no se solapa con A) sobre la misma oferta | 201 -- dos reglas activas conviven sin problema |
+| `PATCH` regla C a `dia_inicio: 4` (ahora sí se solapa con A en 4-5) | 409; la fila de Postgres no cambió |
+| Crear mes 1-3 → crear mes 3-5 (se solapan en marzo) → crear mes 6-8 (no se solapa) | 201, 409, 201 |
+| Año 2026 dic 20-31 → mismo rango año 2027 (no se solapan) → mismo rango año 2026 de nuevo (sí se solapan) | 201, 201, 409 |
+| Crear regla D (día 1-5) → pausarla → crear regla E (día 3-8, se solapa con D) mientras D está pausada | 201, 200, 201 -- D pausada no bloquea, mismo criterio que la exclusión de mecanismos |
+| Reactivar D (`PATCH activa: true`) con E ya activa y solapada | 409 |
+| `npx tsc --noEmit` y `eslint` sobre el repo completo | limpios |
+
+Teardown: las ocho reglas de prueba se borraron a mano de Postgres.
+`cambio_propuestas/2026-09-24_2330-solape-regla-descuento-periodo.md`.
+
+---
+
+## El disparador de `regla_descuento_periodo` (agregado 2026-09-24)
+
+No es una ruta HTTP: `DisparadorReglasPeriodoService.revisar()`, un
+`@Interval` cada 15 min (`src/services/reglas-descuento-periodo/`). Es el
+primero de los dos workers que le faltaban a las reglas de descuento --
+`regla_descuento_automatico` sigue sin el suyo, bloqueado por el pendiente
+de "cuándo se activó" (ver la sección de exclusión mutua, más arriba).
+`regla_descuento_periodo` no tenía ese problema: es una condición de
+estado ("¿hoy cae en el rango?"), reevaluable sola en cada corrida sin
+necesitar memoria de nada.
+
+**Por qué ya se podía construir.** Las dos piezas de diseño que le
+faltaban (exclusión mutua entre los cuatro mecanismos, solape entre reglas
+de período de la misma oferta -- ambas arriba) garantizan dos invariantes
+que el disparador necesita para no tener que arbitrar nada: mientras una
+regla de período está activa, es la ÚNICA dueña del
+`porcentaje_descuento`/`es_inventario_limitado` de esa oferta; y a lo sumo
+UNA regla activa de una oferta puede aplicar en un día dado.
+
+**Reusa las rutas existentes en vez de escribir SQL propio.**
+`OfertasVendedorService.aplicarDescuento()`/`quitarDescuento()` y
+`VentasLimitadasService.abrir()`/`cerrar()` -- así vienen gratis la
+validación, el recálculo de Mongo, la sincronización de Redis y el
+trigger de `precio_historial`, en vez de duplicarlos. Como esas rutas
+piden un actor humano, el disparador pasa el `id_usuario` DUEÑO de la
+oferta con rol vendedor (nunca admin): opera exactamente como si el
+vendedor lo hubiera hecho él mismo. `duracion_segundos: 0` siempre -- el
+disparador mismo decide cuándo apagar, por calendario, no por un TTL de
+Redis.
+
+**Bug real encontrado construyendo esto (no en el diseño de papel): el
+disparador se rechazaba a sí mismo.** `aplicarDescuento()`/`abrir()`
+llamaban a `exigirSinOtroMecanismoActivo()` con el mecanismo
+`'descuento_manual'`/`'venta_relampago_manual'` **fijo**, sin importar
+quién llamara. Cuando el disparador los invocaba para aplicar la MISMA
+regla que los estaba disparando, el chequeo veía "hay una regla de
+período activa" (la propia regla) y respondía 409, como si un mecanismo
+ajeno estuviera compitiendo. **Arreglado** agregando un parámetro
+`mecanismo` opcional (por defecto `'descuento_manual'`/
+`'venta_relampago_manual'`, así los llamadores HTTP de siempre no cambian
+nada) a los dos métodos, para que el disparador se identifique como
+`'regla_periodo'` -- que no choca contra sí mismo en la tabla `EXCLUYE`.
+
+Un segundo caso más sutil, mismo origen: al aplicar una regla con
+`es_venta_relampago: true`, `aplicarDescuento()` corre primero y dispara
+el trigger de Postgres; para cuando `abrir()` corre después, el
+`porcentaje_descuento` que la propia regla ACABA de poner ya luce como "un
+descuento manual activo" (`exigirSinOtroMecanismoActivo()` no sabe quién
+lo puso, solo si la columna está llena). Por eso `abrir()` **salta por
+completo** el chequeo de exclusión cuando `mecanismo` no es
+`'venta_relampago_manual'` -- confía en que la exclusividad ya la validó
+el `aplicarDescuento()` que la misma regla llamó un instante antes.
+
+**El algoritmo, por oferta con al menos una regla de período (activa o
+no):**
+
+1. `reglaHoy` = la regla ACTIVA de esa oferta cuyo rango incluya la fecha
+   de hoy (a lo sumo una, por el solape ya resuelto).
+2. Si el estado actual de la oferta ya coincide con `reglaHoy` (mismo %,
+   mismo `es_venta_relampago`) → no hacer nada.
+3. Si el estado actual no está vacío pero NO coincide con `reglaHoy`:
+   primero hay que decidir si es "nuestro" -- ¿coincide con ALGUNA regla
+   de período de esa oferta, activa o no? Si no coincide con ninguna, se
+   deja intacto (no es un estado que este mecanismo haya puesto) y se
+   loguea una advertencia. Si coincide con alguna, se quita (cierra la
+   venta relámpago si corresponde, después quita el descuento).
+4. Si `reglaHoy` existe (y el estado ya quedó vacío, sea porque lo estaba
+   desde el principio o porque el paso 3 lo vació) → se aplica.
+
+El paso 3 es lo que reconcilia una regla que se pausó a mano
+(`PATCH { activa: false }`) mientras su efecto seguía activo en la oferta
+-- `editar()` de `ReglasDescuentoPeriodoService` solo apaga la columna
+`activa`, nunca toca `oferta`, así que sin este paso el descuento se
+quedaría pegado. La consulta del disparador por eso NO filtra
+`WHERE r.activa = true` a secas: trae toda oferta con
+`r.activa = true OR o.porcentaje_descuento IS NOT NULL`, para que una
+regla recién pausada siga siendo visible el tiempo suficiente para
+limpiarla.
+
+**Limitación conocida y aceptada, documentada también en la sección de
+`revisarDescuentosVencidos()`:** un descuento que no coincide con NINGUNA
+regla de período de su oferta (puesto por otra vía, o cuya regla se borró
+-- aunque hoy no existe ningún `DELETE` de reglas) se deja intacto con una
+advertencia en el log, nunca se pisa a ciegas.
+
+### Probado en vivo el 24 de septiembre de 2026
+
+Contra el servidor y la base real (`ventas_norte`, ofertas 3/18/27), con el
+intervalo bajado a 8 s solo para la prueba (repuesto a 15 min después).
+
+| Caso | Resultado |
+|---|---|
+| Regla que cubre hoy (día 20-28, recurrente) en oferta 3 | primer intento: 409 `"...una regla de descuento por periodo activa..."` -- el bug de arriba, antes del arreglo |
+| Mismo caso, después del arreglo del `mecanismo` | se aplica sola en el siguiente tick: `porcentaje_descuento: 15.00` |
+| Regla que NO cubre hoy (día 1-5) en oferta 18 | nunca se toca, `porcentaje_descuento` sigue `NULL` |
+| Regla que cubre hoy CON `es_venta_relampago: true` en oferta 27 | se aplican las dos cosas en el mismo tick: `porcentaje_descuento: 30.00`, `es_inventario_limitado: true`, clave de Redis de la venta relámpago sembrada |
+| Pausar la regla ya aplicada de la oferta 3 (`activa: false`) | en el siguiente tick, el descuento se quita solo (reconciliación del paso 3) |
+| Crear una segunda regla en la oferta 18 que sí cubre hoy (día 20-28) | se aplica en el siguiente tick, sin tocar la regla vieja (que sigue sin cubrir hoy) |
+| Pausar la regla con venta relámpago de la oferta 27 | en el siguiente tick, se cierra la venta relámpago Y se quita el descuento -- las dos cosas |
+| `npx tsc --noEmit` y `eslint` sobre el repo completo | limpios |
+
+Teardown: las reglas de prueba se borraron a mano de Postgres; la oferta
+18 quedó con un descuento huérfano (su regla se borró directo por SQL, sin
+pasar por la app) que se quitó con el `DELETE .../descuento` real, no a
+mano en la base -- confirma en vivo la limitación conocida de arriba.
+`cambio_propuestas/2026-09-24_2359-disparador-reglas-periodo.md`.

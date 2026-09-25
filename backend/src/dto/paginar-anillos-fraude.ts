@@ -8,7 +8,7 @@ import { AnilloFraude, TipoAnilloFraude } from '../models/anillo-fraude';
  * cada filtro es opcional e independiente.
  *
  *   - `estado=pendiente|revisada|descartada` -> solo esos.
- *   - `tipo=mutuo|ciclo|reiterado` -> solo ese tipo de anillo.
+ *   - `tipo=` uno de `TIPOS_ANILLO_FRAUDE_VALIDOS` -> solo ese tipo de caso.
  *   - sin alguno de los dos -> no se filtra por ese campo.
  */
 export interface PaginarAnillosFraudeQuery {
@@ -33,8 +33,17 @@ export const ESTADOS_ANILLO_FRAUDE_VALIDOS: EstadoAlertaFraude[] = [
   'descartada',
 ];
 
+// `anillo_en_el_tiempo` (B.4) queda fuera: no se persiste como fila propia
+// (ver models/anillo-fraude.ts), asi que nunca hay un caso real de ese tipo
+// que filtrar.
 export const TIPOS_ANILLO_FRAUDE_VALIDOS: TipoAnilloFraude[] = [
   'mutuo',
   'ciclo',
   'reiterado',
+  'cadena_abierta',
+  'satelites',
+  'persistente',
+  'favor_devuelto',
+  'coordinados',
+  'reputacion_expres',
 ];

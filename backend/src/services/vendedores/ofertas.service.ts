@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { mongoDb } from '../../database/mongo';
+import { redis } from '../../database/redis';
 import {
   ErrorConflicto,
   ErrorNoEncontrado,
@@ -22,12 +23,17 @@ import {
 import {
   validarAjusteStock,
   validarDecisionRevision,
+  validarDuracionVencimiento,
   validarEstadoOferta,
   validarFiltroEstadoOferta,
   validarPorcentajeDescuento,
   validarRazonRechazo,
 } from '../../helpers/validaciones-oferta';
 import { expresionPrecioFinal } from '../../helpers/precio-descuento';
+import {
+  exigirSinOtroMecanismoActivo,
+  MecanismoDescuento,
+} from '../../helpers/exclusion-mecanismos-descuento';
 import {
   AprobadorOferta,
   FilaOfertaNueva,
@@ -553,15 +559,37 @@ export class OfertasVendedorService {
    * peticiones caen a la vez sobre la misma oferta, la segunda espera y ve
    * el descuento ya puesto, y responde 409 en vez de pisarlo.
    *
+   * Tambien rechaza con 409 si la oferta tiene una regla de descuento
+   * automatico o por periodo activa (`exigirSinOtroMecanismoActivo()`,
+   * dentro de la misma transaccion) -- los cuatro mecanismos de
+   * descuento/venta relampago son mutuamente excluyentes.
+   *
+   * `duracion_segundos` (agregado 2026-09-24, opcional): si viene y es
+   * mayor a 0, el descuento vence solo -- mismo mecanismo (TTL de Redis +
+   * `VentasLimitadasService.revisarVencidas()`) que ya tenia
+   * `POST .../venta-limitada`. Puramente interno: no se expone en ninguna
+   * respuesta, el cliente no tiene por que saber que existe.
+   *
    * Solo el dueno de la oferta -- una ajena da el mismo 404 generico de
    * siempre. Si quien la aplica es admin, "dueno" se resuelve como la
    * cuenta de la tienda (ver `resolverIdEfectivo()`).
+   *
+   * `mecanismo` (agregado 2026-09-24, opcional, por defecto
+   * `'descuento_manual'`): con QUE identidad se presenta esta activacion
+   * ante `exigirSinOtroMecanismoActivo()`. `POST .../descuento` (el unico
+   * llamador humano) nunca lo pasa -- usa el default. Lo pasan los
+   * disparadores de las reglas automaticas (`DisparadorReglasPeriodoService`
+   * hoy, `regla_automatica` el dia que exista su worker) para identificarse
+   * como lo que de verdad son: si no, `exigirSinOtroMecanismoActivo()` veria
+   * la propia regla que esta disparando esto como "otro mecanismo activo" y
+   * se rechazaria a si misma con un 409.
    */
   async aplicarDescuento(
     idUsuarioToken: string,
     idRolUsuario: number,
     idOfertaParametro: string,
     datos: AplicarDescuentoPeticion,
+    mecanismo: MecanismoDescuento = 'descuento_manual',
   ): Promise<OfertaPropia> {
     const idUsuario = await this.resolverIdEfectivo(
       idUsuarioToken,
@@ -572,6 +600,7 @@ export class OfertasVendedorService {
     }
     const idOferta = Number(idOfertaParametro);
     const porcentaje = validarPorcentajeDescuento(datos.porcentaje_descuento);
+    const duracion = validarDuracionVencimiento(datos.duracion_segundos);
 
     let idProductoMongo: number;
     const cliente = await pool.connect();
@@ -595,6 +624,12 @@ export class OfertasVendedorService {
       if (fila.porcentaje_descuento != null) {
         throw new ErrorConflicto('Esta oferta ya tiene un descuento activo');
       }
+      await exigirSinOtroMecanismoActivo(
+        this.logger,
+        cliente,
+        idOferta,
+        mecanismo,
+      );
       idProductoMongo = Number(fila.id_producto_mongo);
 
       await cliente.query(
@@ -618,6 +653,7 @@ export class OfertasVendedorService {
 
     await this.productosService.recalcularCamposCalculados([idProductoMongo]);
     await this.registroOfertasRedis.sincronizar(idOferta);
+    this.sembrarClaveDescuentoSinLanzar(idOferta, duracion);
     return this.armarOfertaPropia(
       await this.obtenerFilaPropia(idOferta, idUsuario),
     );
@@ -633,6 +669,11 @@ export class OfertasVendedorService {
    * separado la dejaria en un estado sin sentido de negocio -- hay que
    * cerrar la venta relampago primero. Mismo patron de transaccion +
    * `FOR UPDATE` + chequeo de dueno que `aplicarDescuento()`.
+   *
+   * (Agregado 2026-09-24) Tambien borra la clave de Redis del TTL del
+   * descuento, si `aplicarDescuento()` la habia sembrado -- para no dejar
+   * una clave sin vencimiento viva en Redis para siempre despues de que el
+   * descuento ya se quito por otra via.
    */
   async quitarDescuento(
     idUsuarioToken: string,
@@ -701,6 +742,7 @@ export class OfertasVendedorService {
 
     await this.productosService.recalcularCamposCalculados([idProductoMongo]);
     await this.registroOfertasRedis.sincronizar(idOferta);
+    this.borrarClaveDescuentoSinLanzar(idOferta);
     return this.armarOfertaPropia(
       await this.obtenerFilaPropia(idOferta, idUsuario),
     );
@@ -1621,5 +1663,51 @@ export class OfertasVendedorService {
       // Si ni el rollback funciona, la conexion seguramente ya se cayo.
       // No hay nada mas que hacer; sigue el error original de quien llamo.
     }
+  }
+
+  /**
+   * (Agregado 2026-09-24) La clave de Redis que marca el TTL de un
+   * descuento manual -- ver
+   * `VentasLimitadasService.revisarDescuentosVencidos()`, que es quien la
+   * lee. Se siembra SIEMPRE que se aplica un descuento (con `EXPIRE` si
+   * `duracion_segundos > 0`, sin el si es `0`), igual que
+   * `InventarioLimitadoService.activar()` siembra la suya: la existencia
+   * de la clave es la unica senal de "sigue vivo", asi que tiene que
+   * crearse tambien cuando NO hay vencimiento, o el worker la daria por
+   * vencida en el primer tick.
+   */
+  private claveDescuento(idOferta: number): string {
+    return `mesh:oferta:${idOferta}:descuento`;
+  }
+
+  /**
+   * Mejor esfuerzo, nunca lanza: un fallo de Redis aca no debe tumbar
+   * `aplicarDescuento()`, que ya comiteo en Postgres. Si falla, el peor
+   * caso es que el descuento no venza solo (se puede quitar a mano con el
+   * `DELETE` de siempre) -- no que desaparezca antes de tiempo.
+   */
+  private sembrarClaveDescuentoSinLanzar(
+    idOferta: number,
+    duracionSegundos: number,
+  ): void {
+    const clave = this.claveDescuento(idOferta);
+    const promesa =
+      duracionSegundos > 0
+        ? redis.set(clave, '1', 'EX', duracionSegundos)
+        : redis.set(clave, '1');
+    promesa.catch((error: unknown) => {
+      this.logger.warn(
+        `no se pudo sembrar la clave de TTL del descuento de la oferta ${idOferta} (${(error as Error)?.message ?? error})`,
+      );
+    });
+  }
+
+  /** Mejor esfuerzo, nunca lanza -- ver `sembrarClaveDescuentoSinLanzar()`. */
+  private borrarClaveDescuentoSinLanzar(idOferta: number): void {
+    redis.del(this.claveDescuento(idOferta)).catch((error: unknown) => {
+      this.logger.warn(
+        `no se pudo borrar la clave de TTL del descuento de la oferta ${idOferta} (${(error as Error)?.message ?? error})`,
+      );
+    });
   }
 }

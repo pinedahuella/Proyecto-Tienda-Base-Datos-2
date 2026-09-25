@@ -42,6 +42,7 @@ import { CarritoController } from './controllers/carrito/carrito.controller';
 import { CarritoService } from './services/carrito/carrito.service';
 import { FraudeController } from './controllers/fraude/fraude.controller';
 import { AnillosDetectorService } from './services/fraude/anillos-detector.service';
+import { PatronesFraudeDetectorService } from './services/fraude/patrones-fraude-detector.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
 import { AdminReportesService } from './services/admin/admin-reportes.service';
 import { InventarioLimitadoService } from './services/inventario-limitado/inventario-limitado.service';
@@ -72,6 +73,9 @@ import { OfertasDestacadasController } from './controllers/productos/ofertas-des
 import { OfertasDestacadasService } from './services/productos/ofertas-destacadas.service';
 import { ReglasDescuentoAutomaticoController } from './controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller';
 import { ReglasDescuentoAutomaticoService } from './services/reglas-descuento-automatico/reglas-descuento-automatico.service';
+import { ReglasDescuentoPeriodoController } from './controllers/reglas-descuento-periodo/reglas-descuento-periodo.controller';
+import { ReglasDescuentoPeriodoService } from './services/reglas-descuento-periodo/reglas-descuento-periodo.service';
+import { DisparadorReglasPeriodoService } from './services/reglas-descuento-periodo/disparador-reglas-periodo.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -116,6 +120,7 @@ import { ReglasDescuentoAutomaticoService } from './services/reglas-descuento-au
     MasVendidosController,
     OfertasDestacadasController,
     ReglasDescuentoAutomaticoController,
+    ReglasDescuentoPeriodoController,
   ],
   providers: [
     InicioService,
@@ -140,6 +145,7 @@ import { ReglasDescuentoAutomaticoService } from './services/reglas-descuento-au
     ResenasService,
     CarritoService,
     AnillosDetectorService,
+    PatronesFraudeDetectorService,
     AdminReportesService,
     InventarioLimitadoService,
     GrafoSyncService,
@@ -159,6 +165,8 @@ import { ReglasDescuentoAutomaticoService } from './services/reglas-descuento-au
     MasVendidosService,
     OfertasDestacadasService,
     ReglasDescuentoAutomaticoService,
+    ReglasDescuentoPeriodoService,
+    DisparadorReglasPeriodoService,
   ],
 })
 export class AppModule {}

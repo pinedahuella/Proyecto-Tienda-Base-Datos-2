@@ -1,44 +1,82 @@
 import { pool } from '../database/postgres';
 import { ID_ESTADO_ALERTA_FRAUDE_PENDIENTE } from '../models/alerta-fraude';
 import {
+  ID_TIPO_ANILLO_FRAUDE_ANILLO_EN_EL_TIEMPO,
+  ID_TIPO_ANILLO_FRAUDE_CADENA_ABIERTA,
   ID_TIPO_ANILLO_FRAUDE_CICLO,
+  ID_TIPO_ANILLO_FRAUDE_COORDINADOS,
+  ID_TIPO_ANILLO_FRAUDE_FAVOR_DEVUELTO,
   ID_TIPO_ANILLO_FRAUDE_MUTUO,
+  ID_TIPO_ANILLO_FRAUDE_PERSISTENTE,
   ID_TIPO_ANILLO_FRAUDE_REITERADO,
+  ID_TIPO_ANILLO_FRAUDE_REPUTACION_EXPRES,
+  ID_TIPO_ANILLO_FRAUDE_SATELITES,
   TipoAnilloFraude,
 } from '../models/anillo-fraude';
 
+// `anillo_en_el_tiempo` (B.4) tiene entrada aqui solo para que el Record
+// siga exhaustivo -- no se persiste como fila propia (ver
+// models/anillo-fraude.ts), asi que `registrarAnilloFraude` nunca deberia
+// llamarse con ese tipo.
 const ID_TIPO_ANILLO_FRAUDE: Record<TipoAnilloFraude, number> = {
   mutuo: ID_TIPO_ANILLO_FRAUDE_MUTUO,
   ciclo: ID_TIPO_ANILLO_FRAUDE_CICLO,
   reiterado: ID_TIPO_ANILLO_FRAUDE_REITERADO,
+  cadena_abierta: ID_TIPO_ANILLO_FRAUDE_CADENA_ABIERTA,
+  satelites: ID_TIPO_ANILLO_FRAUDE_SATELITES,
+  persistente: ID_TIPO_ANILLO_FRAUDE_PERSISTENTE,
+  anillo_en_el_tiempo: ID_TIPO_ANILLO_FRAUDE_ANILLO_EN_EL_TIEMPO,
+  favor_devuelto: ID_TIPO_ANILLO_FRAUDE_FAVOR_DEVUELTO,
+  coordinados: ID_TIPO_ANILLO_FRAUDE_COORDINADOS,
+  reputacion_expres: ID_TIPO_ANILLO_FRAUDE_REPUTACION_EXPRES,
 };
+
+/**
+ * `mutuo`/`ciclo`/`reiterado` son el MISMO fenomeno (A.1/A.2) escalando o
+ * bajando de confianza sobre el mismo par/grupo de cuentas -- por eso
+ * comparten fila (ver el comentario mas abajo). Los tipos de B.1-B.7 no
+ * escalan entre si: cada uno es un patron distinto, aunque coincida en el
+ * mismo par de cuentas que otro.
+ */
+const TIPOS_CICLO_RESENAS: ReadonlySet<TipoAnilloFraude> = new Set([
+  'mutuo',
+  'ciclo',
+  'reiterado',
+]);
+const IDS_TIPO_CICLO_RESENAS = [
+  ID_TIPO_ANILLO_FRAUDE_MUTUO,
+  ID_TIPO_ANILLO_FRAUDE_CICLO,
+  ID_TIPO_ANILLO_FRAUDE_REITERADO,
+];
 
 /**
  * El UPSERT que deja (o refresca) una fila de `anillo_fraude`, y de paso
  * asegura que `anillo_fraude_resena` tenga una fila por cada resena que hoy
  * forma parte de la evidencia. La llama `AnillosDetectorService`
- * (`detectar()`/`detectarInmediato()`) por cada grupo que encuentran A.1/A.2.
+ * (`detectar()`/`detectarInmediato()`) por cada grupo que encuentran A.1/A.2,
+ * y `PatronesFraudeDetectorService` por cada hallazgo de B.1/B.2/B.3/B.5/B.6/B.7
+ * (ver `elementos Generales/plan pendiente/anillos-fraude-familia-b.md`).
  *
  * `datos.clave` es SOLO los ids de cuenta ordenados (ver el comentario de la
- * columna en el `.sql` de referencia) -- NO lleva el tipo. Por eso el UPSERT
- * sobreescribe `id_tipo_anillo_fraude` con el tipo de ESTA corrida (ya es el
- * "ganador" entre mutuo/reiterado, resuelto por
- * `AnillosDetectorService.agrupar()`): un mismo par/grupo puede subir de
- * `mutuo` a `reiterado`, o bajar de vuelta si la resena que sostenia el
- * `reiterado` sale de la ventana de dias -- sigue siendo el mismo caso, no
- * una fila nueva.
+ * columna en el `.sql` de referencia) -- NO lleva el tipo. La unicidad real
+ * en la base es sobre (tipo, clave): dos tipos DISTINTOS sobre el mismo par
+ * de cuentas son casos separados, con su propia fila. La excepcion es
+ * `mutuo`/`ciclo`/`reiterado`, que SI comparten fila -- son el mismo caso
+ * escalando de confianza -- asi que para esos tres se busca primero si ya
+ * existe una fila de CUALQUIERA de los tres para esta `clave` y se actualiza
+ * esa, en vez de dejar que el `INSERT` cree una fila nueva por cada tipo.
  *
  * NO pisa `id_estado_alerta_fraude` en el conflicto: si un admin ya marco el
- * anillo revisado/descartado, que el worker lo siga encontrando no debe
+ * caso revisado/descartado, que el worker lo siga encontrando no debe
  * reabrirlo solo -- mismo criterio que `registrarAlertaFraude`.
  *
- * Los ids de resena se insertan SIEMPRE, tambien cuando el anillo ya
- * existia: la evidencia puede crecer entre corridas (mas resenas reciprocas
- * escritas despues de la primera deteccion), y `ON CONFLICT DO NOTHING`
- * hace que repetir un id ya guardado no cueste nada.
+ * Los ids de resena se insertan SIEMPRE, tambien cuando el caso ya existia:
+ * la evidencia puede crecer entre corridas (mas resenas escritas despues de
+ * la primera deteccion), y `ON CONFLICT DO NOTHING` hace que repetir un id
+ * ya guardado no cueste nada.
  *
  * Sin notificacion a ninguna cuenta -- a diferencia de `registrarAlertaFraude`,
- * aca las cuentas del anillo son las SOSPECHOSAS, no victimas (ver
+ * aca las cuentas del caso son las SOSPECHOSAS, no victimas (ver
  * `elementos Generales/plan pendiente/anillos-fraude-persistencia.md`).
  */
 export async function registrarAnilloFraude(datos: {
@@ -50,21 +88,44 @@ export async function registrarAnilloFraude(datos: {
   try {
     await cliente.query('BEGIN');
 
-    const resultado = await cliente.query<{ id_anillo_fraude: string }>(
-      `INSERT INTO anillo_fraude (id_tipo_anillo_fraude, clave, id_estado_alerta_fraude)
-       VALUES ($1, $2, $3)
-       ON CONFLICT (clave)
-       DO UPDATE SET
-         id_tipo_anillo_fraude = $1,
-         ultima_vez_confirmado_activo = now()
-       RETURNING id_anillo_fraude`,
-      [
-        ID_TIPO_ANILLO_FRAUDE[datos.tipo],
-        datos.clave,
-        ID_ESTADO_ALERTA_FRAUDE_PENDIENTE,
-      ],
-    );
-    const idAnilloFraude = resultado.rows[0].id_anillo_fraude;
+    const idTipo = ID_TIPO_ANILLO_FRAUDE[datos.tipo];
+    let idAnilloFraude: string;
+
+    if (TIPOS_CICLO_RESENAS.has(datos.tipo)) {
+      const existente = await cliente.query<{ id_anillo_fraude: string }>(
+        `SELECT id_anillo_fraude FROM anillo_fraude
+          WHERE clave = $1 AND id_tipo_anillo_fraude = ANY ($2)
+          FOR UPDATE`,
+        [datos.clave, IDS_TIPO_CICLO_RESENAS],
+      );
+      if (existente.rows.length > 0) {
+        idAnilloFraude = existente.rows[0].id_anillo_fraude;
+        await cliente.query(
+          `UPDATE anillo_fraude
+              SET id_tipo_anillo_fraude = $2, ultima_vez_confirmado_activo = now()
+            WHERE id_anillo_fraude = $1`,
+          [idAnilloFraude, idTipo],
+        );
+      } else {
+        const insertado = await cliente.query<{ id_anillo_fraude: string }>(
+          `INSERT INTO anillo_fraude (id_tipo_anillo_fraude, clave, id_estado_alerta_fraude)
+           VALUES ($1, $2, $3)
+           RETURNING id_anillo_fraude`,
+          [idTipo, datos.clave, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
+        );
+        idAnilloFraude = insertado.rows[0].id_anillo_fraude;
+      }
+    } else {
+      const resultado = await cliente.query<{ id_anillo_fraude: string }>(
+        `INSERT INTO anillo_fraude (id_tipo_anillo_fraude, clave, id_estado_alerta_fraude)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (id_tipo_anillo_fraude, clave)
+         DO UPDATE SET ultima_vez_confirmado_activo = now()
+         RETURNING id_anillo_fraude`,
+        [idTipo, datos.clave, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
+      );
+      idAnilloFraude = resultado.rows[0].id_anillo_fraude;
+    }
 
     for (const idResena of datos.resenas) {
       await cliente.query(

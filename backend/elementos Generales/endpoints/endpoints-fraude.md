@@ -1003,15 +1003,23 @@ que se eliminó el panel EN VIVO `GET /admin/fraude/anillos` (ver la nota al
 inicio de este archivo) y el sufijo `-persistidos` dejó de tener con qué
 contrastar.
 
-Estas rutas leen la tabla nueva `anillo_fraude`/`anillo_fraude_resena` (ver
-`plan pendiente/anillos-fraude-persistencia.sql`), que llena
-`AnillosDetectorService` -- el worker de 15 min y su chequeo acotado por
-reseña, que corren A.1 (ciclos) y A.2 (mismo producto) sobre una ventana de
-**60 días**.
+Estas rutas leen la tabla `anillo_fraude`/`anillo_fraude_resena`, que llenan
+DOS workers: `AnillosDetectorService` (A.1 ciclos, A.2 mismo producto,
+tipos `mutuo`/`ciclo`/`reiterado`, ver `plan pendiente/anillos-fraude-persistencia.sql`)
+y, desde 2026-09-24, `PatronesFraudeDetectorService` -- seis consultas más
+(`cadena_abierta`, `satelites`, `persistente`, `favor_devuelto`,
+`coordinados`, `reputacion_expres`; B.1-B.3 y B.5-B.7 de
+`neo4j/consultas/`), ver `plan pendiente/anillos-fraude-familia-b.md`. Los
+dos workers corren cada 15 min sobre una ventana de **60 días** y tienen su
+propio chequeo acotado por reseña (excepto `satelites`/`reputacion_expres`,
+que agrupan por vendedor y solo corren en el periódico).
 
-A.4 (misma dirección) **no** está en esta tabla -- no depende de reseñas,
-así que no tiene un disparador natural con el mecanismo actual. Ver
-`plan pendiente/anillos-fraude-persistencia.md`.
+A.4 (misma dirección) y B.4 (anillo en el tiempo) **no** están en esta
+tabla: A.4 no depende de reseñas, así que no tiene un disparador natural con
+el mecanismo actual (ver `plan pendiente/anillos-fraude-persistencia.md`);
+B.4 es una consulta de diagnóstico (qué tanto esconde la ventana de 60 días)
+que no se conectó al backend a propósito (ver
+`plan pendiente/anillos-fraude-familia-b.md`).
 
 ## GET /admin/fraude/alertas-resenas
 
@@ -1025,7 +1033,8 @@ reglas que el resto del proyecto). Dos filtros opcionales e independientes:
 - `estado=pendiente|revisada|descartada` -- reusa el mismo catálogo y las
   mismas funciones de validación que `alertas-login`
   (`validarFiltroEstadoAlerta`), sin duplicar nada.
-- `tipo=mutuo|ciclo|reiterado`.
+- `tipo=mutuo|ciclo|reiterado|cadena_abierta|satelites|persistente|favor_devuelto|coordinados|reputacion_expres`
+  (`anillo_en_el_tiempo`, B.4, no está porque no se persiste como caso propio).
 - sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
   ordenados por `ultima_vez_confirmado_activo DESC` (los que siguen activos
   primero, no por cuándo se crearon).
@@ -1063,9 +1072,12 @@ reglas que el resto del proyecto). Dos filtros opcionales e independientes:
 
 `cuentas` **no es una tabla propia** -- no existe `anillo_fraude_cuenta`:
 sale de un `UNION` sobre `resena.id_usuario`/`id_usuario_vendedor`, unido
-contra `usuarios`, para las reseñas listadas en `resenas`. Para
-`mutuo`/`ciclo`/`reiterado` toda cuenta del anillo es autor o vendedor de
-alguna de sus reseñas, así que guardarlas aparte sería redundante.
+contra `usuarios`, para las reseñas listadas en `resenas`. Para casi todos
+los tipos toda cuenta del caso es autor o vendedor de alguna de sus reseñas,
+así que guardarlas aparte sería redundante. **Excepción: `coordinados`
+(B.6)** -- ahí el vendedor calificado es un tercero ajeno al patrón (los dos
+autores coinciden calificándolo, no se relacionan entre sí), así que ese
+tipo deriva las cuentas SOLO de `resena.id_usuario`, sin el vendedor.
 `resenas` son los ids de `resena` (los mismos que en Neo4j) que son la
 evidencia -- ver `detalle-grafo` abajo para su contenido real.
 
@@ -1081,7 +1093,7 @@ de un admin. Detalle completo del razonamiento en
 
 ```json
 { "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
-{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado", "payload": null }
+{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, cadena_abierta, satelites, persistente, favor_devuelto, coordinados, reputacion_expres", "payload": null }
 ```
 
 ### 401 / 403
@@ -1179,6 +1191,17 @@ el código fuente) para tener datos que persistir.
 | `GET .../alertas-resenas?estado=pendiente&tipo=ciclo` (tras marcar) | `total_anillos: 0` -- el filtro ya no lo trae |
 | Sin cookie de sesión | `401` |
 | Sesión de `compradora.norte@mesh.com` (rol comprador) | `403` |
+
+**2026-09-24, familia B**: `PatronesFraudeDetectorService` corrió de verdad
+(worker con intervalo bajado solo para la prueba) contra el grafo real y
+persistió el caso orgánico `reputacion_expres` (cuentas 14/16/17, el mismo
+`prueba.admin.fraude@example.com` ya visto en el panel viejo). Detalle
+completo en `plan pendiente/anillos-fraude-familia-b.md`.
+
+| Caso | Resultado |
+|---|---|
+| `GET .../alertas-resenas?tipo=reputacion_expres` (sesión admin real) | `200`, el caso persistido, con las cuentas correctas |
+| `GET .../alertas-resenas?tipo=no-existe` | `400` con los 9 tipos válidos (ya no solo 3) |
 
 También se probó (por servicio directo, sin HTTP) que dos `registrarAnilloFraude`
 concurrentes a la misma `clave` y que `detectar()`+`detectarInmediato()`

@@ -29,6 +29,7 @@ import {
 import { ReglaDescuentoAutomatico } from '../../models/regla-descuento-automatico';
 import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { CORREO_TIENDA } from '../../helpers/constantes';
+import { exigirSinOtroMecanismoActivo } from '../../helpers/exclusion-mecanismos-descuento';
 
 const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
@@ -85,7 +86,10 @@ export class ReglasDescuentoAutomaticoService {
    * ajena o inexistente da el mismo 404 generico de siempre. Rechaza con
    * 409 si esa oferta **ya tiene** una regla (UNIQUE(id_oferta) en la
    * base): no se pueden duplicar, hay que editar la existente en vez de
-   * crear una segunda.
+   * crear una segunda. Tambien rechaza con 409 si la oferta tiene un
+   * descuento manual, una venta relampago manual o una regla de descuento
+   * por periodo activa (`exigirSinOtroMecanismoActivo()`) -- nace
+   * `activa: true`, asi que crear una regla ES activarla.
    */
   async crear(
     idUsuarioToken: string,
@@ -112,6 +116,12 @@ export class ReglasDescuentoAutomaticoService {
       if (oferta.rowCount === 0) {
         throw new ErrorNoEncontrado('No existe una oferta con ese id');
       }
+      await exigirSinOtroMecanismoActivo(
+        this.logger,
+        pool,
+        idOferta,
+        'regla_automatica',
+      );
 
       const resultado = await pool.query<ReglaDescuentoAutomatico>(
         `INSERT INTO regla_descuento_automatico
@@ -130,7 +140,10 @@ export class ReglasDescuentoAutomaticoService {
       );
       return resultado.rows[0];
     } catch (error) {
-      if (error instanceof ErrorNoEncontrado) {
+      if (
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorConflicto
+      ) {
         throw error;
       }
       if (this.esReglaDuplicada(error)) {
@@ -237,6 +250,11 @@ export class ReglasDescuentoAutomaticoService {
    * menos un campo es obligatorio. Misma comprobacion de dueno que el
    * resto: la regla tiene que ser de una oferta tuya, ajena o inexistente
    * da el mismo 404 generico.
+   *
+   * Reactivar (`activa: true`) pasa primero por
+   * `exigirSinOtroMecanismoActivoParaRegla()`: 409 si la oferta tiene un
+   * descuento manual, una venta relampago manual o una regla de periodo
+   * activa. Pausar (`activa: false`) nunca necesita este chequeo.
    */
   async editar(
     idUsuarioToken: string,
@@ -301,6 +319,10 @@ export class ReglasDescuentoAutomaticoService {
       agregar('activa', validarActiva(datos.activa));
     }
 
+    if (datos.activa === true) {
+      await this.exigirSinOtroMecanismoActivoParaRegla(idRegla, idUsuario);
+    }
+
     try {
       valores.push(idRegla, idUsuario);
       const resultado = await pool.query<ReglaDescuentoAutomatico>(
@@ -321,7 +343,52 @@ export class ReglasDescuentoAutomaticoService {
       }
       return fila;
     } catch (error) {
-      if (error instanceof ErrorNoEncontrado) {
+      if (
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorConflicto
+      ) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Busca la oferta de una regla propia (mismo chequeo de dueno que el
+   * resto -- ajena o inexistente da el 404 generico) y corre
+   * `exigirSinOtroMecanismoActivo()` contra ella. Usado solo cuando
+   * `editar()` reactiva una regla pausada (`PATCH { activa: true }`) --
+   * crear() ya conoce el id_oferta directo, no necesita este paso.
+   */
+  private async exigirSinOtroMecanismoActivoParaRegla(
+    idRegla: number,
+    idUsuario: string,
+  ): Promise<void> {
+    try {
+      const filaOferta = await pool.query<{ id_oferta: number }>(
+        `SELECT o.id_oferta
+           FROM regla_descuento_automatico r
+           JOIN oferta o ON o.id_oferta = r.id_oferta
+          WHERE r.id_regla_descuento_automatico = $1 AND o.id_usuario = $2`,
+        [idRegla, idUsuario],
+      );
+      const fila = filaOferta.rows[0];
+      if (fila == null) {
+        throw new ErrorNoEncontrado(
+          'No existe una regla de descuento con ese id',
+        );
+      }
+      await exigirSinOtroMecanismoActivo(
+        this.logger,
+        pool,
+        Number(fila.id_oferta),
+        'regla_automatica',
+      );
+    } catch (error) {
+      if (
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorConflicto
+      ) {
         throw error;
       }
       manejarErrorConexion(this.logger, error);

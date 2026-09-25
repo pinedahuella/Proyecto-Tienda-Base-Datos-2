@@ -697,10 +697,14 @@ nada**, solo leen:
   .../:id/descuento` y `POST`/`DELETE .../:id/venta-limitada`
   (`OfertasVendedorService`/`VentasLimitadasService`) — al instante, justo
   después de comitear.
-- `InventarioLimitadoService.revisarVencidas()` — cuando una venta
-  relámpago vence sola por su TTL de Redis (no por un `DELETE` manual), esa
-  misma corrida mueve la oferta de vuelta a `mesh:ofertas:descuento`, sin
-  esperar al worker de reconciliación.
+- `VentasLimitadasService.revisarVencidas()` (movido desde
+  `InventarioLimitadoService` el 2026-09-24, ver `endpoints-vendedores.md`)
+  — cuando una venta relámpago vence sola por su TTL de Redis (no por un
+  `DELETE` manual), esa misma corrida saca la oferta de las DOS llaves
+  (desde el 2026-09-24 también le quita el descuento, no solo la venta
+  relámpago — antes de esa fecha la movía de vuelta a
+  `mesh:ofertas:descuento`, comportamiento que era un bug), sin esperar al
+  worker de reconciliación.
 - `RegistroOfertasSyncService` (worker cada 10 min) — red de seguridad:
   repara un escrito reactivo que se perdió o una llave que se corrompió.
 

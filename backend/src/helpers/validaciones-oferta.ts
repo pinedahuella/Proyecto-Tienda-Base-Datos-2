@@ -117,3 +117,29 @@ export function validarPorcentajeDescuento(valor: unknown): string {
   }
   return String(valor);
 }
+
+/**
+ * `duracion_segundos` de `POST .../venta-limitada` y (agregado 2026-09-24)
+ * `POST .../descuento`: cuando cierra por su cuenta -- `0` = sin
+ * vencimiento (hay que cerrarlo a mano). Mismo campo, mismo rango, mismo
+ * mensaje en los dos endpoints -- antes vivia solo como metodo privado de
+ * `VentasLimitadasService`, se saco de ahi para no duplicarlo.
+ */
+const DURACION_VENCIMIENTO_MAXIMA = 7 * 24 * 60 * 60;
+
+export function validarDuracionVencimiento(valor: unknown): number {
+  if (valor == null) {
+    return 0;
+  }
+  if (
+    typeof valor !== 'number' ||
+    !Number.isInteger(valor) ||
+    valor < 0 ||
+    valor > DURACION_VENCIMIENTO_MAXIMA
+  ) {
+    throw new ErrorValidacion(
+      `La duracion_segundos debe ser un entero entre 0 y ${DURACION_VENCIMIENTO_MAXIMA} (7 dias); 0 = sin vencimiento`,
+    );
+  }
+  return valor;
+}

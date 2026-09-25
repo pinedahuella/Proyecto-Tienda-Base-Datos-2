@@ -37,7 +37,14 @@ import {
   PaginarAnillosFraudeQuery,
 } from '../../dto/paginar-anillos-fraude';
 
-/** Las cuentas del anillo, derivadas de sus resenas (ver el comentario de `CuentaDeAnillo`). */
+/**
+ * Las cuentas del caso, derivadas de sus resenas (ver el comentario de
+ * `CuentaDeAnillo`). El vendedor de la evidencia (`id_usuario_vendedor`) se
+ * suma como sospechoso SALVO en `coordinados` (B.6): ahi los dos autores
+ * coinciden calificando a un vendedor que es un tercero ajeno al patron, no
+ * un sospechoso -- sumarlo aca lo implicaria por error. Necesita `taf`
+ * (join a `tipo_anillo_fraude`) en el scope de quien use esta expresion.
+ */
 const SQL_CUENTAS_DE_ANILLO = `(
   SELECT COALESCE(json_agg(jsonb_build_object(
            'id_usuario', u.id_usuario::text, 'usuario', u.usuario
@@ -52,6 +59,7 @@ const SQL_CUENTAS_DE_ANILLO = `(
         FROM anillo_fraude_resena afr
         JOIN resena r ON r.id_resena = afr.id_resena
        WHERE afr.id_anillo_fraude = af.id_anillo_fraude
+         AND taf.tipo_anillo_fraude_nombre <> 'coordinados'
     ) cuentas
     JOIN usuarios u ON u.id_usuario = cuentas.id_usuario
 )`;

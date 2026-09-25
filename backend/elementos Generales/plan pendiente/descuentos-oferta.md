@@ -98,12 +98,16 @@ Dos rutas nuevas, mismo patrón que `POST`/`DELETE
   descuento activo, o si eso debería avisar algo — es una decisión de
   producto, no una necesidad técnica como en la versión anterior.)
 
-### 4. Sin vencimiento automático (por ahora)
+### 4. Vencimiento automático opcional (reversado el 2026-09-24)
 
-Confirmado con el usuario: el descuento no vence solo — el vendedor lo
-prende y apaga a mano, sin fecha de fin, sin worker nuevo. Se puede agregar
-después una `fecha_fin_descuento` + un worker (mismo patrón que
-`InventarioLimitadoService`) sin romper nada de esto.
+Esta decisión se reversó: el usuario pidió agregar un `duracion_segundos`
+opcional a `POST .../descuento`, puramente interno, calcado del mismo
+mecanismo de TTL de Redis + worker que ya tenía `POST .../venta-limitada`
+(no una `fecha_fin_descuento` en Postgres, como se planteaba acá
+originalmente). Ver `elementos Generales/endpoints/endpoints-vendedores.md`,
+sección "TTL opcional para el descuento manual puro", y
+`cambio_propuestas/2026-09-24_2345-ttl-descuento-manual.md` para el
+detalle completo.
 
 ### 5. El campo en Mongo — uno solo, simple
 
