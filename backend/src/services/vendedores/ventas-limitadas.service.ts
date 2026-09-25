@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
+import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { redis } from '../../database/redis';
 import {
@@ -229,6 +230,9 @@ export class VentasLimitadasService {
     }
 
     let apagadas = 0;
+    // Resuelto una sola vez por corrida, y solo si de verdad hay algo que
+    // apagar -- ver apagarVentaLimitadaVencida() para el porque.
+    let idTienda: string | null = null;
     const idsProductoMongoTocados: number[] = [];
     for (const fila of filas) {
       let sigueViva: boolean;
@@ -246,12 +250,8 @@ export class VentasLimitadasService {
         continue;
       }
       try {
-        await pool.query(
-          `UPDATE oferta
-              SET es_inventario_limitado = false, porcentaje_descuento = NULL
-            WHERE id_oferta = $1 AND es_inventario_limitado = true`,
-          [fila.id_oferta],
-        );
+        idTienda ??= await this.obtenerIdTienda();
+        await this.apagarVentaLimitadaVencida(fila.id_oferta, idTienda);
         apagadas++;
         idsProductoMongoTocados.push(Number(fila.id_producto_mongo));
         // La clave del TTL del DESCUENTO (ver revisarDescuentosVencidos())
@@ -288,6 +288,45 @@ export class VentasLimitadasService {
       this.logger.log(
         `revision de ventas limitadas vencidas: ${apagadas} oferta(s) apagada(s) y su descuento quitado (vencieron solas)`,
       );
+    }
+  }
+
+  /**
+   * (Agregado 2026-09-25) El `UPDATE` real de `revisarVentasLimitadasVencidas()`,
+   * en su propia transaccion -- `set_config('mesh.id_usuario', ..., true)`
+   * (el equivalente parametrizado de `SET LOCAL`) solo dura mientras dura
+   * la transaccion que lo puso, así que no sirve de nada fuera de un
+   * `BEGIN`/`COMMIT`. Pone `mesh.id_usuario` en el id de la TIENDA antes
+   * del `UPDATE` para que `trg_oferta_registrar_precio`
+   * (`005_ofertas.sql`/`020_descuentos_oferta.sql`) atribuya la fila nueva
+   * de `precio_historial` a la tienda, no al dueño de la oferta -- sin
+   * esto, quien apaga la venta relampago es este worker, pero
+   * `precio_historial.id_usuario_modifico` quedaba con el vendedor, como si
+   * el la hubiera cerrado el mismo (bug de atribucion, corregido aca).
+   */
+  private async apagarVentaLimitadaVencida(
+    idOferta: number,
+    idTienda: string,
+  ): Promise<void> {
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
+      await cliente.query('SELECT set_config($1, $2, true)', [
+        'mesh.id_usuario',
+        idTienda,
+      ]);
+      await cliente.query(
+        `UPDATE oferta
+            SET es_inventario_limitado = false, porcentaje_descuento = NULL
+          WHERE id_oferta = $1 AND es_inventario_limitado = true`,
+        [idOferta],
+      );
+      await cliente.query('COMMIT');
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      throw error;
+    } finally {
+      cliente.release();
     }
   }
 
@@ -333,6 +372,9 @@ export class VentasLimitadasService {
     }
 
     let quitados = 0;
+    // Resuelto una sola vez por corrida, y solo si de verdad hay algo que
+    // quitar -- ver quitarDescuentoVencido() para el porque.
+    let idTienda: string | null = null;
     const idsProductoMongoTocados: number[] = [];
     for (const fila of filas) {
       let sigueVivo: boolean;
@@ -349,11 +391,8 @@ export class VentasLimitadasService {
         continue;
       }
       try {
-        await pool.query(
-          `UPDATE oferta SET porcentaje_descuento = NULL
-            WHERE id_oferta = $1 AND porcentaje_descuento IS NOT NULL`,
-          [fila.id_oferta],
-        );
+        idTienda ??= await this.obtenerIdTienda();
+        await this.quitarDescuentoVencido(fila.id_oferta, idTienda);
         quitados++;
         idsProductoMongoTocados.push(Number(fila.id_producto_mongo));
         await this.registroOfertasRedis.sincronizar(fila.id_oferta);
@@ -378,6 +417,32 @@ export class VentasLimitadasService {
       this.logger.log(
         `revision de descuentos vencidos: ${quitados} descuento(s) quitado(s) (vencieron solos)`,
       );
+    }
+  }
+
+  /** (Agregado 2026-09-25) Mismo motivo y mismo patron que `apagarVentaLimitadaVencida()`. */
+  private async quitarDescuentoVencido(
+    idOferta: number,
+    idTienda: string,
+  ): Promise<void> {
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
+      await cliente.query('SELECT set_config($1, $2, true)', [
+        'mesh.id_usuario',
+        idTienda,
+      ]);
+      await cliente.query(
+        `UPDATE oferta SET porcentaje_descuento = NULL
+          WHERE id_oferta = $1 AND porcentaje_descuento IS NOT NULL`,
+        [idOferta],
+      );
+      await cliente.query('COMMIT');
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      throw error;
+    } finally {
+      cliente.release();
     }
   }
 
@@ -467,6 +532,14 @@ export class VentasLimitadasService {
       return fila.id_usuario;
     } catch (error) {
       manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  private async intentarRollback(cliente: PoolClient): Promise<void> {
+    try {
+      await cliente.query('ROLLBACK');
+    } catch {
+      // Si ni el rollback funciona, la conexion seguramente ya se cayo.
     }
   }
 }

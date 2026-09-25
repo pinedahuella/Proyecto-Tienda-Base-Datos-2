@@ -43,10 +43,8 @@ const REGEX_ID = /^\d+$/;
 /**
  * CRUD de `regla_descuento_periodo`: la configuracion de "si la fecha de
  * hoy cae en este rango de dia/mes/anio, activa un descuento o una venta
- * relampago" -- ver el modelo `ReglaDescuentoPeriodo` para la cascada. Solo
- * la configuracion -- el disparador real (revisar la fecha de hoy contra
- * las reglas activas) todavia no esta construido, igual que en
- * `regla_descuento_automatico`.
+ * relampago" -- ver el modelo `ReglaDescuentoPeriodo` para la cascada. El
+ * disparador real es `DisparadorReglasPeriodoService`.
  *
  * Mismo criterio de autorizacion que ReglasDescuentoAutomaticoService en
  * todo: cualquier vendedor o admin, y "propia" para un admin es de la

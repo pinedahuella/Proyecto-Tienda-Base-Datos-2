@@ -356,8 +356,13 @@ originales) con un `PATCH` real (no a mano) para que el recálculo pasara
 por el código, no por una corrección manual. El pedido 33 (de la prueba de
 checkout) queda como registro permanente, igual que en rondas anteriores.
 
-**Lo que NO se probó en esta ronda**: `reservaciones()` (el otro reporte
-de admin) no se ejercitó con un pedido `pendiente` real con descuento —
-usa la misma `expresionPrecioFinal()` que `CONSULTA_PEDIDOS_POR_ESTADO`
-(ya verificada), así que el riesgo es bajo, pero no está confirmado en
-vivo con datos propios.
+**`reservaciones()` probado en vivo el 2026-09-25** (quedó pendiente de la
+ronda original): pedido 34 (`compradora_norte`, oferta 31 con 20% de
+descuento, cantidad 2) → `total: "14302.40"` (= 8939 × 0.8 × 2, correcto);
+control negativo, pedido 35 (misma compradora, oferta 34 sin descuento,
+cantidad 1) → `total: "5947.00"` exacto, sin ninguna deducción indebida.
+El resumen agregado sumó bien los dos (`total: "20249.40"`). Teardown: se
+quitaron las líneas de los dos pedidos (`DELETE .../detalles/:id`) y el
+descuento de prueba; los pedidos 34/35 quedan como cascarones vacíos en la
+base (mismo criterio aceptado que el pedido 33 de la ronda original -- un
+pedido real no se puede borrar, `ON DELETE RESTRICT`).

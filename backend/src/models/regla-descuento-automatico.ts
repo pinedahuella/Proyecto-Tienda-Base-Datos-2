@@ -6,8 +6,8 @@
  * (`es_venta_relampago: true`), por `duracion_segundos`, con
  * `porcentaje_descuento`.
  *
- * Esto es solo la configuracion (el CRUD) -- el disparo real (leer
- * ClickHouse y decidir si activar) todavia no existe.
+ * El disparo real (leer ClickHouse y decidir si activar) es
+ * `DisparadorReglasAutomaticoService`.
  *
  * id_regla_descuento_automatico e id_oferta van como string: son bigint, y
  * el driver pg los devuelve como texto para no perder precision (igual que

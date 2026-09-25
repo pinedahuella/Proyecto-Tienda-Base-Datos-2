@@ -3012,15 +3012,17 @@ una corrida se loguea como warning y se reintenta en la próxima.
 ausente): su clave nunca expira, así que el `EXISTS` sigue en `1` para
 siempre y el worker no la toca.
 
-**Atribución, sin resolver todavía:** el `UPDATE` de este worker sigue
-disparando el trigger `oferta_registrar_precio()`, que guarda una fila
-nueva en `precio_historial` con `id_usuario_modifico` = el dueño de la
-oferta (fallback de `current_setting('mesh.id_usuario')`, que el backend
-nunca setea) — igual que hoy pasa con un admin actuando como la tienda.
-Es decir, esta limpieza automática queda atribuida al vendedor dueño de la
-oferta como si él la hubiera hecho a mano, aunque fue un worker. No es
-parte de este arreglo; queda anotado para cuando se decida la atribución
-de las reglas de descuento automático/período.
+**Atribución (corregida 2026-09-25):** el `UPDATE` de este worker dispara
+el trigger `oferta_registrar_precio()`, que guarda una fila nueva en
+`precio_historial`. Antes caía siempre en `id_usuario_modifico` = el dueño
+de la oferta (el fallback de `current_setting('mesh.id_usuario')`, que el
+backend nunca seteaba) -- como si el vendedor hubiera quitado el descuento
+él mismo. Ahora `apagarVentaLimitadaVencida()`/`quitarDescuentoVencido()`
+ponen `mesh.id_usuario` en el id de **la tienda** (`set_config(...,
+true)`, dentro de una transacción) antes del `UPDATE`, así que la fila
+queda atribuida a la tienda -- no al vendedor, no a un id de sistema que no
+existe. Detalle completo y pruebas en
+`cambio_propuestas/2026-09-25_0745-atribucion-limpiezas-automaticas.md`.
 
 ### Probado en vivo el 4 de septiembre de 2026 (versión original)
 
@@ -3617,19 +3619,20 @@ a mano de Postgres las filas de `regla_descuento_automatico`/
 `regla_descuento_periodo` creadas para la prueba. Las ofertas tocadas
 (5, 18, 27, 35, 39, 42) quedaron en su estado original.
 
-### Lo que queda pendiente, sin resolver todavía
+### Lo que quedaba pendiente en esta ronda -- todo resuelto después
 
-- **El disparador real de `regla_descuento_automatico`** (worker que revise
-  ClickHouse) -- estos chequeos de exclusión son la base para poder
-  construirlo, pero sigue bloqueado por el pendiente de "cuándo se activó"
-  (ver el modelo de esa regla). El de `regla_descuento_periodo` **ya se
-  construyó** -- ver "El disparador de `regla_descuento_periodo`", la
-  última sección de este archivo.
-- **Atribución**, mencionado ya en la sección del bug del TTL más arriba:
-  el disparador de período que ya existe toca estas columnas sin que haya
-  un usuario detrás de la petición, y `precio_historial.id_usuario_modifico`
-  cae en el dueño de la oferta por el mismo motivo (`mesh.id_usuario` nunca
-  se setea) -- sigue sin resolverse.
+- **El disparador real de `regla_descuento_automatico`**: se construyó el
+  2026-09-25, ver la sección dedicada más abajo. Los disparadores de
+  período y automático pasan el id REAL del vendedor dueño de la oferta
+  (nunca un id de sistema) al llamar `aplicarDescuento()`/`abrir()`, así
+  que su atribución en `precio_historial` siempre fue correcta -- nunca
+  hizo falta arreglar nada ahí.
+- **Atribución de las limpiezas automáticas por TTL** (venta relámpago y
+  descuento manual vencidos, `VentasLimitadasService.revisarVencidas()`):
+  esa sí caía en el dueño de la oferta por defecto, sin que fuera él quien
+  actuó. Corregido el 2026-09-25 -- ver la sección "Atribución (corregida
+  2026-09-25)" más arriba y
+  `cambio_propuestas/2026-09-25_0745-atribucion-limpiezas-automaticas.md`.
 `cambio_propuestas/2026-09-24_2300-exclusion-mecanismos-descuento.md`.
 
 ---
@@ -3708,11 +3711,11 @@ Teardown: las ocho reglas de prueba se borraron a mano de Postgres.
 No es una ruta HTTP: `DisparadorReglasPeriodoService.revisar()`, un
 `@Interval` cada 15 min (`src/services/reglas-descuento-periodo/`). Es el
 primero de los dos workers que le faltaban a las reglas de descuento --
-`regla_descuento_automatico` sigue sin el suyo, bloqueado por el pendiente
-de "cuándo se activó" (ver la sección de exclusión mutua, más arriba).
-`regla_descuento_periodo` no tenía ese problema: es una condición de
-estado ("¿hoy cae en el rango?"), reevaluable sola en cada corrida sin
-necesitar memoria de nada.
+el segundo es el de `regla_descuento_automatico`, ver la sección dedicada
+más abajo. `regla_descuento_periodo` es una condición de estado ("¿hoy cae
+en el rango?"), reevaluable sola en cada corrida sin necesitar memoria de
+nada -- a diferencia de `regla_descuento_automatico`, que dispara una vez
+y depende de un TTL para saber cuándo apagarse.
 
 **Por qué ya se podía construir.** Las dos piezas de diseño que le
 faltaban (exclusión mutua entre los cuatro mecanismos, solape entre reglas
@@ -3809,3 +3812,90 @@ Teardown: las reglas de prueba se borraron a mano de Postgres; la oferta
 pasar por la app) que se quitó con el `DELETE .../descuento` real, no a
 mano en la base -- confirma en vivo la limitación conocida de arriba.
 `cambio_propuestas/2026-09-24_2359-disparador-reglas-periodo.md`.
+
+---
+
+## El disparador de `regla_descuento_automatico` (agregado 2026-09-25)
+
+No es una ruta HTTP: `DisparadorReglasAutomaticoService.revisar()`, un
+`@Interval` cada 60 s (`src/services/reglas-descuento-automatico/`). Cierra
+el segundo de los dos workers que le faltaban a las reglas de descuento.
+
+**Por qué el pendiente de "cuándo se activó" ya no bloquea nada.** El
+problema original era que este disparo es de una sola vez con duración
+fija, a diferencia de `regla_descuento_periodo` (una condición de estado
+reevaluable sola). Pero `duracion_segundos` en `regla_descuento_automatico`
+**nunca puede ser 0** (`validarDuracionSegundos`, "acá la regla siempre
+tiene que vencer sola") -- así que toda activación de este worker usa
+EXACTAMENTE el mismo TTL de Redis que ya usan `POST .../descuento` y
+`POST .../venta-limitada` con `duracion_segundos`, y
+`VentasLimitadasService.revisarVencidas()` (el worker que ya existía, sin
+ningún cambio) es quien la apaga sola cuando vence. No hace falta guardar
+"cuándo se activó" en Postgres: la cuenta regresiva vive en Redis. Por el
+mismo motivo, este disparador **nunca desactiva nada** -- a diferencia de
+`DisparadorReglasPeriodoService`, no tiene ningún `quitarEfecto()`.
+
+**Algoritmo, mucho más simple que el de período:**
+
+1. Trae toda regla `activa = true` cuya oferta tenga
+   `porcentaje_descuento IS NULL` -- mientras esa columna esté llena, la
+   exclusión mutua garantiza que esta MISMA regla es su única dueña
+   (`UNIQUE(id_oferta)` en `regla_descuento_automatico`), así que no hace
+   falta gastar una consulta a ClickHouse por ella en cada corrida: ya está
+   activa, esperando a que su propio TTL venza.
+2. Por cada una, consulta ClickHouse (`compra_producto`, `lote = 'real'`):
+   unidades vendidas de esa oferta en los últimos `ventana_minutos`.
+3. Si llegan a `umbral_unidades`: `aplicarDescuento()` con
+   `mecanismo: 'regla_automatica'` y el `duracion_segundos`/
+   `porcentaje_descuento` de la regla; si `es_venta_relampago`, `abrir()`
+   con el mismo `duracion_segundos` y mecanismo, inmediatamente después.
+
+**Hallazgo real de diseño, encontrado probando (no es un bug de código):
+si `duracion_segundos` de la regla es MENOR que su `ventana_minutos`, la
+oferta "parpadea".** El TTL apaga el descuento, pero las mismas ventas que
+lo dispararon siguen dentro de la ventana en el siguiente tick, así que se
+vuelve a activar de inmediato -- ciclo de encendido/apagado hasta que esas
+ventas salgan de la ventana. Confirmado en vivo con `duracion_segundos: 8`
+y `ventana_minutos: 10`: se reactivó solo tres veces seguidas (cada vez que
+`VentasLimitadasService.revisarVencidas()` la apagaba) hasta que se pausó
+la regla a mano. En el uso normal esperado (`duracion_segundos` MAYOR que
+`ventana_minutos`, ej. "2 horas de oferta" disparadas por "30 minutos de
+ventas") esto no pasa: para cuando el TTL vence, las ventas que lo
+motivaron ya salieron de la ventana, y solo se reactiva si de verdad
+siguieron vendiendo rápido -- que es el comportamiento deseado. Queda
+anotado como algo a explicar al configurar una regla, no como algo a
+corregir en el código.
+
+**Pausar la regla (`PATCH { activa: false }`) mientras su efecto está
+activo NO lo apaga de inmediato** -- a diferencia del disparador de
+período (que sí reconcilia esto), acá se deja que el TTL de Redis termine
+su curso normal. Decisión consciente: el mecanismo entero de esta regla
+está construido sobre "el TTL manda", meterle una desactivación forzada
+por fuera de eso sería una segunda vía de apagado que no aporta nada, dado
+que lo peor que pasa es que el descuento dure unos segundos/minutos más de
+lo que la config actual diría.
+
+### Probado en vivo el 25 de septiembre de 2026
+
+Contra el servidor y las bases reales (`ventas_norte` oferta 31,
+`ventas_sur` oferta 34), con el intervalo bajado a 5 s solo para la
+prueba (repuesto a 60 s después).
+
+| Caso | Resultado |
+|---|---|
+| Regla creada (umbral 3, ventana 10 min), sin ventas sembradas | nunca se toca |
+| 2 unidades sembradas en ClickHouse (bajo el umbral) | sigue sin tocarse |
+| 1 unidad más (total 3, cruza el umbral) | se activa sola: `porcentaje_descuento: 15.00`; `precio_historial` nuevo con `id_usuario_modifico` = el vendedor dueño real (no un id de sistema); `precio_final` correcto en `GET /vendedor/ofertas` |
+| `POST .../descuento` manual sobre la misma oferta mientras el automático está activo | 409 "ya tiene un descuento activo" |
+| Regla con `es_venta_relampago: true` (umbral 5, ventana 1 min, duración 90 s) + 5 unidades sembradas | se activan las dos cosas en el mismo tick: `porcentaje_descuento: 20.00`, `es_inventario_limitado: true`; Redis: HASH de stock sembrado con el stock real de Postgres, TTL del descuento y de la venta relámpago sincronizados (~90 s) |
+| Duración (90 s) mayor que la ventana (1 min): al vencer el TTL | se apaga sola, sin reactivarse (las ventas que la dispararon ya habían salido de la ventana) |
+| Pausar la regla (`activa: false`) mientras el efecto seguía activo | el efecto ya activo se dejó correr su TTL normal; sin la pausa, se había reactivado 3 veces seguidas (ver el hallazgo del parpadeo arriba) |
+| ClickHouse real caído (`docker stop`), con una regla activa sin disparar | `WARN` en el log por cada intento, la app y el resto de rutas siguieron respondiendo `200` normal, ninguna activación falsa |
+| ClickHouse recuperado (`docker start`) | siguiente corrida limpia, sin reactivación espuria (0 unidades reales, bajo el umbral) |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+Teardown: las dos reglas de prueba y las filas sembradas en
+`compra_producto` (`ALTER TABLE ... DELETE`, ClickHouse no tiene
+transacciones) se borraron a mano; las ofertas 31 y 34 quedaron sin
+descuento/venta relámpago y sin ninguna clave de Redis residual.
+`cambio_propuestas/2026-09-25_0700-disparador-reglas-automatico.md`.

@@ -37,9 +37,9 @@ const CODIGO_UNIQUE_VIOLATION = '23505';
 /**
  * CRUD de `regla_descuento_automatico`: la configuracion de "si se venden
  * umbral_unidades en ventana_minutos, activa un descuento o una venta
- * relampago". Solo la configuracion -- el disparo real (leer ClickHouse y
- * decidir si activar, y de ahi llamar a lo que ya existe en
- * OfertasVendedorService/VentasLimitadasService) todavia no esta construido.
+ * relampago". El disparo real es `DisparadorReglasAutomaticoService`, que
+ * lee ClickHouse y llama a `OfertasVendedorService.aplicarDescuento()`/
+ * `VentasLimitadasService.abrir()`.
  *
  * Mismo criterio de autorizacion que OfertasVendedorService en todo:
  * cualquier vendedor o admin, y "propia" para un admin es de la cuenta de

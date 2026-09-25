@@ -28,10 +28,10 @@ interface EstadoOferta {
  * contra las reglas activas y prende/apaga el descuento (y la venta
  * relampago, si corresponde) de la oferta asociada. A diferencia de
  * `regla_descuento_automatico` (un disparo de una sola vez que dura
- * `duracion_segundos` fijos, todavia sin construir por el pendiente de
- * "cuando se activo"), esta es una condicion de estado -- "¿hoy cae en el
- * rango?" -- que se puede reevaluar sola en cada corrida sin necesitar
- * memoria de nada.
+ * `duracion_segundos` fijos, activado por `DisparadorReglasAutomaticoService`
+ * via TTL de Redis, sin desactivacion propia), esta es una condicion de
+ * estado -- "¿hoy cae en el rango?" -- que se puede reevaluar sola en cada
+ * corrida sin necesitar memoria de nada.
  *
  * Puede construirse ya porque las dos piezas de diseno que le faltaban
  * quedaron resueltas antes: la exclusion mutua entre los cuatro mecanismos

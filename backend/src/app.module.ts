@@ -76,6 +76,7 @@ import { ReglasDescuentoAutomaticoService } from './services/reglas-descuento-au
 import { ReglasDescuentoPeriodoController } from './controllers/reglas-descuento-periodo/reglas-descuento-periodo.controller';
 import { ReglasDescuentoPeriodoService } from './services/reglas-descuento-periodo/reglas-descuento-periodo.service';
 import { DisparadorReglasPeriodoService } from './services/reglas-descuento-periodo/disparador-reglas-periodo.service';
+import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-automatico/disparador-reglas-automatico.service';
 
 /**
  * Modulo principal: la lista de todas las piezas de la aplicacion.
@@ -167,6 +168,7 @@ import { DisparadorReglasPeriodoService } from './services/reglas-descuento-peri
     ReglasDescuentoAutomaticoService,
     ReglasDescuentoPeriodoService,
     DisparadorReglasPeriodoService,
+    DisparadorReglasAutomaticoService,
   ],
 })
 export class AppModule {}
