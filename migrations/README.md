@@ -53,10 +53,10 @@ cualquier otro error corta el arranque con exit 1.
 
 Cada archivo hace una sola cosa y se puede leer solo.
 
-## Los veinte archivos de esquema
+## Los veintitres archivos de esquema
 
 Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
-"los catorce" con quince en la carpeta. Es la misma trampa que este documento
+"los catorce" con quince en la carpeta, y "los veinte" con veintiuno. Es la misma trampa que este documento
 avisa mas abajo para las comprobaciones: una lista escrita a mano caduca sin
 avisar. Antes de creerle a esta, cuentalos:
 
@@ -88,9 +88,11 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `018_notificacion_fraude.sql` | `notificacion_fraude`: una fila por cuenta afectada por una alerta, con su propia lectura -- lo que ve el usuario en `/perfil/alertas-fraude`, aparte de la revision del admin |
 | `019_anillo_fraude.sql` | `anillo_fraude`, `anillo_fraude_resena` y su catalogo: persiste los anillos mutuo/ciclo/reiterado que antes solo detectaba y logueaba `AnillosDetectorService` |
 | `020_descuentos_oferta.sql` | `porcentaje_descuento` en `oferta` y en `precio_historial`; el trigger del precio tambien escucha el descuento y `comprar_pedido()` cobra el precio con descuento |
-| `021_regla_descuento_automatico.sql` | `regla_descuento_automatico`: una regla por oferta (si se venden N en M minutos, rebajar X% o abrir venta relampago por S segundos). Solo la configuracion, el disparo aun no existe en el backend |
+| `021_regla_descuento_automatico.sql` | `regla_descuento_automatico`: una regla por oferta (si se venden N en M minutos, rebajar X% o abrir venta relampago por S segundos). Cuando se escribio solo era configuracion; el disparo llego al backend el 2026-09-25, y el comentario de la tabla que dice lo contrario se queda porque una migracion corrida no se edita |
+| `022_regla_descuento_periodo.sql` | `regla_descuento_periodo`: descuento por calendario (dia, mes y anio de inicio y fin; lo que falta amplia la repeticion). Varias por oferta si no se pisan los dias, eso lo vigila el backend |
+| `023_anillos_fraude_familia_b.sql` | los tipos 4 a 10 de `tipo_anillo_fraude` (patrones B.1 a B.7) y la unicidad de `anillo_fraude` pasa de `clave` a `(id_tipo_anillo_fraude, clave)` |
 
-De la 011 a la 015 son de la Entrega 2, la 016 a la 021 de la Entrega 3, y merecen una
+De la 011 a la 015 son de la Entrega 2, la 016 a la 023 de la Entrega 3, y merecen una
 linea mas de la que caben en la tabla.
 
 **La 011 cierra el diagrama.** Con `comentario`, `resena` y `likes` las 42 cajas
@@ -215,6 +217,29 @@ mismos nombres, porque ese SQL ya se corrio a mano en alguna base.
 La regla de la venta relampago (no se abre sin descuento, y el descuento no se
 quita con la venta abierta) vive en el backend y no aqui: si la venta esta
 abierta solo lo sabe Redis.
+
+**La 022 y la 023 salen tal cual de los SQL de referencia del companero**
+(`backend/elementos Generales/plan pendiente/reglas-descuento-periodos.sql` y
+`anillos-fraude-familia-b.sql`), que ya se corrieron a mano en su base. Por eso
+son identicas columna por columna: un `IF NOT EXISTS` que se salta en su base
+no puede dejar una columna de mas en la nuestra.
+
+- **La 022 es idempotente** por `IF NOT EXISTS` y el trigger se reemplaza.
+  Sin ella fallan con 500 las rutas de reglas por periodo y tambien las de
+  descuento manual y venta relampago, porque la exclusion entre descuentos le
+  pregunta a esta tabla en cada una.
+- **La 023 es idempotente** porque el catalogo entra con `WHERE NOT EXISTS`
+  (no quema la secuencia, ver la 016) y el constraint se quita y se pone solo
+  si hace falta. Lo unico que se le agrega al SQL del companero es el candado
+  del final, igual que el de la 019: falla si un id del 4 al 10 no es el que
+  espera `models/anillo-fraude.ts`, o si la unicidad no quedo en
+  `(id_tipo_anillo_fraude, clave)`, que es el `ON CONFLICT` del backend.
+- **No se probaron contra una base viva** el 2026-09-25: se escribieron sin
+  levantar nada. Lo primero del proximo arranque es mirar que las dos salgan en
+  verde, y correrlo dos veces para ver que la segunda tambien.
+
+La propuesta de casos de fraude (`docs/fraude-entrega3/02-reglas-backend.md`)
+tenia reservada la 022. Paso a la 024.
 
 **La 012 no reemplaza a la 007: la COMPONE.** `comprar_carrito()` llama por
 dentro a las mismas `crear_pedido`, `agregar_linea` y `comprar_pedido`, en vez
@@ -451,6 +476,14 @@ estaba cargada antes de la 020 arranca con cero descuentos, y se ven despues de
 un `.\arrancar.ps1 -Reiniciar` o poniendo uno desde el panel del vendedor. En
 Mongo, `hay_descuento` y los precios rebajados de la tarjeta los escribe el
 ETL (`etl/extraer.sql`), no este archivo.
+
+**Y en Redis, cada uno necesita su clave.** Desde el 2026-09-24 el backend
+quita cada minuto el descuento de toda oferta cuya clave
+`mesh:oferta:<id>:descuento` no exista (asi vencen los descuentos con
+duracion). Este archivo pone el % directo en `oferta` y no puede escribir en
+Redis, asi que sin mas los 13 se borraban en el primer minuto del backend.
+`arrancar.ps1` las crea en su paso 5b-2, sin vencimiento y con `NX`, en el
+mismo arranque que carga la semilla y solo en ese.
 
 ## Como correrlas
 

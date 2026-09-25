@@ -7,7 +7,14 @@
 	import NotificacionesFraude from './NotificacionesFraude.svelte';
 	import NotificacionesAdmin from './NotificacionesAdmin.svelte';
 	import { pedir } from './api';
-	import { cerrarSesion, esCuentaDesarrollador, ID_ROL_ADMIN, leerSesion, verificarSesion } from './sesion';
+	import {
+		cerrarSesion,
+		esCuentaDesarrollador,
+		ID_ROL_ADMIN,
+		ID_ROL_VENDEDOR,
+		leerSesion,
+		verificarSesion
+	} from './sesion';
 	import { carrito } from './estadoCarrito.svelte';
 
 	/**
@@ -37,6 +44,7 @@
 	let {
 		sesion = undefined,
 		esAdmin = undefined,
+		esVendedor = undefined,
 		alSalir
 	}: {
 		sesion?: string | null | undefined;
@@ -50,6 +58,8 @@
 		 * y en el catalogo, sin ninguna pista de por que.
 		 */
 		esAdmin?: boolean | undefined;
+		/** Igual que `esAdmin`: decide si sale el boton Vendedor. */
+		esVendedor?: boolean | undefined;
 		alSalir?: () => void;
 	} = $props();
 
@@ -74,6 +84,10 @@
 	/** La prop manda si viene; si no, lo que averigüe yo. Igual que `correo`. */
 	let soyAdmin = $derived(esAdmin !== undefined ? esAdmin : propioAdmin);
 
+	/** Lo mismo para el vendedor: su boton abre sus ofertas, separadas de Mi perfil. */
+	let propioVendedor = $state(false);
+	let soyVendedor = $derived(esVendedor !== undefined ? esVendedor : propioVendedor);
+
 	/** La prop manda si viene; si no, lo que averigüe yo. */
 	let correo = $derived(sesion !== undefined ? sesion : propia);
 
@@ -97,6 +111,7 @@
 			const usuario = await verificarSesion();
 			propia = usuario?.correo_electronico ?? null;
 			propioAdmin = usuario?.id_rol_usuario === ID_ROL_ADMIN;
+			propioVendedor = usuario?.id_rol_usuario === ID_ROL_VENDEDOR;
 			// La burbuja del carrito solo se cuenta si hay alguien dentro: sin
 			// sesion, /comprador/pedidos contesta 401 y no hay nada que contar.
 			if (usuario) await carrito.recontar();
@@ -274,6 +289,9 @@
 					{#if soyAdmin}
 						<a class="navegar admin" href="/panel?s=reportes">Admin</a>
 					{/if}
+					{#if soyVendedor}
+						<a class="navegar admin" href="/panel?s=ofertas">Vendedor</a>
+					{/if}
 					{#if soyDesarrollador}
 						<a class="navegar admin" href="/panel?s=comandos">Desarrollador</a>
 					{/if}
@@ -313,6 +331,9 @@
 						<a class="opcion" href="/pedidos" onclick={() => cerrarMenu()}>Mis pedidos</a>
 						{#if soyAdmin}
 							<a class="opcion" href="/panel?s=reportes" onclick={() => cerrarMenu()}>Admin</a>
+						{/if}
+						{#if soyVendedor}
+							<a class="opcion" href="/panel?s=ofertas" onclick={() => cerrarMenu()}>Vendedor</a>
 						{/if}
 						{#if soyDesarrollador}
 							<a class="opcion" href="/panel?s=comandos" onclick={() => cerrarMenu()}>Desarrollador</a>

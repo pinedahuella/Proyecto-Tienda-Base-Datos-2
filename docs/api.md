@@ -1,19 +1,45 @@
 # API
 
-> **El contrato completo de las 59 rutas NO esta aqui.** Vive en
-> `backend/elementos Generales/`, que es donde lo mantiene quien escribe el
-> backend y por tanto la fuente de verdad:
+> **El contrato completo de las 119 rutas NO esta aqui.** Vive en
+> `backend/elementos Generales/endpoints/`, que es donde lo mantiene quien
+> escribe el backend y por tanto la fuente de verdad. Los enlaces de antes
+> apuntaban a la carpeta de arriba, de donde los archivos se mudaron:
 >
 > | Archivo | Que cubre |
 > |---|---|
-> | [endpoints.md](../backend/elementos%20Generales/endpoints.md) | usuario, perfil, direcciones, admin |
-> | [endpoints-productos.md](../backend/elementos%20Generales/endpoints-productos.md) | el catalogo publico, y los dos historiales por fecha |
-> | [endpoints-vendedores.md](../backend/elementos%20Generales/endpoints-vendedores.md) | `/vendedor/*`, con la tabla de que rol y que cuenta entra a cada ruta |
-> | [endpoints-compradores.md](../backend/elementos%20Generales/endpoints-compradores.md) | carrito, checkout, pedidos |
+> | [endpoints.md](../backend/elementos%20Generales/endpoints/endpoints.md) | usuario, perfil, direcciones, admin |
+> | [endpoints-productos.md](../backend/elementos%20Generales/endpoints/endpoints-productos.md) | el catalogo publico, los historiales por fecha y las recomendaciones R1 a R3 |
+> | [endpoints-vendedores.md](../backend/elementos%20Generales/endpoints/endpoints-vendedores.md) | `/vendedor/*`, descuentos, ventas relampago y las dos clases de reglas, con la tabla de que rol entra a cada ruta |
+> | [endpoints-compradores.md](../backend/elementos%20Generales/endpoints/endpoints-compradores.md) | pedidos del comprador |
+> | [endpoints-carrito.md](../backend/elementos%20Generales/endpoints/endpoints-carrito.md) | carrito en Redis y checkout |
+> | [endpoints-eventos.md](../backend/elementos%20Generales/endpoints/endpoints-eventos.md) | eventos a ClickHouse, los seis rankings y las tendencias T1 a T3 |
+> | [endpoints-fraude.md](../backend/elementos%20Generales/endpoints/endpoints-fraude.md) | alertas de login y anillos de resenas, con los tipos B |
+> | [endpoints-buscador.md](../backend/elementos%20Generales/endpoints/endpoints-buscador.md), [endpoints-resenas.md](../backend/elementos%20Generales/endpoints/endpoints-resenas.md), [endpoints-reportes.md](../backend/elementos%20Generales/endpoints/endpoints-reportes.md) | el buscador, las resenas y los reportes |
 >
 > Este archivo se queda con lo que NO cambia con cada ruta: el formato de
 > respuesta, como se manejan los errores y como esta organizado el codigo.
 > Duplicar alli la lista de rutas solo garantiza que una de las dos caduque.
+
+## Lo que llego el 2026-09-24 y 25, y donde lo usa el portal
+
+Solo el indice, para saber que pantalla mira cada ruta nueva. El contrato
+esta en los archivos de arriba.
+
+| Ruta | Que es | Donde se ve |
+|---|---|---|
+| `POST /vendedor/ofertas/:id/descuento` con `duracion_segundos` | descuento que se quita solo. Crea `mesh:oferta:<id>:descuento` en Redis, con vencimiento o sin el | panel, Ofertas, "Hasta cuando" |
+| `POST, GET, GET paginado, PATCH /vendedor/reglas-descuento-periodos` | descuento por fecha (tabla de la 022) | panel, Reglas, "Descuentos por fecha" |
+| 409 de exclusion en las cuatro formas de descuento | una oferta tiene un solo descuento activo a la vez | los tres formularios lo explican con `textoConflictoDescuento` |
+| `GET /admin/fraude/alertas-resenas?tipo=` con los tipos B | los seis patrones B guardados (tabla de la 023) | panel, Fraude, y la campana del admin |
+| `GET /admin/eventos/tendencias`, `/embudo`, `/busquedas-sin-respuesta` | T1, T2 y T3, solo admin | panel, Tendencias, "Señales" |
+| `GET /productos/vistos-recientemente` | R1, publica, con `sesion` | portada, "Viste hace poco" |
+| `GET /productos/:id/tambien-vieron` | R2, publica, lee Redis | ficha del producto |
+| `GET /productos/para-ti` | R3, con sesion, lee Redis | portada, "Para ti" |
+
+Los arneses que las miden por HTTP: `pruebas/descuentos.sh`,
+`pruebas/reglas_descuento.sh`, `pruebas/reglas_periodo.sh`,
+`pruebas/anillos_familia_b.sh`, `pruebas/tendencias_avanzadas.sh` y
+`pruebas/recomendaciones.sh`.
 
 ## Estandar de respuestas
 
@@ -168,8 +194,16 @@ nosotros (archivos, clases y funciones) esta en espanol.
 
 ### Cuantas piezas hay, y donde esta la lista
 
-Al dia de hoy el backend son **14 controladores, 14 servicios, 20 modelos,
-34 DTO y 18 helpers**, y monta **59 rutas**.
+Al 2026-09-25 (99891a8) el backend son **36 controladores, 51 servicios
+(contando los workers), 32 modelos, 65 DTO y 38 helpers**, y monta **119
+rutas**. Contado asi, y hay que volver a contarlo antes de creerle a este
+numero:
+
+```bash
+cd backend/src
+find controllers -name "*.controller.ts" | wc -l
+grep -rhoE "@(Get|Post|Patch|Put|Delete)\(" --include=*.controller.ts . | wc -l
+```
 
 **La lista archivo por archivo no se copia aqui a proposito.** `backend/` lo
 escribe y lo mantiene otra persona, asi que un inventario en este documento
@@ -181,8 +215,8 @@ catorce. La lista viva esta en los cuatro `endpoints-*.md` de
 Lo que si vale la pena fijar aqui, porque es la convencion y no cambia, es
 **como se llaman las cosas**: un modelo por cada tabla que el backend LEE, con
 el mismo nombre en singular y en kebab-case (`models/estado-oferta.ts` para
-`estado_oferta`). No hay uno por cada tabla de la base -- son 20 modelos contra
-39 tablas -- porque los catalogos y las tablas que solo toca el SQL no necesitan
+`estado_oferta`). No hay uno por cada tabla de la base -- eran 20 modelos contra
+39 tablas cuando se escribio esto, y la proporcion sigue -- porque los catalogos y las tablas que solo toca el SQL no necesitan
 tipo en TypeScript. Ademas, un
 DTO por cuerpo de peticion o de respuesta, y las carpetas con los nombres
 estandar del framework. Todo lo que escribimos nosotros -- archivos, clases y

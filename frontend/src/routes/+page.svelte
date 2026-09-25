@@ -5,6 +5,11 @@
 	import Autocompletar from '$lib/Autocompletar.svelte';
 	import { pedir } from '$lib/api';
 	import { textoPorcentaje } from '$lib/descuento';
+	import { sesionAnalitica } from '$lib/sesionAnalitica';
+	import EstanteRecomendados, {
+		type ProductoRecomendado,
+		type Recomendado
+	} from '$lib/EstanteRecomendados.svelte';
 
 	/**
 	 * El catalogo. Es la pagina de inicio y es publica: GET /productos no pide
@@ -364,6 +369,24 @@
 	 */
 	let ofertasDescuento = $state<OfertaDestacada[]>([]);
 	let ventasRelampago = $state<OfertaDestacada[]>([]);
+
+	/**
+	 * Las dos recomendaciones de la portada, las dos de ClickHouse.
+	 *
+	 *   R1 GET /productos/vistos-recientemente  publica. Con cookie cuenta lo
+	 *      visto con la cuenta; ademas se manda la `sesion` analitica de la
+	 *      pestana, para que quien mira sin cuenta tambien vea lo suyo.
+	 *   R3 GET /productos/para-ti               pide sesion. Sin ella contesta
+	 *      401 y el estante no sale, sin avisar: no es un error de nadie.
+	 *
+	 * La propuesta decia que "para ti" vacio cayera a T1 (lo que esta
+	 * subiendo), pero T1 es GET /admin/eventos/tendencias y solo lo ve un
+	 * admin. Hasta que el backend tenga una version publica, vacio es vacio.
+	 */
+	let vistosHacePoco = $state<Recomendado[]>([]);
+	let paraTi = $state<Recomendado[]>([]);
+	/** Si el estante trae el plan B, lo mas visto, y no las recomendaciones de la cuenta. */
+	let paraTiEsMasVisto = $state(false);
 
 	/**
 	 * Si lo ultimo que fallo fue traer la SIGUIENTE tanda, no la busqueda.
@@ -967,10 +990,53 @@
 		ventasRelampago = v.ok && Array.isArray(v.payload) ? ordenarOfertas(v.payload) : [];
 	}
 
+	/** Las filas de las dos rutas traen el producto de Mongo o null. Los null no se pintan. */
+	function conProducto<T extends { producto: ProductoRecomendado | null }>(lista: unknown): T[] {
+		return Array.isArray(lista) ? (lista as T[]).filter((f) => f && f.producto) : [];
+	}
+
+	async function cargarRecomendaciones() {
+		const sesion = encodeURIComponent(sesionAnalitica());
+		const [vistos, paraMi] = await Promise.all([
+			pedir<{ ya_comprado: boolean; producto: ProductoRecomendado | null }[]>(
+				`/productos/vistos-recientemente?sesion=${sesion}&limite=10`
+			),
+			pedir<{ producto: ProductoRecomendado | null }[]>('/productos/para-ti')
+		]);
+		vistosHacePoco = vistos.ok
+			? conProducto<{ ya_comprado: boolean; producto: ProductoRecomendado }>(vistos.payload).map((f) => ({
+					producto: f.producto,
+					nota: f.ya_comprado ? 'Ya lo compraste' : undefined
+				}))
+			: [];
+		paraTi = paraMi.ok
+			? conProducto<{ producto: ProductoRecomendado }>(paraMi.payload).map((f) => ({ producto: f.producto }))
+			: [];
+		paraTiEsMasVisto = false;
+		if (paraTi.length === 0) await cargarMasVistos();
+	}
+
+	/**
+	 * Plan B de "Para ti": sin sesion, o con una cuenta que aun no ha mirado nada, el estante
+	 * muestra lo mas visto de la tienda. GET /productos/mas-vistos es publica (d1b670b) y
+	 * trae una tarjeta plana con `imagen` en vez de variantes, asi que se adapta aqui.
+	 */
+	async function cargarMasVistos() {
+		const r = await pedir<(ProductoRecomendado & { imagen?: string | null })[]>('/productos/mas-vistos');
+		if (!r.ok || !Array.isArray(r.payload)) return;
+		paraTi = r.payload
+			.filter((p) => p && p._id != null)
+			.map(({ imagen, ...p }) => ({
+				producto: { ...p, variantes: imagen ? [{ imagenes: [imagen] }] : [] }
+			}));
+		paraTiEsMasVisto = paraTi.length > 0;
+	}
+
 	onMount(() => {
 		cargarCategorias();
 		cargarMasVendidos();
 		cargarOfertasDestacadas();
+		cargarRecomendaciones();
 		buscar();
 	});
 
@@ -1401,6 +1467,17 @@
 					{/each}
 				</div>
 			</section>
+		{/if}
+
+		<!-- Las recomendaciones, con el mismo criterio que las vitrinas: solo
+		     sin filtros. EstanteRecomendados no se monta si la lista esta vacia. -->
+		{#if !hayFiltro}
+			<EstanteRecomendados
+				id="t-para-ti"
+				titulo={paraTiEsMasVisto ? 'Lo mas visto' : 'Para ti'}
+				items={paraTi}
+			/>
+			<EstanteRecomendados id="t-vistos" titulo="Viste hace poco" items={vistosHacePoco} />
 		{/if}
 
 		<!-- Los filtros. Cada cambio vuelve a preguntarle al backend.

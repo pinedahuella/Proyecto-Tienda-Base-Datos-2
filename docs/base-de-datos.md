@@ -38,10 +38,11 @@ mudo a MongoDB".
 El diagrama esta en `diagrama-general.png` de esta misma carpeta. El archivo
 editable es `diagrama-general.drawio`, se abre en https://app.diagrams.net
 
-**Desde el 2026-09-19 ese dibujo tiene las 50 tablas de la base (migraciones 001
-a 019) y se genera, no se dibuja a mano**: `python docs/generar-er.py` lo lee de
-la base viva y falla si una tabla o una llave foranea se queda sin dibujo. El
-ER de la Entrega 1, con sus notas de la migracion a MongoDB, se conserva en
+**Desde el 2026-09-25 ese dibujo tiene las 52 tablas de la base (migraciones 001
+a 023) y se genera, no se dibuja a mano**: `python docs/generar-er.py` lo lee de
+la base viva y falla si una tabla o una llave foranea se queda sin dibujo. Las dos
+tablas de reglas de descuento (021 y 022) van en el modulo de ofertas. El ER de la
+Entrega 1, con sus notas de la migracion a MongoDB, se conserva en
 `diagrama-general-entrega1.drawio`. Lo que se dice arriba de "42 tablas" es la
 foto de la Entrega 1.
 
@@ -1206,8 +1207,80 @@ backend y hoy no los usa ninguna ruta.
   solo para pausarla.
 - `fecha_actualizacion` la mueve el mismo `oferta_tocar_fecha()` de la 005.
 
-Es solo configuracion. El proceso que mire ClickHouse y la dispare todavia no
-existe en el backend.
+~~Es solo configuracion. El proceso que mire ClickHouse y la dispare todavia no
+existe en el backend.~~ Desde el 2026-09-25 existe:
+DisparadorReglasAutomaticoService mira cada minuto las unidades vendidas en
+ClickHouse y, si llegan al umbral, pone el descuento con `duracion_segundos`
+de vencimiento. Lo quita el mismo worker que quita los descuentos manuales con
+duracion (ver abajo, la clave de Redis). Si la duracion no pasa de la ventana,
+la oferta parpadea: se apaga y las mismas ventas la vuelven a prender. El panel
+lo avisa al escribir la regla.
+
+## Las reglas de descuento por periodo (migracion 022)
+
+`regla_descuento_periodo` es la otra forma de descuento automatico: por
+calendario y no por ventas. Sale tal cual del SQL de referencia del companero
+(`backend/elementos Generales/plan pendiente/reglas-descuento-periodos.sql`).
+
+- **El rango es dia, mes y anio**, y lo que falta amplia la repeticion. Con
+  anio pasa una vez; sin anio, cada anio; sin mes, cada mes. Los dos CHECK de
+  tabla son esa cascada: los meses van juntos y no hay anio sin mes.
+- **Varias por oferta**, a diferencia de la automatica, siempre que sus dias no
+  se toquen. Eso no lo puede exigir un CHECK (no ve otras filas): lo vigila el
+  backend y contesta 409.
+- **Dos indices**, uno por oferta para el listado y uno PARCIAL de las activas,
+  que son las unicas que preguntan el disparador y la exclusion.
+- Mismo `ON DELETE CASCADE` y mismo `oferta_tocar_fecha()` que la 021.
+
+El disparador (DisparadorReglasPeriodoService, cada 15 minutos) pone y quita
+el descuento reusando las rutas de siempre, a nombre del vendedor dueno.
+
+### Un descuento a la vez por oferta
+
+Desde el 2026-09-24 las cuatro formas de poner un descuento se excluyen:
+manual (con su venta relampago, que lo exige), regla automatica y regla por
+periodo. Una regla pausada no cuenta. Vive en el backend
+(`helpers/exclusion-mecanismos-descuento.ts`) y no en la base, porque "activa"
+en el descuento manual solo lo sabe `oferta.porcentaje_descuento` y en las
+reglas su columna `activa`: son tres tablas.
+
+### La clave de Redis que decide si un descuento sigue vivo
+
+`POST .../descuento` crea `mesh:oferta:<id>:descuento` (valor `1`), con
+`EXPIRE` si se pidio `duracion_segundos` y sin vencimiento si no. Cada minuto
+el backend quita de PostgreSQL todo descuento que no este en venta relampago y
+cuya clave ya no exista. Es decir, **la verdad de "sigue vivo" esta en Redis**,
+no en una fecha de PostgreSQL.
+
+Eso tiene una consecuencia con la semilla: `001_catalogo.sql` pone sus 13
+descuentos directo en `oferta`, sin pasar por la ruta, asi que nacian sin
+clave y el backend los borraba en su primer minuto. `arrancar.ps1` (paso 5b-2)
+crea la clave de cada uno, sin vencimiento, justo despues de cargar la
+semilla. Solo entonces: en una base ya cargada una clave que falta puede ser
+un descuento con duracion que vencio con el backend apagado. Si alguien vacia
+Redis, los descuentos sin duracion se pierden igual; eso quedo pedido al
+backend en `docs/BACKEND-PENDIENTE.md`.
+
+## Los patrones B de resenas (migracion 023)
+
+La 019 guardaba los anillos mutuo, ciclo y reiterado. La 023 deja guardar
+tambien seis de los siete patrones B (`neo4j/consultas/B1..B7`) en la misma
+`anillo_fraude`, sin tabla nueva. Sale del SQL de referencia del companero
+(`anillos-fraude-familia-b.sql`).
+
+- **Siete filas en `tipo_anillo_fraude`**, ids 4 a 10: cadena_abierta,
+  satelites, persistente, anillo_en_el_tiempo, favor_devuelto, coordinados y
+  reputacion_expres. El backend los fija como constantes y un candado al final
+  de la migracion falla si un id no cuadra. `anillo_en_el_tiempo` (B.4) queda
+  reservado: el backend no lo guarda.
+- **La unicidad de `clave` pasa a `(id_tipo_anillo_fraude, clave)`.** Con la
+  clave sola, dos patrones distintos sobre el mismo par de cuentas se
+  pisaban. El backend ya escribe con ese `ON CONFLICT`, asi que sin la 023 el
+  INSERT falla en una base nueva. mutuo, ciclo y reiterado siguen compartiendo
+  fila porque el backend busca antes cualquiera de los tres.
+- **En `coordinados` el vendedor no es sospechoso.** Son dos autores que
+  califican lo mismo a la vez; las cuentas del caso son ellos dos. No cambia
+  la tabla, lo resuelve la consulta que deriva las cuentas.
 
 ## Los historiales no llevan estado
 

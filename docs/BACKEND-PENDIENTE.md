@@ -4,25 +4,104 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-25: lo tuyo del 24 y 25 ya esta conectado, y dos pedidos
+
+Jalamos ad20dcd, 4e93bba y 99891a8. De este lado ya estan las dos migraciones
+que dejaste en `plan pendiente/` (`022_regla_descuento_periodo.sql` y
+`023_anillos_fraude_familia_b.sql`, copiadas tal cual con el candado de ids de
+la 019), las pantallas (reglas por fecha, duracion del descuento, avisos de 409,
+tipos B en el panel de fraude y en la campana, T1 a T3 en Tendencias, R1 y R3 en
+la portada y R2 en la ficha) y seis arneses por HTTP. Corridos contra la app
+levantada el mismo 25: los seis en verde (98, 44, 54, 28, 23 y 37 OK).
+
+### 1. Que el worker no borre un descuento cuya clave NUNCA existio
+
+`VentasLimitadasService.revisarDescuentosVencidos()` quita todo descuento sin
+`mesh:oferta:<id>:descuento`. No distingue "la clave vencio" de "la clave nunca
+se creo", y lo segundo pasa:
+
+- **La semilla.** `001_catalogo.sql` pone 13 descuentos directo en `oferta`.
+  Nacian sin clave y tu worker los borraba en su primer minuto. Lo arreglamos
+  de este lado: `arrancar.ps1` crea las 13 claves (valor `1`, sin vencimiento,
+  igual que `sembrarClaveDescuentoSinLanzar` sin duracion) justo despues de
+  cargar la semilla.
+- **Redis vaciado.** Un `FLUSHALL`, un volumen de Redis borrado o un Redis que
+  arranca sin su archivo: se pierden todas las claves y el siguiente minuto
+  borra TODOS los descuentos permanentes de PostgreSQL. Eso `arrancar.ps1` no
+  lo puede arreglar, porque no sabe cuales vencieron con el backend apagado.
+- **El `SET` que falla.** `sembrarClaveDescuentoSinLanzar` es mejor esfuerzo y
+  no lanza. Si Redis parpadea justo ahi, el descuento se aplica en PostgreSQL y
+  se borra solo un minuto despues. Tu comentario dice que el peor caso es "que
+  no venza solo"; con el worker de hoy el peor caso es el contrario.
+
+**Lo que pido:** que la ausencia de clave solo cuente como vencimiento cuando
+hubo una clave CON vencimiento. Dos formas, la que prefieras:
+
+1. Guardar en PostgreSQL cuando vence (`oferta.descuento_vence_en timestamptz`,
+   NULL si es permanente) y que el worker mire eso, con Redis solo como
+   acelerador. Pide una migracion; la escribimos nosotros si nos pasas el SQL
+   de referencia, como siempre.
+2. Sin tocar el esquema: sembrar SIEMPRE una segunda clave permanente de
+   "este descuento existe" (`mesh:oferta:<id>:descuento:vivo`) y que el worker
+   solo quite el descuento si esa esta y la de vencimiento no. Sin ninguna de
+   las dos, que lo deje y lo loguee como advertencia.
+
+Mientras tanto, lo de `arrancar.ps1` cubre el caso de la semilla.
+
+### ~~2. "Para ti" vacio no puede caer a T1~~ Resuelto el 2026-09-25 (d1b670b)
+
+David agrego `GET /productos/mas-vistos`, publica, que lee de Redis un ranking
+propio (`mesh:productos:mas_vistos`, lo rehace un worker cada 10 minutos con las
+vistas de 24 horas, o de 7 dias si no hubo). La portada la usa cuando
+`/productos/para-ti` viene vacio o sin sesion, y el estante pasa a llamarse
+"Lo mas visto".
+
+### 3. Un anillo de 3 deja tambien un caso de cadena que sobra
+
+Tres cuentas se califican en circulo, una resena tras otra: A a B, B a C y C a A.
+Cuando llega la segunda, existe A, B, C, y B.1 la guarda al instante como
+`cadena_abierta`. Con la tercera el circulo se cierra y sale el `ciclo`, que es
+lo correcto. Pero la cadena ya guardada se queda, y en el panel de Fraude salen
+dos casos con las mismas tres cuentas. Se ve con `demo-anillo-resenas.ps1`.
+
+**Lo que pido, una de dos:** que al detectar un ciclo se quiten (o se cierren) los
+casos `cadena_abierta` cuyas cuentas estan todas en ese ciclo, o que B.1 no guarde
+una cadena cuyas cuentas ya forman un ciclo.
+
+### 4. Lo que sigue abierto de antes
+
+- `reconciliar()` al arrancar (seccion del 23 en la tarde, punto 1): sigue sin
+  `onApplicationBootstrap`.
+- No hay `DELETE` de regla, ni automatica ni por periodo. Los arneses nuevos
+  (`reglas_periodo.sh`) tambien borran sus reglas por SQL.
+- El TTL de limpieza de las cachés de R2 y R3 que anotaste tu.
+
+---
+
 ## LO NUEVO DEL 2026-09-23 EN LA NOCHE: fraude y recomendaciones, para aprobar primero
 
 Esta en `docs/fraude-entrega3/` (commit d82880f). Es una PROPUESTA probada, no
 hay nada que tocar hasta que el grupo la apruebe. Si se aprueba, esto es lo que
 toca en `backend/`.
 
-1. **Las consultas nuevas.** Las 7 de Neo4j (`neo4j/consultas/B1..B7`) y las 13
-   de ClickHouse (`clickhouse/consultas/`). Llevan parametros (`$nombre` y
+1. ~~**Las consultas nuevas.** Las 7 de Neo4j (`neo4j/consultas/B1..B7`) y las 13
+   de ClickHouse (`clickhouse/consultas/`).~~ **Hecho en parte (2026-09-24 y 25):**
+   B.1 a B.7 salvo B.4 en PatronesFraudeDetectorService, T1 a T3 y R1 a R3.
+   Faltan R4 y F1 a F6. Llevan parametros (`$nombre` y
    `{nombre:Tipo}`), asi que se copian tal cual y los valores estan en
    `B0_parametros.cypher` y `parametros.txt`.
 2. **El punto ciego de 60 dias.** `AnillosDetectorService` ya no ve el anillo
    anillo.uno/dos/tres de marzo. B.3 y B.4 miran la historia entera y conviene
-   correrlas una vez al dia.
+   correrlas una vez al dia. Sigue abierto: las B del backend llevan la misma
+   ventana de 60 dias y B.4 quedo fuera.
 3. **El agrupador de casos.** Hallazgos juntados por cuentas compartidas, puntaje,
    niveles y las reglas R-CASI-1 a 5. Todo en `02-reglas-backend.md`.
-4. **La migracion 022.** El SQL esta en `02-reglas-backend.md`, seccion 7. No se
-   puso en `migrations/` porque `arrancar.ps1` la aplicaria sola.
+4. **La migracion ~~022~~ 024.** El SQL esta en `02-reglas-backend.md`, seccion 7. No se
+   puso en `migrations/` porque `arrancar.ps1` la aplicaria sola. La 022 y la
+   023 ya las ocuparon tus reglas por periodo y la familia B.
 5. **Las rutas.** `GET/PATCH /admin/fraude/casos` y las de recomendaciones
-   (vistos recientemente, tambien vieron, para ti, similares). La tabla de donde
+   (~~vistos recientemente, tambien vieron, para ti~~ hechas el 2026-09-25,
+   similares sigue). La tabla de donde
    sale cada una esta en `03-consultas-clickhouse.md`.
 
 Cuando esten, nosotros hacemos las pantallas y una prueba que pase por HTTP,
@@ -70,7 +149,7 @@ PostgreSQL, igual que hiciste tu en el teardown. Si quieres un
 `DELETE /vendedor/reglas-descuento/:id`, el panel ya tiene donde ponerle el
 boton.
 
-### 4. El disparo
+### ~~4. El disparo~~ Hecho el 2026-09-25
 
 Lo sabemos, esta en tu doc. El panel lo dice en pantalla ("por ahora la regla
 solo se guarda") para que nadie crea que ya cambia precios.
@@ -456,7 +535,7 @@ ficha de producto que tarda mas porque hay que anotar la visita es un mal negoci
 un INSERT de mil filas antes que mil INSERT de una fila. Con el trafico de una
 clase da igual, pero esta anotado para el dia del millon de productos.
 
-### Ruta 2 -- `GET /admin/eventos/tendencias` (solo admin)
+### ~~Ruta 2 -- `GET /admin/eventos/tendencias` (solo admin)~~ Hecha el 2026-09-25 como T1, con otra forma de respuesta (ver endpoints-eventos.md)
 
 ```
 query   dias   por defecto 7

@@ -348,6 +348,22 @@ mesh:demo:sin_ttl:configuracion (hash con modo demo y version 1, sin TTL) y
 mesh:demo:con_ttl:carrito_de_prueba (hash con producto Laptop y cantidad 2, con TTL de
 600 segundos que va bajando). Son los tres comandos del grupo Demo de Redis del panel.
 
+La Demo de descuentos, descuentos que se activan y se apagan solos:
+
+  .\demo-descuentos-solos.ps1                   las dos partes, unos cuatro minutos
+  .\demo-descuentos-solos.ps1 -Parte regla      solo la regla por ventas
+  .\demo-descuentos-solos.ps1 -Parte manual     solo el descuento que vence
+  .\demo-descuentos-solos.ps1 -Duracion 30      el manual dura 30 s (de 30 a 60, 45 por defecto)
+
+Crea un vendedor nuevo con ofertas nuevas, asi nunca choca con otro mecanismo de
+descuento. La regla pide 3 unidades en 2 minutos y da 15 por ciento por 150 s; un
+comprador nuevo hace 3 compras reales y el worker de reglas (cada 60 s, lee ClickHouse)
+aplica el descuento. El manual da 20 por ciento con vencimiento: se ve bajar el TTL de
+mesh:oferta:<n>:descuento (tambien en RedisInsight) y, al vencer, el worker lo quita y
+precio_historial lo anota a nombre de tienda@mesh.com. Al final borra la regla, retira
+las ofertas y borra de ClickHouse las ventas y carritos del comprador. Quedan las
+cuentas y los pedidos en PostgreSQL. Es el grupo Demo de descuentos del panel.
+
 
 ENTRAR A POSTGRES POR TERMINAL
 --------------------------------------------------
@@ -712,6 +728,15 @@ Version de terminal:
   .\demo-anillo-resenas.ps1 -Cuentas 4 -Prefijo otro  anillo de 4, con otro prefijo de cuentas
                                                      al final abre /panel?s=fraude&t=resenas
 
-NO SON REVERSIBLES. El anillo hace compras reales (checkout de verdad, deja
+  .\demo-patrones-resenas.ps1                        cadena, favor devuelto y coordinados
+  .\demo-patrones-resenas.ps1 -Patron cadena         solo uno: cadena, favor o coordinados
+  .\demo-patrones-resenas.ps1 -SinAbrir              no abre el panel al final
+                                                     cuentas nuevas en cada corrida (demo + fecha),
+                                                     confirma cada caso por la API del admin.
+                                                     Se ven en Fraude, Resenas en anillo, filtro
+                                                     por tipo. A los 15 minutos el worker suma
+                                                     Reputacion en minutos con las mismas cuentas
+
+NO SON REVERSIBLES. El anillo y los patrones hacen compras reales (checkout de verdad, deja
 pedidos y kardex) y deja las cuentas de demostracion en el catalogo para
 siempre, igual que anillo.uno/dos/tres de la semilla.

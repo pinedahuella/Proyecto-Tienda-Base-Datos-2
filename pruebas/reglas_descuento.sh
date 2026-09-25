@@ -6,8 +6,12 @@
 #   bash pruebas/reglas_descuento.sh
 #   VENDEDOR=ventas.oriente@mesh.com OTRO=ventas.poniente@mesh.com bash pruebas/reglas_descuento.sh
 #
-# Solo prueba la CONFIGURACION. El disparo (mirar ClickHouse y activar el
-# descuento) todavia no existe en el backend, asi que no hay nada que medir ahi.
+# Prueba la CONFIGURACION y la exclusion con el descuento manual. El disparo
+# (DisparadorReglasAutomaticoService, desde el 2026-09-25) mira ClickHouse cada
+# minuto, y probarlo pide sembrar ventas en compra_producto, que no tiene
+# transacciones ni se deshace: no se mide aqui. Por lo mismo la regla de
+# prueba pide 12 unidades en 45 minutos y pasa casi toda la prueba pausada,
+# para que ninguna venta real la dispare a la mitad.
 #
 # QUE COMPRUEBA
 # ============================================================
@@ -26,9 +30,14 @@
 #      fecha_actualizacion. Cambiar dos numeros deja el resto igual. {} da 400
 #      y un id que no existe 404.
 #   7. Aislamiento. Otro vendedor no la ve en su lista y su PATCH da 404.
+#   8. Exclusion con el descuento manual (2026-09-24). Con la regla pausada el
+#      descuento manual entra (201). Con el descuento puesto, reactivar la
+#      regla da 409 y la regla sigue pausada. Quitado el descuento, reactivar
+#      da 200, y con la regla activa el descuento manual da 409. Al final la
+#      regla queda pausada otra vez.
 #
-# LO QUE DEJA COMO ESTABA, aunque falle a la mitad (hay un trap): borra la
-# regla que creo. Es la UNICA escritura directa a PostgreSQL de esta prueba y
+# LO QUE DEJA COMO ESTABA, aunque falle a la mitad (hay un trap): quita por la
+# API el descuento manual si quedo puesto, y borra la regla que creo. Es la UNICA escritura directa a PostgreSQL de esta prueba y
 # es a proposito: el backend no tiene ruta para borrar una regla, solo para
 # pausarla. Tambien lo hizo asi el companero al probarla (ver
 # endpoints-vendedores.md, "Teardown").
@@ -90,13 +99,22 @@ pedir() {   # METODO RUTA COOKIE [CUERPO_JSON]
 de_cuerpo() { printf '%s' "$CUERPO" | campo "$1"; }
 
 ID_REGLA=""
+DESCUENTO_PUESTO=0
 limpiar() {
+    if [ "$DESCUENTO_PUESTO" = "1" ]; then
+        pedir DELETE "/vendedor/ofertas/$OFERTA/descuento" "$C_VEND"
+        echo; echo "Limpieza: descuento manual de la oferta $OFERTA quitado (HTTP $CODIGO)."
+    fi
     if [ -n "$ID_REGLA" ]; then
         sql "DELETE FROM regla_descuento_automatico WHERE id_regla_descuento_automatico = $ID_REGLA" >/dev/null
         echo; echo "Limpieza: regla $ID_REGLA borrada."
     fi
 }
 trap limpiar EXIT
+# Con la senal atrapada, un Ctrl+C o un timeout tambien pasan por limpiar
+# (ver pruebas/descuentos.sh: en el bash de Git el trap de EXIT solo no basta).
+trap 'exit 130' INT TERM HUP
+OFERTA=""; C_VEND=""
 
 # ------------------------------------------------------------------ 1
 titulo "1. La migracion 021"
@@ -115,9 +133,19 @@ if [ -z "$C_VEND" ] || [ -z "$C_OTRO" ] || [ -z "$C_COMP" ]; then
     exit 1
 fi
 
+# Una oferta que pueda recibir regla Y descuento manual: activa y aprobada
+# (el descuento manual lo pide), sin descuento, sin venta relampago y sin
+# ninguna regla, de las dos clases. Cualquiera de esas cosas daria 409 por la
+# exclusion y la prueba mediria otra cosa.
 OFERTA=$(sql "SELECT o.id_oferta FROM oferta o JOIN usuarios u USING(id_usuario)
+               JOIN estado_oferta eo USING(id_estado_oferta)
                WHERE u.correo_electronico = '$VENDEDOR'
+                 AND eo.estado_oferta_nombre = 'activa'
+                 AND o.fecha_aprobacion IS NOT NULL
+                 AND o.porcentaje_descuento IS NULL
+                 AND NOT o.es_inventario_limitado
                  AND NOT EXISTS (SELECT 1 FROM regla_descuento_automatico r WHERE r.id_oferta = o.id_oferta)
+                 AND NOT EXISTS (SELECT 1 FROM regla_descuento_periodo rp WHERE rp.id_oferta = o.id_oferta AND rp.activa)
                ORDER BY o.id_oferta LIMIT 1")
 AJENA=$(sql "SELECT o.id_oferta FROM oferta o JOIN usuarios u USING(id_usuario)
               WHERE u.correo_electronico = '$OTRO' ORDER BY o.id_oferta LIMIT 1")
@@ -207,6 +235,39 @@ igual "el otro vendedor no la ve" "$LA_VE" "no"
 pedir PATCH "/vendedor/reglas-descuento/$ID_REGLA" "$C_OTRO" '{"activa":true}'
 igual "el otro vendedor no la puede editar" "$CODIGO" "404"
 igual "y sigue pausada" "$(sql "SELECT activa FROM regla_descuento_automatico WHERE id_regla_descuento_automatico=$ID_REGLA")" "f"
+
+# ------------------------------------------------------------------ 8
+titulo "8. Exclusion con el descuento manual"
+pedir POST "/vendedor/ofertas/$OFERTA/descuento" "$C_VEND" '{"porcentaje_descuento":15}'
+igual "con la regla pausada, el descuento manual entra" "$CODIGO" "201"
+[ "$CODIGO" = "201" ] && DESCUENTO_PUESTO=1
+
+pedir PATCH "/vendedor/reglas-descuento/$ID_REGLA" "$C_VEND" '{"activa":true}'
+igual "reactivar la regla con el descuento puesto" "$CODIGO" "409"
+case "$(de_cuerpo mensaje)" in
+    *excluyentes*) OK "el 409 es el de la exclusion" ;;
+    *)             FALLA "el 409 dice otra cosa: $(de_cuerpo mensaje)" ;;
+esac
+igual "la regla sigue pausada" "$(sql "SELECT activa FROM regla_descuento_automatico WHERE id_regla_descuento_automatico=$ID_REGLA")" "f"
+
+pedir DELETE "/vendedor/ofertas/$OFERTA/descuento" "$C_VEND"
+igual "quitar el descuento manual" "$CODIGO" "200"
+[ "$CODIGO" = "200" ] && DESCUENTO_PUESTO=0
+
+pedir PATCH "/vendedor/reglas-descuento/$ID_REGLA" "$C_VEND" '{"activa":true}'
+igual "sin descuento, reactivar la regla" "$CODIGO" "200"
+
+pedir POST "/vendedor/ofertas/$OFERTA/descuento" "$C_VEND" '{"porcentaje_descuento":15}'
+igual "con la regla activa, el descuento manual" "$CODIGO" "409"
+[ "$CODIGO" = "201" ] && DESCUENTO_PUESTO=1
+case "$(de_cuerpo mensaje)" in
+    *"descuento automatico"*) OK "el 409 nombra la regla automatica" ;;
+    *)                        FALLA "el 409 dice otra cosa: $(de_cuerpo mensaje)" ;;
+esac
+igual "y la oferta sigue sin descuento" "$(sql "SELECT COALESCE(porcentaje_descuento::text,'null') FROM oferta WHERE id_oferta=$OFERTA")" "null"
+
+pedir PATCH "/vendedor/reglas-descuento/$ID_REGLA" "$C_VEND" '{"activa":false}'
+igual "la regla vuelve a quedar pausada" "$CODIGO" "200"
 
 echo
 echo "=============================================================="

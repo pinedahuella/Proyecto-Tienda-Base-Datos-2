@@ -674,8 +674,26 @@
 	 * Neo4j, solo cuando se despliega una fila -- `detalle-grafo` no vuelve a
 	 * correr A.1/A.2.
 	 */
-	type TipoAnillo = 'mutuo' | 'ciclo' | 'reiterado';
-	type FiltroTipoAnillo = 'todos' | TipoAnillo;
+	/**
+	 * Los tipos del catalogo `tipo_anillo_fraude`. 1 a 3 son A.1/A.2
+	 * (migracion 019); 4 a 10 son la familia B de `neo4j/consultas/B1..B7`
+	 * (migracion 023), que persiste PatronesFraudeDetectorService desde el
+	 * 2026-09-24. `anillo_en_el_tiempo` (B.4, id 7) esta reservado: el backend
+	 * no lo guarda y rechaza el filtro con 400, asi que tiene nombre por si
+	 * llega pero no sale en el selector.
+	 */
+	type TipoAnillo =
+		| 'mutuo'
+		| 'ciclo'
+		| 'reiterado'
+		| 'cadena_abierta'
+		| 'satelites'
+		| 'persistente'
+		| 'anillo_en_el_tiempo'
+		| 'favor_devuelto'
+		| 'coordinados'
+		| 'reputacion_expres';
+	type FiltroTipoAnillo = 'todos' | Exclude<TipoAnillo, 'anillo_en_el_tiempo'>;
 
 	interface CuentaDeAnillo {
 		id_usuario: string;
@@ -726,10 +744,28 @@
 	const NOMBRE_TIPO_ANILLO: Record<TipoAnillo, string> = {
 		mutuo: 'Se califican entre si',
 		ciclo: 'Ciclo de calificaciones',
-		reiterado: 'Reiteracion sobre los mismos productos'
+		reiterado: 'Reiteracion sobre los mismos productos',
+		cadena_abierta: 'Cadena de calificaciones',
+		satelites: 'Cuentas que solo califican a un vendedor',
+		persistente: 'Siempre califica al mismo vendedor',
+		anillo_en_el_tiempo: 'Anillo que vuelve con el tiempo',
+		favor_devuelto: 'Se devuelven la nota en horas',
+		coordinados: 'Califican juntas lo mismo',
+		reputacion_expres: 'Reputacion en minutos'
 	};
 
-	const FILTROS_TIPO_ANILLO: FiltroTipoAnillo[] = ['todos', 'mutuo', 'ciclo', 'reiterado'];
+	const FILTROS_TIPO_ANILLO: FiltroTipoAnillo[] = [
+		'todos',
+		'mutuo',
+		'ciclo',
+		'reiterado',
+		'cadena_abierta',
+		'satelites',
+		'persistente',
+		'favor_devuelto',
+		'coordinados',
+		'reputacion_expres'
+	];
 	const NOMBRE_FILTRO_TIPO_ANILLO: Record<FiltroTipoAnillo, string> = {
 		todos: 'Todos los tipos',
 		...NOMBRE_TIPO_ANILLO
@@ -885,7 +921,7 @@
 			case 'descartada':
 				return 'No hay anillos descartados.';
 			default:
-				return 'Ningun anillo mutuo, ciclo o reiterado sigue activo en la ventana de 60 dias.';
+				return 'Ningun anillo ni patron de resenas sigue activo en la ventana de 60 dias.';
 		}
 	}
 </script>
@@ -1177,7 +1213,8 @@
 
 	<p class="intro">
 		Grupos de cuentas cuyo patron de calificaciones no se explica por el uso normal de la
-		tienda: se califican entre si, en ciclo, o de forma reiterada sobre los mismos productos.
+		tienda. Se califican entre si o en cadena, se devuelven la nota, califican juntas, o
+		inflan a un vendedor con cuentas recien creadas.
 		Cada 15 minutos, y de inmediato tras cada resena nueva, un worker recorre el grafo de
 		relaciones entre cuentas, resenas y productos sobre una ventana de 60 dias y guarda lo que
 		encuentra, con estado propio para que un admin lo trabaje como una cola. Cuentas que
@@ -1523,13 +1560,20 @@
 	}
 
 	.tipo-ciclo,
-	.tipo-reiterado {
+	.tipo-reiterado,
+	.tipo-favor_devuelto,
+	.tipo-coordinados,
+	.tipo-reputacion_expres {
 		color: var(--rojo);
 		background: var(--off);
 		border: 1px solid var(--rojo);
 	}
 
-	.tipo-mutuo {
+	.tipo-mutuo,
+	.tipo-cadena_abierta,
+	.tipo-satelites,
+	.tipo-persistente,
+	.tipo-anillo_en_el_tiempo {
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border: 1px solid var(--indigo);

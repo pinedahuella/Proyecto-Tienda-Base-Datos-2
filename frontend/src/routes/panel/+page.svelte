@@ -9,6 +9,7 @@
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
 	import ReglasDescuento from '$lib/ReglasDescuento.svelte';
+	import ReglasPeriodo from '$lib/ReglasPeriodo.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
 	import PanelFraude from '$lib/PanelFraude.svelte';
 	import AlertasFraudeUsuario from '$lib/AlertasFraudeUsuario.svelte';
@@ -134,7 +135,7 @@
 			return [
 				{ id: 'reportes', nombre: 'Reportes', pie: 'Como van las ventas y los pedidos' },
 				{ id: 'ofertas', nombre: 'Ofertas', pie: 'Precio, existencias y estado de lo que vende la tienda' },
-				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos cuando una oferta se vende rapido' },
+				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos, por ventas rapidas o por fecha' },
 				{ id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' },
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Lo que otros vendedores quieren meter al catalogo' },
 				{ id: 'cuentas', nombre: 'Cuentas', pie: 'Los usuarios del sistema, su rol y su estado' },
@@ -153,7 +154,7 @@
 		if (esVendedor) {
 			return [
 				{ id: 'ofertas', nombre: 'Ofertas', pie: 'A que precio vendes cada variante y cuantas te quedan' },
-				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos cuando una oferta se vende rapido' },
+				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos, por ventas rapidas o por fecha' },
 				administraLaTienda
 					? { id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' }
 					: { id: 'catalogo', nombre: 'Proponer', pie: 'Mandale al catalogo un producto que falte' },
@@ -190,23 +191,30 @@
 	 * aparte.
 	 */
 	const PERSONALES = new Set(['alertas', 'cuenta']);
-	let enPerfil = $derived(esAdmin && PERSONALES.has(seccion));
 
 	/**
-	 * El ambito "Desarrollador", como Admin y Mi perfil en el admin: la cuenta de desarrollo tiene su
-	 * propio boton en la cabecera y ese boton abre SOLO los comandos, sin Alertas ni Mi cuenta (pedido
-	 * de Meme, 2026-09-20). El resto del panel (ofertas, propuestas, alertas y cuenta) es el de
-	 * cualquier vendedor, y ahi ya no sale Comandos.
+	 * Tres ambitos, cada uno con su boton en la cabecera (pedido de Meme, 2026-09-25):
+	 *   perfil      Alertas y Mi cuenta. Lo personal, igual para todos los roles.
+	 *   desarrollo  Solo Comandos, en las cuentas `desarrollador*`.
+	 *   trabajo     Lo demas: administrar (admin) o vender (vendedor).
+	 * Antes solo el admin tenia su trabajo separado; el vendedor veia sus ofertas
+	 * mezcladas con su cuenta en una sola barra, y "Mi perfil" caia en Ofertas.
+	 * El ambito sale de la seccion que se mira, asi que el enlace directo y el
+	 * boton de atras siguen funcionando sin estado nuevo. El comprador no tiene
+	 * trabajo que separar: su panel es solo lo personal.
 	 */
-	let enDesarrollo = $derived(esDesarrollador && seccion === 'comandos');
+	type Ambito = 'perfil' | 'desarrollo' | 'trabajo';
+	const ambitoDe = (id: string): Ambito =>
+		PERSONALES.has(id) ? 'perfil' : id === 'comandos' ? 'desarrollo' : 'trabajo';
+	let tieneTrabajo = $derived(esAdmin || esVendedor);
+	let ambito = $derived.by<Ambito>(() => {
+		if (seccion && todasLasSecciones.some((s) => s.id === seccion)) return ambitoDe(seccion);
+		return tieneTrabajo ? 'trabajo' : 'perfil';
+	});
+	let enPerfil = $derived(ambito === 'perfil');
+	let enDesarrollo = $derived(ambito === 'desarrollo');
 
-	let secciones = $derived(
-		esAdmin
-			? todasLasSecciones.filter((s) => PERSONALES.has(s.id) === enPerfil)
-			: esDesarrollador
-				? todasLasSecciones.filter((s) => (s.id === 'comandos') === enDesarrollo)
-				: todasLasSecciones
-	);
+	let secciones = $derived(todasLasSecciones.filter((s) => ambitoDe(s.id) === ambito));
 
 	/**
 	 * La elegida de verdad.
@@ -279,13 +287,15 @@
 	 */
 	let saludo = $derived(
 		enDesarrollo
-			? 'Herramientas para desarrollar y ensenar Mesh: arrancar el sistema, cargar productos con semilla y lanzar las demos. Tus ofertas, tus alertas y tu cuenta estan en Mi perfil.'
+			? 'Herramientas para desarrollar y ensenar Mesh: arrancar el sistema, cargar productos con semilla y lanzar las demos. Tus ofertas estan en Vendedor y tu cuenta en Mi perfil.'
 			: esAdmin
 			? enPerfil
 				? 'Tus datos, tus direcciones y los avisos de seguridad de tu cuenta. Lo de administrar el sistema esta en el boton Admin de arriba.'
 				: 'Desde aqui gestionas las cuentas y los catalogos del sistema. Tus datos personales estan en Mi perfil.'
 			: esVendedor
-				? 'Aqui llevas tus ofertas: a que precio vendes cada variante y cuantas unidades te quedan.'
+				? enPerfil
+					? 'Tus datos, tus direcciones y los avisos de seguridad de tu cuenta. Tus ofertas estan en el boton Vendedor de arriba.'
+					: 'Aqui llevas tus ofertas: a que precio vendes cada variante y cuantas unidades te quedan. Tus datos personales estan en Mi perfil.'
 				: 'Aqui estan los datos de tu cuenta y tus direcciones de entrega. Tus pedidos tienen su propia pagina.'
 	);
 
@@ -554,7 +564,7 @@
 	<title>Mesh · Panel</title>
 </svelte:head>
 
-<Cabecera sesion={perfil?.correo_electronico ?? null} {esAdmin} alSalir={salir} />
+<Cabecera sesion={perfil?.correo_electronico ?? null} {esAdmin} {esVendedor} alSalir={salir} />
 
 <main>
 	<div class="env">
@@ -570,10 +580,10 @@
 			</div>
 		{:else if perfil}
 			<div class="saludo">
-				{#if esAdmin}
-					<p class="ambito">{enPerfil ? 'Mi perfil' : 'Administracion'}</p>
-				{:else if enDesarrollo}
+				{#if enDesarrollo}
 					<p class="ambito">Desarrollador</p>
+				{:else if esAdmin || esVendedor}
+					<p class="ambito">{enPerfil ? 'Mi perfil' : esAdmin ? 'Administracion' : 'Vendedor'}</p>
 				{/if}
 				<h1>Hola, {perfil.nombre}</h1>
 				<!-- Uno por rol. Antes era un texto fijo -- "Tu tienda esta lista.
@@ -814,11 +824,13 @@
 				</div>
 
 				<div class="hoja" class:oculta={seccionViva !== 'reglas'}>
-					<!-- Las reglas de descuento automatico (56ce5f8, migracion 021).
-					     Mismo candado que las ofertas: vendedor o admin, cada uno las
-					     suyas, el admin las de la tienda. -->
+					<!-- Las reglas de descuento automatico (56ce5f8, migracion 021)
+					     y las de periodo (migracion 022). Mismo candado que las
+					     ofertas: vendedor o admin, cada uno las suyas, el admin las
+					     de la tienda. -->
 					{#if visitadas.has('reglas')}
 						<ReglasDescuento alExpirarSesion={expiro} />
+						<ReglasPeriodo alExpirarSesion={expiro} />
 					{/if}
 				</div>
 
@@ -885,11 +897,13 @@
 				</div>
 
 				<div class="hoja" class:oculta={seccionViva !== 'reglas'}>
-					<!-- Las reglas de descuento automatico (56ce5f8, migracion 021).
-					     Mismo candado que las ofertas: vendedor o admin, cada uno las
-					     suyas, el admin las de la tienda. -->
+					<!-- Las reglas de descuento automatico (56ce5f8, migracion 021)
+					     y las de periodo (migracion 022). Mismo candado que las
+					     ofertas: vendedor o admin, cada uno las suyas, el admin las
+					     de la tienda. -->
 					{#if visitadas.has('reglas')}
 						<ReglasDescuento alExpirarSesion={expiro} />
+						<ReglasPeriodo alExpirarSesion={expiro} />
 					{/if}
 				</div>
 

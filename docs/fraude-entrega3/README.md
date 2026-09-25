@@ -6,7 +6,37 @@ Este folder junta el diseno de tres cosas que se piden para la Entrega 3.
 2. Las reglas que tendria que aplicar el backend para juntar las alertas en casos, ordenarlas por importancia y decidir cuales se tratan como fraude casi confirmado.
 3. Consultas de ClickHouse para recomendaciones (vistos recientemente, quienes vieron esto tambien vieron, para ti, similares), para tendencias y para operaciones sospechosas.
 
-Todo esta escrito y probado contra las bases levantadas el 2026-09-23. El backend todavia no corre nada de esto. Por eso son propuestas y por eso las pruebas prueban el texto del repositorio y no una ruta HTTP.
+Todo esta escrito y probado contra las bases levantadas el 2026-09-23. ~~El backend todavia no corre nada de esto. Por eso son propuestas y por eso las pruebas prueban el texto del repositorio y no una ruta HTTP.~~ Desde el 2026-09-24 el backend corre buena parte, y lo que falta sigue siendo propuesta.
+
+## Lo que ya esta implementado
+
+Lo conecto Jose David en los commits ad20dcd, 4e93bba y 99891a8. Sus notas estan en `backend/cambio_propuestas/2026-09-24_*` y `2026-09-25_*`.
+
+| Pieza | Estado | Donde vive | Donde se ve | Prueba por HTTP |
+|---|---|---|---|---|
+| B.1 cadena abierta | Implementado | PatronesFraudeDetectorService, cada 15 min y al llegar una resena | panel, Fraude | `pruebas/anillos_familia_b.sh` (solo el filtro) |
+| B.2 satelites | Implementado, solo el worker de 15 min | idem | idem | idem (solo el filtro) |
+| B.3 persistente | Implementado | idem | idem | idem (solo el filtro) |
+| B.4 anillo en el tiempo | **No**. Queda como consulta de diagnostico, el id 7 del catalogo reservado | `neo4j/consultas/B4_*` | no | `?tipo=anillo_en_el_tiempo` da 400 |
+| B.5 favor devuelto | Implementado | idem | idem | `pruebas/anillos_familia_b.sh` |
+| B.6 coordinados | Implementado. El vendedor no entra en las cuentas del caso | idem | idem | `pruebas/anillos_familia_b.sh` |
+| B.7 reputacion expres | Implementado, solo el worker de 15 min | idem | idem | `pruebas/anillos_familia_b.sh` con `ESPERA_B7=960` |
+| Tablas de B | Implementado | `migrations/023_anillos_fraude_familia_b.sql` | | |
+| T1 en ascenso | Implementado | `GET /admin/eventos/tendencias` | panel, Tendencias, Señales | `pruebas/tendencias_avanzadas.sh` |
+| T2 embudo | Implementado | `GET /admin/eventos/embudo` | idem | idem |
+| T3 busquedas sin respuesta | Implementado | `GET /admin/eventos/busquedas-sin-respuesta` | idem | idem |
+| R1 vistos recientemente | Implementado, sin cache | `GET /productos/vistos-recientemente` | portada | `pruebas/recomendaciones.sh` |
+| R2 tambien vieron | Implementado, worker de 15 min a Redis | `GET /productos/:id/tambien-vieron` | ficha del producto | idem |
+| R3 para ti | Implementado, worker de 15 min a Redis | `GET /productos/para-ti` | portada con sesion | idem |
+| R4 similares | No. Depende de que Mongo arme los candidatos | | | |
+| F1 a F6 operaciones sospechosas | No | | | |
+| El agrupador de casos, el puntaje y R-CASI | No | `02-reglas-backend.md` | | |
+| La migracion de casos | No. Era la 022, ahora la 024 | `02-reglas-backend.md`, seccion 7 | | |
+
+Dos cosas que cambiaron al implementarlo y que este folder no decia:
+
+- **Las consultas B del backend llevan ventana de 60 dias**, como A.1 y A.2. Las del repositorio no, y por eso B.3 y B.4 aqui ven la historia entera y alla no. B.4 se dejo fuera justo por eso.
+- **Para ti vacio cae a lo mas visto.** La tabla de "Como las usaria el backend" (en `03-consultas-clickhouse.md`) proponia T1, pero T1 quedo solo para admin. Desde d1b670b hay una ruta publica, `GET /productos/mas-vistos`, y la portada la usa cuando para ti viene vacio, con el titulo "Lo mas visto".
 
 ## Los archivos
 
