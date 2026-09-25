@@ -66,11 +66,21 @@ import { EventosController } from './controllers/eventos.controller';
 import { EventosService } from './services/eventos/eventos.service';
 import { AdminTendenciasController } from './controllers/admin/admin-tendencias.controller';
 import { AdminTendenciasService } from './services/admin/admin-tendencias.service';
+import { AdminTendenciasAvanzadasController } from './controllers/admin/admin-tendencias-avanzadas.controller';
+import { AdminTendenciasAvanzadasService } from './services/admin/admin-tendencias-avanzadas.service';
 import { MasVendidosSyncService } from './services/productos/mas-vendidos-sync.service';
 import { MasVendidosController } from './controllers/productos/mas-vendidos.controller';
 import { MasVendidosService } from './services/productos/mas-vendidos.service';
 import { OfertasDestacadasController } from './controllers/productos/ofertas-destacadas.controller';
 import { OfertasDestacadasService } from './services/productos/ofertas-destacadas.service';
+import { VistosRecientementeController } from './controllers/productos/vistos-recientemente.controller';
+import { VistosRecientementeService } from './services/productos/vistos-recientemente.service';
+import { TambienVieronSyncService } from './services/productos/tambien-vieron-sync.service';
+import { ParaTiSyncService } from './services/productos/para-ti-sync.service';
+import { TambienVieronController } from './controllers/productos/tambien-vieron.controller';
+import { TambienVieronService } from './services/productos/tambien-vieron.service';
+import { ParaTiController } from './controllers/productos/para-ti.controller';
+import { ParaTiService } from './services/productos/para-ti.service';
 import { ReglasDescuentoAutomaticoController } from './controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller';
 import { ReglasDescuentoAutomaticoService } from './services/reglas-descuento-automatico/reglas-descuento-automatico.service';
 import { ReglasDescuentoPeriodoController } from './controllers/reglas-descuento-periodo/reglas-descuento-periodo.controller';
@@ -118,8 +128,12 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     AdminFraudeAnillosController,
     EventosController,
     AdminTendenciasController,
+    AdminTendenciasAvanzadasController,
     MasVendidosController,
     OfertasDestacadasController,
+    VistosRecientementeController,
+    TambienVieronController,
+    ParaTiController,
     ReglasDescuentoAutomaticoController,
     ReglasDescuentoPeriodoController,
   ],
@@ -162,9 +176,15 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     FraudeAnillosPersistidosService,
     EventosService,
     AdminTendenciasService,
+    AdminTendenciasAvanzadasService,
     MasVendidosSyncService,
     MasVendidosService,
     OfertasDestacadasService,
+    VistosRecientementeService,
+    TambienVieronSyncService,
+    ParaTiSyncService,
+    TambienVieronService,
+    ParaTiService,
     ReglasDescuentoAutomaticoService,
     ReglasDescuentoPeriodoService,
     DisparadorReglasPeriodoService,

@@ -91,6 +91,44 @@ export function validarLimiteEvento(valor: string | undefined): number {
   return Math.min(Number(valor), LIMITE_EVENTO_MAXIMO);
 }
 
+const DIAS_BASE_DEFECTO = 21;
+const DIAS_VENTANA_DEFECTO = 30;
+
+/**
+ * Cuantos dias hacia atras mirar para el periodo BASE de
+ * `GET /admin/eventos/tendencias` (contra el que se compara la ventana
+ * reciente). Opcional, por defecto 21 -- mismo valor probado en
+ * `clickhouse/consultas/parametros.txt` -- mismo tope que `validarDiasEvento`.
+ */
+export function validarDiasBase(valor: string | undefined): number {
+  if (valor == null || valor === '') {
+    return DIAS_BASE_DEFECTO;
+  }
+  if (!REGEX_ENTERO_EVENTO.test(valor) || Number(valor) < 1) {
+    throw new ErrorValidacion('dias_base debe ser un numero entero mayor a 0');
+  }
+  return Math.min(Number(valor), DIAS_EVENTO_MAXIMO);
+}
+
+/**
+ * Cuantos dias hacia atras mirar -- compartido por `GET /admin/eventos/embudo`,
+ * `GET /admin/eventos/busquedas-sin-respuesta` y
+ * `GET /productos/vistos-recientemente` (`dias_historial`, mismo valor por
+ * defecto). Opcional, por defecto 30 -- mismo valor probado en
+ * `clickhouse/consultas/parametros.txt`.
+ */
+export function validarDiasVentana(valor: string | undefined): number {
+  if (valor == null || valor === '') {
+    return DIAS_VENTANA_DEFECTO;
+  }
+  if (!REGEX_ENTERO_EVENTO.test(valor) || Number(valor) < 1) {
+    throw new ErrorValidacion(
+      'dias_ventana debe ser un numero entero mayor a 0',
+    );
+  }
+  return Math.min(Number(valor), DIAS_EVENTO_MAXIMO);
+}
+
 /**
  * La direccion del ranking de `GET /admin/eventos/*` (tendencias):
  * `positivo` (por defecto) trae primero los que MAS tuvieron esa metrica

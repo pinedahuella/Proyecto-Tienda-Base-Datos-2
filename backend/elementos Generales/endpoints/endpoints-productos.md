@@ -773,6 +773,130 @@ Contra el servidor y los contenedores reales (`ventas_norte`, ofertas 18 y
 
 ---
 
+## GET /productos/vistos-recientemente (agregado 2026-09-25)
+
+R1 de la propuesta del compañero (`docs/fraude-entrega3/03-consultas-clickhouse.md`):
+los últimos productos DISTINTOS que la persona miró, del más nuevo al más
+viejo. **Pública, sin sesión obligatoria** — mismo criterio que
+`GET /buscador/productos`: un visitante sin cuenta es un caso normal, no
+un error. Controller y servicio separados (`VistosRecientementeController`/
+`Service`), mismo criterio que `MasVendidosController`/`OfertasDestacadasController`
+-- cada feature del catálogo público va aparte aunque comparta el prefijo
+`/productos`.
+
+**Quién es "la persona":** su cuenta (si inició sesión, vía la cookie de
+siempre) O su `sesion` (query param opcional, generada por el navegador,
+mismo mecanismo que `POST /eventos/vista`) -- las dos a la vez, para que
+quien mira sin cuenta y después inicia sesión siga viendo lo de antes de
+entrar. Sin cuenta NI `sesion`, se devuelve `[]` sin gastar una consulta a
+ClickHouse.
+
+```
+GET /productos/vistos-recientemente?sesion=<sesion>&dias_historial=30&limite=10
+```
+
+`dias_historial` (defecto 30, reusa `validarDiasVentana`) y `limite`
+(defecto 20, reusa `validarLimiteEvento`) son opcionales. Los umbrales
+propios de la consulta (ninguno, R1 no tiene mínimos) no aplican aquí.
+
+`ya_comprado` no filtra nada -- informa; el frontend decide si lo esconde
+o lo marca con una etiqueta.
+
+### 200 (ejemplo)
+
+```json
+{
+  "ok": true,
+  "mensaje": "Vistos recientemente obtenidos",
+  "payload": [
+    { "ultima_vista": "2026-09-25 10:50:40.000", "veces": 1, "ya_comprado": true, "producto": { "...": "..." } }
+  ]
+}
+```
+
+### 503
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con ClickHouse", "payload": null }
+```
+
+### Probado en vivo — 2026-09-25
+
+Contra el servidor, ClickHouse y MongoDB reales.
+
+| Caso | Resultado |
+|---|---|
+| Sesión real de `compradora_norte`, con 2 vistas sembradas (una de un producto que sí compró, otra de otro que también resultó ya comprado -- dato real preexistente, no de esta prueba) | `200`, las dos en orden de más reciente a más vieja, `ya_comprado: true` en las dos -- confirmado contra `compra_producto` directo |
+| Visitante SIN cuenta, con `?sesion=...` de una sesión sembrada | `200`, trae el producto visto por esa sesión, `ya_comprado: false` |
+| Sin cuenta y sin `sesion` | `200`, `payload: []`, sin tocar ClickHouse |
+| ClickHouse real caído (`docker stop`) | `503` "No se pudo conectar con ClickHouse" |
+| ClickHouse recuperado | `200` normal |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+Teardown: las filas sembradas (`vista_producto`, `compra_producto`) se
+borraron con `ALTER TABLE ... DELETE`; el pedido real preexistente de
+`compradora_norte` (hallado durante la prueba, no tocado) se dejó intacto.
+
+## GET /productos/:id/tambien-vieron y GET /productos/para-ti (agregado 2026-09-25)
+
+R2 y R3 de la propuesta del compañero. A diferencia de R1
+(`vistos-recientemente`, calculado al pedir), estas dos **nunca calculan
+nada en vivo** -- leen directo de Redis, lo que dejó el worker
+correspondiente en su último ciclo (`TambienVieronSyncService`/
+`ParaTiSyncService`, cada 15 min). Ver esos dos archivos para el diseño
+completo del worker.
+
+**`GET /productos/:id/tambien-vieron`** -- pública, sin sesión. Lee
+`mesh:producto:<id>:tambien-vieron`. Sin caché para ese producto (nunca
+calculado, o excluido por no tener suficientes sesiones en común posibles)
+-> `[]`, nunca un error.
+
+**`GET /productos/para-ti`** -- **requiere sesión** (`SesionGuard`, sin
+`@Roles`: cualquier cuenta tiene sus propias recomendaciones, igual que el
+carrito) -- a diferencia de R1, R3 no tiene sentido sin una cuenta real.
+`id_usuario` sale del token, nunca de un parámetro. Lee
+`mesh:cuenta:<id_usuario>:para-ti`. Un arreglo vacío puede significar "sin
+recomendaciones calculables" o "el worker todavía no proceso esta cuenta"
+-- las dos se ven igual desde esta ruta; la decisión de caer a
+`GET /admin/eventos/tendencias` (T1) en ese caso queda para el frontend,
+no está resuelta en el backend todavía.
+
+### 401 (`para-ti`) / 503
+
+```json
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
+```
+
+### Probado en vivo -- 2026-09-25
+
+Contra el servidor, ClickHouse, MongoDB y Redis reales.
+
+| Caso | Resultado |
+|---|---|
+| **Corrección previa del worker de R2**: antes de esto, el descubrimiento de productos exigía solo "alguna vista"; con datos reales, los 6 productos candidatos tenían 1 sola sesión cada uno y R2 exige mínimo 2 en común -- las 6 claves quedaban siempre vacías. Corregido: el descubrimiento ahora exige `>= min_sesiones_en_comun` sesiones distintas | de 6 candidatos (criterio viejo) bajó a 4 (criterio nuevo) -- el producto con 1 sola sesión se excluyó, confirmado en vivo |
+| Escenario sembrado (Juan + 5 sesiones ajenas, mismo que ya se había verificado a mano) | `GET /productos/990001/tambien-vieron` -> `[{990003, afinidad 0.707}]`, idéntico al valor ya conocido |
+| `GET /productos/990004/tambien-vieron` (producto excluido por el filtro nuevo, sin caché) | `200`, `[]` |
+| Escenario de referencia con productos REALES (1 y 4, dos sesiones ajenas viéndolos juntos) | `GET /productos/1/tambien-vieron` -> `[{4, afinidad, "Laptop Lienzo 15", ...detalle completo}]` -- el `producto` viene resuelto desde Mongo por el propio worker, la ruta no tocó Mongo |
+| `GET /productos/para-ti` sin sesión | `401` "No hay sesion activa" |
+| `GET /productos/para-ti` con sesión real (`comprador_sur`, con un escenario de referencia sembrado: vio el producto 1, dos sesiones ajenas vieron 1 y 4) | `200`, `[{4, puntaje: 1.724, porque_viste: [1], producto: "Laptop Lienzo 15"}]` |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+**Llaves de referencia dejadas a propósito en Redis** (pedido explícito del
+usuario, para inspeccionar cómo se ven con datos no vacíos):
+`mesh:producto:1:tambien-vieron`, `mesh:cuenta:3:para-ti` (las dos con
+"Laptop Lienzo 15" resuelto completo) y `mesh:cuenta:999101:para-ti`
+(cuenta ficticia de prueba, `producto: null` en sus dos entradas porque
+los ids no existen en Mongo). El servidor de prueba se detuvo ANTES de
+limpiar las filas sembradas en ClickHouse, para que el worker no
+sobrescribiera estas claves con un resultado vacío en su siguiente ciclo
+-- quedan "congeladas" con su último valor bueno, mismo comportamiento que
+tendría cualquier producto/cuenta real que dejara de tener actividad.
+
+Teardown: todas las filas sembradas en ClickHouse (`vista_producto`,
+`compra_producto`) se borraron; las tres claves de Redis de arriba se
+dejaron a propósito, sin TTL, no se van a limpiar solas.
+
 ## GET /productos/:id/historial
 
 **Pública, sin restricción de rol ni de dueño** — a diferencia de la

@@ -185,6 +185,25 @@ caida, solo como "no hay nada que buscar". Timeout de 6 s -> 503.
 > ClickHouse cada 10 minutos (`MasVendidosSyncService`) y publicado en un
 > ZSET de Redis; la ruta lee ese ZSET y trae el detalle real a MongoDB.
 > Documentado en `endpoints-productos.md`.
+>
+> **`GET /admin/eventos/tendencias|embudo|busquedas-sin-respuesta`**
+> (agregado 2026-09-25, solo admin) -- las tres consultas de "Tendencias"
+> de la propuesta de fraude del compañero (`docs/fraude-entrega3/`, T1-T3):
+> productos en ascenso, embudo vista→carrito→compra→devolución con
+> diagnóstico, y términos buscados sin respuesta. Controller y servicio
+> separados de `AdminTendenciasController` (`AdminTendenciasAvanzadasController`/
+> `Service`), aunque comparten el prefijo `/admin/eventos`. Documentado en
+> `endpoints-eventos.md`.
+>
+> **`GET /productos/vistos-recientemente`** (pública, sesión opcional),
+> **`GET /productos/:id/tambien-vieron`** (pública) y
+> **`GET /productos/para-ti`** (requiere sesión) -- las tres primeras
+> consultas de "Recomendaciones" de la misma propuesta (R1-R3). R1 se
+> calcula al pedir; R2 y R3 nunca calculan en vivo, leen de Redis lo que
+> dejó `TambienVieronSyncService`/`ParaTiSyncService` (cada 15 min, mismo
+> principio que `mas-vendidos`). R4 (similares) queda pendiente -- depende
+> de que Mongo arme la lista de candidatos por categoría/precio.
+> Documentado en `endpoints-productos.md`.
 
 ---
 

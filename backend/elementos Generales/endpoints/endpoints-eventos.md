@@ -605,6 +605,99 @@ Las filas de prueba de aislamiento se borraron al terminar (`ALTER TABLE
 `eslint` limpios. Sin errores en el log del servidor durante toda la
 ronda.
 
+## GET /admin/eventos/tendencias | embudo | busquedas-sin-respuesta (agregado 2026-09-25)
+
+Tres consultas nuevas, más específicas que el ranking genérico de arriba --
+son las consultas T1/T2/T3 de la propuesta del compañero
+(`docs/fraude-entrega3/03-consultas-clickhouse.md`), traducidas tal cual al
+driver de Node. **Controller y servicio SEPARADOS**
+(`AdminTendenciasAvanzadasController`/`Service`, pedido explícito del
+usuario) del `AdminTendenciasController`/`Service` de arriba, aunque
+comparten el mismo prefijo de ruta (`/admin/eventos`) y el mismo criterio
+de autorización (solo admin).
+
+`GET /admin/eventos/tendencias` es, además, la ruta exacta que el profesor
+pidió el 2026-09-06 (directiva verbal, ver memoria `estado-backend-tienda`)
+y que nunca se había construido -- se reemplazó en su momento por el
+explorador genérico de arriba. Con esto queda cerrada.
+
+Los umbrales de cada consulta (mínimo de vistas, conversión máxima, etc.)
+quedan **fijos** en el servicio -- los mismos valores ya probados por el
+compañero en `clickhouse/consultas/parametros.txt` -- sin exponerlos como
+query param, para no complicar la ruta con parámetros que nadie pidió
+ajustar. Solo `dias_recientes`/`dias_base` (tendencias) o `dias_ventana`
+(embudo, búsquedas) y `limite` son configurables.
+
+### `GET /admin/eventos/tendencias` (T1 -- en ascenso)
+
+Productos cuyo promedio diario de vistas de los últimos `dias_recientes`
+(defecto 7) supera al de los `dias_base` (defecto 21) anteriores, leyendo
+el resumen `vistas_por_producto_dia` (la vista materializada que ya
+existía) con `countMergeIf`/`uniqMergeIf`. `veces` es cuánto creció;
+`vistas_por_persona` va al lado para no confundir una tendencia real con
+un producto inflado a punta de vistas (ver F1, todavía sin conectar).
+
+```json
+GET /admin/eventos/tendencias
+{ "ok": true, "mensaje": "Productos en ascenso obtenidos", "payload": [
+  { "por_dia_ahora": 3.6, "por_dia_antes": 0, "veces": 4.57, "vistas_por_persona": 8.3, "producto": { "...": "..." } }
+] }
+```
+
+### `GET /admin/eventos/embudo` (T2)
+
+Por producto, sesiones/carrito/pedidos/unidades/devueltas de los últimos
+`dias_ventana` (defecto 30) días -- **solo los que tienen un problema**:
+`mucho_interes_poca_compra` (≥20 sesiones, conversión ≤2%) o
+`devolucion_alta` (≥30% de lo vendido vuelve). Pregunta que PostgreSQL no
+puede contestar: no guarda los carritos que no terminaron ni las vistas.
+`FINAL` en `compra_producto`/`devolucion_producto` (`ReplacingMergeTree`).
+
+### `GET /admin/eventos/busquedas-sin-respuesta` (T3)
+
+Términos buscados (≥3 sesiones distintas) con un problema:
+`no_tenemos` (siempre 0 resultados) o `no_convence` (hay resultados,
+nadie hizo clic). El término se compara en minúsculas y sin espacios en
+las puntas. Sin segunda consulta a Mongo -- el término ya es todo el dato.
+
+### 401 / 403 / 503
+
+Mismo comportamiento que el resto de este archivo (arriba).
+
+### Probado en vivo el 25 de septiembre de 2026
+
+Contra el servidor y las bases reales (Postgres, ClickHouse, MongoDB,
+Redis), con sesión real de `admin_mesh`.
+
+| Caso | Resultado |
+|---|---|
+| Las tres rutas, sin datos sembrados | `tendencias` y `busquedas-sin-respuesta`: `[]` (el dataset real tiene muy pocos eventos -- 63 vistas, 42 búsquedas -- consistente con lo que ya había medido el compañero); `embudo`: 2 productos reales con `devolucion_alta`, con el detalle de Mongo bien resuelto |
+| **T1, aislado**: producto ficticio con 25 vistas en 3 sesiones distintas dentro de los últimos 7 días, 0 en los 21 anteriores | aparece con `por_dia_ahora: 3.6`, `veces: 4.57`, `vistas_por_persona: 8.3` -- los tres calculados a mano y verificados contra la fórmula |
+| Control: producto ficticio con solo 5 vistas recientes (bajo el mínimo de 20) | no aparece -- confirma el `HAVING` |
+| **T2, aislado**: producto ficticio con 20 sesiones y 0 pedidos | aparece con `diagnostico: "mucho_interes_poca_compra"` -- caso que los datos reales no habían disparado |
+| Control: producto ficticio con 20 sesiones y 1 pedido (conversión 5% > el máximo de 2%) | no aparece |
+| **T3, aislado**: término con 3 sesiones y 0 resultados siempre | `diagnostico: "no_tenemos"` |
+| Término con 3 sesiones, resultados pero sin clics | `diagnostico: "no_convence"` |
+| Control: término con 3 sesiones, resultados y 1 clic | no aparece |
+| ClickHouse real caído (`docker stop`) | `503` "No se pudo conectar con ClickHouse", sin tumbar el resto de la app |
+| ClickHouse recuperado | la siguiente consulta responde `200` normal |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+**Encontrado durante las pruebas, no un bug de las consultas:** al limpiar
+los datos sembrados de T2 (`vista_producto`), se me olvidó borrar también
+lo que esos mismos `INSERT` habían alimentado en
+`vistas_por_producto_dia` (la vista materializada de T1 se alimenta de
+`vista_producto` automáticamente) -- dos productos ficticios de T2
+aparecieron después como falsos positivos en `tendencias`. Corregido
+borrando también de la tabla derivada. Queda anotado: sembrar en
+`vista_producto` para cualquier prueba futura obliga a limpiar TAMBIÉN
+`vistas_por_producto_dia`, no solo la tabla base.
+
+Teardown completo: todas las filas sembradas (`vista_producto`,
+`vistas_por_producto_dia`, `compra_producto`, `busqueda_realizada`,
+`busqueda_clic`) borradas con `ALTER TABLE ... DELETE`, confirmado con un
+barrido final por los cuatro ids/términos de prueba -- cero residuos.
+
 ## Lo que sigue
 
 Ninguno de este lado -- las seis piezas del plan original
