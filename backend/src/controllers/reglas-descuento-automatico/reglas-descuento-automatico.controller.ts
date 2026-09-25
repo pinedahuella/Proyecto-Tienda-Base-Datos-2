@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -108,6 +109,24 @@ export class ReglasDescuentoAutomaticoController {
       return exito(regla, 'Regla de descuento actualizada');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo actualizar la regla de descuento');
+    }
+  }
+
+  // DELETE /vendedor/reglas-descuento/:id
+  @Delete(':id')
+  async eliminar(
+    @Param('id') id: string,
+    @UsuarioActual() usuarioActual: TokenUsuario,
+  ) {
+    try {
+      await this.reglasDescuentoService.eliminar(
+        usuarioActual.id_usuario,
+        usuarioActual.id_rol_usuario,
+        id,
+      );
+      return exito(null, 'Regla de descuento eliminada');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo eliminar la regla de descuento');
     }
   }
 }

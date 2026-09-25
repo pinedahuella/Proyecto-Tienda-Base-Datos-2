@@ -493,6 +493,79 @@ export class ReglasDescuentoPeriodoService {
     }
   }
 
+  /**
+   * Borra una regla propia -- mismo chequeo de dueno que el resto: ajena o
+   * inexistente da el 404 generico. Rechaza con 409 si la regla esta
+   * `activa`: borrarla mientras esta activa dejaria a `oferta` con un
+   * descuento/venta relampago aplicado y NINGUNA fila de
+   * `regla_descuento_periodo` que lo justifique -- el disparador
+   * (`DisparadorReglasPeriodoService`) solo revisa ofertas que aparecen en
+   * un JOIN contra esta tabla, asi que ese descuento quedaria huerfano para
+   * siempre (el mismo caso que la limitacion conocida ya documentada en
+   * `endpoints-vendedores.md` sobre una regla borrada por SQL directo).
+   * Pausarla primero (`PATCH { activa: false }`) deja que el disparador la
+   * reconcilie y la quite de la oferta; despues de eso, borrar es seguro.
+   */
+  async eliminar(
+    idUsuarioToken: string,
+    idRolUsuario: number,
+    idReglaParametro: string,
+  ): Promise<void> {
+    const idUsuario = await this.resolverIdEfectivo(
+      idUsuarioToken,
+      idRolUsuario,
+    );
+    if (!REGEX_ID.test(idReglaParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idRegla = Number(idReglaParametro);
+
+    try {
+      const actual = await pool.query<{ activa: boolean }>(
+        `SELECT r.activa
+           FROM regla_descuento_periodo r
+           JOIN oferta o ON o.id_oferta = r.id_oferta
+          WHERE r.id_regla_descuento_periodo = $1
+            AND o.id_usuario = $2`,
+        [idRegla, idUsuario],
+      );
+      const fila = actual.rows[0];
+      if (fila == null) {
+        throw new ErrorNoEncontrado(
+          'No existe una regla de descuento por periodo con ese id',
+        );
+      }
+      if (fila.activa) {
+        throw new ErrorConflicto(
+          'Pausa la regla (activa: false) antes de borrarla',
+        );
+      }
+
+      const resultado = await pool.query(
+        `DELETE FROM regla_descuento_periodo r
+                USING oferta o
+               WHERE r.id_oferta = o.id_oferta
+                 AND r.id_regla_descuento_periodo = $1
+                 AND o.id_usuario = $2`,
+        [idRegla, idUsuario],
+      );
+      if (resultado.rowCount === 0) {
+        throw new ErrorNoEncontrado(
+          'No existe una regla de descuento por periodo con ese id',
+        );
+      }
+    } catch (error) {
+      if (
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorValidacion ||
+        error instanceof ErrorConflicto
+      ) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
   private async intentarRollback(cliente: PoolClient): Promise<void> {
     try {
       await cliente.query('ROLLBACK');

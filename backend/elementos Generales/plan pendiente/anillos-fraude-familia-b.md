@@ -135,13 +135,15 @@ usa como **enriquecimiento**: cuando el detalle de un anillo ya persistido
 sea de tipo `ciclo` o `reiterado`, `GET .../detalle-grafo` puede correr B.4
 acotada a esas cuentas y devolver `vueltas`/`olas`/`visible_para_el_detector`
 como dato adicional, sin fila propia en `anillo_fraude`.
-**Decidido: B.4 queda sin construir por ahora.** No se conecto al backend en
-esta ronda -- ni como fila propia ni como enriquecimiento del detalle. Es
-la unica de las siete que no se persiste ni se dispara; su valor sigue
-siendo la consulta de diagnostico en `neo4j/consultas/B4_anillo_en_el_tiempo.cypher`
-tal cual, para correr a mano cuando haga falta revisar si la ventana de 60
-dias esta escondiendo algo. El id 7 del catalogo (`anillo_en_el_tiempo`)
-queda reservado por si se decide construirlo despues.
+**Decidido (actualizado 2026-09-25): B.4 queda FUERA DE ALCANCE.** No se
+conecta al backend -- ni como fila propia ni como enriquecimiento del
+detalle -- y no esta planeado hacerlo en ninguna ronda futura de este
+proyecto. Es la unica de las siete que no se persiste ni se dispara; su
+valor sigue siendo la consulta de diagnostico en
+`neo4j/consultas/B4_anillo_en_el_tiempo.cypher` tal cual, para correr a
+mano si algun dia hace falta revisar si la ventana de 60 dias esta
+escondiendo algo. El id 7 del catalogo (`anillo_en_el_tiempo`) queda
+reservado (no se reutiliza para otro tipo) pero sin plan de construirse.
 
 ---
 

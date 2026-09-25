@@ -396,6 +396,76 @@ export class ReglasDescuentoAutomaticoService {
   }
 
   /**
+   * Borra una regla propia -- mismo chequeo de dueno que el resto: ajena o
+   * inexistente da el 404 generico. Rechaza con 409 si la regla esta
+   * `activa`, mismo criterio y mismo mensaje que
+   * `ReglasDescuentoPeriodoService.eliminar()`: aunque el TTL de Redis
+   * limpia solo el efecto sobre `oferta` cuando vence, borrar la fila
+   * mientras esta activa deja a un vendedor sin forma de ver ni pausar algo
+   * que sigue corriendo. Pausarla primero (`PATCH { activa: false }`) y
+   * despues borrar.
+   */
+  async eliminar(
+    idUsuarioToken: string,
+    idRolUsuario: number,
+    idReglaParametro: string,
+  ): Promise<void> {
+    const idUsuario = await this.resolverIdEfectivo(
+      idUsuarioToken,
+      idRolUsuario,
+    );
+    if (!REGEX_ID.test(idReglaParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idRegla = Number(idReglaParametro);
+
+    try {
+      const actual = await pool.query<{ activa: boolean }>(
+        `SELECT r.activa
+           FROM regla_descuento_automatico r
+           JOIN oferta o ON o.id_oferta = r.id_oferta
+          WHERE r.id_regla_descuento_automatico = $1
+            AND o.id_usuario = $2`,
+        [idRegla, idUsuario],
+      );
+      const fila = actual.rows[0];
+      if (fila == null) {
+        throw new ErrorNoEncontrado(
+          'No existe una regla de descuento con ese id',
+        );
+      }
+      if (fila.activa) {
+        throw new ErrorConflicto(
+          'Pausa la regla (activa: false) antes de borrarla',
+        );
+      }
+
+      const resultado = await pool.query(
+        `DELETE FROM regla_descuento_automatico r
+                USING oferta o
+               WHERE r.id_oferta = o.id_oferta
+                 AND r.id_regla_descuento_automatico = $1
+                 AND o.id_usuario = $2`,
+        [idRegla, idUsuario],
+      );
+      if (resultado.rowCount === 0) {
+        throw new ErrorNoEncontrado(
+          'No existe una regla de descuento con ese id',
+        );
+      }
+    } catch (error) {
+      if (
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorValidacion ||
+        error instanceof ErrorConflicto
+      ) {
+        throw error;
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
    * 23505 es unique_violation: el UNIQUE(id_oferta) de
    * regla_descuento_automatico rechazando una segunda regla sobre la misma
    * oferta.

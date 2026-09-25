@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { pool } from '../../database/postgres';
 import { ID_ROL_VENDEDOR } from '../../models/rol-usuario';
@@ -51,9 +51,18 @@ interface EstadoOferta {
  * que opera exactamente como si el vendedor lo hubiera hecho el mismo.
  * `duracion_segundos: 0` en las dos siempre: el disparador mismo decide
  * cuando apagar, por calendario, no por un TTL de Redis.
+ *
+ * **Corre tambien al arrancar el backend (agregado 2026-09-25).** El
+ * `@Interval` de Nest NO dispara de inmediato, solo despues de que pase el
+ * primer `INTERVALO_MS` -- si el backend estuvo apagado un dia en que una
+ * regla de periodo debia prenderse o apagarse, se hubiera quedado
+ * desincronizada hasta 15 min despues de reiniciar. `onApplicationBootstrap()`
+ * llama a la misma `revisar()` una vez, apenas Nest termina de inicializar
+ * todos los modulos, para que el estado quede correcto desde el primer
+ * segundo en vez de esperar el primer tick.
  */
 @Injectable()
-export class DisparadorReglasPeriodoService {
+export class DisparadorReglasPeriodoService implements OnApplicationBootstrap {
   private readonly logger = new Logger(DisparadorReglasPeriodoService.name);
 
   /** Cada cuanto se revisan las reglas de periodo activas. */
@@ -81,6 +90,11 @@ export class DisparadorReglasPeriodoService {
     } finally {
       this.revisando = false;
     }
+  }
+
+  /** Ver el comentario de la clase -- corre una vez, al arrancar. */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.revisar();
   }
 
   /**

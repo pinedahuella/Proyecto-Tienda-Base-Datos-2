@@ -11,6 +11,18 @@ const SEMILLAS = 5;
 const VIDA_MEDIA_HORAS = 72;
 const LIMITE = 10;
 
+/**
+ * TTL de cada clave -- mismo criterio y mismo valor que
+ * `TambienVieronSyncService.TTL_SEGUNDOS` (R2): mucho mas largo que
+ * `INTERVALO_MS` (15 min) para que un ciclo perdido no la expire de mas, y
+ * mucho mas corto que `DIAS_HISTORIAL` (30 dias) para que una cuenta sin
+ * vistas recientes no se quede semanas con una recomendacion vieja
+ * cacheada. Se renueva en cada ciclo mientras la cuenta siga teniendo
+ * vistas recientes; el dia que deje de tenerlas, el worker deja de tocar su
+ * clave y Redis la borra sola dentro de este plazo.
+ */
+const TTL_SEGUNDOS = 24 * 60 * 60;
+
 interface FilaParaTi {
   id_producto: string;
   puntaje: string;
@@ -59,10 +71,10 @@ export interface ParaTiCacheado {
  * caer a T1 ("en ascenso") en ese caso es de quien lea esta cache despues,
  * no de este worker.
  *
- * Clave `mesh:cuenta:<id>:para-ti`, se SOBRESCRIBE cada ciclo (sin TTL),
- * mismo criterio que R2. (Pendiente de decidir: un TTL de limpieza para
- * cuando una cuenta deja de tener vistas recientes -- no resuelto en esta
- * ronda.)
+ * Clave `mesh:cuenta:<id>:para-ti`, se SOBRESCRIBE cada ciclo con TTL de
+ * `TTL_SEGUNDOS` (24h) -- mismo criterio que R2 (ver ese comentario): se
+ * renueva sola mientras la cuenta siga activa, y se limpia sola cuando deje
+ * de estarlo.
  */
 @Injectable()
 export class ParaTiSyncService {
@@ -143,6 +155,8 @@ export class ParaTiSyncService {
         await redis.set(
           ParaTiSyncService.clave(idUsuario),
           JSON.stringify(cacheado),
+          'EX',
+          TTL_SEGUNDOS,
         );
         calculadas++;
       } catch (error) {

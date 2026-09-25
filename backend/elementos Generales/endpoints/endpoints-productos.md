@@ -891,18 +891,28 @@ completo del worker.
 
 **`GET /productos/:id/tambien-vieron`** -- pública, sin sesión. Lee
 `mesh:producto:<id>:tambien-vieron`. Sin caché para ese producto (nunca
-calculado, o excluido por no tener suficientes sesiones en común posibles)
--> `[]`, nunca un error.
+calculado, excluido por no tener suficientes sesiones en común posibles, o
+la clave ya venció) -> `[]`, nunca un error.
 
 **`GET /productos/para-ti`** -- **requiere sesión** (`SesionGuard`, sin
 `@Roles`: cualquier cuenta tiene sus propias recomendaciones, igual que el
 carrito) -- a diferencia de R1, R3 no tiene sentido sin una cuenta real.
 `id_usuario` sale del token, nunca de un parámetro. Lee
 `mesh:cuenta:<id_usuario>:para-ti`. Un arreglo vacío puede significar "sin
-recomendaciones calculables" o "el worker todavía no proceso esta cuenta"
--- las dos se ven igual desde esta ruta; la decisión de caer a
-`GET /admin/eventos/tendencias` (T1) en ese caso queda para el frontend,
-no está resuelta en el backend todavía.
+recomendaciones calculables", "el worker todavía no proceso esta cuenta" o
+"la cuenta lleva mas de 24h sin actividad y su clave vencio" -- las tres se
+ven igual desde esta ruta; la decisión de caer a
+`GET /productos/mas-vistos` (o a `mas-vendidos`) en ese caso queda para el
+frontend, no está resuelta en el backend todavía.
+
+**TTL de limpieza (agregado 2026-09-25, tarde):** las dos claves se
+reescriben con `EX 86400` (24h) en cada ciclo del worker (`TTL_SEGUNDOS`
+en `tambien-vieron-sync.service.ts`/`para-ti-sync.service.ts`) -- mientras
+el producto/cuenta siga calificando (actividad dentro de los 30 dias que
+exige el descubrimiento de R2/R3), el propio worker renueva el TTL cada 15
+min y en la practica nunca vence; el dia que deje de calificar, el worker
+deja de tocar esa clave puntual y Redis la borra sola dentro de 24h, en vez
+de quedar huerfana mostrando una recomendacion vieja para siempre.
 
 ### 401 (`para-ti`) / 503
 
@@ -939,6 +949,29 @@ tendría cualquier producto/cuenta real que dejara de tener actividad.
 Teardown: todas las filas sembradas en ClickHouse (`vista_producto`,
 `compra_producto`) se borraron; las tres claves de Redis de arriba se
 dejaron a propósito, sin TTL, no se van a limpiar solas.
+
+### Probado en vivo -- TTL de limpieza, 2026-09-25 (tarde)
+
+Contra el servidor y los contenedores reales, sin datos sembrados nuevos
+(se corrieron los dos workers a mano una vez, contra los datos reales que
+hubiera en ese momento, mismo mecanismo que las rondas de prueba de
+`mas-vendidos`).
+
+| Caso | Resultado |
+|---|---|
+| `TTL` de las tres claves "congeladas" de la ronda anterior, antes del cambio | `-1` las tres (sin TTL), confirma el estado descrito arriba |
+| `npx tsc --noEmit` y `npx eslint` sobre los dos archivos tocados | limpios |
+| Ciclo real de los dos workers corrido a mano | R2: 0 productos calificaron (sin datos sembrados activos en este momento, ninguna clave tocada); R3: 2 cuentas calificaron y se recalcularon |
+| `TTL mesh:cuenta:3:para-ti` tras el ciclo | `86392` (~24h) -- la cuenta 3 sí calificó, su clave se reescribió con datos reales actuales y quedó con el TTL nuevo |
+| `TTL mesh:cuenta:999101:para-ti` (cuenta ficticia) y `TTL mesh:producto:1:tambien-vieron` tras el ciclo | siguen en `-1` -- ninguna de las dos calificó en este ciclo (la cuenta ficticia no existe en ClickHouse; R2 no tuvo candidatos), así que el worker no las tocó y se quedaron exactamente como estaban |
+
+**Nota:** `mesh:cuenta:3:para-ti` deja de ser la foto "congelada" de la
+ronda anterior (esa dependía de filas ya borradas de ClickHouse) -- ahora
+tiene el resultado real y vigente, con TTL. Es el comportamiento esperado
+del propio arreglo: una clave con actividad real se mantiene viva sola. Las
+otras dos referencias (`mesh:producto:1:tambien-vieron`,
+`mesh:cuenta:999101:para-ti`) siguen congeladas tal cual, sin TTL, hasta
+que algo las toque de nuevo o pase el resto de su vida útil sin que ocurra.
 
 ## GET /productos/:id/historial
 

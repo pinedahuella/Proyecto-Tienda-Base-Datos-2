@@ -10,6 +10,18 @@ const DIAS_HISTORIAL = 30;
 const MIN_SESIONES_EN_COMUN = 2;
 const LIMITE = 10;
 
+/**
+ * TTL de cada clave -- mucho mas largo que `INTERVALO_MS` (15 min, para que
+ * un ciclo perdido por un error transitorio no la expire de mas) y mucho
+ * mas corto que `DIAS_HISTORIAL` (30 dias, para que una clave huerfana no
+ * se quede semanas mostrando un dato viejo). Cada ciclo la reescribe con un
+ * TTL nuevo mientras el producto siga activo, asi que en la practica nunca
+ * expira estando vivo; el dia que el producto deje de calificar (menos de
+ * `MIN_SESIONES_EN_COMUN` sesiones en los ultimos 30 dias), el worker deja
+ * de tocar su clave y Redis la borra sola dentro de este plazo.
+ */
+const TTL_SEGUNDOS = 24 * 60 * 60;
+
 interface FilaTambienVieron {
   id_producto: string;
   sesiones_en_comun: string;
@@ -63,11 +75,11 @@ export interface TambienVieronCacheado {
  * ClickHouse, Redis o Mongo en un producto se loguea y se reintenta en el
  * proximo ciclo, sin tumbar el resto.
  *
- * Clave `mesh:producto:<id>:tambien-vieron`, se SOBRESCRIBE cada ciclo
- * (sin TTL): el dato nunca queda "frio" esperando que alguien lo pida --
- * lo mantiene vivo el propio worker. (Pendiente de decidir: un TTL de
- * limpieza para cuando un producto deja de tener vistas recientes y su
- * clave vieja queda huerfana -- no resuelto en esta ronda.)
+ * Clave `mesh:producto:<id>:tambien-vieron`, se SOBRESCRIBE cada ciclo con
+ * TTL de `TTL_SEGUNDOS` (24h): mientras el producto siga calificando, el
+ * propio worker la mantiene viva renovando el TTL en cada ciclo; el dia que
+ * deje de calificar, la clave se limpia sola en vez de quedar huerfana
+ * mostrando un dato viejo para siempre (ver el comentario de `TTL_SEGUNDOS`).
  */
 @Injectable()
 export class TambienVieronSyncService {
@@ -152,6 +164,8 @@ export class TambienVieronSyncService {
         await redis.set(
           TambienVieronSyncService.clave(idProducto),
           JSON.stringify(cacheado),
+          'EX',
+          TTL_SEGUNDOS,
         );
         calculados++;
       } catch (error) {

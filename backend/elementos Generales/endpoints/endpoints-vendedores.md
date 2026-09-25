@@ -57,10 +57,12 @@ de restricción, y no son lo mismo:
 | `GET /vendedor/reglas-descuento` | vendedor **o** admin (2 o 3) | solo las **suyas** |
 | `GET /vendedor/reglas-descuento/paginado` | vendedor **o** admin (2 o 3) | solo las **suyas** (idéntico a `GET /vendedor/reglas-descuento`) |
 | `PATCH /vendedor/reglas-descuento/:id` | vendedor **o** admin (2 o 3) | solo sobre **su propia** regla; un admin, sobre cualquier regla **de la tienda** |
+| `DELETE /vendedor/reglas-descuento/:id` | vendedor **o** admin (2 o 3) | solo sobre **su propia** regla; 409 si está `activa` |
 | `POST /vendedor/reglas-descuento-periodos` | vendedor **o** admin (2 o 3) | solo sobre **su propia** oferta; un admin, sobre cualquier oferta **de la tienda** |
 | `GET /vendedor/reglas-descuento-periodos` | vendedor **o** admin (2 o 3) | solo las **suyas** |
 | `GET /vendedor/reglas-descuento-periodos/paginado` | vendedor **o** admin (2 o 3) | solo las **suyas** (idéntico a `GET /vendedor/reglas-descuento-periodos`) |
 | `PATCH /vendedor/reglas-descuento-periodos/:id` | vendedor **o** admin (2 o 3) | solo sobre **su propia** regla; un admin, sobre cualquier regla **de la tienda** |
+| `DELETE /vendedor/reglas-descuento-periodos/:id` | vendedor **o** admin (2 o 3) | solo sobre **su propia** regla; 409 si está `activa` |
 
 **`/vendedor/productos` es el panel de administración del catálogo
 completo, no "mis productos".** Con el giro a multi-vendedor, un producto
@@ -3369,6 +3371,25 @@ Contra el servidor y la base real (`ventas_norte` y `ventas_sur`, ofertas
 Teardown: las dos reglas de prueba se borraron a mano de Postgres, la tabla
 quedó vacía otra vez.
 
+### DELETE /vendedor/reglas-descuento/:id (agregado 2026-09-25)
+
+Borra una regla propia de verdad -- hasta ahora las pruebas la borraban
+directo en Postgres, no había ruta. **409 `"Pausa la regla (activa: false)
+antes de borrarla"` si la regla está activa** -- borrar una regla activa
+dejaría a la oferta con un descuento aplicado (via TTL de Redis) y ninguna
+fila que lo explique; hay que pausarla primero (`PATCH { "activa": false
+}`), lo que además la desactiva de una vez. 200 (`payload: null`) si se
+borró. 404 si no existe o es de otro vendedor.
+
+### Probado en vivo el 25 de septiembre de 2026
+
+| Caso | Resultado |
+|---|---|
+| `DELETE` sobre una regla `activa: true` | 409 |
+| `PATCH { "activa": false }` seguido de `DELETE` | 200, la fila desaparece |
+| `DELETE` sobre un id ya borrado | 404 |
+| `npx tsc --noEmit` y `eslint` sobre los archivos tocados | limpios |
+
 ---
 
 ## Reglas de descuento por período / calendario (agregado 2026-09-24)
@@ -3524,6 +3545,27 @@ Contra el servidor y la base real (`ventas.norte@mesh.com` oferta 3,
 
 Teardown: las tres reglas de prueba se borraron a mano de Postgres, la tabla
 quedó vacía otra vez.
+
+### DELETE /vendedor/reglas-descuento-periodos/:id (agregado 2026-09-25)
+
+Mismo criterio exacto que `DELETE /vendedor/reglas-descuento/:id` (ver esa
+sección): 409 `"Pausa la regla (activa: false) antes de borrarla"` si el
+período está activo, 200 si ya estaba pausado, 404 si no existe o es de
+otro vendedor. Aquí el riesgo de borrar en caliente es más concreto porque
+ya se vio en vivo (ver "Teardown" de la ronda del disparador, más abajo):
+sin este bloqueo, borrar un período activo deja a la oferta con un
+descuento que ninguna fila de `regla_descuento_periodo` justifica, y el
+disparador ya no puede verla para limpiarla -- queda huérfana para
+siempre, no solo hasta el próximo tick.
+
+### Probado en vivo el 25 de septiembre de 2026
+
+| Caso | Resultado |
+|---|---|
+| `DELETE` sobre un período `activa: true` | 409 |
+| `PATCH { "activa": false }` seguido de `DELETE` | 200, la fila desaparece |
+| `DELETE` sobre un id ya borrado | 404 |
+| `npx tsc --noEmit` y `eslint` sobre los archivos tocados | limpios |
 
 ---
 
@@ -3787,9 +3829,21 @@ limpiarla.
 
 **Limitación conocida y aceptada, documentada también en la sección de
 `revisarDescuentosVencidos()`:** un descuento que no coincide con NINGUNA
-regla de período de su oferta (puesto por otra vía, o cuya regla se borró
--- aunque hoy no existe ningún `DELETE` de reglas) se deja intacto con una
-advertencia en el log, nunca se pisa a ciegas.
+regla de período de su oferta (puesto por otra vía) se deja intacto con una
+advertencia en el log, nunca se pisa a ciegas. Ahora que sí existe un
+`DELETE` de reglas (ver la sección dedicada más arriba), ese `DELETE`
+rechaza con 409 borrar una regla `activa` precisamente para no volver a
+caer en este caso -- solo se puede llegar a un descuento huérfano borrando
+la fila por SQL directo, fuera de la aplicación.
+
+**Corre también al arrancar el backend (agregado 2026-09-25).** El
+`@Interval` de Nest no dispara de inmediato, solo después de que pase el
+primer intervalo (15 min) -- si el backend estuvo apagado un día en que una
+regla de período debía prenderse o apagarse, se quedaba desincronizado
+hasta 15 minutos después de reiniciar. `DisparadorReglasPeriodoService`
+ahora implementa `OnApplicationBootstrap` y llama a la misma `revisar()`
+una vez, apenas Nest termina de inicializar todos los módulos -- antes
+incluso de que el servidor empiece a escuchar peticiones.
 
 ### Probado en vivo el 24 de septiembre de 2026
 
@@ -3812,6 +3866,21 @@ Teardown: las reglas de prueba se borraron a mano de Postgres; la oferta
 pasar por la app) que se quitó con el `DELETE .../descuento` real, no a
 mano en la base -- confirma en vivo la limitación conocida de arriba.
 `cambio_propuestas/2026-09-24_2359-disparador-reglas-periodo.md`.
+
+### Probado en vivo el 25 de septiembre de 2026 -- corre también al arrancar
+
+Contra el servidor y la base real (`ventas_norte`, oferta 251).
+
+| Caso | Resultado |
+|---|---|
+| Regla de período insertada directo en Postgres (fuera de la app, simulando "cambió mientras el backend estaba apagado") con rango que cubre el día de hoy, `activa: true`, sobre una oferta sin ningún otro mecanismo activo | `oferta.porcentaje_descuento` queda `NULL` -- nadie la aplicó todavía |
+| Reiniciar el backend y revisar Postgres a los pocos segundos (sin esperar 15 min) | log `"disparador de reglas de periodo: 1 oferta(s) con descuento aplicado, 0 con descuento quitado"` **antes** de `"Nest application successfully started"`; `porcentaje_descuento` ya en `20.00` |
+| `npx tsc --noEmit` y `eslint` sobre el archivo tocado | limpios |
+
+Teardown: la regla y el descuento de prueba se limpiaron con las rutas
+reales (`PATCH { activa: false }` + `DELETE` de la regla, `DELETE
+.../descuento` de la oferta) -- ver las pruebas del `DELETE` de reglas más
+arriba, que se hicieron sobre esta misma oferta y regla.
 
 ---
 
