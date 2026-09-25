@@ -71,6 +71,9 @@ import { AdminTendenciasAvanzadasService } from './services/admin/admin-tendenci
 import { MasVendidosSyncService } from './services/productos/mas-vendidos-sync.service';
 import { MasVendidosController } from './controllers/productos/mas-vendidos.controller';
 import { MasVendidosService } from './services/productos/mas-vendidos.service';
+import { MasVistosSyncService } from './services/productos/mas-vistos-sync.service';
+import { MasVistosController } from './controllers/productos/mas-vistos.controller';
+import { MasVistosService } from './services/productos/mas-vistos.service';
 import { OfertasDestacadasController } from './controllers/productos/ofertas-destacadas.controller';
 import { OfertasDestacadasService } from './services/productos/ofertas-destacadas.service';
 import { VistosRecientementeController } from './controllers/productos/vistos-recientemente.controller';
@@ -130,6 +133,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     AdminTendenciasController,
     AdminTendenciasAvanzadasController,
     MasVendidosController,
+    MasVistosController,
     OfertasDestacadasController,
     VistosRecientementeController,
     TambienVieronController,
@@ -179,6 +183,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     AdminTendenciasAvanzadasService,
     MasVendidosSyncService,
     MasVendidosService,
+    MasVistosSyncService,
+    MasVistosService,
     OfertasDestacadasService,
     VistosRecientementeService,
     TambienVieronSyncService,

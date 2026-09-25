@@ -670,6 +670,49 @@ directo).
 
 ---
 
+## GET /productos/mas-vistos
+
+**Pública, sin sesión** — mismo patrón exacto que `GET /productos/mas-vendidos`
+(controlador separado `MasVistosController`, mismo criterio de vitrina),
+pensada como plan B público para cuando "para ti" (`GET /productos/para-ti`)
+viene vacío: el ranking de vistas equivalente en `AdminTendenciasService`
+(`GET /admin/eventos/vista`) solo lo puede pedir un admin, un cliente
+normal no tiene permiso.
+
+```
+GET /productos/mas-vistos
+```
+
+**De dónde sale el ranking:** `MasVistosSyncService`
+(`src/services/productos/mas-vistos-sync.service.ts`) recalcula cada 10
+minutos, agregando `vista_producto` de ClickHouse de las últimas 24h (o de
+los últimos 7 días si no hubo ninguna vista en 24h; si tampoco hay nada en
+7 días, deja lo anterior sin tocar), contando **sesiones distintas**
+(`count(DISTINCT sesion)`, mismo criterio que
+`AdminTendenciasService.rankingVistas`: ver una ficha es una acción de bajo
+esfuerzo que la misma persona puede repetir varias veces), y publica hasta
+20 ids en el ZSET `mesh:productos:mas_vistos`. Mismo detalle acotado que
+`mas-vendidos` (`_id, nombre, imagen, precio_tienda, precio_desde,
+hay_descuento, resenas_promedio, resenas_total, stock_total`), cacheado por
+el propio worker en el HASH `mesh:productos:mas_vistos:detalle` — esta ruta
+nunca toca ClickHouse ni Mongo en el momento, solo lee las dos estructuras
+de Redis. Solo cuenta `lote = 'real'`, sin excepción.
+
+### Pruebas — hechas el 2026-09-25
+
+Contra el servidor y los contenedores reales.
+
+| Caso | Resultado |
+|---|---|
+| `npx tsc --noEmit` sobre los tres archivos nuevos | limpio |
+| `npx nest start` con Postgres/Mongo/Redis/ClickHouse reales | arranca sin errores, ruta `GET /productos/mas-vistos` mapeada |
+| `GET /productos/mas-vistos` sin datos aún cacheados | `200`, `payload: []` |
+| Consulta manual contra ClickHouse (`vista_producto`, ventana 7 días, `lote = 'real'`) | devuelve filas reales (sin datos en 24h, cae a 7 días como se espera) — confirma que la consulta del worker es válida |
+| ZSET/HASH sembrados a mano en Redis (ids con y sin detalle cacheado) | `GET /productos/mas-vistos` devuelve solo los ids con detalle, en el orden correcto del ranking, saltando el resto sin romper nada — mismo comportamiento verificado que `mas-vendidos` |
+| Teardown | claves de prueba borradas de Redis; el worker real (`@Interval`, cada 10 min) las recalcula solo en su próxima corrida |
+
+---
+
 ## GET /productos/ofertas/descuento y GET /productos/ofertas/venta-relampago
 
 **Públicas, sin sesión** — vitrina, mismo criterio que `GET /productos/mas-vendidos`: controlador separado
