@@ -168,7 +168,7 @@ Que hace:
       que PostgreSQL
   10. imprime el resumen y las URLs
 
-Antes del resumen esta el paso 9c, "Vistas de Kibana": espera hasta 3 minutos a que el
+Antes del resumen esta el paso 9d, "Vistas de Kibana": espera hasta 3 minutos a que el
 contenedor mesh-kibana-vistas termine y muestra su log. Ese contenedor es de un solo uso
 y queda en Exited (0), que es lo esperado, no un fallo. Ver LAS CONSOLAS WEB, mas abajo.
 

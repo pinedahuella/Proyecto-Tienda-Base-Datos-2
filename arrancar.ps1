@@ -2785,7 +2785,7 @@ if ($proximoId -notmatch '^\d+$') {
 
 
 # ------------------------------------------------------------
-# 7c. Los vectores de la recomendacion semantica
+# 7d. Los vectores de la recomendacion semantica
 # ------------------------------------------------------------
 # Va despues del catalogo porque lee de MongoDB y escribe en la tabla de la
 # migracion 024. Los calcula Ollama, que corre en el anfitrion y no en Docker,
@@ -3477,7 +3477,7 @@ if ($faltanNodos.Count -gt 0) {
 
 
 # ------------------------------------------------------------
-# 9c. Vistas de Kibana
+# 9d. Vistas de Kibana
 # ------------------------------------------------------------
 # Las vistas de datos de Kibana (Eventos de autenticacion y Productos) las crea
 # el contenedor mesh-kibana-vistas, que arranca con el docker compose up de mas

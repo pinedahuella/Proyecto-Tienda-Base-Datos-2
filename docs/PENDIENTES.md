@@ -2,7 +2,7 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-09-23.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-09-25.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
@@ -16,11 +16,11 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~7~~ | ~~Una venta relampago que vence sola deja `es_inventario_limitado` en true~~ | -- | -- | **CERRADO el 2026-09-04.** `revisarVencidas()`, un `@Interval` en `inventario-limitado.service.ts`, apaga la columna solo |
 | ~~8~~ | ~~Editar el stock durante una venta relampago desincroniza las dos bases~~ | -- | -- | **CERRADO el 2026-09-04.** El `PATCH` contesta 409 cuando viene `ajuste_stock` con la venta abierta |
 | ~~9~~ | ~~Las tres rutas de la base columnar~~ | -- | -- | **CERRADO el 2026-09-18**, pero con otra forma: `POST /eventos/vista|carrito|busqueda-clic`, seis rankings `GET /admin/eventos/*` y `GET /productos/mas-vendidos`. El panel y el estante de la portada estan hechos, con `bash pruebas/tendencias.sh` (50 OK desde que solo cuentan `lote = 'real'`). David decidio el 2026-09-19 que las seis rutas cuentan solo lote real, sin parametro: no queda nada pendiente ahi |
-| 10 | Los filtros facetados del buscador, con agregaciones | Jose David la consulta, yo la pantalla | ver abajo | **alta: es un requisito literal de la Entrega 3 y hoy no hay ni un `aggs` en `backend/`** |
+| 10 | Los filtros facetados del buscador, con agregaciones | Jose David la ruta | ver `BACKEND-PENDIENTE.md` | **alta, requisito literal de la Entrega 3.** Desde el 2026-09-25 la consulta esta hecha y probada (`elastic/pruebas/facetas.py`, 19 OK) y `/buscar` ya tiene el panel, que cae a la busqueda de siempre mientras la ruta `/buscador/productos/facetado` de 404. Solo falta esa ruta |
 | ~~11~~ | ~~La prueba de falla simulada del checkout~~ | -- | -- | **CERRADO el 2026-09-06.** `bash pruebas/falla_checkout.sh`, 31 OK y 0 FALLA, con su evidencia en `CONSISTENCIA-CHECKOUT.md`. Vuelto a correr el 2026-09-11: 31 OK |
 | 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | Entrega 3 | ver abajo | **es de la Entrega 3 (decidido el 2026-09-19)**; queda la fila 11 de `CONSISTENCIA-CHECKOUT.md` y las tres salidas por elegir entonces |
 | 13 | La lista de ofertas del vendedor viene entera, sin paginar | Jose David la ruta, yo la pantalla | ver `BACKEND-PENDIENTE.md` | **cerrado en lo que importa el 2026-09-19**: David agrego el filtro `estado` y el panel ya pagina con contadores exactos. El `q` de busqueda por texto **no importa (decidido el mismo dia)**; mientras, el buscador pide la lista completa |
-| 14 | Elasticsearch se llena con cada login y **ninguna ruta lo consulta** | Jose David | ver abajo | **alta: investigar en Elasticsearch es lo que pidio el profesor, y hoy hay cero agregaciones en el backend** |
+| ~~14~~ | ~~Elasticsearch se llena con cada login y ninguna ruta lo consulta~~ | -- | -- | **CERRADO el 2026-09-18 por Jose David (10b8fe5)**: `fraude-login-retrospectivo.service.ts` y `toma-cuenta.service.ts` hacen agregaciones `terms` y `cardinality` sobre el indice de login |
 | 15 | Los detectores que faltan del fraude del login, y los detalles de los tres que hay | Jose David | ver abajo | media: lo que hay funciona; lo que falta son senales y bordes |
 | ~~16~~ | ~~La copia de logueos a ClickHouse lee `log_login`, que no recibe filas~~ | -- | -- | **CERRADO por decision (2026-09-19)**: ClickHouse ya no maneja registros de login, los lleva Elasticsearch. La copia queda congelada a proposito |
 | ~~17~~ | ~~Medir en vivo lo que se toco despues de la corrida del 2026-09-11~~ | -- | -- | **CERRADO el 2026-09-12.** Medido contra las bases y roto a proposito; los numeros estan en `docs/TRASPASO.md` |
@@ -33,6 +33,8 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | 24 | El estante de mas vendidos tarda hasta 10 minutos en ver un descuento o un precio nuevo | Jose David | ver `BACKEND-PENDIENTE.md` | baja: el catalogo ya lo ensena al momento; solo el estante de la portada va atrasado |
 | 25 | El buscador no sabe si un producto tiene descuento (`hay_descuento` no va al indice) | Jose David | ver `BACKEND-PENDIENTE.md` | baja: los precios del buscador si van con descuento, falta solo la etiqueta |
 | 26 | El historial de precio de una oferta no trae el % de descuento | Jose David | ver `BACKEND-PENDIENTE.md` | baja: "Mis pedidos" lo compensa con el % que guarda la linea |
+| 27 | "Parecidos a este" no pinta nada, falta `GET /productos/:id/similares` | Jose David | ver `BACKEND-PENDIENTE.md` | **alta, es la recomendacion semantica de la Entrega final.** La 024, los vectores y la pantalla estan desde el 2026-09-25 |
+| 28 | El worker de descuentos borra los que nunca tuvieron clave en Redis | Jose David | ver `BACKEND-PENDIENTE.md` | media: la semilla ya la cubre `arrancar.ps1` (paso 5b-2), pero un Redis vaciado borraria todos los descuentos permanentes |
 
 ---
 

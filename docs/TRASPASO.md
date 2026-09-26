@@ -3,7 +3,43 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-23**.
+Ultima actualizacion: **2026-09-25**.
+
+**El 2026-09-24 y 25: lo de David del 24 y 25 conectado, y lo de la Entrega 3 que es de este lado.** Commits nuestros
+b2d3292, 72eea96 y f8f537f, todos pusheados. De David se jalaron ad20dcd, 4e93bba, 99891a8, d1b670b, 6ecd31b y
+31322cb (solo `backend/`). El repo vive desde el 25 en `C:\Proyectos\Proyecto-Tienda-Base-Datos-2`, ya no en
+OneDrive, asi que los avisos de recargas de vite por OneDrive ya no aplican.
+
+```
+Migraciones          022 reglas de descuento por periodo, 023 anillos de fraude familia B, 024 producto_vector
+                     (pgvector, HNSW) y productos_similares(), 025 hallazgos F1 a F6 de ClickHouse. La de casos de
+                     fraude quedo como 026 y sigue en el plan de David
+Descuentos           Pantalla de reglas por periodo, duracion del descuento y avisos de los 409 de exclusion entre
+                     mecanismos. arrancar.ps1 paso 5b-2 crea con NX las claves mesh:oferta:<id>:descuento de la
+                     semilla, porque el worker de David borra cada minuto los descuentos sin clave. Boton Borrar en
+                     las reglas pausadas (DELETE de 31322cb)
+Fraude               Tipos B en el panel y en la campana, pestana "Compras y navegacion" con F1 a F6
+Tendencias           T1 a T3 en Tendencias, R1 y R3 en la portada, R2 en la ficha. "Para ti" vacio cae a
+                     /productos/mas-vistos con el titulo "Lo mas visto"
+Buscador             Facetas en elastic/pruebas/facetas.py (19 OK) y el panel de /buscar, que cae a la busqueda de
+                     siempre con 404. autocompletar() con bool_prefix sobre nombre.escribiendo. Falta la ruta
+Semantica            etl/cargar_vectores.ps1 (paso 7d de arrancar) llena los vectores con Ollama y
+                     paraphrase-multilingual, 3105 en unos 7 minutos. La columna grupo evita recomendar copias del
+                     generador. pruebas/recomendacion_semantica.py 15 OK. La ficha tiene "Parecidos a este", que no
+                     pinta nada hasta que exista la ruta
+Redis                Tres usuarios ACL (default, inspeccion, operador) en docker-compose. El comando va como LISTA,
+                     escrito en linea compose corta en el > de la contrasena. arrancar agrega al .env
+                     REDIS_INSPECCION_PASSWORD y REDIS_OPERADOR_PASSWORD. redis/prueba_acceso.sh 31 OK
+Docs                 DECISION-NEWSQL-PAGOS.md (ADR-8, no migrar, y si hiciera falta YugabyteDB). Diagrama de
+                     arquitectura con los flujos 9 y 10. ER regenerado con las tablas nuevas
+Informe              contenido-entrega3.json, generar-reporte-entrega3.py y medir-paginas-entrega3.ps1 generan
+                     "Reporte Tercera Entrega - DABD2 - Mesh.docx" (15 paginas)
+Demos                demo-patrones-resenas.ps1 (B.1, B.5, B.6) y demo-descuentos-solos.ps1, en el panel de comandos
+Arneses              descuentos, reglas y los seis de las rutas del 24 y 25 en verde. reglas_periodo.sh 61 OK
+Pendiente de David   /productos/:id/similares, /buscador/productos/facetado, /buscador/productos/sugerencias, el
+                     worker que borra descuentos sin clave, la cadena_abierta que sobra en un anillo de 3, R4, B.4,
+                     casos de fraude (026) y reconciliar al arrancar. Todo en BACKEND-PENDIENTE.md
+```
 
 **El 2026-09-23 en la noche: propuesta de patrones de fraude, reglas de alertas y consultas de ClickHouse.** Todo en
 `docs/fraude-entrega3/`, para aprobar. Nada toca `backend/` ni `migrations/`.
@@ -75,7 +111,7 @@ mesh-kibana-vistas   Contenedor de un solo uso (servicio kibana-vistas) que corr
                      docker compose up: espera a Kibana y a los indices, crea las vistas de datos Productos
                      (mesh_productos) y Eventos de autenticacion (mesh_eventos_autenticacion, campo fecha) y
                      deja el rango de Discover en 60 dias. Termina en Exited (0), es lo esperado. Es idempotente.
-                     arrancar.ps1 tiene el paso 9c "Vistas de Kibana" (espera hasta 3 min y muestra su log) y el
+                     arrancar.ps1 tiene el paso 9d "Vistas de Kibana" (espera hasta 3 min y muestra su log) y el
                      resumen final imprime http://localhost:5601. Las vistas viven en el volumen de
                      Elasticsearch: `-Reiniciar` las borra y se recrean solas
 Dos campanas         La general, NotificacionesFraude.svelte, es de todas las cuentas: alertas de login de la

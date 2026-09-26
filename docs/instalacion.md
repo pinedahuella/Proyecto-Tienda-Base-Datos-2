@@ -9,10 +9,20 @@ Como dejar Mesh corriendo en una PC nueva.
 | Node.js | 24 LTS | https://nodejs.org |
 | Docker Desktop | ultima | https://www.docker.com/products/docker-desktop |
 | Git | ultima | https://git-scm.com/downloads |
+| Ollama | ultima, opcional | https://ollama.com |
 
 Nada mas. Ninguna de las seis bases se instala -- ni PostgreSQL, ni MongoDB, ni
 Redis, ni Neo4j, ni Elasticsearch, ni ClickHouse -- y tampoco sus ventanas: los
 once contenedores estan en el `docker-compose.yml` y Docker los baja solos.
+
+Ollama es lo unico que corre fuera de Docker. Calcula los vectores de la
+recomendacion semantica ("Parecidos a este" en la ficha). Sin el, todo lo demas
+funciona y `arrancar.ps1` solo avisa. Despues de instalarlo hay que bajar el
+modelo una vez (pesa unos 560 MB):
+
+```powershell
+ollama pull paraphrase-multilingual
+```
 
 Si la PC ya tiene PostgreSQL instalado, hay que detener su servicio antes de
 empezar. Usa el puerto 5432 y se pelea con el contenedor. En PowerShell como
@@ -244,9 +254,24 @@ efimeras a proposito:
   antes de descontar.
 
 **Lleva contrasena aunque sea local**, y no es ceremonia: Redis sin
-`requirepass` acepta a cualquiera que alcance el puerto, y el 6379 es de los mas
-barridos que hay. La contrasena sale de `REDIS_PASSWORD` del `.env`, como las
-otras tres.
+contrasena acepta a cualquiera que alcance el puerto, y el 6379 es de los mas
+barridos que hay.
+
+Desde el 2026-09-25 no es una contrasena sola sino **tres usuarios de ACL**,
+declarados en el `command` de Redis en `docker-compose.yml`:
+
+| Usuario | Quien lo usa | Contrasena en el `.env` | Puede |
+|---|---|---|---|
+| `default` | el backend y los arneses | `REDIS_PASSWORD` | todo menos los comandos peligrosos (`FLUSHALL`, `CONFIG`, `ACL`, `SHUTDOWN`, `DEBUG`) |
+| `inspeccion` | RedisInsight | `REDIS_INSPECCION_PASSWORD` | solo leer: claves, TTL, `SCAN`, `INFO` |
+| `operador` | mantenimiento a mano | `REDIS_OPERADOR_PASSWORD` | todo |
+
+Como `default` sigue siendo el usuario por defecto, todo lo que antes entraba
+con `-a $REDIS_PASSWORD` entra igual. Si faltan las otras dos contrasenas en el
+`.env`, `arrancar.ps1` las agrega solo con un valor al azar. El `command` va
+escrito como LISTA a proposito: en una sola linea, Compose corta la contrasena
+en el `>` que la precede. La prueba es `bash redis/prueba_acceso.sh` y el detalle
+esta en la seccion 4b de [redis/README.md](../redis/README.md).
 
 ```bash
 docker exec mesh-redis redis-cli -a $REDIS_PASSWORD --no-auth-warning PING
@@ -260,15 +285,14 @@ comando; sin el funciona igual.
 que Redis este sano y nada mas: no hay migraciones ni ETL que correr, porque el
 carrito y los contadores son datos de la sesion, no un conjunto que se siembre.
 
-Los dos scripts Lua los tiene que cargar el backend al arrancar, y en CADA
-arranque suyo: un `SCRIPT LOAD` se pierde con cada reinicio de Redis. Hoy
-**todavia no lo hace** -- `grep -ril redis backend/src` no devuelve nada -- y esta
-en la lista de lo que falta enchufar, en la seccion 5 de `redis/README.md`. Se
-cargan por la entrada estandar, sin montar nada:
+El backend carga `redis/inventario_limitado.lua` solo, con `defineCommand` de
+ioredis (`inventario-limitado.service.ts`): si Redis se reinicio y contesta
+`NOSCRIPT`, reenvia el script y sigue. El carrito ya no usa Lua; desde el
+2026-09-23 es un HASH con una foto en JSON por linea, y `redis/carrito.lua` queda
+solo para su arnes. Para probar el script a mano, sin el backend:
 
 ```bash
-docker exec -i mesh-redis redis-cli -a $REDIS_PASSWORD --no-auth-warning \
-  -x SCRIPT LOAD < redis/inventario_limitado.lua
+docker exec -i mesh-redis redis-cli -a $REDIS_PASSWORD --no-auth-warning   -x SCRIPT LOAD < redis/inventario_limitado.lua
 ```
 
 Ojo con lo que eso implica: **un arranque en verde NO prueba que la capa de Redis
@@ -284,8 +308,9 @@ El detalle esta en [redis/README.md](../redis/README.md).
 ## RedisInsight: la ventana de Redis
 
 Redis no trae ninguna de fabrica -- `redis-cli` es todo lo que hay. RedisInsight
-es lo que pgAdmin es para PostgreSQL: http://localhost:5540, sin usuario ni
-contrasena.
+es lo que pgAdmin es para PostgreSQL: http://localhost:5540. La pagina no pide
+usuario, y por dentro se conecta a Redis como `inspeccion`, el usuario de solo
+lectura: mirar el TTL de un carrito no necesita poder borrarlo.
 
 **Se eligio esta y no una conexion de Redis en dbgate (que tambien sabe) por una
 razon concreta de la entrega:** RedisInsight ensena el TTL de cada clave y lo
@@ -393,7 +418,7 @@ y **Eventos de autenticacion** (`mesh_eventos_autenticacion`, con el campo de fe
 `Exited (0)`, que es lo esperado, y se puede repetir sin miedo: una vista que ya
 existe no se duplica.
 
-`arrancar.ps1` tiene el paso 9c, "Vistas de Kibana", que espera hasta 3 minutos a
+`arrancar.ps1` tiene el paso 9d, "Vistas de Kibana", que espera hasta 3 minutos a
 ese contenedor y muestra su log. Las vistas viven en el volumen de Elasticsearch y
 no en el repositorio, asi que `.\arrancar.ps1 -Reiniciar` las borra y se recrean
 solas.
@@ -406,8 +431,9 @@ solas.
 | pgAdmin | http://localhost:5050 | `PGADMIN_EMAIL` del .env | `PGADMIN_PASSWORD` del .env |
 | MongoDB | `localhost:27018`, base `mesh` | `MONGO_USER` del .env | `MONGO_PASSWORD` del .env |
 | DbGate | http://localhost:3001 | sin usuario ni contrasena | |
-| Redis | `localhost:6379` | no lleva usuario (`requirepass`) | `REDIS_PASSWORD` del .env |
-| RedisInsight | http://localhost:5540 | sin usuario ni contrasena | |
+| Redis | `localhost:6379` | `default` (se puede omitir), `inspeccion` u `operador` | `REDIS_PASSWORD`, `REDIS_INSPECCION_PASSWORD` o `REDIS_OPERADOR_PASSWORD` del .env |
+| RedisInsight | http://localhost:5540 | la pagina no pide nada; entra a Redis como `inspeccion` | |
+| Ollama | `localhost:11434`, en el anfitrion | sin usuario ni contrasena | |
 | Neo4j | http://localhost:7474 y bolt `localhost:7687` | `neo4j`, fijo | `NEO4J_PASSWORD` del .env |
 | Elasticsearch | `localhost:9200` | sin usuario ni contrasena, solo en local | |
 | Kibana | http://localhost:5601 | sin usuario ni contrasena, solo desde esta maquina | |
@@ -418,8 +444,8 @@ Las dos variables que agrego la Entrega 2 al `.env` son **`REDIS_PASSWORD`** y
 tiene que agregarlas a mano, o Compose se detiene con "falta REDIS_PASSWORD en
 .env" en vez de arrancar con valores en blanco.
 
-Redis **no tiene usuario**: `requirepass` es una contrasena sola, sin nombre
-delante. Neo4j si lo tiene y no se puede cambiar: en la edicion community es
+Redis tiene tres usuarios (ver "Redis" arriba), pero `default` se puede omitir:
+`redis-cli -a $REDIS_PASSWORD` entra con el. Neo4j si lo tiene y no se puede cambiar: en la edicion community es
 siempre `neo4j`, y por eso el `.env` solo pide la contrasena.
 
 **Ninguna contrasena de servicio esta escrita en el repositorio.** Todas viven
