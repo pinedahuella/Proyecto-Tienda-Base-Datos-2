@@ -364,6 +364,19 @@ precio_historial lo anota a nombre de tienda@mesh.com. Al final borra la regla, 
 las ofertas y borra de ClickHouse las ventas y carritos del comprador. Quedan las
 cuentas y los pedidos en PostgreSQL. Es el grupo Demo de descuentos del panel.
 
+Las Demos de la Entrega final:
+
+  .\demo-entrega-final.ps1 -Parte acceso                      los tres usuarios de Redis
+  .\demo-entrega-final.ps1 -Parte semantica -Producto laptop  los parecidos, en la base y por /similares
+  .\demo-entrega-final.ps1 -Parte facetas -Texto laptop       facetas, palabra mal escrita y sugerencias
+  .\demo-entrega-final.ps1 -Parte vectores                    vectores, pendientes del worker y Ollama
+  .\demo-entrega-final.ps1 -Parte rastro -Texto laptop        la fila de ClickHouse de una busqueda con filtros
+
+Cada parte habla primero directo con su base y al final pide lo mismo a la ruta del
+backend. Con el backend apagado ese ultimo paso solo avisa, salvo rastro, que lo
+necesita. rastro escribe una sola fila en ClickHouse y la borra al terminar. Es el grupo
+Demos de la Entrega final del panel.
+
 
 ENTRAR A POSTGRES POR TERMINAL
 --------------------------------------------------

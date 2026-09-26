@@ -233,7 +233,10 @@
      },
      {
       "p": "El índice HNSW recorre un grafo de vecinos y no compara contra todo el catálogo. Por defecto solo mira 40 candidatos, y con los filtros de activo y de grupo podían quedar menos de los pedidos, así que la función sube ese número a 200 solo mientras corre. Después elige el mejor de cada grupo y corta en el límite pedido."
-     }
+     },
+     {"p": "Al revisar el plan encontramos que la primera versión de la función nunca usaba el índice. Comparaba contra el vector base con un JOIN, y un índice HNSW solo sirve para ordenar por distancia a un vector ya conocido. La migración 027 lee primero ese vector y ordena por distancia a él. Aun así, el planificador estimaba que recorrer la tabla salía más barato, y lo medimos sobre los 3103 productos activos."},
+     {"tabla": {"cabecera": ["Camino", "Tiempo total", "Por producto", "Los seis iguales a la búsqueda exacta"], "filas": [["Comparar contra todos", "100 s", "32 ms", "Es la búsqueda exacta"], ["Índice HNSW", "11,7 s", "3,8 ms", "3099 de 3103 productos"]], "anchos": [1.9, 1.1, 1.1, 2.2], "leyenda": "Medición del 26 de septiembre sobre la misma base. En los cuatro casos distintos cambia un solo producto de los seis."}},
+     {"p": "La estimación estaba mal por un factor de ocho, así que la función fija enable_seqscan en off solo mientras corre. No toca ninguna otra consulta y no prohíbe recorrer la tabla, solo la encarece para que el planificador prefiera el índice. La demo enseña el plan de adentro de la función con auto_explain, y ahí aparece el índice idx_producto_vector_hnsw."}
     ]
    },
    {

@@ -887,14 +887,14 @@ El panel es una sola pantalla con pestañas para el admin y cada pestaña llama 
 - Por qué así. Cada pestaña usa la base que mejor contesta su pregunta, y el navegador nunca sabe de cuál sale el dato porque toda respuesta trae ok, mensaje y payload.
 
 ### 108. ¿Dónde está el diagrama de arquitectura final y cómo se generó?
-Está en docs/diagrama-arquitectura.drawio con su PNG. Dibuja los seis motores, lo que hace el backend con cada uno y ocho rutas de datos entre motores. Lo genera un script de Python que al final comprueba que cada flecha nombre cajas que existen. No trae una caja vectorial porque ese componente no existe todavía.
+Está en docs/diagrama-arquitectura.drawio con su PNG. Dibuja los seis motores, lo que hace el backend con cada uno y ocho rutas de datos entre motores. Lo genera un script de Python que al final comprueba que cada flecha nombre cajas que existen. Desde la Entrega final dibuja también los vectores de productos en PostgreSQL y la ruta 11, que lleva el texto de MongoDB a Ollama y el vector a `producto_vector`.
 
 - Dónde se ve. `docs/generar-arquitectura.py` lineas 1 a 18. `docs/ARQUITECTURA.md` lineas 3 a 14. El diagrama entidad relación es otro archivo, `docs/diagrama-general.drawio`, que dibuja `docs/generar-er.py` leyendo la base viva, lineas 1 a 19.
 - Lo que pide el profesor. Entrega final, diagrama de arquitectura completo y correcto (3 pts). Las entregas 2 y 3 también piden actualizarlo.
 - Por qué así. El ER se genera de la base porque el dibujado a mano se quedó en 42 cajas cuando ya había 50 tablas.
 
 ### 109. ¿Dónde está el registro de decisiones arquitectónicas y qué estructura tiene?
-Está repartido en docs. base-de-datos.md trae cinco ADR sobre catálogo, ofertas, imágenes, proponente y lo social. DECISION-GRAFOS-VS-COLUMNAR.md sigue los campos que pide el enunciado y además dice cuándo estaría justificada la alternativa no elegida. La consistencia del checkout tiene su propio documento. No hay ADR escrito para el control de acceso ni para el componente vectorial.
+Está repartido en docs. base-de-datos.md trae cinco ADR sobre catálogo, ofertas, imágenes, proponente y lo social. DECISION-GRAFOS-VS-COLUMNAR.md sigue los campos que pide el enunciado y además dice cuándo estaría justificada la alternativa no elegida. La consistencia del checkout tiene su propio documento. DECISION-NEWSQL-PAGOS.md es el ADR-8, no migrar los pagos a una NewSQL. Los de la Entrega final están en el informe, el ADR-10 de pgvector en la sección 2.1 y el ADR-11 del control de acceso en Redis en la 3.1.
 
 - Dónde se ve. `docs/base-de-datos.md` lineas 561, 571, 581, 591 y 990, encabezados de ADR-1 a ADR-5. `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 14 (contexto), 66 (alternativas) y 256 (consecuencias). `docs/CONSISTENCIA-CHECKOUT.md` linea 122, los puntos de falla.
 - Lo que pide el profesor. Sección 5.3, un registro breve con contexto, alternativas (al menos dos, incluida no cambiar), decisión, justificación y consecuencias.
@@ -949,26 +949,26 @@ El equipo es de tres y cada uno tiene su área. Uno lleva el frontend, los datos
 
 *Entrega final.*
 
-Estas preguntas piden cosas de la entrega final. Cada respuesta dice con claridad qué existe hoy y dónde.
+Estas preguntas piden cosas de la entrega final. Cada respuesta dice con claridad qué existe hoy y dónde. Puestas al día el 26 de septiembre.
 
 ### 116. ¿Hay roles y permisos acotados por servicio en algún componente NoSQL, y hay evidencia de que un usuario sin permisos sea rechazado?
-Hoy no. Todas las conexiones del backend usan una sola cuenta con todos los permisos, el root de MongoDB, la contraseña única de Redis y el usuario de ClickHouse. Hay autenticación pero no se crearon roles con alcance limitado ni existe una prueba de un usuario rechazado. La documentación lo reconoce tal cual.
+Sí, en Redis. Hay tres usuarios de ACL, cada uno con lo justo. `default` es el del backend, trabaja con datos y corre el Lua de la venta relámpago, pero no puede vaciar, configurar ni listar con KEYS. `inspeccion` es el de RedisInsight y solo lee. `operador` es para mantenimiento a mano y puede todo. La evidencia es una prueba que intenta lo prohibido con cada usuario y ve el NOPERM. Lo que borraría algo no se ejecuta, se le pregunta antes a Redis con ACL DRYRUN.
 
-- Dónde se ve. `docs/ARQUITECTURA.md` lineas 238 a 240, donde dice que el control de acceso no está configurado más allá del usuario y contraseña de arranque. `docker-compose.yml` lineas 397 a 402, ClickHouse crea su usuario con permiso de administrar accesos. `clickhouse/users.d/limites-consulta.xml` lineas 28 a 43 solo pone un tope de memoria por consulta.
+- Dónde se ve. `docker-compose.yml` lineas 121 a 170, los tres usuarios con sus reglas, y 213, RedisInsight entrando como inspeccion. `redis/prueba_acceso.sh`, 31 OK, con el ACL DRYRUN en las lineas 53 a 63. En vivo, `.\demo-entrega-final.ps1 -Parte acceso` o el botón Quien puede que en Redis del panel de comandos. El ADR-11 está en el informe, sección 3.1.
 - Lo que pide el profesor. Entrega final, roles y permisos acotados según el servicio, con evidencia de que quien no tiene permiso no puede operar fuera de su alcance (4 pts).
-- Por qué así. Lo que sí funciona hoy es la autorización por rol en la API, con 401 y 403, en `backend/src/guards/sesion.guard.ts` lineas 41 a 98. Esa se aplica en el backend y no dentro de la base.
+- Por qué así. Redis es el que guarda lo más delicado en caliente, el carrito, los contadores de fraude y los descuentos con su TTL, y un FLUSHALL por error se lleva todo eso. Además sigue la autorización por rol en la API, con 401 y 403, en `backend/src/guards/sesion.guard.ts` lineas 41 a 98.
 
 ### 117. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
-No está implementado. Solo existe la imagen de PostgreSQL con pgvector ya incluida en el compose. No hay migración que cree la extensión, ni columna de embeddings, ni ruta del backend, ni pantalla de recomendaciones. La documentación solo anota que la imagen se eligió para no tener que cambiarla después.
+Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector y un índice HNSW. `productos_similares()` devuelve los seis más cercanos por distancia coseno, sin el propio producto, sin inactivos y sin copias del generador. El backend trae esos ids y pide a MongoDB cómo se ven. Los 3105 productos tienen vector.
 
-- Dónde se ve. `docker-compose.yml` linea 8, imagen pgvector de PostgreSQL 18. `docs/ARQUITECTURA.md` lineas 272 a 276 y `docs/GUIA-PRESENTACION.txt` lineas 956 a 957, donde se explica por qué la imagen es pgvector.
+- Dónde se ve. `migrations/024_vectores_productos.sql` lineas 58 (la tabla), 77 (el índice HNSW) y 85 (la función). `migrations/027_similares_con_indice.sql`, la función reescrita para que use el índice, con la medición en su cabecera. `etl/cargar_vectores.ps1`, paso 7d de arrancar. `backend/src/services/productos/similares.service.ts` linea 37, la ruta `GET /productos/:id/similares`, y `vectores-sync.service.ts`, que recalcula cada 3 horas los productos editados. `frontend/src/routes/producto/[id]/+page.svelte` linea 179. `pruebas/recomendacion_semantica.py`, 15 OK. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`.
 - Lo que pide el profesor. Entrega final, recomendación por similitud semántica de la descripción con representaciones vectoriales (5 pts). La sección 5.2 da como referencia una extensión vectorial sobre PostgreSQL.
-- Por qué así. La imagen trae la extensión incluida, así que crearla no exige cambiar de contenedor. Con eso solo está la base preparada.
+- Por qué así. pgvector vive en el PostgreSQL que ya estaba, así que no hubo otro motor ni otra copia de los ids. Ojo si preguntan por el índice. La primera versión de la función nunca lo usaba, porque comparaba con un JOIN y el HNSW solo ordena por distancia a un vector fijo. La 027 lo arregla, y medido sobre los 3103 activos el índice tarda 3,8 ms por producto contra 32 ms de recorrer todo, con los mismos seis en 3099 de 3103.
 
 ### 118. ¿Qué decisiones de arquitectura se sostendrían y cuáles se replantearían? (retrospectiva)
-No hay un documento de retrospectiva en el repositorio. Lo que sí hay son piezas escritas en ARQUITECTURA.md. Ahí se explica que se rechazó la base columnar Cassandra el 3 de septiembre con dos números medidos y que el 6 de septiembre entró ClickHouse porque el dato cambió. También lista lo que el diagrama no esconde, como dos repartidores de id de producto que no se hablan y que todo corre en una sola máquina.
+Está en el capítulo 5 del informe de la Entrega final. Son siete decisiones que sostendríamos, entre ellas el dinero y el stock en PostgreSQL sin migrar a NewSQL, el catálogo en MongoDB, Elasticsearch como copia reconstruible y pgvector sobre el mismo PostgreSQL. Y seis que replantearíamos, cada una con lo que pasó y lo que haríamos distinto. Un ejemplo que sirve para contarlo es la base columnar, que se rechazó el 3 de septiembre con dos números medidos y entró el 6 como ClickHouse porque el dato cambió.
 
-- Dónde se ve. `docs/ARQUITECTURA.md` lineas 143 a 156 (la columnar y el cambio) y 219 a 234 (lo que el diagrama no esconde). `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 256, consecuencias.
+- Dónde se ve. `Reporte Entrega Final - DABD2 - Mesh.docx`, capítulo 5, que sale de `contenido-entrega-final.json`. `docs/ARQUITECTURA.md` lineas 143 a 156 (la columnar y el cambio) y 219 a 234 (lo que el diagrama no esconde). `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 256, consecuencias.
 - Lo que pide el profesor. Entrega final, documento de retrospectiva con las decisiones que se sostendrían y las que se replantearían, justificadas en ambos casos (4 pts).
 - Por qué así. El cambio de la columnar muestra el criterio, la decisión se sostuvo con números y se revisó cuando el volumen de eventos cambió.
 

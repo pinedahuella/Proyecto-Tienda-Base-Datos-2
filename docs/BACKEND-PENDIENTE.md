@@ -34,6 +34,18 @@ hizo de este lado al jalar:
 Nada de esto toco `backend/`. Sigue abierto lo de la fila 28 (el worker de
 descuentos); lo del arranque de `RegistroOfertasSyncService` es otra cosa.
 
+Probado en vivo el mismo 26. Dos cosas para ti, ninguna urgente:
+
+- **`resultados` guarda los que se mostraron, no el total.** En el facetado,
+  `registrarBusqueda` recibe `resultado.resultados.length`, que es el `limite`.
+  Una busqueda de laptop con 203 resultados y `limite=5` queda con
+  `resultados = 5`. Para "busquedas sin resultados" da igual, porque 0 sigue
+  siendo 0, pero cualquier promedio de resultados sale mal. En el facetado
+  ya tienes `resultado.total` a mano.
+- **`productos_similares()` cambio por dentro (migracion 027).** Misma firma y
+  misma forma de respuesta, tu `SimilaresService` no cambia. Ahora usa el
+  indice HNSW; la de la 024 nunca lo usaba.
+
 ---
 
 ## LO NUEVO DEL 2026-09-25 EN LA NOCHE: productos parecidos por descripcion

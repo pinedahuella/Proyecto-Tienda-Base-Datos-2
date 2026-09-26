@@ -93,6 +93,7 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `023_anillos_fraude_familia_b.sql` | los tipos 4 a 10 de `tipo_anillo_fraude` (patrones B.1 a B.7) y la unicidad de `anillo_fraude` pasa de `clave` a `(id_tipo_anillo_fraude, clave)` |
 | `024_vectores_productos.sql` | la extension `vector`, la tabla `producto_vector` con indice HNSW y la funcion `productos_similares()`, para la recomendacion semantica de la Entrega final. La llena `etl/cargar_vectores.ps1` con Ollama. La columna `grupo` evita recomendar las copias que hace el generador de un mismo producto. Prueba, `python pruebas/recomendacion_semantica.py`, 15 OK |
 | `025_hallazgos_evento_fraude.sql` | `tipo_hallazgo_evento` (ids 1 a 6 = F1 a F6), `hallazgo_evento_fraude` y su pivote de cuentas `hallazgo_evento_fraude_cuenta`, donde guarda el detector diario de fraude sobre eventos de ClickHouse. Copia del SQL de referencia del companero con candado de ids |
+| `027_similares_con_indice.sql` | reescribe `productos_similares()` para que use el indice HNSW. La de la 024 comparaba con un JOIN y el indice no le servia; recorria las 3105 filas. Medido sobre los 3103 activos, 3,8 ms por producto contra 32 ms, y los mismos seis en 3099 de 3103. Lleva `enable_seqscan = off` solo mientras corre porque el planificador estimaba mal. La 026 sigue reservada para los casos de fraude |
 
 De la 011 a la 015 son de la Entrega 2, la 016 a la 023 de la Entrega 3, la 024 de la Entrega final, la 025 otra vez de la Entrega 3, y merecen una
 linea mas de la que caben en la tabla.
