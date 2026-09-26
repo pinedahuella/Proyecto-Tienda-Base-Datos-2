@@ -9,20 +9,29 @@ Como dejar Mesh corriendo en una PC nueva.
 | Node.js | 24 LTS | https://nodejs.org |
 | Docker Desktop | ultima | https://www.docker.com/products/docker-desktop |
 | Git | ultima | https://git-scm.com/downloads |
-| Ollama | ultima, opcional | https://ollama.com |
 
 Nada mas. Ninguna de las seis bases se instala -- ni PostgreSQL, ni MongoDB, ni
 Redis, ni Neo4j, ni Elasticsearch, ni ClickHouse -- y tampoco sus ventanas: los
 once contenedores estan en el `docker-compose.yml` y Docker los baja solos.
 
-Ollama es lo unico que corre fuera de Docker. Calcula los vectores de la
-recomendacion semantica ("Parecidos a este" en la ficha). Sin el, todo lo demas
-funciona y `arrancar.ps1` solo avisa. Despues de instalarlo hay que bajar el
-modelo una vez (pesa unos 560 MB):
+Tampoco hace falta instalar Ollama, que calcula los vectores de la
+recomendacion semantica ("Parecidos a este" en la ficha). `arrancar.ps1` (paso
+7d, por `etl/cargar_vectores.ps1`) lo resuelve solo, en este orden:
 
-```powershell
-ollama pull paraphrase-multilingual
-```
+1. Si la PC ya tiene Ollama y responde en `localhost:11434`, usa ese.
+2. Si esta instalado pero apagado, lo enciende oculto con `ollama serve`.
+3. Si la PC no lo tiene, levanta el contenedor `mesh-ollama` del compose, en
+   `localhost:11435`. Va en el perfil `ollama`, asi que un `docker compose up -d`
+   normal no lo arranca.
+
+En los tres casos, si falta el modelo `paraphrase-multilingual` (unos 560 MB) lo
+baja solo. La primera vez en una PC sin nada baja tambien la imagen de Ollama y
+calcula los 3105 vectores en la CPU: son varios minutos, una sola vez. Despues
+solo se calcula lo que cambio. El modelo del contenedor vive en el volumen
+externo `mesh-ollama-modelos`, que `-Reiniciar` no borra.
+
+Si nada de eso funciona (por ejemplo, sin internet la primera vez), el arranque
+sigue: la tienda funciona entera y solo falta el estante de productos parecidos.
 
 Si la PC ya tiene PostgreSQL instalado, hay que detener su servicio antes de
 empezar. Usa el puerto 5432 y se pelea con el contenedor. En PowerShell como
@@ -184,10 +193,12 @@ y llevan la misma version a proposito.
 Apagar todo:
 
 ```bash
-docker compose down
+docker compose --profile ollama down
 ```
 
-Con `-v` ademas borra los datos de la base.
+Con `-v` ademas borra los datos de la base. El `--profile ollama` es para que
+tambien apague `mesh-ollama` si se levanto; sin el, ese contenedor se queda
+prendido. El volumen del modelo es externo y no lo borra ni `-v`.
 
 **Cuatro carpetas del repositorio van montadas dentro de su contenedor**, para
 poder correr los scripts sin copiarlos a mano:
@@ -433,7 +444,7 @@ solas.
 | DbGate | http://localhost:3001 | sin usuario ni contrasena | |
 | Redis | `localhost:6379` | `default` (se puede omitir), `inspeccion` u `operador` | `REDIS_PASSWORD`, `REDIS_INSPECCION_PASSWORD` o `REDIS_OPERADOR_PASSWORD` del .env |
 | RedisInsight | http://localhost:5540 | la pagina no pide nada; entra a Redis como `inspeccion` | |
-| Ollama | `localhost:11434`, en el anfitrion | sin usuario ni contrasena | |
+| Ollama | `localhost:11434` el de la PC, o `localhost:11435` el contenedor `mesh-ollama` | sin usuario ni contrasena | |
 | Neo4j | http://localhost:7474 y bolt `localhost:7687` | `neo4j`, fijo | `NEO4J_PASSWORD` del .env |
 | Elasticsearch | `localhost:9200` | sin usuario ni contrasena, solo en local | |
 | Kibana | http://localhost:5601 | sin usuario ni contrasena, solo desde esta maquina | |

@@ -27,6 +27,10 @@ Semantica            etl/cargar_vectores.ps1 (paso 7d de arrancar) llena los vec
                      paraphrase-multilingual, 3105 en unos 7 minutos. La columna grupo evita recomendar copias del
                      generador. pruebas/recomendacion_semantica.py 15 OK. La ficha tiene "Parecidos a este", que no
                      pinta nada hasta que exista la ruta
+Ollama               Nadie lo instala a mano. cargar_vectores usa el de la PC (localhost:11434, y lo enciende si esta
+                     apagado), y si no hay levanta mesh-ollama, perfil ollama del compose, en el 11435. El modelo se
+                     baja solo. Su volumen mesh-ollama-modelos es externo y -Reiniciar no lo borra. Apagar todo es
+                     docker compose --profile ollama down
 Redis                Tres usuarios ACL (default, inspeccion, operador) en docker-compose. El comando va como LISTA,
                      escrito en linea compose corta en el > de la contrasena. arrancar agrega al .env
                      REDIS_INSPECCION_PASSWORD y REDIS_OPERADOR_PASSWORD. redis/prueba_acceso.sh 31 OK

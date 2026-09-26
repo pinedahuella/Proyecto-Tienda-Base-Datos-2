@@ -921,7 +921,10 @@ Ok "Docker listo"
 # ------------------------------------------------------------
 if ($Reiniciar) {
     Paso "Borrando datos anteriores"
-    docker compose down -v 2>&1 | Out-Null
+    # Con el perfil ollama para que tambien se lleve el contenedor mesh-ollama,
+    # si lo hay. Su volumen de modelos es externo y NO se borra: el modelo no
+    # es un dato de la tienda y bajarlo otra vez son 560 MB.
+    docker compose --profile ollama down -v 2>&1 | Out-Null
     Ok "Volumenes eliminados"
 }
 
@@ -933,6 +936,9 @@ if ($ReiniciarMongo) {
 }
 
 Paso "Levantando contenedores"
+# El volumen externo de mesh-ollama tiene que existir antes de cualquier
+# "compose up", aunque ese contenedor no se levante aqui (ver el paso 7d).
+docker volume create mesh-ollama-modelos 2>&1 | Out-Null
 docker compose up -d 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
     Error1 "Fallo docker compose up. Corre el comando a mano para ver el error."
@@ -2788,9 +2794,15 @@ if ($proximoId -notmatch '^\d+$') {
 # 7d. Los vectores de la recomendacion semantica
 # ------------------------------------------------------------
 # Va despues del catalogo porque lee de MongoDB y escribe en la tabla de la
-# migracion 024. Los calcula Ollama, que corre en el anfitrion y no en Docker,
-# con el modelo paraphrase-multilingual. Solo se calcula lo que falta o cambio,
-# asi que en un arranque normal tarda un par de segundos.
+# migracion 024. Los calcula Ollama con el modelo paraphrase-multilingual. Solo
+# se calcula lo que falta o cambio, asi que en un arranque normal tarda un par
+# de segundos.
+#
+# Nadie instala Ollama a mano. cargar_vectores.ps1 usa el de esta PC si lo
+# tiene (y lo enciende si esta apagado), y si no levanta el contenedor
+# mesh-ollama del compose. El modelo lo baja solo la primera vez. En una PC sin
+# nada, la primera corrida baja la imagen y el modelo y calcula los 3105
+# vectores en la CPU: son varios minutos, una sola vez.
 #
 # NO corta el arranque, igual que ClickHouse y Elasticsearch. Sin Ollama la
 # tienda funciona entera y solo falta el estante de productos parecidos. Pero
@@ -2801,7 +2813,8 @@ switch ($LASTEXITCODE) {
     0 { }
     2 {
         Aviso "Sin Ollama no hay productos parecidos en la ficha. El resto funciona."
-        Aviso "   Se instala desde https://ollama.com y despues:  ollama pull paraphrase-multilingual"
+        Aviso "   No hubo Ollama ni en esta PC ni en Docker. El motivo esta justo arriba."
+        Aviso "   Se reintenta solo con  .\etl\cargar_vectores.ps1"
     }
     default { Error1 "Los vectores no quedaron completos. Se puede reintentar con  .\etl\cargar_vectores.ps1" }
 }

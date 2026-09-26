@@ -8,8 +8,9 @@
 #
 # De donde sale cada cosa
 #   el texto     MongoDB, coleccion productos, nombre + categoria + descripcion
-#   el vector    Ollama en el anfitrion (OLLAMA_URL, por defecto localhost:11434),
-#                modelo paraphrase-multilingual, 768 dimensiones
+#   el vector    Ollama, modelo paraphrase-multilingual, 768 dimensiones. El de
+#                la PC si lo tiene (localhost:11434) y si no el contenedor
+#                mesh-ollama (localhost:11435). Ver el paso 1
 #   el destino   PostgreSQL, producto_vector
 #
 # Solo recalcula un producto si no tiene vector o si su texto cambio. Para
@@ -18,7 +19,8 @@
 #
 # Codigos de salida
 #   0  todo el catalogo tiene vector
-#   2  Ollama no responde o no tiene el modelo. No se toco nada
+#   2  no se consiguio un Ollama con el modelo, ni el de la PC ni el de Docker.
+#      No se toco nada
 #   1  cualquier otro fallo
 #
 # Nada de tuberias hacia docker exec. PowerShell 5.1 les mete un BOM que rompe
@@ -52,16 +54,106 @@ function Psql($sql) {
     return $salida
 }
 
-# 1. Ollama y el modelo, antes de tocar nada
-try {
-    $tags = Invoke-RestMethod -Uri "$ollama/api/tags" -TimeoutSec 5
-} catch {
-    Write-Host "   Ollama no responde en $ollama" -ForegroundColor Yellow
-    exit 2
+# 1. Un Ollama con el modelo, antes de tocar nada
+#
+# Nadie tiene que instalar nada a mano. En este orden
+#   a. OLLAMA_URL del .env, si alguien la puso. Manda y no se busca otro
+#   b. el Ollama de esta PC, en localhost:11434. Si esta instalado pero
+#      apagado, se enciende oculto con "ollama serve"
+#   c. si la PC no tiene Ollama, el contenedor mesh-ollama del compose (perfil
+#      ollama, puerto 11435). La primera vez baja la imagen
+# En los tres casos, si falta el modelo se baja solo, una vez.
+#
+# Los docker de aqui van con $ErrorActionPreference en Continue. Con Stop,
+# PowerShell 5.1 toma como error cualquier linea de stderr, y docker compose
+# escribe ahi su progreso aunque todo salga bien.
+function Responde($url) {
+    try { Invoke-RestMethod -Uri "$url/api/tags" -TimeoutSec 5 | Out-Null; return $true } catch { return $false }
 }
-if (-not ($tags.models | Where-Object { $_.name -like "$modelo*" })) {
-    Write-Host "   Ollama no tiene el modelo $modelo. Se instala con  ollama pull $modelo" -ForegroundColor Yellow
-    exit 2
+function Esperar($url, $segundos) {
+    $hasta = (Get-Date).AddSeconds($segundos)
+    while ((Get-Date) -lt $hasta) {
+        if (Responde $url) { return $true }
+        Start-Sleep -Seconds 2
+    }
+    return $false
+}
+function OllamaDeLaPc {
+    $c = Get-Command ollama -ErrorAction SilentlyContinue
+    if ($c) { return $c.Source }
+    foreach ($r in @("$env:LOCALAPPDATA\Programs\Ollama\ollama.exe", "$env:ProgramFiles\Ollama\ollama.exe")) {
+        if (Test-Path $r) { return $r }
+    }
+    return $null
+}
+
+$exe = $null
+$enDocker = $false
+if ($env_['OLLAMA_URL']) {
+    if (-not (Responde $ollama)) {
+        Write-Host "   Ollama no responde en $ollama (OLLAMA_URL del .env)" -ForegroundColor Yellow
+        exit 2
+    }
+    Write-Host "   Ollama de OLLAMA_URL, $ollama"
+} else {
+    $exe = OllamaDeLaPc
+    if (Responde $ollama) {
+        Write-Host "   Ollama de esta PC, $ollama"
+    } elseif ($exe) {
+        Write-Host "   Ollama esta instalado en esta PC pero apagado. Lo enciendo"
+        Start-Process -FilePath $exe -ArgumentList 'serve' -WindowStyle Hidden
+        if (-not (Esperar $ollama 30)) {
+            Write-Host "   Ollama de esta PC no respondio en 30 s ($exe)" -ForegroundColor Yellow
+            exit 2
+        }
+        Write-Host "   Ollama de esta PC, $ollama"
+    } else {
+        $ollama = 'http://localhost:11435'
+        $enDocker = $true
+        Write-Host "   Esta PC no tiene Ollama. Uso el contenedor mesh-ollama, $ollama"
+        if (-not (Responde $ollama)) {
+            Write-Host "   Levantando mesh-ollama. La primera vez baja la imagen y tarda unos minutos"
+            $ErrorActionPreference = 'Continue'
+            docker volume create mesh-ollama-modelos 2>&1 | Out-Null
+            $salida = docker compose -f (Join-Path $raiz 'docker-compose.yml') --profile ollama up -d ollama 2>&1
+            $codigo = $LASTEXITCODE
+            $ErrorActionPreference = 'Stop'
+            if ($codigo -ne 0) {
+                Write-Host "   No se pudo levantar mesh-ollama. $(($salida | Select-Object -Last 3) -join ' ')" -ForegroundColor Yellow
+                exit 2
+            }
+            if (-not (Esperar $ollama 90)) {
+                Write-Host "   mesh-ollama no respondio en 90 s. Ver  docker logs mesh-ollama" -ForegroundColor Yellow
+                exit 2
+            }
+        }
+    }
+}
+
+function TieneModelo {
+    $t = Invoke-RestMethod -Uri "$ollama/api/tags" -TimeoutSec 10
+    return [bool]($t.models | Where-Object { $_.name -like "$modelo*" })
+}
+if (-not (TieneModelo)) {
+    Write-Host "   Bajando el modelo $modelo, unos 560 MB. Solo la primera vez"
+    $ErrorActionPreference = 'Continue'
+    if ($enDocker) {
+        docker exec mesh-ollama ollama pull $modelo
+    } elseif ($exe) {
+        & $exe pull $modelo
+    } else {
+        # OLLAMA_URL apunta a otra maquina y aqui no hay ejecutable: por la API.
+        try {
+            Invoke-RestMethod -Uri "$ollama/api/pull" -Method Post -ContentType 'application/json' `
+                -Body (@{ model = $modelo; stream = $false } | ConvertTo-Json -Compress) -TimeoutSec 3600 | Out-Null
+        } catch { }
+    }
+    $ErrorActionPreference = 'Stop'
+    if (-not (TieneModelo)) {
+        Write-Host "   No se pudo bajar el modelo $modelo. Hace falta internet la primera vez" -ForegroundColor Yellow
+        exit 2
+    }
+    Write-Host "   Modelo $modelo listo" -ForegroundColor Green
 }
 
 # 2. El catalogo, desde Mongo

@@ -534,6 +534,32 @@ services:
       retries: 10
       start_period: 30s
 
+  # Ollama, para los vectores de la recomendacion semantica (migracion 024).
+  # Solo se usa si la PC NO tiene Ollama propio: etl/cargar_vectores.ps1 prueba
+  # primero el del anfitrion (localhost:11434) y solo si no hay ninguno levanta
+  # este. Por eso va en un perfil y un "docker compose up -d" normal no lo
+  # arranca. A mano:  docker compose --profile ollama up -d ollama
+  #
+  # Escucha en el 11435 de afuera y no en el 11434, para no pelearse con un
+  # Ollama del anfitrion que se instale despues.
+  #
+  # El volumen de los modelos es EXTERNO a proposito. "arrancar.ps1 -Reiniciar"
+  # hace "docker compose down -v", que borra los volumenes del compose, y el
+  # modelo pesa unos 560 MB: rehacer las bases no tiene que volver a bajarlo.
+  # cargar_vectores.ps1 lo crea con "docker volume create" si no existe.
+  #
+  # Sin GPU: corre en la CPU en cualquier PC. Los 3105 vectores tardan mas que
+  # con la tarjeta, pero se calculan una sola vez y despues solo lo que cambia.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: mesh-ollama
+    profiles: ["ollama"]
+    restart: "no"
+    ports:
+      - "11435:11434"
+    volumes:
+      - ollama-modelos:/root/.ollama
+
 volumes:
   postgres-data:
   pgadmin-data:
@@ -546,3 +572,6 @@ volumes:
   elastic-data:
   clickhouse-data:
   clickhouse-logs:
+  ollama-modelos:
+    name: mesh-ollama-modelos
+    external: true

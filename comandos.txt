@@ -487,11 +487,15 @@ SIMPLES. Con comillas dobles la shell del contenedor contesta
 
 APAGAR
 --------------------------------------------------
-  docker compose down
+  docker compose --profile ollama down
 
 Con -v ademas borra los datos:
 
-  docker compose down -v
+  docker compose --profile ollama down -v
+
+El --profile ollama apaga tambien mesh-ollama, el Ollama de Docker que arrancar
+levanta solo si la PC no tiene uno propio. El volumen de su modelo es externo
+y ni -v lo borra.
 
 
 DATOS DE CONEXION
