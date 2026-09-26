@@ -43,6 +43,7 @@ import { CarritoService } from './services/carrito/carrito.service';
 import { FraudeController } from './controllers/fraude/fraude.controller';
 import { AnillosDetectorService } from './services/fraude/anillos-detector.service';
 import { PatronesFraudeDetectorService } from './services/fraude/patrones-fraude-detector.service';
+import { HallazgosEventoFraudeDetectorService } from './services/fraude/hallazgos-evento-fraude-detector.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
 import { AdminReportesService } from './services/admin/admin-reportes.service';
 import { InventarioLimitadoService } from './services/inventario-limitado/inventario-limitado.service';
@@ -62,6 +63,8 @@ import { AdminFraudeLoginController } from './controllers/admin/admin-fraude-log
 import { FraudeLoginExploracionService } from './services/fraude-login/fraude-login-exploracion.service';
 import { AdminFraudeAnillosController } from './controllers/admin/admin-fraude-anillos.controller';
 import { FraudeAnillosPersistidosService } from './services/fraude/fraude-anillos-persistidos.service';
+import { AdminFraudeEventosController } from './controllers/admin/admin-fraude-eventos.controller';
+import { HallazgosEventoFraudePersistidosService } from './services/fraude/hallazgos-evento-fraude-persistidos.service';
 import { EventosController } from './controllers/eventos.controller';
 import { EventosService } from './services/eventos/eventos.service';
 import { AdminTendenciasController } from './controllers/admin/admin-tendencias.controller';
@@ -129,6 +132,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BuscadorProductosController,
     AdminFraudeLoginController,
     AdminFraudeAnillosController,
+    AdminFraudeEventosController,
     EventosController,
     AdminTendenciasController,
     AdminTendenciasAvanzadasController,
@@ -165,6 +169,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     CarritoService,
     AnillosDetectorService,
     PatronesFraudeDetectorService,
+    HallazgosEventoFraudeDetectorService,
     AdminReportesService,
     InventarioLimitadoService,
     GrafoSyncService,
@@ -178,6 +183,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     FraudeLoginRetrospectivoService,
     FraudeLoginExploracionService,
     FraudeAnillosPersistidosService,
+    HallazgosEventoFraudePersistidosService,
     EventosService,
     AdminTendenciasService,
     AdminTendenciasAvanzadasService,

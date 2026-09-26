@@ -1,9 +1,10 @@
 # Endpoints del panel de fraude
 
-Seis rutas de admin, más dos rutas de usuario (agregadas 2026-09-15, ver
+Ocho rutas de admin, más dos rutas de usuario (agregadas 2026-09-15, ver
 más abajo). El panel de fraude en reseñas y la conciliación tocan el grafo
 de **Neo4j**; el de fraude de login es **solo Elasticsearch + Redis**, sin
-tocar el grafo:
+tocar el grafo; el de hallazgos de eventos es **solo ClickHouse + Postgres**,
+sin tocar Neo4j ni Elasticsearch:
 
 - **`GET`/`PATCH /admin/fraude/alertas-resenas` y
   `GET /admin/fraude/alertas-resenas/:id/detalle-grafo`** — el **panel de
@@ -12,6 +13,13 @@ tocar el grafo:
   calificaciones no se explica por el uso normal de la tienda, detectados
   por un worker y persistidos en PostgreSQL. Nombrado en paralelo con
   `alertas-login`. Ver la sección "Anillos de fraude en reseñas", al final.
+- **`GET`/`PATCH /admin/fraude/alertas-eventos`** — el **panel de F1-F6**:
+  hallazgos de fraude sobre eventos de ClickHouse (vistas infladas, compras
+  en ráfaga, IP con varias cuentas, carrito acaparador, devoluciones
+  seriales, granja de registros), detectados por un worker diario y
+  persistidos en PostgreSQL. Nombrado en el mismo patrón que
+  `alertas-login`/`alertas-resenas`. Ver la sección "Hallazgos de fraude
+  sobre eventos", al final.
 - **`GET /admin/grafo/conciliacion`** — la **red de seguridad** de la
   sincronización del grafo: compara los conteos de PostgreSQL (la verdad)
   contra Neo4j (la proyección) y avisa de la deriva. Ver la sección
@@ -1215,3 +1223,170 @@ corriendo al mismo tiempo sobre el mismo anillo no duplican fila -- ver
 `models/anillo-fraude.ts`, `helpers/validaciones-anillo-fraude.ts`,
 `app.module.ts`). Datos de prueba limpiados al final: `anillo_fraude`/
 `anillo_fraude_resena` quedaron vacías, sin tocar `resena` ni el grafo.
+
+---
+
+# Hallazgos de fraude sobre eventos (F1-F6) -- alertas-eventos (2026-09-25)
+
+Dos rutas, **controller y servicio aparte** de todo lo de arriba, mismo
+criterio que `alertas-resenas`: `AdminFraudeEventosController` +
+`HallazgosEventoFraudePersistidosService`
+(`src/controllers/admin/admin-fraude-eventos.controller.ts` +
+`src/services/fraude/hallazgos-evento-fraude-persistidos.service.ts`).
+**Solo admin**. Nombradas `alertas-eventos` en el mismo patrón que
+`alertas-login`/`alertas-resenas`: mismo sustantivo, distinto dominio
+(eventos de ClickHouse -- vistas, carritos, compras, devoluciones,
+registros -- en vez de login o grafo).
+
+Estas rutas leen `hallazgo_evento_fraude`/`hallazgo_evento_fraude_cuenta`
+(`elementos Generales/plan pendiente/hallazgos-evento-fraude.sql`), que
+llena `HallazgosEventoFraudeDetectorService` -- un worker nuevo que corre
+**una vez al día** (no cada 15 min como los demás workers de fraude: F2 y
+F6 hacen un self-join sobre 30 días completos de datos, mucho más pesado
+que un `GROUP BY`) las seis consultas de `clickhouse/consultas/F1..F6.sql`
+sin tocarles una coma. Detalle completo del worker y su diseño en
+`plan pendiente/hallazgos-evento-fraude.md`.
+
+A diferencia de `alertas-resenas`, aquí **sí existe una tabla de pivote
+real** para las cuentas (`hallazgo_evento_fraude_cuenta`, con `es_nucleo`)
+en vez de derivarlas por `UNION` -- decisión explícita del usuario, al
+notar que `docs/fraude-entrega3/02-reglas-backend.md` ya proponía ese
+mismo patrón (`hallazgo_fraude_cuenta`) para su agrupador de casos, sin
+construir. `es_nucleo` es siempre `true` por ahora: la distinción
+núcleo/periferia solo tiene sentido al agrupar varios hallazgos en un caso,
+que no está construido.
+
+**Sin ruta de detalle** (a diferencia de `.../alertas-resenas/:id/detalle-grafo`):
+toda la evidencia de un hallazgo de eventos ya vive en Postgres (`detalle`
+jsonb + las cuentas del pivote), no hace falta consultar otra base para
+ampliarla.
+
+## GET /admin/fraude/alertas-eventos
+
+```
+GET /admin/fraude/alertas-eventos?pagina=1&limite=20&estado=pendiente&tipo=ip_multicuenta_compras
+```
+
+Paginación por número de página, mismas reglas que el resto del proyecto.
+Dos filtros opcionales e independientes:
+
+- `estado=pendiente|revisada|descartada` -- reusa el mismo catálogo y las
+  mismas funciones de validación que `alertas-login`/`alertas-resenas`
+  (`validarFiltroEstadoAlerta`), sin duplicar nada.
+- `tipo=vistas_infladas|compras_en_rafaga|ip_multicuenta_compras|carrito_acaparador|devoluciones_seriales|granja_de_registros`
+- sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
+  ordenados por `fecha_actualizacion DESC`.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Hallazgos obtenidos",
+  "payload": {
+    "hallazgos": [
+      {
+        "id_hallazgo_evento_fraude": "6",
+        "tipo": "ip_multicuenta_compras",
+        "clave": "10.0.0.5",
+        "cuentas": [
+          { "id_usuario": "3", "usuario": "comprador_sur", "es_nucleo": true },
+          { "id_usuario": "4", "usuario": "ventas_norte", "es_nucleo": true }
+        ],
+        "id_producto_mongo": null,
+        "detalle": { "cuentas_distintas": 2, "pedidos": 6 },
+        "contador": 1,
+        "ventana_inicio": "2026-09-26T00:29:30.202Z",
+        "estado": "pendiente",
+        "fecha_creacion": "2026-09-26T00:29:30.202Z",
+        "fecha_actualizacion": "2026-09-26T00:29:30.202Z"
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_hallazgos": 1,
+    "total_paginas": 1
+  }
+}
+```
+
+`cuentas` sale de la tabla de pivote real (`hallazgo_evento_fraude_cuenta`
+unida contra `usuarios`), no de un `UNION` derivado. `id_producto_mongo`
+solo viene lleno en `vistas_infladas`/`carrito_acaparador` -- `null` en el
+resto. `detalle` es evidencia libre por tipo (conteos, ventana, tasas) --
+las cuentas NUNCA van ahí, ya están normalizadas en `cuentas`.
+
+**Sin ninguna notificación a las cuentas del hallazgo** -- mismo criterio
+que `alertas-resenas`: son las SOSPECHOSAS, no la víctima, avisarles daría
+oportunidad de evadir la detección.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
+{ "ok": false, "mensaje": "El tipo debe ser uno de: vistas_infladas, compras_en_rafaga, ip_multicuenta_compras, carrito_acaparador, devoluciones_seriales, granja_de_registros", "payload": null }
+```
+
+### 401 / 403
+
+Mismo comportamiento que el resto del panel: sin sesión -> `401`; sesión
+válida pero no admin -> `403`.
+
+## PATCH /admin/fraude/alertas-eventos/:id
+
+```
+PATCH /admin/fraude/alertas-eventos/6
+Content-Type: application/json
+
+{ "estado": "revisada" }
+```
+
+Mismo criterio exacto que `PATCH /admin/fraude/alertas-resenas/:id`: solo
+admite `revisada`/`descartada` como destino, y **solo desde `pendiente`** --
+un hallazgo ya revisado o descartado no se puede volver a mover desde esta
+ruta. Devuelve el hallazgo actualizado (misma forma que el listado).
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "El hallazgo ya no esta pendiente de revision", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un hallazgo con ese id", "payload": null }
+```
+
+## Pruebas -- hechas el 2026-09-25
+
+Contra el servidor y la base real. Se sembró un hallazgo sintético de
+`ip_multicuenta_compras` directo en Postgres (`hallazgo_evento_fraude` +
+dos filas en `hallazgo_evento_fraude_cuenta`, cuentas reales `comprador_sur`/
+`ventas_norte`) para probar el camino completo sin esperar al worker.
+
+| Caso | Resultado |
+|---|---|
+| `GET .../alertas-eventos` sin datos | `200`, `payload.hallazgos: []` |
+| `GET .../alertas-eventos` sin sesión | `401` |
+| `GET .../alertas-eventos` con el hallazgo sembrado, sin filtro | `200`, el hallazgo con `cuentas` resueltas a nombre real |
+| `GET .../alertas-eventos?tipo=ip_multicuenta_compras` | `200`, `total_hallazgos: 1` |
+| `GET .../alertas-eventos?tipo=vistas_infladas` | `200`, `total_hallazgos: 0` (no aplica a este hallazgo) |
+| `GET .../alertas-eventos?tipo=no_existe` | `400` con los 6 tipos válidos |
+| `GET .../alertas-eventos?estado=revisada` (antes de marcar) | `total_hallazgos: 0` |
+| `PATCH .../alertas-eventos/6` con `{ "estado": "revisada" }` | `200`, el hallazgo actualizado |
+| `PATCH .../alertas-eventos/6` de nuevo | `409` |
+| `PATCH .../alertas-eventos/999` (inexistente) | `404` |
+| `PATCH .../alertas-eventos/6` con `{ "estado": "pendiente" }` | `400` (no es un destino válido) |
+| `GET .../alertas-eventos?estado=revisada` (después de marcar) | `total_hallazgos: 1` -- el filtro ya refleja el cambio |
+| Vendedor (`ventas_norte`) contra `GET .../alertas-eventos` | `403` |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+Además, el worker completo (`HallazgosEventoFraudeDetectorService`) se
+corrió a mano contra ClickHouse/Postgres reales, sembrando 5 compras
+sintéticas en ráfaga -- ver `plan pendiente/hallazgos-evento-fraude.md`
+para el detalle de esa prueba.
+
+Teardown: el hallazgo sintético y sus dos filas de cuenta se borraron
+(`ON DELETE CASCADE` desde `hallazgo_evento_fraude`); las dos tablas
+quedaron vacías.
