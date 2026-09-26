@@ -151,6 +151,19 @@ export interface Producto {
    * manana se indexa este campo en Mongo.
    */
   pendiente_busqueda?: true;
+  /**
+   * Bandera de sincronizacion con el vector de recomendacion semantica
+   * (Entrega final, `producto_vector` en PostgreSQL). Mismo patron "cola sin
+   * cola" que `pendiente_busqueda`, pero NO en los mismos sitios: solo se
+   * pone donde nombre, descripcion, categoria o estado pueden cambiar
+   * (`crear`, `proponer`, `editar`, `revisarPropuesta`, `reenviarPropuesta`
+   * de `vendedores/productos.service.ts`) -- nunca en el recalculo de
+   * precio/stock/resenas de `recalcularUnProducto`, que no toca texto ni
+   * estado. El worker (`VectoresSyncService`) decide si de verdad hace
+   * falta llamar a Ollama comparando el hash del texto, igual que
+   * `etl/cargar_vectores.ps1`.
+   */
+  pendiente_vector?: true;
   variantes: ProductoVariante[];
   /** Opcional: caracteristicas del producto, del catalogo de la app. */
   caracteristicas_adicionales?: EntradaCaracteristica[];

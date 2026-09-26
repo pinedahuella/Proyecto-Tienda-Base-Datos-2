@@ -332,24 +332,43 @@ servido un `GET` anterior, posiblemente cacheado).
 
 **Dónde vive:** `BuscadorProductosController.buscar()`
 (`src/controllers/buscador/productos.controller.ts`), después de obtener
-los resultados y antes de responder. Fire-and-forget, sin `await`.
+los resultados y antes de responder. Fire-and-forget, sin `await`. **Desde
+el 2026-09-26, también** `BuscadorFacetadoController.buscar()`
+(`GET /buscador/productos/facetado`, ver `endpoints-buscador.md`) -- mismo
+patrón, mismo método de `EventosService`, con las cuatro columnas nuevas
+de abajo.
 
-**Solo la ruta PÚBLICA** (`GET /buscador/productos`), nunca
-`GET /buscador/productos/admin`: las búsquedas de un admin revisando el
-catálogo no son parte del embudo de un comprador real.
+**Nunca** desde `GET /buscador/productos/admin`: las búsquedas de un admin
+revisando el catálogo no son parte del embudo de un comprador real.
 
-**`sesion` viaja como query param nuevo, opcional:**
-`GET /buscador/productos?nombre=...&sesion=...`. Si no viene (o viene
-vacío), el evento simplemente **se salta en silencio** -- la búsqueda
-responde igual, `sesion` nunca bloquea ni rechaza nada. `id_usuario` sale
-de `idUsuarioDeCookieOpcional()` (el mismo helper que usa `vista`, ahora
-compartido en `helpers/sesion-opcional.ts`).
+**`sesion` viaja como query param, opcional**, en las dos rutas que
+registran este evento. Si no viene (o viene vacío), el evento simplemente
+**se salta en silencio** -- la búsqueda responde igual, `sesion` nunca
+bloquea ni rechaza nada. `id_usuario` sale de `idUsuarioDeCookieOpcional()`
+(el mismo helper que usa `vista`, compartido en
+`helpers/sesion-opcional.ts`).
 
 `termino` es el propio `query.nombre` (`''` si no vino), `resultados` es
 `resultados.length` de lo que ya se iba a devolver -- ningún cálculo
 extra.
 
-### Pruebas -- hechas el 2026-09-18
+**Columnas nuevas (agregadas 2026-09-26, Entrega final -- el buscador
+facetado, `elementos Generales/plan pendiente/buscador-facetado-clickhouse.md`):**
+
+| Columna | Tipo | La llena `GET /buscador/productos` (simple) | La llena `.../facetado` |
+|---|---|---|---|
+| `facetada` | `UInt8` | siempre `0` | `1` |
+| `categorias` | `Array(UInt32)` | siempre `[]` | los `id_categoria` de `?categoria=7,9` |
+| `precios` | `Array(String)` | siempre `[]` | las claves de `?precio=250-500,...` |
+| `calificaciones` | `Array(String)` | siempre `[]` | las claves de `?calificacion=4-o-mas,...` |
+| `disponible` | `UInt8` | siempre `0` | `1` si se mandó `?disponible=...` (cualquier valor no vacío) |
+
+Se guarda lo que el CLIENTE eligió (los valores crudos de la query), no lo
+que el backend resolvió para armar el filtro real de Elasticsearch --
+`BuscadorFacetadoController` reusa `separarPorComas()` (exportada de
+`BuscadorFacetadoService`), no vuelve a parsear nada.
+
+### Pruebas -- hechas el 2026-09-18 (búsqueda simple)
 
 Contra el servidor y las bases reales.
 
@@ -362,6 +381,20 @@ Contra el servidor y las bases reales.
 
 `npx tsc --noEmit` y `eslint` limpios. Filas de prueba dejadas en la base
 local.
+
+### Pruebas -- hechas el 2026-09-26 (columnas nuevas, las dos rutas)
+
+Contra el servidor y ClickHouse reales.
+
+| Caso | Resultado |
+|---|---|
+| `GET /buscador/productos/facetado?nombre=laptop&categoria=7,8&precio=1000-3000,desde-3000&calificacion=4-o-mas&disponible=si&sesion=...` | fila con `facetada: 1`, `categorias: [7,8]`, `precios: ['1000-3000','desde-3000']`, `calificaciones: ['4-o-mas']`, `disponible: 1` |
+| `GET /buscador/productos/facetado?nombre=telefono` (sin `sesion`) | ninguna fila -- igual que la búsqueda simple |
+| `GET /buscador/productos?nombre=laptop&sesion=...` (regresión, la ruta simple) | fila con `facetada: 0` y las cuatro columnas nuevas vacías/`0` -- confirma que ampliar la firma de `registrarBusqueda()` no le cambió el comportamiento a la ruta vieja |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+Teardown: las tres filas de prueba (`sesion LIKE 'prueba-%'`) borradas con
+`ALTER TABLE busqueda_realizada DELETE WHERE ...`.
 
 ---
 
@@ -385,12 +418,26 @@ Content-Type: application/json
 | `id_producto` | sí | Sobre cuál resultado se hizo clic -- reusa `validarIdProducto` |
 | `posicion` | sí | En qué lugar de la lista estaba (1-based) -- entero mayor a 0 (`validarPosicionEvento`) |
 | `sesion` | sí | Igual que en `vista`/`busqueda_realizada` |
+| `facetada` | no | `boolean`. Si el clic vino de un resultado facetado (`GET /buscador/productos/facetado`) |
+| `categorias` | no | Arreglo de enteros -- los `id_categoria` que estaban elegidos en ese momento |
+| `precios` | no | Arreglo de texto -- las claves de rango elegidas |
+| `calificaciones` | no | Arreglo de texto -- las claves de calificación elegidas |
+| `disponible` | no | `boolean` -- si el filtro de disponibilidad estaba activo |
+
+Los cinco campos de faceta son **opcionales, agregados 2026-09-26**
+(Entrega final, `plan pendiente/buscador-facetado-clickhouse.md`): el
+backend no puede saber por su cuenta qué facetas estaban activas en la
+pantalla donde se hizo clic -- si el frontend no las manda, quedan en su
+default (`false`/`[]`), igual que un clic desde la búsqueda simple.
 
 `id_usuario` opcional, de la cookie si hay una válida (nunca del cuerpo) --
 mismo `idUsuarioDeCookieOpcional()` compartido.
 
 ### 202
 
+```json
+{ "termino": "laptop", "id_producto": 5, "posicion": 1, "sesion": "...", "facetada": true, "categorias": [7], "precios": ["desde-3000"], "calificaciones": ["4-o-mas"], "disponible": true }
+```
 ```json
 { "ok": true, "mensaje": "Clic de busqueda registrado", "payload": null }
 ```
@@ -402,6 +449,10 @@ mismo `idUsuarioDeCookieOpcional()` compartido.
 { "ok": false, "mensaje": "El id_producto es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
 { "ok": false, "mensaje": "La posicion es obligatoria y debe ser un numero entero mayor a 0", "payload": null }
 { "ok": false, "mensaje": "La sesion es obligatoria", "payload": null }
+{ "ok": false, "mensaje": "facetada debe ser verdadero o falso", "payload": null }
+{ "ok": false, "mensaje": "categorias debe ser un arreglo de numeros enteros", "payload": null }
+{ "ok": false, "mensaje": "precios debe ser un arreglo de texto", "payload": null }
+{ "ok": false, "mensaje": "disponible debe ser verdadero o falso", "payload": null }
 ```
 
 ### Pruebas -- hechas el 2026-09-18
@@ -417,6 +468,19 @@ mismo `idUsuarioDeCookieOpcional()` compartido.
 
 `npx tsc --noEmit` y `eslint` limpios. Filas de prueba dejadas en la base
 local.
+
+### Pruebas -- hechas el 2026-09-26 (los cinco campos de faceta)
+
+| Caso | Resultado |
+|---|---|
+| Con las cinco facetas (`facetada: true, categorias: [7], precios: ["desde-3000"], calificaciones: ["4-o-mas"], disponible: true`) | `202`; fila con esos valores exactos |
+| Sin ninguna de las cinco (cliente viejo) | `202`; fila con `facetada: 0` y arreglos vacíos -- confirma que un frontend que todavía no manda estos campos sigue funcionando igual |
+| `categorias: ["siete"]` (texto en vez de número) | `400` "categorias debe ser un arreglo de numeros enteros" |
+| `disponible: "si"` (texto en vez de boolean) | `400` "disponible debe ser verdadero o falso" |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+Teardown: las dos filas de prueba (`sesion LIKE 'prueba-%'`) borradas con
+`ALTER TABLE busqueda_clic DELETE WHERE ...`.
 
 ---
 
@@ -698,11 +762,81 @@ Teardown completo: todas las filas sembradas (`vista_producto`,
 `busqueda_clic`) borradas con `ALTER TABLE ... DELETE`, confirmado con un
 barrido final por los cuatro ids/términos de prueba -- cero residuos.
 
+## GET /admin/eventos/categorias-mas-buscadas | precios-mas-buscados | calificaciones-mas-buscadas (agregado 2026-09-26)
+
+Tres rutas más, mismo `AdminTendenciasController`/`Service` de arriba,
+mismos tres query params (`dias`, `limite`, `direccion`) y misma
+autorización -- pero **no** rankean `busqueda_realizada` agrupada por
+`termino` como las seis originales: rankean las **facetas elegidas** en
+`GET /buscador/productos/facetado`
+(`plan pendiente/buscador-facetado-clickhouse.md`). `disponible` queda
+fuera -- es un sí/no, no tiene un "top N" que rankear.
+
+La diferencia técnica con las seis de arriba: `categorias`/`precios`/
+`calificaciones` son columnas `Array(...)`, no un valor simple por fila --
+una sola búsqueda puede elegir varias (`?categoria=7,9`). La consulta usa
+`ARRAY JOIN` para desenrollar el arreglo en una fila por valor antes de
+agrupar (`rankingPorFaceta()`, servicio separado del `rankingPorTermino()`/
+`rankingPorProducto()` de las otras seis). Una búsqueda sin esa faceta
+elegida tiene el arreglo vacío, y `ARRAY JOIN` sobre un arreglo vacío no
+produce ninguna fila -- queda fuera del conteo solo, sin necesidad de
+filtrar por `facetada`.
+
+```json
+GET /admin/eventos/categorias-mas-buscadas?dias=7&limite=10
+{ "ok": true, "mensaje": "Tendencia de categorias mas buscadas obtenida", "payload": [
+  { "termino": "7", "total": 3 },
+  { "termino": "8", "total": 2 }
+] }
+```
+
+El campo se llama `termino` (mismo `TendenciaTermino` que las rutas
+hermanas, para mantener el shape idéntico) aunque acá no sea un texto
+buscado: es el id de categoría o la clave del rango elegido, según la
+ruta.
+
+### 401 / 403 / 503
+
+Mismo comportamiento que el resto de este archivo.
+
+### Probado en vivo el 2026-09-26
+
+Contra el servidor, Elasticsearch y ClickHouse reales, con sesión real de
+`admin_mesh`. Se sembraron seis búsquedas facetadas reales (vía
+`GET /buscador/productos/facetado`, no `INSERT` directo) con facetas
+conocidas: categoría 7 dos veces más una vez dentro de una búsqueda con
+`categoria=7,8`; categoría 8 una vez más esa misma búsqueda combinada;
+precio `250-500` dos veces; calificación `3-o-mas` una vez.
+
+| Caso | Resultado |
+|---|---|
+| Sin sesión | `401` "No hay sesion activa" |
+| Con sesión de `mesh_tienda` (no admin) | `403` "No tienes permiso para hacer esto" |
+| `categorias-mas-buscadas` | `[{ "termino": "7", "total": 3 }, { "termino": "8", "total": 2 }]` -- exacto, cuenta sesiones DISTINTAS, no búsquedas |
+| `precios-mas-buscados` | `[{ "termino": "250-500", "total": 2 }, { "termino": "desde-3000", "total": 1 }, { "termino": "1000-3000", "total": 1 }]` |
+| `calificaciones-mas-buscadas` | `[{ "termino": "4-o-mas", "total": 1 }, { "termino": "3-o-mas", "total": 1 }]` |
+| `precios-mas-buscados?direccion=negativo` | mismo conjunto, orden invertido (los de `total: 1` primero, `250-500` al final) |
+| `categorias-mas-buscadas?dias=abc` | `400` "dias debe ser un numero entero mayor a 0" |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+Teardown: las seis filas de prueba (`sesion LIKE 'prueba-%'`) borradas de
+`busqueda_realizada` con `ALTER TABLE ... DELETE`, confirmado que los
+conteos volvieron a su base (5 filas).
+
 ## Lo que sigue
 
-Ninguno de este lado -- las seis piezas del plan original
-(`plan pendiente/eventos-clickhouse.md`) y este ranking de tendencias
-están construidos y probados. Lo que queda es del lado del compañero:
-formalizar el esquema en `clickhouse/001_esquema.sql` y decidir sobre
-generadores de datos sembrados -- ver ese documento, sección "Lo que
+Del plan original de eventos (`plan pendiente/eventos-clickhouse.md`) y su
+ranking de tendencias, ninguno de este lado -- las seis piezas y el
+ranking están construidos y probados. Lo que queda es del lado del
+compañero: formalizar el esquema en `clickhouse/001_esquema.sql` y decidir
+sobre generadores de datos sembrados -- ver ese documento, sección "Lo que
 sigue".
+
+Del buscador facetado (`plan pendiente/buscador-facetado-clickhouse.md`),
+tambien nada de este lado -- las cinco columnas nuevas, el registro desde
+las dos rutas de búsqueda, `POST /eventos/busqueda-clic` con sus cinco
+campos opcionales, y las tres rutas de ranking de facetas, todo construido
+y probado en vivo. Le queda al compañero: sumar las mismas
+`ALTER TABLE ADD COLUMN` a `clickhouse/001_esquema.sql` (hoy solo existen
+aplicadas a mano en la base LOCAL de este entorno) -- ver ese documento
+para el `.sql` de referencia exacto.

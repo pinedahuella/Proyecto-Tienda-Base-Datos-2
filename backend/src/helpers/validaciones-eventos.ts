@@ -54,6 +54,67 @@ export function validarPosicionEvento(valor: unknown): number {
   return valor;
 }
 
+/**
+ * Las cuatro facetas de `POST /eventos/busqueda-clic` (que estaban activas
+ * al hacer clic, ver
+ * `elementos Generales/plan pendiente/buscador-facetado-clickhouse.md`) --
+ * todas OPCIONALES: si no vienen, la busqueda no era facetada, quedan en su
+ * default vacio/false. Si vienen, tienen que tener la forma correcta.
+ */
+export function validarFacetadaEvento(valor: unknown): boolean {
+  if (valor == null) {
+    return false;
+  }
+  if (typeof valor !== 'boolean') {
+    throw new ErrorValidacion('facetada debe ser verdadero o falso');
+  }
+  return valor;
+}
+
+export function validarCategoriasEvento(valor: unknown): number[] {
+  if (valor == null) {
+    return [];
+  }
+  if (
+    !Array.isArray(valor) ||
+    !valor.every(
+      (v): v is number => typeof v === 'number' && Number.isInteger(v),
+    )
+  ) {
+    throw new ErrorValidacion(
+      'categorias debe ser un arreglo de numeros enteros',
+    );
+  }
+  return valor;
+}
+
+/** `precios` y `calificaciones` -- mismo arreglo de texto, distinto nombre de campo para el mensaje. */
+export function validarClavesFacetaEvento(
+  valor: unknown,
+  nombreCampo: string,
+): string[] {
+  if (valor == null) {
+    return [];
+  }
+  if (
+    !Array.isArray(valor) ||
+    !valor.every((v): v is string => typeof v === 'string' && v.trim() !== '')
+  ) {
+    throw new ErrorValidacion(`${nombreCampo} debe ser un arreglo de texto`);
+  }
+  return valor;
+}
+
+export function validarDisponibleEvento(valor: unknown): boolean {
+  if (valor == null) {
+    return false;
+  }
+  if (typeof valor !== 'boolean') {
+    throw new ErrorValidacion('disponible debe ser verdadero o falso');
+  }
+  return valor;
+}
+
 // -------------------------------------------------------------------------
 // GET /admin/eventos/* -- filas crudas de las tablas de ClickHouse, en una
 // ventana de dias hacia atras. Mismo criterio que `validarLimite`/

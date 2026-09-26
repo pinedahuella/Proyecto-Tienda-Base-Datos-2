@@ -973,6 +973,107 @@ otras dos referencias (`mesh:producto:1:tambien-vieron`,
 `mesh:cuenta:999101:para-ti`) siguen congeladas tal cual, sin TTL, hasta
 que algo las toque de nuevo o pase el resto de su vida útil sin que ocurra.
 
+## GET /productos/:id/similares (agregado 2026-09-26)
+
+Recomendacion semantica de la Entrega final (5 puntos): productos parecidos
+por el **significado** de nombre + categoria + descripcion, no por
+categoria/precio como R2/R3. La parte de datos es del compañero
+(`migrations/024_vectores_productos.sql`, pgvector, funcion
+`productos_similares(id, limite)`; `etl/cargar_vectores.ps1` llena
+`producto_vector` pidiendole el vector a **Ollama**, modelo
+`paraphrase-multilingual`, 768 dimensiones) -- de este lado solo esta la
+ruta, la bandera y el worker que la mantiene al dia.
+
+**Pública, sin sesión**, igual que `tambien-vieron`. Valida el `:id` con el
+mismo `REGEX_ID` que el resto de rutas de producto. Por dentro es una sola
+consulta:
+
+```sql
+SELECT id_producto, similitud FROM productos_similares($1, 6);
+```
+
+y el mismo enriquecido con Mongo (`$in` de ids) que ya usa
+`TambienVieronSyncService` -- si un id de Postgres no tiene documento en
+Mongo, sale con `producto: null` en vez de romper la respuesta. Si el
+producto pedido no tiene vector todavia (no lo alcanzo
+`cargar_vectores.ps1`, o el worker de abajo), `productos_similares()`
+devuelve vacio y la ruta contesta `[]`, nunca un error.
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Similares obtenidos",
+  "payload": [
+    {
+      "id_producto": 4,
+      "similitud": 0.7776658734087394,
+      "producto": { "...documento completo de Mongo..." : "" }
+    }
+  ]
+}
+```
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+```
+
+### La bandera `pendiente_vector` y el worker `VectoresSyncService`
+
+Mismo patron "cola sin cola" que `pendiente_busqueda` (Elasticsearch), pero
+en sitios distintos: solo se pone donde nombre, descripcion, categoria **o
+estado** pueden cambiar --
+`crear()`/`proponer()`/`revisarPropuesta()`/`reenviarPropuesta()`/`editar()`
+en `vendedores/productos.service.ts` (`models/producto.ts`, campo
+`pendiente_vector?: true`). **No** se pone en las dos ramas de
+`recalcularUnProducto()` (precio/stock/reseñas): esas nunca tocan texto ni
+estado, no tiene sentido gastar una llamada a Ollama por ellas.
+
+`VectoresSyncService` (`services/productos/vectores-sync.service.ts`),
+`@Interval` cada 3 horas (un cambio de descripcion no es urgente, a
+diferencia de una vista o una busqueda reciente):
+
+1. Lee los productos con `pendiente_vector: true` (proyeccion minima:
+   nombre, descripcion, categoria.nombre, estado).
+2. Arma el mismo texto que `cargar_vectores.ps1`
+   (`"nombre. Categoria X. descripcion"`) y calcula su hash MD5.
+3. Compara contra `producto_vector.texto_hash` en Postgres:
+   - **Hash igual** (la bandera se puso por un cambio de estado, o de
+     caracteristicas/variantes que no afectan el texto): **no llama a
+     Ollama**, solo actualiza `activo`/`grupo` si de verdad cambiaron
+     (`UPDATE producto_vector SET activo = ..., grupo = ...`).
+   - **Hash distinto** (o el producto no tenia vector): pide los vectores a
+     Ollama en lotes de 32 (`/api/embed`) y hace el mismo
+     `INSERT ... ON CONFLICT (id_producto) DO UPDATE` que el script del
+     compañero -- conviven sin problema, el `ON CONFLICT` deja la ultima
+     escritura.
+4. Baja la bandera en Mongo solo de los productos que sí quedaron al día;
+   los que fallan (Ollama caido, Postgres caido) se reintentan solos en el
+   siguiente ciclo, sin tumbar el resto del lote.
+
+### Probado en vivo -- 2026-09-26
+
+Contra el servidor, PostgreSQL, MongoDB y el Ollama real de la maquina de
+desarrollo (modelo `paraphrase-multilingual` ya descargado). El intervalo
+del worker se acorto TEMPORALMENTE (8 s) solo para no esperar 3 horas real
+en la prueba, y se devolvio a `3 * 60 * 60 * 1000` antes de terminar --
+queda documentado por si hace falta repetir la prueba.
+
+| Caso | Resultado |
+|---|---|
+| `GET /productos/1/similares` (producto real, con vector ya cargado) | `200`, 6 resultados ordenados por similitud (0.78 -> 0.71), todos "Laptops" -- el mas parecido, "Laptop Lienzo 15" (0.78), viene con el documento completo de Mongo resuelto |
+| `PATCH /vendedor/productos/2 {"estado":"inactivo"}` (sesion `mesh_tienda`) | `200`, la respuesta ya trae `pendiente_busqueda` y `pendiente_vector` en `true` |
+| `PATCH /vendedor/productos/3 {"descripcion":"...(prueba automatica de vectores, se revierte)"}` | `200`, mismo par de banderas en `true` |
+| Ciclo del worker (log real) | `worker de vectores: 2 pendiente(s), 1 recalculado(s), 1 solo activo/grupo, 2 al dia` |
+| `producto_vector` del producto 2 (solo estado) tras el ciclo | `texto_hash` **identico** al de antes, `fecha_calculo` **sin tocar** (no llamo a Ollama), `activo` paso de `t` a `f` |
+| `producto_vector` del producto 3 (texto real cambio) tras el ciclo | `texto_hash` **distinto**, `grupo` distinto (la descripcion entra en el grupo), `fecha_calculo` actualizada a la hora del ciclo (si llamo a Ollama) |
+| `pendiente_vector` en Mongo, productos 2 y 3, tras el ciclo | ausente en los dos (bandera bajada) |
+| Reversion (estado de 2 a `activo`, descripcion de 3 al texto original) + un ciclo mas | producto 2: mismo `texto_hash` de siempre, `activo` de vuelta en `t`; producto 3: `texto_hash` **identico byte a byte** al original (el mismo texto produce el mismo hash), `activo` sin cambios; ambos sin `pendiente_vector` |
+| `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
 ## GET /productos/:id/historial
 
 **Pública, sin restricción de rol ni de dueño** — a diferencia de la

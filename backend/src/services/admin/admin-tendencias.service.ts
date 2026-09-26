@@ -108,6 +108,33 @@ export class AdminTendenciasService {
   }
 
   /**
+   * Las tres facetas del buscador facetado (Entrega final,
+   * `elementos Generales/plan pendiente/buscador-facetado-clickhouse.md`)
+   * que si tiene sentido rankear -- `disponible` queda fuera, es un si/no,
+   * no un "top N". El campo `termino` del resultado, aca, no es un texto
+   * buscado: es el id de categoria o la clave del rango elegido -- se
+   * reusa `TendenciaTermino` para mantener el mismo shape que las seis
+   * rutas hermanas, no porque el dato sea literalmente un termino.
+   */
+  async rankingCategoriasBuscadas(
+    query: ConsultarTendenciasQuery,
+  ): Promise<TendenciaTermino[]> {
+    return this.rankingPorFaceta('categorias', query);
+  }
+
+  async rankingPreciosBuscados(
+    query: ConsultarTendenciasQuery,
+  ): Promise<TendenciaTermino[]> {
+    return this.rankingPorFaceta('precios', query);
+  }
+
+  async rankingCalificacionesBuscadas(
+    query: ConsultarTendenciasQuery,
+  ): Promise<TendenciaTermino[]> {
+    return this.rankingPorFaceta('calificaciones', query);
+  }
+
+  /**
    * El ranking por producto: agrega en ClickHouse (`tabla`/`metrica` nunca
    * salen del cliente, son las constantes que fija cada metodo publico de
    * arriba, asi que interpolarlas es segura), y completa con el detalle
@@ -165,6 +192,50 @@ export class AdminTendenciasService {
       termino: fila.clave,
       total: Number(fila.total),
     }));
+  }
+
+  /**
+   * El ranking de una faceta elegida en `busqueda_realizada` -- a
+   * diferencia de `rankingPorTermino`/`rankingPorProducto`, el valor no es
+   * una columna simple: `categorias`/`precios`/`calificaciones` son
+   * `Array(...)`, una busqueda puede elegir varios a la vez (`?categoria=7,9`).
+   * `ARRAY JOIN` desenrolla el arreglo en una fila por valor antes de
+   * agrupar -- una busqueda sin esa faceta elegida tiene el arreglo vacio,
+   * y `ARRAY JOIN` sobre un arreglo vacio no produce ninguna fila, asi que
+   * queda fuera del conteo solo, sin necesidad de filtrar por `facetada`.
+   * `columna` nunca sale del cliente (la fija cada metodo publico de
+   * arriba), interpolarla es segura, mismo criterio que `tabla`/`metrica`
+   * en `consultarRanking`.
+   */
+  private async rankingPorFaceta(
+    columna: 'categorias' | 'precios' | 'calificaciones',
+    query: ConsultarTendenciasQuery,
+  ): Promise<TendenciaTermino[]> {
+    const dias = validarDiasEvento(query.dias);
+    const limite = validarLimiteEvento(query.limite);
+    const direccion = validarDireccionEvento(query.direccion);
+
+    try {
+      const resultado = await clickhouse.query({
+        query: `SELECT toString(valor) AS clave, count(DISTINCT sesion) AS total
+                  FROM busqueda_realizada
+                  ARRAY JOIN ${columna} AS valor
+                 WHERE fecha >= now() - INTERVAL {dias:UInt32} DAY
+                   AND lote = 'real'
+                 GROUP BY valor
+                 ORDER BY total ${direccion}
+                 LIMIT {limite:UInt32}`,
+        query_params: { dias, limite },
+        format: 'JSONEachRow',
+      });
+      const filas = await resultado.json<{ clave: string; total: string }>();
+      return filas.map((fila) => ({
+        termino: fila.clave,
+        total: Number(fila.total),
+      }));
+    } catch (error) {
+      manejarErrorClickHouse(this.logger, error);
+    }
   }
 
   /**

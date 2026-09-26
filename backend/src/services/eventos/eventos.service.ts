@@ -186,6 +186,18 @@ export class EventosService {
     resultados: number;
     idUsuario: string | null;
     sesion: string;
+    /**
+     * Las cuatro facetas elegidas (Entrega final,
+     * `elementos Generales/plan pendiente/buscador-facetado-clickhouse.md`)
+     * -- opcionales, con default vacio/false: `GET /buscador/productos`
+     * (la busqueda simple) llama a este metodo sin mandarlas, y quedan
+     * exactamente igual que antes de este cambio.
+     */
+    facetada?: boolean;
+    categorias?: number[];
+    precios?: string[];
+    calificaciones?: string[];
+    disponible?: boolean;
   }): Promise<void> {
     try {
       await clickhouse.insert({
@@ -198,6 +210,11 @@ export class EventosService {
             id_usuario: datos.idUsuario,
             sesion: datos.sesion,
             lote: 'real',
+            facetada: datos.facetada ? 1 : 0,
+            categorias: datos.categorias ?? [],
+            precios: datos.precios ?? [],
+            calificaciones: datos.calificaciones ?? [],
+            disponible: datos.disponible ? 1 : 0,
           },
         ],
         format: 'JSONEachRow',
@@ -220,6 +237,14 @@ export class EventosService {
     posicion: number;
     idUsuario: string | null;
     sesion: string;
+    /** Mismas cuatro facetas que `registrarBusqueda` -- que estaban
+     * activas en la pantalla de resultados cuando se hizo clic. El backend
+     * no las puede saber solo, las manda el frontend en el cuerpo. */
+    facetada?: boolean;
+    categorias?: number[];
+    precios?: string[];
+    calificaciones?: string[];
+    disponible?: boolean;
   }): Promise<void> {
     try {
       await clickhouse.insert({
@@ -233,6 +258,11 @@ export class EventosService {
             id_usuario: datos.idUsuario,
             sesion: datos.sesion,
             lote: 'real',
+            facetada: datos.facetada ? 1 : 0,
+            categorias: datos.categorias ?? [],
+            precios: datos.precios ?? [],
+            calificaciones: datos.calificaciones ?? [],
+            disponible: datos.disponible ? 1 : 0,
           },
         ],
         format: 'JSONEachRow',

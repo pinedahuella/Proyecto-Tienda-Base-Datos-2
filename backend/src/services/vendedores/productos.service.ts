@@ -191,6 +191,9 @@ export class ProductosVendedorService {
         // Nace pendiente de sincronizar con el buscador: el indice de
         // Elasticsearch todavia no sabe que este producto existe.
         pendiente_busqueda: true,
+        // Ni tiene vector todavia: nace pendiente tambien para la
+        // recomendacion semantica.
+        pendiente_vector: true,
         variantes,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
@@ -304,6 +307,7 @@ export class ProductosVendedorService {
         // crear(): aunque en_revision no circula todavia, el worker es
         // quien decide eso -- esta ruta solo avisa que el documento cambio.
         pendiente_busqueda: true,
+        pendiente_vector: true,
         variantes,
         ...(caracteristicasAdicionales.length > 0 && {
           caracteristicas_adicionales: caracteristicasAdicionales,
@@ -599,7 +603,13 @@ export class ProductosVendedorService {
 
       await coleccionProductos.updateOne(
         { _id: idProducto },
-        { $set: { estado: nuevoEstado, pendiente_busqueda: true } },
+        {
+          $set: {
+            estado: nuevoEstado,
+            pendiente_busqueda: true,
+            pendiente_vector: true,
+          },
+        },
       );
       estadoARevertir = 'en_revision';
       eventoABorrar = await this.crearEventoModificacion(idProducto, {
@@ -699,7 +709,13 @@ export class ProductosVendedorService {
 
       await coleccionProductos.updateOne(
         { _id: idProducto },
-        { $set: { estado: 'en_revision', pendiente_busqueda: true } },
+        {
+          $set: {
+            estado: 'en_revision',
+            pendiente_busqueda: true,
+            pendiente_vector: true,
+          },
+        },
       );
       estadoARevertir = 'rechazado';
       eventoABorrar = await this.crearEventoModificacion(idProducto, {
@@ -1244,11 +1260,18 @@ export class ProductosVendedorService {
         );
       }
 
-      // pendiente_busqueda va desde el inicio, no condicionado a que campo
-      // cambie: cualquier edicion por esta ruta (nombre, categoria, estado,
-      // caracteristicas, variantes) puede tocar algo que el buscador
-      // indexa, y decidir cual es tarea del futuro worker, no de aca.
-      const conjuntoSet: Record<string, unknown> = { pendiente_busqueda: true };
+      // pendiente_busqueda/pendiente_vector van desde el inicio, no
+      // condicionados a que campo cambie: cualquier edicion por esta ruta
+      // (nombre, categoria, estado, caracteristicas, variantes) puede tocar
+      // algo que el buscador indexa o que el vector representa, y decidir
+      // cual es tarea de cada worker, no de aca -- VectoresSyncService
+      // compara el hash del texto y no llama a Ollama si nombre/categoria/
+      // descripcion no cambiaron de verdad (por ejemplo, si solo cambiaron
+      // caracteristicas o variantes).
+      const conjuntoSet: Record<string, unknown> = {
+        pendiente_busqueda: true,
+        pendiente_vector: true,
+      };
       const conjuntoUnset: Record<string, ''> = {};
       const cambiosEvento: ProductoEventoCambios = {};
 

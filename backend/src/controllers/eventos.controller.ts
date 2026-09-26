@@ -20,6 +20,10 @@ import {
   validarSesionEvento,
   validarTerminoEvento,
   validarPosicionEvento,
+  validarFacetadaEvento,
+  validarCategoriasEvento,
+  validarClavesFacetaEvento,
+  validarDisponibleEvento,
 } from '../helpers/validaciones-eventos';
 import { idUsuarioDeCookieOpcional } from '../helpers/sesion-opcional';
 import { SesionGuard } from '../guards/sesion.guard';
@@ -133,11 +137,24 @@ export class EventosController {
     let idProducto: number;
     let posicion: number;
     let sesion: string;
+    let facetada: boolean;
+    let categorias: number[];
+    let precios: string[];
+    let calificaciones: string[];
+    let disponible: boolean;
     try {
       termino = validarTerminoEvento(cuerpo?.termino);
       idProducto = validarIdProducto(cuerpo?.id_producto);
       posicion = validarPosicionEvento(cuerpo?.posicion);
       sesion = validarSesionEvento(cuerpo?.sesion);
+      facetada = validarFacetadaEvento(cuerpo?.facetada);
+      categorias = validarCategoriasEvento(cuerpo?.categorias);
+      precios = validarClavesFacetaEvento(cuerpo?.precios, 'precios');
+      calificaciones = validarClavesFacetaEvento(
+        cuerpo?.calificaciones,
+        'calificaciones',
+      );
+      disponible = validarDisponibleEvento(cuerpo?.disponible);
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo registrar el clic de busqueda');
       return;
@@ -149,6 +166,11 @@ export class EventosController {
       posicion,
       idUsuario: await idUsuarioDeCookieOpcional(request),
       sesion,
+      facetada,
+      categorias,
+      precios,
+      calificaciones,
+      disponible,
     });
 
     return exito(null, 'Clic de busqueda registrado');

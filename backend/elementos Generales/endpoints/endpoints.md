@@ -167,6 +167,51 @@ caida, solo como "no hay nada que buscar". Timeout de 6 s -> 503.
 
 ---
 
+## GET /vectores (agregado 2026-09-26)
+
+Comprueba la conexion con **Ollama** (la recomendacion semantica de la
+Entrega final -- similitud por contenido, `producto_vector`/pgvector en
+PostgreSQL). Mismo patron que `GET /documental`, `GET /clave-valor`,
+`GET /grafo` y `GET /buscador`, pero sin contar documentos: en vez de eso
+confirma si el modelo de embeddings ya esta descargado en ese Ollama.
+`OLLAMA_URL` apunta al que haya quedado arriba tras `arrancar.ps1` (el de
+la PC, `localhost:11434`, o el contenedor `mesh-ollama`, `localhost:11435`
+-- cada quien pone el que le corresponda en su `.env`). Timeout de 6 s ->
+503.
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Conexion establecida con Ollama",
+  "payload": {
+    "url": "http://localhost:11434",
+    "modelo": "paraphrase-multilingual",
+    "modelo_descargado": true,
+    "modelos_disponibles": ["paraphrase-multilingual:latest", "gemma3:4b"]
+  }
+}
+```
+
+`modelo_descargado: false` (con `ok: true`, no es una caida) significa que
+Ollama conecta pero todavia no bajo el modelo -- `etl/cargar_vectores.ps1`
+lo baja solo en su primera corrida.
+
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con Ollama", "payload": null }
+```
+
+> La ruta que de verdad **usa el vector**, `GET /productos/:id/similares`,
+> esta documentada aparte, en `endpoints-productos.md`.
+
+Probado en vivo el 2026-09-26 contra el Ollama real de la maquina de
+desarrollo: `200` con el modelo `paraphrase-multilingual` ya descargado.
+
+---
+
 > **`POST /eventos/vista`** (pública), **`POST /eventos/carrito`** (exige
 > sesión) y **`POST /eventos/busqueda-clic`** (pública) -- registran en
 > ClickHouse que alguien vio la ficha de un producto, lo agregó al carrito,

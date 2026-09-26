@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { pool } from '../../database/postgres';
 import { redis } from '../../database/redis';
@@ -24,9 +24,17 @@ import { RegistroOfertasRedisService } from './registro-ofertas-redis.service';
  * proyecto (`MasVendidosSyncService`, el que apaga solas las ventas
  * relampago vencidas): nunca lanza, un fallo se loguea y se reintenta en la
  * proxima corrida.
+ *
+ * **Corre tambien al arrancar el backend (agregado 2026-09-26).** El
+ * `@Interval` de Nest NO dispara de inmediato, solo despues de que pase el
+ * primer `INTERVALO_MS` -- si Redis se vacio (o el backend estuvo apagado)
+ * justo antes de reiniciar, las dos vitrinas se hubieran quedado vacias o
+ * desactualizadas hasta 10 min despues. `onApplicationBootstrap()` llama a
+ * la misma `reconciliar()` una vez, apenas Nest termina de inicializar
+ * todos los modulos -- mismo patron que `DisparadorReglasPeriodoService`.
  */
 @Injectable()
-export class RegistroOfertasSyncService {
+export class RegistroOfertasSyncService implements OnApplicationBootstrap {
   private readonly logger = new Logger(RegistroOfertasSyncService.name);
 
   private static readonly INTERVALO_MS = 10 * 60 * 1000; // 10 minutos
@@ -72,6 +80,11 @@ export class RegistroOfertasSyncService {
     } finally {
       this.procesando = false;
     }
+  }
+
+  /** Ver el comentario de la clase -- corre una vez, al arrancar. */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.reconciliar();
   }
 
   /**

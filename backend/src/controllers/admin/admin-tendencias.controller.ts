@@ -15,7 +15,14 @@ import { AdminTendenciasService } from '../../services/admin/admin-tendencias.se
  * agregaba nada, solo listaba eventos ordenados por fecha) -- ver
  * `AdminTendenciasService` para el porque de la metrica de cada tabla.
  *
- * Mismos tres query params en las seis rutas:
+ * Tres rutas mas (`categorias-mas-buscadas`, `precios-mas-buscados`,
+ * `calificaciones-mas-buscadas`, agregado 2026-09-26): el ranking de las
+ * facetas elegidas en `GET /buscador/productos/facetado`
+ * (`elementos Generales/plan pendiente/buscador-facetado-clickhouse.md`),
+ * no de `busqueda_realizada` agrupada por termino. `disponible` queda
+ * fuera -- es un si/no, no tiene un "top N" que rankear.
+ *
+ * Mismos tres query params en las nueve rutas:
  *
  *   dias        cuantos dias hacia atras mirar (defecto 7, tope 365)
  *   limite      cuantos resultados del ranking traer -- "M" (defecto 20, tope 200)
@@ -105,6 +112,54 @@ export class AdminTendenciasController {
       manejarErrorHttp(
         error,
         'No se pudo obtener la tendencia de clics de busqueda',
+      );
+    }
+  }
+
+  // GET /admin/eventos/categorias-mas-buscadas
+  @Get('categorias-mas-buscadas')
+  async categoriasMasBuscadas(@Query() query: ConsultarTendenciasQuery) {
+    try {
+      const ranking =
+        await this.adminTendenciasService.rankingCategoriasBuscadas(query);
+      return exito(ranking, 'Tendencia de categorias mas buscadas obtenida');
+    } catch (error) {
+      manejarErrorHttp(
+        error,
+        'No se pudo obtener la tendencia de categorias mas buscadas',
+      );
+    }
+  }
+
+  // GET /admin/eventos/precios-mas-buscados
+  @Get('precios-mas-buscados')
+  async preciosMasBuscados(@Query() query: ConsultarTendenciasQuery) {
+    try {
+      const ranking =
+        await this.adminTendenciasService.rankingPreciosBuscados(query);
+      return exito(ranking, 'Tendencia de precios mas buscados obtenida');
+    } catch (error) {
+      manejarErrorHttp(
+        error,
+        'No se pudo obtener la tendencia de precios mas buscados',
+      );
+    }
+  }
+
+  // GET /admin/eventos/calificaciones-mas-buscadas
+  @Get('calificaciones-mas-buscadas')
+  async calificacionesMasBuscadas(@Query() query: ConsultarTendenciasQuery) {
+    try {
+      const ranking =
+        await this.adminTendenciasService.rankingCalificacionesBuscadas(query);
+      return exito(
+        ranking,
+        'Tendencia de calificaciones mas buscadas obtenida',
+      );
+    } catch (error) {
+      manejarErrorHttp(
+        error,
+        'No se pudo obtener la tendencia de calificaciones mas buscadas',
       );
     }
   }

@@ -51,8 +51,14 @@ import { GrafoController } from './controllers/grafo/grafo.controller';
 import { GrafoSyncService } from './services/grafo/grafo-sync.service';
 import { BaseDatosBuscadorController } from './controllers/base-datos-buscador.controller';
 import { BaseDatosBuscadorService } from './services/base-datos-buscador.service';
+import { BaseDatosVectoresController } from './controllers/base-datos-vectores.controller';
+import { BaseDatosVectoresService } from './services/base-datos-vectores.service';
 import { BuscadorProductosController } from './controllers/buscador/productos.controller';
 import { BuscadorProductosService } from './services/buscador/productos.service';
+import { BuscadorFacetadoController } from './controllers/buscador/facetado.controller';
+import { BuscadorFacetadoService } from './services/buscador/facetado.service';
+import { BuscadorSugerenciasController } from './controllers/buscador/sugerencias.controller';
+import { BuscadorSugerenciasService } from './services/buscador/sugerencias.service';
 import { BuscadorSyncService } from './services/buscador/buscador-sync.service';
 import { EventosAutenticacionSyncService } from './services/eventos-autenticacion/eventos-autenticacion-sync.service';
 import { FraudeLoginService } from './services/fraude-login/fraude-login.service';
@@ -85,6 +91,9 @@ import { TambienVieronSyncService } from './services/productos/tambien-vieron-sy
 import { ParaTiSyncService } from './services/productos/para-ti-sync.service';
 import { TambienVieronController } from './controllers/productos/tambien-vieron.controller';
 import { TambienVieronService } from './services/productos/tambien-vieron.service';
+import { SimilaresController } from './controllers/productos/similares.controller';
+import { SimilaresService } from './services/productos/similares.service';
+import { VectoresSyncService } from './services/productos/vectores-sync.service';
 import { ParaTiController } from './controllers/productos/para-ti.controller';
 import { ParaTiService } from './services/productos/para-ti.service';
 import { ReglasDescuentoAutomaticoController } from './controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller';
@@ -129,7 +138,10 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     AdminReportesController,
     GrafoController,
     BaseDatosBuscadorController,
+    BaseDatosVectoresController,
     BuscadorProductosController,
+    BuscadorFacetadoController,
+    BuscadorSugerenciasController,
     AdminFraudeLoginController,
     AdminFraudeAnillosController,
     AdminFraudeEventosController,
@@ -141,6 +153,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     OfertasDestacadasController,
     VistosRecientementeController,
     TambienVieronController,
+    SimilaresController,
     ParaTiController,
     ReglasDescuentoAutomaticoController,
     ReglasDescuentoPeriodoController,
@@ -174,7 +187,10 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     InventarioLimitadoService,
     GrafoSyncService,
     BaseDatosBuscadorService,
+    BaseDatosVectoresService,
     BuscadorProductosService,
+    BuscadorFacetadoService,
+    BuscadorSugerenciasService,
     BuscadorSyncService,
     EventosAutenticacionSyncService,
     FraudeLoginService,
@@ -196,6 +212,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     TambienVieronSyncService,
     ParaTiSyncService,
     TambienVieronService,
+    SimilaresService,
+    VectoresSyncService,
     ParaTiService,
     ReglasDescuentoAutomaticoService,
     ReglasDescuentoPeriodoService,
