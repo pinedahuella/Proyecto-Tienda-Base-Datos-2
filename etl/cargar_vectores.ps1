@@ -85,19 +85,23 @@ foreach ($linea in [IO.File]::ReadAllLines((Join-Path $tmp 'productos.jsonl'), [
     $d = $linea | ConvertFrom-Json
     $texto = "$($d.nombre). Categoria $($d.cat). $($d.desc)".Trim()
     $hash = -join ($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes($texto)) | ForEach-Object { $_.ToString('x2') })
-    $productos[[long]$d.id] = [pscustomobject]@{ id = [long]$d.id; texto = $texto; hash = $hash; activo = [bool]$d.activo }
+    # El grupo deja fuera el nombre: las copias del generador cambian el sufijo
+    # del nombre y repiten la descripcion, y no tienen que recomendarse entre si.
+    $grupo = -join ($md5.ComputeHash([Text.Encoding]::UTF8.GetBytes("$($d.cat)|$($d.desc)".Trim())) | ForEach-Object { $_.ToString('x2') })
+    $productos[[long]$d.id] = [pscustomobject]@{ id = [long]$d.id; texto = $texto; hash = $hash; grupo = $grupo; activo = [bool]$d.activo }
 }
 if ($productos.Count -eq 0) { Write-Host "   El catalogo de MongoDB esta vacio" -ForegroundColor Red; exit 1 }
 
 # 3. Lo que ya hay en PostgreSQL
 $hechos = @{}
-foreach ($f in (Psql "SELECT id_producto || '|' || texto_hash || '|' || activo FROM producto_vector;")) {
+foreach ($f in (Psql "SELECT id_producto || '|' || texto_hash || '|' || activo || '|' || COALESCE(grupo, '') FROM producto_vector;")) {
     $p = "$f".Split('|')
-    if ($p.Count -eq 3) { $hechos[[long]$p[0]] = [pscustomobject]@{ hash = $p[1]; activo = ($p[2] -eq 't') } }
+    # PostgreSQL pasa un booleano a texto como true o false, no como t o f.
+    if ($p.Count -eq 4) { $hechos[[long]$p[0]] = [pscustomobject]@{ hash = $p[1]; activo = ($p[2] -in 't', 'true'); grupo = $p[3] } }
 }
 
 $pendientes = @($productos.Values | Where-Object { $Todo -or -not $hechos.ContainsKey($_.id) -or $hechos[$_.id].hash -ne $_.hash } | Sort-Object id)
-$cambianEstado = @($productos.Values | Where-Object { $hechos.ContainsKey($_.id) -and $hechos[$_.id].hash -eq $_.hash -and $hechos[$_.id].activo -ne $_.activo })
+$cambianEstado = @($productos.Values | Where-Object { $hechos.ContainsKey($_.id) -and $hechos[$_.id].hash -eq $_.hash -and ($hechos[$_.id].activo -ne $_.activo -or $hechos[$_.id].grupo -ne $_.grupo) })
 $sobran = @($hechos.Keys | Where-Object { -not $productos.ContainsKey($_) })
 
 Write-Host "   $($productos.Count) productos en MongoDB, $($hechos.Count) con vector, $($pendientes.Count) por calcular"
@@ -122,15 +126,18 @@ for ($i = 0; $i -lt $pendientes.Count; $i += $lote) {
         if ($v.Count -ne 768) { Write-Host "   El modelo devolvio $($v.Count) dimensiones y la tabla espera 768" -ForegroundColor Red; exit 1 }
         $lit = '[' + (($v | ForEach-Object { ([double]$_).ToString('R', $inv) }) -join ',') + ']'
         $pr = $grupo[$k]
-        [void]$sql.AppendLine(("INSERT INTO producto_vector (id_producto, modelo, texto_hash, activo, vector) VALUES ({0}, '{1}', '{2}', {3}, '{4}') " +
-            "ON CONFLICT (id_producto) DO UPDATE SET modelo = EXCLUDED.modelo, texto_hash = EXCLUDED.texto_hash, activo = EXCLUDED.activo, vector = EXCLUDED.vector, fecha_calculo = now();") -f
-            $pr.id, $modelo, $pr.hash, $pr.activo.ToString().ToLower(), $lit)
+        # Concatenado y no con -f. En PowerShell -f pesa mas que +, asi que se
+        # aplicaba solo a la segunda mitad de la cadena y fallaba con FormatError.
+        $activo = $pr.activo.ToString().ToLower()
+        [void]$sql.AppendLine("INSERT INTO producto_vector (id_producto, modelo, texto_hash, grupo, activo, vector) VALUES (" +
+            "$($pr.id), '$modelo', '$($pr.hash)', '$($pr.grupo)', $activo, '$lit') " +
+            "ON CONFLICT (id_producto) DO UPDATE SET modelo = EXCLUDED.modelo, texto_hash = EXCLUDED.texto_hash, grupo = EXCLUDED.grupo, activo = EXCLUDED.activo, vector = EXCLUDED.vector, fecha_calculo = now();")
     }
     Write-Host ("   {0} de {1}" -f ([Math]::Min($i + $lote, $pendientes.Count)), $pendientes.Count)
 }
 
 foreach ($pr in $cambianEstado) {
-    [void]$sql.AppendLine("UPDATE producto_vector SET activo = $($pr.activo.ToString().ToLower()) WHERE id_producto = $($pr.id);")
+    [void]$sql.AppendLine("UPDATE producto_vector SET activo = $($pr.activo.ToString().ToLower()), grupo = '$($pr.grupo)' WHERE id_producto = $($pr.id);")
 }
 if ($sobran.Count) {
     [void]$sql.AppendLine("DELETE FROM producto_vector WHERE id_producto IN ($($sobran -join ','));")
@@ -150,5 +157,5 @@ if ($conVector -ne $productos.Count) {
     Write-Host "   Vectores $conVector de $($productos.Count) productos" -ForegroundColor Red
     exit 1
 }
-Write-Host "   Vectores $conVector de $($productos.Count) productos, $($cambianEstado.Count) cambiaron de estado, $($sobran.Count) quitados" -ForegroundColor Green
+Write-Host "   Vectores $conVector de $($productos.Count) productos, $($cambianEstado.Count) cambiaron de estado o de grupo, $($sobran.Count) quitados" -ForegroundColor Green
 exit 0
