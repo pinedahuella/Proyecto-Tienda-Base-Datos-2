@@ -49,6 +49,9 @@ Pantallas            Vistas en Edge sin ventana: la ficha con Parecidos a este, 
 Sustentacion         PREGUNTAS-SUSTENTACION.md 108, 109, 116, 117 y 118 decian que no habia vectores, ni control
                      de acceso, ni retrospectiva. Reescritas con lo que hay y donde se ve
 facetas.py           19 OK
+servicios.ps1        Lanzaba el backend como dist/main, relativo, y Procesos-De busca la carpeta del repo en la
+                     linea de comando. parar-backend decia "no estaba corriendo" con el backend vivo y reiniciar
+                     desde el panel lo dejaba duplicado. Ahora va con la ruta entera, probado que lo encuentra
 ```
 
 **El 2026-09-24 y 25: lo de David del 24 y 25 conectado, y lo de la Entrega 3 que es de este lado.** Commits nuestros

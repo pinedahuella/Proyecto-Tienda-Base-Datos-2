@@ -71,7 +71,11 @@ function Iniciar-Backend {
     Pop-Location
     if ($codigo -ne 0) { Mal "La compilacion fallo, codigo $codigo"; exit 1 }
     Paso 'Backend, levantando'
-    Start-Process -FilePath 'node' -ArgumentList '--enable-source-maps', 'dist/main' `
+    # La ruta va ENTERA y no como dist/main. Procesos-De reconoce el backend
+    # buscando la carpeta del repo en la linea de comando, y con la ruta
+    # relativa no aparecia: parar-backend decia "no estaba corriendo" con el
+    # backend vivo, y reiniciar lo dejaba duplicado (2026-09-26).
+    Start-Process -FilePath 'node' -ArgumentList '--enable-source-maps', "`"$(Join-Path $raiz 'backend\dist\main.js')`"" `
         -WorkingDirectory (Join-Path $raiz 'backend') -WindowStyle Hidden `
         -RedirectStandardOutput (Join-Path $logs 'backend.out.log') `
         -RedirectStandardError (Join-Path $logs 'backend.err.log')
