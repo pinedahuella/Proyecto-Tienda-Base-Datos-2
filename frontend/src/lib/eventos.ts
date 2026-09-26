@@ -30,15 +30,38 @@ export function registrarVista(idProducto: number, origen: OrigenVista): void {
 	);
 }
 
-/** POST /eventos/busqueda-clic -- se hizo clic en un resultado de busqueda. Publica. */
-export function registrarClicBusqueda(termino: string, idProducto: number, posicion: number): void {
+/**
+ * Las facetas que estaban puestas en /buscar al hacer clic. Van tal como
+ * viajan a GET /buscador/productos/facetado, con la categoria ya en numero.
+ */
+export interface FacetasDelClic {
+	categorias: number[];
+	precios: string[];
+	calificaciones: string[];
+	disponible: boolean;
+}
+
+/**
+ * POST /eventos/busqueda-clic -- se hizo clic en un resultado de busqueda. Publica.
+ *
+ * `facetas` solo se manda si la busqueda salio de la ruta facetada. Sin ella
+ * (la cabecera, o /buscar cuando esa ruta contesta 404) el backend guarda
+ * facetada = 0, que es lo que paso.
+ */
+export function registrarClicBusqueda(
+	termino: string,
+	idProducto: number,
+	posicion: number,
+	facetas?: FacetasDelClic
+): void {
 	void pedir(
 		'/eventos/busqueda-clic',
 		conJson('POST', {
 			termino,
 			id_producto: idProducto,
 			posicion,
-			sesion: sesionAnalitica()
+			sesion: sesionAnalitica(),
+			...(facetas && { facetada: true, ...facetas })
 		})
 	);
 }

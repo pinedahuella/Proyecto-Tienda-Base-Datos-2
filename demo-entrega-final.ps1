@@ -1,7 +1,8 @@
 # demo-entrega-final.ps1
-# Lo de la Entrega final y el buscador, ensenado en vivo sin pasar por el
-# backend. Cada parte habla directo con su base, asi que funciona aunque la ruta
-# del backend todavia no exista.
+# Lo de la Entrega final y el buscador, ensenado en vivo. Cada parte habla
+# primero directo con su base, y al final pide lo mismo a la ruta del backend
+# que usa la app (desde ced29f5 de Jose David, 2026-09-26). Si el backend no
+# esta corriendo, ese ultimo paso solo avisa y lo de la base igual se ve.
 #
 #   .\demo-entrega-final.ps1 -Parte acceso                      los tres usuarios de Redis
 #   .\demo-entrega-final.ps1 -Parte semantica -Producto laptop  los parecidos de un producto
@@ -26,7 +27,8 @@ param(
     [ValidateSet('acceso', 'semantica', 'facetas')]
     [string]$Parte = 'acceso',
     [string]$Producto = 'laptop',
-    [string]$Texto = 'laptop'
+    [string]$Texto = 'laptop',
+    [string]$Backend = 'http://localhost:3000'
 )
 
 function Paso($t) { Write-Host "`n>> $t" -ForegroundColor Cyan }
@@ -57,6 +59,17 @@ function Psql([string]$sql) {
     $salida = docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -qtAX -v ON_ERROR_STOP=1 -f /tmp/demo_final.sql 2>&1
     if ($LASTEXITCODE -ne 0) { Mal "PostgreSQL contesto con error. $salida"; exit 1 }
     return @($salida | ForEach-Object { "$_" } | Where-Object { $_.Trim() -ne '' })
+}
+
+# GET a la ruta del backend. Devuelve el payload, o $null si no contesta.
+function Api([string]$ruta) {
+    try {
+        $r = Invoke-RestMethod -Uri "$Backend$ruta" -TimeoutSec 20
+        return ,$r.payload
+    } catch {
+        Av "El backend no contesto en $Backend$ruta. $($_.Exception.Message)"
+        return $null
+    }
 }
 
 function Mongo([string]$js) {
@@ -201,6 +214,22 @@ SELECT id_producto FROM producto_vector
     $plan | Where-Object { $_ -match 'Index Scan|Execution Time' } | ForEach-Object { Write-Host "   $($_.Trim())" }
     Ok "$conVector productos con vector de 768 dimensiones, en la tabla producto_vector"
     Ok "El indice HNSW recorre un grafo de vecinos y no compara contra todos"
+
+    Paso "Lo mismo por la app, GET /productos/$id/similares"
+    $api = Api "/productos/$id/similares"
+    if ($null -ne $api) {
+        $idsApi = @($api | ForEach-Object { [long]$_.id_producto })
+        $idsBase = @($sim.Keys)
+        foreach ($f in $api) {
+            $nombre = if ($f.producto) { $f.producto.nombre } else { "(id $($f.id_producto), no esta en Mongo)" }
+            Write-Host ("   {0,8}% {1}" -f [math]::Round($f.similitud * 100, 1), $nombre)
+        }
+        if (($idsApi -join ',') -eq ($idsBase -join ',')) {
+            Ok "La ruta devuelve los mismos $($idsApi.Count), en el mismo orden. Es el estante Parecidos a este de la ficha"
+        } else {
+            Mal "La ruta devolvio otros ids. Base $($idsBase -join ','), ruta $($idsApi -join ',')"
+        }
+    }
     exit 0
 }
 
@@ -212,5 +241,26 @@ if ($Parte -eq 'facetas') {
     Contenedor 'mesh-elastic'
     $env:PYTHONIOENCODING = 'utf-8'
     & python (Join-Path $PSScriptRoot 'elastic\pruebas\demo_facetas.py') $Texto
-    exit $LASTEXITCODE
+    $codigo = $LASTEXITCODE
+
+    Paso "Lo mismo por la app, GET /buscador/productos/facetado?nombre=$Texto"
+    $api = Api "/buscador/productos/facetado?nombre=$([uri]::EscapeDataString($Texto))&limite=5"
+    if ($null -ne $api) {
+        Ok "$($api.total) resultados. Los primeros"
+        foreach ($r in $api.resultados) { Write-Host "   $($r.nombre)" }
+        Write-Host "   Categorias" -ForegroundColor DarkGray
+        foreach ($c in ($api.facetas.categoria | Select-Object -First 6)) { Write-Host ("   {0,6}  {1}" -f $c.cantidad, $c.nombre) }
+        Write-Host "   Precio" -ForegroundColor DarkGray
+        foreach ($c in $api.facetas.precio) { Write-Host ("   {0,6}  {1}" -f $c.cantidad, $c.clave) }
+        Ok "Con existencias, $($api.facetas.disponible). Es el panel de /buscar"
+    }
+
+    $prefijo = $Texto.Substring(0, [Math]::Min(3, $Texto.Length))
+    Paso "Autocompletado, GET /buscador/productos/sugerencias?prefijo=$prefijo"
+    $api = Api "/buscador/productos/sugerencias?prefijo=$([uri]::EscapeDataString($prefijo))&limite=6"
+    if ($null -ne $api) {
+        foreach ($s in $api) { Write-Host "   $($s.nombre)" }
+        Ok "Solo nombres que empiezan por '$prefijo', con bool_prefix sobre nombre.escribiendo"
+    }
+    exit $codigo
 }

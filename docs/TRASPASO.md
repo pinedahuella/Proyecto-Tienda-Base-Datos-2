@@ -3,7 +3,29 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-25**.
+Ultima actualizacion: **2026-09-26**.
+
+**El 2026-09-26: ced29f5 de David jalado y conectado, sin levantar nada.** David hizo las tres rutas que faltaban:
+`GET /productos/:id/similares`, `GET /buscador/productos/facetado` y `GET /buscador/productos/sugerencias`. Tambien
+agrego `VectoresSyncService`, que cada 3 horas recalcula los vectores de los productos editados, `GET /vectores`,
+tres rankings de facetas y la reconciliacion de ofertas al arrancar. Las rutas encajan con las pantallas que ya
+estaban, asi que "Parecidos a este" y el panel de /buscar deberian salir solos. De este lado:
+
+```
+ClickHouse           Columnas de facetas (facetada, categorias, precios, calificaciones, disponible) en
+                     busqueda_realizada y busqueda_clic, como ALTER ... ADD COLUMN IF NOT EXISTS en 001_esquema.sql.
+                     David las tenia solo en su base local. Sin ellas, en una base nueva fallaban en silencio los
+                     eventos de busqueda y clic
+Ollama y backend     cargar_vectores.ps1 escribe OLLAMA_URL y OLLAMA_MODELO_VECTORES en backend/.env con el Ollama
+                     que eligio. Si es mesh-ollama en el 11435, el backend ya no se queda en el 11434
+/buscar              El clic manda las facetas activas, solo si los resultados salieron de la ruta facetada
+Tendencias           Rankings "Categorias filtradas", "Precios filtrados" y "Estrellas filtradas"
+Demos                demo-entrega-final.ps1 -Parte semantica compara la base con /similares; -Parte facetas
+                     ensena el facetado y las sugerencias por el backend
+Comprobado           tsc del backend 0 errores, svelte-check 0 en 219 archivos, parser de PowerShell 0. Probado
+                     sobre una copia el bloque que escribe backend/.env, que no reescribe si ya coincide. NADA en
+                     vivo: falta arrancar, correr las dos demos y facetas.py
+```
 
 **El 2026-09-24 y 25: lo de David del 24 y 25 conectado, y lo de la Entrega 3 que es de este lado.** Commits nuestros
 b2d3292, 72eea96 y f8f537f, todos pusheados. De David se jalaron ad20dcd, 4e93bba, 99891a8, d1b670b, 6ecd31b y

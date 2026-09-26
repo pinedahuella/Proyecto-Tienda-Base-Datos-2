@@ -2,7 +2,7 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-09-25.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-09-26.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
@@ -16,7 +16,7 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~7~~ | ~~Una venta relampago que vence sola deja `es_inventario_limitado` en true~~ | -- | -- | **CERRADO el 2026-09-04.** `revisarVencidas()`, un `@Interval` en `inventario-limitado.service.ts`, apaga la columna solo |
 | ~~8~~ | ~~Editar el stock durante una venta relampago desincroniza las dos bases~~ | -- | -- | **CERRADO el 2026-09-04.** El `PATCH` contesta 409 cuando viene `ajuste_stock` con la venta abierta |
 | ~~9~~ | ~~Las tres rutas de la base columnar~~ | -- | -- | **CERRADO el 2026-09-18**, pero con otra forma: `POST /eventos/vista|carrito|busqueda-clic`, seis rankings `GET /admin/eventos/*` y `GET /productos/mas-vendidos`. El panel y el estante de la portada estan hechos, con `bash pruebas/tendencias.sh` (50 OK desde que solo cuentan `lote = 'real'`). David decidio el 2026-09-19 que las seis rutas cuentan solo lote real, sin parametro: no queda nada pendiente ahi |
-| 10 | Los filtros facetados del buscador, con agregaciones | Jose David la ruta | ver `BACKEND-PENDIENTE.md` | **alta, requisito literal de la Entrega 3.** Desde el 2026-09-25 la consulta esta hecha y probada (`elastic/pruebas/facetas.py`, 19 OK) y `/buscar` ya tiene el panel, que cae a la busqueda de siempre mientras la ruta `/buscador/productos/facetado` de 404. Solo falta esa ruta |
+| ~~10~~ | ~~Los filtros facetados del buscador, con agregaciones~~ | -- | -- | **CERRADO el 2026-09-26 por Jose David (ced29f5)**: `GET /buscador/productos/facetado`, puerto a TypeScript de `facetas.py`, con la misma forma que espera `/buscar`. Tambien acepta `nombre` vacio para navegar solo por facetas. El clic de `/buscar` manda las facetas activas y el admin tiene tres rankings nuevos en Tendencias. Las columnas de ClickHouse quedaron en `clickhouse/001_esquema.sql`. Falta verlo en vivo |
 | ~~11~~ | ~~La prueba de falla simulada del checkout~~ | -- | -- | **CERRADO el 2026-09-06.** `bash pruebas/falla_checkout.sh`, 31 OK y 0 FALLA, con su evidencia en `CONSISTENCIA-CHECKOUT.md`. Vuelto a correr el 2026-09-11: 31 OK |
 | 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | Entrega 3 | ver abajo | **es de la Entrega 3 (decidido el 2026-09-19)**; queda la fila 11 de `CONSISTENCIA-CHECKOUT.md` y las tres salidas por elegir entonces |
 | 13 | La lista de ofertas del vendedor viene entera, sin paginar | Jose David la ruta, yo la pantalla | ver `BACKEND-PENDIENTE.md` | **cerrado en lo que importa el 2026-09-19**: David agrego el filtro `estado` y el panel ya pagina con contadores exactos. El `q` de busqueda por texto **no importa (decidido el mismo dia)**; mientras, el buscador pide la lista completa |
@@ -33,7 +33,8 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | 24 | El estante de mas vendidos tarda hasta 10 minutos en ver un descuento o un precio nuevo | Jose David | ver `BACKEND-PENDIENTE.md` | baja: el catalogo ya lo ensena al momento; solo el estante de la portada va atrasado |
 | 25 | El buscador no sabe si un producto tiene descuento (`hay_descuento` no va al indice) | Jose David | ver `BACKEND-PENDIENTE.md` | baja: los precios del buscador si van con descuento, falta solo la etiqueta |
 | 26 | El historial de precio de una oferta no trae el % de descuento | Jose David | ver `BACKEND-PENDIENTE.md` | baja: "Mis pedidos" lo compensa con el % que guarda la linea |
-| 27 | "Parecidos a este" no pinta nada, falta `GET /productos/:id/similares` | Jose David | ver `BACKEND-PENDIENTE.md` | **alta, es la recomendacion semantica de la Entrega final.** La 024, los vectores y la pantalla estan desde el 2026-09-25 |
+| ~~27~~ | ~~"Parecidos a este" no pinta nada, falta `GET /productos/:id/similares`~~ | -- | -- | **CERRADO el 2026-09-26 por Jose David (ced29f5)**, con la misma forma que `tambien-vieron`. Suma `VectoresSyncService`, que cada 3 horas recalcula los productos marcados con `pendiente_vector` usando el mismo texto y hash que `cargar_vectores.ps1`. `cargar_vectores.ps1` le deja escrito en `backend/.env` el Ollama que eligio. Falta verlo en vivo |
+| 29 | `GET /buscador/productos/sugerencias` existe y ninguna pantalla la usa | mia, si se quiere | -- | baja: era opcional. La cabecera sigue con la busqueda difusa, que ya ensena precio y nota. Se ve con `.\demo-entrega-final.ps1 -Parte facetas` |
 | 28 | El worker de descuentos borra los que nunca tuvieron clave en Redis | Jose David | ver `BACKEND-PENDIENTE.md` | media: la semilla ya la cubre `arrancar.ps1` (paso 5b-2), pero un Redis vaciado borraria todos los descuentos permanentes |
 
 ---

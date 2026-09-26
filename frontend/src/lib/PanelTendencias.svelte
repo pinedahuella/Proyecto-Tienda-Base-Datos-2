@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { mensajeUtil, pedir } from './api';
+	import { NOMBRE_PRECIO, NOMBRE_CALIFICACION } from './buscador';
 	import TendenciasAuto from './TendenciasAuto.svelte';
 	import TendenciasSenales from './TendenciasSenales.svelte';
 
@@ -89,13 +90,26 @@
 		total: number;
 	}
 
-	type Clave = 'vista' | 'carrito' | 'compra' | 'devolucion' | 'busqueda' | 'busqueda-clic';
+	type Clave =
+		| 'vista'
+		| 'carrito'
+		| 'compra'
+		| 'devolucion'
+		| 'busqueda'
+		| 'busqueda-clic'
+		| 'categorias-mas-buscadas'
+		| 'precios-mas-buscados'
+		| 'calificaciones-mas-buscadas';
 
 	interface Ranking {
 		clave: Clave;
 		nombre: string;
-		/** Por que se agrupa, que decide como se pinta cada fila. */
-		agrupa: 'producto' | 'termino';
+		/**
+		 * Por que se agrupa, que decide como se pinta cada fila. `faceta` llega
+		 * con la misma forma que `termino`, pero el termino es una clave de
+		 * /buscar (un id de categoria, `250-500`, `4-o-mas`) y se traduce.
+		 */
+		agrupa: 'producto' | 'termino' | 'faceta';
 		/** Que cuenta el total, en singular y en plural. */
 		unidad: [string, string];
 		/** Una linea que dice que mide esta pestana y por que se mide asi. */
@@ -148,6 +162,28 @@
 			unidad: ['sesion distinta', 'sesiones distintas'],
 			explica:
 				'Que terminos terminan en un clic sobre un resultado, en sesiones distintas. Un termino muy buscado y poco cliqueado suele ser un buscador que no encuentra lo que la gente quiere.'
+		},
+		{
+			clave: 'categorias-mas-buscadas',
+			nombre: 'Categorias filtradas',
+			agrupa: 'faceta',
+			unidad: ['sesion distinta', 'sesiones distintas'],
+			explica:
+				'Que categorias marca la gente en el panel de /buscar. Solo cuentan las busquedas facetadas, la de la cabecera no filtra.'
+		},
+		{
+			clave: 'precios-mas-buscados',
+			nombre: 'Precios filtrados',
+			agrupa: 'faceta',
+			unidad: ['sesion distinta', 'sesiones distintas'],
+			explica: 'Que rango de precio marca la gente al buscar. Dice cuanto esta dispuesta a gastar.'
+		},
+		{
+			clave: 'calificaciones-mas-buscadas',
+			nombre: 'Estrellas filtradas',
+			agrupa: 'faceta',
+			unidad: ['sesion distinta', 'sesiones distintas'],
+			explica: 'Cuantas veces se pide un minimo de estrellas al buscar.'
 		}
 	];
 
@@ -244,10 +280,43 @@
 			return;
 		}
 
+		if (ranking.clave === 'categorias-mas-buscadas') {
+			await cargarCategorias();
+			if (mia !== vigente) return;
+		}
+
 		filas =
 			ranking.agrupa === 'producto'
 				? (r.payload as FilaProducto[]).map(deProducto)
-				: (r.payload as FilaTermino[]).map(deTermino);
+				: ranking.agrupa === 'faceta'
+					? (r.payload as FilaTermino[]).map((f, i) => deFaceta(ranking.clave, f, i))
+					: (r.payload as FilaTermino[]).map(deTermino);
+	}
+
+	/**
+	 * Los nombres de las categorias, para el ranking de categorias filtradas.
+	 * ClickHouse guarda el id que mando /buscar, no el nombre. Se piden una vez,
+	 * y si /categorias falla la fila sale con el id en vez de tapar el ranking.
+	 */
+	let nombreCategoria: Map<string, string> | null = null;
+
+	async function cargarCategorias() {
+		if (nombreCategoria) return;
+		const r = await pedir<{ id_categoria: number; nombre: string }[]>('/categorias');
+		if (r.ok && Array.isArray(r.payload)) {
+			nombreCategoria = new Map(r.payload.map((c) => [String(c.id_categoria), c.nombre]));
+		}
+	}
+
+	function deFaceta(clave: Clave, f: FilaTermino, i: number): Fila {
+		const valor = typeof f.termino === 'string' ? f.termino : '';
+		const titulo =
+			clave === 'categorias-mas-buscadas'
+				? (nombreCategoria?.get(valor) ?? `Categoria ${valor}`)
+				: clave === 'precios-mas-buscados'
+					? (NOMBRE_PRECIO[valor] ?? valor)
+					: (NOMBRE_CALIFICACION[valor] ?? valor);
+		return { id: `${valor}#${i}`, titulo, detalle: null, enlace: null, total: num(f.total) };
 	}
 
 	function deProducto(f: FilaProducto, i: number): Fila {

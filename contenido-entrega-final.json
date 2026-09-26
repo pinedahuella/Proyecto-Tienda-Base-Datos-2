@@ -214,6 +214,7 @@
      {
       "vin": [
        "`etl/cargar_vectores.ps1` guarda el md5 del texto con que se calculó cada vector. En un arranque normal solo recalcula los productos cuyo texto cambió y tarda unos segundos.",
+       "Entre un arranque y otro, el backend recalcula cada tres horas los productos que un vendedor creó o editó, con el mismo texto y el mismo md5. Si solo cambiaron las variantes o el estado, no le pide nada a Ollama.",
        "La primera carga de los 3105 productos tardó 413 segundos.",
        "El generador de datos de prueba copia productos con otro sufijo en el nombre y la misma descripción. Sin cuidarlo, los seis parecidos de un teléfono eran seis copias del mismo teléfono. La columna `grupo` guarda el md5 de la categoría y la descripción sin el nombre, y la consulta devuelve un solo producto por grupo."
       ]
@@ -245,7 +246,7 @@
       "p": "Al modelo nunca se le dice la categoría como dato aparte, solo la lee dentro del texto. Que los parecidos caigan en la misma categoría es la señal de que el vector captura de qué trata el producto."
      },
      {
-      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo sin pasar por el backend está `.\\demo-entrega-final.ps1 -Parte semantica`, que busca un producto por nombre, muestra sus seis parecidos con el porcentaje de similitud y el plan de PostgreSQL con el índice en uso."
+      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo sin pasar por el backend está `.\\demo-entrega-final.ps1 -Parte semantica`, que busca un producto por nombre, muestra sus seis parecidos con el porcentaje de similitud y el plan de PostgreSQL con el índice en uso. Al final le pide lo mismo a la ruta y comprueba que devuelve los mismos productos en el mismo orden."
      }
     ]
    }

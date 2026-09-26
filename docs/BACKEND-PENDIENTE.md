@@ -4,6 +4,38 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-26: ced29f5 jalado y conectado
+
+Las tres rutas que se pedian abajo ya estan y encajan con las pantallas sin
+tocarlas: similares (la ficha), facetado (`/buscar`) y sugerencias. Lo que se
+hizo de este lado al jalar:
+
+- **Las columnas de facetas en ClickHouse ya estan en `clickhouse/001_esquema.sql`**,
+  como `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` despues de cada `CREATE`,
+  porque ese archivo se reaplica en cada arranque sobre tablas que ya existen.
+  Es lo que pedia tu `plan pendiente/buscador-facetado-clickhouse.sql`. Sin
+  eso, en una base nueva fallaba en silencio el INSERT de cada busqueda y cada
+  clic, y los tres rankings de facetas daban error.
+- **`OLLAMA_URL` en `backend/.env`.** `cargar_vectores.ps1` (paso 7d) elige un
+  Ollama: el de la PC en el 11434 o `mesh-ollama` en el 11435 si la PC no
+  tiene. Ahora le escribe esa misma direccion y el modelo a `backend/.env`,
+  para que tu `VectoresSyncService` y `GET /vectores` no se queden en el
+  11434 por defecto. Surte efecto al siguiente arranque del backend.
+- `/buscar` manda en el clic `facetada`, `categorias`, `precios`,
+  `calificaciones` y `disponible`, solo cuando los resultados salieron de la
+  ruta facetada.
+- Tendencias, pestana Rankings, suma "Categorias filtradas", "Precios
+  filtrados" y "Estrellas filtradas", con tus tres rutas. Las categorias salen
+  con su nombre, que se saca de `GET /categorias`.
+- `demo-entrega-final.ps1` termina cada parte pidiendo lo mismo a tu ruta. En
+  `semantica` compara los ids de la base con los de `/similares`, y en
+  `facetas` ensena el facetado y las sugerencias.
+
+Nada de esto toco `backend/`. Sigue abierto lo de la fila 28 (el worker de
+descuentos); lo del arranque de `RegistroOfertasSyncService` es otra cosa.
+
+---
+
 ## LO NUEVO DEL 2026-09-25 EN LA NOCHE: productos parecidos por descripcion
 
 Es la recomendacion semantica de la Entrega final (5 puntos). La parte de datos

@@ -15,7 +15,7 @@
 		type Facetas,
 		type Elegidos
 	} from '$lib/buscador';
-	import { registrarClicBusqueda } from '$lib/eventos';
+	import { registrarClicBusqueda, type FacetasDelClic } from '$lib/eventos';
 
 	/**
 	 * La pagina de resultados del buscador, /buscar?q=...
@@ -70,6 +70,21 @@
 		elegidos.categoria.length + elegidos.precio.length + elegidos.calificacion.length > 0 ||
 			elegidos.disponible
 	);
+
+	/**
+	 * Lo que viaja con el clic a ClickHouse. Solo si las facetas llegaron de
+	 * la ruta facetada: si esa ruta dio 404 y se cayo a la busqueda simple, el
+	 * clic no fue sobre una busqueda facetada aunque la direccion traiga filtros.
+	 */
+	function facetasDelClic(): FacetasDelClic | undefined {
+		if (!facetas) return undefined;
+		return {
+			categorias: elegidos.categoria.map(Number).filter(Number.isInteger),
+			precios: elegidos.precio,
+			calificaciones: elegidos.calificacion,
+			disponible: elegidos.disponible
+		};
+	}
 
 	let resultados = $state<ResultadoBusqueda[]>([]);
 	let facetas = $state<Facetas | null>(null);
@@ -305,7 +320,7 @@
 									class="fila"
 									href="/producto/{r.id_producto}?origen=buscador"
 									onclick={() => {
-										if (!verTodo) registrarClicBusqueda(consulta, r.id_producto, i + 1);
+										if (!verTodo) registrarClicBusqueda(consulta, r.id_producto, i + 1, facetasDelClic());
 									}}
 								>
 									<span class="texto">
