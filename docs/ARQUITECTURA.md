@@ -237,9 +237,11 @@ solo uso, `mesh-kibana-vistas`, que termina en `Exited (0)`. Eso
 importa para cualquier discusion sobre escalar: una base distribuida en un solo
 nodo se queda con todos sus costes y ninguna de sus ventajas.
 
-**El control de acceso todavia no esta configurado** en los componentes NoSQL
-mas alla del usuario y contrasena de arranque. Es de la Entrega final y esta
-anotado como tal.
+**El control de acceso esta configurado en Redis y solo en Redis.** Tres usuarios
+de ACL (el backend, RedisInsight y mantenimiento), cada uno con lo justo, y la
+prueba `bash redis/prueba_acceso.sh`. Las otras bases NoSQL siguen con un solo
+usuario de arranque. El enunciado pide al menos un componente, y Redis se
+eligio porque es el que mas servicios tocan a la vez.
 
 ---
 
@@ -272,8 +274,8 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **2026-09-18 y 19** | Seis eventos de producto y buscador en ClickHouse, con su resumen diario y los rankings de tendencias. Un worker cada 10 minutos cachea lo mas vendido en un ZSET de Redis. El detector de anillos (cada 15 minutos) guarda en PostgreSQL lo que encuentra en Neo4j. `etl/cargar_compras.sh` copia compras y devoluciones a ClickHouse. El `.drawio` de arquitectura se rehizo entero y el ER se genera desde la base viva |
 | **2026-09-20** | Entra **Kibana** 8.15.3, la misma version que Elasticsearch, como ventana de inspeccion (`127.0.0.1:5601`, tope de memoria de 1 GB), y el contenedor de un solo uso `mesh-kibana-vistas`, que crea sus dos vistas de datos en cada `docker compose up`. Solo en el Mermaid; el `.drawio` falta |
 | **2026-09-24 y 25** | Reglas de descuento automaticas y por fecha en **PostgreSQL** (migraciones 021 y 022). El disparador de las automaticas cuenta ventas en **ClickHouse** cada 60 segundos y el vencimiento de cada descuento vive como clave con TTL en **Redis**. La familia B de patrones de resenas corre sobre **Neo4j** y guarda en `anillo_fraude` (migracion 023). Tendencias T1 a T3 y recomendaciones R1 a R3 salen de **ClickHouse**, y R2, R3 y lo mas visto quedan calculados en **Redis**. El `.drawio` y el Mermaid se pusieron al dia. La evaluacion de NewSQL para pagos esta en `DECISION-NEWSQL-PAGOS.md` (ADR-8) |
-| Entrega final | entrara el componente vectorial y el control de acceso |
+| **Entrega final (2026-09-25)** | Entra **pgvector** sobre el mismo PostgreSQL: `producto_vector` con indice HNSW y `productos_similares()` (migracion 024). Los vectores los calcula **Ollama** con `paraphrase-multilingual` desde el texto de **MongoDB** (`etl/cargar_vectores.ps1`, flujo 11). Ollama es el de la PC si lo tiene o el contenedor `mesh-ollama`, que solo se levanta si hace falta. **Redis** pasa de una contrasena sola a tres usuarios de ACL |
 
-El `pgvector` de la Entrega final, por cierto, **ya viene en la imagen**: el
-compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. No hay que
-cambiar de imagen cuando toque, solo crear la extension.
+El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el
+compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. Cuando toco no
+hubo que cambiar de imagen, la migracion 024 solo crea la extension.

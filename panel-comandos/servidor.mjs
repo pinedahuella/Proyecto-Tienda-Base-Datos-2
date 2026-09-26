@@ -311,6 +311,33 @@ const CATALOGO = [
     campos: [],
     construir: () => ['-Accion', 'borrar'],
   },
+
+  // --- Demos de la Entrega final ------------------------------------------
+  {
+    id: 'final-acceso', grupo: 'Demos de la Entrega final', titulo: 'Quien puede que en Redis',
+    explica: 'Los tres usuarios de Redis intentan lo mismo y se ve que contesta Redis. El del backend escribe pero no puede vaciar ni configurar, el de RedisInsight solo mira, y el de mantenimiento puede todo. Lo que borraria algo no se ejecuta, se le pregunta a Redis si lo dejaria.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Parte', 'acceso'],
+  },
+  {
+    id: 'final-semantica', grupo: 'Demos de la Entrega final', titulo: 'Productos parecidos por su descripcion',
+    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen segun su descripcion, con el porcentaje de parecido y cuanto tardo la base. No necesita el backend.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [
+      { nombre: 'producto', etiqueta: 'Palabra del nombre', tipo: 'texto', patron: '^[A-Za-z0-9 ]{2,30}$', defecto: 'laptop' },
+    ],
+    construir: (v) => ['-Parte', 'semantica', '-Producto', v.producto],
+  },
+  {
+    id: 'final-facetas', grupo: 'Demos de la Entrega final', titulo: 'Filtros del buscador y palabras mal escritas',
+    explica: 'Busca una palabra y ensena cuantos hay por categoria, precio y calificacion, que pasa al elegir una categoria, la misma palabra mal escrita y el autocompletado. Solo lee.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [
+      { nombre: 'texto', etiqueta: 'Que buscar', tipo: 'texto', patron: '^[A-Za-z0-9 ]{3,30}$', defecto: 'laptop' },
+    ],
+    construir: (v) => ['-Parte', 'facetas', '-Texto', v.texto],
+  },
 ];
 
 // ---------------------------------------------------------------------------

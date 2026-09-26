@@ -30,6 +30,39 @@ Lo que espera la pantalla, la misma forma que `tambien-vieron`.
 Si el producto no tiene vector la funcion devuelve vacio y la ruta contesta
 `[]`. Mientras la ruta no exista la ficha recibe 404 y no pinta el estante.
 
+### Por que no alcanza con R4, y quien sabe que dos productos se parecen
+
+R4 (`clickhouse/consultas/R4_populares_de_lista.sql`) no decide que productos
+se parecen. Recibe una lista de candidatos ya armada y la ordena por lo que se
+mira, se agrega al carrito y se compra. Esa lista iba a salir de Mongo con
+"misma categoria y precio parecido", o sea un filtro por campos. El enunciado
+pide otra cosa para la Entrega final (5 puntos): "similitud semantica de la
+descripcion" con "representaciones vectoriales". Sin vectores no cumple.
+
+Mongo tampoco sabe que dos productos se parecen, y no hace falta que lo sepa.
+Solo pone el texto y los datos de la tarjeta. El camino es este.
+
+1. `etl/cargar_vectores.ps1` (paso 7d de `arrancar.ps1`) lee de Mongo el
+   nombre, la categoria y la descripcion de cada producto.
+2. Ollama, con el modelo `paraphrase-multilingual`, convierte ese texto en un
+   vector de 768 numeros. Dos textos que dicen cosas parecidas, aunque usen
+   otras palabras, dan vectores que apuntan hacia el mismo lado.
+3. El vector se guarda en PostgreSQL, tabla `producto_vector` (pgvector), con
+   un indice HNSW.
+4. `productos_similares(id, 6)` compara el vector del producto con los demas
+   por distancia coseno y devuelve los 6 mas cercanos con su similitud (de 0 a
+   1). Quita el propio producto, los inactivos y las copias del generador.
+5. Tu ruta toma esos ids y trae sus documentos de Mongo con un
+   `find({ _id: { $in: ids } })`, igual que ya haces en R2, para pintar las
+   tarjetas.
+
+O sea, PostgreSQL dice cuales, Mongo dice como se ven. Nada de esto toca
+ClickHouse. Si algun dia quieres mezclarlas, R4 si sirve encima: los 20 mas
+parecidos de la 024 como candidatos y R4 los ordena por popularidad. Eso es
+opcional, la rubrica se cumple solo con la 024 y la ruta.
+
+Para verlo sin backend: `.\demo-entrega-final.ps1 -Parte semantica -Producto laptop`.
+
 ---
 
 ## LO NUEVO DEL 2026-09-25 EN LA NOCHE: las facetas del buscador, lista para copiar

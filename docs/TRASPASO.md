@@ -40,6 +40,12 @@ Informe              contenido-entrega3.json, generar-reporte-entrega3.py y medi
                      "Reporte Tercera Entrega - DABD2 - Mesh.docx" (15 paginas)
 Demos                demo-patrones-resenas.ps1 (B.1, B.5, B.6) y demo-descuentos-solos.ps1, en el panel de comandos
 Arneses              descuentos, reglas y los seis de las rutas del 24 y 25 en verde. reglas_periodo.sh 61 OK
+Entrega final        "Reporte Entrega Final - DABD2 - Mesh.docx" (16 paginas) con la retrospectiva en el capitulo 5,
+                     ADR-10 (pgvector) y ADR-11 (ACL de Redis). Se genera con contenido-entrega-final.json,
+                     generar-reporte-entrega-final.py y medir-paginas-entrega-final.ps1, igual que el de la Entrega 3.
+                     La fecha de la portada es FECHA en el generador
+Demos finales        demo-entrega-final.ps1 -Parte acceso|semantica|facetas, en el panel de comandos como "Demos de la
+                     Entrega final". Hablan directo con Redis, PostgreSQL, Mongo y Elasticsearch, sin backend
 Pendiente de David   /productos/:id/similares, /buscador/productos/facetado, /buscador/productos/sugerencias, el
                      worker que borra descuentos sin clave, la cadena_abierta que sobra en un anillo de 3, R4, B.4,
                      casos de fraude (026) y reconciliar al arrancar. Todo en BACKEND-PENDIENTE.md

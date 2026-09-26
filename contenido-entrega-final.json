@@ -1,0 +1,629 @@
+[
+ {
+  "titulo": "INTRODUCCIÓN",
+  "subsecciones": [
+   {
+    "titulo": "1.1. Alcance de la entrega y repositorio",
+    "bloques": [
+     {
+      "p": "Mesh es nuestra implementación de TiendaYa, una tienda en línea en la que varios vendedores comparten un mismo catálogo. Al llegar a esta entrega el sistema ya reparte sus datos entre seis motores. PostgreSQL es la fuente de verdad del dinero y del stock, MongoDB guarda el catálogo y su historial, Redis el carrito y la oferta limitada, Neo4j las relaciones entre cuentas y reseñas, ClickHouse los eventos en el tiempo y Elasticsearch el índice de búsqueda."
+     },
+     {
+      "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores guardados en el mismo PostgreSQL, y el control de acceso en Redis, con un usuario por servicio y permisos acotados. El informe incluye además el diagrama de arquitectura final y la retrospectiva sobre las decisiones de todo el semestre."
+     },
+     {
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 251 commits sobre `main` entre el 15 de agosto y el 25 de septiembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce."
+     }
+    ]
+   },
+   {
+    "titulo": "1.2. Cómo responde este informe a la rúbrica y a los lineamientos",
+    "bloques": [
+     {
+      "tabla": {
+       "cabecera": [
+        "Criterio de la rúbrica",
+        "Puntos",
+        "Sección",
+        "Evidencia medida"
+       ],
+       "filas": [
+        [
+         "Funcionalidad de recomendación semántica",
+         "5",
+         "2",
+         "3105 productos con vector, función de búsqueda por similitud con índice HNSW y prueba con 15 comprobaciones en verde"
+        ],
+        [
+         "Control de acceso configurado en un componente NoSQL",
+         "4",
+         "3",
+         "Tres usuarios de ACL en Redis y prueba con 31 comprobaciones en verde, cada negativa con su control"
+        ],
+        [
+         "Diagrama de arquitectura final, completo y correcto",
+         "3",
+         "4",
+         "Diagrama generado con `docs/generar-arquitectura.py` con los seis motores, el componente vectorial, Ollama y los usuarios de Redis"
+        ],
+        [
+         "Documento de retrospectiva",
+         "4",
+         "5",
+         "Siete decisiones que sostendríamos y seis que replantearíamos, cada una con lo que pasó de verdad"
+        ],
+        [
+         "Presentación del proyecto",
+         "4",
+         "fuera del informe",
+         "Demos en el panel de comandos y el archivo `PREGUNTAS-SUSTENTACION.md`"
+        ]
+       ],
+       "anchos": [
+        2.3,
+        0.6,
+        0.8,
+        2.8
+       ],
+       "leyenda": "Cada criterio de la rúbrica de la Entrega final con la sección que lo cubre."
+      }
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Lineamiento del enunciado",
+        "Dónde se cumple"
+       ],
+       "filas": [
+        [
+         "5.1 Distribución de responsabilidades",
+         "Sección 1.3, respaldada por el historial de git"
+        ],
+        [
+         "5.2 Componentes de referencia",
+         "Extensión vectorial sobre PostgreSQL, la opción de referencia del enunciado"
+        ],
+        [
+         "5.3 Registro de decisiones arquitectónicas",
+         "ADR-10 en 2.1 y ADR-11 en 3.1"
+        ],
+        [
+         "5.4 Documentación para levantar el sistema",
+         "Sección 4.3, un solo comando que también calcula los vectores"
+        ]
+       ],
+       "anchos": [
+        2.4,
+        4.1
+       ],
+       "leyenda": "Los lineamientos generales del enunciado y dónde se cumplen."
+      }
+     }
+    ]
+   },
+   {
+    "titulo": "1.3. Distribución de responsabilidades",
+    "bloques": [
+     {
+      "p": "Mantuvimos el reparto de todo el semestre. José David Navichoque Pineda se encargó del backend y José Manuel González Corado del frontend, las migraciones, los ETL, los scripts de cada base, las pruebas, la documentación y el arranque. Lo que una parte necesitaba de la otra quedaba escrito en `docs/BACKEND-PENDIENTE.md`, con la consulta ya probada."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Componente",
+        "José David Navichoque, backend",
+        "José Manuel González, el resto"
+       ],
+       "filas": [
+        [
+         "Recomendación semántica",
+         "La ruta que devuelve los parecidos de un producto",
+         "Migración 024, carga de vectores con Ollama, función de similitud, prueba y estante de la ficha"
+        ],
+        [
+         "Control de acceso",
+         "Revisión de los comandos de Redis que usa el backend",
+         "Usuarios de ACL en `docker-compose.yml`, contraseñas automáticas en el arranque y prueba de acceso"
+        ],
+        [
+         "Arquitectura y retrospectiva",
+         "",
+         "Diagrama de arquitectura, diagrama entidad relación, retrospectiva e informe"
+        ]
+       ],
+       "anchos": [
+        1.4,
+        2.5,
+        2.6
+       ],
+       "leyenda": "Quién hizo cada parte de la Entrega final."
+      }
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Integrante",
+        "Usuario en git",
+        "Commits"
+       ],
+       "filas": [
+        [
+         "José Manuel González Corado",
+         "José Manuel González Corado",
+         "150"
+        ],
+        [
+         "José David Navichoque Pineda",
+         "pinedahuella",
+         "96"
+        ],
+        [
+         "Juan Pablo Torres García",
+         "zapatoazul",
+         "5"
+        ],
+        [
+         "Total",
+         "",
+         "251"
+        ]
+       ],
+       "anchos": [
+        2.4,
+        2.4,
+        1.2
+       ],
+       "leyenda": "Commits por integrante en el historial de git al 25 de septiembre de 2026."
+      }
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "titulo": "RECOMENDACIÓN SEMÁNTICA DE PRODUCTOS",
+  "subsecciones": [
+   {
+    "titulo": "2.1. Por qué pgvector y su registro de decisión",
+    "bloques": [
+     {
+      "p": "Hasta esta entrega la tienda solo sabía relacionar productos por su categoría o por lo que otros compradores miraron. Dos productos que sirven para lo mismo pero están descritos con otras palabras no se encontraban. El enunciado pide sugerencias basadas en la similitud semántica de la descripción, con representaciones vectoriales."
+     },
+     {
+      "adr": {
+       "id": "ADR-10",
+       "titulo": "Dónde guardar y consultar los vectores de los productos",
+       "contexto": "Cada producto necesita un vector que represente el significado de su texto y una consulta que encuentre los más cercanos a uno dado. El catálogo tiene 3105 productos activos y la consulta se hace una vez por cada ficha que se abre.",
+       "alternativas": "No introducir cambios y recomendar por categoría y precio parecido, que ya se podía con MongoDB y ClickHouse. Un componente vectorial dedicado, como Qdrant o Milvus. El tipo `dense_vector` de Elasticsearch, que ya corre en el sistema. La extensión pgvector sobre el PostgreSQL existente.",
+       "decision": "pgvector sobre el PostgreSQL existente, con una tabla `producto_vector`, un índice HNSW y la función `productos_similares()`.",
+       "justificacion": "Por patrón de consulta, buscar los vecinos de un producto entre unos miles es justo lo que un índice HNSW resuelve en milisegundos. Por costo operativo, la imagen `pgvector/pgvector:pg18` venía en el sistema desde la Entrega 1, así que no hubo contenedor nuevo ni otra copia de los identificadores. Por consistencia, el vector vive junto a las ofertas y los pedidos y se puede cruzar con ellos en la misma consulta. Elasticsearch también servía, pero su índice se reconstruye entero cuando cambia el mapeo y los vectores tardan minutos en calcularse. La primera alternativa quedó descartada porque filtrar por campos no mide el significado del texto.",
+       "consecuencias": "Ganamos la recomendación sin operar un motor más. Aceptamos que el vector es una copia derivada del texto de MongoDB y hay que recalcularlo cuando ese texto cambia, lo que el ETL resuelve comparando un hash. También que PostgreSQL recibe una consulta más por ficha y que calcular los vectores necesita un modelo local. A millones de productos la decisión se revisaría."
+      }
+     }
+    ]
+   },
+   {
+    "titulo": "2.2. Cómo se calcula el vector de cada producto",
+    "bloques": [
+     {
+      "p": "El texto de cada producto se arma con su nombre, su categoría y su descripción, leídos de MongoDB. Ese texto se convierte en un vector de 768 números con el modelo `paraphrase-multilingual`, que entiende español y está entrenado para que dos frases con el mismo sentido den vectores cercanos aunque usen palabras distintas."
+     },
+     {
+      "p": "El modelo corre en Ollama, en la misma máquina. Ningún texto sale a un servicio externo y no hay costo por consulta. El arranque usa el Ollama de la PC si ya lo tiene y, si no, levanta el contenedor `mesh-ollama` y baja el modelo solo, así que nadie del equipo tuvo que instalar nada a mano."
+     },
+     {
+      "vin": [
+       "`etl/cargar_vectores.ps1` guarda el md5 del texto con que se calculó cada vector. En un arranque normal solo recalcula los productos cuyo texto cambió y tarda unos segundos.",
+       "La primera carga de los 3105 productos tardó 413 segundos.",
+       "El generador de datos de prueba copia productos con otro sufijo en el nombre y la misma descripción. Sin cuidarlo, los seis parecidos de un teléfono eran seis copias del mismo teléfono. La columna `grupo` guarda el md5 de la categoría y la descripción sin el nombre, y la consulta devuelve un solo producto por grupo."
+      ]
+     }
+    ]
+   },
+   {
+    "titulo": "2.3. La consulta de productos parecidos",
+    "bloques": [
+     {
+      "p": "La función `productos_similares(id, limite)` compara el vector del producto con los demás por distancia coseno y devuelve los más cercanos con su similitud, de 0 a 1. Deja fuera al propio producto, a los inactivos y a las copias del mismo grupo."
+     },
+     {
+      "codigo": "SELECT v.id_producto, v.vector <=> base.vector AS distancia\n  FROM producto_vector v, base\n WHERE v.id_producto <> p_id_producto\n   AND v.activo\n   AND v.grupo IS DISTINCT FROM base.grupo\n ORDER BY v.vector <=> base.vector\n LIMIT 200",
+      "leyenda": "El núcleo de productos_similares() en migrations/024_vectores_productos.sql. El operador <=> es la distancia coseno de pgvector."
+     },
+     {
+      "p": "El índice HNSW recorre un grafo de vecinos y no compara contra todo el catálogo. Por defecto solo mira 40 candidatos, y con los filtros de activo y de grupo podían quedar menos de los pedidos, así que la función sube ese número a 200 solo mientras corre. Después elige el mejor de cada grupo y corta en el límite pedido."
+     }
+    ]
+   },
+   {
+    "titulo": "2.4. Evidencia y dónde se ve",
+    "bloques": [
+     {
+      "p": "La prueba `python pruebas/recomendacion_semantica.py` corre contra las bases en funcionamiento y dio 15 comprobaciones en verde. Revisa que cada producto de MongoDB tenga su vector y que no sobre ninguno, que los parecidos compartan categoría mucho más seguido de lo que daría el azar, con ese azar medido sobre los mismos productos como control, que la función no devuelva el propio producto ni productos inactivos, y que un producto sin vector devuelva una lista vacía sin romper nada."
+     },
+     {
+      "p": "Al modelo nunca se le dice la categoría como dato aparte, solo la lee dentro del texto. Que los parecidos caigan en la misma categoría es la señal de que el vector captura de qué trata el producto."
+     },
+     {
+      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo sin pasar por el backend está `.\\demo-entrega-final.ps1 -Parte semantica`, que busca un producto por nombre, muestra sus seis parecidos con el porcentaje de similitud y el plan de PostgreSQL con el índice en uso."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "titulo": "CONTROL DE ACCESO EN REDIS",
+  "subsecciones": [
+   {
+    "titulo": "3.1. Por qué en Redis y su registro de decisión",
+    "bloques": [
+     {
+      "adr": {
+       "id": "ADR-11",
+       "titulo": "Control de acceso en un componente NoSQL",
+       "contexto": "Hasta esta entrega Redis tenía una sola contraseña. El backend, las pruebas y RedisInsight entraban con ella y podían hacer lo mismo, incluido vaciar la base con FLUSHALL. RedisInsight solo se usa para mirar claves y su tiempo de vida, y aun así podía borrar el carrito de cualquier cliente o el contador de una venta relámpago en curso.",
+       "alternativas": "Dejar la contraseña única. Usuarios de ACL en Redis. Roles en MongoDB. La seguridad de Elasticsearch con usuarios y roles.",
+       "decision": "Usuarios de ACL en Redis, tres, declarados en `docker-compose.yml`.",
+       "justificacion": "Redis es la base que más servicios tocan a la vez y la que guarda lo que no se puede reconstruir, los carritos abiertos y el stock de una venta relámpago. Las ACL vienen en Redis desde la versión 6 y se declaran en el mismo archivo que levanta el contenedor, así que quedan versionadas y valen desde el primer arranque. MongoDB lo usan sobre todo el backend y el ETL, y sus roles protegerían menos. Activar la seguridad de Elasticsearch obligaba a cambiar cómo se conectan Kibana, el backend y el ETL, un costo alto para una base que no guarda nada propio.",
+       "consecuencias": "Cada servicio entra con lo justo y un error del backend ya no puede vaciar Redis. Aceptamos que el usuario del backend sigue siendo amplio, porque cambiarle el usuario obligaba a tocar su código y se prefirió recortarle los comandos. Las otras bases NoSQL siguen con un solo usuario de arranque. Las contraseñas nuevas viven en el `.env` y el arranque las genera solo si faltan."
+      }
+     }
+    ]
+   },
+   {
+    "titulo": "3.2. Los tres usuarios",
+    "bloques": [
+     {
+      "tabla": {
+       "cabecera": [
+        "Usuario",
+        "Quién lo usa",
+        "Puede",
+        "No puede"
+       ],
+       "filas": [
+        [
+         "`default`",
+         "El backend y los scripts",
+         "Leer, escribir, poner vencimientos, correr scripts Lua, recorrer claves con SCAN, pedir INFO",
+         "Todo lo de la categoría peligrosa, como FLUSHALL, CONFIG, KEYS, ACL, SHUTDOWN y DEBUG"
+        ],
+        [
+         "`inspeccion`",
+         "RedisInsight",
+         "Leer claves, ver su tiempo de vida, SCAN e INFO",
+         "Escribir, borrar, cambiar vencimientos o correr scripts"
+        ],
+        [
+         "`operador`",
+         "Mantenimiento a mano",
+         "Todo",
+         ""
+        ]
+       ],
+       "anchos": [
+        1.0,
+        1.3,
+        2.2,
+        2.0
+       ],
+       "leyenda": "Los tres usuarios de ACL de Redis y sus permisos."
+      }
+     },
+     {
+      "p": "A la categoría peligrosa se le devolvió solo INFO, porque la biblioteca del backend lo pide al conectarse y lo usa para revisar la salud de Redis. Antes de cerrar la lista se revisó que el backend no usara ningún otro comando de esa categoría."
+     },
+     {
+      "p": "El comando de Redis va escrito como lista en `docker-compose.yml`. Escrito en una sola línea, Compose cortaba la contraseña en el signo que la precede y Redis arrancaba con una contraseña distinta a la del `.env`."
+     }
+    ]
+   },
+   {
+    "titulo": "3.3. Evidencia",
+    "bloques": [
+     {
+      "p": "La prueba es `bash redis/prueba_acceso.sh` y dio 31 comprobaciones en verde. Cada negativa tiene su control. Que `inspeccion` no pueda escribir una clave solo cuenta si `default` sí pudo escribirla, y que `default` no pueda leer la configuración solo cuenta si `operador` sí la lee. Sin esos controles, un Redis caído haría pasar todas las negativas."
+     },
+     {
+      "p": "Los comandos que destruyen algo, como FLUSHALL o SHUTDOWN, no se intentan a ciegas. Primero se le pregunta a Redis con ACL DRYRUN, que contesta sin ejecutar, y solo si dice que lo negaría se intenta de verdad para ver el rechazo. Si la configuración estuviera mal, la prueba no vaciaría la base."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Grupo",
+        "Qué se comprueba"
+       ],
+       "filas": [
+        [
+         "Los usuarios",
+         "Existen los tres, cada uno entra con su contraseña, nadie entra con la de otro y sin contraseña no se entra"
+        ],
+        [
+         "`default`",
+         "Escribe, lee, pone vencimientos, corre Lua y SCAN, y no puede vaciar, leer ni cambiar la configuración, listar con KEYS, tocar usuarios ni apagar el servidor"
+        ],
+        [
+         "`inspeccion`",
+         "Lee y ve el tiempo de vida, y no puede escribir, borrar, cambiar el vencimiento, correr scripts ni vaciar. Al final la clave sigue intacta"
+        ],
+        [
+         "`operador`",
+         "Lee la configuración, ve las reglas de cada usuario y borra la clave de la prueba"
+        ]
+       ],
+       "anchos": [
+        1.3,
+        5.2
+       ],
+       "leyenda": "Las 31 comprobaciones de redis/prueba_acceso.sh agrupadas por usuario."
+      }
+     },
+     {
+      "p": "En clase se enseña con `.\\demo-entrega-final.ps1 -Parte acceso`, que pone a los tres usuarios a intentar lo mismo y muestra lo que contesta Redis a cada uno."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "titulo": "ARQUITECTURA FINAL",
+  "subsecciones": [
+   {
+    "titulo": "4.1. El diagrama de arquitectura",
+    "bloques": [
+     {
+      "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el flujo 11, que lleva el texto de cada producto de MongoDB a Ollama y guarda su vector en PostgreSQL, y la nota de los tres usuarios de Redis."
+     },
+     {
+      "figura": {
+       "archivo": "diagrama-arquitectura.png",
+       "leyenda": "Arquitectura final de Mesh al 25 de septiembre de 2026, generada con docs/generar-arquitectura.py.",
+       "ancho": 9.0,
+       "horizontal": true
+      }
+     }
+    ]
+   },
+   {
+    "titulo": "4.2. Qué guarda cada componente",
+    "bloques": [
+     {
+      "tabla": {
+       "cabecera": [
+        "Componente",
+        "Qué guarda",
+        "Desde",
+        "Por qué ahí"
+       ],
+       "filas": [
+        [
+         "PostgreSQL 18",
+         "Cuentas, ofertas, stock, pedidos, pagos, reseñas, reglas de descuento, alertas y vectores",
+         "Fase inicial",
+         "El dinero y el stock necesitan una transacción atómica"
+        ],
+        [
+         "MongoDB",
+         "Catálogo con atributos por categoría, historial de eventos del producto y registro de inicios de sesión",
+         "Entrega 1",
+         "Cada categoría trae atributos distintos y la ficha se lee entera"
+        ],
+        [
+         "Redis",
+         "Carrito con vencimiento, oferta limitada, candado del checkout, contadores de fraude y listas calculadas",
+         "Entrega 2",
+         "Datos de paso con tiempo de vida y operaciones atómicas bajo concurrencia"
+        ],
+        [
+         "Neo4j",
+         "Cuentas, reseñas y productos como grafo",
+         "Entrega 2",
+         "Los anillos de reseñas son consultas de varios saltos"
+        ],
+        [
+         "ClickHouse",
+         "Eventos de vista, carrito, búsqueda, compra y devolución",
+         "Entrega 2",
+         "Preguntas nuevas por intervalos de tiempo sobre muchos eventos"
+        ],
+        [
+         "Elasticsearch",
+         "Índice de búsqueda del catálogo y copia del registro de inicios de sesión",
+         "Entrega 3",
+         "Tolerancia a errores, relevancia y agregaciones para las facetas"
+        ],
+        [
+         "pgvector",
+         "Un vector de 768 números por producto",
+         "Entrega final",
+         "Vecinos más cercanos sin un motor aparte"
+        ]
+       ],
+       "anchos": [
+        1.2,
+        2.3,
+        0.9,
+        2.1
+       ],
+       "leyenda": "Los componentes de persistencia de Mesh y su rol."
+      }
+     },
+     {
+      "p": "El diagrama entidad relación se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones."
+     }
+    ]
+   },
+   {
+    "titulo": "4.3. Cómo se levanta el sistema completo",
+    "bloques": [
+     {
+      "p": "Todo se levanta con `.\\arrancar.ps1`. El script prende los contenedores, corre las migraciones, carga los datos, reconstruye el catálogo en MongoDB, el índice de búsqueda y el grafo, calcula los vectores que falten y al final cuenta lo que quedó en cada base contra PostgreSQL en lugar de suponer que salió bien. Las contraseñas nuevas de Redis se agregan solas al `.env`. El backend y el frontend se arrancan después con `npm run start:dev` y `npm run dev`. La guía completa está en `docs/instalacion.md`."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "titulo": "RETROSPECTIVA",
+  "subsecciones": [
+   {
+    "titulo": "5.1. Cómo la hicimos",
+    "bloques": [
+     {
+      "p": "Para cada decisión miramos qué prometía su registro y qué pasó después, con lo medido en las pruebas y lo que tuvimos que arreglar. Una decisión se sostiene si lo que prometió se cumplió y lo que aceptó como costo no nos cobró más de la cuenta. Se replantea si tuvimos que rodearla o si hoy la tomaríamos distinto con lo que sabemos."
+     },
+     {
+      "p": "Separamos lo técnico de lo que aprendimos sobre la forma de trabajar, porque varias de las cosas que replantearíamos tienen que ver con el orden en que hicimos el trabajo."
+     }
+    ]
+   },
+   {
+    "titulo": "5.2. Lo que sostendríamos",
+    "bloques": [
+     {
+      "tabla": {
+       "cabecera": [
+        "Decisión",
+        "Por qué se sostiene",
+        "Evidencia"
+       ],
+       "filas": [
+        [
+         "El dinero y el stock en PostgreSQL, sin migrar las ofertas ni los pagos (ADR-2 y ADR-8)",
+         "Es la única pieza donde un error cuesta dinero, y una transacción local es fácil de probar",
+         "Cero sobreventas y cero descuadres sobre 555 ofertas. La prueba de falla del checkout dio 31 en verde y ninguna caída cobra a medias"
+        ],
+        [
+         "La oferta limitada con un script Lua en Redis",
+         "Decide quién gana cada unidad sin bloqueos en la aplicación",
+         "Cero sobreventas con 5000 solicitudes y 200 clientes simultáneos"
+        ],
+        [
+         "El catálogo en MongoDB (ADR-1)",
+         "Cada categoría trae atributos distintos y ninguna tabla fija los aguanta sin columnas vacías",
+         "El llenado promedio de atributos es 59 por ciento, y se filtra por atributo sin tocar el esquema"
+        ],
+        [
+         "Neo4j para los anillos de reseñas, alimentado con una cola transaccional",
+         "La consulta de varios saltos se escribe una vez y se lee sin esfuerzo",
+         "Desde la migración 015 el grafo se mantiene solo y una ruta de conciliación compara sus conteos con PostgreSQL"
+        ],
+        [
+         "Elasticsearch como copia reconstruible del catálogo (ADR-9)",
+         "No guarda nada propio, así que perderlo no pierde datos",
+         "Se reconstruye entero en el arranque y la prueba de facetas dio 19 en verde"
+        ],
+        [
+         "pgvector sobre el mismo PostgreSQL (ADR-10)",
+         "Resolvió la recomendación sin un contenedor ni un ETL más",
+         "3105 vectores y la prueba de recomendación con 15 en verde"
+        ],
+        [
+         "Un solo comando de arranque que cuenta lo que quedó",
+         "Una PC nueva queda lista sin pasos a mano y el script no dice listo sin haberlo medido",
+         "El arranque compara cada base contra PostgreSQL y avisa en rojo si algo no cuadra"
+        ]
+       ],
+       "anchos": [
+        2.0,
+        2.2,
+        2.3
+       ],
+       "leyenda": "Las decisiones que tomaríamos igual."
+      }
+     },
+     {
+      "p": "La que más pesó fue dejar el dinero en PostgreSQL. Cada vez que una base nueva entró al sistema, la pregunta fue qué pasa con el checkout si esa base se cae, y la respuesta fue siempre la misma, el pedido se cobra en una sola transacción y todo lo demás se puede reconstruir o se avisa. La evaluación de NewSQL de la entrega anterior llegó a la misma conclusión con otro camino."
+     }
+    ]
+   },
+   {
+    "titulo": "5.3. Lo que replantearíamos",
+    "bloques": [
+     {
+      "tabla": {
+       "cabecera": [
+        "Decisión",
+        "Qué pasó",
+        "Qué haríamos hoy"
+       ],
+       "filas": [
+        [
+         "Dos repartidores de identificador de producto, la secuencia de PostgreSQL y el mayor identificador de MongoDB",
+         "No se hablan. Medimos una secuencia adelantada 21 números respecto al máximo real, y el arranque tuvo que ganar una revisión que avisa si los dos se cruzan",
+         "Un solo dueño del identificador desde la Entrega 1, la secuencia de PostgreSQL, y MongoDB recibiéndolo"
+        ],
+        [
+         "El vencimiento de un descuento guardado solo como clave con tiempo de vida en Redis",
+         "El proceso que quita descuentos vencidos no distingue una clave que venció de una que nunca existió. Los 13 descuentos de la semilla se borraban en su primer minuto y un Redis vaciado borraría todos",
+         "El vencimiento como columna en PostgreSQL y Redis solo como acelerador. En Redis va lo que se puede perder"
+        ],
+        [
+         "Aplazar la base columnar en la Entrega 2 (ADR-3)",
+         "La aplazamos el 3 de septiembre y la metimos el 6. Decidimos con las consultas que ya teníamos, y el fraude consiste en hacer preguntas que no sabíamos que íbamos a hacer",
+         "Decidir por el tipo de preguntas que vienen y no solo por las que ya existen"
+        ],
+        [
+         "Escribir los eventos a ClickHouse sin respaldo (ADR-6)",
+         "Si ClickHouse está caído, los eventos de ese rato se pierden y los rankings quedan cortos sin avisar",
+         "Una cola en PostgreSQL, igual que la del grafo, que se vacía cuando ClickHouse vuelve"
+        ],
+        [
+         "El registro de inicios de sesión primero en ClickHouse",
+         "Terminó en MongoDB con copia en Elasticsearch, y la copia a ClickHouse quedó congelada",
+         "Elegir el destino por quién lo va a consultar antes de escribir el primer evento"
+        ],
+        [
+         "El checkout leyendo de MongoDB sin que MongoDB esté en la transacción",
+         "La prueba de falla encontró que con MongoDB caído no se puede comprar, aunque el pedido se cobra solo en PostgreSQL",
+         "Que el checkout lea precio y stock solo de PostgreSQL y que MongoDB sea solo para pintar"
+        ]
+       ],
+       "anchos": [
+        2.0,
+        2.3,
+        2.2
+       ],
+       "leyenda": "Las decisiones que tomaríamos distinto."
+      }
+     },
+     {
+      "p": "Las seis tienen algo en común. En casi todas una copia terminó comportándose como si fuera la verdad. El identificador de MongoDB, la clave de Redis, el evento que solo existía en ClickHouse. Cuando la copia se pierde o se adelanta, algo que debía reconstruirse se rompe. La regla que sacamos es que cada dato tenga un solo dueño escrito, y que todo lo demás se pueda borrar y volver a calcular sin perder nada."
+     }
+    ]
+   },
+   {
+    "titulo": "5.4. Lo que aprendimos sobre la forma de trabajar",
+    "bloques": [
+     {
+      "vin": [
+       "Sostendríamos el contrato escrito entre el backend y el resto. Cada pedido llevaba la consulta probada y la forma exacta de la respuesta, y eso permitió trabajar en paralelo sin pisarnos.",
+       "Replantearíamos crear tablas a mano en una base local. Una tabla de reglas de descuento llegó al repositorio sin su migración, solo existía en la base de quien la creó, y hubo que escribirla después a partir del modelo del backend. La migración tiene que viajar en el mismo cambio que el código que la usa.",
+       "Sostendríamos que cada prueba tenga su control. Una negativa sin control sale en verde también con la base caída, y el control es lo que separa un rechazo de verdad de un servicio que no contesta.",
+       "Replantearíamos dejar el control de acceso para el final. Durante casi todo el semestre cualquier servicio pudo vaciar Redis, y configurarlo desde la Entrega 2 habría costado lo mismo."
+      ]
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "titulo": "CONCLUSIONES",
+  "subsecciones": [
+   {
+    "titulo": "6.1. Conclusiones",
+    "bloques": [
+     {
+      "p": "La recomendación semántica encontró su lugar dentro de la base que ya teníamos. Un índice HNSW sobre 3105 vectores responde sin un motor aparte, y el vector se recalcula solo cuando cambia el texto del producto."
+     },
+     {
+      "p": "El control de acceso en Redis cerró un riesgo que tuvimos todo el semestre sin notarlo. Hoy cada servicio entra con lo justo y la prueba demuestra cada negativa con su control."
+     },
+     {
+      "p": "Mirando el semestre completo, lo que mejor funcionó fue decidir por el patrón de consulta y dejar el dinero en una sola transacción. Lo que peor funcionó fueron las copias sin dueño claro. Si empezáramos de nuevo, escribiríamos quién es el dueño de cada dato antes de elegir dónde guardarlo."
+     }
+    ]
+   }
+  ]
+ }
+]
