@@ -786,8 +786,23 @@ foreach ($linea in Get-Content "$PSScriptRoot\.env") {
 #
 # La regla: agregar un servicio al compose con una variable obligatoria incluye
 # agregarla AQUI y a .env.example, en la misma pasada.
+# Las dos contrasenas de los usuarios nuevos de Redis (control de acceso, desde
+# el 2026-09-25) se llenan solas si faltan. Nadie las escribe a mano ni las
+# necesita saber para trabajar, asi que pedirselas a cada uno del equipo
+# despues de un pull seria justo el fallo que cuenta el comentario de abajo.
+foreach ($nueva in @("REDIS_INSPECCION_PASSWORD", "REDIS_OPERADOR_PASSWORD")) {
+    if (-not $env_[$nueva] -or $env_[$nueva] -eq "cambiame") {
+        $azar = -join ((48..57) + (97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
+        $lineas = @(Get-Content "$PSScriptRoot\.env" | Where-Object { $_ -notmatch "^\s*$nueva\s*=" })
+        $lineas += "$nueva=$azar"
+        [IO.File]::WriteAllLines("$PSScriptRoot\.env", $lineas, (New-Object System.Text.UTF8Encoding($false)))
+        $env_[$nueva] = $azar
+        Ok "$nueva no estaba en el .env, la agregue con una contrasena al azar"
+    }
+}
+
 $faltantes = @()
-# Son las TRECE que docker-compose.yml marca con ":?". Se comprueba con:
+# Son las QUINCE que docker-compose.yml marca con ":?". Se comprueba con:
 #   las de   grep -o '\${[A-Z0-9_]*:?' docker-compose.yml
 #   tienen que estar todas en esta lista.
 # PGADMIN_EMAIL y PGADMIN_PASSWORD llevaban aqui desde siempre y faltaban: el
@@ -795,7 +810,8 @@ $faltantes = @()
 foreach ($obligatoria in @("DB_USER", "DB_PASSWORD", "DB_NAME",
                           "MONGO_USER", "MONGO_PASSWORD", "MONGO_DB",
                           "PGADMIN_EMAIL", "PGADMIN_PASSWORD",
-                          "REDIS_PASSWORD", "NEO4J_PASSWORD",
+                          "REDIS_PASSWORD", "REDIS_INSPECCION_PASSWORD", "REDIS_OPERADOR_PASSWORD",
+                          "NEO4J_PASSWORD",
                           "CLICKHOUSE_DB", "CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD")) {
     if (-not $env_[$obligatoria] -or $env_[$obligatoria] -eq "cambiame") {
         $faltantes += $obligatoria
@@ -2765,6 +2781,29 @@ if ($proximoId -notmatch '^\d+$') {
         $margen = [int]$proximoId - [int]$mayorEnMongo
         Ok "sin cruce: PostgreSQL reparte el $proximoId y el mayor de Mongo es $mayorEnMongo ($margen de margen)"
     }
+}
+
+
+# ------------------------------------------------------------
+# 7c. Los vectores de la recomendacion semantica
+# ------------------------------------------------------------
+# Va despues del catalogo porque lee de MongoDB y escribe en la tabla de la
+# migracion 024. Los calcula Ollama, que corre en el anfitrion y no en Docker,
+# con el modelo paraphrase-multilingual. Solo se calcula lo que falta o cambio,
+# asi que en un arranque normal tarda un par de segundos.
+#
+# NO corta el arranque, igual que ClickHouse y Elasticsearch. Sin Ollama la
+# tienda funciona entera y solo falta el estante de productos parecidos. Pero
+# no se queda callado, dice cuantos productos tienen vector y como se arregla.
+Paso "Vectores de la recomendacion semantica"
+& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\etl\cargar_vectores.ps1"
+switch ($LASTEXITCODE) {
+    0 { }
+    2 {
+        Aviso "Sin Ollama no hay productos parecidos en la ficha. El resto funciona."
+        Aviso "   Se instala desde https://ollama.com y despues:  ollama pull paraphrase-multilingual"
+    }
+    default { Error1 "Los vectores no quedaron completos. Se puede reintentar con  .\etl\cargar_vectores.ps1" }
 }
 
 

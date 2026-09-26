@@ -99,6 +99,39 @@ El de en medio es el que pidio el buscador "de texto predictivo": con el se
 puede contestar mientras la persona todavia escribe, sin esperar a que termine
 la palabra.
 
+## Filtros facetados y autocompletado (2026-09-25)
+
+La consulta esta escrita y probada en `pruebas/facetas.py`, y el backend solo
+tiene que copiarla. La funcion `consulta()` arma el cuerpo de la busqueda y
+`autocompletar()` el de las sugerencias. Hay un ejemplo ya armado en
+`consultas/facetas_ejemplo.json`.
+
+Cuatro facetas, todas con agregaciones del motor.
+
+```
+categoria      terms sobre id_categoria, con su nombre
+precio         range sobre precio_desde, cinco tramos sacados de los percentiles
+calificacion   range sobre resenas_promedio, 4 o mas y 3 o mas
+disponible     filter sobre stock_total mayor que cero
+```
+
+El texto va en `query` y los filtros elegidos en `post_filter`, asi recortan la
+lista pero no los conteos. Cada faceta aplica los filtros de las otras y no el
+suyo, por eso con Laptops elegida la faceta de categoria sigue diciendo cuantos
+hay en Monitores. Dentro de una faceta las opciones se suman, entre facetas se
+cruzan.
+
+El autocompletado usa `nombre.escribiendo` con `bool_prefix`. La busqueda de
+hoy no lo usa, y con "lap" trae 507 productos de cualquier tipo. Con
+`autocompletar()` trae los que empiezan por "lap".
+
+```bash
+python elastic/pruebas/facetas.py      # solo Elasticsearch arriba, 19 OK
+```
+
+Cada comprobacion tiene su control, y se probo rompiendo la consulta a
+proposito dos veces. La prueba detecto las dos.
+
 ## Como se corre
 
 ```bash

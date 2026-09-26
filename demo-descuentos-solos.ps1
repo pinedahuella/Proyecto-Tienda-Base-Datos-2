@@ -225,6 +225,9 @@ try {
             $s = EsperarDescuento $ofertas[0].Id $false ($DURACION_REGLA + 70)
             if ($s -ge 0) { Ok 'el descuento de la regla tambien se apago solo' }
         }
+        # Ya esta pausada, asi que el DELETE del backend la deja borrar. El SQL
+        # queda de red por si el backend no contesta.
+        try { Llamar DELETE "/vendedor/reglas-descuento/$regla" $null $vendedor.Sesion | Out-Null } catch { }
         Sql "DELETE FROM regla_descuento_automatico WHERE id_regla_descuento_automatico = $regla" | Out-Null
         Ok 'regla borrada'
     }

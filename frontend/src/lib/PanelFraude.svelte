@@ -308,12 +308,14 @@
 	];
 
 	/** Las dos vistas de Fraude, una a la vez, para no tener que bajar por toda la pagina. */
-	type PestanaFraude = 'entradas' | 'resenas';
+	type PestanaFraude = 'entradas' | 'resenas' | 'eventos';
 	/** `/panel?s=fraude&t=resenas` abre directo en los anillos: la campana del admin y la demo lo usan. */
 	let pestanaFraude = $state<PestanaFraude>(
 		typeof location !== 'undefined' && new URLSearchParams(location.search).get('t') === 'resenas'
 			? 'resenas'
-			: 'entradas'
+			: typeof location !== 'undefined' && new URLSearchParams(location.search).get('t') === 'eventos'
+				? 'eventos'
+				: 'entradas'
 	);
 
 	/** Cuantas por pagina. El mismo 20 que el resto de las listas del panel. */
@@ -912,6 +914,219 @@
 		return `${totalAnillosP} ${totalAnillosP === 1 ? nombre.slice(0, -1) : nombre}`;
 	}
 
+	/**
+	 * Hallazgos F1 a F6 sobre los eventos de ClickHouse (compras, carritos,
+	 * vistas, devoluciones y registros). Los detecta una vez al dia
+	 * HallazgosEventoFraudeDetectorService y viven en hallazgo_evento_fraude
+	 * (migracion 025). GET y PATCH /admin/fraude/alertas-eventos, mismo triage
+	 * que los anillos. Se piden la primera vez que se abre la pestana.
+	 */
+	type TipoHallazgo =
+		| 'vistas_infladas'
+		| 'compras_en_rafaga'
+		| 'ip_multicuenta_compras'
+		| 'carrito_acaparador'
+		| 'devoluciones_seriales'
+		| 'granja_de_registros';
+	type FiltroTipoHallazgo = 'todos' | TipoHallazgo;
+
+	interface Hallazgo {
+		id_hallazgo_evento_fraude: string;
+		tipo: TipoHallazgo;
+		clave: string;
+		cuentas: { id_usuario: string; usuario: string; es_nucleo: boolean }[];
+		id_producto_mongo: string | number | null;
+		detalle: Record<string, unknown>;
+		contador: number;
+		ventana_inicio: string;
+		estado: EstadoAlerta;
+		fecha_creacion: string;
+		fecha_actualizacion: string;
+	}
+
+	interface HallazgosPaginados {
+		hallazgos: Hallazgo[];
+		pagina: number;
+		limite: number;
+		total_hallazgos: number;
+		total_paginas: number;
+	}
+
+	const NOMBRE_TIPO_HALLAZGO: Record<TipoHallazgo, string> = {
+		vistas_infladas: 'Vistas infladas',
+		compras_en_rafaga: 'Compras en rafaga',
+		ip_multicuenta_compras: 'Varias cuentas, una IP',
+		carrito_acaparador: 'Carrito acaparador',
+		devoluciones_seriales: 'Devoluciones seriales',
+		granja_de_registros: 'Granja de registros'
+	};
+
+	const QUE_ES_HALLAZGO: Record<TipoHallazgo, string> = {
+		vistas_infladas: 'Un producto con demasiadas vistas por sesion, como si alguien refrescara su ficha.',
+		compras_en_rafaga: 'Una cuenta con muchos pedidos en pocos minutos.',
+		ip_multicuenta_compras: 'Varias cuentas que compran desde la misma IP.',
+		carrito_acaparador: 'Mete muchas unidades al carrito y casi no compra.',
+		devoluciones_seriales: 'Devuelve la mitad o mas de lo que compra.',
+		granja_de_registros: 'Muchas cuentas registradas desde la misma IP en una hora.'
+	};
+
+	const FILTROS_TIPO_HALLAZGO: FiltroTipoHallazgo[] = ['todos', ...(Object.keys(NOMBRE_TIPO_HALLAZGO) as TipoHallazgo[])];
+
+	/** Los numeros de `detalle` con nombre de persona. Lo que no este aqui sale con su clave legible. */
+	const NOMBRE_DATO: Record<string, string> = {
+		vistas: 'Vistas',
+		sesiones: 'Sesiones',
+		vistas_por_sesion: 'Vistas por sesion',
+		pedidos: 'Pedidos',
+		pedidos_en_la_peor_rafaga: 'Pedidos en la peor rafaga',
+		ventana_minutos: 'Ventana en minutos',
+		total_cuentas: 'Cuentas',
+		cuentas_distintas: 'Cuentas',
+		unidades_carrito: 'Unidades al carrito',
+		unidades_compradas: 'Unidades compradas',
+		unidades_devueltas: 'Unidades devueltas',
+		veces: 'Veces',
+		tasa: 'Tasa'
+	};
+
+	/** Las claves que son un id interno no se ensenan: la cuenta ya sale con su nombre. */
+	const CLAVE_VISIBLE: Partial<Record<TipoHallazgo, string>> = {
+		ip_multicuenta_compras: 'IP',
+		granja_de_registros: 'IP'
+	};
+
+	function datosHallazgo(h: Hallazgo): { nombre: string; valor: string }[] {
+		return Object.entries(h.detalle ?? {})
+			.filter(([k, v]) => !k.startsWith('id_') && (typeof v === 'number' || typeof v === 'string'))
+			.map(([k, v]) => ({
+				nombre: NOMBRE_DATO[k] ?? k.replace(/_/g, ' '),
+				valor: k === 'tasa' && typeof v === 'number' && v <= 1 ? `${Math.round(v * 100)} %` : String(v)
+			}));
+	}
+
+	let hallazgos = $state<Hallazgo[]>([]);
+	let filtroEstadoHallazgos = $state<FiltroAlerta>('pendiente');
+	let filtroVistoHallazgos = $state<FiltroAlerta>('pendiente');
+	let filtroTipoHallazgos = $state<FiltroTipoHallazgo>('todos');
+	let paginaHallazgos = $state(1);
+	let totalPaginasHallazgos = $state(0);
+	let totalHallazgos = $state(0);
+	let cargandoHallazgos = $state(false);
+	let errorHallazgos = $state('');
+	let pedidoHallazgos = 0;
+	let marcandoHallazgo = $state<string | null>(null);
+	let hallazgosPedidos = false;
+
+	$effect(() => {
+		if (pestanaFraude === 'eventos' && !hallazgosPedidos) {
+			hallazgosPedidos = true;
+			void cargarHallazgos(1);
+		}
+	});
+
+	async function cargarHallazgos(pagina: number) {
+		const este = ++pedidoHallazgos;
+		paginaHallazgos = pagina;
+		cargandoHallazgos = true;
+		errorHallazgos = '';
+
+		const partes = [`pagina=${pagina}`, `limite=${POR_PAGINA}`];
+		if (filtroEstadoHallazgos !== 'todas') partes.push(`estado=${filtroEstadoHallazgos}`);
+		if (filtroTipoHallazgos !== 'todos') partes.push(`tipo=${filtroTipoHallazgos}`);
+
+		const r = await pedir<HallazgosPaginados>(`/admin/fraude/alertas-eventos?${partes.join('&')}`);
+
+		if (este !== pedidoHallazgos) return;
+		cargandoHallazgos = false;
+
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+
+		if (!r.ok || !r.payload) {
+			errorHallazgos = mensajeUtil(r);
+			hallazgos = [];
+			return;
+		}
+
+		const p = r.payload;
+		const lista = p.hallazgos ?? [];
+
+		if (lista.length === 0 && p.total_paginas > 0 && pagina > p.total_paginas) {
+			void cargarHallazgos(p.total_paginas);
+			return;
+		}
+
+		hallazgos = lista;
+		filtroVistoHallazgos = filtroEstadoHallazgos;
+		paginaHallazgos = p.pagina;
+		totalPaginasHallazgos = p.total_paginas;
+		totalHallazgos = p.total_hallazgos;
+	}
+
+	function cambiarFiltroEstadoHallazgos(f: FiltroAlerta) {
+		if (f === filtroEstadoHallazgos) return;
+		filtroEstadoHallazgos = f;
+		void cargarHallazgos(1);
+	}
+
+	function cambiarFiltroTipoHallazgos(t: FiltroTipoHallazgo) {
+		if (t === filtroTipoHallazgos) return;
+		filtroTipoHallazgos = t;
+		void cargarHallazgos(1);
+	}
+
+	async function marcarHallazgo(h: Hallazgo, estado: 'revisada' | 'descartada') {
+		marcandoHallazgo = h.id_hallazgo_evento_fraude;
+		const r = await pedir<Hallazgo>(
+			`/admin/fraude/alertas-eventos/${h.id_hallazgo_evento_fraude}`,
+			conJson('PATCH', { estado })
+		);
+		marcandoHallazgo = null;
+
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+
+		if (!r.ok || !r.payload) {
+			errorHallazgos = mensajeUtil(r);
+			void cargarHallazgos(paginaHallazgos);
+			return;
+		}
+
+		if (filtroEstadoHallazgos !== 'todas' && filtroEstadoHallazgos !== estado) {
+			hallazgos = hallazgos.filter((x) => x.id_hallazgo_evento_fraude !== h.id_hallazgo_evento_fraude);
+			totalHallazgos = Math.max(0, totalHallazgos - 1);
+		} else {
+			hallazgos = hallazgos.map((x) =>
+				x.id_hallazgo_evento_fraude === h.id_hallazgo_evento_fraude ? r.payload! : x
+			);
+		}
+	}
+
+	function etiquetaHallazgos(): string {
+		if (filtroVistoHallazgos === 'todas') {
+			return `${totalHallazgos} ${totalHallazgos === 1 ? 'hallazgo' : 'hallazgos'}`;
+		}
+		const nombre = NOMBRE_FILTRO[filtroVistoHallazgos].toLowerCase();
+		return `${totalHallazgos} ${totalHallazgos === 1 ? nombre.slice(0, -1) : nombre}`;
+	}
+
+	function textoVacioHallazgos(): string {
+		switch (filtroVistoHallazgos) {
+			case 'pendiente':
+				return 'No hay hallazgos pendientes de revisar.';
+			case 'revisada':
+				return 'No hay hallazgos revisados.';
+			case 'descartada':
+				return 'No hay hallazgos descartados.';
+			default:
+				return 'El detector todavia no encontro nada raro en compras, carritos ni registros.';
+		}
+	}
+
 	function textoVacioAnillosP(): string {
 		switch (filtroVistoAnillosP) {
 			case 'pendiente':
@@ -951,6 +1166,16 @@
 		onclick={() => (pestanaFraude = 'resenas')}
 	>
 		Resenas en anillo
+	</button>
+	<button
+		type="button"
+		role="tab"
+		class="pestana"
+		class:elegida={pestanaFraude === 'eventos'}
+		aria-selected={pestanaFraude === 'eventos'}
+		onclick={() => (pestanaFraude = 'eventos')}
+	>
+		Compras y navegacion
 	</button>
 </div>
 
@@ -1186,6 +1411,178 @@
 	admin los trabaje como cola. Ver el bloque "manipulacion de resenas" del
 	script para el porque del panel EN VIVO que este reemplazo el 2026-09-18.
 -->
+<div hidden={pestanaFraude !== 'eventos'}>
+<section class="fraude" aria-labelledby="titulo-hallazgos">
+	<div class="titulo">
+		<h2 id="titulo-hallazgos">Compras y navegacion sospechosas</h2>
+		{#if !errorHallazgos && !(cargandoHallazgos && hallazgos.length === 0)}
+			<span
+				class="etiqueta"
+				class:limpio={totalHallazgos === 0 ||
+					filtroVistoHallazgos === 'revisada' ||
+					filtroVistoHallazgos === 'descartada'}
+			>
+				{etiquetaHallazgos()}
+			</span>
+		{/if}
+		<div class="acciones">
+			<button type="button" onclick={() => cargarHallazgos(paginaHallazgos)} disabled={cargandoHallazgos}>
+				Volver a mirar
+			</button>
+		</div>
+	</div>
+
+	<p class="intro">
+		Lo que se ve en los eventos de la tienda y no en las resenas. Compras muy seguidas, varias
+		cuentas desde la misma IP, carritos que apartan sin comprar, devoluciones en serie o cuentas
+		creadas en lote. Una vez al dia el sistema revisa los ultimos 30 dias en ClickHouse y guarda
+		lo que encuentra para revisarlo aqui.
+	</p>
+
+	<div class="filtros-alertas">
+		<div class="pestanas" role="group" aria-label="Filtrar hallazgos por estado">
+			{#each FILTROS as f (f)}
+				<button
+					type="button"
+					class="pestana"
+					class:elegida={filtroEstadoHallazgos === f}
+					aria-pressed={filtroEstadoHallazgos === f}
+					onclick={() => cambiarFiltroEstadoHallazgos(f)}
+				>
+					{NOMBRE_FILTRO[f]}
+				</button>
+			{/each}
+		</div>
+
+		<label class="filtro-tipo">
+			<span class="gris">Tipo</span>
+			<select
+				value={filtroTipoHallazgos}
+				onchange={(e) => cambiarFiltroTipoHallazgos(e.currentTarget.value as FiltroTipoHallazgo)}
+			>
+				{#each FILTROS_TIPO_HALLAZGO as t (t)}
+					<option value={t}>{t === 'todos' ? 'Todos' : NOMBRE_TIPO_HALLAZGO[t]}</option>
+				{/each}
+			</select>
+		</label>
+	</div>
+
+	{#if errorHallazgos}
+		<div class="fallo" role="alert">
+			<p>{errorHallazgos}</p>
+			<button type="button" onclick={() => cargarHallazgos(paginaHallazgos)}>Reintentar</button>
+		</div>
+	{:else if cargandoHallazgos && hallazgos.length === 0}
+		<p class="gris">Buscando hallazgos...</p>
+	{:else if hallazgos.length === 0}
+		<div class="limpio-caja">
+			<p>{textoVacioHallazgos()}</p>
+		</div>
+	{:else}
+		<ul class="lista-alertas" class:esperando={cargandoHallazgos} aria-busy={cargandoHallazgos}>
+			{#each hallazgos as h (h.id_hallazgo_evento_fraude)}
+				<li class="alerta">
+					<div class="alerta-cabeza">
+						<span class="tipo">{NOMBRE_TIPO_HALLAZGO[h.tipo] ?? h.tipo}</span>
+						<span class="estado estado-{h.estado}">{NOMBRE_ESTADO[h.estado] ?? h.estado}</span>
+					</div>
+
+					<p class="gris">{QUE_ES_HALLAZGO[h.tipo] ?? ''}</p>
+
+					<dl class="datos">
+						{#if h.cuentas.length > 0}
+							<div>
+								<dt>{h.cuentas.length === 1 ? 'Cuenta' : 'Cuentas'}</dt>
+								<dd class="afectadas">
+									{#each h.cuentas as c (c.id_usuario)}
+										<span class="cuenta-con-accion">
+											<span class="clave">{c.usuario}</span>
+											<BloquearCuenta idUsuario={c.id_usuario} usuario={c.usuario} {alExpirarSesion} />
+										</span>
+									{/each}
+								</dd>
+							</div>
+						{/if}
+						{#if CLAVE_VISIBLE[h.tipo]}
+							<div>
+								<dt>{CLAVE_VISIBLE[h.tipo]}</dt>
+								<dd class="clave">{h.clave}</dd>
+							</div>
+						{/if}
+						{#if h.id_producto_mongo != null}
+							<div>
+								<dt>Producto</dt>
+								<dd><a href="/producto/{h.id_producto_mongo}" target="_blank" rel="noopener">Ver producto</a></dd>
+							</div>
+						{/if}
+						{#each datosHallazgo(h) as d (d.nombre)}
+							<div>
+								<dt>{d.nombre}</dt>
+								<dd>{d.valor}</dd>
+							</div>
+						{/each}
+						{#if h.contador > 1}
+							<div>
+								<dt>Veces detectado</dt>
+								<dd>{h.contador}</dd>
+							</div>
+						{/if}
+						<div>
+							<dt>Detectado</dt>
+							<dd>{fecha(h.fecha_creacion)}</dd>
+						</div>
+					</dl>
+
+					{#if h.estado === 'pendiente'}
+						<div class="triage">
+							<button
+								type="button"
+								class="revisar"
+								disabled={marcandoHallazgo === h.id_hallazgo_evento_fraude}
+								onclick={() => marcarHallazgo(h, 'revisada')}
+							>
+								Marcar revisado
+							</button>
+							<button
+								type="button"
+								class="descartar"
+								disabled={marcandoHallazgo === h.id_hallazgo_evento_fraude}
+								onclick={() => marcarHallazgo(h, 'descartada')}
+							>
+								Descartar
+							</button>
+						</div>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+
+		{#if totalPaginasHallazgos > 1}
+			<nav class="paginacion" aria-label="Paginas de hallazgos">
+				<button
+					type="button"
+					onclick={() => cargarHallazgos(paginaHallazgos - 1)}
+					disabled={paginaHallazgos <= 1 || cargandoHallazgos}
+				>
+					Anterior
+				</button>
+				<span class="cuantas">
+					Pagina {paginaHallazgos} de {totalPaginasHallazgos}
+					<span class="menor">({etiquetaHallazgos()})</span>
+				</span>
+				<button
+					type="button"
+					onclick={() => cargarHallazgos(paginaHallazgos + 1)}
+					disabled={paginaHallazgos >= totalPaginasHallazgos || cargandoHallazgos}
+				>
+					Siguiente
+				</button>
+			</nav>
+		{/if}
+	{/if}
+</section>
+</div>
+
 <div hidden={pestanaFraude !== 'resenas'}>
 <section class="fraude" aria-labelledby="titulo-anillos-p">
 	<div class="titulo">

@@ -38,10 +38,12 @@ mudo a MongoDB".
 El diagrama esta en `diagrama-general.png` de esta misma carpeta. El archivo
 editable es `diagrama-general.drawio`, se abre en https://app.diagrams.net
 
-**Desde el 2026-09-25 ese dibujo tiene las 52 tablas de la base (migraciones 001
-a 023) y se genera, no se dibuja a mano**: `python docs/generar-er.py` lo lee de
+**Desde el 2026-09-25 ese dibujo tiene las 56 tablas de la base (migraciones 001
+a 025) y se genera, no se dibuja a mano**: `python docs/generar-er.py` lo lee de
 la base viva y falla si una tabla o una llave foranea se queda sin dibujo. Las dos
-tablas de reglas de descuento (021 y 022) van en el modulo de ofertas. El ER de la
+tablas de reglas de descuento (021 y 022) van en el modulo de ofertas, los
+hallazgos F1 a F6 (025) en el de fraude y `producto_vector` (024) en la isla del
+catalogo, porque apunta a MongoDB por id y no por llave foranea. El ER de la
 Entrega 1, con sus notas de la migracion a MongoDB, se conserva en
 `diagrama-general-entrega1.drawio`. Lo que se dice arriba de "42 tablas" es la
 foto de la Entrega 1.

@@ -4,6 +4,80 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-25 EN LA NOCHE: productos parecidos por descripcion
+
+Es la recomendacion semantica de la Entrega final (5 puntos). La parte de datos
+ya esta. La migracion 024 crea `producto_vector` con pgvector y la funcion
+`productos_similares(id, limite)`, y `etl/cargar_vectores.ps1` llena los
+vectores con Ollama dentro de `arrancar.ps1`. La ficha del producto ya tiene el
+estante "Parecidos a este". Solo falta la ruta.
+
+### `GET /productos/:id/similares`
+
+Publica, igual que `tambien-vieron`. Por dentro es una consulta y el mismo
+enriquecido de Mongo que ya usas en R2.
+
+```sql
+SELECT id_producto, similitud FROM productos_similares($1, 6);
+```
+
+Lo que espera la pantalla, la misma forma que `tambien-vieron`.
+
+```json
+[{ "id_producto": 12, "similitud": 0.83, "producto": { ...documento de Mongo... } }]
+```
+
+Si el producto no tiene vector la funcion devuelve vacio y la ruta contesta
+`[]`. Mientras la ruta no exista la ficha recibe 404 y no pinta el estante.
+
+---
+
+## LO NUEVO DEL 2026-09-25 EN LA NOCHE: las facetas del buscador, lista para copiar
+
+Es lo que falta para los 5 puntos del buscador de la Entrega 3. La consulta de
+Elasticsearch ya esta hecha y probada (`elastic/pruebas/facetas.py`, 19 OK), y
+la pantalla de `/buscar` ya la consume. Solo falta la ruta.
+
+### 1. `GET /buscador/productos/facetado`
+
+```
+?nombre=laptop&categoria=7,9&precio=250-500,500-1000&calificacion=4-o-mas&disponible=si&limite=50&sesion=
+```
+
+Todos los filtros son opcionales y van separados por comas. El cuerpo que se
+manda a `mesh_productos/_search` es exactamente el que arma `consulta()` en
+`facetas.py`. Hay uno de ejemplo en `elastic/consultas/facetas_ejemplo.json`.
+Que registre la busqueda en ClickHouse igual que `GET /buscador/productos`.
+
+Lo que espera la pantalla.
+
+```json
+{
+  "resultados": [ ...igual que GET /buscador/productos... ],
+  "total": 217,
+  "facetas": {
+    "categoria":    [{ "id": 7, "nombre": "Laptops", "cantidad": 217 }],
+    "precio":       [{ "clave": "250-500", "cantidad": 12 }],
+    "calificacion": [{ "clave": "4-o-mas", "cantidad": 3 }],
+    "disponible":   215
+  }
+}
+```
+
+`total` es `hits.total.value`. Cada faceta sale de `aggregations.<faceta>.valores`.
+Mientras la ruta no exista, `/buscar` recibe 404 y cae a la busqueda de siempre
+sin panel, asi que no se rompe nada.
+
+### 2. `GET /buscador/productos/sugerencias?prefijo=lap` (opcional)
+
+El autocompletado de verdad. El cuerpo lo arma `autocompletar()` en el mismo
+archivo, con `bool_prefix` sobre `nombre.escribiendo`, que el mapeo ya trae y
+nadie usa. Devuelve `[{ "id_producto": 12, "nombre": "Laptop Vireo Air 12" }]`.
+La correccion de errores ya la cumple la busqueda de hoy con `fuzziness`, esto
+suma el autocompletar.
+
+---
+
 ## LO NUEVO DEL 2026-09-25: lo tuyo del 24 y 25 ya esta conectado, y dos pedidos
 
 Jalamos ad20dcd, 4e93bba y 99891a8. De este lado ya estan las dos migraciones
@@ -70,11 +144,15 @@ una cadena cuyas cuentas ya forman un ciclo.
 
 ### 4. Lo que sigue abierto de antes
 
-- `reconciliar()` al arrancar (seccion del 23 en la tarde, punto 1): sigue sin
-  `onApplicationBootstrap`.
-- No hay `DELETE` de regla, ni automatica ni por periodo. Los arneses nuevos
-  (`reglas_periodo.sh`) tambien borran sus reglas por SQL.
-- El TTL de limpieza de las cachés de R2 y R3 que anotaste tu.
+- `reconciliar()` al arrancar (seccion del 23 en la tarde, punto 1): el
+  disparador de reglas por periodo ya corre al arrancar (2026-09-25, 17:30).
+  El `reconciliar()` de las vitrinas de ofertas sigue sin `onApplicationBootstrap`.
+- ~~No hay `DELETE` de regla, ni automatica ni por periodo.~~ Hecho el
+  2026-09-25 con 409 si la regla esta activa. Los paneles del vendedor ya tienen
+  el boton Borrar en las reglas pausadas, `reglas_periodo.sh` lo prueba en su
+  seccion 9, y los arneses y `demo-descuentos-solos.ps1` limpian por la ruta.
+- ~~El TTL de limpieza de las cachés de R2 y R3 que anotaste tu.~~ Hecho el
+  2026-09-25.
 
 ---
 
@@ -87,7 +165,9 @@ toca en `backend/`.
 1. ~~**Las consultas nuevas.** Las 7 de Neo4j (`neo4j/consultas/B1..B7`) y las 13
    de ClickHouse (`clickhouse/consultas/`).~~ **Hecho en parte (2026-09-24 y 25):**
    B.1 a B.7 salvo B.4 en PatronesFraudeDetectorService, T1 a T3 y R1 a R3.
-   Faltan R4 y F1 a F6. Llevan parametros (`$nombre` y
+   F1 a F6 hechos el 2026-09-25 en la noche, con su migracion 025 y la pestana
+   Compras y navegacion del panel de Fraude. Falta R4, que queda cubierta por
+   la recomendacion semantica de la 024. Llevan parametros (`$nombre` y
    `{nombre:Tipo}`), asi que se copian tal cual y los valores estan en
    `B0_parametros.cypher` y `parametros.txt`.
 2. **El punto ciego de 60 dias.** `AnillosDetectorService` ya no ve el anillo
@@ -96,9 +176,10 @@ toca en `backend/`.
    ventana de 60 dias y B.4 quedo fuera.
 3. **El agrupador de casos.** Hallazgos juntados por cuentas compartidas, puntaje,
    niveles y las reglas R-CASI-1 a 5. Todo en `02-reglas-backend.md`.
-4. **La migracion ~~022~~ 024.** El SQL esta en `02-reglas-backend.md`, seccion 7. No se
+4. **La migracion ~~022~~ ~~024~~ ~~025~~ 026.** El SQL esta en `02-reglas-backend.md`, seccion 7. No se
    puso en `migrations/` porque `arrancar.ps1` la aplicaria sola. La 022 y la
-   023 ya las ocuparon tus reglas por periodo y la familia B.
+   023 ya las ocuparon tus reglas por periodo y la familia B, la 024 los
+   vectores de la recomendacion semantica y la 025 tus hallazgos F1 a F6.
 5. **Las rutas.** `GET/PATCH /admin/fraude/casos` y las de recomendaciones
    (~~vistos recientemente, tambien vieron, para ti~~ hechas el 2026-09-25,
    similares sigue). La tabla de donde

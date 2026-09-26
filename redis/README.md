@@ -903,12 +903,52 @@ Ya esta puesta en `docker-compose.yml`, pero conviene saber por que importa:
   limitada en la mitad de la venta. Con `noeviction` las claves solo desaparecen
   por su vencimiento; si la memoria se llena, Redis rechaza las escrituras -- que
   es ruidoso y por lo tanto mejor.
-- **`requirepass`.** El 6379 es de los puertos mas barridos que hay.
+- **Usuarios de ACL en vez de `requirepass`** (desde el 2026-09-25, ver 4b). El
+  6379 es de los puertos mas barridos que hay, y ademas cada servicio entra con
+  lo justo.
 
 Los scripts se cargan con `SCRIPT LOAD` y se llaman con `EVALSHA`. El backend
 tiene que estar listo para recibir `NOSCRIPT` -- Redis puede vaciar la cache de
 scripts en un reinicio o con `SCRIPT FLUSH` -- y volver a cargarlos. Es el unico
 error de esta capa que hay que manejar a mano.
+
+
+---
+
+# 4b. El control de acceso (Entrega final)
+
+El enunciado pide autenticacion y autorizacion configuradas en al menos un
+componente NoSQL, con roles acotados segun el servicio que los usa. Se hizo en
+Redis porque es la base que mas servicios tocan a la vez (el backend, las
+pruebas, RedisInsight) y porque antes todos entraban con la misma contrasena y
+podian hacer lo mismo, incluido `FLUSHALL`.
+
+Tres usuarios, definidos en `docker-compose.yml` con `--user`, asi que valen
+desde que el contenedor arranca y sobreviven a un reinicio.
+
+```
+usuario     quien lo usa            puede                         no puede
+default     backend y scripts       leer, escribir, vencer,       todo @dangerous, o sea
+                                    Lua, SCAN, INFO               FLUSHALL, CONFIG, KEYS,
+                                                                  ACL, SHUTDOWN, DEBUG
+inspeccion  RedisInsight            leer, TTL, SCAN, INFO         escribir, borrar, Lua
+operador    mantenimiento a mano    todo
+```
+
+`default` sigue siendo el usuario del backend a proposito. El backend se conecta
+solo con `REDIS_PASSWORD` y cambiarle el usuario seria tocar su codigo. Lo que
+cambia es lo que ese usuario puede hacer. A `-@dangerous` se le devuelve `INFO`
+porque ioredis lo pide al conectar y el backend lo usa en su revision de salud,
+y se comprobo antes de cerrar la lista que el backend no usa ningun otro
+comando de esa categoria.
+
+Las contrasenas de `inspeccion` y `operador` estan en el `.env`
+(`REDIS_INSPECCION_PASSWORD` y `REDIS_OPERADOR_PASSWORD`). Si faltan,
+`arrancar.ps1` las agrega sola con un valor al azar.
+
+La evidencia es `bash redis/prueba_acceso.sh`. Cada negativa tiene su control,
+por ejemplo que `inspeccion` no pueda escribir una clave que `default` si pudo
+escribir, y que `default` no pueda leer la configuracion que `operador` si lee.
 
 
 ---

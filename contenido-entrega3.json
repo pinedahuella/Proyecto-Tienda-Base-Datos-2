@@ -1,0 +1,686 @@
+[
+  {
+    "titulo": "INTRODUCCIÓN",
+    "subsecciones": [
+      {
+        "titulo": "1.1. Alcance de la entrega y repositorio",
+        "bloques": [
+          {
+            "p": "Mesh es nuestra implementación de TiendaYa, una tienda en línea en la que varios vendedores comparten un mismo catálogo. En las dos entregas anteriores PostgreSQL quedó como fuente de verdad, MongoDB guardó el catálogo y su historial, Redis el carrito y la oferta limitada, Neo4j las relaciones entre cuentas y ClickHouse los eventos en el tiempo."
+          },
+          {
+            "p": "La Entrega 3 agrega dos cosas. Un motor de búsqueda que tolera errores de escritura, ordena por relevancia y calcula filtros facetados con sus propias agregaciones, y una estrategia de consistencia para el checkout, que en este punto ya toca varias bases a la vez y puede fallar a medias. Hicimos además la evaluación opcional de un motor NewSQL para los pagos."
+          },
+          {
+            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 244 commits sobre `main` entre el 15 de agosto y el 25 de septiembre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce."
+          }
+        ]
+      },
+      {
+        "titulo": "1.2. Cómo responde este informe a la rúbrica y a los lineamientos",
+        "bloques": [
+          {
+            "tabla": {
+              "cabecera": [
+                "Criterio de la rúbrica",
+                "Puntos",
+                "Sección",
+                "Evidencia medida"
+              ],
+              "filas": [
+                [
+                  "Buscador implementado, con tolerancia a variaciones y filtros facetados",
+                  "5",
+                  "2",
+                  "Prueba del buscador y prueba de facetas con 19 comprobaciones en verde, cada una con su control"
+                ],
+                [
+                  "Documento de estrategia de consistencia para el checkout distribuido",
+                  "5",
+                  "3",
+                  "`docs/CONSISTENCIA-CHECKOUT.md`, once puntos de falla con su mecanismo"
+                ],
+                [
+                  "Evidencia de la prueba de falla simulada y su manejo",
+                  "4",
+                  "4",
+                  "Prueba de falla del checkout con 31 comprobaciones en verde, corrida dos veces"
+                ],
+                [
+                  "Calidad del informe y del repositorio",
+                  "1",
+                  "6",
+                  "Diagrama de arquitectura al 25 de septiembre, diagrama entidad relación generado desde la base y arranque en un solo comando"
+                ],
+                [
+                  "Evaluación NewSQL para pagos, opcional",
+                  "extra",
+                  "5",
+                  "Registro ADR-8 con cuatro alternativas y las condiciones en las que la respuesta cambiaría"
+                ]
+              ],
+              "anchos": [
+                2.3,
+                0.6,
+                0.7,
+                2.9
+              ],
+              "leyenda": "Cada criterio de la rúbrica de la Entrega 3 con la sección que lo cubre."
+            }
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Lineamiento del enunciado",
+                "Dónde se cumple"
+              ],
+              "filas": [
+                [
+                  "5.1 Distribución de responsabilidades",
+                  "Sección 1.3, respaldada por el historial de git"
+                ],
+                [
+                  "5.2 Componentes de referencia",
+                  "Elasticsearch, la opción de referencia del enunciado para el motor de búsqueda"
+                ],
+                [
+                  "5.3 Registro de decisiones arquitectónicas",
+                  "ADR-9 en 2.1 y ADR-8 en 5"
+                ],
+                [
+                  "5.4 Documentación para levantar el sistema",
+                  "Sección 6.3, un solo comando que también carga el índice de búsqueda"
+                ]
+              ],
+              "anchos": [
+                2.4,
+                4.1
+              ],
+              "leyenda": "Los lineamientos generales del enunciado y dónde se cumplen."
+            }
+          }
+        ]
+      },
+      {
+        "titulo": "1.3. Distribución de responsabilidades",
+        "bloques": [
+          {
+            "p": "Mantuvimos el reparto de las entregas anteriores. José David Navichoque Pineda se encargó del backend y José Manuel González Corado del frontend, las migraciones, los ETL, los scripts de cada base, las pruebas, la documentación y el arranque. Cuando una parte necesitaba algo de la otra lo dejábamos escrito en `docs/BACKEND-PENDIENTE.md`, con la consulta ya probada."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Componente",
+                "José David Navichoque, backend",
+                "José Manuel González, el resto"
+              ],
+              "filas": [
+                [
+                  "Buscador",
+                  "`BuscadorService`, sus rutas y el worker que mantiene el índice al día",
+                  "Mapeo del índice, analizador, ETL desde MongoDB, prueba del buscador y buscador de la cabecera"
+                ],
+                [
+                  "Filtros facetados",
+                  "La ruta que sirve la consulta",
+                  "Consulta con agregaciones, su prueba y el panel de filtros de la página de resultados"
+                ],
+                [
+                  "Checkout",
+                  "`CarritoService`, el candado, las reservas y los mensajes de error por base caída",
+                  "Función `comprar_carrito()`, documento de consistencia y prueba de falla simulada"
+                ],
+                [
+                  "NewSQL y arquitectura",
+                  "",
+                  "Registro ADR-8, diagrama de arquitectura y diagrama entidad relación"
+                ]
+              ],
+              "anchos": [
+                1.4,
+                2.5,
+                2.6
+              ],
+              "leyenda": "Quién hizo cada parte de la Entrega 3."
+            }
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Integrante",
+                "Usuario en git",
+                "Commits"
+              ],
+              "filas": [
+                [
+                  "José Manuel González Corado",
+                  "José Manuel González Corado",
+                  "146"
+                ],
+                [
+                  "José David Navichoque Pineda",
+                  "pinedahuella",
+                  "93"
+                ],
+                [
+                  "Juan Pablo Torres García",
+                  "zapatoazul",
+                  "5"
+                ],
+                [
+                  "Total",
+                  "",
+                  "244"
+                ]
+              ],
+              "leyenda": "Commits por integrante en el historial de git al 25 de septiembre de 2026.",
+              "anchos": [
+                2.4,
+                2.4,
+                1.2
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "titulo": "BÚSQUEDA DE PRODUCTOS CON UN MOTOR DE BÚSQUEDA",
+    "subsecciones": [
+      {
+        "titulo": "2.1. Por qué un motor de búsqueda y su registro de decisión",
+        "bloques": [
+          {
+            "p": "Hasta la Entrega 2 un comprador solo encontraba un producto si escribía su nombre casi igual. MongoDB Community tiene búsqueda de texto con `$text`, pero no tolera errores de escritura. Encuentra la palabra o no la encuentra. En un catálogo escrito en español eso falla por dos lados, las tildes y los errores de tecleo."
+          },
+          {
+            "adr": {
+              "id": "ADR-9",
+              "titulo": "Elasticsearch para la búsqueda del catálogo",
+              "contexto": "Buscar labtop no encontraba Laptop y buscar camara no encontraba Cámara. El catálogo vive en MongoDB, y hay productos que existen solo ahí porque los publica un vendedor desde el panel.",
+              "alternativas": "Seguir con `$text` de MongoDB, usar `pg_trgm` de PostgreSQL, o incorporar Elasticsearch.",
+              "decision": "Elasticsearch 8, con un índice `mesh_productos` alimentado desde MongoDB.",
+              "justificacion": "`$text` no tiene búsqueda difusa. `pg_trgm` sí la tiene, pero el catálogo no está en PostgreSQL y habría que copiarlo de vuelta, y tampoco da relevancia, autocompletado ni agregaciones sin construirlas a mano. Elasticsearch da las cuatro cosas y es la opción de referencia del enunciado.",
+              "consecuencias": "Una base más que mantener y un índice que es copia de MongoDB y puede quedar atrás unos segundos. Se acepta porque el índice no guarda nada propio y se puede reconstruir entero en cualquier momento."
+            }
+          }
+        ]
+      },
+      {
+        "titulo": "2.2. El mapeo del índice, hecho a mano",
+        "bloques": [
+          {
+            "p": "El enunciado pide un mapeo construido de forma deliberada y no el que Elasticsearch deduce solo. El nuestro está en `elastic/001_indice.json` y cada campo tiene un tipo elegido por la pregunta que va a recibir."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Campo",
+                "Tipo",
+                "Para qué"
+              ],
+              "filas": [
+                [
+                  "`nombre`",
+                  "text con el analizador `espanol_llano`",
+                  "La búsqueda normal, con tolerancia a errores"
+                ],
+                [
+                  "`nombre.escribiendo`",
+                  "search_as_you_type",
+                  "Sugerencias mientras la persona todavía escribe"
+                ],
+                [
+                  "`nombre.exacto`",
+                  "keyword",
+                  "Ordenar y agrupar sin analizar"
+                ],
+                [
+                  "`descripcion` y `variantes`",
+                  "text con `espanol_llano`",
+                  "Encontrar un producto por lo que dice de sí mismo"
+                ],
+                [
+                  "`id_categoria`, `categoria_padre`, `estado`",
+                  "integer y keyword",
+                  "Filtrar y agregar por valor exacto"
+                ],
+                [
+                  "`precio_desde`, `resenas_promedio`, `stock_total`",
+                  "double e integer",
+                  "Los rangos de las facetas"
+                ]
+              ],
+              "anchos": [
+                2.1,
+                1.8,
+                2.6
+              ],
+              "leyenda": "Los campos del índice mesh_productos y la razón de su tipo."
+            }
+          },
+          {
+            "p": "El analizador `espanol_llano` pasa todo a minúsculas y quita las tildes, y nada más. No usamos el analizador `spanish` que trae Elasticsearch porque recorta las palabras a su raíz, y nuestros nombres son marcas y modelos inventados, como Vireo o Ámbar, que no ganan nada con eso. Tampoco quitamos palabras vacías, porque La Cumbre es un nombre y el filtro se comería La."
+          }
+        ]
+      },
+      {
+        "titulo": "2.3. Tolerancia a variaciones y autocompletado",
+        "bloques": [
+          {
+            "p": "La búsqueda usa `multi_match` sobre nombre, descripción y variantes con `fuzziness` automática, y el nombre pesa el triple. La distancia de edición que se tolera crece con el largo de la palabra, así que labtop encuentra Laptop y una palabra de tres letras no se confunde con cualquier otra."
+          },
+          {
+            "codigo": "buscando \"labtop\"   ->  Laptop Ambar Campus 14\n                        Laptop Vireo Air 12\n                        (el teclado no sale)",
+            "leyenda": "Salida de la prueba del buscador, bash pruebas/busqueda.sh."
+          },
+          {
+            "p": "Para el autocompletado el mapeo ya trae `nombre.escribiendo`, del tipo `search_as_you_type`. Probamos la consulta con `bool_prefix` sobre ese campo y con lap sugiere solo productos cuyo nombre empieza así, mientras que la búsqueda difusa con el mismo texto trae 507 productos de cualquier tipo. La consulta está en `elastic/pruebas/facetas.py`, en la función `autocompletar()`."
+          }
+        ]
+      },
+      {
+        "titulo": "2.4. Filtros facetados con agregaciones",
+        "bloques": [
+          {
+            "p": "Los filtros de la página de resultados los calcula Elasticsearch con agregaciones, sobre los mismos resultados de la búsqueda. Hay cuatro facetas, categoría con `terms`, precio y calificación con `range`, y existencias con `filter`. Los tramos de precio salen de los percentiles medidos sobre los 3105 productos, con la mediana en Q496 y el percentil 90 en Q3500."
+          },
+          {
+            "p": "El texto va en `query` y los filtros elegidos en `post_filter`, así recortan la lista sin recortar los conteos. Cada faceta es una agregación que aplica los filtros de las otras facetas y no el suyo. Por eso, con Laptops elegida, la faceta de categoría sigue diciendo cuántos productos hay en Monitores y la persona puede sumar esa categoría. Dentro de una faceta las opciones se suman y entre facetas se cruzan."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Comprobación",
+                "Resultado"
+              ],
+              "filas": [
+                [
+                  "Las categorías suman el total de resultados",
+                  "334 de 334"
+                ],
+                [
+                  "Los tramos de precio no se pisan ni dejan huecos",
+                  "suman 334"
+                ],
+                [
+                  "Al elegir Laptops los resultados son los que prometía la faceta",
+                  "217"
+                ],
+                [
+                  "La faceta de categoría no se recorta con su propio filtro",
+                  "igual antes y después"
+                ],
+                [
+                  "Dos categorías se suman",
+                  "254"
+                ],
+                [
+                  "Laptops con precio desde Q3000 da lo que prometía la faceta de precio",
+                  "205"
+                ],
+                [
+                  "Solo con existencias",
+                  "332, ninguno agotado"
+                ],
+                [
+                  "labtop encuentra sobre todo Laptops",
+                  "sí"
+                ],
+                [
+                  "Un texto sin sentido no trae resultados ni facetas",
+                  "sí"
+                ]
+              ],
+              "anchos": [
+                4.6,
+                1.9
+              ],
+              "leyenda": "Prueba de facetas, python elastic/pruebas/facetas.py, 19 OK y 0 FALLA, buscando laptop."
+            }
+          },
+          {
+            "p": "Para comprobar que la prueba no aprueba sin mirar la rompimos dos veces a propósito. Una vez hicimos que cada faceta aplicara también su propio filtro, y otra movimos el borde de un tramo de precio. En los dos casos la prueba falló justo en la comprobación que correspondía."
+          }
+        ]
+      },
+      {
+        "titulo": "2.5. Cómo se mantiene el índice al día",
+        "bloques": [
+          {
+            "p": "El índice se alimenta desde MongoDB y no desde PostgreSQL, porque hay productos que solo existen en MongoDB. Si se construyera desde PostgreSQL, un producto que se vende y se puede reseñar no aparecería en el buscador, sin ningún error."
+          },
+          {
+            "p": "Cada vez que un producto cambia en MongoDB queda marcado con `pendiente_busqueda`, y un worker del backend lo pasa al índice cada 10 segundos. Además `etl/cargar_busqueda.sh` puede tirar el índice y reconstruirlo entero, y `arrancar.ps1` lo hace solo cuando el índice está vacío o desfasado. Como el índice no guarda nada propio, reconstruirlo siempre deja el mismo resultado."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "titulo": "ESTRATEGIA DE CONSISTENCIA DEL CHECKOUT",
+    "subsecciones": [
+      {
+        "titulo": "3.1. Los componentes que intervienen",
+        "bloques": [
+          {
+            "p": "Comprar en Mesh es una transacción de PostgreSQL rodeada de lecturas y escrituras en otras bases que no pueden participar de ella. Un COMMIT de PostgreSQL no puede deshacer una escritura en Redis, y Redis no puede escribir en PostgreSQL. La postura del proyecto es que el dinero y el stock son transaccionales y no se negocian, y todo lo demás se acepta como eventual declarando cuánto tarda."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Componente",
+                "Qué aporta",
+                "Dentro del COMMIT"
+              ],
+              "filas": [
+                [
+                  "Redis, candado de checkout",
+                  "Evita el doble cobro",
+                  "no"
+                ],
+                [
+                  "Redis, carrito",
+                  "Las líneas y sus cantidades",
+                  "no"
+                ],
+                [
+                  "Redis, contador de venta relámpago",
+                  "Las unidades apartadas",
+                  "no"
+                ],
+                [
+                  "MongoDB, catálogo",
+                  "Nombres de producto y variante",
+                  "no"
+                ],
+                [
+                  "PostgreSQL, `comprar_carrito()`",
+                  "Pedido, líneas, stock, kardex y pago",
+                  "sí"
+                ],
+                [
+                  "PostgreSQL, cola `evento_grafo`",
+                  "Lo que tiene que viajar a Neo4j",
+                  "sí"
+                ],
+                [
+                  "MongoDB, campos agregados",
+                  "Stock y ofertas por producto",
+                  "no"
+                ],
+                [
+                  "Neo4j y Elasticsearch",
+                  "Grafo de reseñas e índice de búsqueda",
+                  "no"
+                ]
+              ],
+              "anchos": [
+                2.4,
+                2.8,
+                1.3
+              ],
+              "leyenda": "Los componentes del checkout en el orden en que aparecen."
+            }
+          },
+          {
+            "p": "La función `comprar_carrito()` de la migración 012 crea el pedido, agrega cada línea y cobra en una sola llamada. Dentro, cada oferta se bloquea con `FOR UPDATE` y siempre en el mismo orden, así dos compras de los mismos productos no se esperan una a la otra para siempre. Si cualquier paso falla no queda ni pedido, ni pago, ni stock descontado."
+          }
+        ]
+      },
+      {
+        "titulo": "3.2. Los puntos de falla y su mecanismo",
+        "bloques": [
+          {
+            "tabla": {
+              "cabecera": [
+                "Qué puede pasar",
+                "Qué hace el sistema",
+                "Mecanismo"
+              ],
+              "filas": [
+                [
+                  "Doble clic en pagar",
+                  "Candado en Redis por cuenta, 30 segundos",
+                  "reintento idempotente"
+                ],
+                [
+                  "El precio cambió entre ver y pagar",
+                  "Compara con la foto guardada en el carrito y pide confirmar",
+                  "rechazo explícito"
+                ],
+                [
+                  "Se acabó el stock",
+                  "La función lanza una excepción y no escribe nada",
+                  "todo o nada"
+                ],
+                [
+                  "Falla la compra con unidades apartadas",
+                  "Devuelve las reservas en ese momento, sin esperar a que venzan",
+                  "compensación"
+                ],
+                [
+                  "La compra sale bien y Redis falla al confirmar",
+                  "La venta queda cerrada igual",
+                  "ventana aceptada"
+                ],
+                [
+                  "El proceso muere entre el COMMIT y el vaciado del carrito",
+                  "El carrito vence solo",
+                  "ventana aceptada"
+                ],
+                [
+                  "Dos compras a la vez sobre la misma oferta",
+                  "`FOR UPDATE` con orden fijo",
+                  "serialización"
+                ],
+                [
+                  "Los números del catálogo en MongoDB quedan viejos",
+                  "Se recalculan al final y el ETL los rehace",
+                  "ventana aceptada"
+                ],
+                [
+                  "El grafo de Neo4j queda viejo",
+                  "Cola `evento_grafo` y worker cada 10 segundos",
+                  "reintento idempotente"
+                ],
+                [
+                  "El índice de búsqueda queda viejo",
+                  "Marca `pendiente_busqueda` y worker cada 10 segundos",
+                  "ventana aceptada"
+                ],
+                [
+                  "MongoDB cae durante el checkout",
+                  "Responde 503 antes de escribir nada",
+                  "todo o nada"
+                ]
+              ],
+              "anchos": [
+                2.2,
+                2.9,
+                1.4
+              ],
+              "leyenda": "Los once puntos de falla de docs/CONSISTENCIA-CHECKOUT.md con el mecanismo adoptado."
+            }
+          },
+          {
+            "p": "Usamos los tres mecanismos que menciona el enunciado. Los reintentos idempotentes cubren el doble cobro y el grafo, la compensación cubre las unidades apartadas de una compra que falla, y la ventana de consistencia eventual cubre todo lo que es copia, con su tiempo declarado."
+          }
+        ]
+      },
+      {
+        "titulo": "3.3. Lo que la estrategia no resuelve",
+        "bloques": [
+          {
+            "p": "El precio no se congela al agregar al carrito. Se compara al pagar y, si cambió, el sistema pide confirmación en lugar de cobrar distinto sin avisar, pero la garantía fuerte no existe. La nota del catálogo se refresca cuando corre el ETL y no tiene cola propia. Y hay dos repartidores de identificadores de producto, PostgreSQL y el panel del vendedor, que el arranque vigila y avisa cuando el margen se acaba."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "titulo": "PRUEBA DE FALLA SIMULADA",
+    "subsecciones": [
+      {
+        "titulo": "4.1. Cómo se hizo",
+        "bloques": [
+          {
+            "p": "La prueba `pruebas/falla_checkout.sh` compra de verdad por la API cinco veces seguidas y cambia solo lo que hay debajo. Primero con todo vivo, después con Redis parado, con MongoDB parado, con PostgreSQL parado y otra vez con todo vivo. La primera y la última corrida demuestran que la prueba sabe comprar. Sin ellas, un escenario que no compra no probaría nada."
+          },
+          {
+            "p": "Antes y después de cada escenario cuenta en PostgreSQL los pedidos, los pagos, el kardex y el stock de la oferta, y revisa el carrito en Redis y el candado de checkout."
+          }
+        ]
+      },
+      {
+        "titulo": "4.2. Evidencia y comportamiento del sistema",
+        "bloques": [
+          {
+            "tabla": {
+              "cabecera": [
+                "Escenario",
+                "Respuesta",
+                "PostgreSQL",
+                "Carrito"
+              ],
+              "filas": [
+                [
+                  "Todo vivo",
+                  "201, comprado",
+                  "Pedido, pago, kardex y stock de 7 a 6",
+                  "Se vacía"
+                ],
+                [
+                  "Redis parado",
+                  "503, No se pudo conectar con Redis",
+                  "Intacto",
+                  "Entero"
+                ],
+                [
+                  "MongoDB parado",
+                  "503, No se pudo conectar con MongoDB",
+                  "Intacto",
+                  "Entero"
+                ],
+                [
+                  "PostgreSQL parado",
+                  "503, No se pudo conectar con PostgreSQL",
+                  "Intacto",
+                  "Entero"
+                ],
+                [
+                  "Todo vivo otra vez",
+                  "201, comprado",
+                  "Vuelve a vender, stock de 7 a 6",
+                  "Se vacía"
+                ]
+              ],
+              "anchos": [
+                1.4,
+                2.2,
+                1.9,
+                1.0
+              ],
+              "leyenda": "Prueba de falla del checkout, 31 OK y 0 FALLA, corrida el 6 y el 11 de septiembre."
+            }
+          },
+          {
+            "p": "Ninguna caída cobró a medias. En los tres escenarios PostgreSQL quedó con los mismos pedidos, pagos, kardex y stock que antes, el candado de Redis quedó suelto para reintentar de inmediato, y la persona recibió un mensaje que dice qué base falta. En la segunda corrida quedaron 42 pedidos, 42 pagos y 5666 filas de kardex en los tres escenarios."
+          }
+        ]
+      },
+      {
+        "titulo": "4.3. El hallazgo",
+        "bloques": [
+          {
+            "p": "La prueba encontró una dependencia que el documento no tenía escrita. Con MongoDB parado no se puede comprar, aunque MongoDB no participa del COMMIT y solo aporta nombres para la pantalla. No hay inconsistencia, porque no se cobra nada, pero sí una dependencia que se puede aflojar. Quedó como el punto 11 de la tabla de fallas, con la medición y las salidas posibles."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "titulo": "EVALUACIÓN DE UN MOTOR NEWSQL PARA LOS PAGOS",
+    "subsecciones": [
+      {
+        "titulo": "5.1. El registro de decisión",
+        "bloques": [
+          {
+            "p": "El pago en Mesh es una fila que nace dentro de la misma transacción que el pedido, el descuento de stock y el kardex. Evaluamos si convenía llevarlo a un motor NewSQL, que reparte transacciones ACID entre varios nodos con consenso Raft. El análisis completo está en `docs/DECISION-NEWSQL-PAGOS.md`."
+          },
+          {
+            "adr": {
+              "id": "ADR-8",
+              "titulo": "Pagos en un motor NewSQL",
+              "contexto": "Un solo PostgreSQL con pedidos y pagos en decenas o pocos cientos. El único punto de contención real es la venta relámpago, que ya se resolvió en la Entrega 2 con un contador atómico en Redis delante de PostgreSQL.",
+              "alternativas": "Quedarse en PostgreSQL, mover solo los pagos a NewSQL, mover todo el núcleo transaccional a CockroachDB, o moverlo a YugabyteDB.",
+              "decision": "Se queda PostgreSQL.",
+              "justificacion": "Mover solo los pagos separa el cobro del stock y obliga a una saga entre motores, justo lo que el checkout evita hoy. Moverlo todo conserva la atomicidad pero reparte entre nodos una carga que un solo nodo aguanta de sobra, vuelve más lenta la fila caliente de la venta relámpago porque cada escritura pasa por consenso, pide al menos tres nodos para tolerar fallos y obliga a portar funciones PL/pgSQL y triggers que en CockroachDB tienen soporte parcial.",
+              "consecuencias": "El checkout sigue siendo una transacción local y fácil de probar. Se asume que PostgreSQL es un punto único de falla, y si cae no se puede comprar hasta que vuelva, sin cobrar a medias."
+            }
+          },
+          {
+            "p": "La respuesta cambiaría con compradores en varias regiones que necesiten escribir cerca, con un volumen de pedidos que un nodo ya no aguante medido y no supuesto, o con un requisito de disponibilidad que no admita perder la compra durante la caída de un servidor. Para el tercer caso hay un paso más barato antes de NewSQL, una réplica de PostgreSQL con conmutación automática. Si llegara el caso, YugabyteDB sería la primera opción porque corre las funciones y triggers que hoy sostienen el checkout."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "titulo": "ARQUITECTURA ACTUALIZADA",
+    "subsecciones": [
+      {
+        "titulo": "6.1. El diagrama de arquitectura",
+        "bloques": [
+          {
+            "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el índice de búsqueda con su worker, y desde la entrega anterior se sumaron las reglas de descuento, los patrones de reseñas de la familia B y las recomendaciones que se calculan en ClickHouse y se guardan en Redis."
+          },
+          {
+            "figura": {
+              "archivo": "diagrama-arquitectura.png",
+              "leyenda": "Arquitectura de Mesh al 25 de septiembre de 2026, generada con docs/generar-arquitectura.py.",
+              "ancho": 9.0,
+              "horizontal": true
+            }
+          }
+        ]
+      },
+      {
+        "titulo": "6.2. El diagrama entidad relación",
+        "bloques": [
+          {
+            "p": "PostgreSQL tiene hoy 56 tablas y 73 llaves foráneas. El diagrama se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones."
+          }
+        ]
+      },
+      {
+        "titulo": "6.3. Cómo se levanta el sistema completo",
+        "bloques": [
+          {
+            "p": "Todo se levanta con `.\\arrancar.ps1`. El script prende los contenedores, corre las migraciones, carga los datos, reconstruye el catálogo en MongoDB, el índice de búsqueda y el grafo, y al final cuenta lo que quedó en cada base contra PostgreSQL en lugar de suponer que salió bien. El backend y el frontend se arrancan después con `npm run start:dev` y `npm run dev`. La guía completa está en `docs/instalacion.md`."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "titulo": "CONCLUSIONES",
+    "subsecciones": [
+      {
+        "titulo": "7.1. Conclusiones",
+        "bloques": [
+          {
+            "p": "El motor de búsqueda resolvió algo que ninguna de las bases anteriores hacía bien, encontrar un producto aunque se escriba mal su nombre, y además calcula los filtros de la página de resultados con sus propias agregaciones. El mapeo se hizo campo por campo y el analizador se eligió mirando nuestros nombres de producto."
+          },
+          {
+            "p": "En el checkout aprendimos que la consistencia se decide punto por punto. El dinero y el stock quedaron en una sola transacción y todo lo demás tiene un mecanismo declarado. La prueba de falla confirmó que ninguna caída cobra a medias y además encontró una dependencia con MongoDB que no teníamos escrita."
+          },
+          {
+            "p": "La evaluación de NewSQL terminó en no migrar, y lo sostenemos con los mismos criterios que las decisiones anteriores. A este volumen un motor distribuido resolvería un problema que no tenemos y haría más lento el que sí tenemos."
+          }
+        ]
+      }
+    ]
+  }
+]

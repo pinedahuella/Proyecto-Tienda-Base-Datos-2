@@ -168,12 +168,32 @@
 				: [];
 	}
 
+	/**
+	 * Recomendacion semantica de la Entrega final, "parecidos por descripcion":
+	 * GET /productos/:id/similares. La ruta solo tiene que llamar a
+	 * productos_similares() de la migracion 024 y traer cada producto de Mongo,
+	 * igual que tambien-vieron. Mientras no exista contesta 404 y el estante no sale.
+	 */
+	let similares = $state<Recomendado[]>([]);
+
+	async function traerSimilares(cual: number) {
+		const r = await pedir<{ producto: ProductoRecomendado | null }[]>(`/productos/${cual}/similares`);
+		if (cual !== id) return;
+		similares =
+			r.ok && Array.isArray(r.payload)
+				? r.payload
+						.filter((f) => f && f.producto && f.producto._id !== cual)
+						.map((f) => ({ producto: f.producto as ProductoRecomendado }))
+				: [];
+	}
+
 	async function traer(cual: number) {
 		cargando = true;
 		error = '';
 		producto = null;
 		elegida = 0;
 		tambienVieron = [];
+		similares = [];
 
 		if (!Number.isInteger(cual) || cual < 1) {
 			error = 'Ese no es un numero de producto valido';
@@ -200,6 +220,7 @@
 				: 'enlace_directo';
 			registrarVista(cual, origen);
 			void traerTambienVieron(cual);
+			void traerSimilares(cual);
 		} else if (r.estado === 404) {
 			error = 'Ese producto no esta en el catalogo publico';
 		} else {
@@ -1173,6 +1194,7 @@
 		{/if}
 
 		{#if producto}
+			<EstanteRecomendados id="t-similares" titulo="Parecidos a este" items={similares} />
 			<EstanteRecomendados id="t-tambien-vieron" titulo="Quienes vieron esto tambien vieron" items={tambienVieron} />
 		{/if}
 	</div>

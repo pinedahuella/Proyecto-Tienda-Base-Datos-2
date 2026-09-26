@@ -135,7 +135,7 @@ F1 (vistas infladas) y F4 (carrito acaparador) no entran en los casos de fraude 
 
 ## 7. Tablas y rutas que harian falta
 
-Tablas nuevas, propuestas para una migracion 024 que no se escribio en `migrations/` a proposito, porque `arrancar.ps1` aplica todo lo que encuentra ahi. Era la 022. El 2026-09-25 la 022 se la quedaron las reglas de descuento por periodo y la 023 la familia B de anillos, asi que esta pasa a la siguiente libre.
+Tablas nuevas, propuestas para una migracion 026 que no se escribio en `migrations/` a proposito, porque `arrancar.ps1` aplica todo lo que encuentra ahi. Era la 022. El 2026-09-25 la 022 se la quedaron las reglas de descuento por periodo y la 023 la familia B de anillos, asi que esta paso a la 024, y esa misma noche la 024 se la quedaron los vectores de la recomendacion semantica, y la 025 los hallazgos F1 a F6 que implemento el companero. Queda en la 026.
 
 ```sql
 CREATE TABLE nivel_caso_fraude (

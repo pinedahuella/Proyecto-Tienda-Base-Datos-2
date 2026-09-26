@@ -37,12 +37,12 @@ flowchart TB
     FE -- "HTTP + cookie de sesion" --> BE
 
     subgraph persistencia[PERSISTENCIA]
-        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>50 tablas")]
+        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>56 tablas, con reglas de descuento,<br/>hallazgos F1 a F6 y vectores")]
         MG[("MongoDB :27018<br/><b>CATALOGO, HISTORIAL Y LOG DE LOGIN</b><br/>productos, productos_eventos, categorias,<br/>eventos_autenticacion")]
-        RD[("Redis :6379<br/><b>TRANSITORIO Y ATOMICO</b><br/>carrito, reservas, candado,<br/>contadores de fraude del login")]
-        N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>163 nodos y 281 relaciones,<br/>90 resenas, 4 tipos de arista")]
+        RD[("Redis :6379<br/><b>TRANSITORIO Y ATOMICO</b><br/>carrito, reservas, candado,<br/>contadores de fraude del login,<br/>vencimiento de descuentos, rankings<br/>y recomendaciones ya calculadas")]
+        N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>163 nodos y 281 relaciones,<br/>4 tipos de arista,<br/>anillos y familia B de patrones")]
         ES[("Elasticsearch :9200<br/><b>BUSQUEDA DE TEXTO Y EVENTOS DE LOGIN</b><br/>mesh_productos, difusa y sin tildes<br/>mesh_eventos_autenticacion")]
-        CH[("ClickHouse :8123<br/><b>EVENTOS EN EL TIEMPO</b><br/>seis tablas de eventos de producto y buscador,<br/>copia de logueos y resumen diario")]
+        CH[("ClickHouse :8123<br/><b>EVENTOS EN EL TIEMPO</b><br/>seis tablas de eventos de producto y buscador,<br/>copia de logueos y resumen diario,<br/>tendencias y recomendaciones")]
     end
 
     BE -- "pedidos, pagos, ofertas,<br/>stock, resenas, usuarios,<br/>alerta_fraude" --> PG
@@ -58,8 +58,10 @@ flowchart TB
     MG -. "worker cada 5 s<br/>BANDERA pendiente_elastic" .-> ES
     PG -. "etl/cargar_eventos.sh<br/>INCREMENTAL por marca de agua<br/>CONGELADA desde el 2026-09-10" .-> CH
     PG -. "etl/cargar_compras.sh<br/>compras y devoluciones, en cada arranque" .-> CH
-    N4 -. "detector de anillos, cada 15 min<br/>anillo_fraude" .-> PG
-    CH -. "worker de mas vendidos, cada 10 min<br/>ZSET" .-> RD
+    N4 -. "detectores de anillos y familia B,<br/>cada 15 min y al llegar una resena<br/>anillo_fraude" .-> PG
+    CH -. "mas vendidos y mas vistos cada 10 min,<br/>tambien vieron y para ti cada 15 min" .-> RD
+    CH -. "disparador de reglas automaticas,<br/>cada 60 s, cuenta ventas recientes" .-> PG
+    RD -. "clave de descuento vencida,<br/>cada minuto se quita de oferta" .-> PG
 
     subgraph herramientas[INSPECCION, no son parte del sistema]
         H["pgAdmin :5050 · dbgate :3001 · RedisInsight :5540 · Kibana :5601<br/>Neo4j Browser :7474 · ClickHouse play :8123/play"]
@@ -269,6 +271,7 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **2026-09-10 y 11** | El log de login se muda a **MongoDB** (`eventos_autenticacion`) y un worker lo copia a un segundo indice de **Elasticsearch**. Tres contadores de **Redis** dejan alertas en `alerta_fraude` de **PostgreSQL** (migracion 016). La copia de logueos a ClickHouse queda congelada. Ya esta en el Mermaid y en `docs/diagrama-arquitectura.drawio` y su `.png`, que se regeneraron ese dia con Kibana en la nota de herramientas de inspeccion |
 | **2026-09-18 y 19** | Seis eventos de producto y buscador en ClickHouse, con su resumen diario y los rankings de tendencias. Un worker cada 10 minutos cachea lo mas vendido en un ZSET de Redis. El detector de anillos (cada 15 minutos) guarda en PostgreSQL lo que encuentra en Neo4j. `etl/cargar_compras.sh` copia compras y devoluciones a ClickHouse. El `.drawio` de arquitectura se rehizo entero y el ER se genera desde la base viva |
 | **2026-09-20** | Entra **Kibana** 8.15.3, la misma version que Elasticsearch, como ventana de inspeccion (`127.0.0.1:5601`, tope de memoria de 1 GB), y el contenedor de un solo uso `mesh-kibana-vistas`, que crea sus dos vistas de datos en cada `docker compose up`. Solo en el Mermaid; el `.drawio` falta |
+| **2026-09-24 y 25** | Reglas de descuento automaticas y por fecha en **PostgreSQL** (migraciones 021 y 022). El disparador de las automaticas cuenta ventas en **ClickHouse** cada 60 segundos y el vencimiento de cada descuento vive como clave con TTL en **Redis**. La familia B de patrones de resenas corre sobre **Neo4j** y guarda en `anillo_fraude` (migracion 023). Tendencias T1 a T3 y recomendaciones R1 a R3 salen de **ClickHouse**, y R2, R3 y lo mas visto quedan calculados en **Redis**. El `.drawio` y el Mermaid se pusieron al dia. La evaluacion de NewSQL para pagos esta en `DECISION-NEWSQL-PAGOS.md` (ADR-8) |
 | Entrega final | entrara el componente vectorial y el control de acceso |
 
 El `pgvector` de la Entrega final, por cierto, **ya viene en la imagen**: el

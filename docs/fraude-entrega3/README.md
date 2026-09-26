@@ -17,7 +17,7 @@ Lo conecto Jose David en los commits ad20dcd, 4e93bba y 99891a8. Sus notas estan
 | B.1 cadena abierta | Implementado | PatronesFraudeDetectorService, cada 15 min y al llegar una resena | panel, Fraude | `pruebas/anillos_familia_b.sh` (solo el filtro) |
 | B.2 satelites | Implementado, solo el worker de 15 min | idem | idem | idem (solo el filtro) |
 | B.3 persistente | Implementado | idem | idem | idem (solo el filtro) |
-| B.4 anillo en el tiempo | **No**. Queda como consulta de diagnostico, el id 7 del catalogo reservado | `neo4j/consultas/B4_*` | no | `?tipo=anillo_en_el_tiempo` da 400 |
+| B.4 anillo en el tiempo | **No, fuera de alcance** (decidido el 2026-09-25). Queda como consulta de diagnostico, el id 7 del catalogo reservado | `neo4j/consultas/B4_*` | no | `?tipo=anillo_en_el_tiempo` da 400 |
 | B.5 favor devuelto | Implementado | idem | idem | `pruebas/anillos_familia_b.sh` |
 | B.6 coordinados | Implementado. El vendedor no entra en las cuentas del caso | idem | idem | `pruebas/anillos_familia_b.sh` |
 | B.7 reputacion expres | Implementado, solo el worker de 15 min | idem | idem | `pruebas/anillos_familia_b.sh` con `ESPERA_B7=960` |
@@ -29,9 +29,9 @@ Lo conecto Jose David en los commits ad20dcd, 4e93bba y 99891a8. Sus notas estan
 | R2 tambien vieron | Implementado, worker de 15 min a Redis | `GET /productos/:id/tambien-vieron` | ficha del producto | idem |
 | R3 para ti | Implementado, worker de 15 min a Redis | `GET /productos/para-ti` | portada con sesion | idem |
 | R4 similares | No. Depende de que Mongo arme los candidatos | | | |
-| F1 a F6 operaciones sospechosas | No | | | |
+| F1 a F6 operaciones sospechosas | Implementado, worker diario, con sus tablas en la migracion 025 | HallazgosEventoFraudeDetectorService, `GET/PATCH /admin/fraude/alertas-eventos` | panel, Fraude, Compras y navegacion | no hay arnes todavia |
 | El agrupador de casos, el puntaje y R-CASI | No | `02-reglas-backend.md` | | |
-| La migracion de casos | No. Era la 022, ahora la 024 | `02-reglas-backend.md`, seccion 7 | | |
+| La migracion de casos | No. Era la 022, ahora la 026 | `02-reglas-backend.md`, seccion 7 | | |
 
 Dos cosas que cambiaron al implementarlo y que este folder no decia:
 

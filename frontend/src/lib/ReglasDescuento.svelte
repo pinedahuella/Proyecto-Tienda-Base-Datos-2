@@ -223,6 +223,30 @@
 		editando = '';
 	}
 
+	/**
+	 * Borrar una regla (DELETE, desde el 2026-09-25). El backend solo borra una
+	 * regla pausada y contesta 409 si esta activa, porque borrarla prendida
+	 * dejaba un descuento huerfano. Por eso el boton solo sale en las pausadas,
+	 * y pide confirmar en la misma fila en vez de abrir un dialogo del navegador.
+	 */
+	let confirmandoBorrar = $state('');
+
+	async function borrar(regla: Regla) {
+		const id = regla.id_regla_descuento_automatico;
+		guardando = id;
+		errorFila = { ...errorFila, [id]: '' };
+		const r = await pedir<unknown>(`/vendedor/reglas-descuento/${id}`, { method: 'DELETE' });
+		guardando = '';
+		confirmandoBorrar = '';
+		if (expiro(r)) return;
+		if (!r.ok) {
+			errorFila = { ...errorFila, [id]: mensajeUtil(r) || 'No se pudo borrar.' };
+			return;
+		}
+		reglas = reglas.filter((x) => x.id_regla_descuento_automatico !== id);
+		totalReglas = Math.max(0, totalReglas - 1);
+	}
+
 	onMount(() => cargar(1));
 </script>
 
@@ -307,6 +331,16 @@
 								{r.activa ? 'Pausar' : 'Reactivar'}
 							</button>
 							<button type="button" onclick={() => abrirEdicion(r)}>Editar</button>
+							{#if !r.activa}
+								{#if confirmandoBorrar === id}
+									<button type="button" class="peligro" disabled={guardando === id} onclick={() => borrar(r)}>
+										Si, borrar
+									</button>
+									<button type="button" onclick={() => (confirmandoBorrar = '')}>No</button>
+								{:else}
+									<button type="button" onclick={() => (confirmandoBorrar = id)}>Borrar</button>
+								{/if}
+							{/if}
 						</div>
 					{/if}
 					{#if errorFila[id]}
@@ -549,5 +583,9 @@
 		.reglas {
 			padding: 18px 16px;
 		}
+	}
+	.peligro {
+		color: var(--rojo);
+		border-color: var(--rojo);
 	}
 </style>

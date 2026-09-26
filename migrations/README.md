@@ -53,7 +53,7 @@ cualquier otro error corta el arranque con exit 1.
 
 Cada archivo hace una sola cosa y se puede leer solo.
 
-## Los veintitres archivos de esquema
+## Los veinticinco archivos de esquema
 
 Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
 "los catorce" con quince en la carpeta, y "los veinte" con veintiuno. Es la misma trampa que este documento
@@ -91,8 +91,10 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `021_regla_descuento_automatico.sql` | `regla_descuento_automatico`: una regla por oferta (si se venden N en M minutos, rebajar X% o abrir venta relampago por S segundos). Cuando se escribio solo era configuracion; el disparo llego al backend el 2026-09-25, y el comentario de la tabla que dice lo contrario se queda porque una migracion corrida no se edita |
 | `022_regla_descuento_periodo.sql` | `regla_descuento_periodo`: descuento por calendario (dia, mes y anio de inicio y fin; lo que falta amplia la repeticion). Varias por oferta si no se pisan los dias, eso lo vigila el backend |
 | `023_anillos_fraude_familia_b.sql` | los tipos 4 a 10 de `tipo_anillo_fraude` (patrones B.1 a B.7) y la unicidad de `anillo_fraude` pasa de `clave` a `(id_tipo_anillo_fraude, clave)` |
+| `024_vectores_productos.sql` | la extension `vector`, la tabla `producto_vector` con indice HNSW y la funcion `productos_similares()`, para la recomendacion semantica de la Entrega final. La llena `etl/cargar_vectores.ps1` |
+| `025_hallazgos_evento_fraude.sql` | `tipo_hallazgo_evento` (ids 1 a 6 = F1 a F6), `hallazgo_evento_fraude` y su pivote de cuentas `hallazgo_evento_fraude_cuenta`, donde guarda el detector diario de fraude sobre eventos de ClickHouse. Copia del SQL de referencia del companero con candado de ids |
 
-De la 011 a la 015 son de la Entrega 2, la 016 a la 023 de la Entrega 3, y merecen una
+De la 011 a la 015 son de la Entrega 2, la 016 a la 023 de la Entrega 3, la 024 de la Entrega final, la 025 otra vez de la Entrega 3, y merecen una
 linea mas de la que caben en la tabla.
 
 **La 011 cierra el diagrama.** Con `comentario`, `resena` y `likes` las 42 cajas
@@ -239,7 +241,8 @@ no puede dejar una columna de mas en la nuestra.
   verde, y correrlo dos veces para ver que la segunda tambien.
 
 La propuesta de casos de fraude (`docs/fraude-entrega3/02-reglas-backend.md`)
-tenia reservada la 022. Paso a la 024.
+tenia reservada la 022. Paso a la 024, despues a la 025 y queda en la 026, porque la 024 es la
+de los vectores de la recomendacion semantica y la 025 la de los hallazgos F1 a F6.
 
 **La 012 no reemplaza a la 007: la COMPONE.** `comprar_carrito()` llama por
 dentro a las mismas `crear_pedido`, `agregar_linea` y `comprar_pedido`, en vez

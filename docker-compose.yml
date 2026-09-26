@@ -116,14 +116,64 @@ services:
   # `appendonly yes` para que el carrito sobreviva a un reinicio del
   # contenedor. Un carrito que se pierde porque se reinicio Docker se ve
   # exactamente igual que un TTL mal puesto, y esa confusion cuesta una tarde.
+  #
+  # CONTROL DE ACCESO (Entrega final, desde el 2026-09-25). Tres usuarios de
+  # ACL, uno por servicio, en vez de una sola contrasena para todo:
+  #
+  #   default     el backend y los scripts del equipo. Lee y escribe datos,
+  #               corre los scripts Lua, y NO puede nada de @dangerous
+  #               (FLUSHALL, CONFIG, KEYS, ACL, SHUTDOWN, DEBUG, MONITOR...).
+  #               Se le devuelve solo INFO, que ioredis usa al conectar y el
+  #               backend en su revision de salud.
+  #   inspeccion  RedisInsight. Solo lectura, +@read, sin escribir ni borrar.
+  #   operador    mantenimiento. Todo, con su propia contrasena.
+  #
+  # `reset` primero para que cada usuario nazca de cero y no herede nada del
+  # default de fabrica. Las reglas viven aqui y no en un ACL SETUSER de
+  # arrancar.ps1, porque asi valen tambien tras un reinicio del contenedor.
+  # La prueba es redis/prueba_acceso.sh.
+  #
+  # El comando va como LISTA y no como una sola linea. Escrito en linea,
+  # docker compose lo parte como un shell y el `>` de cada contrasena lo toma
+  # por una redireccion, asi que corta ahi el comando entero sin avisar. Redis
+  # arrancaba solo con `--user default reset on` y ningun usuario tenia clave.
+  # "on" va entre comillas porque sin ellas YAML lo lee como un booleano.
   redis:
     image: redis:8-alpine
     container_name: mesh-redis
     restart: unless-stopped
-    command: >
-      redis-server
-      --requirepass ${REDIS_PASSWORD:?falta REDIS_PASSWORD en .env}
-      --appendonly yes
+    command:
+      - redis-server
+      - --user
+      - default
+      - reset
+      - "on"
+      - ">${REDIS_PASSWORD:?falta REDIS_PASSWORD en .env}"
+      - "~*"
+      - "&*"
+      - "+@all"
+      - "-@dangerous"
+      - "+info"
+      - --user
+      - inspeccion
+      - reset
+      - "on"
+      - ">${REDIS_INSPECCION_PASSWORD:?falta REDIS_INSPECCION_PASSWORD en .env}"
+      - "~*"
+      - "+@read"
+      - "+@connection"
+      - "-@dangerous"
+      - "+info"
+      - --user
+      - operador
+      - reset
+      - "on"
+      - ">${REDIS_OPERADOR_PASSWORD:?falta REDIS_OPERADOR_PASSWORD en .env}"
+      - "~*"
+      - "&*"
+      - "+@all"
+      - --appendonly
+      - "yes"
     ports:
       - "6379:6379"
     volumes:
@@ -158,7 +208,15 @@ services:
       RI_REDIS_HOST: redis
       RI_REDIS_PORT: 6379
       RI_REDIS_ALIAS: Mesh Redis
-      RI_REDIS_PASSWORD: ${REDIS_PASSWORD:?falta REDIS_PASSWORD en .env}
+      # Entra con el usuario de solo lectura. Mirar el TTL de un carrito no
+      # necesita poder borrarlo.
+      RI_REDIS_USERNAME: inspeccion
+      RI_REDIS_PASSWORD: ${REDIS_INSPECCION_PASSWORD:?falta REDIS_INSPECCION_PASSWORD en .env}
+      # Sin clave de cifrado, RedisInsight en Docker no puede guardar la
+      # contrasena de la conexion ("Unsupported encryption strategy") y la
+      # conexion de arriba no aparece. Se reusa un secreto del .env para no
+      # pedirle otra variable a nadie.
+      RI_ENCRYPTION_KEY: ${REDIS_INSPECCION_PASSWORD:?falta REDIS_INSPECCION_PASSWORD en .env}
     ports:
       - "5540:5540"
     volumes:

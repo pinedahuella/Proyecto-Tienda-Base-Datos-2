@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Dibuja el diagrama entidad relacion de Mesh a partir del esquema VIVO.
 
-    python generar-er.py                  el diagrama completo, las 52 tablas
+    python generar-er.py                  el diagrama completo, las 56 tablas
     python generar-er.py --modulo fraude  solo un modulo, para el informe
 
 Escribe docs/diagrama-general.drawio (editable en diagrams.net) y, si encuentra
@@ -101,7 +101,7 @@ MODULOS = {
                   "imagen_producto", "imagen_producto_producto", "caracteristica",
                   "caracteristica_variante", "tipo_dato", "categoria_caracteristica",
                   "categoria_caracteristica_variante", "producto_caracteristica",
-                  "producto_variante_caracteristica_variante"]),
+                  "producto_variante_caracteristica_variante", "producto_vector"]),
     "ofertas": ("Ofertas e inventario", "#FFE6CC", "#D79B00",
                 ["oferta", "estado_oferta", "precio_historial", "stock_movimiento",
                  "motivo_movimiento", "propuesta_producto", "rechazo_producto", "rechazo_oferta",
@@ -112,7 +112,8 @@ MODULOS = {
                 ["resena", "comentario", "likes"]),
     "fraude": ("Fraude y grafo", "#F8CECC", "#B85450",
                ["alerta_fraude", "tipo_alerta_fraude", "estado_alerta_fraude", "notificacion_fraude",
-                "anillo_fraude", "tipo_anillo_fraude", "anillo_fraude_resena", "evento_grafo"]),
+                "anillo_fraude", "tipo_anillo_fraude", "anillo_fraude_resena", "evento_grafo",
+                "hallazgo_evento_fraude", "hallazgo_evento_fraude_cuenta", "tipo_hallazgo_evento"]),
 }
 
 # columnas del diagrama completo, de izquierda a derecha
@@ -121,11 +122,13 @@ DISPOSICION = [
     ["log_login", "log_registro", "direcciones", "direccion_historial"],
     ["rol_usuario", "usuarios", "estado_usuario"],
     ["propuesta_producto", "|", "precio_historial", "oferta", "stock_movimiento", "pedido", "|",
-     "resena", "comentario", "likes", "|", "alerta_fraude", "notificacion_fraude"],
+     "resena", "comentario", "likes", "|", "alerta_fraude", "notificacion_fraude", "|",
+     "hallazgo_evento_fraude_cuenta"],
     ["rechazo_producto", "|", "estado_oferta", "rechazo_oferta", "motivo_movimiento",
      "regla_descuento_automatico", "regla_descuento_periodo", "|",
      "estado_pedido", "pedido_producto", "pago", "|", "anillo_fraude_resena", "anillo_fraude",
-     "|", "tipo_alerta_fraude", "estado_alerta_fraude", "tipo_anillo_fraude", "evento_grafo"],
+     "|", "tipo_alerta_fraude", "estado_alerta_fraude", "tipo_anillo_fraude", "evento_grafo",
+     "|", "hallazgo_evento_fraude", "tipo_hallazgo_evento"],
     ["metodo_pago", "estado_pago"],
 ]
 
@@ -137,7 +140,7 @@ DISPOSICION_CATALOGO = [
     ["categoria_caracteristica", "categoria_caracteristica_variante", "producto_caracteristica",
      "productos_historial", "productos_variantes"],
     ["producto_variante_caracteristica_variante", "productos_variantes_historial", "imagen_producto",
-     "imagen_producto_producto"],
+     "imagen_producto_producto", "|", "producto_vector"],
 ]
 
 # vistas recortadas para el informe. Solo se dibujan las lineas entre las tablas presentes.
@@ -446,7 +449,7 @@ def main():
         pos_cat = colocar(DISPOSICION_CATALOGO, caja, 40, alto_core + 150)
         pos.update(pos_cat)
         lienzo.texto_suelto(40, 20, 1400, 30,
-                            "Modelo relacional de Mesh en PostgreSQL, %d tablas, migraciones 001 a 019"
+                            "Modelo relacional de Mesh en PostgreSQL, %d tablas, migraciones 001 a 025"
                             % len(tablas), 18, True)
         lienzo.texto_suelto(40, 54, 1400, 24,
                             "PK llave primaria, FK llave foránea, UQ valor único. La pata de gallo marca el lado "

@@ -106,6 +106,9 @@ limpiar() {
         echo; echo "Limpieza: descuento manual de la oferta $OFERTA quitado (HTTP $CODIGO)."
     fi
     if [ -n "$ID_REGLA" ]; then
+        # Por la ruta, pausar y borrar. El SQL queda de red por si el backend no contesta.
+        pedir PATCH "/vendedor/reglas-descuento/$ID_REGLA" "$C_VEND" '{"activa":false}'
+        pedir DELETE "/vendedor/reglas-descuento/$ID_REGLA" "$C_VEND"
         sql "DELETE FROM regla_descuento_automatico WHERE id_regla_descuento_automatico = $ID_REGLA" >/dev/null
         echo; echo "Limpieza: regla $ID_REGLA borrada."
     fi

@@ -1,0 +1,261 @@
+{
+  "size": 20,
+  "query": {
+    "bool": {
+      "must": [
+        {
+          "multi_match": {
+            "query": "laptop",
+            "fields": [
+              "nombre^3",
+              "descripcion",
+              "variantes"
+            ],
+            "fuzziness": "AUTO"
+          }
+        }
+      ],
+      "filter": [
+        {
+          "term": {
+            "estado": "activo"
+          }
+        }
+      ]
+    }
+  },
+  "post_filter": {
+    "bool": {
+      "filter": [
+        {
+          "terms": {
+            "id_categoria": [
+              7
+            ]
+          }
+        },
+        {
+          "bool": {
+            "should": [
+              {
+                "range": {
+                  "precio_desde": {
+                    "gte": 1000,
+                    "lt": 3000
+                  }
+                }
+              },
+              {
+                "range": {
+                  "precio_desde": {
+                    "gte": 3000
+                  }
+                }
+              }
+            ],
+            "minimum_should_match": 1
+          }
+        }
+      ]
+    }
+  },
+  "aggs": {
+    "categoria": {
+      "filter": {
+        "bool": {
+          "filter": [
+            {
+              "bool": {
+                "should": [
+                  {
+                    "range": {
+                      "precio_desde": {
+                        "gte": 1000,
+                        "lt": 3000
+                      }
+                    }
+                  },
+                  {
+                    "range": {
+                      "precio_desde": {
+                        "gte": 3000
+                      }
+                    }
+                  }
+                ],
+                "minimum_should_match": 1
+              }
+            }
+          ]
+        }
+      },
+      "aggs": {
+        "valores": {
+          "terms": {
+            "field": "id_categoria",
+            "size": 50
+          },
+          "aggs": {
+            "nombre": {
+              "terms": {
+                "field": "categoria_nombre.exacto",
+                "size": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "precio": {
+      "filter": {
+        "bool": {
+          "filter": [
+            {
+              "terms": {
+                "id_categoria": [
+                  7
+                ]
+              }
+            }
+          ]
+        }
+      },
+      "aggs": {
+        "valores": {
+          "range": {
+            "field": "precio_desde",
+            "keyed": true,
+            "ranges": [
+              {
+                "key": "hasta-250",
+                "to": 250
+              },
+              {
+                "key": "250-500",
+                "from": 250,
+                "to": 500
+              },
+              {
+                "key": "500-1000",
+                "from": 500,
+                "to": 1000
+              },
+              {
+                "key": "1000-3000",
+                "from": 1000,
+                "to": 3000
+              },
+              {
+                "key": "desde-3000",
+                "from": 3000
+              }
+            ]
+          }
+        }
+      }
+    },
+    "calificacion": {
+      "filter": {
+        "bool": {
+          "filter": [
+            {
+              "terms": {
+                "id_categoria": [
+                  7
+                ]
+              }
+            },
+            {
+              "bool": {
+                "should": [
+                  {
+                    "range": {
+                      "precio_desde": {
+                        "gte": 1000,
+                        "lt": 3000
+                      }
+                    }
+                  },
+                  {
+                    "range": {
+                      "precio_desde": {
+                        "gte": 3000
+                      }
+                    }
+                  }
+                ],
+                "minimum_should_match": 1
+              }
+            }
+          ]
+        }
+      },
+      "aggs": {
+        "valores": {
+          "range": {
+            "field": "resenas_promedio",
+            "keyed": true,
+            "ranges": [
+              {
+                "key": "4-o-mas",
+                "from": 4
+              },
+              {
+                "key": "3-o-mas",
+                "from": 3
+              }
+            ]
+          }
+        }
+      }
+    },
+    "disponible": {
+      "filter": {
+        "bool": {
+          "filter": [
+            {
+              "terms": {
+                "id_categoria": [
+                  7
+                ]
+              }
+            },
+            {
+              "bool": {
+                "should": [
+                  {
+                    "range": {
+                      "precio_desde": {
+                        "gte": 1000,
+                        "lt": 3000
+                      }
+                    }
+                  },
+                  {
+                    "range": {
+                      "precio_desde": {
+                        "gte": 3000
+                      }
+                    }
+                  }
+                ],
+                "minimum_should_match": 1
+              }
+            }
+          ]
+        }
+      },
+      "aggs": {
+        "valores": {
+          "filter": {
+            "range": {
+              "stock_total": {
+                "gt": 0
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

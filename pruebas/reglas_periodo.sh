@@ -111,6 +111,12 @@ limpiar() {
         echo "Limpieza: regla automatica $ID_AUTO borrada."
     fi
     if [ -n "$IDS" ]; then
+        # Por la ruta, como lo haria el vendedor: pausar y borrar. El SQL de
+        # abajo queda de red por si el backend ya no contesta.
+        for _id in ${IDS//,/ }; do
+            pedir PATCH "$RUTA/$_id" "$C_VEND" '{"activa":false}'
+            pedir DELETE "$RUTA/$_id" "$C_VEND"
+        done
         sql "DELETE FROM regla_descuento_periodo WHERE id_regla_descuento_periodo IN (${IDS#,})" >/dev/null
         echo "Limpieza: reglas por periodo ${IDS#,} borradas."
     fi
@@ -302,6 +308,24 @@ igual "el otro vendedor no las ve" "$LA_VE" "no"
 pedir PATCH "$RUTA/$ID_A" "$C_OTRO" '{"activa":true}'
 igual "el otro vendedor no la puede editar" "$CODIGO" "404"
 igual "y sigue pausada" "$(sql "SELECT activa FROM regla_descuento_periodo WHERE id_regla_descuento_periodo=$ID_A")" "f"
+
+# ------------------------------------------------------------------ 9
+titulo "9. Borrar"
+pedir POST "$RUTA" "$C_VEND" "$(cuerpo "$OFERTA" 1 2 1 1 2098 false 12)"
+ID_E=$(de_cuerpo payload.id_regla_descuento_periodo)
+anotar "$ID_E"
+igual "crear una regla para borrarla" "$CODIGO" "201"
+pedir DELETE "$RUTA/$ID_E" "$C_VEND"
+igual "activa no se deja borrar" "$CODIGO" "409"
+igual "y sigue ahi" "$(sql "SELECT count(*) FROM regla_descuento_periodo WHERE id_regla_descuento_periodo=$ID_E")" "1"
+pedir DELETE "$RUTA/$ID_E" "$C_OTRO"
+igual "el otro vendedor no la puede borrar" "$CODIGO" "404"
+pedir PATCH "$RUTA/$ID_E" "$C_VEND" '{"activa":false}'
+pedir DELETE "$RUTA/$ID_E" "$C_VEND"
+igual "pausada si se borra" "$CODIGO" "200"
+igual "y ya no esta en la base" "$(sql "SELECT count(*) FROM regla_descuento_periodo WHERE id_regla_descuento_periodo=$ID_E")" "0"
+pedir DELETE "$RUTA/$ID_E" "$C_VEND"
+igual "borrarla otra vez da 404" "$CODIGO" "404"
 
 echo
 echo "=============================================================="

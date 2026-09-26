@@ -7,7 +7,9 @@ Escribe docs/diagrama-arquitectura.drawio y, si encuentra draw.io, el .png.
 
 Es un dibujo hecho a mano en coordenadas, no sale de la base. Lo que cambia con
 el tiempo son las cifras de cada caja, y estan en la tabla CAJAS de abajo, en un
-solo sitio. Se midieron el 2026-09-19 contra los contenedores vivos.
+solo sitio. Se midieron el 2026-09-19 contra los contenedores vivos, y el
+2026-09-25 se sumaron las reglas de descuento, la familia B de fraude y las
+recomendaciones, leidas del codigo del backend.
 
 Las flechas punteadas llevan un numero y el mecanismo de cada una esta en la
 leyenda de abajo. Un rotulo largo sobre una flecha de 80 puntos no se lee, y la
@@ -30,31 +32,35 @@ SALIDA = os.path.join(BASE, "diagrama-arquitectura.drawio")
 ANCHO_DB = 250
 HUECO_DB = 78
 Y_DB = 390
-ALTO_DB = 210
+ALTO_DB = 250
 
 # orden de izquierda a derecha pensado para que casi todos los flujos sean
 # entre vecinos. clave, titulo, rol, lineas, relleno, borde
 CAJAS = [
     ("neo4j", "Neo4j 5", "RELACIONES ENTRE CUENTAS", [
-        "13 usuarios, 51 productos,",
-        "90 reseñas y 9 domicilios",
-        "3 aristas por reseña",
-        "5 consultas de varios saltos",
+        "cuentas, reseñas, productos",
+        "y domicilios, 3 aristas por reseña",
+        "anillos cerrados de varios saltos",
+        "7 patrones de reseñas, familia B",
+        "cadena, favor devuelto, coordinados",
     ], "#E1D5E7", "#9673A6"),
     ("pg", "PostgreSQL 18", "FUENTE DE VERDAD", [
-        "50 tablas y 66 llaves foráneas",
+        "56 tablas y 73 llaves foráneas",
         "pedidos, pagos, ofertas, stock",
+        "reglas de descuento automáticas",
+        "y por fecha, hallazgos F1 a F6",
+        "vectores de productos con pgvector",
         "reseñas, alertas y anillos de fraude",
         "cola evento_grafo",
     ], "#DAE8FC", "#6C8EBF"),
     ("mongo", "MongoDB", "CATÁLOGO Y LOG DE LOGIN", [
-        "productos 1105, productos_eventos",
+        "productos 3105, productos_eventos",
         "categorias, eventos_autenticacion",
         "atributos que varían por categoría",
         "historial por eventos",
     ], "#D5E8D4", "#82B366"),
     ("es", "Elasticsearch 8", "BÚSQUEDA DE TEXTO", [
-        "mesh_productos, 1105 documentos",
+        "mesh_productos, 3105 documentos",
         "mesh_eventos_autenticacion",
         "búsqueda difusa que ignora tildes",
     ], "#FFF2CC", "#D6B656"),
@@ -62,14 +68,20 @@ CAJAS = [
         "base columnar, mesh_eventos",
         "vista, carrito, compra, devolución,",
         "búsqueda y clic, más el resumen diario",
-        "los rankings de tendencias salen de aquí",
+        "tendencias, embudo y búsquedas",
+        "sin respuesta",
+        "recomendaciones, vistos, también",
+        "vieron y para ti",
     ], "#FFE6CC", "#D79B00"),
     ("redis", "Redis 8", "TRANSITORIO Y ATÓMICO", [
         "carrito con expiración por inactividad",
         "inventario limitado con script Lua",
         "candado de checkout",
         "contadores de fraude del login",
-        "ranking de más vendidos",
+        "vencimiento de descuentos con TTL",
+        "tres usuarios de ACL por servicio",
+        "más vendidos y más vistos",
+        "recomendaciones ya calculadas",
     ], "#F8CECC", "#B85450"),
 ]
 
@@ -77,22 +89,25 @@ CAJAS = [
 FLUJOS = [
     (1, "pg", "mongo", "PostgreSQL a MongoDB, etl/cargar.js por lotes, conserva lo que el vendedor edita desde la aplicación"),
     (2, "pg", "neo4j", "PostgreSQL a Neo4j, cada reseña tocada entra en la cola evento_grafo y un worker la vacía cada 10 segundos"),
-    (3, "neo4j", "pg", "Neo4j a PostgreSQL, el detector de anillos corre cada 15 minutos y guarda lo que encuentra en anillo_fraude"),
+    (3, "neo4j", "pg", "Neo4j a PostgreSQL, los detectores de anillos y de la familia B corren cada 15 minutos, B también al llegar una reseña, y guardan lo que encuentran en anillo_fraude"),
     (4, "mongo", "es", "MongoDB a Elasticsearch, la marca pendiente_busqueda cada 10 segundos y los intentos de login cada 5"),
     (5, "es", "pg", "Elasticsearch a PostgreSQL, el análisis retrospectivo cada 15 minutos deja alertas en alerta_fraude"),
     (6, "redis", "pg", "Redis a PostgreSQL, un contador de fallos de login que cruza su umbral deja una fila en alerta_fraude"),
     (7, "pg", "ch", "PostgreSQL a ClickHouse, etl/cargar_compras.sh copia compras y devoluciones en cada arranque"),
-    (8, "ch", "redis", "ClickHouse a Redis, un worker cada 10 minutos recalcula el ranking de más vendidos"),
+    (8, "ch", "redis", "ClickHouse a Redis, cada 10 minutos se recalculan más vendidos y más vistos, y cada 15 también vieron y para ti"),
+    (9, "ch", "pg", "ClickHouse a PostgreSQL, cada 60 segundos el disparador cuenta las ventas recientes y aplica la regla automática, y una vez al día los hallazgos F1 a F6 van a hallazgo_evento_fraude"),
+    (10, "redis", "pg", "Redis a PostgreSQL, cada minuto un descuento cuya clave de vencimiento ya no existe se quita de oferta"),
+    (11, "mongo", "pg", "MongoDB a PostgreSQL, etl/cargar_vectores.ps1 le pide a Ollama el vector de cada producto y lo guarda en producto_vector"),
 ]
 
 # lo que el backend hace con cada motor, escrito sobre su flecha
 USO = {
     "neo4j": "lee el panel de fraude",
-    "pg": "pedidos, pagos, ofertas, reseñas",
+    "pg": "pedidos, pagos, ofertas, reglas, reseñas",
     "mongo": "catálogo, historial, intentos de login",
     "es": "busca productos y eventos",
-    "ch": "escribe eventos, lee rankings",
-    "redis": "carrito, reservas, candado",
+    "ch": "escribe eventos, lee rankings y recomendaciones",
+    "redis": "carrito, reservas, candado, descuentos",
 }
 
 
@@ -237,7 +252,7 @@ def construir():
     x0 = 40
 
     L.texto(x0, 14, 1500, 30, "Mesh, arquitectura políglota con seis motores de persistencia", 20, negrita=True)
-    L.texto(x0, 48, 1700, 24, "Estado al 19 de septiembre de 2026. Las flechas continuas son lo que hace el backend, "
+    L.texto(x0, 48, 1700, 24, "Estado al 25 de septiembre de 2026. Las flechas continuas son lo que hace el backend, "
             "las punteadas y numeradas son datos que viajan de un motor a otro, y su mecanismo está en la leyenda.",
             11, gris=True)
 
@@ -245,9 +260,11 @@ def construir():
     # flecha a cada motor baje derecha, sin cruzar otras cajas.
     ancho_be = ancho_total
     L.rect("cliente", x0, 90, 300, 62, "<b>Frontend</b><br>SvelteKit, puerto 5173", "#E6E6F5", "#3D3D99")
-    L.rect("workers", x0 + 400, 86, 1380, 70,
-           "<b>Workers del backend</b><br>grafo 10 s, buscador 10 s, login a Elasticsearch 5 s, anillos 15 min, "
-           "fraude retrospectivo 15 min, más vendidos 10 min, venta relámpago 1 min",
+    L.rect("workers", x0 + 400, 80, 1380, 84,
+           "<b>Workers del backend</b><br>grafo 10 s, buscador 10 s, login a Elasticsearch 5 s, anillos y familia B 15 min, "
+           "fraude retrospectivo 15 min, hallazgos F1 a F6 cada día, más vendidos y más vistos 10 min, también vieron y para ti 15 min, "
+           "vencimientos de venta relámpago y descuento 1 min, reglas automáticas 60 s, reglas por fecha 15 min, "
+           "registro de ofertas en Redis 10 min",
            "#FFFFFF", "#888888", sizes=11, dash=True, alinea="left")
     L.rect("backend", x0, 216, ancho_be, 56,
            "<b>Backend</b>, NestJS con Fastify, puerto 3000. Escribe en cinco motores y lee de los seis",
@@ -266,7 +283,8 @@ def construir():
 
     # flujos numerados. Adyacentes van por el hueco, los saltados por debajo.
     orden = [k for k, *_ in CAJAS]
-    y_bajo = {5: Y_DB + ALTO_DB + 34, 6: Y_DB + ALTO_DB + 62, 7: Y_DB + ALTO_DB + 90}
+    y_bajo = {5: Y_DB + ALTO_DB + 34, 6: Y_DB + ALTO_DB + 62, 7: Y_DB + ALTO_DB + 90,
+              9: Y_DB + ALTO_DB + 118, 10: Y_DB + ALTO_DB + 146}
     for n, a, b, _ in FLUJOS:
         ia, ib = orden.index(a), orden.index(b)
         etiqueta = str(n)
@@ -284,7 +302,7 @@ def construir():
                      puntos=[(xa, y), (xb, y)], punteada=True, color=col)
 
     # leyenda
-    y_ley = Y_DB + ALTO_DB + 140
+    y_ley = Y_DB + ALTO_DB + 196
     L.texto(x0, y_ley, 800, 24, "Leyenda de las flechas punteadas", 13, negrita=True)
     y = y_ley + 30
     for n, a, b, texto in FLUJOS:

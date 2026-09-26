@@ -141,7 +141,7 @@
 				{ id: 'cuentas', nombre: 'Cuentas', pie: 'Los usuarios del sistema, su rol y su estado' },
 				// Se llamaba "Resenas". Desde el 2026-09-10 lleva tambien los intentos de
 				// entrada sospechosos, y nadie los iria a buscar bajo ese nombre.
-				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo e intentos de entrada sospechosos' },
+				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo, intentos de entrada y compras sospechosas' },
 				{ id: 'tendencias', nombre: 'Tendencias', pie: 'Lo mas visto, comprado y buscado en los ultimos dias' },
 				// Distinta de "Fraude": esa es EN VIVO contra el grafo y solo la ve
 				// un admin; esta es "a mi cuenta le paso algo" y la ve cualquiera --

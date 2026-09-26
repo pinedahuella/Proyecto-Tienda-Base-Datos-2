@@ -176,3 +176,107 @@ export function marcaDeEstado(r: ResultadoBusqueda): string | null {
 	if (!r.estado || r.estado === 'activo') return null;
 	return r.estado;
 }
+
+/**
+ * Los filtros facetados del buscador (Entrega 3).
+ *
+ * La consulta de Elasticsearch esta hecha y probada en `elastic/pruebas/facetas.py`
+ * (`consulta()`), y la ruta que la sirve la pide `docs/BACKEND-PENDIENTE.md`:
+ *
+ *   GET /buscador/productos/facetado?nombre=&categoria=7,9&precio=250-500
+ *       &calificacion=4-o-mas&disponible=si&limite=&sesion=
+ *
+ * Mientras esa ruta no exista contesta 404, y entonces se cae a la busqueda de
+ * siempre sin facetas: la pagina no se rompe, solo no pinta el panel.
+ */
+export interface OpcionFaceta {
+	clave: string;
+	nombre: string;
+	cantidad: number;
+}
+
+export interface Facetas {
+	categoria: OpcionFaceta[];
+	precio: OpcionFaceta[];
+	calificacion: OpcionFaceta[];
+	disponible: number;
+}
+
+/** Lo elegido, con las mismas claves que viajan en la direccion y a la ruta. */
+export interface Elegidos {
+	categoria: string[];
+	precio: string[];
+	calificacion: string[];
+	disponible: boolean;
+}
+
+export const NOMBRE_PRECIO: Record<string, string> = {
+	'hasta-250': 'Hasta Q250',
+	'250-500': 'Q250 a Q500',
+	'500-1000': 'Q500 a Q1,000',
+	'1000-3000': 'Q1,000 a Q3,000',
+	'desde-3000': 'Mas de Q3,000'
+};
+
+export const NOMBRE_CALIFICACION: Record<string, string> = {
+	'4-o-mas': '4 estrellas o mas',
+	'3-o-mas': '3 estrellas o mas'
+};
+
+export interface BusquedaFacetada extends Busqueda {
+	/** null si la ruta todavia no existe o no mando facetas. */
+	facetas: Facetas | null;
+	total: number;
+}
+
+interface PayloadFacetado {
+	resultados?: ResultadoBusqueda[];
+	total?: number;
+	facetas?: {
+		categoria?: { id: number | string; nombre: string; cantidad: number }[];
+		precio?: { clave: string; cantidad: number }[];
+		calificacion?: { clave: string; cantidad: number }[];
+		disponible?: number;
+	};
+}
+
+export async function buscarFacetado(texto: string, elegidos: Elegidos, limite = 50): Promise<BusquedaFacetada> {
+	const consulta = texto.trim();
+	if (consulta.length < MINIMO_LETRAS) {
+		return { resultados: [], error: '', facetas: null, total: 0 };
+	}
+
+	const partes = [`nombre=${encodeURIComponent(consulta)}`, `limite=${limite}`];
+	if (elegidos.categoria.length) partes.push(`categoria=${encodeURIComponent(elegidos.categoria.join(','))}`);
+	if (elegidos.precio.length) partes.push(`precio=${encodeURIComponent(elegidos.precio.join(','))}`);
+	if (elegidos.calificacion.length) partes.push(`calificacion=${encodeURIComponent(elegidos.calificacion.join(','))}`);
+	if (elegidos.disponible) partes.push('disponible=si');
+	partes.push(`sesion=${encodeURIComponent(sesionAnalitica())}`);
+
+	const respuesta = await pedir<PayloadFacetado>(`/buscador/productos/facetado?${partes.join('&')}`);
+
+	if (respuesta.estado === 404) {
+		const simple = await buscarProductos(consulta, limite);
+		return { ...simple, facetas: null, total: simple.resultados.length };
+	}
+	if (!respuesta.ok) {
+		return { resultados: [], error: mensajeUtil(respuesta), facetas: null, total: 0 };
+	}
+
+	const p = respuesta.payload ?? {};
+	const resultados = Array.isArray(p.resultados) ? p.resultados : [];
+	const f = p.facetas;
+	const facetas: Facetas | null = f
+		? {
+				categoria: (f.categoria ?? []).map((c) => ({ clave: String(c.id), nombre: c.nombre, cantidad: c.cantidad })),
+				precio: (f.precio ?? []).map((c) => ({ clave: c.clave, nombre: NOMBRE_PRECIO[c.clave] ?? c.clave, cantidad: c.cantidad })),
+				calificacion: (f.calificacion ?? []).map((c) => ({
+					clave: c.clave,
+					nombre: NOMBRE_CALIFICACION[c.clave] ?? c.clave,
+					cantidad: c.cantidad
+				})),
+				disponible: f.disponible ?? 0
+			}
+		: null;
+	return { resultados, error: '', facetas, total: p.total ?? resultados.length };
+}

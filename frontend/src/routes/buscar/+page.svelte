@@ -5,12 +5,15 @@
 	import Pie from '$lib/Pie.svelte';
 	import {
 		buscarProductos,
+		buscarFacetado,
 		precioVisible,
 		precioSegundo,
 		nota,
 		marcaDeEstado,
 		MINIMO_LETRAS,
-		type ResultadoBusqueda
+		type ResultadoBusqueda,
+		type Facetas,
+		type Elegidos
 	} from '$lib/buscador';
 	import { registrarClicBusqueda } from '$lib/eventos';
 
@@ -26,11 +29,14 @@
 	 * del navegador hace lo que se espera. Es la misma decision que ya toma el
 	 * catalogo con sus filtros.
 	 *
-	 * Esta pagina NO filtra ni ordena. Lo que llega es lo que Elasticsearch
-	 * considera mas parecido, en su orden de relevancia, y reordenarlo aqui
-	 * seria tirar justo el trabajo por el que existe el motor. Quien quiera
-	 * filtrar por categoria o por precio tiene el catalogo, y desde aqui se
-	 * llega con un enlace.
+	 * Esta pagina NO ordena. Lo que llega es lo que Elasticsearch considera mas
+	 * parecido, en su orden de relevancia, y reordenarlo aqui seria tirar justo
+	 * el trabajo por el que existe el motor.
+	 *
+	 * Los filtros facetados (Entrega 3) los calcula tambien Elasticsearch, con
+	 * agregaciones, y van en la direccion igual que el texto: `cat`, `precio`,
+	 * `nota` y `disp`. Si la ruta de facetas todavia no existe en el backend, la
+	 * busqueda sale como siempre y el panel no se pinta.
 	 */
 
 	/** Lo que pide la direccion. */
@@ -50,7 +56,24 @@
 	 */
 	let verTodo = $derived(page.url.searchParams.get('todo') === '1');
 
+	/** Lo elegido en las facetas, leido de la direccion. */
+	function lista(clave: string): string[] {
+		return (page.url.searchParams.get(clave) ?? '').split(',').filter(Boolean);
+	}
+	let elegidos = $derived<Elegidos>({
+		categoria: lista('cat'),
+		precio: lista('precio'),
+		calificacion: lista('nota'),
+		disponible: page.url.searchParams.get('disp') === '1'
+	});
+	let hayElegidos = $derived(
+		elegidos.categoria.length + elegidos.precio.length + elegidos.calificacion.length > 0 ||
+			elegidos.disponible
+	);
+
 	let resultados = $state<ResultadoBusqueda[]>([]);
+	let facetas = $state<Facetas | null>(null);
+	let total = $state(0);
 	let error = $state('');
 	let cargando = $state(false);
 
@@ -69,6 +92,7 @@
 	 * Depende de `consulta`, que sale de la url, asi que tambien corre cuando
 	 * se llega aqui desde otra busqueda sin recargar la pagina -- que es lo que
 	 * pasa al escribir otra cosa en la cabecera estando ya en esta pantalla.
+	 * Tambien depende de lo elegido en las facetas, que vive en la misma url.
 	 */
 	$effect(() => {
 		const texto = consulta;
@@ -76,10 +100,12 @@
 		// en la direccion vuelva a buscar. Leerlo solo dentro del `.then` lo
 		// dejaria fuera de las dependencias del efecto.
 		const todo = verTodo;
+		const filtros = elegidos;
 		const mia = ++ultimaConsulta;
 
 		if (texto.length < MINIMO_LETRAS) {
 			resultados = [];
+			facetas = null;
 			error = '';
 			cargando = false;
 			resuelta = texto;
@@ -88,23 +114,57 @@
 
 		cargando = true;
 
-		buscarProductos(texto, TOPE, todo).then((salida) => {
+		// El admin busca por su ruta, que tambien trae lo no activo y no lleva facetas.
+		const pedido = todo
+			? buscarProductos(texto, TOPE, true).then((s) => ({
+					...s,
+					facetas: null,
+					total: s.resultados.length
+				}))
+			: buscarFacetado(texto, filtros, TOPE);
+
+		pedido.then((salida) => {
 			if (mia !== ultimaConsulta) return;
 			resultados = salida.resultados;
+			facetas = salida.facetas;
+			total = salida.total;
 			error = salida.error;
 			cargando = false;
 			resuelta = texto;
 		});
 	});
 
-	/** Como se lee el conteo. Sin "resultado(s)" ni parentesis. */
-	let cuantos = $derived(
-		resultados.length === 1 ? '1 producto encontrado' : `${resultados.length} productos encontrados`
-	);
-
-	async function abrir(r: ResultadoBusqueda) {
-		await goto(`/producto/${r.id_producto}`);
+	/** Marca o desmarca una opcion y lo deja en la direccion. */
+	function alternar(clave: 'cat' | 'precio' | 'nota', valor: string) {
+		const url = new URL(page.url);
+		const actual = lista(clave);
+		const nueva = actual.includes(valor) ? actual.filter((v) => v !== valor) : [...actual, valor];
+		if (nueva.length) url.searchParams.set(clave, nueva.join(','));
+		else url.searchParams.delete(clave);
+		goto(url, { keepFocus: true, noScroll: true, replaceState: true });
 	}
+
+	function alternarDisponible() {
+		const url = new URL(page.url);
+		if (elegidos.disponible) url.searchParams.delete('disp');
+		else url.searchParams.set('disp', '1');
+		goto(url, { keepFocus: true, noScroll: true, replaceState: true });
+	}
+
+	function limpiar() {
+		const url = new URL(page.url);
+		for (const clave of ['cat', 'precio', 'nota', 'disp']) url.searchParams.delete(clave);
+		goto(url, { keepFocus: true, noScroll: true, replaceState: true });
+	}
+
+	/** Como se lee el conteo. Sin "resultado(s)" ni parentesis. */
+	let cuantos = $derived.by(() => {
+		const n = facetas ? total : resultados.length;
+		const texto = n === 1 ? '1 producto encontrado' : `${n} productos encontrados`;
+		return facetas && total > resultados.length
+			? `${texto}, se ven los ${resultados.length} mas parecidos`
+			: texto;
+	});
 </script>
 
 <svelte:head>
@@ -128,7 +188,7 @@
 		<p class="vacio">
 			Escribe al menos {MINIMO_LETRAS} letras en el buscador de arriba.
 		</p>
-	{:else if cargando}
+	{:else if cargando && !facetas}
 		<p class="vacio">Buscando</p>
 	{:else if error !== ''}
 		<div class="malo">
@@ -141,7 +201,7 @@
 			</p>
 			<a class="boton" href="/">Ir al catalogo</a>
 		</div>
-	{:else if resultados.length === 0}
+	{:else if resultados.length === 0 && !hayElegidos}
 		<div class="malo suave">
 			<p>No hay productos que se parezcan a {consulta}.</p>
 			<p class="letra-chica">
@@ -151,50 +211,141 @@
 			<a class="boton" href="/">Ver todo el catalogo</a>
 		</div>
 	{:else}
-		<ul class="lista">
-			{#each resultados as r, i (r.id_producto)}
-				<li>
-					<a
-						class="fila"
-						href="/producto/{r.id_producto}?origen=buscador"
-						onclick={() => {
-							if (!verTodo) registrarClicBusqueda(consulta, r.id_producto, i + 1);
-						}}
-					>
-						<span class="texto">
-							<span class="nombre">{r.nombre}</span>
-							<span class="bajo">
-								{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
-								{#if marcaDeEstado(r)}
-									<span class="estado">{marcaDeEstado(r)}</span>
-								{/if}
-								{#if nota(r)}<span class="dato">{nota(r)}</span>{/if}
-								<span class="dato" class:agotado={r.stock_total <= 0}>
-									{r.stock_total > 0 ? `${r.stock_total} disponibles` : 'Sin existencias'}
-								</span>
-							</span>
-						</span>
+		<div class="con-filtros" class:sin-panel={!facetas}>
+			{#if facetas}
+				<aside class="filtros" aria-label="Filtros">
+					<div class="grupo">
+						<h2>Categoria</h2>
+						<div class="opciones">
+							{#each facetas.categoria as o (o.clave)}
+								<label
+									class="opcion"
+									class:vacia={o.cantidad === 0 && !elegidos.categoria.includes(o.clave)}
+								>
+									<input
+										type="checkbox"
+										checked={elegidos.categoria.includes(o.clave)}
+										onchange={() => alternar('cat', o.clave)}
+									/>
+									<span>{o.nombre}</span>
+									<span class="n">{o.cantidad}</span>
+								</label>
+							{/each}
+						</div>
+					</div>
 
-						<span class="cifras">
-							{#if precioVisible(r)}
-								<span class="precio">{precioVisible(r)}</span>
-							{:else}
-								<span class="sin-precio">Sin precio</span>
-							{/if}
-							{#if precioSegundo(r)}
-								<span class="segundo">desde {precioSegundo(r)} con otro vendedor</span>
-							{/if}
-						</span>
-					</a>
-				</li>
-			{/each}
-		</ul>
+					<div class="grupo">
+						<h2>Precio</h2>
+						<div class="opciones">
+							{#each facetas.precio as o (o.clave)}
+								<label
+									class="opcion"
+									class:vacia={o.cantidad === 0 && !elegidos.precio.includes(o.clave)}
+								>
+									<input
+										type="checkbox"
+										checked={elegidos.precio.includes(o.clave)}
+										onchange={() => alternar('precio', o.clave)}
+									/>
+									<span>{o.nombre}</span>
+									<span class="n">{o.cantidad}</span>
+								</label>
+							{/each}
+						</div>
+					</div>
 
-		<p class="nota-pie">
-			El buscador ordena por parecido y no trae filtros. Para filtrar por
-			categoria, precio o caracteristicas esta
-			<a href="/">el catalogo</a>.
-		</p>
+					<div class="grupo">
+						<h2>Calificacion</h2>
+						<div class="opciones">
+							{#each facetas.calificacion as o (o.clave)}
+								<label
+									class="opcion"
+									class:vacia={o.cantidad === 0 && !elegidos.calificacion.includes(o.clave)}
+								>
+									<input
+										type="checkbox"
+										checked={elegidos.calificacion.includes(o.clave)}
+										onchange={() => alternar('nota', o.clave)}
+									/>
+									<span>{o.nombre}</span>
+									<span class="n">{o.cantidad}</span>
+								</label>
+							{/each}
+						</div>
+					</div>
+
+					<div class="grupo">
+						<h2>Existencias</h2>
+						<div class="opciones">
+							<label class="opcion">
+								<input type="checkbox" checked={elegidos.disponible} onchange={alternarDisponible} />
+								<span>Solo disponibles</span>
+								<span class="n">{facetas.disponible}</span>
+							</label>
+						</div>
+					</div>
+
+					{#if hayElegidos}
+						<button type="button" class="limpiar" onclick={limpiar}>Quitar filtros</button>
+					{/if}
+				</aside>
+			{/if}
+
+			<div class="resultados">
+				{#if resultados.length === 0}
+					<div class="malo suave">
+						<p>Nada coincide con esos filtros.</p>
+						<button type="button" class="boton" onclick={limpiar}>Quitar filtros</button>
+					</div>
+				{:else}
+					<ul class="lista">
+						{#each resultados as r, i (r.id_producto)}
+							<li>
+								<a
+									class="fila"
+									href="/producto/{r.id_producto}?origen=buscador"
+									onclick={() => {
+										if (!verTodo) registrarClicBusqueda(consulta, r.id_producto, i + 1);
+									}}
+								>
+									<span class="texto">
+										<span class="nombre">{r.nombre}</span>
+										<span class="bajo">
+											{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
+											{#if marcaDeEstado(r)}
+												<span class="estado">{marcaDeEstado(r)}</span>
+											{/if}
+											{#if nota(r)}<span class="dato">{nota(r)}</span>{/if}
+											<span class="dato" class:agotado={r.stock_total <= 0}>
+												{r.stock_total > 0 ? `${r.stock_total} disponibles` : 'Sin existencias'}
+											</span>
+										</span>
+									</span>
+
+									<span class="cifras">
+										{#if precioVisible(r)}
+											<span class="precio">{precioVisible(r)}</span>
+										{:else}
+											<span class="sin-precio">Sin precio</span>
+										{/if}
+										{#if precioSegundo(r)}
+											<span class="segundo">desde {precioSegundo(r)} con otro vendedor</span>
+										{/if}
+									</span>
+								</a>
+							</li>
+						{/each}
+					</ul>
+
+					{#if !facetas}
+						<p class="nota-pie">
+							El buscador ordena por parecido. Para filtrar por categoria, precio o
+							caracteristicas esta <a href="/">el catalogo</a>.
+						</p>
+					{/if}
+				{/if}
+			</div>
+		</div>
 	{/if}
 </main>
 
@@ -259,15 +410,79 @@
 		margin-top: 0.6rem;
 		padding: 8px 16px;
 		text-decoration: none;
+		font: inherit;
 		font-size: var(--f-base);
 		color: var(--sobre-indigo);
 		background: var(--indigo);
+		border: none;
 		border-radius: var(--r);
+		cursor: pointer;
 		transition: background var(--t);
 	}
 
 	.boton:hover {
 		background: var(--indigo-os);
+	}
+
+	.con-filtros {
+		display: grid;
+		grid-template-columns: 15rem minmax(0, 1fr);
+		gap: 1.75rem;
+		align-items: start;
+	}
+
+	.con-filtros.sin-panel {
+		grid-template-columns: minmax(0, 1fr);
+	}
+
+	.filtros {
+		display: flex;
+		flex-direction: column;
+		gap: 1.2rem;
+	}
+
+	.grupo h2 {
+		margin: 0 0 0.45rem;
+		font-size: var(--f-ms);
+		font-weight: 600;
+		color: var(--tinta);
+	}
+
+	.opciones {
+		display: flex;
+		flex-direction: column;
+		gap: 0.3rem;
+	}
+
+	.opcion {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		font-size: var(--f-ms);
+		color: var(--tinta);
+		cursor: pointer;
+	}
+
+	.opcion .n {
+		margin-left: auto;
+		font-size: var(--f-sm);
+		color: var(--gris);
+	}
+
+	.opcion.vacia {
+		color: var(--gris);
+	}
+
+	.limpiar {
+		align-self: flex-start;
+		padding: 0;
+		font: inherit;
+		font-size: var(--f-ms);
+		color: var(--indigo);
+		background: none;
+		border: none;
+		cursor: pointer;
+		text-decoration: underline;
 	}
 
 	.lista {
@@ -388,6 +603,31 @@
 		.cifras {
 			align-items: flex-start;
 			text-align: left;
+		}
+
+		/* En telefono los filtros van arriba y cada grupo se desliza de lado, sin
+		   esconderse detras de un boton. */
+		.con-filtros {
+			grid-template-columns: minmax(0, 1fr);
+			gap: 1rem;
+		}
+
+		.filtros {
+			gap: 0.8rem;
+		}
+
+		.opciones {
+			flex-direction: row;
+			overflow-x: auto;
+			gap: 0.5rem;
+			padding-bottom: 0.25rem;
+		}
+
+		.opcion {
+			flex: none;
+			padding: 6px 10px;
+			border: 1px solid var(--linea);
+			border-radius: 999px;
 		}
 	}
 </style>
