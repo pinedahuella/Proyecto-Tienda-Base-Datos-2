@@ -45,7 +45,7 @@ export class BuscadorFacetadoController {
       if (typeof query.sesion === 'string' && query.sesion.trim() !== '') {
         void this.eventosService.registrarBusqueda({
           termino: query.nombre ?? '',
-          resultados: resultado.resultados.length,
+          resultados: resultado.total,
           idUsuario: await idUsuarioDeCookieOpcional(request),
           sesion: query.sesion.trim(),
           facetada: true,

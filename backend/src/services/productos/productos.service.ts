@@ -413,11 +413,12 @@ export class ProductosService {
    * Dos consultas, ambas hasta la misma fecha limite (medianoche del dia
    * siguiente, zona Guatemala -06:00, igual que reconstruirEnFecha):
    *
-   *   - precio: la ultima fila de precio_historial antes de esa fecha.
-   *     Como el trigger oferta_registrar_precio (005_ofertas.sql) siempre
-   *     escribe una fila al nacer la oferta, que no aparezca ninguna
-   *     significa que la oferta todavia no existia en esa fecha -- de ahi
-   *     sale el 404 "La oferta no existia en esa fecha".
+   *   - precio: la ultima fila de precio_historial antes de esa fecha, junto
+   *     con el porcentaje_descuento vigente en ESA fila (snapshot, no el
+   *     actual de la oferta). Como el trigger oferta_registrar_precio
+   *     (005_ofertas.sql) siempre escribe una fila al nacer la oferta, que
+   *     no aparezca ninguna significa que la oferta todavia no existia en
+   *     esa fecha -- de ahi sale el 404 "La oferta no existia en esa fecha".
    *   - stock: la ultima fila de stock_movimiento antes de esa fecha. A
    *     diferencia del precio, que no aparezca ninguna fila NO es un
    *     error: una oferta creada sin stock inicial nunca escribe una fila
@@ -449,8 +450,8 @@ export class ProductosService {
       fechaLimite.setUTCDate(fechaLimite.getUTCDate() + 1);
 
       const [precioResultado, stockResultado] = await Promise.all([
-        pool.query<{ precio: string }>(
-          `SELECT precio FROM precio_historial
+        pool.query<{ precio: string; porcentaje_descuento: string | null }>(
+          `SELECT precio, porcentaje_descuento FROM precio_historial
            WHERE id_oferta = $1 AND fecha_creacion < $2
            ORDER BY fecha_creacion DESC LIMIT 1`,
           [idOfertaParametro, fechaLimite],
@@ -470,6 +471,7 @@ export class ProductosService {
       return {
         id_oferta: idOfertaParametro,
         precio: precioResultado.rows[0].precio,
+        porcentaje_descuento: precioResultado.rows[0].porcentaje_descuento,
         stock: stockResultado.rows[0]?.stock_resultante ?? 0,
       };
     } catch (error) {

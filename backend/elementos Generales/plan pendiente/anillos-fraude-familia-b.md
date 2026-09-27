@@ -259,6 +259,39 @@ persistido durante la prueba (cuentas 14/16/17) es un hallazgo REAL, no un
 dato de prueba -- se queda en la tabla a propósito, mismo criterio que los
 hallazgos de A.1/A.2 ya persistidos contra el dataset real.
 
+## `cadena_abierta` que sobrevive a su propio ciclo -- decisión: no se toca (2026-09-27)
+
+Reportado por el compañero (`docs/BACKEND-PENDIENTE.md`, "la cadena_abierta
+que sobra en un anillo de 3"): si A califica a B y B a C, B.1 guarda la
+cadena `cadena_abierta` con esas 3 cuentas. Si despues C califica a A y el
+circulo se cierra, A.1 guarda un `ciclo` NUEVO con la misma clave -- pero
+nada borra ni cierra la fila vieja de la cadena, que se queda `pendiente`
+para siempre.
+
+**Confirmado en el código, no es un malentendido del reporte**: el
+`NOT EXISTS { (fin)-[...2..6]->(inicio) }` de `CYPHER_B1_BASE` evita que
+B.1 vuelva a CONFIRMAR esa cadena una vez que el circulo ya cerró, pero eso
+solo afecta corridas futuras -- la fila que ya se insertó cuando la cadena
+todavía estaba abierta no se toca. `registrarAnilloFraude` solo fusiona
+tipos dentro de `TIPOS_CICLO_RESENAS` (`mutuo`/`ciclo`/`reiterado`);
+`cadena_abierta` nunca estuvo en ese conjunto, así que la escalada
+cadena→ciclo nunca se conecta con la fila anterior.
+
+**Decisión del usuario: se deja así, no se arregla.** Cadena abierta y
+ciclo son dos estados temporales reales y distintos (primero abierto,
+después cerrado) -- conservar ambos como evidencia histórica no es un dato
+corrupto. Ademas, con el agrupador de casos ya construido
+(`agrupador-fraude.md`), `AgrupadorFraudeService` junta hallazgos que
+comparten al menos una cuenta sin excepción para este caso: la cadena y el
+ciclo, al compartir las 3 mismas cuentas, ya caen en el MISMO `caso_fraude`
+como dos evidencias -- el problema práctico que motivó el reporte (el admin
+revisando la misma historia dos veces, como dos casos sueltos) ya no ocurre
+en el panel de casos, aunque siga viendose como dos filas separadas en el
+panel viejo de anillos (`GET /admin/fraude/alertas-resenas`).
+
+No se tocó ningún código por esta decisión -- ni `AnillosDetectorService`
+ni `PatronesFraudeDetectorService` ni `registrarAnilloFraude` cambiaron.
+
 ## Lo que le toca al compañero
 
 Nada de esquema real todavía -- `anillos-fraude-familia-b.sql` es de

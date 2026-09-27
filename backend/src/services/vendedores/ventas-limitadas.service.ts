@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
-import { redis } from '../../database/redis';
 import {
   ErrorConflicto,
   ErrorNoEncontrado,
@@ -162,38 +161,58 @@ export class VentasLimitadasService {
   private revisandoVencidas = false;
 
   /**
-   * Cuando una venta relampago tiene `duracion_segundos`, Redis le pone un
-   * `EXPIRE` a `mesh:oferta:<id>` (y `redis/inventario_limitado.lua`
-   * sincroniza el de su ZSET de reservas con el mismo TTL) -- al vencer,
-   * las dos claves desaparecen SOLAS, sin avisarle a nadie.
+   * Cuando una venta relampago tiene `duracion_segundos`, `activar()` guarda
+   * el mismo vencimiento por partida doble: un `EXPIRE` en Redis sobre
+   * `mesh:oferta:<id>` (lo que de verdad usa el checkout para saber si la
+   * venta sigue viva) y `oferta.fecha_vencimiento_venta_limitada` en
+   * Postgres (lo que usa ESTA revision para decidir si ya vencio).
    *
-   * **Bug corregido (2026-09-24):** hasta ahora, cuando eso pasaba, solo se
-   * apagaba `oferta.es_inventario_limitado` -- `porcentaje_descuento`
-   * quedaba pegado para siempre, porque nada mas lo tocaba (`revertir()`
-   * tampoco lo toca; `quitarDescuento()` de `OfertasVendedorService` ni
-   * siquiera se puede llamar mientras `es_inventario_limitado` sigue en
-   * `true`). Una venta relampago que vencia sola dejaba el descuento activo
-   * de manera permanente, sin que el panel del vendedor lo mostrara como
-   * "en venta relampago" pero tampoco como "sin descuento". Ahora esta
-   * revision apaga las dos columnas EN LA MISMA sentencia y recalcula los
-   * campos calculados de Mongo (`hay_descuento`/`precio_tienda`/
-   * `precio_desde`) para las ofertas que toco, igual que
-   * `OfertasVendedorService.quitarDescuento()`.
+   * **Bug corregido (2026-09-27): antes esta revision le preguntaba a
+   * Redis** (`existeVentaLimitada()`, un `EXISTS`) si la clave seguia ahi --
+   * y Redis no distingue "vencio de verdad" de "se perdio" (un `FLUSHALL`,
+   * un volumen borrado). Una venta relampago SIN vencimiento propio
+   * tambien tiene su clave en Redis (solo que sin TTL); si Redis se
+   * vaciaba, esa clave desaparecia igual que una que si vencio, y esta
+   * revision la apagaba en Postgres PARA SIEMPRE, sin que nadie lo pidiera.
+   * Detalle completo del bug y la decision de arreglarlo asi en
+   * `plan pendiente/vencimiento-automatico-oferta.md`.
+   *
+   * **Ahora esta revision ya NO toca Redis para decidir**: la consulta de
+   * `revisarVentasLimitadasVencidas()` filtra directo por
+   * `fecha_vencimiento_venta_limitada <= now()`, asi que cada fila que
+   * llega aca ya vencio de verdad segun Postgres, sin importar que haya
+   * pasado en Redis. Una venta relampago PERMANENTE
+   * (`fecha_vencimiento_venta_limitada IS NULL`) ni siquiera entra en la
+   * consulta -- nunca se apaga sola, pase lo que pase en Redis.
+   *
+   * Fuera de alcance a proposito: si la venta vencio segun Postgres pero su
+   * clave de Redis (el contador de stock del checkout) sigue viva por algun
+   * motivo, esta revision no la borra a mano -- las dos se sembraron con el
+   * MISMO `ttlSegundos` en `activar()`, asi que para cuando este worker
+   * (cada minuto) nota el vencimiento en Postgres, el `EXPIRE` de Redis ya
+   * paso tambien en la enorme mayoria de los casos; tampoco se intenta
+   * revivir una clave de Redis que se haya perdido -- eso es un problema
+   * aparte (que stock resembrar, que las reservas en curso se pierden si o
+   * si), decision del usuario dejarlo fuera de esta ronda.
+   *
+   * **Bug corregido (2026-09-24, sigue vigente):** cuando una venta vence,
+   * ademas de apagar `es_inventario_limitado` tambien se quita el
+   * `porcentaje_descuento` -- si no, quedaba pegado para siempre
+   * (`revertir()` no lo toca; `quitarDescuento()` de `OfertasVendedorService`
+   * ni siquiera se puede llamar mientras `es_inventario_limitado` sigue en
+   * `true`). Recalcula tambien los campos calculados de Mongo
+   * (`hay_descuento`/`precio_tienda`/`precio_desde`) para las ofertas que
+   * toco.
    *
    * Cada minuto, este `@Interval` (mismo mecanismo que el worker del outbox
-   * del grafo, `GrafoSyncService`) revisa las ofertas marcadas y, para cada
-   * una, reusa `InventarioLimitadoService.existeVentaLimitada()` (un
-   * `EXISTS` de Redis, sin tocar nada). Si la clave ya no existe, apaga las
-   * dos columnas. Nunca borra nada en Redis -- si vencio sola, las dos
-   * claves ya se fueron solas; si la revirtieron por `DELETE`, tambien. No
-   * relanza si algo falla: es mantenimiento, no debe tumbar nada del resto
-   * de la app.
+   * del grafo, `GrafoSyncService`). No relanza si algo falla: es
+   * mantenimiento, no debe tumbar nada del resto de la app.
    *
-   * Vive aca (y no en `InventarioLimitadoService`, donde vivia antes de
-   * este arreglo) porque necesita `ProductosService` para el recalculo de
-   * Mongo, y `ProductosService` ya inyecta `InventarioLimitadoService`
-   * (para `estado()` en la ficha) -- ponerlo alla habria sido una
-   * dependencia circular.
+   * Vive aca (y no en `InventarioLimitadoService`, donde vivia antes del
+   * arreglo del 2026-09-24) porque necesita `ProductosService` para el
+   * recalculo de Mongo, y `ProductosService` ya inyecta
+   * `InventarioLimitadoService` (para `estado()` en la ficha) -- ponerlo
+   * alla habria sido una dependencia circular.
    */
   @Interval(
     'inventario-limitado-vencidas',
@@ -219,7 +238,10 @@ export class VentasLimitadasService {
         id_oferta: number;
         id_producto_mongo: string;
       }>(
-        'SELECT id_oferta, id_producto_mongo FROM oferta WHERE es_inventario_limitado = true',
+        `SELECT id_oferta, id_producto_mongo FROM oferta
+          WHERE es_inventario_limitado = true
+            AND fecha_vencimiento_venta_limitada IS NOT NULL
+            AND fecha_vencimiento_venta_limitada <= now()`,
       );
       filas = resultado.rows;
     } catch (error) {
@@ -235,32 +257,11 @@ export class VentasLimitadasService {
     let idTienda: string | null = null;
     const idsProductoMongoTocados: number[] = [];
     for (const fila of filas) {
-      let sigueViva: boolean;
-      try {
-        sigueViva = await this.inventarioLimitadoService.existeVentaLimitada(
-          fila.id_oferta,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `revision de ventas limitadas vencidas: no se pudo leer Redis para la oferta ${fila.id_oferta} (${(error as Error)?.message ?? error})`,
-        );
-        continue;
-      }
-      if (sigueViva) {
-        continue;
-      }
       try {
         idTienda ??= await this.obtenerIdTienda();
         await this.apagarVentaLimitadaVencida(fila.id_oferta, idTienda);
         apagadas++;
         idsProductoMongoTocados.push(Number(fila.id_producto_mongo));
-        // La clave del TTL del DESCUENTO (ver revisarDescuentosVencidos())
-        // tambien se borra aca -- si no, un descuento sin vencimiento propio
-        // (duracion_segundos: 0, la clave nunca expira sola) que quedo
-        // debajo de esta venta relampago se quedaria en Redis para siempre,
-        // sin que nada la borre nunca (la oferta ya no entra en la consulta
-        // de abajo porque porcentaje_descuento acaba de quedar NULL).
-        this.borrarClaveDescuentoSinLanzar(fila.id_oferta);
         // sincronizar() nunca lanza (ver registro-ofertas-redis.service.ts)
         // -- un problema de Redis aca no debe tumbar esta revision, que ya
         // logro lo que le importa (apagar las columnas en Postgres). Si
@@ -317,7 +318,10 @@ export class VentasLimitadasService {
       ]);
       await cliente.query(
         `UPDATE oferta
-            SET es_inventario_limitado = false, porcentaje_descuento = NULL
+            SET es_inventario_limitado = false,
+                porcentaje_descuento = NULL,
+                fecha_vencimiento_venta_limitada = NULL,
+                fecha_vencimiento_descuento = NULL
           WHERE id_oferta = $1 AND es_inventario_limitado = true`,
         [idOferta],
       );
@@ -331,27 +335,31 @@ export class VentasLimitadasService {
   }
 
   /**
-   * (Agregado 2026-09-24) El mismo mecanismo que
+   * (Agregado 2026-09-24) El mismo proposito que
    * `revisarVentasLimitadasVencidas()`, pero para el descuento MANUAL puro
    * (`POST .../descuento`, sin venta relampago) cuando se aplico con
-   * `duracion_segundos`. Es puramente interno -- el cliente nunca ve nada
-   * de este TTL, solo el resultado (el descuento desaparece solo).
+   * `duracion_segundos`. Puramente interno -- el cliente nunca ve nada de
+   * este vencimiento, solo el resultado (el descuento desaparece solo).
    *
-   * `OfertasVendedorService.aplicarDescuento()` siempre siembra
-   * `claveDescuento(idOferta)` al aplicar un descuento (con `EXPIRE` si
-   * `duracion_segundos > 0`, sin el si es `0` -- igual que
-   * `InventarioLimitadoService.activar()` hace con su propia clave), y la
-   * borra en `quitarDescuento()`. Esta revision solo mira las ofertas con
-   * `porcentaje_descuento` puesto que NO estan en venta relampago (esas ya
-   * las cubre `revisarVentasLimitadasVencidas()`); si la clave ya no
-   * existe, el descuento vencio y se quita.
+   * **Bug corregido (2026-09-27):** hasta el 2026-09-26 esta revision
+   * miraba si `claveDescuento(idOferta)` seguia viva en Redis -- y un
+   * descuento SIN vencimiento (`duracion_segundos: 0`) tambien tenia esa
+   * clave, solo que sin TTL. Si Redis se vaciaba (un `FLUSHALL`, un
+   * volumen borrado), la clave desaparecia igual que si hubiera vencido de
+   * verdad, y esta revision quitaba el descuento PERMANENTE para siempre,
+   * sin que nadie lo pidiera. Detalle completo en
+   * `plan pendiente/vencimiento-automatico-oferta.md`.
    *
-   * Limitacion conocida y aceptada: un descuento puesto por fuera de esta
-   * ruta (a mano en Postgres, sin pasar por `aplicarDescuento()`) nunca
-   * tuvo esta clave sembrada, asi que el `EXISTS` de abajo daria `false` y
-   * esta revision lo quitaria en el proximo tick. No aplica a nada de lo
-   * que hoy existe en la base (ningun descuento activo se creo asi), pero
-   * queda anotado por si algun dia se siembra un descuento directo por SQL.
+   * Ahora la consulta de abajo filtra directo por
+   * `fecha_vencimiento_descuento <= now()` en Postgres -- ya no se le
+   * pregunta nada a Redis, y esa clave de Redis (`mesh:oferta:<id>:descuento`)
+   * dejo de sembrarse/leerse por completo: nada mas la usaba. Un descuento
+   * permanente (`fecha_vencimiento_descuento IS NULL`) ni siquiera entra en
+   * la consulta -- nunca se quita solo.
+   *
+   * Solo mira las ofertas que NO estan en venta relampago (esas ya las
+   * cubre `revisarVentasLimitadasVencidas()`, que tiene su propia columna,
+   * `fecha_vencimiento_venta_limitada`).
    */
   private async revisarDescuentosVencidos(): Promise<void> {
     let filas: { id_oferta: number; id_producto_mongo: string }[];
@@ -361,7 +369,10 @@ export class VentasLimitadasService {
         id_producto_mongo: string;
       }>(
         `SELECT id_oferta, id_producto_mongo FROM oferta
-          WHERE porcentaje_descuento IS NOT NULL AND es_inventario_limitado = false`,
+          WHERE porcentaje_descuento IS NOT NULL
+            AND es_inventario_limitado = false
+            AND fecha_vencimiento_descuento IS NOT NULL
+            AND fecha_vencimiento_descuento <= now()`,
       );
       filas = resultado.rows;
     } catch (error) {
@@ -377,19 +388,6 @@ export class VentasLimitadasService {
     let idTienda: string | null = null;
     const idsProductoMongoTocados: number[] = [];
     for (const fila of filas) {
-      let sigueVivo: boolean;
-      try {
-        sigueVivo =
-          (await redis.exists(this.claveDescuento(fila.id_oferta))) === 1;
-      } catch (error) {
-        this.logger.warn(
-          `revision de descuentos vencidos: no se pudo leer Redis para la oferta ${fila.id_oferta} (${(error as Error)?.message ?? error})`,
-        );
-        continue;
-      }
-      if (sigueVivo) {
-        continue;
-      }
       try {
         idTienda ??= await this.obtenerIdTienda();
         await this.quitarDescuentoVencido(fila.id_oferta, idTienda);
@@ -433,7 +431,8 @@ export class VentasLimitadasService {
         idTienda,
       ]);
       await cliente.query(
-        `UPDATE oferta SET porcentaje_descuento = NULL
+        `UPDATE oferta
+            SET porcentaje_descuento = NULL, fecha_vencimiento_descuento = NULL
           WHERE id_oferta = $1 AND porcentaje_descuento IS NOT NULL`,
         [idOferta],
       );
@@ -444,18 +443,6 @@ export class VentasLimitadasService {
     } finally {
       cliente.release();
     }
-  }
-
-  private claveDescuento(idOferta: number): string {
-    return `mesh:oferta:${idOferta}:descuento`;
-  }
-
-  private borrarClaveDescuentoSinLanzar(idOferta: number): void {
-    redis.del(this.claveDescuento(idOferta)).catch((error: unknown) => {
-      this.logger.warn(
-        `no se pudo borrar la clave de TTL del descuento de la oferta ${idOferta} (${(error as Error)?.message ?? error})`,
-      );
-    });
   }
 
   // ---------------------------------------------------------------------

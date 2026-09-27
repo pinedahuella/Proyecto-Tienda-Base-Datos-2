@@ -181,8 +181,11 @@ export interface OfertaPendiente {
  */
 export interface OfertaHistorial {
   id_oferta: string;
-  /** numeric(12,2) de Postgres: string. */
+  /** numeric(12,2) de Postgres: string. El precio de LISTA, sin descuento. */
   precio: string;
+  /** El % de descuento vigente en esa fecha (1-99), o `null` si no habia
+   * ninguno -- de `precio_historial.porcentaje_descuento`. */
+  porcentaje_descuento: string | null;
   stock: number;
 }
 

@@ -35,6 +35,8 @@ export interface ResultadoBusquedaProducto {
   precio_desde: number | null;
   /** El precio de la tienda, el que se ensena primero. */
   precio_tienda: number | null;
+  /** `true` si alguna variante tiene una oferta activa con descuento. */
+  hay_descuento: boolean;
   /** Existencias activas entre todos los vendedores. */
   stock_total: number;
   resenas_promedio: number;

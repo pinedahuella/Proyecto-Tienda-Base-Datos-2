@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { Decimal128 } from 'mongodb';
 import { clickhouse } from '../../database/clickhouse';
@@ -98,9 +98,18 @@ interface FilaProductoProyectado {
  * con una bandera para que una corrida lenta no se pise con la siguiente,
  * y nunca lanza -- un fallo de ClickHouse, Mongo o Redis se loguea y se
  * reintenta en la proxima corrida, sin tumbar nada mas.
+ *
+ * **Corre tambien al arrancar el backend (agregado 2026-09-27).** El
+ * `@Interval` de Nest NO dispara de inmediato, solo despues de que pase el
+ * primer `INTERVALO_MS` -- si Redis se vacio (o el backend estuvo apagado)
+ * justo antes de reiniciar, el ranking y el detalle se hubieran quedado
+ * vacios o desactualizados hasta 10 min despues. `onApplicationBootstrap()`
+ * llama a la misma `recalcular()` una vez, apenas Nest termina de
+ * inicializar todos los modulos -- mismo patron que
+ * `RegistroOfertasSyncService`/`DisparadorReglasPeriodoService`.
  */
 @Injectable()
-export class MasVendidosSyncService {
+export class MasVendidosSyncService implements OnApplicationBootstrap {
   private readonly logger = new Logger(MasVendidosSyncService.name);
 
   static readonly CLAVE_RANKING = 'mesh:productos:mas_vendidos';
@@ -156,6 +165,11 @@ export class MasVendidosSyncService {
     } finally {
       this.procesando = false;
     }
+  }
+
+  /** Ver el comentario de la clase -- corre una vez, al arrancar. */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.recalcular();
   }
 
   /**

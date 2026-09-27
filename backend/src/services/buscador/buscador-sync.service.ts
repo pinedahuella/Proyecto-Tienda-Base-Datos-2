@@ -98,6 +98,14 @@ export class BuscadorSyncService {
  * forma que `etl/extraer_busqueda.js` -- mismos nombres de campo, mismo
  * tratamiento de `Decimal128` y de las variantes. Si esa forma cambia algun
  * dia, hay que cambiar las dos a la par.
+ *
+ * `hay_descuento` (agregado 2026-09-27) todavia NO esta en
+ * `etl/extraer_busqueda.js` (fuera de `backend/`, no se toca desde aca) --
+ * hasta que se agregue ahi tambien, una corrida completa del ETL
+ * (`etl/cargar_busqueda.sh`, la que reconstruye el indice entero) va a
+ * dejar ese campo afuera para TODOS los productos, y solo este worker
+ * incremental (los que tengan `pendiente_busqueda: true`) lo va a ir
+ * rellenando de a poco.
  */
 function aDocumentoIndice(producto: Producto): Record<string, unknown> {
   const variantes = (producto.variantes ?? [])
@@ -113,6 +121,7 @@ function aDocumentoIndice(producto: Producto): Record<string, unknown> {
     categoria_padre: producto.categoria?.categoria_padre ?? null,
     precio_desde: aNumero(producto.precio_desde),
     precio_tienda: aNumero(producto.precio_tienda),
+    hay_descuento: producto.hay_descuento ?? false,
     stock_total: producto.stock_total ?? 0,
     total_ofertas: producto.total_ofertas ?? 0,
     resenas_promedio: producto.resenas_promedio ?? 0,

@@ -187,6 +187,12 @@ export class InventarioLimitadoService {
    * `ttlSegundos` es cuando CIERRA la venta entera (0 = sin vencimiento).
    * No es el tiempo de una reserva individual -- ese es otro parametro,
    * de la operacion `reservar` (paso 3, todavia sin construir).
+   *
+   * Ademas del TTL de Redis, guarda `oferta.fecha_vencimiento_venta_limitada`
+   * (`now() + ttlSegundos`, o `NULL` si `ttlSegundos` es `0`) -- es lo que
+   * lee `VentasLimitadasService.revisarVentasLimitadasVencidas()` para
+   * decidir si ya vencio (desde 2026-09-27 ya NO le pregunta a Redis: ver
+   * `plan pendiente/vencimiento-automatico-oferta.md`, el porque).
    */
   async activar(
     idOferta: number,
@@ -211,8 +217,12 @@ export class InventarioLimitadoService {
 
     try {
       await pool.query(
-        'UPDATE oferta SET es_inventario_limitado = true WHERE id_oferta = $1',
-        [idOferta],
+        `UPDATE oferta
+            SET es_inventario_limitado = true,
+                fecha_vencimiento_venta_limitada = CASE WHEN $2 > 0
+                  THEN now() + make_interval(secs => $2) ELSE NULL END
+          WHERE id_oferta = $1`,
+        [idOferta, ttlSegundos],
       );
     } catch (error) {
       manejarErrorConexion(this.logger, error);
@@ -242,7 +252,9 @@ export class InventarioLimitadoService {
       // ningun camino hasta que alguien note el error a mano.
       try {
         await pool.query(
-          'UPDATE oferta SET es_inventario_limitado = false WHERE id_oferta = $1',
+          `UPDATE oferta
+              SET es_inventario_limitado = false, fecha_vencimiento_venta_limitada = NULL
+            WHERE id_oferta = $1`,
           [idOferta],
         );
       } catch {
@@ -254,8 +266,9 @@ export class InventarioLimitadoService {
   }
 
   /**
-   * Apaga el modo de venta limitada: `es_inventario_limitado = false` en
-   * Postgres y `DEL` de las dos llaves de esa oferta en Redis.
+   * Apaga el modo de venta limitada: `es_inventario_limitado = false` (y
+   * `fecha_vencimiento_venta_limitada = NULL`) en Postgres, y `DEL` de las
+   * dos llaves de esa oferta en Redis.
    */
   async revertir(idOferta: number): Promise<void> {
     if (!Number.isInteger(idOferta) || idOferta <= 0) {
@@ -264,7 +277,10 @@ export class InventarioLimitadoService {
 
     try {
       const resultado = await pool.query(
-        'UPDATE oferta SET es_inventario_limitado = false WHERE id_oferta = $1 RETURNING id_oferta',
+        `UPDATE oferta
+            SET es_inventario_limitado = false, fecha_vencimiento_venta_limitada = NULL
+          WHERE id_oferta = $1
+          RETURNING id_oferta`,
         [idOferta],
       );
       if (resultado.rowCount === 0) {

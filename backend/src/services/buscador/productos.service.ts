@@ -16,6 +16,7 @@ interface DocumentoIndice {
   categoria_nombre: string | null;
   precio_desde: number | null;
   precio_tienda: number | null;
+  hay_descuento: boolean;
   stock_total: number;
   resenas_promedio: number;
   resenas_total: number;
@@ -132,6 +133,7 @@ export class BuscadorProductosService {
       categoria: fuente?.categoria_nombre ?? null,
       precio_desde: fuente?.precio_desde ?? null,
       precio_tienda: fuente?.precio_tienda ?? null,
+      hay_descuento: fuente?.hay_descuento ?? false,
       stock_total: fuente?.stock_total ?? 0,
       resenas_promedio: fuente?.resenas_promedio ?? 0,
       resenas_total: fuente?.resenas_total ?? 0,
