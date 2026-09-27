@@ -6,12 +6,22 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-26 en la noche)
 
-Revisado contra tu ced29f5. Lo de la Entrega final ya esta completo, asi que
-nada de esto bloquea la entrega. Van por orden de importancia, con la seccion
-de abajo donde esta el detalle.
+Revisado contra tu a9e3d95. Lo de la Entrega final ya esta completo. Los
+casos de fraude (C1 a C8) son de la Entrega 3. C2 y C3 son fallos seguros;
+C1 es una decision que conviene cerrar (ver su seccion, se reevaluo el mismo
+26). Van por orden de importancia, con la
+seccion de abajo donde esta el detalle.
 
 | # | Que | Donde esta el detalle | Importa |
 |---|---|---|---|
+| C1 | Al guardar, una alerta de login que toca dos anillos une sus casos, aunque el agrupador dice que el login nunca fusiona. Decidir si se quiere | seccion del 26 en la noche | media, decision |
+| C2 | Una fusion borra el caso que el admin ya habia confirmado | seccion del 26 en la noche | **alta** |
+| C3 | Cada grupo borra las cuentas de todo el caso: 105 evidencias quedaron sin cuentas | seccion del 26 en la noche | **alta** |
+| C4 | La recencia del puntaje mide cuando el admin reviso, no cuando paso el fraude | seccion del 26 en la noche | media |
+| C5 | Siguen sumando los hallazgos que el admin descarto | seccion del 26 en la noche | media |
+| C6 | El vendedor de una granja de mas de 10 cuentas nunca es nucleo | seccion del 26 en la noche | media |
+| C7 | El primer caso sale a los 15 minutos, sin forma de pedirlo antes | seccion del 26 en la noche | media, para la demo |
+| C8 | Casos con 0 evidencias se quedan en la lista | seccion del 26 en la noche | baja |
 | 1 | El worker de descuentos borra los descuentos cuya clave de Redis nunca existio. Si Redis se vacia, se lleva todos los descuentos permanentes | seccion del 25, punto 1 | media |
 | 2 | Las senales y los detalles que faltan del fraude del login | seccion del 11, puntos 4 y 5 | media |
 | 3 | Un anillo de 3 deja un caso `cadena_abierta` que sobra junto al `ciclo`, y el panel ensena dos casos con las mismas cuentas | seccion del 25, punto 3 | media |
@@ -24,6 +34,154 @@ de abajo donde esta el detalle.
 Hechos y ya no los pedimos: similares, facetado, sugerencias, el `DELETE` de
 reglas, el TTL de R2 y R3, "Para ti" vacio y las vitrinas de ofertas al
 arrancar.
+
+---
+
+## LO NUEVO DEL 2026-09-26 EN LA NOCHE: los casos de fraude (a9e3d95), conectados y probados
+
+De este lado ya esta todo: la migracion **026_casos_fraude.sql** (tu SQL, con dos
+cambios que se explican abajo) y la pestana **Casos** en Fraude, con filtros por
+estado y nivel, el detalle con nucleo, periferia y evidencia, y los botones
+Marcar revisado, Confirmar fraude y Descartar (este pide el motivo). Tus tres
+rutas contestan bien y encajan.
+
+Los dos cambios a tu SQL:
+
+- Las tres llaves de `evidencia_caso_fraude` hacia `anillo_fraude`,
+  `hallazgo_evento_fraude` y `alerta_fraude` van con `ON DELETE CASCADE`. Sin
+  eso, `pruebas/alertas_login.sh` y `demo-fraude-pais.ps1 -Limpiar` fallan al
+  borrar una alerta que ya es evidencia. La 026 rehace las llaves en tu base
+  tambien, es idempotente.
+- R-CASI-1 ya no nombra A.4 en su descripcion, porque lo descartaste.
+
+**Lo que falla, medido.** Se levanto tu backend contra nuestra base (48 anillos
+y 91 alertas de login de los tipos que entran). El worker dijo
+`10/10 caso(s) al dia, de 125 hallazgo(s)`, pero en `caso_fraude` quedaron **2**.
+Despues se aislo cada fallo con tus mismas clases compiladas, dentro de una
+transaccion deshecha al final: **
+ode pruebas/casos_fraude_fusion.cjs** (con el
+backend compilado). Hoy da 3 FALLA, C1, C2 y C3. Cuando esten arreglados tiene que
+dar 0 FALLA.
+
+### C1. Una alerta de login termina fusionando casos (reevaluado el 26 en la noche)
+
+`agrupar()` mete la misma alerta en TODOS los grupos que toca. Pero
+`evidencia_caso_fraude` no deja que una alerta sea evidencia de dos casos, asi
+que `persistir()` del segundo grupo encuentra la alerta en el caso del primero,
+la cuenta en `idsExistentes` y **fusiona los dos casos**. Prueba aislada: dos
+anillos sin cuentas en comun (17-18 y 19-20) dan 2 grupos y 2 casos. Con una
+alerta `multi_cuenta_ip` que toca a 17 y a 19, el agrupador sigue armando 2
+grupos, pero al guardar queda 1 caso.
+
+**Lo que NO es.** En nuestra base el caso 1 junto 116 evidencias y 23 cuentas,
+con `admin_mesh`, `mesh_tienda` y los compradores como nucleo. Eso es un
+artefacto de probar en local: las 67 alertas de login de ese caso salieron de
+127.0.0.1 (o son de rotacion por identificador), y en local todo sale de ahi.
+Las 13 alertas con IP REAL, las de las demos con Tor desde otros paises, no
+entraron en ningun caso, porque tocan cuentas de demo que no estan en anillos,
+y el agrupador las descarto como debe. Con IPs reales ese amontonamiento no
+pasa.
+
+**Lo que SI es.** La prueba aislada usa una sola alerta y dos anillos, sin
+127.0.0.1 de por medio. Si una IP de verdad toca cuentas de dos anillos
+distintos (un wifi compartido, o el mismo operador), el guardado une los dos
+casos, cuando tu agrupador dice que el login nunca fusiona. Una de las dos
+partes esta mal, y cual depende de lo que quieran:
+
+- si una IP compartida SI debe unir casos (mismo operador), que el agrupador
+  lo haga a proposito y lo diga, y que el comentario de la clase cambie;
+- si NO debe unir, que la alerta vaya a un solo grupo (el que comparta mas
+  cuentas con ella).
+
+En los dos casos conviene que la alerta solo aporte las cuentas que ya estan
+en el grupo. Hoy mete todas las de esa IP, y con varias alertas esas cuentas
+llegan al "2 o mas" del nucleo sin ninguna evidencia de resenas.
+
+### C2. Una fusion se come la decision del admin (no depende de la IP)
+
+Al fusionar sobrevive el id mas chico y los demas casos se BORRAN, con su
+estado y su motivo. Prueba aislada: el admin confirma el caso 4, llega la
+alerta del punto anterior y el caso 4 desaparece dentro del 3, que queda
+**pendiente**. La confirmacion se pierde sin rastro.
+
+Pasa con cualquier fusion, tambien con una legitima: un anillo nuevo que une
+dos casos, uno ya confirmado, hace lo mismo.
+
+**Lo que pido:** que el superviviente herede el estado mas grave
+(confirmada, luego revisada, luego pendiente) y el motivo, o que un caso ya
+revisado no se fusione y quede anotado en el log.
+
+### C3. Cada grupo borra las cuentas de todo el caso (no depende de la IP)
+
+`sincronizarCuentas()` hace `DELETE` de las cuentas de TODAS las evidencias del
+caso y despues pone solo las del grupo que esta guardando. Cuando dos grupos
+caen en el mismo caso (C1), el segundo deja sin cuentas a las evidencias del
+primero. Medido: **105 evidencias sin ninguna cuenta**. Tambien el puntaje y
+el nivel quedan con lo del ultimo grupo: en la prueba aislada el caso fusionado
+dice 32,5 puntos, que es solo la mitad de su evidencia, y la cuenta 18 ya no
+sale.
+
+Tambien pasa sin login: si un grupo se parte en dos entre una corrida y otra,
+las dos mitades caen en el mismo caso viejo y la segunda borra las cuentas de
+la primera.
+
+**Lo que pido:** borrar solo las cuentas de las evidencias que se estan
+guardando.
+
+### C4. La recencia mide cuando el admin reviso, no cuando paso el fraude
+
+El puntaje usa `fecha_actualizacion` de cada fuente. En `anillo_fraude` esa
+columna solo cambia con el PATCH del admin (la del detector es
+`ultima_vez_confirmado_activo`), y en `alerta_fraude` y
+`hallazgo_evento_fraude` cambia con cada re-deteccion y tambien con el PATCH.
+Revisar hoy un anillo de hace seis meses lo vuelve reciente y le quita el
+descuento de 0,5.
+
+**Lo que pido:** `ultima_vez_confirmado_activo` para los anillos, y para las
+otras dos una fecha que el PATCH no toque.
+
+### C5. Cuentan tambien los hallazgos que el admin ya descarto
+
+Los tres adaptadores leen todas las filas, sin mirar el estado. Un anillo o
+una alerta que el admin descarto como falso positivo sigue sumando puntos y
+uniendo cuentas. **Lo que pido:** dejar fuera las `descartada`.
+
+### C6. El vendedor de una granja grande nunca es nucleo
+
+Una cuenta con mas de 10 contrapartes en resenas es "concentradora": no une
+grupos y nunca es nucleo. El conteo usa TODAS las resenas, tambien las del
+fraude. Una granja (`satelites`) con 11 cuentas satelite vuelve concentradora
+justo al vendedor que se beneficia, y queda fuera del nucleo de su propio
+caso. Hoy no pasa porque nuestra base tiene pocas resenas (0 concentradoras),
+pero cualquier vendedor real con movimiento pasa de 10. **Lo que pido:** no
+contar para ese umbral las resenas que ya son evidencia de un anillo.
+
+### C7. El primer caso sale a los 15 minutos, y no hay como pedirlo antes
+
+El worker no corre al arrancar (el mismo `onApplicationBootstrap` que le
+pusiste a las vitrinas) ni hay ruta para recalcular. En una demo hay que
+esperar 15 minutos despues de levantar el backend para ver la pestana con
+algo. **Lo que pido:** que corra al arrancar, y si puedes, un
+`POST /admin/fraude/casos/recalcular` solo para admin.
+
+### C8. Casos vacios
+
+Con la cascada de la 026, si se borra la unica fuente de un caso, el caso se
+queda con 0 evidencias y sigue en la lista. **Lo que pido:** que cada corrida
+borre los casos pendientes sin evidencia.
+
+### Menores
+
+- R-CASI-4 y el bono B.4 leen `metricas.olas`, `invisible_hoy` y
+  `orden_secuencial`, que ningun detector escribe. Hoy nunca suman. No es un
+  error, pero la regla aparece en el catalogo y en la pantalla como si pudiera
+  cumplirse.
+- `MOTIVO_DEVOLUCION = 3` en `reglas-casi-confirmado.service.ts` es un id fijo.
+  Coincide con `devolucion` en una base nueva, pero conviene buscarlo por
+  nombre como en el resto del agrupador.
+- `persistente`: si la regularidad sale NaN (media 0 en el Cypher de B.3),
+  JSON la guarda como `null`, `Number(null)` da 0 y suma los +5 de "regular".
+- `motivo` del PATCH no tiene largo maximo. La pantalla corta en 500.
 
 ---
 

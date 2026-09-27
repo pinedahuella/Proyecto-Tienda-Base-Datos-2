@@ -307,15 +307,20 @@
 		{ nombre: 'Ubicacion y acceso', tipos: ['toma_cuenta', 'viaje_imposible'] }
 	];
 
-	/** Las dos vistas de Fraude, una a la vez, para no tener que bajar por toda la pagina. */
-	type PestanaFraude = 'entradas' | 'resenas' | 'eventos';
-	/** `/panel?s=fraude&t=resenas` abre directo en los anillos: la campana del admin y la demo lo usan. */
+	/** Las vistas de Fraude, una a la vez, para no tener que bajar por toda la pagina. */
+	type PestanaFraude = 'casos' | 'entradas' | 'resenas' | 'eventos';
+	/**
+	 * `/panel?s=fraude&t=resenas` abre directo en los anillos: la campana del
+	 * admin y la demo lo usan. `t=casos` y `t=eventos` abren las suyas.
+	 */
+	const PESTANA_DE_LA_DIRECCION =
+		typeof location !== 'undefined' ? new URLSearchParams(location.search).get('t') : null;
 	let pestanaFraude = $state<PestanaFraude>(
-		typeof location !== 'undefined' && new URLSearchParams(location.search).get('t') === 'resenas'
-			? 'resenas'
-			: typeof location !== 'undefined' && new URLSearchParams(location.search).get('t') === 'eventos'
-				? 'eventos'
-				: 'entradas'
+		PESTANA_DE_LA_DIRECCION === 'resenas' ||
+			PESTANA_DE_LA_DIRECCION === 'eventos' ||
+			PESTANA_DE_LA_DIRECCION === 'casos'
+			? PESTANA_DE_LA_DIRECCION
+			: 'entradas'
 	);
 
 	/** Cuantas por pagina. El mismo 20 que el resto de las listas del panel. */
@@ -1139,6 +1144,286 @@
 				return 'Ningun anillo ni patron de resenas sigue activo en la ventana de 60 dias.';
 		}
 	}
+
+	// ------------------------------------------------ casos agrupados
+	/**
+	 * Los casos de fraude (migracion 026, agrupador de Jose David). Un caso
+	 * junta hallazgos de las otras tres pestanas cuando comparten cuentas y
+	 * les pone puntaje y nivel. Los arma AgrupadorFraudeWorkerService cada 15
+	 * minutos, asi que un hallazgo nuevo tarda hasta eso en salir aqui.
+	 * GET /admin/fraude/casos, GET y PATCH /admin/fraude/casos/:id.
+	 */
+	type NivelCaso = 'informativo' | 'revisar' | 'prioritario' | 'casi_confirmado';
+	type EstadoCaso = EstadoAlerta | 'confirmada';
+	type FiltroEstadoCaso = 'todas' | EstadoCaso;
+	type FiltroNivelCaso = 'todos' | NivelCaso;
+
+	interface CasoResumen {
+		id_caso_fraude: number;
+		nivel: NivelCaso;
+		puntaje: number;
+		estado: EstadoCaso;
+		reglas_cumplidas: string[];
+		cantidad_evidencias: number;
+		cantidad_cuentas: number;
+		ultima_evidencia: string;
+		fecha_creacion: string;
+		fecha_actualizacion: string;
+	}
+
+	interface EvidenciaCaso {
+		id_evidencia_caso_fraude: number;
+		fuente: 'grafo' | 'eventos' | 'login';
+		tipo: string;
+		clave: string;
+		/** numeric de PostgreSQL: puede llegar como texto. */
+		puntos: number | string;
+		metricas: Record<string, unknown>;
+		ultima_evidencia: string;
+	}
+
+	interface CasoDetalle extends CasoResumen {
+		motivo: string | null;
+		cuentas: { id_usuario: string; usuario: string; es_nucleo: boolean }[];
+		evidencia: EvidenciaCaso[];
+	}
+
+	interface CasosPaginados {
+		casos: CasoResumen[];
+		pagina: number;
+		limite: number;
+		total_casos: number;
+		total_paginas: number;
+	}
+
+	const NOMBRE_NIVEL: Record<NivelCaso, string> = {
+		informativo: 'Informativo',
+		revisar: 'Revisar',
+		prioritario: 'Prioritario',
+		casi_confirmado: 'Casi confirmado'
+	};
+
+	const FILTROS_NIVEL_CASO: FiltroNivelCaso[] = ['todos', 'casi_confirmado', 'prioritario', 'revisar', 'informativo'];
+
+	/** Pendientes primero: es lo que abre la pestana y lo que falta por mirar. */
+	const FILTROS_ESTADO_CASO: FiltroEstadoCaso[] = ['pendiente', 'todas', 'revisada', 'confirmada', 'descartada'];
+
+	const NOMBRE_FILTRO_CASO: Record<FiltroEstadoCaso, string> = {
+		todas: 'Todos',
+		pendiente: 'Pendientes',
+		revisada: 'Revisados',
+		confirmada: 'Confirmados',
+		descartada: 'Descartados'
+	};
+
+	const NOMBRE_ESTADO_CASO: Record<EstadoCaso, string> = {
+		pendiente: 'Pendiente',
+		revisada: 'Revisado',
+		confirmada: 'Confirmado',
+		descartada: 'Descartado'
+	};
+
+	/** Lo que quiere decir cada regla, en corto. El texto largo esta en la tabla regla_casi_confirmado. */
+	const QUE_ES_REGLA: Record<string, string> = {
+		'R-CASI-1': 'Se califican entre si y compraron o se registraron desde la misma IP',
+		'R-CASI-2': 'Recibieron resenas de cuentas con menos de una hora de vida',
+		'R-CASI-3': 'Califico un producto y despues lo devolvio',
+		'R-CASI-4': 'El mismo ciclo volvio en dos o mas olas',
+		'R-CASI-5': 'Califican juntas y compraron o se registraron desde la misma IP'
+	};
+
+	/** El nombre de cada fuente, el mismo de su pestana. */
+	const NOMBRE_FUENTE: Record<EvidenciaCaso['fuente'], string> = {
+		grafo: 'Resenas',
+		eventos: 'Compras y navegacion',
+		login: 'Intentos de entrada'
+	};
+
+	function tipoDeEvidencia(e: EvidenciaCaso): string {
+		if (e.fuente === 'grafo') return NOMBRE_TIPO_ANILLO[e.tipo as TipoAnillo] ?? e.tipo;
+		if (e.fuente === 'eventos') return NOMBRE_TIPO_HALLAZGO[e.tipo as TipoHallazgo] ?? e.tipo;
+		return QUE_PASO[e.tipo as TipoAlerta] ?? e.tipo;
+	}
+
+	/** Los numeros de la evidencia que valen la pena. Las listas (IPs, identificadores) se quedan en su pestana. */
+	function datosEvidencia(e: EvidenciaCaso): string {
+		return Object.entries(e.metricas ?? {})
+			.filter(([k, v]) => !k.startsWith('id_') && (typeof v === 'number' || typeof v === 'string'))
+			.map(([k, v]) => `${NOMBRE_DATO[k] ?? k.replace(/_/g, ' ')} ${typeof v === 'number' ? Math.round(v * 100) / 100 : v}`)
+			.join(', ');
+	}
+
+	function puntos(valor: number | string): string {
+		const n = Number(valor);
+		return Number.isFinite(n) ? String(Math.round(n * 10) / 10) : '--';
+	}
+
+	let casos = $state<CasoResumen[]>([]);
+	let filtroEstadoCasos = $state<FiltroEstadoCaso>('pendiente');
+	let filtroVistoCasos = $state<FiltroEstadoCaso>('pendiente');
+	let filtroNivelCasos = $state<FiltroNivelCaso>('todos');
+	let paginaCasos = $state(1);
+	let totalPaginasCasos = $state(0);
+	let totalCasos = $state(0);
+	let cargandoCasos = $state(false);
+	let errorCasos = $state('');
+	let pedidoCasos = 0;
+	let casosPedidos = false;
+
+	/** El detalle de cada caso abierto: se pide al desplegarlo y se guarda. */
+	let detalleCaso = $state<Record<number, CasoDetalle | 'cargando' | 'error'>>({});
+	let abiertoCaso = $state<number | null>(null);
+	let marcandoCaso = $state<number | null>(null);
+	/** El caso que esta pidiendo el motivo para descartarse, y lo escrito. */
+	let descartandoCaso = $state<number | null>(null);
+	let motivoCaso = $state('');
+	let errorMarcarCaso = $state('');
+
+	$effect(() => {
+		if (pestanaFraude === 'casos' && !casosPedidos) {
+			casosPedidos = true;
+			void cargarCasos(1);
+		}
+	});
+
+	async function cargarCasos(pagina: number) {
+		const este = ++pedidoCasos;
+		paginaCasos = pagina;
+		cargandoCasos = true;
+		errorCasos = '';
+
+		const partes = [`pagina=${pagina}`, `limite=${POR_PAGINA}`];
+		if (filtroEstadoCasos !== 'todas') partes.push(`estado=${filtroEstadoCasos}`);
+		if (filtroNivelCasos !== 'todos') partes.push(`nivel=${filtroNivelCasos}`);
+
+		const r = await pedir<CasosPaginados>(`/admin/fraude/casos?${partes.join('&')}`);
+
+		if (este !== pedidoCasos) return;
+		cargandoCasos = false;
+
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+
+		if (!r.ok || !r.payload) {
+			errorCasos = mensajeUtil(r);
+			casos = [];
+			return;
+		}
+
+		const p = r.payload;
+		const lista = p.casos ?? [];
+
+		if (lista.length === 0 && p.total_paginas > 0 && pagina > p.total_paginas) {
+			void cargarCasos(p.total_paginas);
+			return;
+		}
+
+		casos = lista;
+		filtroVistoCasos = filtroEstadoCasos;
+		paginaCasos = p.pagina;
+		totalPaginasCasos = p.total_paginas;
+		totalCasos = p.total_casos;
+	}
+
+	function cambiarFiltroEstadoCasos(f: FiltroEstadoCaso) {
+		if (f === filtroEstadoCasos) return;
+		filtroEstadoCasos = f;
+		void cargarCasos(1);
+	}
+
+	function cambiarFiltroNivelCasos(n: FiltroNivelCaso) {
+		if (n === filtroNivelCasos) return;
+		filtroNivelCasos = n;
+		void cargarCasos(1);
+	}
+
+	async function traerDetalleCaso(id: number) {
+		detalleCaso[id] = 'cargando';
+		const r = await pedir<CasoDetalle>(`/admin/fraude/casos/${id}`);
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+		detalleCaso[id] = r.ok && r.payload ? r.payload : 'error';
+	}
+
+	function alternarDetalleCaso(c: CasoResumen) {
+		if (abiertoCaso === c.id_caso_fraude) {
+			abiertoCaso = null;
+			return;
+		}
+		abiertoCaso = c.id_caso_fraude;
+		// Se vuelve a pedir cada vez que se abre: el worker lo pudo recalcular.
+		void traerDetalleCaso(c.id_caso_fraude);
+	}
+
+	function pedirMotivo(c: CasoResumen) {
+		descartandoCaso = c.id_caso_fraude;
+		motivoCaso = '';
+		errorMarcarCaso = '';
+	}
+
+	async function marcarCaso(c: CasoResumen, estado: 'revisada' | 'confirmada' | 'descartada') {
+		const motivo = motivoCaso.trim();
+		if (estado === 'descartada' && motivo === '') {
+			errorMarcarCaso = 'Escribe por que se descarta. Si llega evidencia nueva, el caso se reabre solo.';
+			return;
+		}
+		marcandoCaso = c.id_caso_fraude;
+		errorMarcarCaso = '';
+		const r = await pedir<CasoDetalle>(
+			`/admin/fraude/casos/${c.id_caso_fraude}`,
+			conJson('PATCH', estado === 'descartada' ? { estado, motivo } : { estado })
+		);
+		marcandoCaso = null;
+
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+
+		if (!r.ok || !r.payload) {
+			// Un 409 quiere decir que otro admin ya lo movio: se recarga para ver como quedo.
+			errorCasos = mensajeUtil(r);
+			void cargarCasos(paginaCasos);
+			return;
+		}
+
+		descartandoCaso = null;
+		motivoCaso = '';
+		detalleCaso[c.id_caso_fraude] = r.payload;
+		if (filtroEstadoCasos !== 'todas' && filtroEstadoCasos !== estado) {
+			casos = casos.filter((x) => x.id_caso_fraude !== c.id_caso_fraude);
+			totalCasos = Math.max(0, totalCasos - 1);
+		} else {
+			casos = casos.map((x) => (x.id_caso_fraude === c.id_caso_fraude ? r.payload! : x));
+		}
+	}
+
+	function etiquetaCasos(): string {
+		if (filtroVistoCasos === 'todas') {
+			return `${totalCasos} ${totalCasos === 1 ? 'caso' : 'casos'}`;
+		}
+		const nombre = NOMBRE_FILTRO_CASO[filtroVistoCasos].toLowerCase();
+		return `${totalCasos} ${totalCasos === 1 ? nombre.slice(0, -1) : nombre}`;
+	}
+
+	function textoVacioCasos(): string {
+		switch (filtroVistoCasos) {
+			case 'pendiente':
+				return 'No hay casos pendientes de revisar.';
+			case 'revisada':
+				return 'No hay casos revisados.';
+			case 'confirmada':
+				return 'No hay casos confirmados.';
+			case 'descartada':
+				return 'No hay casos descartados.';
+			default:
+				return 'Todavia no hay casos. El sistema los arma cada 15 minutos con lo que encuentran las otras pestanas.';
+		}
+	}
 </script>
 
 <!--
@@ -1147,6 +1432,16 @@
 	entrada" del script.
 -->
 <div class="pestanas pestanas-fraude" role="tablist" aria-label="Vista de fraude">
+	<button
+		type="button"
+		role="tab"
+		class="pestana"
+		class:elegida={pestanaFraude === 'casos'}
+		aria-selected={pestanaFraude === 'casos'}
+		onclick={() => (pestanaFraude = 'casos')}
+	>
+		Casos
+	</button>
 	<button
 		type="button"
 		role="tab"
@@ -1179,8 +1474,249 @@
 	</button>
 </div>
 
-<!-- Las dos vistas siguen montadas y solo se esconde la que no toca: asi
+<!-- Las vistas siguen montadas y solo se esconde la que no toca: asi
      cada una conserva su filtro, su pagina y no vuelve a pedir al cambiar. -->
+<div hidden={pestanaFraude !== 'casos'}>
+<section class="fraude" aria-labelledby="titulo-casos">
+	<div class="titulo">
+		<h2 id="titulo-casos">Casos de fraude</h2>
+		{#if !errorCasos && !(cargandoCasos && casos.length === 0)}
+			<span
+				class="etiqueta"
+				class:limpio={totalCasos === 0 || (filtroVistoCasos !== 'pendiente' && filtroVistoCasos !== 'todas')}
+			>
+				{etiquetaCasos()}
+			</span>
+		{/if}
+		<div class="acciones">
+			<button type="button" onclick={() => cargarCasos(paginaCasos)} disabled={cargandoCasos}>
+				Volver a mirar
+			</button>
+		</div>
+	</div>
+
+	<p class="intro">
+		Un caso junta lo que encuentran las otras pestanas cuando toca a las mismas cuentas, y le pone
+		un puntaje. Mas puntos si viene de varias fuentes y si es reciente. Casi confirmado quiere decir
+		que cumple una regla que casi nunca tiene otra explicacion. Se recalculan cada 15 minutos.
+	</p>
+
+	<div class="filtros-alertas">
+		<div class="pestanas" role="group" aria-label="Filtrar casos por estado">
+			{#each FILTROS_ESTADO_CASO as f (f)}
+				<button
+					type="button"
+					class="pestana"
+					class:elegida={filtroEstadoCasos === f}
+					aria-pressed={filtroEstadoCasos === f}
+					onclick={() => cambiarFiltroEstadoCasos(f)}
+				>
+					{NOMBRE_FILTRO_CASO[f]}
+				</button>
+			{/each}
+		</div>
+
+		<label class="filtro-tipo">
+			<span class="gris">Nivel</span>
+			<select value={filtroNivelCasos} onchange={(e) => cambiarFiltroNivelCasos(e.currentTarget.value as FiltroNivelCaso)}>
+				{#each FILTROS_NIVEL_CASO as n (n)}
+					<option value={n}>{n === 'todos' ? 'Todos' : NOMBRE_NIVEL[n]}</option>
+				{/each}
+			</select>
+		</label>
+	</div>
+
+	{#if errorCasos}
+		<div class="fallo" role="alert">
+			<p>{errorCasos}</p>
+			<button type="button" onclick={() => cargarCasos(paginaCasos)}>Reintentar</button>
+		</div>
+	{:else if cargandoCasos && casos.length === 0}
+		<p class="gris">Buscando casos...</p>
+	{:else if casos.length === 0}
+		<div class="limpio-caja">
+			<p>{textoVacioCasos()}</p>
+		</div>
+	{:else}
+		<ul class="lista-alertas" class:esperando={cargandoCasos} aria-busy={cargandoCasos}>
+			{#each casos as c (c.id_caso_fraude)}
+				{@const detalle = detalleCaso[c.id_caso_fraude]}
+				{@const desplegado = abiertoCaso === c.id_caso_fraude}
+				<li class="alerta">
+					<div class="alerta-cabeza">
+						<span class="nivel nivel-{c.nivel}">{NOMBRE_NIVEL[c.nivel] ?? c.nivel}</span>
+						<span class="que-paso">Caso {c.id_caso_fraude}, {puntos(c.puntaje)} puntos</span>
+						<span class="estado estado-{c.estado}">{NOMBRE_ESTADO_CASO[c.estado] ?? c.estado}</span>
+					</div>
+
+					{#if c.reglas_cumplidas.length > 0}
+						<ul class="reglas">
+							{#each c.reglas_cumplidas as regla (regla)}
+								<li><span class="clave">{regla}</span> {QUE_ES_REGLA[regla] ?? ''}</li>
+							{/each}
+						</ul>
+					{/if}
+
+					<dl class="datos">
+						<div>
+							<dt>Cuentas</dt>
+							<dd>{c.cantidad_cuentas}</dd>
+						</div>
+						<div>
+							<dt>Evidencias</dt>
+							<dd>{c.cantidad_evidencias}</dd>
+						</div>
+						<div>
+							<dt>Ultima evidencia</dt>
+							<dd>{fecha(c.ultima_evidencia)}</dd>
+						</div>
+						<div>
+							<dt>Armado</dt>
+							<dd>{fecha(c.fecha_creacion)}</dd>
+						</div>
+					</dl>
+
+					<div class="triage">
+						<button type="button" class="revisar" onclick={() => alternarDetalleCaso(c)}>
+							{desplegado ? 'Ocultar detalle' : 'Ver cuentas y evidencia'}
+						</button>
+						{#if c.estado === 'pendiente'}
+							<button
+								type="button"
+								class="revisar"
+								disabled={marcandoCaso === c.id_caso_fraude}
+								onclick={() => marcarCaso(c, 'revisada')}
+							>
+								Marcar revisado
+							</button>
+							<button
+								type="button"
+								class="confirmar"
+								disabled={marcandoCaso === c.id_caso_fraude}
+								onclick={() => marcarCaso(c, 'confirmada')}
+							>
+								Confirmar fraude
+							</button>
+							<button
+								type="button"
+								class="descartar"
+								disabled={marcandoCaso === c.id_caso_fraude}
+								onclick={() => pedirMotivo(c)}
+							>
+								Descartar
+							</button>
+						{/if}
+					</div>
+
+					{#if descartandoCaso === c.id_caso_fraude}
+						<div class="motivo">
+							<label>
+								<span class="gris">Por que se descarta</span>
+								<textarea bind:value={motivoCaso} rows="2" maxlength="500"></textarea>
+							</label>
+							{#if errorMarcarCaso}
+								<p class="error-motivo" role="alert">{errorMarcarCaso}</p>
+							{/if}
+							<div class="triage sin-borde">
+								<button
+									type="button"
+									class="descartar"
+									disabled={marcandoCaso === c.id_caso_fraude}
+									onclick={() => marcarCaso(c, 'descartada')}
+								>
+									Descartar el caso
+								</button>
+								<button type="button" class="descartar" onclick={() => (descartandoCaso = null)}>
+									Cancelar
+								</button>
+							</div>
+						</div>
+					{/if}
+
+					{#if desplegado}
+						<div class="detalle">
+							{#if detalle === 'cargando' || detalle === undefined}
+								<p class="gris">Trayendo el caso...</p>
+							{:else if detalle === 'error'}
+								<p class="gris">No se pudo traer el detalle del caso.</p>
+							{:else}
+								{#if detalle.motivo}
+									<p class="gris">Motivo, {detalle.motivo}</p>
+								{/if}
+								<dl class="datos">
+									<div>
+										<dt>Nucleo</dt>
+										<dd class="afectadas">
+											{#each detalle.cuentas.filter((x) => x.es_nucleo) as cu (cu.id_usuario)}
+												<span class="cuenta-con-accion">
+													<span class="clave">{cu.usuario}</span>
+													<BloquearCuenta idUsuario={cu.id_usuario} usuario={cu.usuario} {alExpirarSesion} />
+												</span>
+											{:else}
+												<span class="gris">Ninguna</span>
+											{/each}
+										</dd>
+									</div>
+									<div>
+										<dt>Periferia</dt>
+										<dd class="afectadas">
+											{#each detalle.cuentas.filter((x) => !x.es_nucleo) as cu (cu.id_usuario)}
+												<span class="clave">{cu.usuario}</span>
+											{:else}
+												<span class="gris">Ninguna</span>
+											{/each}
+										</dd>
+									</div>
+								</dl>
+								<p class="gris nota-nucleo">
+									Nucleo son las cuentas que salen en dos o mas evidencias del caso, o en una fuerte
+									como un ciclo. Periferia, las que salen una sola vez.
+								</p>
+								<ul class="evidencias">
+									{#each detalle.evidencia as e (e.id_evidencia_caso_fraude)}
+										<li>
+											<span class="fuente">{NOMBRE_FUENTE[e.fuente] ?? e.fuente}</span>
+											<span>{tipoDeEvidencia(e)}</span>
+											<span class="gris">{puntos(e.puntos)} puntos</span>
+											{#if datosEvidencia(e)}
+												<span class="gris">{datosEvidencia(e)}</span>
+											{/if}
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						</div>
+					{/if}
+				</li>
+			{/each}
+		</ul>
+
+		{#if totalPaginasCasos > 1}
+			<nav class="paginacion" aria-label="Paginas de casos">
+				<button
+					type="button"
+					onclick={() => cargarCasos(paginaCasos - 1)}
+					disabled={paginaCasos <= 1 || cargandoCasos}
+				>
+					Anterior
+				</button>
+				<span class="cuantas">
+					Pagina {paginaCasos} de {totalPaginasCasos}
+					<span class="menor">({etiquetaCasos()})</span>
+				</span>
+				<button
+					type="button"
+					onclick={() => cargarCasos(paginaCasos + 1)}
+					disabled={paginaCasos >= totalPaginasCasos || cargandoCasos}
+				>
+					Siguiente
+				</button>
+			</nav>
+		{/if}
+	{/if}
+</section>
+</div>
+
 <div hidden={pestanaFraude !== 'entradas'}>
 <section class="fraude" aria-labelledby="titulo-entradas">
 	<div class="titulo">
@@ -2207,6 +2743,123 @@
 	.triage .descartar {
 		color: var(--gris);
 		border: 1px solid var(--linea);
+	}
+
+	/* Confirmar es lo unico que habilita sanciones: en rojo, para que no se pulse por costumbre. */
+	.triage .confirmar {
+		color: var(--rojo);
+		border: 1px solid var(--rojo);
+	}
+
+	.triage.sin-borde {
+		margin-top: var(--e2);
+		padding-top: 0;
+		border-top: none;
+	}
+
+	/* El nivel del caso. Casi confirmado relleno, porque es lo primero que hay que mirar. */
+	.nivel {
+		padding: 3px 10px;
+		font-size: var(--f-sm);
+		border-radius: 999px;
+		white-space: nowrap;
+		color: var(--gris);
+		background: var(--panel);
+		border: 1px solid var(--linea);
+	}
+
+	.nivel-casi_confirmado {
+		color: #fff;
+		background: var(--rojo);
+		border-color: var(--rojo);
+	}
+
+	.nivel-prioritario {
+		color: var(--rojo);
+		background: var(--off);
+		border-color: var(--rojo);
+	}
+
+	.nivel-revisar {
+		color: var(--indigo);
+		background: var(--indigo-cl);
+		border-color: var(--indigo);
+	}
+
+	.estado-confirmada {
+		color: #fff;
+		background: var(--rojo);
+		border-color: var(--rojo);
+	}
+
+	.reglas {
+		display: flex;
+		flex-direction: column;
+		gap: var(--e1);
+		margin: var(--e3) 0 0;
+		padding: 0;
+		list-style: none;
+		font-size: var(--f-sm);
+		color: var(--texto);
+	}
+
+	.motivo {
+		margin-top: var(--e3);
+	}
+
+	.motivo label {
+		display: flex;
+		flex-direction: column;
+		gap: var(--e1);
+	}
+
+	.motivo textarea {
+		width: 100%;
+		padding: 8px 10px;
+		font-family: inherit;
+		font-size: var(--f-sm);
+		color: var(--texto);
+		background: var(--panel);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		resize: vertical;
+	}
+
+	.error-motivo {
+		margin: var(--e1) 0 0;
+		font-size: var(--f-sm);
+		color: var(--rojo);
+	}
+
+	.nota-nucleo {
+		margin: var(--e2) 0;
+		font-size: var(--f-xs);
+	}
+
+	.evidencias {
+		display: flex;
+		flex-direction: column;
+		gap: var(--e2);
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: var(--f-sm);
+	}
+
+	.evidencias li {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--e2);
+		align-items: baseline;
+		padding-top: var(--e2);
+		border-top: 1px solid var(--linea);
+	}
+
+	.fuente {
+		font-size: var(--f-xs);
+		color: var(--gris);
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
 	}
 
 	.triage button:disabled {
