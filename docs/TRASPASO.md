@@ -5,6 +5,11 @@ Son cinco minutos y te ahorra el dia.
 
 Ultima actualizacion: **2026-09-26**.
 
+**El 26 a las 22:15: 14e5084 de David, los arreglos de los casos de fraude.** Arreglo C2, C3, C5 y C8. Comprobado de este
+lado con `node pruebas/casos_fraude_fusion.cjs` contra su backend compilado: el caso fusionado queda confirmado y con sus
+5 cuentas, 0 FALLA. C1 sigue como decision (la prueba lo marca asi), y mientras se una, el puntaje sale del ultimo grupo
+(32,5 contra 36,4). Quedan C4, C6, C7 y C9 en BACKEND-PENDIENTE. Nada de lo nuestro necesito cambio para su arreglo.
+
 **El 26 a las 22:00: 37ad2e6 de David ("detalles varios"), conectado y probado en vivo.** Trae el vencimiento de los
 descuentos y de la venta relampago en PostgreSQL (migracion 028, dos columnas, NULL es permanente), asi que la clave de
 Redis `mesh:oferta:<id>:descuento` desaparecio y un Redis vaciado ya no se lleva descuentos. Tambien `hay_descuento` en

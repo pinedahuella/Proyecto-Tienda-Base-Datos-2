@@ -6,7 +6,7 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-26 en la noche)
 
-Revisado contra tu 37ad2e6. Lo de la Entrega final ya esta completo. Los
+Revisado contra tu 14e5084. Lo de la Entrega final ya esta completo. Los
 casos de fraude (C1 a C8) son de la Entrega 3. C2 y C3 son fallos seguros;
 C1 es una decision que conviene cerrar (ver su seccion, se reevaluo el mismo
 26). Van por orden de importancia, con la
@@ -14,18 +14,17 @@ seccion de abajo donde esta el detalle.
 
 | # | Que | Donde esta el detalle | Importa |
 |---|---|---|---|
-| C1 | Al guardar, una alerta de login que toca dos anillos une sus casos, aunque el agrupador dice que el login nunca fusiona. Decidir si se quiere | seccion del 26 en la noche | media, decision |
-| C2 | Una fusion borra el caso que el admin ya habia confirmado | seccion del 26 en la noche | **alta** |
-| C3 | Cada grupo borra las cuentas de todo el caso: 105 evidencias quedaron sin cuentas | seccion del 26 en la noche | **alta** |
+| C1 | Al guardar, una alerta de login que toca dos anillos une sus casos, aunque el agrupador dice que el login nunca fusiona. Decidir si se quiere. Mientras se una, el puntaje del caso sale solo del ultimo grupo guardado (32,5 en la prueba; con toda su evidencia, 36,4) | seccion del 26 en la noche | media, decision |
 | C4 | La recencia del puntaje mide cuando el admin reviso, no cuando paso el fraude | seccion del 26 en la noche | media |
-| C5 | Siguen sumando los hallazgos que el admin descarto | seccion del 26 en la noche | media |
+| C9 | Lo que dijiste en 14e5084: un hallazgo que ya era evidencia de un caso y despues se descarta sigue en `evidencia_caso_fraude`, sumando los mismos puntos, hasta que el caso se quede sin otra evidencia | tu nota en agrupador-fraude.md | baja |
 | C6 | El vendedor de una granja de mas de 10 cuentas nunca es nucleo | seccion del 26 en la noche | media |
 | C7 | El primer caso sale a los 15 minutos, sin forma de pedirlo antes | seccion del 26 en la noche | media, para la demo |
-| C8 | Casos con 0 evidencias se quedan en la lista | seccion del 26 en la noche | baja |
 | 2 | Las senales y los detalles que faltan del fraude del login | seccion del 11, puntos 4 y 5 | media |
 | 4 | El estante de mas vendidos ya se arma al arrancar, pero al cambiar un precio sigue tardando hasta 10 minutos | seccion del 23, punto 1 | baja |
 | 8 | Queda uno de los dos 409 con la ruta dentro: `ventas-limitadas.service.ts` linea 97, "...aplicalo primero con POST /vendedor/ofertas/..." | seccion del 23, punto 4 | solo texto |
 | 9 | `GET /vendedor/ofertas` no devuelve `fecha_vencimiento_descuento` ni `fecha_vencimiento_venta_limitada`. Con eso el panel podria decir "vence a las 21:50" | nuevo, 2026-09-26 | baja |
+
+Hechos en 14e5084 y probados de este lado con `node pruebas/casos_fraude_fusion.cjs`, que ahora da 0 FALLA: C2 (el caso fusionado queda confirmado), C3 (quedan las 5 cuentas), y por tu nota C5 y C8. La prueba marca C1 como DECISION y no como falla.
 
 Hechos y ya no los pedimos: similares, facetado, sugerencias, el `DELETE` de
 reglas, el TTL de R2 y R3, "Para ti" vacio, las vitrinas de ofertas al

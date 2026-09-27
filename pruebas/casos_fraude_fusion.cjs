@@ -7,8 +7,13 @@
 //   node pruebas/casos_fraude_fusion.cjs
 //
 // Necesita PostgreSQL arriba con la 026, dos anillos sin cuentas en comun y una
-// alerta multi_cuenta_ip. Con el agrupador arreglado, el paso 2 tiene que dejar DOS
-// casos, el caso confirmado tiene que seguir confirmado y ninguna cuenta se pierde.
+// alerta multi_cuenta_ip.
+//
+// C2 y C3 son FALLA: el caso confirmado tiene que seguir confirmado y ninguna cuenta
+// se pierde. Los arreglo David en 14e5084 (2026-09-26) y esta prueba da 0 FALLA.
+// C1 sale como DECISION y no cuenta como falla: si una IP compartida debe unir dos
+// anillos en un caso es algo que tienen que decidir. Mientras se una, el puntaje del
+// caso sale solo del ultimo grupo guardado, y la prueba lo dice.
 const path = require('path');
 const BACK = path.join(__dirname, '..', 'backend');
 process.chdir(BACK);
@@ -101,7 +106,15 @@ const { PersistenciaCasoFraudeService } = fraude('persistencia-caso-fraude.servi
   console.log('   casos al guardar:', JSON.stringify(despues));
 
   const fallos = [];
-  if (despues.length < antes.length) fallos.push('C1, la alerta de login fusiono casos que el agrupador dejo separados');
+  const decisiones = [];
+  if (despues.length < antes.length) {
+    decisiones.push('C1, la alerta de login unio dos casos que el agrupador dejo separados');
+    const completo = new PuntajeFraudeService().calcular({ cuentas: new Map(), hallazgos: [anillo1, anillo2, login] });
+    const guardado = despues[0].puntaje;
+    if (Math.abs(completo - guardado) > 0.01) {
+      decisiones.push(`   y el puntaje guardado (${guardado}) sale del ultimo grupo; con toda su evidencia daria ${Math.round(completo * 10) / 10}`);
+    }
+  }
   if (!despues.some((c) => c.estado === 'confirmada')) fallos.push(`C2, el caso ${confirmado} confirmado ya no existe o volvio a pendiente`);
   const todas = new Set([...c1, ...c2].map(String));
   const quedan = new Set(despues.flatMap((c) => (c.cuentas ?? '').split(',')));
@@ -111,6 +124,7 @@ const { PersistenciaCasoFraudeService } = fraude('persistencia-caso-fraude.servi
   await cliente.query('ROLLBACK');
   cliente.release();
   await pool.end();
+  if (decisiones.length) console.log(`\nDECISION PENDIENTE\n  ${decisiones.join('\n  ')}`);
   console.log(fallos.length ? `\n${fallos.length} FALLA\n  ${fallos.join('\n  ')}` : '\n0 FALLA');
   console.log('Deshecho, no quedo nada en la base.');
   process.exit(fallos.length ? 1 : 0);
