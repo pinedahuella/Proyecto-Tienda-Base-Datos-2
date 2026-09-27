@@ -9,9 +9,11 @@ Ultima actualizacion: **2026-09-26**.
 026_casos_fraude.sql (su SQL con las llaves en cascada y R-CASI-1 sin A.4, aplicada dos veces sin error y con el
 candado de la 016 intacto) y la pestana Casos en Fraude (filtros por estado y nivel, detalle con nucleo, periferia
 y evidencia, revisar, confirmar y descartar con motivo), vista en Edge con 0 errores de JavaScript. Su logica tiene
-fallos medidos, anotados como C1 a C8 en BACKEND-PENDIENTE: el worker dijo 10 casos y guardo 2, porque una alerta de
-login fusiona casos; en local eso metio a admin_mesh, mesh_tienda y los compradores como nucleo de un casi
-confirmado, una fusion borra el caso que el admin confirmo y 105 evidencias quedaron sin cuentas. Probado con sus
+fallos medidos, anotados como C1 a C8 en BACKEND-PENDIENTE: una fusion borra el caso que el admin confirmo (C2) y
+105 evidencias quedaron sin cuentas (C3). El worker dijo 10 casos y guardo 2, y el caso grande tenia a admin_mesh y
+la tienda como nucleo, pero eso es de probar en local: sus 67 alertas de login salieron de 127.0.0.1, y las 13 con
+IP real de las demos con Tor no entraron en ningun caso. Lo que queda de C1 es una decision: si una IP compartida
+debe unir casos o no, porque el agrupador dice que no y el guardado lo hace. Probado con sus
 clases compiladas dentro de una transaccion deshecha, en pruebas/casos_fraude_fusion.cjs, que hoy da 3 FALLA (C1, C2 y C3) y
 tiene que dar 0 cuando David lo arregle. Nada de backend/ se toco.
 

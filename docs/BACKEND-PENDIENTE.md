@@ -7,13 +7,14 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 ## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-26 en la noche)
 
 Revisado contra tu a9e3d95. Lo de la Entrega final ya esta completo. Los
-casos de fraude (C1 a C8) son de la Entrega 3 y los tres primeros hacen que
-la pestana ensene casos equivocados. Van por orden de importancia, con la
+casos de fraude (C1 a C8) son de la Entrega 3. C2 y C3 son fallos seguros;
+C1 es una decision que conviene cerrar (ver su seccion, se reevaluo el mismo
+26). Van por orden de importancia, con la
 seccion de abajo donde esta el detalle.
 
 | # | Que | Donde esta el detalle | Importa |
 |---|---|---|---|
-| C1 | Una alerta de login termina fusionando casos, y mete cuentas inocentes (admin, tienda, compradores) como nucleo | seccion del 26 en la noche | **alta** |
+| C1 | Al guardar, una alerta de login que toca dos anillos une sus casos, aunque el agrupador dice que el login nunca fusiona. Decidir si se quiere | seccion del 26 en la noche | media, decision |
 | C2 | Una fusion borra el caso que el admin ya habia confirmado | seccion del 26 en la noche | **alta** |
 | C3 | Cada grupo borra las cuentas de todo el caso: 105 evidencias quedaron sin cuentas | seccion del 26 en la noche | **alta** |
 | C4 | La recencia del puntaje mide cuando el admin reviso, no cuando paso el fraude | seccion del 26 en la noche | media |
@@ -62,7 +63,7 @@ ode pruebas/casos_fraude_fusion.cjs** (con el
 backend compilado). Hoy da 3 FALLA, C1, C2 y C3. Cuando esten arreglados tiene que
 dar 0 FALLA.
 
-### C1. Una alerta de login termina fusionando casos (la decision del usuario no se cumple)
+### C1. Una alerta de login termina fusionando casos (reevaluado el 26 en la noche)
 
 `agrupar()` mete la misma alerta en TODOS los grupos que toca. Pero
 `evidencia_caso_fraude` no deja que una alerta sea evidencia de dos casos, asi
@@ -72,28 +73,45 @@ anillos sin cuentas en comun (17-18 y 19-20) dan 2 grupos y 2 casos. Con una
 alerta `multi_cuenta_ip` que toca a 17 y a 19, el agrupador sigue armando 2
 grupos, pero al guardar queda 1 caso.
 
-En local es peor, porque todo sale de 127.0.0.1: el caso 1 junto 116 evidencias
-y 23 cuentas, entre ellas `admin_mesh`, `mesh_tienda`, `compradora_norte`,
-`comprador_sur` y `ventas_norte`, **como nucleo** de un caso casi confirmado.
-Toda la evidencia de esas cinco es de login.
+**Lo que NO es.** En nuestra base el caso 1 junto 116 evidencias y 23 cuentas,
+con `admin_mesh`, `mesh_tienda` y los compradores como nucleo. Eso es un
+artefacto de probar en local: las 67 alertas de login de ese caso salieron de
+127.0.0.1 (o son de rotacion por identificador), y en local todo sale de ahi.
+Las 13 alertas con IP REAL, las de las demos con Tor desde otros paises, no
+entraron en ningun caso, porque tocan cuentas de demo que no estan en anillos,
+y el agrupador las descarto como debe. Con IPs reales ese amontonamiento no
+pasa.
 
-**Lo que pido:** que una alerta de login vaya a UN solo grupo (el que comparta
-mas cuentas con ella), que solo aporte las cuentas que ya estan en ese grupo, y
-que no cuente para el "2 o mas" del nucleo. Asi el login suma puntos pero no
-arrastra gente ni une nada.
+**Lo que SI es.** La prueba aislada usa una sola alerta y dos anillos, sin
+127.0.0.1 de por medio. Si una IP de verdad toca cuentas de dos anillos
+distintos (un wifi compartido, o el mismo operador), el guardado une los dos
+casos, cuando tu agrupador dice que el login nunca fusiona. Una de las dos
+partes esta mal, y cual depende de lo que quieran:
 
-### C2. Una fusion se come la decision del admin
+- si una IP compartida SI debe unir casos (mismo operador), que el agrupador
+  lo haga a proposito y lo diga, y que el comentario de la clase cambie;
+- si NO debe unir, que la alerta vaya a un solo grupo (el que comparta mas
+  cuentas con ella).
+
+En los dos casos conviene que la alerta solo aporte las cuentas que ya estan
+en el grupo. Hoy mete todas las de esa IP, y con varias alertas esas cuentas
+llegan al "2 o mas" del nucleo sin ninguna evidencia de resenas.
+
+### C2. Una fusion se come la decision del admin (no depende de la IP)
 
 Al fusionar sobrevive el id mas chico y los demas casos se BORRAN, con su
 estado y su motivo. Prueba aislada: el admin confirma el caso 4, llega la
 alerta del punto anterior y el caso 4 desaparece dentro del 3, que queda
 **pendiente**. La confirmacion se pierde sin rastro.
 
+Pasa con cualquier fusion, tambien con una legitima: un anillo nuevo que une
+dos casos, uno ya confirmado, hace lo mismo.
+
 **Lo que pido:** que el superviviente herede el estado mas grave
 (confirmada, luego revisada, luego pendiente) y el motivo, o que un caso ya
 revisado no se fusione y quede anotado en el log.
 
-### C3. Cada grupo borra las cuentas de todo el caso
+### C3. Cada grupo borra las cuentas de todo el caso (no depende de la IP)
 
 `sincronizarCuentas()` hace `DELETE` de las cuentas de TODAS las evidencias del
 caso y despues pone solo las del grupo que esta guardando. Cuando dos grupos
@@ -103,9 +121,12 @@ el nivel quedan con lo del ultimo grupo: en la prueba aislada el caso fusionado
 dice 32,5 puntos, que es solo la mitad de su evidencia, y la cuenta 18 ya no
 sale.
 
+Tambien pasa sin login: si un grupo se parte en dos entre una corrida y otra,
+las dos mitades caen en el mismo caso viejo y la segunda borra las cuentas de
+la primera.
+
 **Lo que pido:** borrar solo las cuentas de las evidencias que se estan
-guardando. Si arreglas C1 esto casi no pasa, pero el `DELETE` sigue siendo
-demasiado ancho.
+guardando.
 
 ### C4. La recencia mide cuando el admin reviso, no cuando paso el fraude
 
