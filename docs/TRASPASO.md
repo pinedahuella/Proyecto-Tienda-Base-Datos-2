@@ -5,6 +5,11 @@ Son cinco minutos y te ahorra el dia.
 
 Ultima actualizacion: **2026-09-26**.
 
+**Antes que nada: de5de2a de David ("cambios varios", 26 a las 22:19) esta jalado pero SIN revisar.** Toca
+`models/oferta.ts`, `ofertas.service.ts`, `ventas-limitadas.service.ts` y el puntaje, el agrupador y el worker de los
+casos de fraude; seguramente son los pendientes 8 y 9 y C4, C6 o C7 de BACKEND-PENDIENTE. Revisarlo contra esa lista y
+conectar lo que haga falta de este lado antes de probar.
+
 **PARA LA PROXIMA VEZ: probar todo junto, en este orden.** El 26 todo se probo por partes, levantando solo lo
 necesario por la RAM. Lo que NUNCA corrio entero es `arrancar.ps1` con las migraciones 026, 027 y 028 y el indice con
 `hay_descuento`. Al terminar el 26 quedo todo apagado, incluido Ollama; `cargar_vectores.ps1` lo vuelve a encender solo.
