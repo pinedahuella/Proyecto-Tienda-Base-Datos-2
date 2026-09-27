@@ -5,6 +5,16 @@ Son cinco minutos y te ahorra el dia.
 
 Ultima actualizacion: **2026-09-26**.
 
+**El 26 en la noche: los casos de fraude de David (a9e3d95).** Jalado y conectado. De este lado, la migracion
+026_casos_fraude.sql (su SQL con las llaves en cascada y R-CASI-1 sin A.4, aplicada dos veces sin error y con el
+candado de la 016 intacto) y la pestana Casos en Fraude (filtros por estado y nivel, detalle con nucleo, periferia
+y evidencia, revisar, confirmar y descartar con motivo), vista en Edge con 0 errores de JavaScript. Su logica tiene
+fallos medidos, anotados como C1 a C8 en BACKEND-PENDIENTE: el worker dijo 10 casos y guardo 2, porque una alerta de
+login fusiona casos; en local eso metio a admin_mesh, mesh_tienda y los compradores como nucleo de un casi
+confirmado, una fusion borra el caso que el admin confirmo y 105 evidencias quedaron sin cuentas. Probado con sus
+clases compiladas dentro de una transaccion deshecha, en pruebas/casos_fraude_fusion.cjs, que hoy da 3 FALLA (C1, C2 y C3) y
+tiene que dar 0 cuando David lo arregle. Nada de backend/ se toco.
+
 **El 2026-09-26: ced29f5 de David jalado y conectado, sin levantar nada.** David hizo las tres rutas que faltaban:
 `GET /productos/:id/similares`, `GET /buscador/productos/facetado` y `GET /buscador/productos/sugerencias`. Tambien
 agrego `VectoresSyncService`, que cada 3 horas recalcula los vectores de los productos editados, `GET /vectores`,

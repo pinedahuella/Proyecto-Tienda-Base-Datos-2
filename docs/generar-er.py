@@ -113,7 +113,9 @@ MODULOS = {
     "fraude": ("Fraude y grafo", "#F8CECC", "#B85450",
                ["alerta_fraude", "tipo_alerta_fraude", "estado_alerta_fraude", "notificacion_fraude",
                 "anillo_fraude", "tipo_anillo_fraude", "anillo_fraude_resena", "evento_grafo",
-                "hallazgo_evento_fraude", "hallazgo_evento_fraude_cuenta", "tipo_hallazgo_evento"]),
+                "hallazgo_evento_fraude", "hallazgo_evento_fraude_cuenta", "tipo_hallazgo_evento",
+                "caso_fraude", "nivel_caso_fraude", "caso_fraude_regla", "regla_casi_confirmado",
+                "evidencia_caso_fraude", "evidencia_caso_fraude_cuenta"]),
 }
 
 # columnas del diagrama completo, de izquierda a derecha
@@ -129,7 +131,9 @@ DISPOSICION = [
      "estado_pedido", "pedido_producto", "pago", "|", "anillo_fraude_resena", "anillo_fraude",
      "|", "tipo_alerta_fraude", "estado_alerta_fraude", "tipo_anillo_fraude", "evento_grafo",
      "|", "hallazgo_evento_fraude", "tipo_hallazgo_evento"],
-    ["metodo_pago", "estado_pago"],
+    ["metodo_pago", "estado_pago", "|", "evidencia_caso_fraude", "evidencia_caso_fraude_cuenta"],
+    # los casos de fraude (026): juntan anillos, hallazgos de eventos y alertas
+    ["caso_fraude", "nivel_caso_fraude", "|", "caso_fraude_regla", "regla_casi_confirmado"],
 ]
 
 # el catalogo es una isla: ninguna de sus tablas tiene llave foranea hacia el
@@ -448,9 +452,13 @@ def main():
         alto_core = max(p["y"] + p["h"] for p in pos.values())
         pos_cat = colocar(DISPOSICION_CATALOGO, caja, 40, alto_core + 150)
         pos.update(pos_cat)
+        # La ultima migracion se lee de la carpeta: escrita a mano se quedo en la
+        # 025 cuando ya iban por la 027.
+        ultima = max(f[:3] for f in os.listdir(os.path.join(RAIZ, "migrations"))
+                     if f[:3].isdigit() and f.endswith(".sql"))
         lienzo.texto_suelto(40, 20, 1400, 30,
-                            "Modelo relacional de Mesh en PostgreSQL, %d tablas, migraciones 001 a 025"
-                            % len(tablas), 18, True)
+                            "Modelo relacional de Mesh en PostgreSQL, %d tablas, migraciones 001 a %s"
+                            % (len(tablas), ultima), 18, True)
         lienzo.texto_suelto(40, 54, 1400, 24,
                             "PK llave primaria, FK llave foránea, UQ valor único. La pata de gallo marca el lado "
                             "muchos. El catálogo de abajo es una isla a propósito, oferta y pedido_producto "
