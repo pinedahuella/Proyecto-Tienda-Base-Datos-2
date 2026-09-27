@@ -1,11 +1,17 @@
 # Endpoints del panel de fraude
 
-Ocho rutas de admin, más dos rutas de usuario (agregadas 2026-09-15, ver
+Once rutas de admin, más dos rutas de usuario (agregadas 2026-09-15, ver
 más abajo). El panel de fraude en reseñas y la conciliación tocan el grafo
 de **Neo4j**; el de fraude de login es **solo Elasticsearch + Redis**, sin
 tocar el grafo; el de hallazgos de eventos es **solo ClickHouse + Postgres**,
-sin tocar Neo4j ni Elasticsearch:
+sin tocar Neo4j ni Elasticsearch; el agrupador de casos es **solo
+PostgreSQL**, sobre lo que las demás rutas ya detectaron y persistieron:
 
+- **`GET`/`PATCH /admin/fraude/casos` y `GET .../casos/:id`** — el
+  **agrupador de casos de fraude**: junta en un solo caso, con puntaje y
+  nivel combinados, los hallazgos de las tres fuentes de abajo cuando
+  comparten cuentas. No reemplaza los tres paneles individuales, los
+  junta. Ver la sección "El agrupador de casos de fraude", al final.
 - **`GET`/`PATCH /admin/fraude/alertas-resenas` y
   `GET /admin/fraude/alertas-resenas/:id/detalle-grafo`** — el **panel de
   manipulación de reseñas** de la Entrega 2 (Bloque 4 de
@@ -1390,3 +1396,228 @@ para el detalle de esa prueba.
 Teardown: el hallazgo sintético y sus dos filas de cuenta se borraron
 (`ON DELETE CASCADE` desde `hallazgo_evento_fraude`); las dos tablas
 quedaron vacías.
+
+# El agrupador de casos de fraude -- alertas-eventos/alertas-login/alertas-resenas juntas (2026-09-26)
+
+Tres rutas, **controller y servicio propios**, capa aparte de todo lo de
+arriba: `AdminCasosFraudeController` + `CasosFraudeService`
+(`src/controllers/admin/admin-casos-fraude.controller.ts` +
+`src/services/fraude/casos-fraude.service.ts`). **Solo admin**. No
+reemplaza ninguno de los tres paneles individuales (`alertas-resenas`,
+`alertas-eventos`, `alertas-login`) -- los junta: agrupa por cuentas
+compartidas los hallazgos de las tres fuentes que hoy no se hablan entre
+sí (`anillo_fraude` del grafo, `hallazgo_evento_fraude` de ClickHouse,
+`alerta_fraude` del login) en un solo "caso" con un puntaje y un nivel
+combinados, para que el admin no tenga que revisar tres paneles sueltos y
+armar la conexión a mano. Diseño completo, decisiones y la propuesta
+original del compañero en
+`elementos Generales/plan pendiente/agrupador-fraude.md`.
+
+La agrupación (unión-búsqueda sobre cuentas compartidas), el puntaje y las
+cinco reglas "casi confirmado" las arma
+`AgrupadorFraudeWorkerService` (`@Interval` cada 15 minutos, recalcula
+todo desde cero) -- estas tres rutas **solo leen y actualizan** lo que ese
+worker ya dejó en `caso_fraude`/`evidencia_caso_fraude`/
+`evidencia_caso_fraude_cuenta`, nunca agrupan ni califican por su cuenta.
+
+## GET /admin/fraude/casos
+
+```
+GET /admin/fraude/casos?pagina=1&limite=20&nivel=prioritario&estado=pendiente
+```
+
+Paginación por número de página, mismas reglas que el resto del proyecto.
+Dos filtros opcionales e independientes:
+
+- `nivel=informativo|revisar|prioritario|casi_confirmado`
+- `estado=pendiente|revisada|descartada|confirmada` -- el mismo catálogo
+  de siempre, más `confirmada` (el único que habilita sanciones).
+- sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
+  ordenados por nivel (los más graves primero), luego puntaje, luego
+  última evidencia.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Casos de fraude obtenidos",
+  "payload": {
+    "casos": [
+      {
+        "id_caso_fraude": 13,
+        "nivel": "prioritario",
+        "puntaje": 54.24,
+        "estado": "pendiente",
+        "reglas_cumplidas": [],
+        "cantidad_evidencias": 5,
+        "cantidad_cuentas": 6,
+        "ultima_evidencia": "2026-09-24T17:28:46.048Z",
+        "fecha_creacion": "2026-09-27T00:12:58.901Z",
+        "fecha_actualizacion": "2026-09-27T00:42:58.808Z"
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_casos": 1,
+    "total_paginas": 1
+  }
+}
+```
+
+El resumen no trae cuentas ni evidencia -- eso solo en el detalle
+(`GET .../casos/:id`), para no arrastrar la lista de identificadores de
+`multi_cuenta_ip`/`multi_cuenta_ip_lenta` (puede traer decenas) en cada
+fila del listado.
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El nivel debe ser uno de: informativo, revisar, prioritario, casi_confirmado", "payload": null }
+{ "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada, confirmada", "payload": null }
+```
+
+### 401 / 403
+
+Mismo comportamiento que el resto del panel: sin sesión -> `401`; sesión
+válida pero no admin -> `403`.
+
+## GET /admin/fraude/casos/:id
+
+```
+GET /admin/fraude/casos/13
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Caso de fraude obtenido",
+  "payload": {
+    "id_caso_fraude": 13,
+    "nivel": "prioritario",
+    "puntaje": 54.24,
+    "estado": "pendiente",
+    "reglas_cumplidas": [],
+    "cantidad_evidencias": 5,
+    "cantidad_cuentas": 6,
+    "ultima_evidencia": "2026-09-24T17:28:46.048Z",
+    "fecha_creacion": "2026-09-27T00:12:58.901Z",
+    "fecha_actualizacion": "2026-09-27T00:42:58.808Z",
+    "motivo": null,
+    "cuentas": [
+      { "usuario": "prueba_admin_fraude", "es_nucleo": true, "id_usuario": "14" },
+      { "usuario": "prueba_comprador_fraude", "es_nucleo": false, "id_usuario": "13" }
+    ],
+    "evidencia": [
+      {
+        "id_evidencia_caso_fraude": 37,
+        "fuente": "grafo",
+        "tipo": "reputacion_expres",
+        "clave": "14-16-17",
+        "metricas": { "autor_minutos_vida": 54.35 },
+        "puntos": 20,
+        "ultima_evidencia": "2026-09-24T17:28:46.048+00:00"
+      }
+    ]
+  }
+}
+```
+
+`cuentas` -- **todas** las cuentas involucradas en algún hallazgo del caso,
+resueltas contra `usuarios` (nunca el id crudo solo), con `es_nucleo` (en
+2+ hallazgos del caso, o en uno "fuerte") para que el admin distinga el
+centro del anillo de la periferia. `evidencia` -- cada hallazgo real,
+resuelto contra su tabla de origen (exactamente una según `fuente`:
+`grafo`=`anillo_fraude`, `eventos`=`hallazgo_evento_fraude`,
+`login`=`alerta_fraude`), con `metricas` igual a la `detalle` jsonb de esa
+fila (las cuentas de la evidencia individual **nunca** van en `metricas`,
+ya están en `cuentas` a nivel de caso). `puntos` es el aporte de ESE
+hallazgo al puntaje total del caso (`PuntajeFraudeService.puntosDeHallazgo`),
+no el puntaje del caso completo.
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un caso con ese id", "payload": null }
+```
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El id no es valido", "payload": null }
+```
+
+## PATCH /admin/fraude/casos/:id
+
+```
+PATCH /admin/fraude/casos/13
+Content-Type: application/json
+
+{ "estado": "revisada", "motivo": "opcional para revisada/confirmada" }
+```
+
+Solo admite `revisada`/`descartada`/`confirmada` como destino (`pendiente`
+es de donde se sale, nunca a donde se llega desde esta ruta), y **solo
+desde `pendiente`** -- un caso ya revisado, descartado o confirmado no se
+puede volver a mover desde esta ruta. `motivo` es obligatorio para
+`descartada` (opcional para los otros dos). Al descartar, guarda la firma
+de la evidencia de ese momento (`fuente:tipo:clave` por hallazgo,
+ordenado) -- si más adelante llega evidencia nueva y la firma cambia, el
+worker lo reabre solo como `pendiente` con una nota; si la firma es
+idéntica, se queda descartado. Devuelve el caso actualizado (misma forma
+que el detalle).
+
+### 400
+
+```json
+{ "ok": false, "mensaje": "El estado debe ser uno de: revisada, descartada, confirmada", "payload": null }
+{ "ok": false, "mensaje": "Descartar un caso exige un motivo", "payload": null }
+```
+
+### 409
+
+```json
+{ "ok": false, "mensaje": "El caso ya no esta pendiente de revision", "payload": null }
+```
+
+### 404
+
+```json
+{ "ok": false, "mensaje": "No existe un caso con ese id", "payload": null }
+```
+
+## Pruebas -- hechas el 2026-09-26/27
+
+Contra el servidor (`npx nest start`) y la base real, sin sembrar nada: el
+worker (`AgrupadorFraudeWorkerService`) ya había armado un caso real de
+los datos existentes (el anillo `prueba_admin_fraude`/`multicuenta_test_*`
+de pruebas anteriores de login + el hallazgo de `reputacion_expres` con
+`autor_minutos_vida` real, ver la memoria del arreglo de `detalle`).
+
+| Caso | Resultado |
+|---|---|
+| `GET .../casos` sin filtros | `200`, el caso real (`id 13`, `prioritario`, `puntaje 54.24`, `5` evidencias, `6` cuentas) |
+| `GET .../casos?nivel=prioritario` | `200`, `total_casos: 1` |
+| `GET .../casos?nivel=informativo` | `200`, `total_casos: 0` (no aplica a este caso) |
+| `GET .../casos?nivel=no_existe` | `400` con los 4 niveles válidos |
+| `GET .../casos?estado=no_existe` | `400` con los 4 estados válidos |
+| `GET .../casos` sin sesión | `401` |
+| `GET .../casos` con sesión de vendedor (`ventas_poniente`) | `403` |
+| `GET .../casos/13` | `200`, cuentas resueltas a nombre real y evidencia de las tres fuentes (`reputacion_expres` del grafo con `metricas.autor_minutos_vida: 54.35`, tres `multi_cuenta_ip`/`multi_cuenta_ip_lenta` del login) |
+| `GET .../casos/999999` (inexistente) | `404` |
+| `GET .../casos/abc` (id no numérico) | `400` |
+| `PATCH .../casos/13` con `{ "estado": "pendiente" }` | `400` (no es un destino válido) |
+| `PATCH .../casos/13` con `{ "estado": "descartada" }` sin `motivo` | `400` |
+| `PATCH .../casos/999999` | `404` |
+| `PATCH .../casos/13` con `{ "estado": "revisada", "motivo": "..." }` | `200`, el caso actualizado con `estado: "revisada"` |
+| `PATCH .../casos/13` de nuevo | `409` |
+| `npx tsc --noEmit` y `npx eslint` sobre los archivos tocados | limpios |
+
+Teardown: el caso real `13` se devolvió a `pendiente` por SQL directo
+(`UPDATE caso_fraude SET id_estado_alerta_fraude = ... WHERE id_caso_fraude = 13`,
+`motivo`/`firma_al_descartar` a `NULL`) -- es un caso real armado por el
+worker sobre datos de pruebas anteriores, no algo sembrado para esta
+prueba, así que se dejó exactamente como estaba antes de probar el
+`PATCH`.

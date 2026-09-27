@@ -83,6 +83,11 @@ export async function registrarAnilloFraude(datos: {
   tipo: TipoAnilloFraude;
   clave: string;
   resenas: number[];
+  /** Las metricas del hallazgo (horas, minutos de vida, regularidad, etc.)
+   * -- solo `favor_devuelto`/`reputacion_expres`/`persistente` la traen hoy
+   * (ver `PatronesFraudeDetectorService`); el resto se queda con el `{}` por
+   * defecto de la columna. */
+  detalle?: Record<string, unknown>;
 }): Promise<void> {
   const cliente = await pool.connect();
   try {
@@ -117,12 +122,17 @@ export async function registrarAnilloFraude(datos: {
       }
     } else {
       const resultado = await cliente.query<{ id_anillo_fraude: string }>(
-        `INSERT INTO anillo_fraude (id_tipo_anillo_fraude, clave, id_estado_alerta_fraude)
-         VALUES ($1, $2, $3)
+        `INSERT INTO anillo_fraude (id_tipo_anillo_fraude, clave, id_estado_alerta_fraude, detalle)
+         VALUES ($1, $2, $3, $4::jsonb)
          ON CONFLICT (id_tipo_anillo_fraude, clave)
-         DO UPDATE SET ultima_vez_confirmado_activo = now()
+         DO UPDATE SET ultima_vez_confirmado_activo = now(), detalle = $4::jsonb
          RETURNING id_anillo_fraude`,
-        [idTipo, datos.clave, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
+        [
+          idTipo,
+          datos.clave,
+          ID_ESTADO_ALERTA_FRAUDE_PENDIENTE,
+          JSON.stringify(datos.detalle ?? {}),
+        ],
       );
       idAnilloFraude = resultado.rows[0].id_anillo_fraude;
     }

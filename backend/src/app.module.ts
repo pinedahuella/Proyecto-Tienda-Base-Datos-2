@@ -69,6 +69,14 @@ import { AdminFraudeLoginController } from './controllers/admin/admin-fraude-log
 import { FraudeLoginExploracionService } from './services/fraude-login/fraude-login-exploracion.service';
 import { AdminFraudeAnillosController } from './controllers/admin/admin-fraude-anillos.controller';
 import { FraudeAnillosPersistidosService } from './services/fraude/fraude-anillos-persistidos.service';
+import { AdminCasosFraudeController } from './controllers/admin/admin-casos-fraude.controller';
+import { HallazgoFraudeAdaptadorService } from './services/fraude/hallazgo-fraude-adaptador.service';
+import { AgrupadorFraudeService } from './services/fraude/agrupador-fraude.service';
+import { PuntajeFraudeService } from './services/fraude/puntaje-fraude.service';
+import { ReglasCasiConfirmadoService } from './services/fraude/reglas-casi-confirmado.service';
+import { PersistenciaCasoFraudeService } from './services/fraude/persistencia-caso-fraude.service';
+import { AgrupadorFraudeWorkerService } from './services/fraude/agrupador-fraude-worker.service';
+import { CasosFraudeService } from './services/fraude/casos-fraude.service';
 import { AdminFraudeEventosController } from './controllers/admin/admin-fraude-eventos.controller';
 import { HallazgosEventoFraudePersistidosService } from './services/fraude/hallazgos-evento-fraude-persistidos.service';
 import { EventosController } from './controllers/eventos.controller';
@@ -144,6 +152,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BuscadorSugerenciasController,
     AdminFraudeLoginController,
     AdminFraudeAnillosController,
+    AdminCasosFraudeController,
     AdminFraudeEventosController,
     EventosController,
     AdminTendenciasController,
@@ -199,6 +208,13 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     FraudeLoginRetrospectivoService,
     FraudeLoginExploracionService,
     FraudeAnillosPersistidosService,
+    HallazgoFraudeAdaptadorService,
+    AgrupadorFraudeService,
+    PuntajeFraudeService,
+    ReglasCasiConfirmadoService,
+    PersistenciaCasoFraudeService,
+    AgrupadorFraudeWorkerService,
+    CasosFraudeService,
     HallazgosEventoFraudePersistidosService,
     EventosService,
     AdminTendenciasService,

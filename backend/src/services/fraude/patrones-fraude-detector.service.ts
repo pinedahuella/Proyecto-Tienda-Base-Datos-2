@@ -212,13 +212,37 @@ export class PatronesFraudeDetectorService {
       const resenas = dedup(fila.resenas.map(aNumero));
       const clave = [...cuentas].sort((a, b) => a - b).join('-');
       try {
-        await registrarAnilloFraude({ tipo, clave, resenas });
+        await registrarAnilloFraude({
+          tipo,
+          clave,
+          resenas,
+          detalle: this.detalleDe(tipo, fila),
+        });
       } catch (error) {
         this.logger.warn(
           `no se pudo persistir el caso ${tipo} ${clave}: ${mensajeCorto(error)}`,
         );
       }
     }
+  }
+
+  /** Solo estos tres tipos traen metricas hoy -- ver `PUNTOS_BASE` en
+   * `puntaje-fraude.service.ts`. Los demas se quedan con el `{}` por
+   * defecto de `registrarAnilloFraude`. */
+  private detalleDe(
+    tipo: HallazgoTipado['tipo'],
+    fila: FilaHallazgo,
+  ): Record<string, unknown> | undefined {
+    if (tipo === 'favor_devuelto') {
+      return { horas: fila.horas };
+    }
+    if (tipo === 'reputacion_expres') {
+      return { autor_minutos_vida: fila.autor_minutos_vida };
+    }
+    if (tipo === 'persistente') {
+      return { es_mutuo: fila.es_mutuo, regularidad: fila.regularidad };
+    }
+    return undefined;
   }
 }
 
@@ -230,10 +254,15 @@ type HallazgoTipado = {
   fila: FilaHallazgo;
 };
 
-/** Una fila cruda de cualquiera de las consultas: ids de Neo4j (Integer). */
+/** Una fila cruda de cualquiera de las consultas: ids de Neo4j (Integer).
+ * Los ultimos cuatro campos solo los traen B.3/B.5/B.7 -- ver `detalleDe`. */
 interface FilaHallazgo {
   cuentas: unknown[];
   resenas: unknown[];
+  horas?: number;
+  autor_minutos_vida?: number;
+  es_mutuo?: boolean;
+  regularidad?: number;
 }
 
 /** Mismo criterio que `anillos-detector.service.ts`. */
@@ -342,7 +371,16 @@ WHERE size(meses) >= $min_meses
 WITH a, b, rs,
      1.0 * size(rs) / COUNT { (a)-[:ESCRIBIO]->(:Resena) } AS exclusividad
 WHERE exclusividad >= $min_exclusividad
-RETURN [a.id, b.id] AS cuentas, [x IN rs | x.id] AS resenas
+WITH a, b, rs,
+     [i IN range(1, size(rs) - 1) |
+        (rs[i].fecha.epochSeconds - rs[i - 1].fecha.epochSeconds) / 86400.0] AS intervalos
+WITH a, b, rs, intervalos,
+     reduce(s = 0.0, x IN intervalos | s + x) / size(intervalos) AS media
+WITH a, b, rs, media,
+     sqrt(reduce(s = 0.0, x IN intervalos | s + (x - media) ^ 2) / size(intervalos)) AS desviacion
+RETURN [a.id, b.id] AS cuentas, [x IN rs | x.id] AS resenas,
+       desviacion / media AS regularidad,
+       EXISTS { (b)-[:ESCRIBIO]->(:Resena)-[:CALIFICA_A]->(a) } AS es_mutuo
 `;
 
 const CYPHER_B3_VENTANA = CYPHER_B3_BASE + CYPHER_B3_RESTO;
@@ -366,8 +404,10 @@ WHERE rb.fecha >= ra.fecha
 const CYPHER_B5_RESTO = `
 WITH CASE WHEN a.id < b.id THEN a ELSE b END AS x,
      CASE WHEN a.id < b.id THEN b ELSE a END AS y,
-     collect(ra.id) + collect(rb.id) AS resenas
-RETURN [x.id, y.id] AS cuentas, resenas
+     collect(ra.id) + collect(rb.id) AS resenas,
+     min(rb.fecha.epochSeconds - ra.fecha.epochSeconds) AS segundos_minimos
+RETURN [x.id, y.id] AS cuentas, resenas,
+       segundos_minimos / 3600.0 AS horas
 `;
 
 const CYPHER_B5_VENTANA = CYPHER_B5_BASE + CYPHER_B5_RESTO;
@@ -428,6 +468,8 @@ WHERE r.calificacion >= $nota_alta
   AND r.fecha.epochSeconds >= v.fecha_alta.epochSeconds
   AND r.fecha.epochSeconds - v.fecha_alta.epochSeconds <= $dias_vendedor_nuevo * 86400
   AND r.fecha >= datetime() - duration({days: $dias})
-WITH v, collect(DISTINCT a) AS autores, collect(r) AS resenas
-RETURN [v.id] + [x IN autores | x.id] AS cuentas, [r IN resenas | r.id] AS resenas
+WITH v, a, r, (r.fecha.epochSeconds - a.fecha_alta.epochSeconds) / 60.0 AS minutos
+WITH v, collect(DISTINCT a) AS autores, collect(r) AS resenas, min(minutos) AS minutos_min
+RETURN [v.id] + [x IN autores | x.id] AS cuentas, [r IN resenas | r.id] AS resenas,
+       minutos_min AS autor_minutos_vida
 `;
