@@ -1794,7 +1794,7 @@ Correr-Migraciones "$PSScriptRoot\migrations" "/migrations" "migrations/" $true
 # amarillo en cada arranque justamente para que nadie suponga otra cosa.
 Paso "Corriendo conjuntos de datos"
 
-# Lo lee el paso 5b-2: solo una semilla recien cargada necesita sus claves de Redis.
+# Lo lee el paso 5b-2: solo se comprueban los descuentos de una semilla recien cargada.
 $sembroDatos = $false
 
 $productosEnBase = ("SELECT count(*) FROM productos;" |
@@ -1814,67 +1814,31 @@ if (($productosEnBase -match '^\d+$') -and ([int]$productosEnBase -gt 0)) {
 
 
 # ------------------------------------------------------------
-# 5b-2. La clave de Redis de cada descuento sembrado
+# 5b-2. Los descuentos de la semilla quedan permanentes
 # ------------------------------------------------------------
-# Desde el 2026-09-24 el backend quita solo un descuento cuando vence
-# (VentasLimitadasService.revisarDescuentosVencidos, cada minuto). No mira
-# una fecha: mira si existe la clave `mesh:oferta:<id>:descuento` en Redis,
-# y si no existe da el descuento por vencido y lo quita de PostgreSQL.
+# Hasta el 2026-09-26 este paso creaba en Redis la clave
+# `mesh:oferta:<id>:descuento` de cada descuento sembrado, porque el worker del
+# backend daba por vencido todo descuento sin clave y lo quitaba en su primer
+# minuto. Desde 37ad2e6 de Jose David esa clave no existe: el vencimiento vive
+# en PostgreSQL, en `oferta.fecha_vencimiento_descuento` (migracion 028), NULL
+# quiere decir permanente, y el worker ya no le pregunta nada a Redis. Un Redis
+# vaciado tampoco se lleva los descuentos.
 #
-# La ruta del vendedor (POST .../descuento) siempre crea esa clave. La semilla
-# no pasa por la ruta: 001_catalogo.sql pone el % directo en `oferta`, asi
-# que sus 13 descuentos nacian sin clave y el backend los borraba en su
-# primer minuto. La portada se quedaba sin la etiqueta de descuento sin que
-# nada fallara.
-#
-# Aqui se crea la clave de cada oferta con descuento, igual que la ruta cuando
-# el descuento no lleva duracion: valor "1" y SIN vencimiento
-# (ofertas.service.ts, sembrarClaveDescuentoSinLanzar: `SET clave 1`). Con NX,
-# para no pisar el vencimiento de una clave que ya exista.
-#
-# Solo cuando la semilla acaba de entrar, a proposito. En una base que ya
-# tenia datos, una oferta con descuento y sin clave puede ser un descuento con
-# duracion que vencio con el backend apagado; recrearle la clave lo volveria
-# permanente. Ese caso lo resuelve el backend la proxima vez que corra.
-#
-# Redis se espera aqui y no en su paso de mas abajo porque el backend puede
-# estar corriendo durante un -Reiniciar: cuanto antes exista la clave, menos
-# margen tiene su worker para llevarse los descuentos recien sembrados.
+# La semilla pone el % directo en `oferta` sin fecha, asi que sus descuentos
+# nacen permanentes sin hacer nada. Aqui solo se comprueba, para que un cambio
+# futuro en la semilla o en la 028 no los deje venciendo sin avisar.
 if ($sembroDatos) {
-    Paso "Claves de vencimiento de los descuentos sembrados"
-
-    $ofertasConDescuento = @(("SELECT id_oferta FROM oferta WHERE porcentaje_descuento > 0 ORDER BY id_oferta;" |
-        docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim() -split "\r?\n" |
-        Where-Object { $_ -match '^\d+$' })
-
-    if ($ofertasConDescuento.Count -eq 0) {
-        Aviso "La semilla no dejo ninguna oferta con descuento. Nada que hacer."
-    } elseif (-not (Esperar-Contenedor "mesh-redis" 60)) {
-        Aviso "Redis no respondio a tiempo. Los $($ofertasConDescuento.Count) descuentos de la semilla no tienen clave"
-        Aviso "   y el backend los va a quitar en su primer minuto. Vuelve a correr .\arrancar.ps1 -Reiniciar."
-    } else {
-        # La contrasena viaja en REDISCLI_AUTH y no con -a, igual que en
-        # demo-redis-sin-ttl.ps1: asi redis-cli no avisa y no sale en la linea.
-        $creadas = 0
-        $yaEstaban = 0
-        $fallidas = 0
-        foreach ($idOferta in $ofertasConDescuento) {
-            $respuesta = "$(docker exec -e "REDISCLI_AUTH=$($env_['REDIS_PASSWORD'])" mesh-redis redis-cli SET "mesh:oferta:${idOferta}:descuento" 1 NX 2>&1)".Trim()
-            if ($LASTEXITCODE -ne 0) {
-                $fallidas++
-            } elseif ($respuesta -eq "OK") {
-                $creadas++
-            } else {
-                # NX y la clave ya estaba: redis-cli contesta vacio (nil).
-                $yaEstaban++
-            }
-        }
-
-        if ($fallidas -gt 0) {
-            Aviso "$fallidas de $($ofertasConDescuento.Count) claves no se pudieron crear. Esos descuentos los va a quitar el backend."
+    Paso "Descuentos de la semilla"
+    $cuentaDescuentos = ("SELECT count(*) || '|' || count(*) FILTER (WHERE fecha_vencimiento_descuento IS NOT NULL) FROM oferta WHERE porcentaje_descuento > 0;" |
+        docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+    if ($cuentaDescuentos -match '^(\d+)\|(\d+)$') {
+        if ([int]$Matches[2] -gt 0) {
+            Aviso "$($Matches[2]) de $($Matches[1]) descuentos de la semilla tienen fecha de vencimiento. El backend los va a quitar cuando venzan."
         } else {
-            Ok "$creadas claves creadas sin vencimiento, $yaEstaban ya estaban ($($ofertasConDescuento.Count) ofertas con descuento)"
+            Ok "$($Matches[1]) descuentos sembrados, todos permanentes (sin fecha de vencimiento)"
         }
+    } else {
+        Aviso "No se pudo comprobar los descuentos de la semilla. $cuentaDescuentos"
     }
 }
 

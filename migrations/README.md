@@ -95,6 +95,7 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `025_hallazgos_evento_fraude.sql` | `tipo_hallazgo_evento` (ids 1 a 6 = F1 a F6), `hallazgo_evento_fraude` y su pivote de cuentas `hallazgo_evento_fraude_cuenta`, donde guarda el detector diario de fraude sobre eventos de ClickHouse. Copia del SQL de referencia del companero con candado de ids |
 | `026_casos_fraude.sql` | los casos de fraude del agrupador de Jose David: `caso_fraude`, sus niveles, las reglas R-CASI y su puente, `evidencia_caso_fraude` (una fila por hallazgo real, con tres llaves exclusivas a `anillo_fraude`, `hallazgo_evento_fraude` o `alerta_fraude`) y sus cuentas, `anillo_fraude.detalle` y el estado `confirmada`. Es su SQL de referencia con las tres llaves en `ON DELETE CASCADE` y R-CASI-1 sin A.4 |
 | `027_similares_con_indice.sql` | reescribe `productos_similares()` para que use el indice HNSW. La de la 024 comparaba con un JOIN y el indice no le servia; recorria las 3105 filas. Medido sobre los 3103 activos, 3,8 ms por producto contra 32 ms, y los mismos seis en 3099 de 3103. Lleva `enable_seqscan = off` solo mientras corre porque el planificador estimaba mal. La 026 son los casos de fraude |
+| `028_vencimiento_oferta.sql` | `oferta.fecha_vencimiento_descuento` y `oferta.fecha_vencimiento_venta_limitada`, NULL es permanente. Desde aqui el vencimiento lo decide PostgreSQL y no una clave de Redis, que un Redis vaciado se llevaba con los descuentos permanentes. SQL de referencia de Jose David (37ad2e6), copiado tal cual |
 
 De la 011 a la 015 son de la Entrega 2, la 016 a la 023 de la Entrega 3, la 024 de la Entrega final, la 025 otra vez de la Entrega 3, y merecen una
 linea mas de la que caben en la tabla.
@@ -482,13 +483,12 @@ un `.\arrancar.ps1 -Reiniciar` o poniendo uno desde el panel del vendedor. En
 Mongo, `hay_descuento` y los precios rebajados de la tarjeta los escribe el
 ETL (`etl/extraer.sql`), no este archivo.
 
-**Y en Redis, cada uno necesita su clave.** Desde el 2026-09-24 el backend
-quita cada minuto el descuento de toda oferta cuya clave
-`mesh:oferta:<id>:descuento` no exista (asi vencen los descuentos con
-duracion). Este archivo pone el % directo en `oferta` y no puede escribir en
-Redis, asi que sin mas los 13 se borraban en el primer minuto del backend.
-`arrancar.ps1` las crea en su paso 5b-2, sin vencimiento y con `NX`, en el
-mismo arranque que carga la semilla y solo en ese.
+**Y nacen permanentes.** Este archivo pone el % directo en `oferta`, sin
+`fecha_vencimiento_descuento`, asi que desde la 028 son descuentos sin fecha y el
+backend no los toca. Hasta el 2026-09-26 el vencimiento lo decidia una clave de
+Redis, `mesh:oferta:<id>:descuento`, que este archivo no puede escribir, y
+`arrancar.ps1` tenia que crearlas en su paso 5b-2. Ese paso ahora solo comprueba
+que ninguno de la semilla tenga fecha.
 
 ## Como correrlas
 

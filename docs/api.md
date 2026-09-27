@@ -27,7 +27,7 @@ esta en los archivos de arriba.
 
 | Ruta | Que es | Donde se ve |
 |---|---|---|
-| `POST /vendedor/ofertas/:id/descuento` con `duracion_segundos` | descuento que se quita solo. Crea `mesh:oferta:<id>:descuento` en Redis, con vencimiento o sin el | panel, Ofertas, "Hasta cuando" |
+| `POST /vendedor/ofertas/:id/descuento` con `duracion_segundos` | descuento que se quita solo. Guarda cuando vence en `oferta.fecha_vencimiento_descuento` (migracion 028, NULL es permanente); ya no usa Redis | panel, Ofertas, "Hasta cuando" |
 | `POST, GET, GET paginado, PATCH /vendedor/reglas-descuento-periodos` | descuento por fecha (tabla de la 022) | panel, Reglas, "Descuentos por fecha" |
 | 409 de exclusion en las cuatro formas de descuento | una oferta tiene un solo descuento activo a la vez | los tres formularios lo explican con `textoConflictoDescuento` |
 | `GET /admin/fraude/alertas-resenas?tipo=` con los tipos B | los seis patrones B guardados (tabla de la 023) | panel, Fraude, y la campana del admin |

@@ -51,6 +51,7 @@
       "precio_tienda": { "type": "double" },
       "stock_total": { "type": "integer" },
       "total_ofertas": { "type": "integer" },
+      "hay_descuento": { "type": "boolean" },
 
       "resenas_promedio": { "type": "double" },
       "resenas_total": { "type": "integer" },

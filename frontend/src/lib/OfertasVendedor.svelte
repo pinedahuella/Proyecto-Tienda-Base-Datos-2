@@ -482,9 +482,10 @@
 	let porcentajeNuevo = $state('');
 	/**
 	 * Cuanto dura el descuento, en segundos y como texto. Vacio es "sin limite",
-	 * que es como funcionaba antes del 2026-09-24. Con duracion, el backend le
-	 * pone vencimiento a la clave `mesh:oferta:<id>:descuento` y su worker lo
-	 * quita solo al vencer.
+	 * que es como funcionaba antes del 2026-09-24. Con duracion, el backend
+	 * guarda cuando vence en `oferta.fecha_vencimiento_descuento` (migracion
+	 * 028) y su worker lo quita solo al llegar esa fecha. Hasta el 2026-09-26
+	 * era una clave de Redis con TTL, que un Redis vaciado se llevaba.
 	 */
 	let duracionDescuento = $state('');
 	let descuentoOcupado = $state(false);

@@ -378,9 +378,15 @@ export function traerProductoEnFecha(idProducto: string | number, fecha: string)
 /** Precio y existencias de una oferta, tal como estaban ese dia. */
 export interface OfertaEnFecha {
 	id_oferta: string;
-	/** Decimal de PostgreSQL: viaja como texto para no perder centavos. */
+	/** Decimal de PostgreSQL: viaja como texto para no perder centavos. El de LISTA, sin descuento. */
 	precio: string;
 	stock: number;
+	/**
+	 * El % de descuento que tenia la oferta ese dia (de la misma fila de
+	 * precio_historial), o null si no tenia. Llega desde 37ad2e6, 2026-09-26;
+	 * un backend anterior no lo manda, por eso es opcional.
+	 */
+	porcentaje_descuento?: string | null;
 }
 
 /**
