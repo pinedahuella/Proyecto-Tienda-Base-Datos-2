@@ -156,6 +156,30 @@ if (-not (TieneModelo)) {
     Write-Host "   Modelo $modelo listo" -ForegroundColor Green
 }
 
+# El backend tambien habla con Ollama (VectoresSyncService recalcula los
+# productos editados y /vectores revisa la conexion) y lee OLLAMA_URL de
+# backend/.env, no de este. Si aqui se eligio mesh-ollama en el 11435 y el
+# backend se queda con su 11434 por defecto, los similares siguen saliendo
+# pero ningun producto editado vuelve a tener vector, sin error visible. Por
+# eso se le deja escrito el mismo Ollama que se acaba de elegir. Surte efecto
+# la proxima vez que arranque el backend.
+$envBackend = Join-Path $raiz 'backend\.env'
+if (Test-Path $envBackend) {
+    $lineas = @(Get-Content $envBackend)
+    $cambio = $false
+    foreach ($par in @(@('OLLAMA_URL', $ollama), @('OLLAMA_MODELO_VECTORES', $modelo))) {
+        $nombre = $par[0]; $valor = $par[1]
+        $actual = $lineas | Where-Object { $_ -match "^\s*$nombre\s*=" } | Select-Object -First 1
+        if ($actual -and $actual.Split('=', 2)[1].Trim() -eq $valor) { continue }
+        $lineas = @($lineas | Where-Object { $_ -notmatch "^\s*$nombre\s*=" }) + "$nombre=$valor"
+        $cambio = $true
+    }
+    if ($cambio) {
+        [IO.File]::WriteAllLines($envBackend, $lineas, $sinBom)
+        Write-Host "   backend\.env apunta ahora a $ollama con $modelo"
+    }
+}
+
 # 2. El catalogo, desde Mongo
 $js = @'
 db.productos.find({}, { nombre: 1, descripcion: 1, 'categoria.nombre': 1, estado: 1 }).forEach(function (d) {

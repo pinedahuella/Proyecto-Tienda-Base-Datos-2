@@ -4,6 +4,73 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-26 en la noche)
+
+Revisado contra tu ced29f5. Lo de la Entrega final ya esta completo, asi que
+nada de esto bloquea la entrega. Van por orden de importancia, con la seccion
+de abajo donde esta el detalle.
+
+| # | Que | Donde esta el detalle | Importa |
+|---|---|---|---|
+| 1 | El worker de descuentos borra los descuentos cuya clave de Redis nunca existio. Si Redis se vacia, se lleva todos los descuentos permanentes | seccion del 25, punto 1 | media |
+| 2 | Las senales y los detalles que faltan del fraude del login | seccion del 11, puntos 4 y 5 | media |
+| 3 | Un anillo de 3 deja un caso `cadena_abierta` que sobra junto al `ciclo`, y el panel ensena dos casos con las mismas cuentas | seccion del 25, punto 3 | media |
+| 4 | El estante de mas vendidos tarda hasta 10 minutos al arrancar y al cambiar un precio. Le falta el `onApplicationBootstrap` que ya le pusiste a las vitrinas | secciones del 23 en la tarde (punto 1) y del 23 (punto 1) | baja |
+| 5 | En el facetado, `resultados` guarda los que se mostraron y no el total | seccion del 26, abajo | baja |
+| 6 | `hay_descuento` no llega al indice de Elasticsearch | seccion del 23, punto 2 | baja |
+| 7 | El historial de precio de una oferta no trae el % | seccion del 23, punto 3 | baja |
+| 8 | El 409 de `ofertas.service.ts` linea 719 le ensena la ruta a la persona | seccion del 23, punto 4 | solo texto |
+
+Hechos y ya no los pedimos: similares, facetado, sugerencias, el `DELETE` de
+reglas, el TTL de R2 y R3, "Para ti" vacio y las vitrinas de ofertas al
+arrancar.
+
+---
+
+## LO NUEVO DEL 2026-09-26: ced29f5 jalado y conectado
+
+Las tres rutas que se pedian abajo ya estan y encajan con las pantallas sin
+tocarlas: similares (la ficha), facetado (`/buscar`) y sugerencias. Lo que se
+hizo de este lado al jalar:
+
+- **Las columnas de facetas en ClickHouse ya estan en `clickhouse/001_esquema.sql`**,
+  como `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` despues de cada `CREATE`,
+  porque ese archivo se reaplica en cada arranque sobre tablas que ya existen.
+  Es lo que pedia tu `plan pendiente/buscador-facetado-clickhouse.sql`. Sin
+  eso, en una base nueva fallaba en silencio el INSERT de cada busqueda y cada
+  clic, y los tres rankings de facetas daban error.
+- **`OLLAMA_URL` en `backend/.env`.** `cargar_vectores.ps1` (paso 7d) elige un
+  Ollama: el de la PC en el 11434 o `mesh-ollama` en el 11435 si la PC no
+  tiene. Ahora le escribe esa misma direccion y el modelo a `backend/.env`,
+  para que tu `VectoresSyncService` y `GET /vectores` no se queden en el
+  11434 por defecto. Surte efecto al siguiente arranque del backend.
+- `/buscar` manda en el clic `facetada`, `categorias`, `precios`,
+  `calificaciones` y `disponible`, solo cuando los resultados salieron de la
+  ruta facetada.
+- Tendencias, pestana Rankings, suma "Categorias filtradas", "Precios
+  filtrados" y "Estrellas filtradas", con tus tres rutas. Las categorias salen
+  con su nombre, que se saca de `GET /categorias`.
+- `demo-entrega-final.ps1` termina cada parte pidiendo lo mismo a tu ruta. En
+  `semantica` compara los ids de la base con los de `/similares`, y en
+  `facetas` ensena el facetado y las sugerencias.
+
+Nada de esto toco `backend/`. Sigue abierto lo de la fila 28 (el worker de
+descuentos); lo del arranque de `RegistroOfertasSyncService` es otra cosa.
+
+Probado en vivo el mismo 26. Dos cosas para ti, ninguna urgente:
+
+- **`resultados` guarda los que se mostraron, no el total.** En el facetado,
+  `registrarBusqueda` recibe `resultado.resultados.length`, que es el `limite`.
+  Una busqueda de laptop con 203 resultados y `limite=5` queda con
+  `resultados = 5`. Para "busquedas sin resultados" da igual, porque 0 sigue
+  siendo 0, pero cualquier promedio de resultados sale mal. En el facetado
+  ya tienes `resultado.total` a mano.
+- **`productos_similares()` cambio por dentro (migracion 027).** Misma firma y
+  misma forma de respuesta, tu `SimilaresService` no cambia. Ahora usa el
+  indice HNSW; la de la 024 nunca lo usaba.
+
+---
+
 ## LO NUEVO DEL 2026-09-25 EN LA NOCHE: productos parecidos por descripcion
 
 Es la recomendacion semantica de la Entrega final (5 puntos). La parte de datos
@@ -178,8 +245,9 @@ una cadena cuyas cuentas ya forman un ciclo.
 ### 4. Lo que sigue abierto de antes
 
 - `reconciliar()` al arrancar (seccion del 23 en la tarde, punto 1): el
-  disparador de reglas por periodo ya corre al arrancar (2026-09-25, 17:30).
-  El `reconciliar()` de las vitrinas de ofertas sigue sin `onApplicationBootstrap`.
+  disparador de reglas por periodo ya corre al arrancar (2026-09-25, 17:30), y
+  las vitrinas de ofertas tambien desde ced29f5 (2026-09-26). Falta solo el
+  worker de mas vendidos.
 - ~~No hay `DELETE` de regla, ni automatica ni por periodo.~~ Hecho el
   2026-09-25 con 409 si la regla esta activa. Los paneles del vendedor ya tienen
   el boton Borrar en las reglas pausadas, `reglas_periodo.sh` lo prueba en su

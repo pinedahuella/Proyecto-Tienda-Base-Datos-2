@@ -3,7 +3,56 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-25**.
+Ultima actualizacion: **2026-09-26**.
+
+**El 2026-09-26: ced29f5 de David jalado y conectado, sin levantar nada.** David hizo las tres rutas que faltaban:
+`GET /productos/:id/similares`, `GET /buscador/productos/facetado` y `GET /buscador/productos/sugerencias`. Tambien
+agrego `VectoresSyncService`, que cada 3 horas recalcula los vectores de los productos editados, `GET /vectores`,
+tres rankings de facetas y la reconciliacion de ofertas al arrancar. Las rutas encajan con las pantallas que ya
+estaban, asi que "Parecidos a este" y el panel de /buscar deberian salir solos. De este lado:
+
+```
+ClickHouse           Columnas de facetas (facetada, categorias, precios, calificaciones, disponible) en
+                     busqueda_realizada y busqueda_clic, como ALTER ... ADD COLUMN IF NOT EXISTS en 001_esquema.sql.
+                     David las tenia solo en su base local. Sin ellas, en una base nueva fallaban en silencio los
+                     eventos de busqueda y clic
+Ollama y backend     cargar_vectores.ps1 escribe OLLAMA_URL y OLLAMA_MODELO_VECTORES en backend/.env con el Ollama
+                     que eligio. Si es mesh-ollama en el 11435, el backend ya no se queda en el 11434
+/buscar              El clic manda las facetas activas, solo si los resultados salieron de la ruta facetada
+Tendencias           Rankings "Categorias filtradas", "Precios filtrados" y "Estrellas filtradas"
+Demos                demo-entrega-final.ps1 -Parte semantica compara la base con /similares; -Parte facetas
+                     ensena el facetado y las sugerencias por el backend
+Comprobado           tsc del backend 0 errores, svelte-check 0 en 219 archivos, parser de PowerShell 0. Probado
+                     sobre una copia el bloque que escribe backend/.env, que no reescribe si ya coincide
+```
+
+**Segunda vuelta del 26, ya en vivo y levantando solo lo necesario** (Postgres, Mongo y Redis primero, Elastic y
+ClickHouse despues, sin Neo4j, sin consolas web y sin arrancar.ps1, porque la RAM no daba para todo).
+
+```
+Similares y HNSW     productos_similares() de la 024 NUNCA usaba el indice: comparaba con un JOIN y el HNSW solo
+                     ordena por distancia a un vector fijo. La 027 la reescribe. Medido sobre los 3103 activos,
+                     3,8 ms por producto con indice y 32 ms recorriendo todo, los mismos seis en 3099 de 3103.
+                     Lleva enable_seqscan = off solo mientras corre porque el planificador estimaba mal. Antes de
+                     aplicarla se comparo la salida de 20 productos con la vieja, igual. recomendacion_semantica.py
+                     sigue en 15 OK. El informe final y la demo ya lo cuentan con estos numeros
+Demos                demo-entrega-final.ps1 suma -Parte vectores y -Parte rastro, y las dos estan en el panel.
+                     Arreglado un fallo que ya estaba: con una sola fila, (Psql ...)[0] tomaba la primera LETRA
+                     y el conteo de vectores decia 3 en vez de 3105. Todas las demos corridas en verde, tambien
+                     vectores y rastro desde el panel
+ClickHouse           001_esquema.sql aplicado, las 10 columnas de facetas estan. Probado el clic con y sin facetas
+                     por POST /eventos/busqueda-clic, y los tres rankings de facetas como admin
+Pantallas            Vistas en Edge sin ventana: la ficha con Parecidos a este, /buscar con el panel de facetas
+                     (Laptops y mas de Q3,000 dan 205, igual que facetas.py) y Tendencias con Categorias filtradas
+                     mostrando el nombre. 0 errores de JavaScript. Lo que el navegador de prueba dejo en ClickHouse
+                     se borro
+Sustentacion         PREGUNTAS-SUSTENTACION.md 108, 109, 116, 117 y 118 decian que no habia vectores, ni control
+                     de acceso, ni retrospectiva. Reescritas con lo que hay y donde se ve
+facetas.py           19 OK
+servicios.ps1        Lanzaba el backend como dist/main, relativo, y Procesos-De busca la carpeta del repo en la
+                     linea de comando. parar-backend decia "no estaba corriendo" con el backend vivo y reiniciar
+                     desde el panel lo dejaba duplicado. Ahora va con la ruta entera, probado que lo encuentra
+```
 
 **El 2026-09-24 y 25: lo de David del 24 y 25 conectado, y lo de la Entrega 3 que es de este lado.** Commits nuestros
 b2d3292, 72eea96 y f8f537f, todos pusheados. De David se jalaron ad20dcd, 4e93bba, 99891a8, d1b670b, 6ecd31b y

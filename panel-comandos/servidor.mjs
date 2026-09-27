@@ -322,7 +322,7 @@ const CATALOGO = [
   },
   {
     id: 'final-semantica', grupo: 'Demos de la Entrega final', titulo: 'Productos parecidos por su descripcion',
-    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen segun su descripcion, con el porcentaje de parecido y cuanto tardo la base. No necesita el backend.',
+    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen segun su descripcion, con el porcentaje de parecido y cuanto tardo la base. Al final se los pide a la ruta de la ficha, GET /productos/:id/similares, y comprueba que sean los mismos. Si el backend esta apagado, ese ultimo paso solo avisa.',
     script: 'demo-entrega-final.ps1', confirmar: null,
     campos: [
       { nombre: 'producto', etiqueta: 'Palabra del nombre', tipo: 'texto', patron: '^[A-Za-z0-9 ]{2,30}$', defecto: 'laptop' },
@@ -331,12 +331,28 @@ const CATALOGO = [
   },
   {
     id: 'final-facetas', grupo: 'Demos de la Entrega final', titulo: 'Filtros del buscador y palabras mal escritas',
-    explica: 'Busca una palabra y ensena cuantos hay por categoria, precio y calificacion, que pasa al elegir una categoria, la misma palabra mal escrita y el autocompletado. Solo lee.',
+    explica: 'Busca una palabra y ensena cuantos hay por categoria, precio y calificacion, que pasa al elegir una categoria, la misma palabra mal escrita y el autocompletado. Despues lo mismo por las rutas de la app, el facetado de /buscar y las sugerencias. Solo lee.',
     script: 'demo-entrega-final.ps1', confirmar: null,
     campos: [
       { nombre: 'texto', etiqueta: 'Que buscar', tipo: 'texto', patron: '^[A-Za-z0-9 ]{3,30}$', defecto: 'laptop' },
     ],
     construir: (v) => ['-Parte', 'facetas', '-Texto', v.texto],
+  },
+  {
+    id: 'final-vectores', grupo: 'Demos de la Entrega final', titulo: 'Quien mantiene los vectores al dia',
+    explica: 'Cuantos productos tienen vector en PostgreSQL, cuantos esperan al worker del backend (los que un vendedor creo o edito) y si el backend llega a Ollama con el modelo descargado. Solo lee.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Parte', 'vectores'],
+  },
+  {
+    id: 'final-rastro', grupo: 'Demos de la Entrega final', titulo: 'Lo que ClickHouse guarda de una busqueda con filtros',
+    explica: 'Hace una busqueda con filtros por el backend, igual que /buscar, y ensena la fila que quedo en ClickHouse con la categoria, el precio y la disponibilidad elegidos. Despues el ranking de categorias filtradas que ve el admin en Tendencias. Al final borra esa fila, asi que las tendencias quedan como estaban. Necesita el backend.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [
+      { nombre: 'texto', etiqueta: 'Que buscar', tipo: 'texto', patron: '^[A-Za-z0-9 ]{3,30}$', defecto: 'laptop' },
+    ],
+    construir: (v) => ['-Parte', 'rastro', '-Texto', v.texto],
   },
 ];
 

@@ -214,6 +214,7 @@
      {
       "vin": [
        "`etl/cargar_vectores.ps1` guarda el md5 del texto con que se calculó cada vector. En un arranque normal solo recalcula los productos cuyo texto cambió y tarda unos segundos.",
+       "Entre un arranque y otro, el backend recalcula cada tres horas los productos que un vendedor creó o editó, con el mismo texto y el mismo md5. Si solo cambiaron las variantes o el estado, no le pide nada a Ollama.",
        "La primera carga de los 3105 productos tardó 413 segundos.",
        "El generador de datos de prueba copia productos con otro sufijo en el nombre y la misma descripción. Sin cuidarlo, los seis parecidos de un teléfono eran seis copias del mismo teléfono. La columna `grupo` guarda el md5 de la categoría y la descripción sin el nombre, y la consulta devuelve un solo producto por grupo."
       ]
@@ -232,7 +233,10 @@
      },
      {
       "p": "El índice HNSW recorre un grafo de vecinos y no compara contra todo el catálogo. Por defecto solo mira 40 candidatos, y con los filtros de activo y de grupo podían quedar menos de los pedidos, así que la función sube ese número a 200 solo mientras corre. Después elige el mejor de cada grupo y corta en el límite pedido."
-     }
+     },
+     {"p": "Al revisar el plan encontramos que la primera versión de la función nunca usaba el índice. Comparaba contra el vector base con un JOIN, y un índice HNSW solo sirve para ordenar por distancia a un vector ya conocido. La migración 027 lee primero ese vector y ordena por distancia a él. Aun así, el planificador estimaba que recorrer la tabla salía más barato, y lo medimos sobre los 3103 productos activos."},
+     {"tabla": {"cabecera": ["Camino", "Tiempo total", "Por producto", "Los seis iguales a la búsqueda exacta"], "filas": [["Comparar contra todos", "100 s", "32 ms", "Es la búsqueda exacta"], ["Índice HNSW", "11,7 s", "3,8 ms", "3099 de 3103 productos"]], "anchos": [1.9, 1.1, 1.1, 2.2], "leyenda": "Medición del 26 de septiembre sobre la misma base. En los cuatro casos distintos cambia un solo producto de los seis."}},
+     {"p": "La estimación estaba mal por un factor de ocho, así que la función fija enable_seqscan en off solo mientras corre. No toca ninguna otra consulta y no prohíbe recorrer la tabla, solo la encarece para que el planificador prefiera el índice. La demo enseña el plan de adentro de la función con auto_explain, y ahí aparece el índice idx_producto_vector_hnsw."}
     ]
    },
    {
@@ -245,7 +249,7 @@
       "p": "Al modelo nunca se le dice la categoría como dato aparte, solo la lee dentro del texto. Que los parecidos caigan en la misma categoría es la señal de que el vector captura de qué trata el producto."
      },
      {
-      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo sin pasar por el backend está `.\\demo-entrega-final.ps1 -Parte semantica`, que busca un producto por nombre, muestra sus seis parecidos con el porcentaje de similitud y el plan de PostgreSQL con el índice en uso."
+      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo sin pasar por el backend está `.\\demo-entrega-final.ps1 -Parte semantica`, que busca un producto por nombre, muestra sus seis parecidos con el porcentaje de similitud y el plan de PostgreSQL con el índice en uso. Al final le pide lo mismo a la ruta y comprueba que devuelve los mismos productos en el mismo orden."
      }
     ]
    }

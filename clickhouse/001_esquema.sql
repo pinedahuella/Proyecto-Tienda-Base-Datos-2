@@ -213,6 +213,24 @@ ENGINE = MergeTree
 ORDER BY (termino, fecha)
 TTL toDateTime(fecha) + INTERVAL 12 MONTH;
 
+-- Las facetas elegidas (GET /buscador/productos/facetado, desde el
+-- 2026-09-26). Se guardan tal como las mando el cliente: `categoria=7,9`
+-- queda [7,9] y `precio=250-500` queda ['250-500']. Con DEFAULT, asi que las
+-- filas viejas y las de la busqueda simple quedan en facetada = 0.
+--
+-- Van en ALTER y no dentro del CREATE porque este archivo se reaplica en cada
+-- arranque sobre un volumen que ya tiene la tabla, y ahi el CREATE IF NOT
+-- EXISTS no hace nada. Sin estas columnas el backend no falla al buscar,
+-- pero el INSERT del evento si, en silencio, y la tendencia de facetas del
+-- admin se cae entera. Referencia de Jose David en
+-- backend/elementos Generales/plan pendiente/buscador-facetado-clickhouse.sql
+ALTER TABLE busqueda_realizada
+    ADD COLUMN IF NOT EXISTS facetada       UInt8         DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS categorias     Array(UInt32) DEFAULT [],
+    ADD COLUMN IF NOT EXISTS precios        Array(String) DEFAULT [],
+    ADD COLUMN IF NOT EXISTS calificaciones Array(String) DEFAULT [],
+    ADD COLUMN IF NOT EXISTS disponible     UInt8         DEFAULT 0;
+
 
 -- ============================================================
 -- busqueda_clic -- clic sobre un resultado de busqueda
@@ -238,6 +256,15 @@ CREATE TABLE IF NOT EXISTS busqueda_clic
 ENGINE = MergeTree
 ORDER BY (termino, fecha)
 TTL toDateTime(fecha) + INTERVAL 12 MONTH;
+
+-- Las facetas que estaban puestas en /buscar al hacer clic. Mismo criterio
+-- que en busqueda_realizada, arriba.
+ALTER TABLE busqueda_clic
+    ADD COLUMN IF NOT EXISTS facetada       UInt8         DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS categorias     Array(UInt32) DEFAULT [],
+    ADD COLUMN IF NOT EXISTS precios        Array(String) DEFAULT [],
+    ADD COLUMN IF NOT EXISTS calificaciones Array(String) DEFAULT [],
+    ADD COLUMN IF NOT EXISTS disponible     UInt8         DEFAULT 0;
 
 
 -- ============================================================
