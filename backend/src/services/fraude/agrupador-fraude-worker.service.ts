@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { HallazgoFraudeAdaptadorService } from './hallazgo-fraude-adaptador.service';
 import { AgrupadorFraudeService } from './agrupador-fraude.service';
@@ -27,9 +27,18 @@ import { PersistenciaCasoFraudeService } from './persistencia-caso-fraude.servic
  * `PersistenciaCasoFraudeService.limpiarCasosVaciosPendientes()`
  * (`docs/BACKEND-PENDIENTE.md`, item C8) -- ver el comentario de ese
  * metodo para el porque.
+ *
+ * **Corre tambien al arrancar el backend (agregado 2026-09-27, item C7).**
+ * El `@Interval` de Nest NO dispara de inmediato, solo despues de que pase
+ * el primer `INTERVALO_MS` (15 min) -- en una demo, eso significaba
+ * esperar 15 minutos despues de levantar el backend para ver la pestana
+ * de Casos con algo. `onApplicationBootstrap()` llama a la misma
+ * `ejecutarCiclo()` una vez, apenas Nest termina de inicializar todos los
+ * modulos -- mismo patron que `MasVendidosSyncService`/
+ * `RegistroOfertasSyncService`/`DisparadorReglasPeriodoService`.
  */
 @Injectable()
-export class AgrupadorFraudeWorkerService {
+export class AgrupadorFraudeWorkerService implements OnApplicationBootstrap {
   private readonly logger = new Logger(AgrupadorFraudeWorkerService.name);
 
   private static readonly INTERVALO_MS = 15 * 60 * 1000;
@@ -53,6 +62,11 @@ export class AgrupadorFraudeWorkerService {
     } finally {
       this.procesando = false;
     }
+  }
+
+  /** Ver el comentario de la clase -- corre una vez, al arrancar. */
+  async onApplicationBootstrap(): Promise<void> {
+    await this.ejecutar();
   }
 
   private async ejecutarCiclo(): Promise<void> {

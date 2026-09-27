@@ -94,7 +94,7 @@ export class VentasLimitadasService {
     );
     if (fila.porcentaje_descuento == null) {
       throw new ErrorConflicto(
-        `La oferta ${idOferta} necesita un descuento activo antes de abrir una venta relampago: aplicalo primero con POST /vendedor/ofertas/${idOferta}/descuento`,
+        `La oferta ${idOferta} necesita un descuento activo antes de abrir una venta relampago: aplicalo primero`,
       );
     }
     if (mecanismo === 'venta_relampago_manual') {

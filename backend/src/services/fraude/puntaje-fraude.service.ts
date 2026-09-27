@@ -169,13 +169,31 @@ export class PuntajeFraudeService {
     return bono;
   }
 
-  /** +10 si es mutuo, +5 si la regularidad es menor que 0.2 -- lee
-   * `metricas.es_mutuo`, `metricas.regularidad`. */
+  /**
+   * +10 si es mutuo, +5 si la regularidad es menor que 0.2 -- lee
+   * `metricas.es_mutuo`, `metricas.regularidad`.
+   *
+   * **Bug corregido (2026-09-27, "menores" de `docs/BACKEND-PENDIENTE.md`):**
+   * cuando B.3 calcula la regularidad con una media de 0 (un solo
+   * intervalo, o varios identicos), Neo4j devuelve `NaN`. `JSON.stringify`
+   * convierte ese `NaN` en el literal `null` al guardarlo en
+   * `anillo_fraude.detalle`, y `Number(null)` da `0` -- finito y menor a
+   * 0.2 -- asi que el viejo `Number(metricas.regularidad)` sumaba el bono
+   * de "regular" sobre un dato que en realidad no existia. Ahora se exige
+   * `typeof === 'number'` ANTES de mirar si es finito: un `null` (o
+   * cualquier otra cosa que no sea numero) nunca llega a `< 0.2`.
+   */
   private bonoPersistente(metricas: Record<string, unknown>): number {
     let bono = 0;
     if (metricas.es_mutuo === true) bono += 10;
-    const regularidad = Number(metricas.regularidad);
-    if (Number.isFinite(regularidad) && regularidad < 0.2) bono += 5;
+    const regularidad = metricas.regularidad;
+    if (
+      typeof regularidad === 'number' &&
+      Number.isFinite(regularidad) &&
+      regularidad < 0.2
+    ) {
+      bono += 5;
+    }
     return bono;
   }
 

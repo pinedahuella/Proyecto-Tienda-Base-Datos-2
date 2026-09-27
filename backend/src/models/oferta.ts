@@ -120,6 +120,11 @@ export interface OfertaPropiaResumen {
    * venta". Ver `POST/DELETE /vendedor/ofertas/:id/venta-limitada`.
    */
   es_inventario_limitado: boolean;
+  /** Cuando se apaga solo el descuento/la venta relampago (`null` =
+   * permanente, nunca vence solo) -- para que el panel pueda mostrar
+   * "vence a las 21:50". Ver `plan pendiente/vencimiento-automatico-oferta.md`. */
+  fecha_vencimiento_descuento: Date | null;
+  fecha_vencimiento_venta_limitada: Date | null;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
@@ -213,6 +218,8 @@ export interface FilaOfertaPropia {
   aprobo_nombre: string | null;
   aprobo_apellido: string | null;
   es_inventario_limitado: boolean;
+  fecha_vencimiento_descuento: Date | null;
+  fecha_vencimiento_venta_limitada: Date | null;
   fecha_creacion: Date;
   fecha_actualizacion: Date;
 }
