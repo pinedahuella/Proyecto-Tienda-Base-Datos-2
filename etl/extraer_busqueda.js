@@ -78,6 +78,7 @@ const cursor = db.productos.find(FILTRO, {
   precio_tienda: 1,
   stock_total: 1,
   total_ofertas: 1,
+  hay_descuento: 1,
   resenas_promedio: 1,
   resenas_total: 1,
   'variantes.nombre_variante': 1
@@ -108,6 +109,11 @@ cursor.forEach(function (p) {
     precio_tienda: aNumero(p.precio_tienda),
     stock_total: p.stock_total ?? 0,
     total_ofertas: p.total_ofertas ?? 0,
+    // La etiqueta de descuento en los resultados. La calcula el ETL del catalogo
+    // (etl/cargar.js) y el backend la manda igual en su sincronizacion
+    // incremental (buscador-sync.service.ts, desde 37ad2e6); si faltara aqui,
+    // reconstruir el indice la borraria de todos los productos.
+    hay_descuento: p.hay_descuento === true,
 
     // Salen del refresco de notas del ETL (etl/cargar_notas.js). Sirven para
     // desempatar dos productos que casan igual de bien con lo que se escribio.

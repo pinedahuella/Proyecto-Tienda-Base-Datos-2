@@ -6,7 +6,7 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-26 en la noche)
 
-Revisado contra tu a9e3d95. Lo de la Entrega final ya esta completo. Los
+Revisado contra tu 37ad2e6. Lo de la Entrega final ya esta completo. Los
 casos de fraude (C1 a C8) son de la Entrega 3. C2 y C3 son fallos seguros;
 C1 es una decision que conviene cerrar (ver su seccion, se reevaluo el mismo
 26). Van por orden de importancia, con la
@@ -22,18 +22,23 @@ seccion de abajo donde esta el detalle.
 | C6 | El vendedor de una granja de mas de 10 cuentas nunca es nucleo | seccion del 26 en la noche | media |
 | C7 | El primer caso sale a los 15 minutos, sin forma de pedirlo antes | seccion del 26 en la noche | media, para la demo |
 | C8 | Casos con 0 evidencias se quedan en la lista | seccion del 26 en la noche | baja |
-| 1 | El worker de descuentos borra los descuentos cuya clave de Redis nunca existio. Si Redis se vacia, se lleva todos los descuentos permanentes | seccion del 25, punto 1 | media |
 | 2 | Las senales y los detalles que faltan del fraude del login | seccion del 11, puntos 4 y 5 | media |
-| 3 | Un anillo de 3 deja un caso `cadena_abierta` que sobra junto al `ciclo`, y el panel ensena dos casos con las mismas cuentas | seccion del 25, punto 3 | media |
-| 4 | El estante de mas vendidos tarda hasta 10 minutos al arrancar y al cambiar un precio. Le falta el `onApplicationBootstrap` que ya le pusiste a las vitrinas | secciones del 23 en la tarde (punto 1) y del 23 (punto 1) | baja |
-| 5 | En el facetado, `resultados` guarda los que se mostraron y no el total | seccion del 26, abajo | baja |
-| 6 | `hay_descuento` no llega al indice de Elasticsearch | seccion del 23, punto 2 | baja |
-| 7 | El historial de precio de una oferta no trae el % | seccion del 23, punto 3 | baja |
-| 8 | El 409 de `ofertas.service.ts` linea 719 le ensena la ruta a la persona | seccion del 23, punto 4 | solo texto |
+| 4 | El estante de mas vendidos ya se arma al arrancar, pero al cambiar un precio sigue tardando hasta 10 minutos | seccion del 23, punto 1 | baja |
+| 8 | Queda uno de los dos 409 con la ruta dentro: `ventas-limitadas.service.ts` linea 97, "...aplicalo primero con POST /vendedor/ofertas/..." | seccion del 23, punto 4 | solo texto |
+| 9 | `GET /vendedor/ofertas` no devuelve `fecha_vencimiento_descuento` ni `fecha_vencimiento_venta_limitada`. Con eso el panel podria decir "vence a las 21:50" | nuevo, 2026-09-26 | baja |
 
 Hechos y ya no los pedimos: similares, facetado, sugerencias, el `DELETE` de
-reglas, el TTL de R2 y R3, "Para ti" vacio y las vitrinas de ofertas al
-arrancar.
+reglas, el TTL de R2 y R3, "Para ti" vacio, las vitrinas de ofertas al
+arrancar y, en 37ad2e6, el vencimiento en PostgreSQL (el viejo 1, ya es la
+migracion 028), `hay_descuento` en el indice (6), el total en `resultados` (5),
+el % en el historial de precio (7) y mas vendidos al arrancar (media 4). El 3,
+la `cadena_abierta` que sobra junto al ciclo, lo cerraste como decision: se
+queda, porque los dos estados son reales y el agrupador ya los junta en un
+solo caso. De este lado quedo conectado todo: la 028, el paso 5b-2 de
+arrancar, `hay_descuento` en `etl/extraer_busqueda.js` y en el mapeo, la
+etiqueta "Con descuento" en la cabecera y en /buscar, el % del dia en Mis
+pedidos y en el historial del vendedor, y la demo y la prueba de descuentos
+sin la clave de Redis (`pruebas/descuentos.sh` 98 OK con tu backend).
 
 ---
 

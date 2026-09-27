@@ -358,9 +358,10 @@ La Demo de descuentos, descuentos que se activan y se apagan solos:
 Crea un vendedor nuevo con ofertas nuevas, asi nunca choca con otro mecanismo de
 descuento. La regla pide 3 unidades en 2 minutos y da 15 por ciento por 150 s; un
 comprador nuevo hace 3 compras reales y el worker de reglas (cada 60 s, lee ClickHouse)
-aplica el descuento. El manual da 20 por ciento con vencimiento: se ve bajar el TTL de
-mesh:oferta:<n>:descuento (tambien en RedisInsight) y, al vencer, el worker lo quita y
-precio_historial lo anota a nombre de tienda@mesh.com. Al final borra la regla, retira
+aplica el descuento. El manual da 20 por ciento con vencimiento: se ve cuanto falta segun
+oferta.fecha_vencimiento_descuento en PostgreSQL (migracion 028) y, al llegar la fecha, el
+worker lo quita y precio_historial lo anota a nombre de tienda@mesh.com. Desde el
+2026-09-26 no hay llave de Redis para esto: un Redis vaciado ya no se lleva descuentos. Al final borra la regla, retira
 las ofertas y borra de ClickHouse las ventas y carritos del comprador. Quedan las
 cuentas y los pedidos en PostgreSQL. Es el grupo Demo de descuentos del panel.
 

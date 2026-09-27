@@ -211,9 +211,11 @@
 	/** Lo que devuelve GET /productos/ofertas/:id/historial?fecha= */
 	interface OfertaEnFecha {
 		id_oferta: string;
-		/** numeric(12,2) de PostgreSQL: llega como texto. */
+		/** numeric(12,2) de PostgreSQL: llega como texto. El de LISTA, sin descuento. */
 		precio: string;
 		stock: number;
+		/** El % de descuento de ese dia, o null. Desde 37ad2e6; un backend anterior no lo manda. */
+		porcentaje_descuento?: string | null;
 	}
 
 	/** Lo minimo de GET /vendedor/ofertas/producto/:id: de ahi sale el id_oferta. */
@@ -1322,7 +1324,11 @@
 								<span>{v.nombre_variante}</span>
 								{#if enFecha}
 									<span class="dato">
-										{quetzales(enFecha.precio)} · {enFecha.stock}
+										{quetzales(enFecha.precio)}
+										{#if Number(enFecha.porcentaje_descuento) > 0}
+											con {Number(enFecha.porcentaje_descuento)} % de descuento
+										{/if}
+										· {enFecha.stock}
 										{enFecha.stock === 1 ? 'unidad' : 'unidades'}
 									</span>
 								{:else}

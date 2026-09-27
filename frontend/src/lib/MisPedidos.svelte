@@ -956,6 +956,12 @@
 							<dt>Precio publicado</dt>
 							<dd>{dinero(oferta.precio)}</dd>
 						</div>
+						{#if tieneDescuento(oferta.porcentaje_descuento)}
+							<div class="ficha">
+								<dt>Descuento ese dia</dt>
+								<dd>{Number(oferta.porcentaje_descuento)} %</dd>
+							</div>
+						{/if}
 						<div class="ficha">
 							<dt>Existencias</dt>
 							<dd>

@@ -17,9 +17,13 @@
 #      backend/cambio_propuestas/2026-09-25_0700-disparador-reglas-automatico.md).
 #   2. Descuento manual con vencimiento. Otra oferta nueva recibe un 20 por
 #      ciento por 45 segundos (POST /vendedor/ofertas/:id/descuento con
-#      duracion_segundos). La llave mesh:oferta:<n>:descuento de Redis cuenta
-#      hacia atras; cuando vence, el worker de vencidos (cada 60 s) quita el
-#      descuento y precio_historial lo registra a nombre de tienda@mesh.com.
+#      duracion_segundos). PostgreSQL guarda cuando vence, en
+#      oferta.fecha_vencimiento_descuento (migracion 028), y la demo cuenta
+#      hacia atras con esa fecha; cuando vence, el worker de vencidos (cada
+#      60 s) quita el descuento y precio_historial lo registra a nombre de
+#      tienda@mesh.com. Hasta el 2026-09-26 la cuenta la llevaba una llave de
+#      Redis con TTL, mesh:oferta:<n>:descuento; ya no existe, porque un Redis
+#      vaciado se llevaba con ella los descuentos permanentes.
 #
 # Las dos ofertas son de una cuenta vendedora nueva de cada corrida, asi que
 # nunca chocan con otro mecanismo de descuento (la exclusion entre regla,
@@ -34,7 +38,7 @@
 # LO QUE NO SE PUEDE LIMPIAR: las dos cuentas, los pedidos, pagos y kardex de
 # PostgreSQL y las filas de precio_historial. Igual que en las otras demos.
 #
-# Redis, ClickHouse y PostgreSQL solo se LEEN para ensenar (TTL, historial);
+# Redis, ClickHouse y PostgreSQL solo se LEEN para ensenar (vencimiento, historial);
 # todo lo que cambia algo pasa por el backend, salvo la limpieza de arriba.
 
 param(
@@ -182,7 +186,7 @@ try {
         } else {
             Mal 'el worker no aplico el descuento en 90 s'; $fallos++
         }
-        # Pausar no apaga el efecto ya puesto (el TTL manda), pero evita que
+        # Pausar no apaga el efecto ya puesto (manda su fecha de vencimiento), pero evita que
         # vuelva a dispararse mientras corre la demo.
         Llamar PATCH "/vendedor/reglas-descuento/$regla" @{ activa = $false } $vendedor.Sesion | Out-Null
         Ok "regla pausada. El descuento sigue hasta que venzan sus $DURACION_REGLA s"
@@ -194,13 +198,20 @@ try {
         Paso "Parte 2. Descuento manual de $Duracion s sobre $($of.Nombre)"
         Llamar POST "/vendedor/ofertas/$($of.Id)/descuento" @{ porcentaje_descuento = $PCT_MANUAL; duracion_segundos = $Duracion } $vendedor.Sesion | Out-Null
         Ok "descuento puesto. $(Precio (Oferta $of.Id))"
-        $llave = "mesh:oferta:$($of.Id):descuento"
-        Ok "en Redis: $llave (buscala asi en RedisInsight, localhost:5540)"
+        $vence = Sql "SELECT to_char(fecha_vencimiento_descuento AT TIME ZONE 'America/Guatemala', 'HH24:MI:SS') FROM oferta WHERE id_oferta = $($of.Id)"
+        if (-not $vence) { Mal 'la oferta no tiene fecha_vencimiento_descuento. Falta la migracion 028 o el backend es viejo'; $fallos++ }
+        else { Ok "PostgreSQL guarda que vence a las $vence (oferta.fecha_vencimiento_descuento)" }
+        # La llave vieja de Redis ya no se crea. Si aparece, el backend es anterior a 37ad2e6.
+        if ((Redis exists "mesh:oferta:$($of.Id):descuento" | Out-String).Trim() -eq '1') {
+            Av 'aparecio la llave vieja mesh:oferta:<n>:descuento en Redis. El backend corriendo es anterior al 2026-09-26'
+        } else {
+            Ok 'en Redis no hay llave de este descuento. Aunque Redis se vacie, el vencimiento no se pierde'
+        }
         while ($true) {
-            $ttl = [int]((Redis ttl $llave | Out-String).Trim())
-            if ($ttl -lt 0) { Ok 'la llave vencio y Redis la borro'; break }
-            Write-Host "   TTL $ttl s" -ForegroundColor Yellow
-            Start-Sleep -Seconds ([Math]::Min(10, [Math]::Max(1, $ttl)))
+            $quedan = Sql "SELECT GREATEST(0, ceil(extract(epoch FROM fecha_vencimiento_descuento - now())))::int FROM oferta WHERE id_oferta = $($of.Id)"
+            if (-not ($quedan -match '^\d+$') -or [int]$quedan -le 0) { Ok 'llego la fecha de vencimiento'; break }
+            Write-Host "   faltan $quedan s" -ForegroundColor Yellow
+            Start-Sleep -Seconds ([Math]::Min(10, [Math]::Max(1, [int]$quedan)))
         }
         Write-Host '   esperando al worker de vencidos, corre cada 60 s...' -ForegroundColor DarkGray
         $s = EsperarDescuento $of.Id $false 90

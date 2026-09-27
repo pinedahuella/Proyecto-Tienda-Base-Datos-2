@@ -330,6 +330,7 @@
 											{#if marcaDeEstado(r)}
 												<span class="estado">{marcaDeEstado(r)}</span>
 											{/if}
+											{#if r.hay_descuento}<span class="descuento">Con descuento</span>{/if}
 											{#if nota(r)}<span class="dato">{nota(r)}</span>{/if}
 											<span class="dato" class:agotado={r.stock_total <= 0}>
 												{r.stock_total > 0 ? `${r.stock_total} disponibles` : 'Sin existencias'}
@@ -565,6 +566,17 @@
 		font-size: var(--f-xs);
 		color: var(--rojo);
 		border: 1px solid var(--rojo);
+		border-radius: 999px;
+	}
+
+	/* Los mismos colores que la etiqueta de descuento del catalogo. */
+	.descuento {
+		padding: 1px 7px;
+		font-size: var(--f-xs);
+		font-weight: 600;
+		color: var(--descuento-tinta);
+		background: var(--descuento-fondo);
+		border: 1px solid var(--descuento-linea);
 		border-radius: 999px;
 	}
 

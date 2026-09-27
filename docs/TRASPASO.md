@@ -5,6 +5,17 @@ Son cinco minutos y te ahorra el dia.
 
 Ultima actualizacion: **2026-09-26**.
 
+**El 26 a las 22:00: 37ad2e6 de David ("detalles varios"), conectado y probado en vivo.** Trae el vencimiento de los
+descuentos y de la venta relampago en PostgreSQL (migracion 028, dos columnas, NULL es permanente), asi que la clave de
+Redis `mesh:oferta:<id>:descuento` desaparecio y un Redis vaciado ya no se lleva descuentos. Tambien `hay_descuento` en
+el indice, el total en `resultados` de ClickHouse, el % en el historial de precio y mas vendidos al arrancar. De este
+lado: la 028 (aplicada dos veces sin error), el paso 5b-2 de arrancar ya no siembra claves y solo comprueba que la
+semilla nace permanente, `hay_descuento` en `etl/extraer_busqueda.js` y en `elastic/001_indice.json` (el indice
+reconstruido lo trae, coincide con Mongo), la etiqueta "Con descuento" en la cabecera y en /buscar (vista en Edge), el %
+del dia en Mis pedidos y en el historial del vendedor, y la demo y la prueba de descuentos sin la clave de Redis.
+`pruebas/descuentos.sh` 98 OK y `demo-descuentos-solos.ps1 -Parte manual` en verde, contra su backend. Pedido nuevo para
+el: que `GET /vendedor/ofertas` devuelva las dos fechas de vencimiento.
+
 **El 26 en la noche: los casos de fraude de David (a9e3d95).** Jalado y conectado. De este lado, la migracion
 026_casos_fraude.sql (su SQL con las llaves en cascada y R-CASI-1 sin A.4, aplicada dos veces sin error y con el
 candado de la 016 intacto) y la pestana Casos en Fraude (filtros por estado y nivel, detalle con nucleo, periferia

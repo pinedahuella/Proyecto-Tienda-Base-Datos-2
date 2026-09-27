@@ -44,6 +44,11 @@ export interface ResultadoBusqueda {
 	stock_total: number;
 	resenas_promedio: number;
 	resenas_total: number;
+	/**
+	 * Alguna presentacion tiene una oferta con descuento. Llega desde 37ad2e6
+	 * (2026-09-26); un indice armado antes no lo trae, por eso es opcional.
+	 */
+	hay_descuento?: boolean;
 }
 
 /**

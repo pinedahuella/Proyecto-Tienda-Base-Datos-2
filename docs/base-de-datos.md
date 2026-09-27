@@ -1246,22 +1246,25 @@ periodo. Una regla pausada no cuenta. Vive en el backend
 en el descuento manual solo lo sabe `oferta.porcentaje_descuento` y en las
 reglas su columna `activa`: son tres tablas.
 
-### La clave de Redis que decide si un descuento sigue vivo
+### Quien decide si un descuento sigue vivo (migracion 028)
 
-`POST .../descuento` crea `mesh:oferta:<id>:descuento` (valor `1`), con
-`EXPIRE` si se pidio `duracion_segundos` y sin vencimiento si no. Cada minuto
-el backend quita de PostgreSQL todo descuento que no este en venta relampago y
-cuya clave ya no exista. Es decir, **la verdad de "sigue vivo" esta en Redis**,
-no en una fecha de PostgreSQL.
+`POST .../descuento` guarda cuando vence en `oferta.fecha_vencimiento_descuento`:
+`now() + duracion_segundos`, o NULL si no se pidio duracion, que quiere decir
+permanente. La venta relampago tiene la suya, `fecha_vencimiento_venta_limitada`.
+Cada minuto el backend quita todo descuento que no este en venta relampago y
+cuya fecha ya paso. **La verdad de "sigue vivo" esta en PostgreSQL.**
 
-Eso tiene una consecuencia con la semilla: `001_catalogo.sql` pone sus 13
-descuentos directo en `oferta`, sin pasar por la ruta, asi que nacian sin
-clave y el backend los borraba en su primer minuto. `arrancar.ps1` (paso 5b-2)
-crea la clave de cada uno, sin vencimiento, justo despues de cargar la
-semilla. Solo entonces: en una base ya cargada una clave que falta puede ser
-un descuento con duracion que vencio con el backend apagado. Si alguien vacia
-Redis, los descuentos sin duracion se pierden igual; eso quedo pedido al
-backend en `docs/BACKEND-PENDIENTE.md`.
+Hasta el 2026-09-26 estaba en Redis: una clave `mesh:oferta:<id>:descuento`
+con `EXPIRE`, y el backend quitaba todo descuento cuya clave no existiera. Eso
+tenia dos problemas. La semilla (`001_catalogo.sql`) pone sus descuentos directo
+en `oferta`, sin clave, y `arrancar.ps1` tenia que sembrarlas en su paso 5b-2.
+Y un Redis vaciado se llevaba para siempre tambien los descuentos permanentes.
+Con la 028 (37ad2e6 de Jose David) la clave desaparecio y el paso 5b-2 solo
+comprueba que los descuentos de la semilla nacieron permanentes.
+
+Queda fuera a proposito: si Redis se vacia a media venta relampago, su
+contador de stock (`mesh:oferta:<id>`) no se vuelve a sembrar y la venta queda
+pausada hasta que venza o el vendedor la reabra. El descuento no se pierde.
 
 ## Los patrones B de resenas (migracion 023)
 

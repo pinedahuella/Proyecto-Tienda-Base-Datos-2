@@ -51,14 +51,15 @@
 #      /comprador/pedidos/:id cuadran con la formula.
 #  12. Quitar el descuento da 200, hay_descuento vuelve a false, y quitarlo
 #      otra vez da 409.
-#  13. La clave de Redis `mesh:oferta:<id>:descuento` (2026-09-24). Un
-#      descuento sin duracion la deja sin vencimiento (TTL -1) y quitarlo la
-#      borra. Es la unica senal que mira el worker de vencimiento: sin ella
-#      el descuento se da por vencido.
+#  13. El vencimiento vive en PostgreSQL, `oferta.fecha_vencimiento_descuento`
+#      (migracion 028, desde 37ad2e6 de David el 2026-09-26). Un descuento sin
+#      duracion la deja en NULL (permanente) y quitarlo la limpia. La clave
+#      vieja de Redis `mesh:oferta:<id>:descuento` ya no se crea: era la que
+#      hacia que un Redis vaciado se llevara los descuentos permanentes.
 #  14. La expiracion. duracion_segundos -1, 604801 y "60" dan 400. Con 6
-#      segundos la clave nace con TTL de 6 como mucho, y el worker del backend
+#      segundos la fecha queda de 1 a 6 s en el futuro, y el worker del backend
 #      (cada minuto) quita solo el descuento: porcentaje_descuento vuelve a
-#      NULL, Mongo a hay_descuento false y la clave desaparece. Tarda hasta
+#      NULL, la fecha tambien y Mongo a hay_descuento false. Tarda hasta
 #      ~70 s.
 #
 # LO QUE DEJA COMO ESTABA, aunque falle a la mitad (hay un trap): la venta
@@ -439,13 +440,15 @@ pedir POST "/vendedor/ofertas/$OFERTA/descuento" "$VEND" '{"porcentaje_descuento
 [ "$(mismo_num "$(sql "SELECT porcentaje_descuento FROM oferta WHERE id_oferta=$OFERTA;")" "$DESCUENTO")" = "1" ] \
     && OK "y el descuento sigue siendo el primero" || FALLA "el segundo descuento piso al primero"
 
-# La clave que mira el worker de vencimiento. Sin duracion, sin TTL. El
-# backend la escribe sin esperar a Redis (mejor esfuerzo), asi que se le da
-# un segundo.
+# Lo que mira el worker de vencimiento: la fecha en PostgreSQL. Sin duracion,
+# NULL. Y ninguna clave en Redis, que era la que se perdia con un FLUSHALL.
 CLAVE_DESC="mesh:oferta:$OFERTA:descuento"
+VENCE="SELECT COALESCE(fecha_vencimiento_descuento::text, 'null') FROM oferta WHERE id_oferta=$OFERTA;"
+[ "$(sql "$VENCE")" = "null" ] && OK "fecha_vencimiento_descuento en NULL, permanente, porque no se pidio duracion" \
+    || FALLA "fecha_vencimiento_descuento es '$(sql "$VENCE")' y el descuento era sin duracion (falta la 028?)"
 sleep 1
-[ "$(R EXISTS "$CLAVE_DESC")" = "1" ] && OK "Redis tiene $CLAVE_DESC" || FALLA "falta $CLAVE_DESC: el worker quitaria este descuento en su siguiente vuelta"
-[ "$(R TTL "$CLAVE_DESC")" = "-1" ] && OK "y sin vencimiento (TTL -1), porque no se pidio duracion" || FALLA "la clave tiene TTL $(R TTL "$CLAVE_DESC") y el descuento era sin duracion"
+[ "$(R EXISTS "$CLAVE_DESC")" = "0" ] && OK "y no depende de Redis, no hay $CLAVE_DESC" \
+    || FALLA "aparecio $CLAVE_DESC: el backend corriendo es anterior a 37ad2e6"
 
 
 # ============================================================
@@ -674,7 +677,7 @@ revisar_mongo false
 pedir DELETE "/vendedor/ofertas/$OFERTA/descuento" "$VEND"
 [ "$CODIGO" = "409" ] && OK "quitar un descuento que ya no esta, 409" || FALLA "quitarlo otra vez contesto $CODIGO"
 sleep 1
-[ "$(R EXISTS "$CLAVE_DESC")" = "0" ] && OK "quitarlo borro $CLAVE_DESC" || FALLA "$CLAVE_DESC sigue en Redis despues de quitar el descuento"
+[ "$(sql "$VENCE")" = "null" ] && OK "quitarlo deja fecha_vencimiento_descuento en NULL" || FALLA "fecha_vencimiento_descuento quedo en $(sql "$VENCE") despues de quitar el descuento"
 
 
 # ============================================================
@@ -694,11 +697,10 @@ pedir POST "/vendedor/ofertas/$OFERTA/descuento" "$VEND" "{\"porcentaje_descuent
 if [ "$CODIGO" = "201" ]; then
     DESCUENTO_PUESTO=1
     OK "descuento con duracion_segundos 6, 201"
-    sleep 1
-    ttl=$(R TTL "$CLAVE_DESC")
-    case "$ttl" in
-        [1-6]) OK "la clave nace con TTL $ttl (6 como mucho)" ;;
-        *)     FALLA "la clave tiene TTL '$ttl' y se pidieron 6 segundos" ;;
+    faltan=$(sql "SELECT ceil(extract(epoch FROM fecha_vencimiento_descuento - now()))::int FROM oferta WHERE id_oferta=$OFERTA;")
+    case "$faltan" in
+        [0-6]) OK "fecha_vencimiento_descuento a $faltan s (6 como mucho)" ;;
+        *)     FALLA "fecha_vencimiento_descuento a '$faltan' s y se pidieron 6 segundos" ;;
     esac
 
     quitado=0
@@ -710,8 +712,8 @@ if [ "$CODIGO" = "201" ]; then
     done
     if [ "$quitado" = "1" ]; then
         DESCUENTO_PUESTO=0
-        OK "el worker lo quito solo al vencer la clave"
-        [ "$(R EXISTS "$CLAVE_DESC")" = "0" ] && OK "y la clave ya no esta" || FALLA "la clave sigue en Redis"
+        OK "el worker lo quito solo al llegar la fecha"
+        [ "$(sql "$VENCE")" = "null" ] && OK "y limpio fecha_vencimiento_descuento" || FALLA "fecha_vencimiento_descuento quedo en $(sql "$VENCE")"
         [ "$(sql "SELECT COALESCE(porcentaje_descuento::text, 'null') FROM precio_historial WHERE id_oferta=$OFERTA ORDER BY id_precio_historial DESC LIMIT 1;")" = "null" ] \
             && OK "precio_historial registra la fila sin descuento" || FALLA "precio_historial no registro el vencimiento"
         # El recalculo de Mongo va despues del UPDATE, en la misma vuelta del worker.
