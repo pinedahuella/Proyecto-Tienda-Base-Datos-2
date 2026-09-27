@@ -188,6 +188,69 @@ No se necesita ningun cambio de codigo por este descarte -- ambos
 servicios ya se comportan como si A.4 no existiera, que es exactamente lo
 que se decidio.
 
+## Fallos reportados contra `a9e3d95` (`docs/BACKEND-PENDIENTE.md`, C1-C8) -- 2026-09-27
+
+El compañero midio 3 fallos reales con `pruebas/casos_fraude_fusion.cjs`
+(dentro de una transaccion que se deshace, sin dejar nada en la base) mas
+otros cinco items menores. Se van arreglando de a uno, empezando por los
+que no necesitan una decision de negocio:
+
+- **C3 (arreglado)** -- `sincronizarCuentas()` borraba las cuentas de TODA
+  la evidencia del caso, no solo la del grupo que se estaba guardando; si
+  dos grupos caian en el mismo caso, el segundo borraba las cuentas que
+  el primero ya habia puesto (105 evidencias sin cuentas, medido). Ahora
+  el `DELETE` va scopeado a los ids de evidencia de esta llamada. Probado
+  con `casos_fraude_fusion.cjs`: ya no aparece en la lista de FALLA, y las
+  5 cuentas de los dos anillos quedan completas tras la fusion.
+- **C8 (arreglado)** -- un caso `pendiente` que se queda sin evidencia
+  (por ejemplo si su unica fuente se borra via el `ON DELETE CASCADE` de
+  la 026) se quedaba en la lista para siempre. Nuevo
+  `PersistenciaCasoFraudeService.limpiarCasosVaciosPendientes()`, llamado
+  una vez al final de cada corrida completa del worker -- solo
+  `pendiente`, nunca un caso ya revisado/confirmado/descartado. Probado
+  sembrando dos casos vacios (uno pendiente, uno confirmado): se borro
+  exactamente el pendiente.
+- **C2 (arreglado)** -- al fusionar dos casos, sobrevive el de menor id y
+  el otro se borra ENTERO (solo su evidencia se movia) -- si el que se
+  borraba estaba `revisada`/`confirmada`, esa decision del admin se perdia
+  sin rastro. Decision (opcion "a" del reporte, la mas simple): el
+  sobreviviente hereda el estado mas grave (`confirmada` > `revisada`)
+  y el motivo -- `descartada`/`pendiente` nunca "promocionan" nada por
+  esta via, eso lo sigue manejando el `seReabre` que ya existia (reabre
+  solo si la firma de evidencia cambio). Nuevo
+  `PersistenciaCasoFraudeService.promocionDeEstado()`. Probado con
+  `casos_fraude_fusion.cjs`: el caso fusionado ahora queda `confirmada`
+  (antes volvia a `pendiente`, perdiendo la confirmacion del admin).
+- **C1 (pendiente, es una decision)** -- una alerta de login que toca
+  cuentas de dos anillos sin relacion fusiona sus casos, aunque el
+  agrupador dice que el login nunca fusiona por si solo. Hay que decidir
+  si una IP compartida SI debe unir casos (y que el agrupador lo haga a
+  proposito) o si NO debe (y la alerta se queda con el grupo que mas
+  cuentas comparta). Sin resolver todavia.
+- **C5 (arreglado)** -- los tres adaptadores (`obtenerDeGrafo`/
+  `obtenerDeEventos`/`obtenerDeLogin`) leian hallazgos sin mirar el
+  estado; uno que el admin ya marco `descartada` seguia sumando puntos y
+  uniendo cuentas en cada corrida. Ahora las tres consultas dejan fuera
+  `id_estado_alerta_fraude = 'descartada'` (mismo nombre de columna en
+  las tres tablas). Probado sembrando un par pendiente/descartada por
+  cada fuente (`anillo_fraude`, `hallazgo_evento_fraude`, `alerta_fraude`):
+  el pendiente aparece, el descartado no, en los tres adaptadores.
+  **Residual, no arreglado (fuera de lo que pidio C5):** un hallazgo que
+  YA era evidencia de un caso antes de marcarse `descartada` no se borra
+  de `evidencia_caso_fraude` solo -- deja de entrar en corridas futuras
+  (el agrupador ya no lo ve), pero su fila vieja de evidencia se queda
+  congelada, sumando los mismos puntos de siempre, salvo que ese caso se
+  quede sin ninguna otra evidencia (ahi si lo agarra C8). Si esto importa,
+  es un item nuevo, no estaba en la lista C1-C8.
+- **C4, C6, C7 y los "menores"** -- no marcados como evidencia por el
+  usuario, quedan fuera de esta ronda.
+
+Cada arreglo se probo en vivo, no solo por lectura de codigo: se compilo
+el backend (`npm run build`) para poder correr
+`pruebas/casos_fraude_fusion.cjs` tal cual, y para C8 un script puntual
+propio (no versionado) que sembro dos casos vacios a mano. `tsc`/`eslint`
+limpios despues de cada cambio.
+
 ## Le queda al compañero (fuera de `backend/`)
 
 Mandar esta migracion como la 026 real (`agrupador-fraude.sql`, este

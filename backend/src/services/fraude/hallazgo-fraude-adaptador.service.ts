@@ -63,7 +63,12 @@ export class HallazgoFraudeAdaptadorService {
 
   /** A.1/A.2 (mutuo, ciclo, reiterado) y B.1-B.3/B.5-B.7 -- todo lo que ya
    * persiste `anillo_fraude`, sin distinguir tipo aca: el agrupador decide
-   * que hacer con cada uno via el catalogo de puntos (seccion 3). */
+   * que hacer con cada uno via el catalogo de puntos (seccion 3).
+   *
+   * Deja fuera `descartada` (item C5, `docs/BACKEND-PENDIENTE.md`): un
+   * anillo que el admin ya reviso y marco como falso positivo no debe
+   * seguir sumando puntos ni sirviendo de puente entre cuentas en una
+   * corrida futura del agrupador. */
   async obtenerDeGrafo(): Promise<Hallazgo[]> {
     try {
       const resultado = await pool.query<FilaGrafo>(
@@ -71,7 +76,11 @@ export class HallazgoFraudeAdaptadorService {
                 a.clave, a.detalle, a.fecha_actualizacion
            FROM anillo_fraude a
            JOIN tipo_anillo_fraude t
-             ON t.id_tipo_anillo_fraude = a.id_tipo_anillo_fraude`,
+             ON t.id_tipo_anillo_fraude = a.id_tipo_anillo_fraude
+          WHERE a.id_estado_alerta_fraude <> (
+                  SELECT id_estado_alerta_fraude FROM estado_alerta_fraude
+                   WHERE estado_alerta_fraude_nombre = 'descartada'
+                )`,
       );
       return resultado.rows.map((fila) => {
         const cuentas = fila.clave
@@ -93,7 +102,8 @@ export class HallazgoFraudeAdaptadorService {
     }
   }
 
-  /** F2, F3, F5, F6 -- ver `TIPOS_EVENTO_INCLUIDOS`. */
+  /** F2, F3, F5, F6 -- ver `TIPOS_EVENTO_INCLUIDOS`. Deja fuera
+   * `descartada` -- ver el comentario de `obtenerDeGrafo()`. */
   async obtenerDeEventos(): Promise<Hallazgo[]> {
     try {
       const resultado = await pool.query<FilaConCuentas>(
@@ -107,6 +117,10 @@ export class HallazgoFraudeAdaptadorService {
            JOIN hallazgo_evento_fraude_cuenta c
              ON c.id_hallazgo_evento_fraude = h.id_hallazgo_evento_fraude
           WHERE t.tipo_hallazgo_evento_nombre = ANY($1)
+            AND h.id_estado_alerta_fraude <> (
+                  SELECT id_estado_alerta_fraude FROM estado_alerta_fraude
+                   WHERE estado_alerta_fraude_nombre = 'descartada'
+                )
           GROUP BY h.id_hallazgo_evento_fraude, t.tipo_hallazgo_evento_nombre,
                    h.detalle, h.fecha_actualizacion`,
         [TIPOS_EVENTO_INCLUIDOS],
@@ -121,7 +135,8 @@ export class HallazgoFraudeAdaptadorService {
    * `TIPOS_LOGIN_INCLUIDOS`. Las cuentas ya vienen resueltas en
    * `notificacion_fraude` (`registrarAlertaFraude` las resuelve una sola
    * vez al nacer la alerta, incluso cuando `alerta_fraude.detalle` solo
-   * trae identificadores de texto, correo o usuario). */
+   * trae identificadores de texto, correo o usuario). Deja fuera
+   * `descartada` -- ver el comentario de `obtenerDeGrafo()`. */
   async obtenerDeLogin(): Promise<Hallazgo[]> {
     try {
       const resultado = await pool.query<FilaConCuentas>(
@@ -135,6 +150,10 @@ export class HallazgoFraudeAdaptadorService {
            JOIN notificacion_fraude n
              ON n.id_alerta_fraude = a.id_alerta_fraude
           WHERE t.tipo_alerta_fraude_nombre = ANY($1)
+            AND a.id_estado_alerta_fraude <> (
+                  SELECT id_estado_alerta_fraude FROM estado_alerta_fraude
+                   WHERE estado_alerta_fraude_nombre = 'descartada'
+                )
           GROUP BY a.id_alerta_fraude, t.tipo_alerta_fraude_nombre,
                    a.detalle, a.fecha_actualizacion`,
         [TIPOS_LOGIN_INCLUIDOS],

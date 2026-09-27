@@ -13,6 +13,25 @@ const COLUMNA_POR_FUENTE: Record<FuenteHallazgo, string> = {
   login: 'id_alerta_fraude',
 };
 
+/** Que tan grave es cada estado, solo para decidir que hereda el
+ * sobreviviente de una fusion -- ver `promocionDeEstado()`. `descartada`
+ * va en el medio (una decision real del admin) pero NUNCA se promociona
+ * por esta via: reabrir un caso descartado es un camino aparte, ya
+ * resuelto por el `seReabre` de `resolverCaso()`. */
+const RANGO_ESTADO: Record<string, number> = {
+  pendiente: 0,
+  descartada: 1,
+  revisada: 2,
+  confirmada: 3,
+};
+
+interface EstadoCasoPrevio {
+  id_caso_fraude: string;
+  estado_alerta_fraude_nombre: string;
+  motivo: string | null;
+  firma_al_descartar: string | null;
+}
+
 /**
  * Paso 4 del agrupador de casos de fraude: reconcilia UN `GrupoFraude` ya
  * armado (`AgrupadorFraudeService`) y puntuado (`PuntajeFraudeService`/
@@ -63,7 +82,6 @@ export class PersistenciaCasoFraudeService {
       );
       await this.sincronizarCuentas(
         cliente,
-        idCasoFraude,
         grupo.hallazgos,
         idEvidenciaPorHallazgo,
         grupo.cuentas,
@@ -81,6 +99,48 @@ export class PersistenciaCasoFraudeService {
   }
 
   /**
+   * Borra los casos `pendiente` que se quedaron sin ninguna evidencia --
+   * `docs/BACKEND-PENDIENTE.md`, item C8. Puede pasar sin que sea un bug
+   * de este servicio: `evidencia_caso_fraude` tiene `ON DELETE CASCADE`
+   * desde su fuente real (`anillo_fraude`/`hallazgo_evento_fraude`/
+   * `alerta_fraude`), asi que si esa fila se borra de verdad (una prueba
+   * que limpia, un admin que borra una alerta vieja), la evidencia
+   * desaparece con ella, pero el caso que la tenia como unica evidencia
+   * se queda huerfano -- nada mas lo revisita para notar que ya no le
+   * queda nada.
+   *
+   * Solo `pendiente`: un caso que un admin ya revisó/confirmó/descartó no
+   * se borra solo aunque se quede sin evidencia -- esa decision humana no
+   * la borra un worker de mantenimiento. `caso_fraude_regla` tiene
+   * `ON DELETE CASCADE` hacia `caso_fraude`, asi que no hace falta
+   * borrarla aparte.
+   *
+   * La llama `AgrupadorFraudeWorkerService` una vez al final de cada
+   * corrida completa (todos los grupos ya persistidos) -- nunca desde
+   * `persistir()`, que es por-grupo y no sabe si otro grupo de la misma
+   * corrida dejo un caso vacio.
+   */
+  async limpiarCasosVaciosPendientes(): Promise<number> {
+    try {
+      const resultado = await pool.query<{ id_caso_fraude: string }>(
+        `DELETE FROM caso_fraude cf
+          WHERE cf.id_estado_alerta_fraude = (
+                  SELECT id_estado_alerta_fraude FROM estado_alerta_fraude
+                   WHERE estado_alerta_fraude_nombre = 'pendiente'
+                )
+            AND NOT EXISTS (
+                  SELECT 1 FROM evidencia_caso_fraude e
+                   WHERE e.id_caso_fraude = cf.id_caso_fraude
+                )
+          RETURNING id_caso_fraude`,
+      );
+      return resultado.rowCount ?? 0;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
    * Busca que casos existentes ya tocan alguno de estos hallazgos.
    * Ninguno -> crea uno nuevo. Uno -> lo actualiza. Dos o mas -> los
    * FUSIONA (se queda el de menor id, mueve la evidencia de los demas y
@@ -90,6 +150,18 @@ export class PersistenciaCasoFraudeService {
    * Si el caso resultante estaba `descartada` y la firma de evidencia
    * cambio, lo reabre como `pendiente` con una nota -- si la firma es
    * identica, se queda descartado (misma evidencia, misma decision).
+   *
+   * **Bug corregido (2026-09-27, item C2):** al fusionar, sobrevive el de
+   * menor id -- pero antes, si CUALQUIER otro de los que se fusionan
+   * estaba `revisada`/`confirmada`, esa decision del admin se perdia sin
+   * rastro (el caso sobrante se borra entero, solo su evidencia se movia).
+   * Medido en vivo con `pruebas/casos_fraude_fusion.cjs`: un caso
+   * `confirmada` fusionado dentro de uno `pendiente` volvia a quedar
+   * `pendiente`. Ahora, antes de borrar los sobrantes, se captura el
+   * estado/motivo de TODOS (sobreviviente incluido) y el sobreviviente
+   * hereda el mas grave -- `revisarPromocionDeEstado()` para el porque
+   * `descartada`/`pendiente` nunca "promocionan" por esta via (esas dos
+   * las sigue manejando el reabre de arriba, sin cambios).
    */
   private async resolverCaso(
     cliente: PoolClient,
@@ -130,6 +202,22 @@ export class PersistenciaCasoFraudeService {
     const [idSuperviviente, ...idsSobrantes] = [...idsExistentes].sort(
       (a, b) => a - b,
     );
+
+    // Capturado ANTES de borrar nada -- una vez que un sobrante se borra,
+    // su estado/motivo se pierden para siempre si no se guardaron ya.
+    const previos = await cliente.query<EstadoCasoPrevio>(
+      `SELECT cf.id_caso_fraude, eaf.estado_alerta_fraude_nombre, cf.motivo, cf.firma_al_descartar
+         FROM caso_fraude cf
+         JOIN estado_alerta_fraude eaf
+           ON eaf.id_estado_alerta_fraude = cf.id_estado_alerta_fraude
+        WHERE cf.id_caso_fraude = ANY($1)
+        FOR UPDATE`,
+      [[idSuperviviente, ...idsSobrantes]],
+    );
+    const estadoSuperviviente = previos.rows.find(
+      (fila) => Number(fila.id_caso_fraude) === idSuperviviente,
+    )!;
+
     for (const idSobrante of idsSobrantes) {
       await cliente.query(
         `UPDATE evidencia_caso_fraude SET id_caso_fraude = $1 WHERE id_caso_fraude = $2`,
@@ -144,21 +232,11 @@ export class PersistenciaCasoFraudeService {
       ]);
     }
 
-    const actual = await cliente.query<{
-      estado_alerta_fraude_nombre: string;
-      firma_al_descartar: string | null;
-    }>(
-      `SELECT eaf.estado_alerta_fraude_nombre, cf.firma_al_descartar
-         FROM caso_fraude cf
-         JOIN estado_alerta_fraude eaf
-           ON eaf.id_estado_alerta_fraude = cf.id_estado_alerta_fraude
-        WHERE cf.id_caso_fraude = $1
-        FOR UPDATE`,
-      [idSuperviviente],
-    );
+    const promocion = this.promocionDeEstado(previos.rows, estadoSuperviviente);
     const seReabre =
-      actual.rows[0].estado_alerta_fraude_nombre === 'descartada' &&
-      actual.rows[0].firma_al_descartar !== firma;
+      promocion == null &&
+      estadoSuperviviente.estado_alerta_fraude_nombre === 'descartada' &&
+      estadoSuperviviente.firma_al_descartar !== firma;
 
     await cliente.query(
       `UPDATE caso_fraude
@@ -170,7 +248,19 @@ export class PersistenciaCasoFraudeService {
       [nivel, puntaje, ultimaEvidencia, idSuperviviente],
     );
 
-    if (seReabre) {
+    if (promocion != null) {
+      await cliente.query(
+        `UPDATE caso_fraude
+            SET id_estado_alerta_fraude = (SELECT id_estado_alerta_fraude FROM estado_alerta_fraude WHERE estado_alerta_fraude_nombre = $1),
+                motivo = $2
+          WHERE id_caso_fraude = $3`,
+        [
+          promocion.estado_alerta_fraude_nombre,
+          promocion.motivo,
+          idSuperviviente,
+        ],
+      );
+    } else if (seReabre) {
       await cliente.query(
         `UPDATE caso_fraude
             SET id_estado_alerta_fraude = (SELECT id_estado_alerta_fraude FROM estado_alerta_fraude WHERE estado_alerta_fraude_nombre = 'pendiente'),
@@ -182,6 +272,36 @@ export class PersistenciaCasoFraudeService {
     }
 
     return idSuperviviente;
+  }
+
+  /**
+   * El mas grave entre `previos` (sobreviviente incluido) que sea
+   * `revisada`/`confirmada` y supere al del sobreviviente -- `null` si
+   * ninguno lo supera (incluye el caso comun de una sola fila, sin
+   * fusion de verdad). Nunca devuelve `pendiente` ni `descartada`: esas
+   * dos no "promocionan" nada, se manejan aparte (`descartada` con el
+   * `seReabre` de `resolverCaso()`; `pendiente` simplemente no cambia
+   * nada porque ya es el piso).
+   */
+  private promocionDeEstado(
+    previos: EstadoCasoPrevio[],
+    superviviente: EstadoCasoPrevio,
+  ): EstadoCasoPrevio | null {
+    const rangoActual = RANGO_ESTADO[superviviente.estado_alerta_fraude_nombre];
+    const candidatos = previos.filter(
+      (fila) =>
+        (fila.estado_alerta_fraude_nombre === 'confirmada' ||
+          fila.estado_alerta_fraude_nombre === 'revisada') &&
+        RANGO_ESTADO[fila.estado_alerta_fraude_nombre] > rangoActual,
+    );
+    if (candidatos.length === 0) {
+      return null;
+    }
+    return candidatos.sort(
+      (a, b) =>
+        RANGO_ESTADO[b.estado_alerta_fraude_nombre] -
+        RANGO_ESTADO[a.estado_alerta_fraude_nombre],
+    )[0];
   }
 
   /** Upsert de un `evidencia_caso_fraude` por hallazgo -- el `ON CONFLICT`
@@ -218,24 +338,35 @@ export class PersistenciaCasoFraudeService {
     return idEvidenciaPorHallazgo;
   }
 
-  /** Borra la membresia vieja del caso y la vuelve a armar entera desde
-   * las cuentas de cada hallazgo -- mas simple y menos propenso a dejar
-   * una fila huerfana que calcular un diff a mano. */
+  /**
+   * Borra la membresia vieja de CADA evidencia que se esta guardando en
+   * esta llamada, y la vuelve a armar entera desde las cuentas de su
+   * hallazgo -- mas simple y menos propenso a dejar una fila huerfana que
+   * calcular un diff a mano.
+   *
+   * **Bug corregido (2026-09-27):** el `DELETE` borraba la membresia de
+   * TODA la evidencia del caso (`WHERE id_caso_fraude = ...`), no solo la
+   * de `hallazgos` -- cuando dos grupos distintos terminaban en el mismo
+   * caso (una fusion, o evidencia que ya existia de una corrida anterior),
+   * el segundo `persistir()` borraba las cuentas que el primero ya habia
+   * puesto, sin volver a insertarlas (`hallazgos` aca es solo lo del
+   * grupo que se esta guardando ahora). Medido en vivo contra la base real
+   * (`docs/BACKEND-PENDIENTE.md`, item C3): 105 evidencias sin ninguna
+   * cuenta. Ahora el `DELETE` va scopeado a los ids de evidencia de
+   * `idEvidenciaPorHallazgo` (exactamente lo que este `for` esta a punto
+   * de reinsertar), nunca a evidencia ajena del mismo caso.
+   */
   private async sincronizarCuentas(
     cliente: PoolClient,
-    idCasoFraude: number,
     hallazgos: Hallazgo[],
     idEvidenciaPorHallazgo: Map<Hallazgo, number>,
     cuentas: Map<number, boolean>,
   ): Promise<void> {
+    const idsEvidencia = [...idEvidenciaPorHallazgo.values()];
     await cliente.query(
       `DELETE FROM evidencia_caso_fraude_cuenta
-        WHERE id_evidencia_caso_fraude IN (
-          SELECT id_evidencia_caso_fraude
-            FROM evidencia_caso_fraude
-           WHERE id_caso_fraude = $1
-        )`,
-      [idCasoFraude],
+        WHERE id_evidencia_caso_fraude = ANY($1)`,
+      [idsEvidencia],
     );
 
     for (const hallazgo of hallazgos) {

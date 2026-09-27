@@ -22,6 +22,11 @@ import { PersistenciaCasoFraudeService } from './persistencia-caso-fraude.servic
  * Mismo patron `@Interval` + bandera `procesando` que el resto de los
  * workers del proyecto: nunca lanza, un fallo se loguea y se reintenta en
  * la proxima corrida.
+ *
+ * Al final de cada corrida completa llama tambien a
+ * `PersistenciaCasoFraudeService.limpiarCasosVaciosPendientes()`
+ * (`docs/BACKEND-PENDIENTE.md`, item C8) -- ver el comentario de ese
+ * metodo para el porque.
  */
 @Injectable()
 export class AgrupadorFraudeWorkerService {
@@ -86,5 +91,21 @@ export class AgrupadorFraudeWorkerService {
     this.logger.log(
       `agrupador de fraude: ${persistidos}/${grupos.length} caso(s) al dia, de ${hallazgos.length} hallazgo(s)`,
     );
+
+    // Al final de la corrida completa, nunca por-grupo (ver el comentario
+    // del metodo): un grupo puede dejar vacio un caso que otro grupo de
+    // esta misma corrida ya toco.
+    try {
+      const borrados = await this.persistencia.limpiarCasosVaciosPendientes();
+      if (borrados > 0) {
+        this.logger.log(
+          `agrupador de fraude: ${borrados} caso(s) pendiente(s) sin evidencia borrado(s)`,
+        );
+      }
+    } catch (error) {
+      this.logger.warn(
+        `agrupador de fraude: no se pudieron limpiar los casos vacios (${(error as Error)?.message ?? error})`,
+      );
+    }
   }
 }
