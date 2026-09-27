@@ -4,6 +4,29 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-26 en la noche)
+
+Revisado contra tu ced29f5. Lo de la Entrega final ya esta completo, asi que
+nada de esto bloquea la entrega. Van por orden de importancia, con la seccion
+de abajo donde esta el detalle.
+
+| # | Que | Donde esta el detalle | Importa |
+|---|---|---|---|
+| 1 | El worker de descuentos borra los descuentos cuya clave de Redis nunca existio. Si Redis se vacia, se lleva todos los descuentos permanentes | seccion del 25, punto 1 | media |
+| 2 | Las senales y los detalles que faltan del fraude del login | seccion del 11, puntos 4 y 5 | media |
+| 3 | Un anillo de 3 deja un caso `cadena_abierta` que sobra junto al `ciclo`, y el panel ensena dos casos con las mismas cuentas | seccion del 25, punto 3 | media |
+| 4 | El estante de mas vendidos tarda hasta 10 minutos al arrancar y al cambiar un precio. Le falta el `onApplicationBootstrap` que ya le pusiste a las vitrinas | secciones del 23 en la tarde (punto 1) y del 23 (punto 1) | baja |
+| 5 | En el facetado, `resultados` guarda los que se mostraron y no el total | seccion del 26, abajo | baja |
+| 6 | `hay_descuento` no llega al indice de Elasticsearch | seccion del 23, punto 2 | baja |
+| 7 | El historial de precio de una oferta no trae el % | seccion del 23, punto 3 | baja |
+| 8 | El 409 de `ofertas.service.ts` linea 719 le ensena la ruta a la persona | seccion del 23, punto 4 | solo texto |
+
+Hechos y ya no los pedimos: similares, facetado, sugerencias, el `DELETE` de
+reglas, el TTL de R2 y R3, "Para ti" vacio y las vitrinas de ofertas al
+arrancar.
+
+---
+
 ## LO NUEVO DEL 2026-09-26: ced29f5 jalado y conectado
 
 Las tres rutas que se pedian abajo ya estan y encajan con las pantallas sin
@@ -222,8 +245,9 @@ una cadena cuyas cuentas ya forman un ciclo.
 ### 4. Lo que sigue abierto de antes
 
 - `reconciliar()` al arrancar (seccion del 23 en la tarde, punto 1): el
-  disparador de reglas por periodo ya corre al arrancar (2026-09-25, 17:30).
-  El `reconciliar()` de las vitrinas de ofertas sigue sin `onApplicationBootstrap`.
+  disparador de reglas por periodo ya corre al arrancar (2026-09-25, 17:30), y
+  las vitrinas de ofertas tambien desde ced29f5 (2026-09-26). Falta solo el
+  worker de mas vendidos.
 - ~~No hay `DELETE` de regla, ni automatica ni por periodo.~~ Hecho el
   2026-09-25 con 409 si la regla esta activa. Los paneles del vendedor ya tienen
   el boton Borrar en las reglas pausadas, `reglas_periodo.sh` lo prueba en su
