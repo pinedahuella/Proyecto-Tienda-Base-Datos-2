@@ -17,6 +17,12 @@ debe unir casos o no, porque el agrupador dice que no y el guardado lo hace. Pro
 clases compiladas dentro de una transaccion deshecha, en pruebas/casos_fraude_fusion.cjs, que hoy da 3 FALLA (C1, C2 y C3) y
 tiene que dar 0 cuando David lo arregle. Nada de backend/ se toco.
 
+**Ollama y el backend, probado en vivo el 26 a las 21:25.** cargar_vectores.ps1 corrio entero (3105 de 3105, 0 por
+calcular, 26 s; no toco backend/.env porque ya coincidia). El worker de vectores de David (VectoresSyncService) se
+corrio a mano con su codigo compilado sobre un producto marcado como editado: llego a Ollama, recalculo, dejo el mismo
+hash y el MISMO vector que el ETL (distancia 0) y bajo la bandera en Mongo. pruebas/vectores_worker.cjs, 5 OK. Sin
+probar queda solo el contenedor mesh-ollama, que se usa unicamente en una PC sin Ollama.
+
 **El 2026-09-26: ced29f5 de David jalado y conectado, sin levantar nada.** David hizo las tres rutas que faltaban:
 `GET /productos/:id/similares`, `GET /buscador/productos/facetado` y `GET /buscador/productos/sugerencias`. Tambien
 agrego `VectoresSyncService`, que cada 3 horas recalcula los vectores de los productos editados, `GET /vectores`,
