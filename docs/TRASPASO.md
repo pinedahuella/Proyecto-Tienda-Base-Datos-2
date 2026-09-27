@@ -5,6 +5,27 @@ Son cinco minutos y te ahorra el dia.
 
 Ultima actualizacion: **2026-09-26**.
 
+**PARA LA PROXIMA VEZ: probar todo junto, en este orden.** El 26 todo se probo por partes, levantando solo lo
+necesario por la RAM. Lo que NUNCA corrio entero es `arrancar.ps1` con las migraciones 026, 027 y 028 y el indice con
+`hay_descuento`. Al terminar el 26 quedo todo apagado, incluido Ollama; `cargar_vectores.ps1` lo vuelve a encender solo.
+
+```
+1. .rrancar.ps1                         aplica 026, 027 y 028, recalcula vectores (paso 7d) y rehace el indice
+                                          Si falta RAM: docker stop mesh-pgadmin mesh-dbgate mesh-redisinsight
+2. .\panel-comandos.ps1                   y desde ahi reiniciar backend y frontend (compilan lo de hoy)
+3. bash pruebas/descuentos.sh             98 OK el 26
+4. node pruebas/casos_fraude_fusion.cjs   0 FALLA y C1 como DECISION el 26 (necesita el backend compilado)
+5. node pruebas/vectores_worker.cjs       5 OK el 26
+6. python pruebas/recomendacion_semantica.py   15 OK
+7. python elastic/pruebas/facetas.py       19 OK
+8. Panel de comandos, Demos de la Entrega final: las 5 (acceso, semantica, facetas, vectores, rastro)
+   y Demo de descuentos, parte manual
+9. Esperar 15 minutos desde que arranco el backend (el agrupador no corre antes, C7) y mirar
+   /panel, Fraude, pestana Casos
+10. Con todo arriba, los arneses de pruebas/*.sh en serie, DE UNO EN UNO (ver el recuadro "Antes de decir que algo
+    funciona, MIDELO" mas abajo). alertas_login.sh y demo-fraude-pais borran alertas: con la 026 ya no chocan
+```
+
 **El 26 a las 22:15: 14e5084 de David, los arreglos de los casos de fraude.** Arreglo C2, C3, C5 y C8. Comprobado de este
 lado con `node pruebas/casos_fraude_fusion.cjs` contra su backend compilado: el caso fusionado queda confirmado y con sus
 5 cuentas, 0 FALLA. C1 sigue como decision (la prueba lo marca asi), y mientras se una, el puntaje sale del ultimo grupo
