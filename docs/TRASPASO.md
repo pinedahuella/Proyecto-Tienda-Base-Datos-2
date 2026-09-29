@@ -258,7 +258,7 @@ demo-redis-sin-ttl   .ps1 con -Accion crear, ver o borrar. Crea mesh:demo:sin_tt
                      TTL de 600 s). ver lista todas las mesh:* con tipo y TTL, borrar solo quita las mesh:demo:*.
                      Son tres comandos nuevos del grupo Demo de Redis: el panel de comandos tiene 29 en cinco
                      grupos (comandos.txt)
-PREGUNTAS-SUSTENTACION.md  En la raiz. 118 preguntas y respuestas para la sustentacion, con el archivo y las
+PREGUNTAS-SUSTENTACION.md  En la raiz. 121 preguntas y respuestas para la sustentacion, con el archivo y las
                      lineas de cada cosa
 ```
 

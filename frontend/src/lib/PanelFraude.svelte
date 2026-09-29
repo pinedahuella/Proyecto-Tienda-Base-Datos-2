@@ -1421,7 +1421,9 @@
 			case 'descartada':
 				return 'No hay casos descartados.';
 			default:
-				return 'Todavia no hay casos. El sistema los arma cada 15 minutos con lo que encuentran las otras pestanas.';
+				// Desde de5de2a el agrupador corre tambien al arrancar el backend, no
+				// solo cada 15 minutos.
+				return 'Todavia no hay casos. El sistema los arma al arrancar y cada 15 minutos con lo que encuentran las otras pestanas.';
 		}
 	}
 </script>
@@ -1498,7 +1500,7 @@
 	<p class="intro">
 		Un caso junta lo que encuentran las otras pestanas cuando toca a las mismas cuentas, y le pone
 		un puntaje. Mas puntos si viene de varias fuentes y si es reciente. Casi confirmado quiere decir
-		que cumple una regla que casi nunca tiene otra explicacion. Se recalculan cada 15 minutos.
+		que cumple una regla que casi nunca tiene otra explicacion. Se recalculan al arrancar y cada 15 minutos.
 	</p>
 
 	<div class="filtros-alertas">

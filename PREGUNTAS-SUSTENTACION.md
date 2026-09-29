@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 119 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 121 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las líneas son las del código en main al 20 de septiembre de 2026, salvo las preguntas 32 a 34 y la 119, que están al 23 de septiembre. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
 
@@ -956,7 +956,7 @@ Sí, en Redis. Hay tres usuarios de ACL, cada uno con lo justo. `default` es el 
 
 - Dónde se ve. `docker-compose.yml` lineas 121 a 170, los tres usuarios con sus reglas, y 213, RedisInsight entrando como inspeccion. `redis/prueba_acceso.sh`, 31 OK, con el ACL DRYRUN en las lineas 53 a 63. En vivo, `.\demo-entrega-final.ps1 -Parte acceso` o el botón Quien puede que en Redis del panel de comandos. El ADR-11 está en el informe, sección 3.1.
 - Lo que pide el profesor. Entrega final, roles y permisos acotados según el servicio, con evidencia de que quien no tiene permiso no puede operar fuera de su alcance (4 pts).
-- Por qué así. Redis es el que guarda lo más delicado en caliente, el carrito, los contadores de fraude y los descuentos con su TTL, y un FLUSHALL por error se lleva todo eso. Además sigue la autorización por rol en la API, con 401 y 403, en `backend/src/guards/sesion.guard.ts` lineas 41 a 98.
+- Por qué así. Redis es el que guarda lo más delicado en caliente, el carrito, los contadores de fraude y las ventas relámpago, y un FLUSHALL por error se lleva todo eso. Además sigue la autorización por rol en la API, con 401 y 403, en `backend/src/guards/sesion.guard.ts` lineas 41 a 98.
 
 ### 117. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
 Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector y un índice HNSW. `productos_similares()` devuelve los seis más cercanos por distancia coseno, sin el propio producto, sin inactivos y sin copias del generador. El backend trae esos ids y pide a MongoDB cómo se ven. Los 3105 productos tienen vector.
@@ -978,3 +978,16 @@ La oferta guarda su precio de lista y aparte un porcentaje de descuento que pued
 - Dónde se ve. `migrations/020_descuentos_oferta.sql` lineas 109 a 129, las dos columnas. Lineas 196 a 198, el trigger. Lineas 314 a 317, el cobro con descuento. `backend/src/helpers/precio-descuento.ts` lineas 20 a 21, la misma fórmula en el backend. `backend/src/services/vendedores/ventas-limitadas.service.ts` lineas 73 a 77, el 409 al abrir sin descuento. `pruebas/descuentos.sh` lineas 379 a 386 y 471 a 484, los dos 409 medidos por HTTP.
 - Lo que pide el profesor. No es un requisito aparte del enunciado; se apoya en el historial de precios de la fase inicial y en la venta relámpago de la Entrega 2.
 - Por qué así. Guardar el precio final sería una segunda verdad que puede quedar vieja. Con el de lista y el porcentaje, el historial y el pedido saben qué se publicó y qué se cobró.
+
+### 120. ¿Cómo se juntan las alertas de fraude en casos y cómo se decide quién es el núcleo?
+Las cuatro familias de detección (anillos y patrones de reseñas en Neo4j, compras y navegación en ClickHouse, y el login en Elasticsearch) dejan hallazgos, cada uno con las cuentas que toca. El agrupador une en un mismo grupo los hallazgos que comparten cuentas, pero el login nunca une por sí solo, porque compartir una IP es un indicio y no una prueba. Una cuenta es núcleo si aparece en dos o más hallazgos del grupo o en uno fuerte (ciclo, reiterado, satélites, coordinados), y el resto es periferia, que se lista pero ninguna acción automática toca. El puntaje suma los puntos por tipo, los multiplica por la diversidad de fuentes y los reduce si la evidencia es vieja. El agrupador corre al arrancar el backend y después cada 15 minutos.
+
+- Dónde se ve. `backend/src/services/fraude/agrupador-fraude.service.ts` linea 60 (agrupar) y 156 (las cuentas concentradoras). `puntaje-fraude.service.ts` linea 65. `agrupador-fraude-worker.service.ts` linea 68, la corrida al arrancar. `migrations/026_casos_fraude.sql` lineas 48, 102 y 152, el caso, su evidencia y sus cuentas. En la app, el panel de Fraude, pestaña Casos. Pruebas `node pruebas/casos_fraude_fusion.cjs` y `node pruebas/casos_fraude_granja.cjs`.
+- Ojo si preguntan por el vendedor de una granja. Una cuenta con más de 10 contrapartes en reseñas es concentradora y nunca es núcleo. Antes contaban también las reseñas del propio fraude, así que el vendedor que armaba una granja de 11 cuentas quedaba fuera del núcleo de su caso. Ahora esas reseñas no cuentan para el umbral, y la prueba de la granja lo demuestra (saboteada falla).
+- Lo que queda abierto. Si una IP compartida debe unir casos (C1) y que la recencia use la fecha del detector y no la del admin (C4). Están en `docs/BACKEND-PENDIENTE.md` y la propuesta de fondo en `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`.
+
+### 121. ¿Dónde vive el vencimiento de un descuento y qué pasa si se vacía Redis?
+En PostgreSQL. La oferta guarda `fecha_vencimiento_descuento` y `fecha_vencimiento_venta_limitada`, y nulo quiere decir que no vence. Un worker del backend revisa cada minuto las que ya pasaron su fecha y las apaga. Hasta el 26 de septiembre el vencimiento era una clave de Redis con TTL, y un Redis vaciado se llevaba los descuentos. Ahora Redis solo lleva el contador de la venta relámpago. El panel del vendedor muestra hasta cuándo dura cada uno, y si la venta relámpago vence sola se lleva también el descuento, así que la etiqueta muestra la fecha que llega primero.
+
+- Dónde se ve. `migrations/028_vencimiento_oferta.sql` lineas 44 y 45. `backend/src/services/vendedores/ventas-limitadas.service.ts` lineas 364 y 422. `frontend/src/lib/descuento.ts` linea 76 y `OfertasVendedor.svelte` linea 571. En vivo, `.\demo-descuentos-solos.ps1 -Parte manual`, que muestra la fecha en PostgreSQL, por la ruta del vendedor y el worker quitándolo.
+- Por qué así. Una fecha en la base de verdad no se pierde con un FLUSHALL, y el worker puede saber qué venció sin preguntarle a Redis.
