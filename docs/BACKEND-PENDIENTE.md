@@ -12,6 +12,11 @@ imagen y si se puede comprar, y el paso 7e de arrancar la llena (16908 ofertas,
 0 sin copia). Lo tuyo son los pasos 3.1 a 3.9 de `docs/PLAN-COMPRAR-SIN-MONGO.md`,
 en ese orden: primero escribir la copia al crear una oferta y al editar un
 producto, despues leerla en el carrito y en el pedido en vez de ir a MongoDB.
+Decidido con el equipo el 29: editar un producto es SINCRONO (PostgreSQL y
+MongoDB en la misma peticion, las dos o ninguna, paso 3.2), y el precio y la
+cantidad van a MongoDB por el outbox `evento_catalogo` de la migracion 030, que
+ya existe con sus triggers y su prueba. Te toca el worker que la vacia (3.8,
+copiado de GrafoSyncService) y quitar los `await` de despues de comprar (3.9).
 Cada funcion con su linea esta en el plan. Cuando lo subas, yo ajusto
 `pruebas/falla_checkout.sh` y cierro la fila 12.
 

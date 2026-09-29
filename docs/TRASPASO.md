@@ -9,7 +9,9 @@ Ultima actualizacion: **2026-09-29**.
 base quedo hecha y probada en vivo: `migrations/029_catalogo_en_oferta.sql` (seis columnas en `oferta`, la funcion
 `copiar_catalogo_a_oferta` y el trigger de la fecha que ya no se mueve por la copia) y el paso 7e de `arrancar.ps1`
 con `etl/extraer_catalogo_oferta.js`. Medido: 16908 ofertas copiadas, la segunda vuelta cambia 0, las fechas de las
-ofertas iguales antes y despues, 0 sin copia. **El backend es de David y no se toco.** Sus pasos, con archivo y linea,
+ofertas iguales antes y despues, 0 sin copia. Despues, por decision del equipo, la migracion 030 con el outbox
+`evento_catalogo` (precio, descuento, stock y estado de una oferta van a MongoDB por un worker) y editar un producto
+pasa a ser sincrono en las dos bases. `pruebas/evento_catalogo.sql` da 14 OK. **El backend es de David y no se toco.** Sus pasos, con archivo y linea,
 estan en `docs/PLAN-COMPRAR-SIN-MONGO.md`. Cuando los suba, falta ajustar el escenario B de `pruebas/falla_checkout.sh`
 (con MongoDB parado la compra tiene que salir) y cerrar la fila 12 de PENDIENTES y la 11 de CONSISTENCIA-CHECKOUT.
 
