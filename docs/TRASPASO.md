@@ -3,32 +3,35 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-26**.
+Ultima actualizacion: **2026-09-28**.
 
-**Antes que nada: de5de2a de David ("cambios varios", 26 a las 22:19) esta jalado pero SIN revisar.** Toca
-`models/oferta.ts`, `ofertas.service.ts`, `ventas-limitadas.service.ts` y el puntaje, el agrupador y el worker de los
-casos de fraude; seguramente son los pendientes 8 y 9 y C4, C6 o C7 de BACKEND-PENDIENTE. Revisarlo contra esa lista y
-conectar lo que haga falta de este lado antes de probar.
+**EMPIEZA AQUI (28-09, noche).** Lo del 26 quedo probado todo junto y la revision del profesor dejo trabajo nuevo.
 
-**PARA LA PROXIMA VEZ: probar todo junto, en este orden.** El 26 todo se probo por partes, levantando solo lo
-necesario por la RAM. Lo que NUNCA corrio entero es `arrancar.ps1` con las migraciones 026, 027 y 028 y el indice con
-`hay_descuento`. Al terminar el 26 quedo todo apagado, incluido Ollama; `cargar_vectores.ps1` lo vuelve a encender solo.
+**Lo siguiente es decidir las propuestas de `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`** (fila 32 de PENDIENTES). El
+profesor dijo que las decisiones del informe son genericas y no contestan ni las dependencias entre bases ni el fraude.
+El documento propone un modelo unico de senales con su historia de detecciones en ClickHouse (su ejemplo del par mutuo
+que se vuelve a detectar), doce consultas nuevas en las cinco bases, copiar el nombre en `oferta` para comprar solo con
+PostgreSQL y Redis, el carrito que guarda la foto que manda el frontend, Elasticsearch mas alla de las facetas y la
+busqueda hibrida con el vector. Nada esta implementado, se espera la decision del equipo.
+
+**de5de2a de David, revisado y probado en vivo el 28.** Arreglo C6, C7, los pendientes 8 y 9 y el NaN de la regularidad.
 
 ```
-1. .rrancar.ps1                         aplica 026, 027 y 028, recalcula vectores (paso 7d) y rehace el indice
-                                          Si falta RAM: docker stop mesh-pgadmin mesh-dbgate mesh-redisinsight
-2. .\panel-comandos.ps1                   y desde ahi reiniciar backend y frontend (compilan lo de hoy)
-3. bash pruebas/descuentos.sh             98 OK el 26
-4. node pruebas/casos_fraude_fusion.cjs   0 FALLA y C1 como DECISION el 26 (necesita el backend compilado)
-5. node pruebas/vectores_worker.cjs       5 OK el 26
-6. python pruebas/recomendacion_semantica.py   15 OK
-7. python elastic/pruebas/facetas.py       19 OK
-8. Panel de comandos, Demos de la Entrega final: las 5 (acceso, semantica, facetas, vectores, rastro)
-   y Demo de descuentos, parte manual
-9. Esperar 15 minutos desde que arranco el backend (el agrupador no corre antes, C7) y mirar
-   /panel, Fraude, pestana Casos
-10. Con todo arriba, los arneses de pruebas/*.sh en serie, DE UNO EN UNO (ver el recuadro "Antes de decir que algo
-    funciona, MIDELO" mas abajo). alertas_login.sh y demo-fraude-pais borran alertas: con la 026 ya no chocan
+arrancar.ps1            corrio entero con 026, 027 y 028 (279 s, exit 0). Se salto los vectores porque Ollama de la
+                        PC tardo mas de 30 s en despertar con todo lo demas subiendo. Ahora espera 120 s, y probado
+                        con Ollama apagado, lo enciende y sigue (25 s)
+C7                      el agrupador corre al arrancar, 10 casos de 126 hallazgos, el backend escucha unos 2 s despues
+C6 y regularidad        pruebas/casos_fraude_granja.cjs, 6 OK, saboteada (sin el filtro) da 2 FALLA
+casos_fraude_fusion     0 FALLA, C1 sigue como DECISION
+9, fechas de vencimiento  el panel del vendedor dice "-10% hasta las 22:40" y "Venta relampago abierta hasta las 22:40",
+                        y si la venta vence sola se lleva el descuento, asi que manda la fecha mas temprana. Visto en
+                        Edge como desarrollador1, 0 errores de JavaScript
+Pruebas sueltas         descuentos 98, vectores_worker 5, recomendacion_semantica 15, facetas 19
+Demos                   las 5 de la Entrega final y la de descuentos, corridas desde la pestana Comandos del frontend
+                        como desarrollador1, todas "Termino bien". La de descuentos ahora muestra la fecha por la ruta
+Arneses en serie        23 de 23 en verde, incluido falla_checkout 31. Dos estaban viejos y se ajustaron,
+                        alertas_login (la 026 agrego el estado confirmada, 52 OK) y anillos (la cuenta de control sale
+                        en una cadena abierta de la familia B, que es periferia por diseno, 27 OK)
 ```
 
 **El 26 a las 22:15: 14e5084 de David, los arreglos de los casos de fraude.** Arreglo C2, C3, C5 y C8. Comprobado de este
