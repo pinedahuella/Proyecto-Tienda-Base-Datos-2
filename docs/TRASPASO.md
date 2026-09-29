@@ -3,7 +3,15 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-28**.
+Ultima actualizacion: **2026-09-29**.
+
+**EMPIEZA AQUI (29-09).** De las propuestas del profesor se empezo por la decision 5, comprar sin MongoDB. La
+base quedo hecha y probada en vivo: `migrations/029_catalogo_en_oferta.sql` (seis columnas en `oferta`, la funcion
+`copiar_catalogo_a_oferta` y el trigger de la fecha que ya no se mueve por la copia) y el paso 7e de `arrancar.ps1`
+con `etl/extraer_catalogo_oferta.js`. Medido: 16908 ofertas copiadas, la segunda vuelta cambia 0, las fechas de las
+ofertas iguales antes y despues, 0 sin copia. **El backend es de David y no se toco.** Sus pasos, con archivo y linea,
+estan en `docs/PLAN-COMPRAR-SIN-MONGO.md`. Cuando los suba, falta ajustar el escenario B de `pruebas/falla_checkout.sh`
+(con MongoDB parado la compra tiene que salir) y cerrar la fila 12 de PENDIENTES y la 11 de CONSISTENCIA-CHECKOUT.
 
 **EMPIEZA AQUI (28-09, noche).** Lo del 26 quedo probado todo junto y la revision del profesor dejo trabajo nuevo.
 

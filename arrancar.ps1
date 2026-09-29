@@ -2755,6 +2755,80 @@ if ($proximoId -notmatch '^\d+$') {
 
 
 # ------------------------------------------------------------
+# 7e. La copia del catalogo dentro de cada oferta
+# ------------------------------------------------------------
+# Migracion 029. Cada oferta guarda el nombre del producto y de la variante, la
+# imagen y si se puede comprar, para que el checkout no dependa de MongoDB.
+# PostgreSQL no puede leer MongoDB, asi que la copia se lleva desde aqui:
+# etl/extraer_catalogo_oferta.js arma una llamada a copiar_catalogo_a_oferta()
+# dentro de mesh-mongo, se copia a mesh-postgres y se corre alli.
+#
+# Va despues del catalogo (7) y de los lotes (5c y 6b), que son los que crean
+# ofertas sin copia. En un arranque normal no cambia ninguna fila, porque la
+# funcion solo escribe lo que difiere.
+#
+# NO corta el arranque. Mientras el backend no lea estas columnas nada depende
+# de ellas, y cuando las lea, una oferta sin copia (catalogo_copiado_en NULL)
+# vuelve a pedirle el dato a MongoDB. Pero avisa en rojo, porque sin la copia
+# el checkout sigue cayendo con MongoDB.
+#
+# Las ofertas que quedan sin copia despues de esto son ofertas sobre una
+# variante que ya no existe en MongoDB. Se cuentan aparte porque no es un fallo
+# de la copia, es un dato huerfano que ya estaba ahi.
+Paso "Copiando el catalogo a las ofertas"
+
+$tmpCatalogo = Join-Path $env:TEMP "mesh-catalogo-oferta"
+New-Item -ItemType Directory -Force -Path $tmpCatalogo | Out-Null
+$sqlCatalogo = Join-Path $tmpCatalogo "mesh-catalogo-oferta.sql"
+
+$copiaOk = $false
+docker cp "$PSScriptRoot\etl\extraer_catalogo_oferta.js" "mesh-mongo:/tmp/extraer_catalogo_oferta.js" 2>&1 | Out-Null
+if ($LASTEXITCODE -ne 0) {
+    Error1 "No se pudo copiar extraer_catalogo_oferta.js a Mongo"
+} else {
+    $salidaCatalogo = docker exec mesh-mongo sh -c (Comando-Mongo "--file /tmp/extraer_catalogo_oferta.js") 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        Error1 "No se pudo leer el catalogo de MongoDB para las ofertas:"
+        Write-Host $salidaCatalogo -ForegroundColor Red
+    } else {
+        $partes = $salidaCatalogo.Trim() -split '\s+'
+        docker cp "mesh-mongo:/tmp/mesh-catalogo-oferta.sql" "$sqlCatalogo" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Error1 "No se pudo traer mesh-catalogo-oferta.sql de Mongo" }
+        else {
+            docker cp "$sqlCatalogo" "mesh-postgres:/tmp/mesh-catalogo-oferta.sql" 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar mesh-catalogo-oferta.sql a PostgreSQL" }
+            else {
+                $cambiadas = (docker exec mesh-postgres sh -c "psql -U $($env_['DB_USER']) -d $($env_['DB_NAME']) -qtAX -v ON_ERROR_STOP=1 -f /tmp/mesh-catalogo-oferta.sql" 2>&1 | Out-String).Trim()
+                if ($LASTEXITCODE -ne 0 -or $cambiadas -notmatch '^\d+$') {
+                    Error1 "copiar_catalogo_a_oferta() fallo:"
+                    Write-Host $cambiadas -ForegroundColor Red
+                } else {
+                    Ok "$($partes[1]) variantes de $($partes[0]) productos leidas de MongoDB, $cambiadas oferta(s) puestas al dia"
+                    $copiaOk = $true
+                }
+            }
+        }
+    }
+}
+Remove-Item -Recurse -Force $tmpCatalogo -ErrorAction SilentlyContinue
+
+if ($copiaOk) {
+    $sinCopia = ("SELECT count(*) FROM oferta WHERE catalogo_copiado_en IS NULL;" |
+        docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
+    if ($sinCopia -notmatch '^\d+$') {
+        Aviso "No se pudo contar las ofertas sin copia del catalogo"
+    } elseif ([int]$sinCopia -gt 0) {
+        Aviso "$sinCopia oferta(s) apuntan a una variante que no existe en MongoDB y quedaron sin copia"
+    } else {
+        Ok "todas las ofertas tienen su copia del catalogo"
+    }
+} else {
+    Error1 "Las ofertas no tienen la copia del catalogo. El checkout seguira dependiendo de MongoDB."
+    Error1 "   Se reintenta arrancando de nuevo; el motivo esta justo arriba."
+}
+
+
+# ------------------------------------------------------------
 # 7d. Los vectores de la recomendacion semantica
 # ------------------------------------------------------------
 # Va despues del catalogo porque lee de MongoDB y escribe en la tabla de la

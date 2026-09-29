@@ -4,6 +4,17 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-29: comprar sin MongoDB, LO PRIMERO
+
+Se eligio la decision 5, la del profesor. La base ya esta hecha y probada: la
+migracion 029 copia en `oferta` el nombre del producto, el de la variante, la
+imagen y si se puede comprar, y el paso 7e de arrancar la llena (16908 ofertas,
+0 sin copia). Lo tuyo son los pasos 3.1 a 3.9 de `docs/PLAN-COMPRAR-SIN-MONGO.md`,
+en ese orden: primero escribir la copia al crear una oferta y al editar un
+producto, despues leerla en el carrito y en el pedido en vez de ir a MongoDB.
+Cada funcion con su linea esta en el plan. Cuando lo subas, yo ajusto
+`pruebas/falla_checkout.sh` y cierro la fila 12.
+
 ## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-28 en la noche)
 
 Revisado contra tu 14e5084. Lo de la Entrega final ya esta completo. Los
