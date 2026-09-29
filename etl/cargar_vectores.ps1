@@ -102,8 +102,11 @@ if ($env_['OLLAMA_URL']) {
     } elseif ($exe) {
         Write-Host "   Ollama esta instalado en esta PC pero apagado. Lo enciendo"
         Start-Process -FilePath $exe -ArgumentList 'serve' -WindowStyle Hidden
-        if (-not (Esperar $ollama 30)) {
-            Write-Host "   Ollama de esta PC no respondio en 30 s ($exe)" -ForegroundColor Yellow
+        # 120 s y no 30: medido el 28-09, en reposo contesta a los 19 s, pero dentro
+        # de arrancar, con Elastic, Neo4j y ClickHouse subiendo a la vez, paso de 30
+        # y el paso de vectores se salto con Ollama ya casi arriba.
+        if (-not (Esperar $ollama 120)) {
+            Write-Host "   Ollama de esta PC no respondio en 120 s ($exe)" -ForegroundColor Yellow
             exit 2
         }
         Write-Host "   Ollama de esta PC, $ollama"

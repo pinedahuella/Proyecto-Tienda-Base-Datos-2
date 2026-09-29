@@ -2,7 +2,7 @@
 	import { onMount } from 'svelte';
 	import { pedir, conJson, mensajeUtil, type RespuestaApi } from './api';
 	import Autocompletar from './Autocompletar.svelte';
-	import { textoConflictoDescuento, textoPorcentaje, tieneDescuento } from './descuento';
+	import { textoConflictoDescuento, textoCuando, textoHasta, textoPorcentaje, tieneDescuento } from './descuento';
 
 	/**
 	 * Las ofertas del vendedor: verlas, editarlas y publicar una nueva.
@@ -141,6 +141,15 @@
 		 * le quedan.
 		 */
 		stock_disponible: number | null;
+		/**
+		 * Cuando se apagan solos el descuento y la venta relampago (migracion
+		 * 028). `null` es que no vencen: los quita el vendedor. La ruta los
+		 * manda desde de5de2a (2026-09-26) y con ellos la fila dice "hasta las
+		 * 21:50". Si la venta relampago vence sola se lleva tambien el
+		 * descuento; cerrarla a mano no.
+		 */
+		fecha_vencimiento_descuento: string | null;
+		fecha_vencimiento_venta_limitada: string | null;
 		fecha_creacion: string;
 		fecha_actualizacion: string;
 	}
@@ -204,6 +213,9 @@
 			es_inventario_limitado: boolean;
 			/** Lo mismo que en `Oferta`: las unidades reales de Redis, o null. */
 			stock_disponible: number | null;
+			/** Lo mismo que en `Oferta`: cuando se apagan solos, o null. */
+			fecha_vencimiento_descuento: string | null;
+			fecha_vencimiento_venta_limitada: string | null;
 		} | null;
 	}
 
@@ -250,7 +262,12 @@
 	 */
 	type OfertaRelampago = Pick<
 		Oferta,
-		'id_oferta' | 'stock' | 'estado' | 'es_inventario_limitado' | 'porcentaje_descuento'
+		| 'id_oferta'
+		| 'stock'
+		| 'estado'
+		| 'es_inventario_limitado'
+		| 'porcentaje_descuento'
+		| 'fecha_vencimiento_venta_limitada'
 	>;
 
 	/**
@@ -260,7 +277,13 @@
 	 */
 	type OfertaDescuento = Pick<
 		Oferta,
-		'id_oferta' | 'precio' | 'porcentaje_descuento' | 'precio_final' | 'es_inventario_limitado'
+		| 'id_oferta'
+		| 'precio'
+		| 'porcentaje_descuento'
+		| 'precio_final'
+		| 'es_inventario_limitado'
+		| 'fecha_vencimiento_descuento'
+		| 'fecha_vencimiento_venta_limitada'
 	>;
 
 	/**
@@ -539,6 +562,25 @@
 	let errorPublicar = $state('');
 
 	// ---------------------------------------------------------------- helpers
+	/**
+	 * Cuando se acaba de verdad el descuento. Si la venta relampago vence sola,
+	 * el worker quita tambien el descuento (ventas-limitadas.service.ts), asi
+	 * que manda la mas temprana de las dos fechas. Sin esto la fila decia
+	 * "-10% hasta las 23:10" con la venta cerrando, y llevandoselo, a las 22:40.
+	 */
+	function finDelDescuento(o: {
+		fecha_vencimiento_descuento?: string | null;
+		fecha_vencimiento_venta_limitada?: string | null;
+		es_inventario_limitado?: boolean;
+	}): string | null {
+		const fechas = [
+			o.fecha_vencimiento_descuento,
+			o.es_inventario_limitado ? o.fecha_vencimiento_venta_limitada : null
+		].filter((f): f is string => !!f);
+		if (fechas.length === 0) return null;
+		return fechas.reduce((a, b) => (new Date(a) <= new Date(b) ? a : b));
+	}
+
 	/** true si la sesion se acabo. Se avisa al panel para que saque a la persona. */
 	function expiro(r: RespuestaApi<unknown>): boolean {
 		if (r.estado === 401) {
@@ -1039,7 +1081,12 @@
 								// el precio durante una venta devolvia la oferta a la tarjeta
 								// con `stock_disponible` sin definir, y la tarjeta volvia a
 								// ensenar el `stock` congelado de PostgreSQL.
-								stock_disponible: o.stock_disponible
+								stock_disponible: o.stock_disponible,
+								// Y las fechas en que se apagan solos, por lo mismo: sin
+								// copiarlas, poner un descuento de una hora no decia hasta
+								// cuando en la tarjeta.
+								fecha_vencimiento_descuento: o.fecha_vencimiento_descuento,
+								fecha_vencimiento_venta_limitada: o.fecha_vencimiento_venta_limitada
 							}
 						}
 					: v
@@ -1139,13 +1186,24 @@
 	 * cambian exactamente un booleano, y volver a pedir las 976 ofertas del
 	 * vendedor para enterarse de eso seria pagar la lista entera por un bit.
 	 */
-	function marcarRelampago(idOferta: string, abierta: boolean, sembrado: number | null = null) {
+	function marcarRelampago(
+		idOferta: string,
+		abierta: boolean,
+		sembrado: number | null = null,
+		segundos: number | null = null
+	) {
 		// Al ABRIR, las unidades reales son las que el backend dice que sembro
 		// (`stock_sembrado`), que es el stock de ese instante. Al CERRAR vuelven
 		// a ser null, que es lo que significa "aqui manda PostgreSQL otra vez".
 		// Sin esto, la fila quedaba marcada como en venta pero con el numero
 		// viejo hasta la siguiente recarga completa.
 		const disponible = abierta ? sembrado : null;
+		// La ruta de abrir no devuelve cuando cierra, solo lo sembrado. Se
+		// calcula con el plazo elegido: el backend guarda now() + ese plazo, asi
+		// que la diferencia es lo que tarda la peticion. Al cerrar a mano el
+		// backend la deja en NULL, y aqui tambien.
+		const vence =
+			abierta && segundos != null ? new Date(Date.now() + segundos * 1000).toISOString() : null;
 
 		// La oferta puede estar en la pagina, en la lista completa de una busqueda,
 		// o en las dos: se parchea donde este.
@@ -1155,7 +1213,8 @@
 				lista[i] = {
 					...lista[i],
 					es_inventario_limitado: abierta,
-					stock_disponible: disponible
+					stock_disponible: disponible,
+					fecha_vencimiento_venta_limitada: vence
 				};
 			}
 		}
@@ -1170,7 +1229,8 @@
 							mi_oferta: {
 								...v.mi_oferta,
 								es_inventario_limitado: abierta,
-								stock_disponible: disponible
+								stock_disponible: disponible,
+								fecha_vencimiento_venta_limitada: vence
 							}
 						}
 					: v
@@ -1244,7 +1304,12 @@
 		if (expiro(r)) return;
 
 		if (r.ok && r.payload) {
-			marcarRelampago(o.id_oferta, true, r.payload.stock_sembrado);
+			marcarRelampago(
+				o.id_oferta,
+				true,
+				r.payload.stock_sembrado,
+				elegido === '' ? null : Number(elegido)
+			);
 			relampagoDe = null;
 			duracionRelampago = '';
 			// El aviso reusa el TEXTO de la opcion elegida en vez de traducir los
@@ -1803,6 +1868,14 @@
 				Tus unidades vuelven al stock normal.
 				<strong>Quien tenga algo apartado ahora mismo lo pierde.</strong>
 			</p>
+			{#if o.fecha_vencimiento_venta_limitada}
+				<!-- Si vence sola, el worker quita tambien el descuento; cerrarla a
+				     mano lo deja puesto (ventas-limitadas.service.ts). -->
+				<p class="nota">
+					Si no la cierras, cierra sola {textoCuando(o.fecha_vencimiento_venta_limitada)} y quita el
+					descuento.
+				</p>
+			{/if}
 
 			{#if errorRelampago}
 				<p class="malo" role="alert">{errorRelampago}</p>
@@ -1919,12 +1992,19 @@
 	precio: string;
 	porcentaje_descuento: string | null;
 	precio_final: string;
+	/** Opcionales: la cola de revision no los trae, y ahi no hacen falta. */
+	fecha_vencimiento_descuento?: string | null;
+	fecha_vencimiento_venta_limitada?: string | null;
+	es_inventario_limitado?: boolean;
 })}
 	<strong class="precio">{quetzales(o.precio_final ?? o.precio)}</strong>
 	{#if tieneDescuento(o.porcentaje_descuento)}
 		<span class="con-descuento-linea">
 			<s class="lista">{quetzales(o.precio)}</s>
-			<span class="descuento">-{textoPorcentaje(o.porcentaje_descuento)}</span>
+			<span class="descuento"
+				>-{textoPorcentaje(o.porcentaje_descuento)}
+				{textoHasta(finDelDescuento(o))}</span
+			>
 		</span>
 	{/if}
 {/snippet}
@@ -1939,6 +2019,9 @@
 			<p class="nota">
 				Tiene <strong>{textoPorcentaje(o.porcentaje_descuento)}</strong> de descuento: se vende a
 				<strong>{quetzales(o.precio_final)}</strong> en vez de {quetzales(o.precio)}.
+				{#if finDelDescuento(o)}
+					Se quita solo {textoCuando(finDelDescuento(o))}.
+				{/if}
 			</p>
 
 			{#if o.es_inventario_limitado}
@@ -2329,7 +2412,10 @@
 												{#if mia}
 													<span class="chip {mia.estado}">{mia.estado}</span>
 													{#if tieneDescuento(mia.porcentaje_descuento)}
-														<span class="descuento">-{textoPorcentaje(mia.porcentaje_descuento)}</span>
+														<span class="descuento"
+															>-{textoPorcentaje(mia.porcentaje_descuento)}
+															{textoHasta(finDelDescuento(mia))}</span
+														>
 													{/if}
 													{#if mia.es_inventario_limitado}
 														<span
@@ -2337,6 +2423,7 @@
 															title="El stock de esta oferta lo lleva Redis mientras la venta este abierta"
 														>
 															Venta relampago abierta
+															{textoHasta(mia.fecha_vencimiento_venta_limitada)}
 														</span>
 													{/if}
 													<div class="acciones">
@@ -2659,6 +2746,7 @@
 										title="El stock de esta oferta lo lleva Redis mientras la venta este abierta"
 									>
 										Venta relampago abierta
+										{textoHasta(o.fecha_vencimiento_venta_limitada)}
 									</span>
 								{/if}
 							</div>

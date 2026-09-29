@@ -201,6 +201,11 @@ try {
         $vence = Sql "SELECT to_char(fecha_vencimiento_descuento AT TIME ZONE 'America/Guatemala', 'HH24:MI:SS') FROM oferta WHERE id_oferta = $($of.Id)"
         if (-not $vence) { Mal 'la oferta no tiene fecha_vencimiento_descuento. Falta la migracion 028 o el backend es viejo'; $fallos++ }
         else { Ok "PostgreSQL guarda que vence a las $vence (oferta.fecha_vencimiento_descuento)" }
+        # La misma fecha por la ruta del panel del vendedor (de5de2a). Con ella la fila dice
+        # "hasta las 21:50" sin preguntarle a la base.
+        $porRuta = (Oferta $of.Id).fecha_vencimiento_descuento
+        if (-not $porRuta) { Mal 'GET /vendedor/ofertas no trae fecha_vencimiento_descuento. El backend es anterior a de5de2a'; $fallos++ }
+        else { Ok "GET /vendedor/ofertas tambien la trae, y el panel del vendedor dice hasta las $(([datetime]$porRuta).ToLocalTime().ToString('HH:mm'))" }
         # La llave vieja de Redis ya no se crea. Si aparece, el backend es anterior a 37ad2e6.
         if ((Redis exists "mesh:oferta:$($of.Id):descuento" | Out-String).Trim() -eq '1') {
             Av 'aparecio la llave vieja mesh:oferta:<n>:descuento en Redis. El backend corriendo es anterior al 2026-09-26'

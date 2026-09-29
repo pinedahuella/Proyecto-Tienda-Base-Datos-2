@@ -279,7 +279,7 @@ const CATALOGO = [
   // --- Demo de descuentos -------------------------------------------------
   {
     id: 'demo-descuentos', grupo: 'Demo de descuentos', titulo: 'Descuentos que se activan y se apagan solos',
-    explica: 'Un vendedor nuevo con dos ofertas. regla: tres compras reales cruzan el umbral de una regla y el worker aplica el descuento en menos de un minuto. manual: un descuento con vencimiento corto, con su TTL bajando en Redis; al vencer el worker lo quita y el historial de precio lo anota a nombre de la tienda. Al final borra la regla, retira las ofertas y quita las ventas de ClickHouse. Tarda unos cuatro minutos.',
+    explica: 'Un vendedor nuevo con dos ofertas. regla: tres compras reales cruzan el umbral de una regla y el worker aplica el descuento en menos de un minuto. manual: un descuento con vencimiento corto, que PostgreSQL guarda en oferta.fecha_vencimiento_descuento y el panel del vendedor ensena como hasta las HH:MM; al vencer el worker lo quita y el historial de precio lo anota a nombre de la tienda. Al final borra la regla, retira las ofertas y quita las ventas de ClickHouse. Tarda unos cuatro minutos.',
     script: 'demo-descuentos-solos.ps1', confirmar: 'SI',
     peligro: 'Deja cuentas nuevas y, con la regla, tres pedidos reales en PostgreSQL. Eso no se deshace.',
     campos: [

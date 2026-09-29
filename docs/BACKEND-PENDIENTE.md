@@ -4,7 +4,7 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
-## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-26 en la noche)
+## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-28 en la noche)
 
 Revisado contra tu 14e5084. Lo de la Entrega final ya esta completo. Los
 casos de fraude (C1 a C8) son de la Entrega 3. C2 y C3 son fallos seguros;
@@ -17,12 +17,12 @@ seccion de abajo donde esta el detalle.
 | C1 | Al guardar, una alerta de login que toca dos anillos une sus casos, aunque el agrupador dice que el login nunca fusiona. Decidir si se quiere. Mientras se una, el puntaje del caso sale solo del ultimo grupo guardado (32,5 en la prueba; con toda su evidencia, 36,4) | seccion del 26 en la noche | media, decision |
 | C4 | La recencia del puntaje mide cuando el admin reviso, no cuando paso el fraude | seccion del 26 en la noche | media |
 | C9 | Lo que dijiste en 14e5084: un hallazgo que ya era evidencia de un caso y despues se descarta sigue en `evidencia_caso_fraude`, sumando los mismos puntos, hasta que el caso se quede sin otra evidencia | tu nota en agrupador-fraude.md | baja |
-| C6 | El vendedor de una granja de mas de 10 cuentas nunca es nucleo | seccion del 26 en la noche | media |
-| C7 | El primer caso sale a los 15 minutos, sin forma de pedirlo antes | seccion del 26 en la noche | media, para la demo |
 | 2 | Las senales y los detalles que faltan del fraude del login | seccion del 11, puntos 4 y 5 | media |
 | 4 | El estante de mas vendidos ya se arma al arrancar, pero al cambiar un precio sigue tardando hasta 10 minutos | seccion del 23, punto 1 | baja |
-| 8 | Queda uno de los dos 409 con la ruta dentro: `ventas-limitadas.service.ts` linea 97, "...aplicalo primero con POST /vendedor/ofertas/..." | seccion del 23, punto 4 | solo texto |
-| 9 | `GET /vendedor/ofertas` no devuelve `fecha_vencimiento_descuento` ni `fecha_vencimiento_venta_limitada`. Con eso el panel podria decir "vence a las 21:50" | nuevo, 2026-09-26 | baja |
+
+Hechos en de5de2a y probados en vivo de este lado el 2026-09-28: C6 (`node pruebas/casos_fraude_granja.cjs`, 6 OK, y saboteada da 2 FALLA), C7 (el agrupador corre al arrancar, 10 casos de 126 hallazgos, y el backend tarda unos 2 s mas en escuchar), el 8 (el 409 ya no lleva la ruta), el 9 (el panel del vendedor dice "hasta las 22:40" en el descuento y en la venta relampago, visto en Edge) y el NaN de la regularidad de B.3 (misma prueba). Una nota sobre C6: `anillo_fraude_resena` incluye anillos que el admin descarto, asi que esas resenas tampoco cuentan para el umbral. No cambia nada mientras C5 deje fuera los descartados. Queda pedido, si puedes, `POST /admin/fraude/casos/recalcular`.
+
+Las propuestas nuevas del profesor (modelo unico de senales, nombre en `oferta`, carrito con la foto del cliente) estan en `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`. Son para decidir en equipo, todavia no son pedidos.
 
 Hechos en 14e5084 y probados de este lado con `node pruebas/casos_fraude_fusion.cjs`, que ahora da 0 FALLA: C2 (el caso fusionado queda confirmado), C3 (quedan las 5 cuentas), y por tu nota C5 y C8. La prueba marca C1 como DECISION y no como falla.
 
@@ -62,8 +62,7 @@ Los dos cambios a tu SQL:
 y 91 alertas de login de los tipos que entran). El worker dijo
 `10/10 caso(s) al dia, de 125 hallazgo(s)`, pero en `caso_fraude` quedaron **2**.
 Despues se aislo cada fallo con tus mismas clases compiladas, dentro de una
-transaccion deshecha al final: **
-ode pruebas/casos_fraude_fusion.cjs** (con el
+transaccion deshecha al final: **`node pruebas/casos_fraude_fusion.cjs`** (con el
 backend compilado). Hoy da 3 FALLA, C1, C2 y C3. Cuando esten arreglados tiene que
 dar 0 FALLA.
 

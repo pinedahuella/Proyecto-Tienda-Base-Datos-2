@@ -62,3 +62,30 @@ export function textoConflictoDescuento(r: { estado: number; mensaje?: string })
 	}
 	return mensaje || 'Esta oferta ya tiene otro descuento activo.';
 }
+
+/**
+ * Cuando se apaga solo un descuento o una venta relampago: "a las 21:50" si es
+ * hoy, "el 30/09 a las 21:50" si no. Vacio cuando no vence solo (`null`, que es
+ * permanente).
+ *
+ * La fecha la guarda PostgreSQL (`oferta.fecha_vencimiento_descuento` y
+ * `fecha_vencimiento_venta_limitada`, migracion 028) y el worker del backend
+ * la cumple cada minuto, asi que puede pasar hasta un minuto despues de la hora
+ * que se ensena. Se ensena en la hora de quien mira.
+ */
+export function textoCuando(fecha: string | Date | null | undefined, ahora: Date = new Date()): string {
+	if (fecha == null || fecha === '') return '';
+	const d = fecha instanceof Date ? fecha : new Date(fecha);
+	if (Number.isNaN(d.getTime())) return '';
+	const dos = (n: number) => String(n).padStart(2, '0');
+	const hora = `a las ${dos(d.getHours())}:${dos(d.getMinutes())}`;
+	if (d.toDateString() === ahora.toDateString()) return hora;
+	return `el ${dos(d.getDate())}/${dos(d.getMonth() + 1)} ${hora}`;
+}
+
+/** Lo mismo para la etiqueta de la fila: "hasta las 21:50", "hasta el 30/09 a las 21:50". */
+export function textoHasta(fecha: string | Date | null | undefined, ahora: Date = new Date()): string {
+	const cuando = textoCuando(fecha, ahora);
+	if (cuando === '') return '';
+	return cuando.startsWith('a las ') ? `hasta ${cuando.slice(2)}` : `hasta ${cuando}`;
+}

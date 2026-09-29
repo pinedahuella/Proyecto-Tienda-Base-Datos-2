@@ -175,13 +175,20 @@ done
 [ -n "$ID_ANILLO" ] && OK "el detector guardo el anillo $ID_ANILLO a los $s s" || { FALLA "no aparecio ningun anillo con las tres cuentas en $ESPERA s"; }
 [ "$TIPO" = "ciclo" ] && OK "lo clasifico como ciclo" || FALLA "tipo inesperado, '$TIPO'"
 
-# El control no puede estar en ningun anillo, ni pendiente ni de otro estado.
+# El control no puede estar en ningun anillo de la familia A (mutuo, ciclo, reiterado).
+# Desde la familia B (023) si sale en una cadena abierta (B.1): califico a una cuenta del
+# ciclo, asi que es un eslabon de una cadena que no vuelve a el. Es lo que el diseno llama
+# periferia (docs/fraude-entrega3/02-reglas-backend.md): se lista y nada automatico la toca.
 en_control=$(curl -s "$API/admin/fraude/alertas-resenas?pagina=1&limite=200" -H "Cookie: $ADMIN" | python -c "
 import sys,json
 p='$PREF'
 d=json.load(sys.stdin)['payload']['anillos']
-print(sum(1 for a in d for c in a['cuentas'] if c['usuario']==p+'4'))")
-[ "$en_control" = "0" ] && OK "la cuenta de control ($PREF""4) no sale en ningun anillo" || FALLA "la cuenta de control salio en $en_control anillos"
+a_=sum(1 for a in d if a['tipo'] in ('mutuo','ciclo','reiterado') for c in a['cuentas'] if c['usuario']==p+'4')
+b_=sum(1 for a in d if a['tipo'] not in ('mutuo','ciclo','reiterado') for c in a['cuentas'] if c['usuario']==p+'4')
+print(a_, b_)")
+en_a=${en_control%% *}; en_b=${en_control##* }
+[ "$en_a" = "0" ] && OK "la cuenta de control ($PREF""4) no sale en ningun anillo de la familia A" || FALLA "la cuenta de control salio en $en_a anillos de la familia A"
+[ "$en_b" != "0" ] && echo "  (la cuenta de control sale en $en_b cadena(s) abierta(s) de la familia B, como periferia, esperado)"
 
 if [ -n "$ID_ANILLO" ]; then
     # Confirmacion, solo lectura. Las resenas del anillo quedaron en la tabla pivote.
@@ -210,6 +217,14 @@ print(len(d.get('resenas') or []))")
 fi
 
 pend_desp=$(curl -s "$API/admin/fraude/alertas-resenas?estado=pendiente&pagina=1&limite=1" -H "Cookie: $ADMIN" | campo payload.total_anillos)
+# Las cadenas abiertas de la familia B que toca el control nacen pendientes y son de esta
+# prueba. Se descuentan para comparar solo lo que no es de ella.
+pend_b=$(sql "SELECT count(*) FROM anillo_fraude a JOIN estado_alerta_fraude e USING (id_estado_alerta_fraude)
+               JOIN tipo_anillo_fraude t USING (id_tipo_anillo_fraude)
+              WHERE e.estado_alerta_fraude_nombre = 'pendiente' AND t.tipo_anillo_fraude_nombre NOT IN ('mutuo','ciclo','reiterado')
+                AND EXISTS (SELECT 1 FROM usuarios u WHERE u.usuario LIKE '$PREF%'
+                             AND u.id_usuario::text = ANY (string_to_array(a.clave, '-')));")
+[ -n "$pend_b" ] && pend_desp=$((pend_desp - pend_b))
 [ "$pend_desp" = "$pend_antes" ] && OK "los anillos pendientes quedaron como estaban ($pend_antes), el de la prueba ya esta revisado" \
     || FALLA "pendientes, $pend_antes antes y $pend_desp despues"
 

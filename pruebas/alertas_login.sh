@@ -586,10 +586,12 @@ if [ -n "$ESPERADOS" ] && [ "$TIPOS" = "$ESPERADOS" ]; then
 else
     FALLA "tipo_alerta_fraude dice '$TIPOS', el backend espera '$ESPERADOS'"
 fi
-if [ "$ESTADOS" = "1=pendiente 2=revisada 3=descartada" ]; then
-    OK "estado_alerta_fraude tiene sus 3 filas con los ids del backend ($ESTADOS)"
+# La 026 (casos de fraude) agrega `confirmada` como cuarta fila. Las alertas de login
+# solo usan las tres primeras, que son las que el backend fija por id.
+if [ "$ESTADOS" = "1=pendiente 2=revisada 3=descartada" ] || [ "$ESTADOS" = "1=pendiente 2=revisada 3=descartada 4=confirmada" ]; then
+    OK "estado_alerta_fraude tiene las filas con los ids del backend ($ESTADOS)"
 else
-    FALLA "estado_alerta_fraude dice '$ESTADOS', se esperaba 1=pendiente 2=revisada 3=descartada"
+    FALLA "estado_alerta_fraude dice '$ESTADOS', se esperaba 1=pendiente 2=revisada 3=descartada, y 4=confirmada desde la 026"
 fi
 
 CODIGO_PLANTILLA=$(curl -s --max-time 10 -o "$CUERPO" -w '%{http_code}' "$ES/_index_template/$PLANTILLA_EVENTOS" 2>/dev/null)

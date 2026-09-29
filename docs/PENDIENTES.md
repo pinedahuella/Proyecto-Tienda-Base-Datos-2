@@ -2,7 +2,7 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-09-26.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-09-28.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
 | # | Que | De quien | Cuanto | Urgencia |
@@ -34,7 +34,8 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~25~~ | ~~El buscador no sabe si un producto tiene descuento~~ | -- | -- | **CERRADO el 2026-09-26**: David lo manda en la sincronizacion (37ad2e6) y de este lado va en `etl/extraer_busqueda.js` y el mapeo; la cabecera y /buscar ensenan "Con descuento" |
 | ~~26~~ | ~~El historial de precio de una oferta no trae el % de descuento~~ | -- | -- | **CERRADO el 2026-09-26** por David (37ad2e6); Mis pedidos y el historial del vendedor ya lo ensenan |
 | ~~27~~ | ~~"Parecidos a este" no pinta nada, falta `GET /productos/:id/similares`~~ | -- | -- | **CERRADO el 2026-09-26 por Jose David (ced29f5)**, con la misma forma que `tambien-vieron`. Suma `VectoresSyncService`, que cada 3 horas recalcula los productos marcados con `pendiente_vector` usando el mismo texto y hash que `cargar_vectores.ps1`. `cargar_vectores.ps1` le deja escrito en `backend/.env` el Ollama que eligio. Falta verlo en vivo |
-| 31 | Los casos de fraude: falta decidir si una IP compartida une casos (C1) | Jose David y el equipo | ver `BACKEND-PENDIENTE.md` | **media, Entrega 3.** C2, C3, C5 y C8 arreglados por David el 2026-09-26 (14e5084) y comprobados con `pruebas/casos_fraude_fusion.cjs`, 0 FALLA. Quedan C4, C6, C7 y C9 |
+| 31 | Los casos de fraude: falta decidir si una IP compartida une casos (C1) | Jose David y el equipo | ver `BACKEND-PENDIENTE.md` | **media, Entrega 3.** C2, C3, C5 y C8 arreglados por David el 2026-09-26 (14e5084), C6 y C7 el mismo 26 (de5de2a), comprobados con `pruebas/casos_fraude_fusion.cjs` y `pruebas/casos_fraude_granja.cjs`, 0 FALLA. Quedan C4 y C9 |
+| 32 | Revision del profesor: decisiones genericas, dependencias entre bases y fraude | el equipo | `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md` | **alta, para decidir antes de implementar (2026-09-28).** Modelo unico de senales y detecciones con historia en ClickHouse, doce consultas nuevas en las cinco bases, nombre en `oferta` para comprar sin MongoDB (cierra la fila 12), carrito con la foto del cliente, Elasticsearch mas alla de las facetas, busqueda hibrida con el vector, y reescribir las decisiones del informe. La seccion 1.6 junta lo pendiente del panel de fraude |
 | ~~30~~ | ~~En el facetado, ClickHouse guarda en `resultados` los que se mostraron y no el total~~ | -- | -- | **CERRADO el 2026-09-26** por David (37ad2e6) |
 | 29 | `GET /buscador/productos/sugerencias` existe y ninguna pantalla la usa | mia, si se quiere | -- | baja: era opcional. La cabecera sigue con la busqueda difusa, que ya ensena precio y nota. Se ve con `.\demo-entrega-final.ps1 -Parte facetas` |
 | ~~28~~ | ~~El worker de descuentos borra los que nunca tuvieron clave en Redis~~ | -- | -- | **CERRADO el 2026-09-26** por David (37ad2e6): el vencimiento vive en PostgreSQL, migracion 028. Probado con `pruebas/descuentos.sh` 98 OK y la demo de descuentos |
