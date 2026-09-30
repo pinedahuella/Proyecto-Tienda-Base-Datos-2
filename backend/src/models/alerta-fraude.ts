@@ -13,20 +13,6 @@
  * exitoso).
  */
 
-// La migracion de referencia inserta estos nueve en este orden -- un
-// catalogo tan chico no cambia sin una migracion nueva, asi que es seguro
-// fijar los ids aqui en vez de consultarlos cada vez (mismo criterio que
-// ID_ROL_COMPRADOR/ID_ROL_VENDEDOR/ID_ROL_ADMIN en models/rol-usuario.ts).
-export const ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_IP = 1;
-export const ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA = 2;
-export const ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP = 3;
-export const ID_TIPO_ALERTA_FRAUDE_TOMA_CUENTA = 4;
-export const ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA_LENTA = 5;
-export const ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP_LENTA = 6;
-export const ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA_LENTA = 7;
-export const ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA = 8;
-export const ID_TIPO_ALERTA_FRAUDE_VIAJE_IMPOSIBLE = 9;
-
 export const ID_ESTADO_ALERTA_FRAUDE_PENDIENTE = 1;
 export const ID_ESTADO_ALERTA_FRAUDE_REVISADA = 2;
 export const ID_ESTADO_ALERTA_FRAUDE_DESCARTADA = 3;

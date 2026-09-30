@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { elasticClient } from '../../database/elastic';
 import { registrarAlertaFraude } from '../../helpers/registrar-alerta-fraude';
-import { ID_TIPO_ALERTA_FRAUDE_TOMA_CUENTA } from '../../models/alerta-fraude';
 
 const INDICE =
   process.env.ELASTIC_INDICE_EVENTOS ?? 'mesh_eventos_autenticacion';
@@ -111,7 +110,7 @@ export class TomaCuentaService {
       ventanaInicio.setSeconds(0, 0);
 
       await registrarAlertaFraude({
-        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_TOMA_CUENTA,
+        tipo: 'toma_cuenta',
         clave: datos.identificador,
         idUsuario: datos.idUsuario,
         detalle: {

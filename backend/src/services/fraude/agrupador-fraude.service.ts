@@ -145,7 +145,7 @@ export class AgrupadorFraudeService {
    *
    * **Bug corregido (2026-09-27, item C6):** el conteo incluia TODAS las
    * reseñas, tambien las que ya son evidencia de un anillo
-   * (`anillo_fraude_resena`) -- un vendedor con una granja de mas de 10
+   * (`senal_fraude_resena`) -- un vendedor con una granja de mas de 10
    * cuentas satelite (`satelites`, B.2) pasaba el umbral por su PROPIO
    * fraude, quedando marcado "concentrador" y excluido para siempre de
    * ser nucleo de su propio caso (justo lo contrario de lo que busca esta
@@ -160,11 +160,11 @@ export class AgrupadorFraudeService {
            FROM (
                   SELECT id_usuario, id_usuario_vendedor AS contraparte
                     FROM resena
-                   WHERE id_resena NOT IN (SELECT id_resena FROM anillo_fraude_resena)
+                   WHERE id_resena NOT IN (SELECT id_resena FROM senal_fraude_resena)
                   UNION ALL
                   SELECT id_usuario_vendedor AS id_usuario, id_usuario AS contraparte
                     FROM resena
-                   WHERE id_resena NOT IN (SELECT id_resena FROM anillo_fraude_resena)
+                   WHERE id_resena NOT IN (SELECT id_resena FROM senal_fraude_resena)
                 ) todas
           GROUP BY id_usuario
          HAVING count(DISTINCT contraparte) > $1`,

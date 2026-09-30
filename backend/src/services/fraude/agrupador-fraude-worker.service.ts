@@ -72,12 +72,7 @@ export class AgrupadorFraudeWorkerService implements OnApplicationBootstrap {
   private async ejecutarCiclo(): Promise<void> {
     let hallazgos;
     try {
-      const [grafo, eventos, login] = await Promise.all([
-        this.adaptador.obtenerDeGrafo(),
-        this.adaptador.obtenerDeEventos(),
-        this.adaptador.obtenerDeLogin(),
-      ]);
-      hallazgos = [...grafo, ...eventos, ...login];
+      hallazgos = await this.adaptador.obtener();
     } catch (error) {
       this.logger.warn(
         `agrupador de fraude: no se pudo leer los hallazgos (${(error as Error)?.message ?? error})`,

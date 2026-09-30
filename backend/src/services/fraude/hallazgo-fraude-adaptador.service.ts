@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { pool } from '../../database/postgres';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
-import { Hallazgo } from '../../models/fraude/hallazgo';
+import { FuenteHallazgo, Hallazgo } from '../../models/fraude/hallazgo';
 
 /**
  * F1 (vistas infladas) y F4 (carrito acaparador) no entran en los casos de
@@ -22,9 +22,8 @@ const TIPOS_EVENTO_INCLUIDOS = [
  * y `viaje_imposible` describen a la cuenta ATACADA (la victima): sumarlas
  * al puntaje de fraude de esa cuenta la castigaria por ser atacada, asi que
  * van a una cola de seguridad de cuentas aparte, nunca a un caso.
- * `fuerza_bruta_ip` tampoco entra -- no tiene cuentas destino resueltas en
- * `notificacion_fraude` (ver `registrarAlertaFraude`), nadie a quien
- * agrupar.
+ * `fuerza_bruta_ip` tampoco entra -- no tiene cuentas (ver
+ * `registrarAlertaFraude`), nadie a quien agrupar.
  */
 const TIPOS_LOGIN_INCLUIDOS = [
   'multi_cuenta_ip',
@@ -33,151 +32,90 @@ const TIPOS_LOGIN_INCLUIDOS = [
   'ip_rotacion_cuenta_lenta',
 ];
 
-interface FilaGrafo {
-  id_anillo_fraude: string;
-  tipo_anillo_fraude_nombre: string;
-  clave: string;
-  detalle: Record<string, unknown>;
-  fecha_actualizacion: Date;
-}
+/**
+ * De que familia de `senal_fraude` viene cada fuente del agrupador. Los
+ * anillos (A) y los patrones de resenas (B) son las dos familias de Neo4j y
+ * entran TODOS los tipos.
+ */
+const FUENTE_POR_FAMILIA: Record<string, FuenteHallazgo> = {
+  anillo_resenas: 'grafo',
+  patron_resenas: 'grafo',
+  compras_navegacion: 'eventos',
+  login: 'login',
+};
 
-interface FilaConCuentas {
+interface FilaSenal {
   id: string;
   tipo: string;
+  familia: string;
   detalle: Record<string, unknown>;
-  fecha_actualizacion: Date;
+  ultima_deteccion: Date;
   cuentas: string[];
 }
 
 /**
- * Los tres adaptadores del paso 1 del agrupador de casos de fraude
- * (`elementos Generales/plan pendiente/agrupador-fraude.md`): leen las tres
- * fuentes que hoy no se hablan (`anillo_fraude`, `hallazgo_evento_fraude`,
- * `alerta_fraude`) y devuelven `Hallazgo[]`, la forma comun que el
- * agrupador junta despues. Ninguno decide nada de agrupacion, puntaje ni
- * persistencia -- solo traducen.
+ * El adaptador del agrupador de casos de fraude
+ * (`elementos Generales/plan pendiente/agrupador-fraude.md`): lee
+ * `senal_fraude` (el modelo unico, ver `refactor-fraude-senales.md`) y
+ * devuelve `Hallazgo[]`, la forma comun que el agrupador junta despues. No
+ * decide nada de agrupacion, puntaje ni persistencia -- solo traduce.
+ *
+ * Reemplaza a los tres adaptadores de antes (`anillo_fraude`,
+ * `hallazgo_evento_fraude` y `alerta_fraude`, etapa 7 del refactor).
+ * Cambios de significado que conviene conocer:
+ *  - `idOrigen` es el id de la SENAL, no el de una fila de ventana.
+ *  - `ultimaEvidencia` sale de `ultima_deteccion`, que solo mueve el detector:
+ *    revisar una senal vieja ya no la "rejuvenece" en el puntaje (item C4).
+ *  - Las cuentas salen de `senal_fraude_cuenta` (cualquier rol).
  */
 @Injectable()
 export class HallazgoFraudeAdaptadorService {
   private readonly logger = new Logger(HallazgoFraudeAdaptadorService.name);
 
-  /** A.1/A.2 (mutuo, ciclo, reiterado) y B.1-B.3/B.5-B.7 -- todo lo que ya
-   * persiste `anillo_fraude`, sin distinguir tipo aca: el agrupador decide
-   * que hacer con cada uno via el catalogo de puntos (seccion 3).
-   *
-   * Deja fuera `descartada` (item C5, `docs/BACKEND-PENDIENTE.md`): un
-   * anillo que el admin ya reviso y marco como falso positivo no debe
-   * seguir sumando puntos ni sirviendo de puente entre cuentas en una
-   * corrida futura del agrupador. */
-  async obtenerDeGrafo(): Promise<Hallazgo[]> {
+  /** Todas las senales vigentes que puede usar un caso. Deja fuera las
+   * `descartada` (item C5, `docs/BACKEND-PENDIENTE.md`): una senal que el
+   * admin ya marco como falso positivo no debe seguir sumando puntos ni
+   * sirviendo de puente entre cuentas en una corrida futura. */
+  async obtener(): Promise<Hallazgo[]> {
     try {
-      const resultado = await pool.query<FilaGrafo>(
-        `SELECT a.id_anillo_fraude, t.tipo_anillo_fraude_nombre,
-                a.clave, a.detalle, a.fecha_actualizacion
-           FROM anillo_fraude a
-           JOIN tipo_anillo_fraude t
-             ON t.id_tipo_anillo_fraude = a.id_tipo_anillo_fraude
-          WHERE a.id_estado_alerta_fraude <> (
+      const resultado = await pool.query<FilaSenal>(
+        `SELECT s.id_senal_fraude AS id,
+                t.tipo_senal_fraude_nombre AS tipo,
+                f.familia_senal_fraude_nombre AS familia,
+                s.detalle, s.ultima_deteccion,
+                array_agg(c.id_usuario) AS cuentas
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+           JOIN senal_fraude_cuenta c
+             ON c.id_senal_fraude = s.id_senal_fraude
+          WHERE s.id_estado_alerta_fraude <> (
                   SELECT id_estado_alerta_fraude FROM estado_alerta_fraude
                    WHERE estado_alerta_fraude_nombre = 'descartada'
-                )`,
+                )
+            AND (f.familia_senal_fraude_nombre IN ('anillo_resenas', 'patron_resenas')
+                 OR t.tipo_senal_fraude_nombre = ANY($1))
+          GROUP BY s.id_senal_fraude, t.tipo_senal_fraude_nombre,
+                   f.familia_senal_fraude_nombre, s.detalle, s.ultima_deteccion`,
+        [[...TIPOS_EVENTO_INCLUIDOS, ...TIPOS_LOGIN_INCLUIDOS]],
       );
       return resultado.rows.map((fila) => {
-        const cuentas = fila.clave
-          .split('-')
-          .map(Number)
-          .filter((numero) => Number.isInteger(numero));
+        const cuentas = [...new Set(fila.cuentas.map(Number))];
         return {
-          fuente: 'grafo' as const,
-          idOrigen: Number(fila.id_anillo_fraude),
-          tipo: fila.tipo_anillo_fraude_nombre,
+          fuente: FUENTE_POR_FAMILIA[fila.familia],
+          idOrigen: Number(fila.id),
+          tipo: fila.tipo,
           cuentas,
           clave: construirClave(cuentas),
           metricas: fila.detalle,
-          ultimaEvidencia: fila.fecha_actualizacion,
+          ultimaEvidencia: fila.ultima_deteccion,
         };
       });
     } catch (error) {
       manejarErrorConexion(this.logger, error);
     }
-  }
-
-  /** F2, F3, F5, F6 -- ver `TIPOS_EVENTO_INCLUIDOS`. Deja fuera
-   * `descartada` -- ver el comentario de `obtenerDeGrafo()`. */
-  async obtenerDeEventos(): Promise<Hallazgo[]> {
-    try {
-      const resultado = await pool.query<FilaConCuentas>(
-        `SELECT h.id_hallazgo_evento_fraude AS id,
-                t.tipo_hallazgo_evento_nombre AS tipo,
-                h.detalle, h.fecha_actualizacion,
-                array_agg(c.id_usuario) AS cuentas
-           FROM hallazgo_evento_fraude h
-           JOIN tipo_hallazgo_evento t
-             ON t.id_tipo_hallazgo_evento = h.id_tipo_hallazgo_evento
-           JOIN hallazgo_evento_fraude_cuenta c
-             ON c.id_hallazgo_evento_fraude = h.id_hallazgo_evento_fraude
-          WHERE t.tipo_hallazgo_evento_nombre = ANY($1)
-            AND h.id_estado_alerta_fraude <> (
-                  SELECT id_estado_alerta_fraude FROM estado_alerta_fraude
-                   WHERE estado_alerta_fraude_nombre = 'descartada'
-                )
-          GROUP BY h.id_hallazgo_evento_fraude, t.tipo_hallazgo_evento_nombre,
-                   h.detalle, h.fecha_actualizacion`,
-        [TIPOS_EVENTO_INCLUIDOS],
-      );
-      return resultado.rows.map((fila) => this.aHallazgo('eventos', fila));
-    } catch (error) {
-      manejarErrorConexion(this.logger, error);
-    }
-  }
-
-  /** `multi_cuenta_ip`/`ip_rotacion_cuenta` (y sus `_lenta`) -- ver
-   * `TIPOS_LOGIN_INCLUIDOS`. Las cuentas ya vienen resueltas en
-   * `notificacion_fraude` (`registrarAlertaFraude` las resuelve una sola
-   * vez al nacer la alerta, incluso cuando `alerta_fraude.detalle` solo
-   * trae identificadores de texto, correo o usuario). Deja fuera
-   * `descartada` -- ver el comentario de `obtenerDeGrafo()`. */
-  async obtenerDeLogin(): Promise<Hallazgo[]> {
-    try {
-      const resultado = await pool.query<FilaConCuentas>(
-        `SELECT a.id_alerta_fraude AS id,
-                t.tipo_alerta_fraude_nombre AS tipo,
-                a.detalle, a.fecha_actualizacion,
-                array_agg(n.id_usuario) AS cuentas
-           FROM alerta_fraude a
-           JOIN tipo_alerta_fraude t
-             ON t.id_tipo_alerta_fraude = a.id_tipo_alerta_fraude
-           JOIN notificacion_fraude n
-             ON n.id_alerta_fraude = a.id_alerta_fraude
-          WHERE t.tipo_alerta_fraude_nombre = ANY($1)
-            AND a.id_estado_alerta_fraude <> (
-                  SELECT id_estado_alerta_fraude FROM estado_alerta_fraude
-                   WHERE estado_alerta_fraude_nombre = 'descartada'
-                )
-          GROUP BY a.id_alerta_fraude, t.tipo_alerta_fraude_nombre,
-                   a.detalle, a.fecha_actualizacion`,
-        [TIPOS_LOGIN_INCLUIDOS],
-      );
-      return resultado.rows.map((fila) => this.aHallazgo('login', fila));
-    } catch (error) {
-      manejarErrorConexion(this.logger, error);
-    }
-  }
-
-  private aHallazgo(
-    fuente: 'eventos' | 'login',
-    fila: FilaConCuentas,
-  ): Hallazgo {
-    const cuentas = [...new Set(fila.cuentas.map(Number))];
-    return {
-      fuente,
-      idOrigen: Number(fila.id),
-      tipo: fila.tipo,
-      cuentas,
-      clave: construirClave(cuentas),
-      metricas: fila.detalle,
-      ultimaEvidencia: fila.fecha_actualizacion,
-    };
   }
 }
 

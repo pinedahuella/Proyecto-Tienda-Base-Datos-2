@@ -3,15 +3,9 @@ import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { GrupoFraude } from '../../models/fraude/grupo-fraude';
-import { FuenteHallazgo, Hallazgo } from '../../models/fraude/hallazgo';
+import { Hallazgo } from '../../models/fraude/hallazgo';
 import { PuntajeFraudeService } from './puntaje-fraude.service';
 import { ReglasCasiConfirmadoService } from './reglas-casi-confirmado.service';
-
-const COLUMNA_POR_FUENTE: Record<FuenteHallazgo, string> = {
-  grafo: 'id_anillo_fraude',
-  eventos: 'id_hallazgo_evento_fraude',
-  login: 'id_alerta_fraude',
-};
 
 /** Que tan grave es cada estado, solo para decidir que hereda el
  * sobreviviente de una fusion -- ver `promocionDeEstado()`. `descartada`
@@ -102,9 +96,9 @@ export class PersistenciaCasoFraudeService {
    * Borra los casos `pendiente` que se quedaron sin ninguna evidencia --
    * `docs/BACKEND-PENDIENTE.md`, item C8. Puede pasar sin que sea un bug
    * de este servicio: `evidencia_caso_fraude` tiene `ON DELETE CASCADE`
-   * desde su fuente real (`anillo_fraude`/`hallazgo_evento_fraude`/
-   * `alerta_fraude`), asi que si esa fila se borra de verdad (una prueba
-   * que limpia, un admin que borra una alerta vieja), la evidencia
+   * desde `senal_fraude`, asi que si esa fila
+   * se borra de verdad (una prueba que limpia, un admin que borra una
+   * senal vieja), la evidencia
    * desaparece con ella, pero el caso que la tenia como unica evidencia
    * se queda huerfano -- nada mas lo revisita para notar que ya no le
    * queda nada.
@@ -173,9 +167,8 @@ export class PersistenciaCasoFraudeService {
   ): Promise<number> {
     const idsExistentes = new Set<number>();
     for (const hallazgo of hallazgos) {
-      const columna = COLUMNA_POR_FUENTE[hallazgo.fuente];
       const resultado = await cliente.query<{ id_caso_fraude: string }>(
-        `SELECT id_caso_fraude FROM evidencia_caso_fraude WHERE ${columna} = $1`,
+        `SELECT id_caso_fraude FROM evidencia_caso_fraude WHERE id_senal_fraude = $1`,
         [hallazgo.idOrigen],
       );
       if (resultado.rows[0] != null) {
@@ -304,10 +297,10 @@ export class PersistenciaCasoFraudeService {
     )[0];
   }
 
-  /** Upsert de un `evidencia_caso_fraude` por hallazgo -- el `ON CONFLICT`
-   * usa el indice unico parcial de la columna que le toca segun la
-   * fuente. Devuelve el id de evidencia de cada hallazgo, para que
-   * `sincronizarCuentas` sepa a cual enganchar cada cuenta. */
+  /** Upsert de un `evidencia_caso_fraude` por hallazgo (por senal) -- el
+   * `ON CONFLICT` usa el indice unico parcial de `id_senal_fraude`. Devuelve
+   * el id de evidencia de cada hallazgo, para que `sincronizarCuentas` sepa
+   * a cual enganchar cada cuenta. */
   private async sincronizarEvidencia(
     cliente: PoolClient,
     idCasoFraude: number,
@@ -315,14 +308,13 @@ export class PersistenciaCasoFraudeService {
   ): Promise<Map<Hallazgo, number>> {
     const idEvidenciaPorHallazgo = new Map<Hallazgo, number>();
     for (const hallazgo of hallazgos) {
-      const columna = COLUMNA_POR_FUENTE[hallazgo.fuente];
       const puntos = this.puntajeFraudeService.puntosDeHallazgo(hallazgo);
       const resultado = await cliente.query<{
         id_evidencia_caso_fraude: string;
       }>(
-        `INSERT INTO evidencia_caso_fraude (id_caso_fraude, ${columna}, puntos, ultima_evidencia)
+        `INSERT INTO evidencia_caso_fraude (id_caso_fraude, id_senal_fraude, puntos, ultima_evidencia)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (${columna}) WHERE ${columna} IS NOT NULL
+         ON CONFLICT (id_senal_fraude) WHERE id_senal_fraude IS NOT NULL
          DO UPDATE SET
            id_caso_fraude = EXCLUDED.id_caso_fraude,
            puntos = EXCLUDED.puntos,

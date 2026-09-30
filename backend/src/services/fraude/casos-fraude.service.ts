@@ -29,28 +29,29 @@ import {
 } from '../../models/fraude/caso-fraude';
 import { construirClave } from './hallazgo-fraude-adaptador.service';
 
-/** La misma evidencia, resuelta contra su fuente real -- ninguna de las
- * tres tablas se toca, solo se leen (`evidencia_caso_fraude` guarda la FK
- * exclusiva, ver `plan pendiente/agrupador-fraude.md`). */
+/** La `fuente` que muestra la API (`grafo`/`eventos`/`login`) sale de la
+ * familia de la senal -- mismo mapa que `FUENTE_POR_FAMILIA` del adaptador. */
+const SQL_FUENTE_DE_FAMILIA = `CASE f.familia_senal_fraude_nombre
+           WHEN 'compras_navegacion' THEN 'eventos'
+           WHEN 'login' THEN 'login'
+           ELSE 'grafo' END`;
+
+/** La misma evidencia, resuelta contra su senal -- `senal_fraude` no se
+ * toca, solo se lee (`evidencia_caso_fraude.id_senal_fraude`). */
 const SQL_EVIDENCIA = `(
   SELECT COALESCE(json_agg(jsonb_build_object(
            'id_evidencia_caso_fraude', ev.id_evidencia_caso_fraude,
-           'fuente', CASE WHEN ev.id_anillo_fraude IS NOT NULL THEN 'grafo'
-                          WHEN ev.id_hallazgo_evento_fraude IS NOT NULL THEN 'eventos'
-                          ELSE 'login' END,
-           'tipo', COALESCE(ta.tipo_anillo_fraude_nombre, teh.tipo_hallazgo_evento_nombre, taf.tipo_alerta_fraude_nombre),
-           'clave', COALESCE(anf.clave, hef.clave, alf.clave),
-           'metricas', COALESCE(anf.detalle, hef.detalle, alf.detalle, '{}'::jsonb),
+           'fuente', ${SQL_FUENTE_DE_FAMILIA},
+           'tipo', t.tipo_senal_fraude_nombre,
+           'clave', s.clave,
+           'metricas', s.detalle,
            'puntos', ev.puntos,
            'ultima_evidencia', ev.ultima_evidencia
          ) ORDER BY ev.ultima_evidencia DESC), '[]'::json)
     FROM evidencia_caso_fraude ev
-    LEFT JOIN anillo_fraude anf ON anf.id_anillo_fraude = ev.id_anillo_fraude
-    LEFT JOIN tipo_anillo_fraude ta ON ta.id_tipo_anillo_fraude = anf.id_tipo_anillo_fraude
-    LEFT JOIN hallazgo_evento_fraude hef ON hef.id_hallazgo_evento_fraude = ev.id_hallazgo_evento_fraude
-    LEFT JOIN tipo_hallazgo_evento teh ON teh.id_tipo_hallazgo_evento = hef.id_tipo_hallazgo_evento
-    LEFT JOIN alerta_fraude alf ON alf.id_alerta_fraude = ev.id_alerta_fraude
-    LEFT JOIN tipo_alerta_fraude taf ON taf.id_tipo_alerta_fraude = alf.id_tipo_alerta_fraude
+    JOIN senal_fraude s ON s.id_senal_fraude = ev.id_senal_fraude
+    JOIN tipo_senal_fraude t ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+    JOIN familia_senal_fraude f ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
    WHERE ev.id_caso_fraude = cf.id_caso_fraude
 )`;
 
@@ -274,18 +275,13 @@ export class CasosFraudeService {
         cuentas: string[];
       }>(
         `SELECT
-           CASE WHEN ev.id_anillo_fraude IS NOT NULL THEN 'grafo'
-                WHEN ev.id_hallazgo_evento_fraude IS NOT NULL THEN 'eventos'
-                ELSE 'login' END AS fuente,
-           COALESCE(ta.tipo_anillo_fraude_nombre, teh.tipo_hallazgo_evento_nombre, taf.tipo_alerta_fraude_nombre) AS tipo,
+           ${SQL_FUENTE_DE_FAMILIA} AS fuente,
+           t.tipo_senal_fraude_nombre AS tipo,
            array_agg(DISTINCT ec.id_usuario::text) AS cuentas
          FROM evidencia_caso_fraude ev
-         LEFT JOIN anillo_fraude anf ON anf.id_anillo_fraude = ev.id_anillo_fraude
-         LEFT JOIN tipo_anillo_fraude ta ON ta.id_tipo_anillo_fraude = anf.id_tipo_anillo_fraude
-         LEFT JOIN hallazgo_evento_fraude hef ON hef.id_hallazgo_evento_fraude = ev.id_hallazgo_evento_fraude
-         LEFT JOIN tipo_hallazgo_evento teh ON teh.id_tipo_hallazgo_evento = hef.id_tipo_hallazgo_evento
-         LEFT JOIN alerta_fraude alf ON alf.id_alerta_fraude = ev.id_alerta_fraude
-         LEFT JOIN tipo_alerta_fraude taf ON taf.id_tipo_alerta_fraude = alf.id_tipo_alerta_fraude
+         JOIN senal_fraude s ON s.id_senal_fraude = ev.id_senal_fraude
+         JOIN tipo_senal_fraude t ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+         JOIN familia_senal_fraude f ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
          JOIN evidencia_caso_fraude_cuenta ec ON ec.id_evidencia_caso_fraude = ev.id_evidencia_caso_fraude
         WHERE ev.id_caso_fraude = $1
         GROUP BY ev.id_evidencia_caso_fraude, fuente, tipo`,

@@ -2,7 +2,6 @@ import { Injectable, Logger } from '@nestjs/common';
 import { elasticClient } from '../../database/elastic';
 import { registrarAlertaFraude } from '../../helpers/registrar-alerta-fraude';
 import type { GeoUbicacion } from '../../helpers/contexto-peticion';
-import { ID_TIPO_ALERTA_FRAUDE_VIAJE_IMPOSIBLE } from '../../models/alerta-fraude';
 
 const INDICE =
   process.env.ELASTIC_INDICE_EVENTOS ?? 'mesh_eventos_autenticacion';
@@ -115,7 +114,7 @@ export class ViajeImposibleService {
         ventanaInicio.setSeconds(0, 0);
 
         await registrarAlertaFraude({
-          idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_VIAJE_IMPOSIBLE,
+          tipo: 'viaje_imposible',
           clave: datos.identificador,
           idUsuario: datos.idUsuario,
           detalle: {

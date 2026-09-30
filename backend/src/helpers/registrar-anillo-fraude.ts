@@ -1,35 +1,7 @@
+import type { PoolClient } from 'pg';
 import { pool } from '../database/postgres';
 import { ID_ESTADO_ALERTA_FRAUDE_PENDIENTE } from '../models/alerta-fraude';
-import {
-  ID_TIPO_ANILLO_FRAUDE_ANILLO_EN_EL_TIEMPO,
-  ID_TIPO_ANILLO_FRAUDE_CADENA_ABIERTA,
-  ID_TIPO_ANILLO_FRAUDE_CICLO,
-  ID_TIPO_ANILLO_FRAUDE_COORDINADOS,
-  ID_TIPO_ANILLO_FRAUDE_FAVOR_DEVUELTO,
-  ID_TIPO_ANILLO_FRAUDE_MUTUO,
-  ID_TIPO_ANILLO_FRAUDE_PERSISTENTE,
-  ID_TIPO_ANILLO_FRAUDE_REITERADO,
-  ID_TIPO_ANILLO_FRAUDE_REPUTACION_EXPRES,
-  ID_TIPO_ANILLO_FRAUDE_SATELITES,
-  TipoAnilloFraude,
-} from '../models/anillo-fraude';
-
-// `anillo_en_el_tiempo` (B.4) tiene entrada aqui solo para que el Record
-// siga exhaustivo -- no se persiste como fila propia (ver
-// models/anillo-fraude.ts), asi que `registrarAnilloFraude` nunca deberia
-// llamarse con ese tipo.
-const ID_TIPO_ANILLO_FRAUDE: Record<TipoAnilloFraude, number> = {
-  mutuo: ID_TIPO_ANILLO_FRAUDE_MUTUO,
-  ciclo: ID_TIPO_ANILLO_FRAUDE_CICLO,
-  reiterado: ID_TIPO_ANILLO_FRAUDE_REITERADO,
-  cadena_abierta: ID_TIPO_ANILLO_FRAUDE_CADENA_ABIERTA,
-  satelites: ID_TIPO_ANILLO_FRAUDE_SATELITES,
-  persistente: ID_TIPO_ANILLO_FRAUDE_PERSISTENTE,
-  anillo_en_el_tiempo: ID_TIPO_ANILLO_FRAUDE_ANILLO_EN_EL_TIEMPO,
-  favor_devuelto: ID_TIPO_ANILLO_FRAUDE_FAVOR_DEVUELTO,
-  coordinados: ID_TIPO_ANILLO_FRAUDE_COORDINADOS,
-  reputacion_expres: ID_TIPO_ANILLO_FRAUDE_REPUTACION_EXPRES,
-};
+import type { TipoAnilloFraude } from '../models/anillo-fraude';
 
 /**
  * `mutuo`/`ciclo`/`reiterado` son el MISMO fenomeno (A.1/A.2) escalando o
@@ -43,16 +15,12 @@ const TIPOS_CICLO_RESENAS: ReadonlySet<TipoAnilloFraude> = new Set([
   'ciclo',
   'reiterado',
 ]);
-const IDS_TIPO_CICLO_RESENAS = [
-  ID_TIPO_ANILLO_FRAUDE_MUTUO,
-  ID_TIPO_ANILLO_FRAUDE_CICLO,
-  ID_TIPO_ANILLO_FRAUDE_REITERADO,
-];
 
 /**
- * El UPSERT que deja (o refresca) una fila de `anillo_fraude`, y de paso
- * asegura que `anillo_fraude_resena` tenga una fila por cada resena que hoy
- * forma parte de la evidencia. La llama `AnillosDetectorService`
+ * El UPSERT que deja (o refresca) la senal de un anillo en `senal_fraude`, y
+ * de paso asegura que `senal_fraude_resena` tenga una fila por cada resena que
+ * hoy forma parte de la evidencia. Desde la etapa 8 del refactor ya no escribe
+ * en `anillo_fraude` ni en `anillo_fraude_resena`. La llama `AnillosDetectorService`
  * (`detectar()`/`detectarInmediato()`) por cada grupo que encuentran A.1/A.2,
  * y `PatronesFraudeDetectorService` por cada hallazgo de B.1/B.2/B.3/B.5/B.6/B.7
  * (ver `elementos Generales/plan pendiente/anillos-fraude-familia-b.md`).
@@ -93,58 +61,7 @@ export async function registrarAnilloFraude(datos: {
   try {
     await cliente.query('BEGIN');
 
-    const idTipo = ID_TIPO_ANILLO_FRAUDE[datos.tipo];
-    let idAnilloFraude: string;
-
-    if (TIPOS_CICLO_RESENAS.has(datos.tipo)) {
-      const existente = await cliente.query<{ id_anillo_fraude: string }>(
-        `SELECT id_anillo_fraude FROM anillo_fraude
-          WHERE clave = $1 AND id_tipo_anillo_fraude = ANY ($2)
-          FOR UPDATE`,
-        [datos.clave, IDS_TIPO_CICLO_RESENAS],
-      );
-      if (existente.rows.length > 0) {
-        idAnilloFraude = existente.rows[0].id_anillo_fraude;
-        await cliente.query(
-          `UPDATE anillo_fraude
-              SET id_tipo_anillo_fraude = $2, ultima_vez_confirmado_activo = now()
-            WHERE id_anillo_fraude = $1`,
-          [idAnilloFraude, idTipo],
-        );
-      } else {
-        const insertado = await cliente.query<{ id_anillo_fraude: string }>(
-          `INSERT INTO anillo_fraude (id_tipo_anillo_fraude, clave, id_estado_alerta_fraude)
-           VALUES ($1, $2, $3)
-           RETURNING id_anillo_fraude`,
-          [idTipo, datos.clave, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
-        );
-        idAnilloFraude = insertado.rows[0].id_anillo_fraude;
-      }
-    } else {
-      const resultado = await cliente.query<{ id_anillo_fraude: string }>(
-        `INSERT INTO anillo_fraude (id_tipo_anillo_fraude, clave, id_estado_alerta_fraude, detalle)
-         VALUES ($1, $2, $3, $4::jsonb)
-         ON CONFLICT (id_tipo_anillo_fraude, clave)
-         DO UPDATE SET ultima_vez_confirmado_activo = now(), detalle = $4::jsonb
-         RETURNING id_anillo_fraude`,
-        [
-          idTipo,
-          datos.clave,
-          ID_ESTADO_ALERTA_FRAUDE_PENDIENTE,
-          JSON.stringify(datos.detalle ?? {}),
-        ],
-      );
-      idAnilloFraude = resultado.rows[0].id_anillo_fraude;
-    }
-
-    for (const idResena of datos.resenas) {
-      await cliente.query(
-        `INSERT INTO anillo_fraude_resena (id_anillo_fraude, id_resena)
-         VALUES ($1, $2)
-         ON CONFLICT (id_anillo_fraude, id_resena) DO NOTHING`,
-        [idAnilloFraude, idResena],
-      );
-    }
+    await registrarSenalDelAnillo(cliente, datos);
 
     await cliente.query('COMMIT');
   } catch (error) {
@@ -153,4 +70,108 @@ export async function registrarAnilloFraude(datos: {
   } finally {
     cliente.release();
   }
+}
+
+/**
+ * Deja la senal del anillo en `senal_fraude`, `senal_fraude_resena` y
+ * `senal_fraude_cuenta` (ver
+ * `elementos Generales/plan pendiente/refactor-fraude-senales.md`). Va en la
+ * transaccion de `registrarAnilloFraude`: si una escritura falla, ninguna
+ * queda a medias.
+ *
+ * Cada deteccion sube `total_detecciones` y avanza `ultima_deteccion`. NO toca
+ * `id_estado_alerta_fraude` ni `fecha_actualizacion` (son de la revision del
+ * admin), mismo criterio que la escritura de arriba.
+ *
+ * Igual que arriba, `mutuo`/`ciclo`/`reiterado` comparten senal: se busca
+ * cualquiera de los tres por `clave` y se le cambia el tipo, en vez de dejar
+ * que nazca una senal nueva por cada tipo.
+ */
+async function registrarSenalDelAnillo(
+  cliente: PoolClient,
+  datos: {
+    tipo: TipoAnilloFraude;
+    clave: string;
+    resenas: number[];
+    detalle?: Record<string, unknown>;
+  },
+): Promise<void> {
+  let idSenal: string;
+
+  if (TIPOS_CICLO_RESENAS.has(datos.tipo)) {
+    const existente = await cliente.query<{ id_senal_fraude: string }>(
+      `SELECT s.id_senal_fraude
+         FROM senal_fraude s
+         JOIN tipo_senal_fraude t
+           ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+        WHERE s.clave = $1 AND t.tipo_senal_fraude_nombre = ANY ($2)
+        FOR UPDATE OF s`,
+      [datos.clave, [...TIPOS_CICLO_RESENAS]],
+    );
+    if (existente.rows.length > 0) {
+      idSenal = existente.rows[0].id_senal_fraude;
+      await cliente.query(
+        `UPDATE senal_fraude
+            SET id_tipo_senal_fraude = (SELECT id_tipo_senal_fraude
+                                          FROM tipo_senal_fraude
+                                         WHERE tipo_senal_fraude_nombre = $2),
+                ultima_deteccion = now(),
+                total_detecciones = total_detecciones + 1
+          WHERE id_senal_fraude = $1`,
+        [idSenal, datos.tipo],
+      );
+    } else {
+      const insertada = await cliente.query<{ id_senal_fraude: string }>(
+        `INSERT INTO senal_fraude (id_tipo_senal_fraude, clave, id_estado_alerta_fraude)
+         SELECT id_tipo_senal_fraude, $2, $3
+           FROM tipo_senal_fraude WHERE tipo_senal_fraude_nombre = $1
+         RETURNING id_senal_fraude`,
+        [datos.tipo, datos.clave, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
+      );
+      idSenal = insertada.rows[0].id_senal_fraude;
+    }
+  } else {
+    const resultado = await cliente.query<{ id_senal_fraude: string }>(
+      `INSERT INTO senal_fraude (id_tipo_senal_fraude, clave, id_estado_alerta_fraude, detalle)
+       SELECT id_tipo_senal_fraude, $2, $3, $4::jsonb
+         FROM tipo_senal_fraude WHERE tipo_senal_fraude_nombre = $1
+       ON CONFLICT (id_tipo_senal_fraude, clave)
+       DO UPDATE SET ultima_deteccion = now(),
+                     total_detecciones = senal_fraude.total_detecciones + 1,
+                     detalle = $4::jsonb
+       RETURNING id_senal_fraude`,
+      [
+        datos.tipo,
+        datos.clave,
+        ID_ESTADO_ALERTA_FRAUDE_PENDIENTE,
+        JSON.stringify(datos.detalle ?? {}),
+      ],
+    );
+    idSenal = resultado.rows[0].id_senal_fraude;
+  }
+
+  for (const idResena of datos.resenas) {
+    await cliente.query(
+      `INSERT INTO senal_fraude_resena (id_senal_fraude, id_resena)
+       VALUES ($1, $2)
+       ON CONFLICT (id_senal_fraude, id_resena) DO NOTHING`,
+      [idSenal, idResena],
+    );
+  }
+
+  // Las cuentas, todas 'autor' (en un anillo de resenas la cuenta senalada es
+  // la sospechosa, nunca la victima). Salen de la `clave`, que es EXACTAMENTE
+  // el conjunto de cuentas que detecto el detector: no de un join con las
+  // resenas, que metia al vendedor en `coordinados` (B.6), donde es un
+  // tercero ajeno al patron y no un sospechoso.
+  const idsCuentas = datos.clave.split('-').filter((id) => /^\d+$/.test(id));
+  await cliente.query(
+    `INSERT INTO senal_fraude_cuenta (id_senal_fraude, id_usuario, id_rol_cuenta_senal)
+     SELECT $1::bigint, u.id_usuario, rol.id_rol_cuenta_senal
+       FROM usuarios u
+       JOIN rol_cuenta_senal rol ON rol.rol_cuenta_senal_nombre = 'autor'
+      WHERE u.id_usuario = ANY ($2::bigint[])
+     ON CONFLICT DO NOTHING`,
+    [idSenal, idsCuentas],
+  );
 }
