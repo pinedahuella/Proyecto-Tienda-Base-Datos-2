@@ -61,6 +61,7 @@ import {
 import { UsuarioService } from '../../services/usuario.service';
 import { ProductosService } from '../../services/productos/productos.service';
 import { CORREO_TIENDA } from '../../helpers/constantes';
+import { escribirConCatalogoPostgres } from '../../helpers/catalogo-postgres';
 import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 
 const ESTADO_PRODUCTO_NUEVO = 'borrador';
@@ -203,8 +204,16 @@ export class ProductosVendedorService {
         }),
       };
 
-      await coleccionProductos.insertOne(producto);
-      await this.crearEventoCreacion(producto);
+      // Mongo + copia del catalogo en PostgreSQL, ver escribirConCatalogoPostgres.
+      await escribirConCatalogoPostgres(
+        this.logger,
+        producto,
+        async () => {
+          await coleccionProductos.insertOne(producto);
+          await this.crearEventoCreacion(producto);
+        },
+        () => this.deshacerProductoMongo(producto._id),
+      );
 
       return producto;
     } catch (error) {
@@ -317,33 +326,39 @@ export class ProductosVendedorService {
         }),
       };
 
-      await coleccionProductos.insertOne(producto);
-      await this.crearEventoCreacion(producto);
+      // El producto en Mongo (invisible por la lista blanca), la copia del
+      // catalogo y la propuesta en Postgres van en la misma transaccion de
+      // PostgreSQL; si algo falla, se hace ROLLBACK y se deshace Mongo.
+      await escribirConCatalogoPostgres(
+        this.logger,
+        producto,
+        async (cliente) => {
+          await coleccionProductos.insertOne(producto);
+          await this.crearEventoCreacion(producto);
+          try {
+            await cliente.query(
+              'INSERT INTO propuesta_producto (id_usuario, id_producto_mongo) VALUES ($1, $2)',
+              [idUsuario, producto._id],
+            );
+          } catch (error) {
+            if (
+              (error as { code?: string } | undefined)?.code ===
+              CODIGO_UNIQUE_VIOLATION
+            ) {
+              throw new ErrorConflicto(
+                'No se pudo registrar la propuesta. Volve a intentarlo.',
+              );
+            }
+            throw error;
+          }
+        },
+        () => this.deshacerProductoMongo(producto._id),
+      );
     } catch (error) {
-      if (error instanceof ErrorValidacion) {
+      if (error instanceof ErrorValidacion || error instanceof ErrorConflicto) {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);
-    }
-
-    // El producto ya esta en Mongo (invisible por la lista blanca). Ahora la
-    // propuesta en Postgres; si falla, se deshace la escritura de Mongo.
-    try {
-      await pool.query(
-        'INSERT INTO propuesta_producto (id_usuario, id_producto_mongo) VALUES ($1, $2)',
-        [idUsuario, producto._id],
-      );
-    } catch (error) {
-      await this.deshacerProductoMongo(producto._id);
-      if (
-        (error as { code?: string } | undefined)?.code ===
-        CODIGO_UNIQUE_VIOLATION
-      ) {
-        throw new ErrorConflicto(
-          'No se pudo registrar la propuesta. Volve a intentarlo.',
-        );
-      }
-      manejarErrorConexion(this.logger, error);
     }
 
     return producto;
@@ -1327,8 +1342,57 @@ export class ProductosVendedorService {
         operacion.$unset = conjuntoUnset;
       }
 
-      await coleccion.updateOne({ _id: idProducto }, operacion);
-      await this.crearEventoModificacion(idProducto, cambiosEvento);
+      let idEvento: string | null = null;
+      const escribirMongo = async (): Promise<void> => {
+        await coleccion.updateOne({ _id: idProducto }, operacion);
+        idEvento = await this.crearEventoModificacion(
+          idProducto,
+          cambiosEvento,
+        );
+      };
+
+      if (nombre != null || variantes != null) {
+        // Cambia algo que vive tambien en la copia del catalogo en
+        // PostgreSQL (nombre del producto o variantes): misma transaccion.
+        // La compensacion devuelve a Mongo los valores que tenia.
+        const previo = productoActual as unknown as Record<string, unknown>;
+        const reversaSet: Record<string, unknown> = {};
+        const reversaUnset: Record<string, ''> = {};
+        for (const clave of [
+          ...Object.keys(conjuntoSet),
+          ...Object.keys(conjuntoUnset),
+        ]) {
+          if (previo[clave] !== undefined) {
+            reversaSet[clave] = previo[clave];
+          } else {
+            reversaUnset[clave] = '';
+          }
+        }
+        await escribirConCatalogoPostgres(
+          this.logger,
+          {
+            _id: idProducto,
+            nombre: nombre ?? productoActual.nombre,
+            variantes: variantes ?? productoActual.variantes,
+          },
+          escribirMongo,
+          async () => {
+            const reversa: Record<string, unknown> = {};
+            if (Object.keys(reversaSet).length > 0) reversa.$set = reversaSet;
+            if (Object.keys(reversaUnset).length > 0) {
+              reversa.$unset = reversaUnset;
+            }
+            await coleccion.updateOne({ _id: idProducto }, reversa);
+            if (idEvento != null) {
+              await mongoDb
+                .collection('productos_eventos')
+                .deleteOne({ _id: idEvento as never });
+            }
+          },
+        );
+      } else {
+        await escribirMongo();
+      }
 
       return (await coleccion.findOne({ _id: idProducto })) as Producto;
     } catch (error) {

@@ -81,7 +81,7 @@ interface FilaRespuesta {
  *
  * Al publicar una resena (`crear`) se recalculan los campos `resenas_promedio`
  * y `resenas_total` que Mongo guarda como copia en el documento del producto
- * (via `ProductosService.recalcularCamposCalculados`): son los que usan la
+ * (via `EventoProductoSyncService`, cola `evento_producto`): son los que usan la
  * tarjeta y el filtro del catalogo. La media autoritativa la sigue calculando
  * en vivo `listarDeProducto` desde PostgreSQL (`resumen.promedio`).
  */
@@ -275,11 +275,10 @@ export class ResenasService {
    * El `UNIQUE (id_usuario, id_usuario_vendedor, id_producto_mongo)` de la
    * tabla rechaza la segunda resena del mismo trio -> 409.
    *
-   * Ya escrita, se recalculan `resenas_promedio`/`resenas_total` en el
-   * documento de Mongo del producto. Si ese recalculo falla no revienta la
-   * publicacion: la resena ya esta en PostgreSQL (la fuente de verdad) y
-   * `recalcularCamposCalculados` se traga sus propios errores -- la copia
-   * del catalogo se pondra al dia en el proximo cambio o corrida del ETL.
+   * `resenas_promedio`/`resenas_total` en el documento de Mongo NO se
+   * tocan aqui: el trigger de `resena` deja el producto en `evento_producto`
+   * en la misma transaccion y `EventoProductoSyncService` lo recalcula aparte
+   * (si Mongo esta caido, queda pendiente y se reintenta).
    */
   async crear(
     idUsuario: string,
@@ -315,7 +314,6 @@ export class ResenasService {
         [idUsuario, comentario, idVendedor, idProducto, calificacion],
       );
       const fila = resultado.rows[0];
-      await this.productosService.recalcularCamposCalculados([idProducto]);
       // Sin await, a proposito: no debe retrasar la respuesta. El trigger
       // de Postgres ya encolo el evento en evento_grafo con el INSERT de
       // arriba; esto solo evita que la proyeccion a Neo4j tenga que

@@ -587,7 +587,19 @@ export class ProductosService {
     }
   }
 
-  private async recalcularUnProducto(idProducto: number): Promise<void> {
+  /**
+   * Lo mismo que recalcularCamposCalculados para UN producto, pero SI lanza
+   * el error en vez de tragarselo: lo usa el worker de `evento_producto`, que
+   * necesita saber si fallo para reintentar.
+   */
+  async recalcularProductoEstricto(idProducto: number): Promise<void> {
+    await this.recalcularUnProducto(idProducto, true);
+  }
+
+  private async recalcularUnProducto(
+    idProducto: number,
+    relanzar = false,
+  ): Promise<void> {
     try {
       const [porVariante, totalEnRaiz, resumenResenas] = await Promise.all([
         pool.query<FilaCalculoVariante>(
@@ -747,6 +759,9 @@ export class ProductosService {
         `No se pudieron recalcular los campos calculados (precio/stock/resenas) del producto ${idProducto}: ` +
           (error instanceof Error ? error.message : String(error)),
       );
+      if (relanzar) {
+        throw error;
+      }
     }
   }
 

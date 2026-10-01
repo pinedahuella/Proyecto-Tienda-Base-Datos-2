@@ -255,13 +255,11 @@ export class VentasLimitadasService {
     // Resuelto una sola vez por corrida, y solo si de verdad hay algo que
     // apagar -- ver apagarVentaLimitadaVencida() para el porque.
     let idTienda: string | null = null;
-    const idsProductoMongoTocados: number[] = [];
     for (const fila of filas) {
       try {
         idTienda ??= await this.obtenerIdTienda();
         await this.apagarVentaLimitadaVencida(fila.id_oferta, idTienda);
         apagadas++;
-        idsProductoMongoTocados.push(Number(fila.id_producto_mongo));
         // sincronizar() nunca lanza (ver registro-ofertas-redis.service.ts)
         // -- un problema de Redis aca no debe tumbar esta revision, que ya
         // logro lo que le importa (apagar las columnas en Postgres). Si
@@ -271,17 +269,6 @@ export class VentasLimitadasService {
       } catch (error) {
         this.logger.warn(
           `revision de ventas limitadas vencidas: no se pudo apagar la oferta ${fila.id_oferta} (${(error as Error)?.message ?? error})`,
-        );
-      }
-    }
-    if (idsProductoMongoTocados.length > 0) {
-      try {
-        await this.productosService.recalcularCamposCalculados(
-          idsProductoMongoTocados,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `revision de ventas limitadas vencidas: no se pudo recalcular Mongo (${(error as Error)?.message ?? error})`,
         );
       }
     }
@@ -386,28 +373,15 @@ export class VentasLimitadasService {
     // Resuelto una sola vez por corrida, y solo si de verdad hay algo que
     // quitar -- ver quitarDescuentoVencido() para el porque.
     let idTienda: string | null = null;
-    const idsProductoMongoTocados: number[] = [];
     for (const fila of filas) {
       try {
         idTienda ??= await this.obtenerIdTienda();
         await this.quitarDescuentoVencido(fila.id_oferta, idTienda);
         quitados++;
-        idsProductoMongoTocados.push(Number(fila.id_producto_mongo));
         await this.registroOfertasRedis.sincronizar(fila.id_oferta);
       } catch (error) {
         this.logger.warn(
           `revision de descuentos vencidos: no se pudo quitar el descuento de la oferta ${fila.id_oferta} (${(error as Error)?.message ?? error})`,
-        );
-      }
-    }
-    if (idsProductoMongoTocados.length > 0) {
-      try {
-        await this.productosService.recalcularCamposCalculados(
-          idsProductoMongoTocados,
-        );
-      } catch (error) {
-        this.logger.warn(
-          `revision de descuentos vencidos: no se pudo recalcular Mongo (${(error as Error)?.message ?? error})`,
         );
       }
     }

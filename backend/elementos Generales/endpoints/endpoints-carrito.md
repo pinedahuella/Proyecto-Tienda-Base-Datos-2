@@ -14,6 +14,21 @@ PostgreSQL con el `id_pedido` en `localStorage`.
 > `POST /carrito/comprar` y `DELETE /carrito` conectan `confirmar`/`devolver`
 > de la venta relámpago. Ver las secciones de "Pruebas" con fecha 2026-09-03.
 >
+> **2026-10-01 — El carrito y el checkout ya no leen MongoDB.** El nombre del
+> producto, el nombre y el estado de la variante y la imagen de portada salen
+> de la copia del catálogo en PostgreSQL (`producto_catalogo` y
+> `variante_catalogo`, unidas a `oferta` por el par `id_producto_mongo` +
+> `id_producto_variante_mongo`). Mongo sigue siendo la fuente del catálogo; la
+> copia la mantiene el backend al crear, proponer y editar productos. Efectos
+> en esta API: (1) `PUT /carrito/lineas/:idOferta` y `POST /carrito/comprar`
+> ya no devuelven 503 por MongoDB; (2) una variante que todavía no esté en la
+> copia sale como `"(producto no encontrado)"` / `"(variante no encontrada)"`
+> y su `disponible` no se ve afectado por el estado, pero al pagar un pedido
+> manual cuenta como no disponible; (3) los campos calculados de Mongo ya no
+> se recalculan en la petición: los recalcula un worker aparte (ver abajo).
+> Decisiones y plan: `plan pendiente/catalogo-en-postgres.md` y
+> `plan pendiente/evento-producto.md`.
+>
 > **2026-09-23 — REDISEÑO pedido por el profesor: "el carrito debe resistir
 > por sí solo".** `GET /carrito` ya no consulta PostgreSQL ni MongoDB — lee
 > una FOTO (nombre, precio, imagen, vendedor, stock, disponibilidad) que se
@@ -63,7 +78,7 @@ siempre con datos en vivo, nunca con esta foto.
 
 | Ruta | Redis | PostgreSQL / Mongo |
 |---|---|---|
-| `PUT /carrito/lineas/:idOferta` | `HSET` + `EXPIRE` | **SÍ, una vez**: 1 consulta a `oferta` + 1 a `productos` (Mongo), solo para ESA línea, para armar la foto que se guarda |
+| `PUT /carrito/lineas/:idOferta` | `HSET` + `EXPIRE` | **SÍ, una vez**: 1 consulta a PostgreSQL (`oferta` unida a la copia del catálogo), solo para ESA línea, para armar la foto que se guarda. **Ya no toca Mongo** (2026-10-01) |
 | `DELETE /carrito/lineas/:idOferta` | `HDEL` + `EXPIRE` | **nada** |
 | `DELETE /carrito` | `DEL` | **nada** |
 | `GET /carrito` | `HGETALL` + `EXPIRE` | **nada** — lee las fotos ya guardadas |
@@ -205,8 +220,9 @@ GET /carrito
   reserva de Redis); la disponibilidad real de la línea es si la reserva
   sigue viva, no ese número — por eso `reserva_vencida` puede salir aunque
   `stock_disponible` todavía se vea positivo.
-- Un producto o variante que no aparezca en Mongo (no debería: el catálogo
-  no borra) sale con `"(producto no encontrado)"` / `"(variante no
+- Un producto o variante que no aparezca en la copia del catálogo en
+  PostgreSQL (`variante_catalogo`; no debería: se siembra y se mantiene al
+  crear/editar productos) sale con `"(producto no encontrado)"` / `"(variante no
   encontrada)"`, sin romper el resto del carrito.
 
 ### 401 / 503 / 500
@@ -243,8 +259,8 @@ rechazar el `PUT`** — pero sí se consulta (para armar la foto): un id
 inventado se guarda igual, con nombres de relleno `"(oferta no
 encontrada)"` y `motivo: "oferta_no_existe"` ya congelados en la foto, y
 `comprar_carrito()` lo rechaza al pagar de todos modos. Este `PUT` es la
-**única** escritura del carrito que toca Postgres/Mongo (una consulta a
-cada una, solo por esta línea) — el resto de las rutas de escritura siguen
+**única** escritura del carrito que toca Postgres (una consulta, solo por
+esta línea; desde el 2026-10-01 ya no toca Mongo) — el resto de las rutas de escritura siguen
 siendo Redis puro.
 
 ### Si la oferta es de inventario limitado (venta relámpago)
@@ -309,8 +325,10 @@ previa, sigue intacta.
 { "ok": false, "mensaje": "No se pudo actualizar el carrito", "payload": null }
 ```
 
-Los dos de en medio son nuevos desde el rediseño (2026-09-23): antes `PUT`
-no tocaba ni Postgres ni Mongo, así que no podían fallar por su culpa.
+El de PostgreSQL es nuevo desde el rediseño (2026-09-23): antes `PUT` no
+tocaba ni Postgres ni Mongo. El de MongoDB **ya no puede salir de esta ruta**
+desde el 2026-10-01 (el catálogo se lee de PostgreSQL); queda en la lista
+solo por historia.
 
 ---
 
@@ -390,8 +408,13 @@ El **checkout**. Lee el carrito, comprueba que todo se pueda comprar, y lo
 compra llamando a **`comprar_carrito()`**
 (`migrations/012_comprar_carrito.sql`), que crea el pedido, le mete todas
 las líneas y lo compra en **una sola transacción** — un fallo no deja ni
-pedido ni líneas a medias. Si sale bien: `DEL` del carrito y recálculo de
-los campos calculados de Mongo de cada producto tocado.
+pedido ni líneas a medias. Si sale bien: `DEL` del carrito. Los campos calculados de Mongo de cada
+producto tocado **ya no se recalculan en esta petición** (2026-10-01): los
+triggers de `oferta` anotan el producto en `evento_producto` dentro de la
+misma transacción de la compra y `EventoProductoSyncService` lo recalcula
+cada 5 s. La tarjeta del catálogo puede tardar unos segundos en reflejar el
+stock nuevo; la ficha y el cobro siguen en vivo contra PostgreSQL. Con Mongo
+caído la compra responde igual de rápido: ya no depende de él.
 
 ```
 POST /carrito/comprar

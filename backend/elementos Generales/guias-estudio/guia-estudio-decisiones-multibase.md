@@ -11,6 +11,7 @@ Este documento reconstruye, a partir del código real del backend (no de un resu
 5. Neo4j: el grafo de fraude en reseñas
 6. Fraude de login: Redis + Elasticsearch
 7. ClickHouse: la base columnar y los últimos cambios
+8. El catálogo copiado a PostgreSQL y la cola de productos por recalcular (2026-10-01)
 
 ---
 
@@ -478,6 +479,7 @@ Todo servicio con `@Interval(...)` en `backend/src` que mueve o deriva datos de 
 | `BuscadorSyncService` | MongoDB (`productos`) | Elasticsearch (`mesh_productos`) | `pendiente_busqueda: true` en el propio documento | 10 s (`INTERVALO_MS = 10000`), hasta 200/corrida | Bandera en el mismo documento | No (siempre espera el reloj de 10s) |
 | `EventosAutenticacionSyncService` | MongoDB (`eventos_autenticacion`) | Elasticsearch (`mesh_eventos_autenticacion`) | `pendiente_elastic` en el propio documento | 5 s (`INTERVALO_MS = 5000`), hasta 500/corrida | Bandera en el mismo documento | **Sí** — `sincronizarAhora()`, llamada por `UsuarioController` justo tras cada login |
 | `GrafoSyncService` | PostgreSQL (`resena`) | Neo4j (`:Resena`, `:Usuario`, `:Producto`) | fila en tabla outbox `evento_grafo` (trigger `trg_resena_al_grafo`) | 10 s (`INTERVALO_MS = 10000`), tope 500/corrida, `FOR UPDATE SKIP LOCKED` | Outbox con tabla + trigger | **Sí** — `procesarAhora()`, llamada por `ResenasService.crear()` justo tras insertar |
+| `EventoProductoSyncService` | PostgreSQL (`oferta`, `resena`) | MongoDB (campos calculados de `productos`: precio, stock, ofertas, descuento, nota) | fila en tabla outbox `evento_producto` (triggers `trg_oferta_al_producto` y `trg_resena_al_producto`), UNA fila pendiente por producto | 5 s (`INTERVALO_MS = 5000`), hasta 200/corrida | Outbox con tabla + trigger, deduplicado por producto | no |
 | `AnillosDetectorService` | Neo4j (consultas Cypher A.1/A.2) | PostgreSQL (`anillo_fraude`, `anillo_fraude_resena`) | ninguna bandera — re-evalúa toda la ventana en cada corrida | 15 min (`INTERVALO_MS = 15 * 60 * 1000`), ventana de 60 días | Ninguno — recomputación completa por ventana temporal | **Sí** — `detectarInmediato(idResena)`, llamada por `ResenasService.crear()` encadenada tras `procesarAhora()` |
 | `FraudeLoginRetrospectivoService` | Elasticsearch (`mesh_eventos_autenticacion`, agregaciones) | PostgreSQL (`alerta_fraude`) | ninguna bandera — re-evalúa últimas 24h completas en cada corrida | 15 min (`INTERVALO_MS = 15 * 60 * 1000`) | Ninguno — recomputación completa por ventana temporal | **Sí** — `evaluarInmediato()`, llamada por `UsuarioController` justo tras cada login |
 | `MasVendidosSyncService` | ClickHouse (`compra_producto`) | Redis (ZSET `mesh:productos:mas_vendidos`) | ninguna bandera — recalcula agregando la ventana de 24h/7d en cada corrida | 10 min (`INTERVALO_MS = 10 * 60 * 1000`) | ZSET con reemplazo atómico vía `RENAME` | No |
@@ -1237,3 +1239,33 @@ Fastify tiene tres modos relevantes para `request.ip` cuando hay un proxy delant
 - **`trustProxy: 'loopback'`**: Fastify solo confía en el `X-Forwarded-For` cuando la conexión directa (el socket) viene de `127.0.0.0/8` o `::1` — es decir, cuando quien habla con el backend es un proceso de la propia máquina (Vite, el túnel). A partir de ahí, se detiene en la **primera IP de fuera** del rango de loopback. Mismo escenario de arriba: `request.ip = 192.42.116.59` (la real). Y si alguien intenta pegarle directo al puerto 3000 desde otra máquina sin pasar por el proxy, su conexión no viene de loopback, así que su cabecera `X-Forwarded-For` **no se lee en absoluto** — no puede inventarse ninguna IP.
 
 Este era un hallazgo real, no cosmético: sin la línea, `request.ip` daba `127.0.0.1` para **todo el mundo** que entrara por el túnel del celular — y eso corrompía silenciosamente el campo `ip` de `vista_producto`, `carrito_producto`, `compra_producto`, `devolucion_producto` **y** los contadores de fraude por IP (`fuerza_bruta_ip`, `multi_cuenta_ip` de Redis, y las agregaciones por IP de Elasticsearch): cuatro personas entrando desde sus celulares por el mismo túnel ya disparaban una alerta `multi_cuenta_ip` falsa, porque todas contaban como la misma IP `127.0.0.1`.
+
+---
+
+## Parte 8 — El catálogo copiado a PostgreSQL y la cola de productos por recalcular (2026-10-01)
+
+Esta parte explica por qué el carrito y el checkout dejaron de depender de MongoDB, y cómo se mantiene todo en pie. Plan y estado: `plan pendiente/catalogo-en-postgres.md` y `plan pendiente/evento-producto.md`.
+
+### El problema que había
+
+El checkout no escribía en Mongo, pero lo **leía** antes de cobrar (nombre del producto, nombre y estado de la variante) y lo **escribía** después de cobrar (`recalcularCamposCalculados`, con `await`). Con Mongo caído la compra daba 503, y aunque la compra ya estuviera cobrada, la respuesta esperaba unos 3 s por producto (`serverSelectionTimeoutMS`), en serie. Era la fila 11 de `docs/CONSISTENCIA-CHECKOUT.md`: una dependencia de **disponibilidad**, no de consistencia.
+
+### Decisión 1: la copia va normalizada, en dos tablas, no como columnas de `oferta`
+
+`producto_catalogo (id_producto_mongo, nombre)` y `variante_catalogo (id_producto_mongo, id_producto_variante_mongo, nombre_variante, estado, imagen)`. El nombre depende de la **variante**, no de la oferta: una variante puede tener muchas ofertas (modelo multi-vendedor), y como columna de `oferta` el nombre se repetiría N veces y un renombre tocaría N filas. El par de ids identifica la variante (en Mongo dos productos pueden repetir el id de variante). `imagen` guarda una sola imagen, la portada, porque es lo único que necesita la línea del carrito. La FK de `oferta` a `variante_catalogo` está prevista como etapa 2 y NO se aplicó: crear una oferta sobre un producto recién creado la rechazaría si la copia aún no existe.
+
+### Decisión 2: Mongo y PostgreSQL no comparten transacción, así que el orden es lo que protege
+
+`escribirConCatalogoPostgres` (`helpers/catalogo-postgres.ts`) hace: `BEGIN` en PostgreSQL, `UPSERT` de la copia (sin commit todavía), escritura en Mongo, `COMMIT`. Si falla antes del `COMMIT`: `ROLLBACK` y se deshace Mongo. Si falla el `COMMIT`: se deshace Mongo. PostgreSQL va primero porque su `COMMIT` es lo último que puede fallar, y es mucho más raro que falle que una escritura de Mongo. Ventana que queda, declarada: el proceso muere entre la escritura de Mongo y el `COMMIT`, o falla la propia compensación. No es una transacción distribuida (no hay commit en dos fases entre estas dos bases); es una aproximación con ventana de milisegundos.
+
+### Decisión 3: el recálculo de Mongo sale de la petición, vía outbox deduplicado
+
+Mismo patrón que `evento_grafo` (Parte 4), con una diferencia deliberada: `evento_producto` guarda **una fila pendiente por producto**, no una por cambio (índice único parcial + `UPSERT` en el trigger). Recalcular siempre parte del estado actual, así que 50 cambios seguidos se resuelven con un solo recálculo. Dos triggers (`oferta`, solo las columnas que entran en los campos calculados; `resena`) escriben en la misma transacción del cambio, por lo que no se puede olvidar un sitio. El worker (`EventoProductoSyncService`) marca `procesado_en` solo si `fecha` sigue siendo la que leyó; si el producto cambió mientras se recalculaba, la fila queda pendiente y se repite. Un producto que falla 5 veces se aparta; un cambio nuevo lo reactiva (el trigger pone `intentos = 0`). Si Mongo está caído, el worker corta la corrida sin contar intentos.
+
+Se descartó dejar la llamada directa sin `await` (fire-and-forget): sigue metiendo a Mongo en la ruta de compra, no reintenta y duplica lo que ya hace el worker.
+
+### Lo que se acepta
+
+- La tarjeta del catálogo (precio, stock, nota) puede ir hasta unos segundos atrás. La ficha y el cobro siguen en vivo contra PostgreSQL, así que nada se vende de más.
+- Los cambios al catálogo hechos fuera del backend (ETL, scripts) no pasan por `escribirConCatalogoPostgres`: hay que sembrar con `plan pendiente/catalogo-en-postgres-sembrar.cjs`.
+- Sin las migraciones reales (`029` catálogo, `030` cola y triggers) el worker falla en cada pasada; en local ya están aplicadas a mano.

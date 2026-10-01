@@ -249,10 +249,12 @@ comentario raíz con el texto y, apuntándolo, la fila de `resena`. Los dos
 `INSERT` van en **una sola sentencia** (un CTE), que PostgreSQL ejecuta de
 forma atómica.
 
-**Efecto sobre el catálogo en Mongo.** Ya escrita la reseña, se recalculan
-`resenas_promedio` y `resenas_total` en el documento del producto
-(`ProductosService.recalcularCamposCalculados`, el mismo que ya corre
-cuando cambia una oferta). Son campos calculados que usan la tarjeta del
+**Efecto sobre el catálogo en Mongo.** Desde el 2026-10-01 la petición ya no
+recalcula nada en Mongo: el trigger `trg_resena_al_producto` anota el
+producto en `evento_producto` en la misma transacción y el worker
+(`EventoProductoSyncService`, cada 5 s) recalcula `resenas_promedio` y
+`resenas_total` en el documento del producto (lo mismo que corre cuando
+cambia una oferta). Son campos calculados que usan la tarjeta del
 catálogo y los filtros `resenas_promedio_min/max` y `resenas_total_min/max`
 de `GET /productos` — **no** la fuente de verdad: la nota media autoritativa
 la calcula en vivo `GET /productos/:id/resenas` (`resumen.promedio`) desde

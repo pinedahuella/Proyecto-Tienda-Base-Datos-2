@@ -837,12 +837,15 @@ compara contra su oferta **tal como está hoy**:
 }
 ```
 
-`stock` trae el saldo resultante de cada oferta tocada — se usa para
-recalcular en el momento `precio_tienda`/`stock_tienda`/`stock_total`/
-`total_ofertas` de cada producto afectado en Mongo (son copias, no la
-verdad; ver `endpoints-productos.md`). Si esa actualización de Mongo
-fallara por su cuenta, la compra ya quedó hecha en PostgreSQL de todas
-formas — no se deshace.
+`stock` trae el saldo resultante de cada oferta tocada. Desde el 2026-10-01
+la compra **ya no recalcula** en esa misma petición `precio_tienda`/
+`stock_tienda`/`stock_total`/`total_ofertas` del producto en Mongo (son
+copias, no la verdad; ver `endpoints-productos.md`): el trigger de `oferta`
+anota el producto en `evento_producto` dentro de la transacción y un worker
+(`EventoProductoSyncService`, cada 5 s) lo recalcula. El estado de la
+variante que se revisa antes de pagar sale de `variante_catalogo`
+(PostgreSQL), así que esta ruta tampoco depende de Mongo; una variante que no
+esté en la copia cuenta como no disponible.
 
 ### 201 — hay que confirmar un cambio de precio primero
 
@@ -920,8 +923,10 @@ seguir de todas formas, repetir la petición con `confirmar_cambios: true`.
 
 ```json
 { "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
-{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
 ```
+
+Desde el 2026-10-01 esta ruta ya no devuelve el 503 de MongoDB: el estado de
+la variante se lee de `variante_catalogo` en PostgreSQL.
 
 ### 500
 
@@ -965,8 +970,9 @@ POST /comprador/pedidos/3/cancelar
 ```
 
 `stock` sale vacío (`[]`) si el pedido estaba `pendiente`: no hubo nada
-que devolver. Igual que en `comprar`, cada oferta tocada dispara un
-recálculo de los cuatro números copiados del producto en Mongo.
+que devolver. Igual que en `comprar`, cada oferta tocada deja el producto en
+`evento_producto` y el worker recalcula en Mongo los cuatro números copiados
+(no se recalculan en la petición).
 
 ### 400
 

@@ -59,8 +59,8 @@ interface CompraResultadoPostgres {
  * (migrations/007_flujo_pedido.sql) y no se tocan: este servicio solo las
  * llama, resolviendo antes lo que Postgres no puede saber por su cuenta
  * (los nombres de Mongo, de quien es el pedido -- que ninguna funcion
- * comprueba) y poniendo al dia despues los cuatro numeros calculados del
- * catalogo en Mongo (ver ProductosService.recalcularCamposCalculados).
+ * comprueba). Los cuatro numeros calculados del catalogo en Mongo los pone al
+ * dia aparte `EventoProductoSyncService` (cola `evento_producto`).
  */
 @Injectable()
 export class PedidosCompradorService {
@@ -603,11 +603,9 @@ export class PedidosCompradorService {
    * FOR UPDATE sobre la misma fila, ya bloqueada por esta misma
    * transaccion) lee siempre el mismo estado que ya se valido.
    *
-   * Con la compra ya confirmada en PostgreSQL, pone al dia en Mongo los
-   * cuatro numeros calculados de cada producto afectado (ver
-   * ProductosService.recalcularCamposCalculados) -- si eso fallara, no
-   * deshace la compra: solo queda una tarjeta del catalogo desactualizada
-   * un rato.
+   * Los numeros calculados del catalogo en Mongo NO se recalculan aqui: los
+   * triggers de `oferta` dejan el producto en `evento_producto` dentro de
+   * esta misma transaccion y `EventoProductoSyncService` lo recalcula aparte.
    */
   async comprarPedido(
     idPedidoParametro: string,
@@ -659,8 +657,10 @@ export class PedidosCompradorService {
       await cliente.query('COMMIT');
 
       const compra = resultado.rows[0].comprar_pedido;
-      const idsProducto = compra.stock.map((linea) => linea.id_producto);
-      await this.productosService.recalcularCamposCalculados(idsProducto);
+      // Los campos calculados de Mongo los recalcula aparte
+      // `EventoProductoSyncService` (cola `evento_producto`, llenada por los
+      // triggers de `oferta` en esta misma transaccion): Mongo ya no
+      // interviene en la respuesta de la compra.
 
       return {
         comprado: true,
@@ -709,8 +709,8 @@ export class PedidosCompradorService {
       const cancelacion = resultado.rows[0].cancelar_pedido;
 
       if (cancelacion.stock.length > 0) {
-        const idsProducto = cancelacion.stock.map((linea) => linea.id_producto);
-        await this.productosService.recalcularCamposCalculados(idsProducto);
+        // Los campos calculados de Mongo los recalcula el worker de
+        // `evento_producto` (lo encola el trigger de `oferta`).
 
         // Evento de analitica en ClickHouse (plan pendiente/eventos-clickhouse.md).
         // Solo cuando el pedido SI estaba comprado (stock.length > 0) -- uno
@@ -834,10 +834,10 @@ export class PedidosCompradorService {
    * (los dos numeric(12,2) de Postgres, formateados igual): exacto, sin
    * el redondeo binario de comparar como numero de JavaScript.
    *
-   * El estado de la variante no vive en PostgreSQL (el catalogo esta en
-   * Mongo): se resuelve aparte, con una sola consulta a
-   * ProductosService.obtenerEstadosVariante() para todas las lineas del
-   * pedido -- una variante que se desactivo despues de agregarla al
+   * El estado de la variante sale de `variante_catalogo` (la copia del
+   * catalogo en PostgreSQL), en la misma consulta que el resto -- sin Mongo.
+   * Una variante que no esta en la copia cuenta como no disponible. Una
+   * variante que se desactivo despues de agregarla al
    * carrito se trata igual que si el producto entero estuviera oculto: no
    * se puede comprar (mismo criterio que agregarLinea, que ya la rechaza
    * al agregarla).
@@ -863,25 +863,23 @@ export class PedidosCompradorService {
       precio_actual: string;
       stock: number;
       estado_oferta_nombre: string;
-      id_producto_mongo: string;
-      id_producto_variante_mongo: string;
+      estado_variante: string | null;
     }>(
       `SELECT pp.id_pedido_producto, pp.nombre_producto, pp.nombre_variante, pp.cantidad,
-              pp.id_producto_mongo, pp.id_producto_variante_mongo,
               ${expresionPrecioFinal('ph')}::text AS precio_congelado,
               ${expresionPrecioFinal('o')}::text AS precio_actual,
-              o.stock, eo.estado_oferta_nombre
+              o.stock, eo.estado_oferta_nombre,
+              vc.estado AS estado_variante
        FROM pedido_producto pp
        JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
        JOIN oferta o ON o.id_oferta = ph.id_oferta
        JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+       LEFT JOIN variante_catalogo vc
+              ON vc.id_producto_mongo = pp.id_producto_mongo
+             AND vc.id_producto_variante_mongo = pp.id_producto_variante_mongo
        WHERE pp.id_pedido = $1
        FOR UPDATE OF o`,
       [idPedido],
-    );
-
-    const estadosVariante = await this.productosService.obtenerEstadosVariante(
-      resultado.rows.map((fila) => Number(fila.id_producto_mongo)),
     );
 
     const bloqueantes: string[] = [];
@@ -894,10 +892,7 @@ export class PedidosCompradorService {
         );
         continue;
       }
-      const estadoVariante = estadosVariante.get(
-        `${fila.id_producto_mongo}:${fila.id_producto_variante_mongo}`,
-      );
-      if (estadoVariante !== 'activa') {
+      if (fila.estado_variante !== 'activa') {
         bloqueantes.push(
           `La variante "${fila.nombre_variante}" ya no esta disponible`,
         );

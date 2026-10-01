@@ -60,6 +60,7 @@ import { BuscadorFacetadoService } from './services/buscador/facetado.service';
 import { BuscadorSugerenciasController } from './controllers/buscador/sugerencias.controller';
 import { BuscadorSugerenciasService } from './services/buscador/sugerencias.service';
 import { BuscadorSyncService } from './services/buscador/buscador-sync.service';
+import { EventoProductoSyncService } from './services/productos/evento-producto-sync.service';
 import { EventosAutenticacionSyncService } from './services/eventos-autenticacion/eventos-autenticacion-sync.service';
 import { FraudeLoginService } from './services/fraude-login/fraude-login.service';
 import { TomaCuentaService } from './services/fraude-login/toma-cuenta.service';
@@ -201,6 +202,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BuscadorFacetadoService,
     BuscadorSugerenciasService,
     BuscadorSyncService,
+    EventoProductoSyncService,
     EventosAutenticacionSyncService,
     FraudeLoginService,
     TomaCuentaService,

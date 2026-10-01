@@ -1,5 +1,18 @@
 # Prueba de falla: MongoDB caido durante el checkout
 
+> **ACTUALIZACION 2026-10-01: la dependencia de este documento se cerro en el
+> backend.** El carrito y el checkout (`POST /carrito/comprar` y
+> `POST /comprador/pedidos/:id/comprar`) ya no leen Mongo: nombre, estado de
+> la variante e imagen salen de `producto_catalogo`/`variante_catalogo` en
+> PostgreSQL (la opcion 2 de la seccion 4, extendida a nombres e imagen), y el
+> recalculo de Mongo posterior a la compra salio de la peticion (lo hace un
+> worker con la cola `evento_producto`). Con Mongo caido la compra deberia
+> pasar de 503 a comprar normal. **Falta la prueba en vivo** (el escenario B
+> de `pruebas/falla_checkout.sh` esperaba el 503 y hay que actualizarlo; lo
+> hace quien lleva las pruebas) y las migraciones reales. Detalle:
+> `plan pendiente/catalogo-en-postgres.md` y `plan pendiente/evento-producto.md`.
+> Lo de abajo se conserva como el registro de la medicion original.
+
 Complementa `docs/CONSISTENCIA-CHECKOUT.md` (Entrega 3). Esa tabla de
 "puntos de falla" no tiene una fila para **"se cae MongoDB en mitad de una
 compra"**, y salio como hallazgo al probar. Aqui queda lo medido y el

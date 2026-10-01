@@ -292,7 +292,21 @@ contadores ni transacción — más simple, a cambio de un riesgo aceptado y
 bajo: si dos vendedores crean un producto en el mismo instante exacto,
 uno de los dos podría fallar por id duplicado (recuperable reintentando).
 El producto y su primer evento se escriben uno después del otro, sin
-transacción (Mongo no está en modo replica set).
+transacción de Mongo (no está en modo replica set).
+
+**Copia del catálogo en PostgreSQL (2026-10-01).** Al crear, el producto y
+sus variantes se copian también a `producto_catalogo` y `variante_catalogo`
+(nombre, nombre de la variante, estado, imagen de portada), en una
+transacción de PostgreSQL abierta mientras se escribe en Mongo: primero el
+`UPSERT` de la copia, luego Mongo, luego el `COMMIT`. Si Mongo falla se hace
+`ROLLBACK` (todo o nada, 503); si falla el `COMMIT`, se deshace lo de Mongo.
+Lo mismo aplica a `POST /vendedor/productos/propuestas` (aquí además va el
+`INSERT` de la propuesta dentro de la misma transacción) y a
+`PATCH /vendedor/productos/:id` cuando cambia `nombre` o `variantes` (si solo
+cambia otra cosa, no se toca la copia). Ventana que queda, declarada: si el
+proceso muere entre la escritura de Mongo y el `COMMIT`, o falla la propia
+compensación, Mongo y la copia pueden quedar distintos. Aprobar, rechazar y
+reenviar una propuesta no cambian nombre ni variantes y no tocan la copia.
 
 ### Cuerpo de la petición
 
@@ -2153,9 +2167,10 @@ es `null`.)
 
 Misma forma que cada elemento de `GET /vendedor/ofertas`. Deja al día en
 Mongo los cinco campos calculados del producto y la variante afectados
-(`precio_tienda`/`precio_desde`/`stock_tienda`/`stock_total`/`total_ofertas`,
-ver `ProductosService.recalcularCamposCalculados`) — una oferta `pendiente`
-no cambia ninguno de esos números, pero el recálculo se llama igual.
+(`precio_tienda`/`precio_desde`/`stock_tienda`/`stock_total`/`total_ofertas`)
+— desde el 2026-10-01 no en la petición sino por el worker de
+`evento_producto` (cada 5 s; el trigger de `oferta` anota el producto). Una
+oferta `pendiente` no cambia ninguno de esos números.
 
 Probado en vivo el 28 de agosto de 2026 contra la base real (48
 comprobaciones), con las cinco cuentas:
