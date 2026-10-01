@@ -207,7 +207,7 @@ camino que conecta WARP no se ha ejecutado de verdad.
 3. Abre un **tunel rapido de Cloudflare** a ese backend.
 4. Manda los intentos desde el pais por el tunel y **comprueba en las bases**
    que quedaron: lee de Mongo con que IP los registro el backend y busca sus
-   alertas en `alerta_fraude`. Si no estan, lo dice y sale con error. Si la IP
+   senales en `senal_fraude` (antes de la migracion 033, `alerta_fraude`). Si no estan, lo dice y sale con error. Si la IP
    registrada es `127.0.0.1`, dice que el backend que corre es de antes del
    `trustProxy` y que hay que reiniciarlo. Despues cierra el tunel y Tor.
 

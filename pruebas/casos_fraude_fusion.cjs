@@ -6,8 +6,13 @@
 //   cd backend; npm run build; cd ..
 //   node pruebas/casos_fraude_fusion.cjs
 //
-// Necesita PostgreSQL arriba con la 026, dos anillos sin cuentas en comun y una
-// alerta multi_cuenta_ip.
+// Necesita PostgreSQL arriba con la 033, dos senales de anillo sin cuentas en comun
+// y una senal multi_cuenta_ip.
+//
+// Desde el refactor de fraude (7453ffe, migraciones 031 a 033) todo hallazgo es una
+// senal: su idOrigen es senal_fraude.id_senal_fraude y la evidencia del caso tiene
+// una sola llave, id_senal_fraude. Antes esta prueba tomaba los ids de anillo_fraude
+// y alerta_fraude, que el backend ya no lee.
 //
 // C2 y C3 son FALLA: el caso confirmado tiene que seguir confirmado y ninguna cuenta
 // se pierde. Los arreglo David en 14e5084 (2026-09-26) y esta prueba da 0 FALLA.
@@ -39,21 +44,26 @@ const { PersistenciaCasoFraudeService } = fraude('persistencia-caso-fraude.servi
   const agrupador = new AgrupadorFraudeService();
   const persistencia = new PersistenciaCasoFraudeService(new PuntajeFraudeService(), new ReglasCasiConfirmadoService());
 
-  // Dos anillos reales sin cuentas en comun, y una alerta real de login.
-  const [a1] = await filas(`SELECT id_anillo_fraude, clave FROM anillo_fraude ORDER BY id_anillo_fraude LIMIT 1`);
+  // Dos senales de anillo reales sin cuentas en comun, y una senal real de login.
+  // La clave de un anillo son sus cuentas ordenadas y unidas con guion.
+  const ANILLOS = `SELECT s.id_senal_fraude, s.clave FROM senal_fraude s
+                     JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude)
+                     JOIN familia_senal_fraude f USING (id_familia_senal_fraude)
+                    WHERE f.familia_senal_fraude_nombre IN ('anillo_resenas', 'patron_resenas')
+                      AND s.clave ~ '^[0-9]+(-[0-9]+)+$'`;
+  const [a1] = await filas(`${ANILLOS} ORDER BY s.id_senal_fraude LIMIT 1`);
   const [a2] = a1
     ? await filas(
-        `SELECT id_anillo_fraude, clave FROM anillo_fraude
-          WHERE NOT (string_to_array(clave, '-') && string_to_array($1, '-'))
-          ORDER BY id_anillo_fraude LIMIT 1`,
+        `${ANILLOS} AND NOT (string_to_array(s.clave, '-') && string_to_array($1, '-'))
+          ORDER BY s.id_senal_fraude LIMIT 1`,
         [a1.clave],
       )
     : [];
   const [al] = await filas(
-    `SELECT id_alerta_fraude FROM alerta_fraude a JOIN tipo_alerta_fraude t USING (id_tipo_alerta_fraude)
-      WHERE t.tipo_alerta_fraude_nombre = 'multi_cuenta_ip' LIMIT 1`,
+    `SELECT s.id_senal_fraude FROM senal_fraude s JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude)
+      WHERE t.tipo_senal_fraude_nombre = 'multi_cuenta_ip' LIMIT 1`,
   );
-  if (!a1 || !a2 || !al) throw new Error('Hacen falta dos anillos sin cuentas en comun y una alerta multi_cuenta_ip');
+  if (!a1 || !a2 || !al) throw new Error('Hacen falta dos senales de anillo sin cuentas en comun y una senal multi_cuenta_ip');
 
   const c1 = a1.clave.split('-').map(Number);
   const c2 = a2.clave.split('-').map(Number);
@@ -62,9 +72,10 @@ const { PersistenciaCasoFraudeService } = fraude('persistencia-caso-fraude.servi
     fuente, idOrigen: Number(id), tipo, cuentas,
     clave: [...cuentas].sort((x, y) => x - y).join('-'), metricas: {}, ultimaEvidencia: ahora,
   });
-  const anillo1 = h('grafo', a1.id_anillo_fraude, 'mutuo', c1);
-  const anillo2 = h('grafo', a2.id_anillo_fraude, 'mutuo', c2);
-  const login = h('login', al.id_alerta_fraude, 'multi_cuenta_ip', [c1[0], c2[0]]);
+  const anillo1 = h('grafo', a1.id_senal_fraude, 'mutuo', c1);
+  const anillo2 = h('grafo', a2.id_senal_fraude, 'mutuo', c2);
+  const login = h('login', al.id_senal_fraude, 'multi_cuenta_ip', [c1[0], c2[0]]);
+  const senales = [a1.id_senal_fraude, a2.id_senal_fraude, al.id_senal_fraude];
 
   const casos = async () =>
     filas(
@@ -75,15 +86,13 @@ const { PersistenciaCasoFraudeService } = fraude('persistencia-caso-fraude.servi
                 WHERE v.id_caso_fraude = c.id_caso_fraude) AS cuentas
          FROM caso_fraude c JOIN estado_alerta_fraude e USING (id_estado_alerta_fraude)
         WHERE c.id_caso_fraude IN (SELECT id_caso_fraude FROM evidencia_caso_fraude
-                                    WHERE id_anillo_fraude IN ($1, $2) OR id_alerta_fraude = $3)
+                                    WHERE id_senal_fraude IN ($1, $2, $3))
         ORDER BY 1`,
-      [a1.id_anillo_fraude, a2.id_anillo_fraude, al.id_alerta_fraude],
+      senales,
     );
 
   // Se sacan las tres fuentes de sus casos, para empezar de cero dentro de la transaccion.
-  await filas(`DELETE FROM evidencia_caso_fraude WHERE id_anillo_fraude IN ($1, $2) OR id_alerta_fraude = $3`, [
-    a1.id_anillo_fraude, a2.id_anillo_fraude, al.id_alerta_fraude,
-  ]);
+  await filas(`DELETE FROM evidencia_caso_fraude WHERE id_senal_fraude IN ($1, $2, $3)`, senales);
 
   console.log(`Anillos ${a1.clave} y ${a2.clave}, y una alerta de login que toca a ${c1[0]} y a ${c2[0]}`);
   for (const g of await agrupador.agrupar([anillo1, anillo2])) await persistencia.persistir(g);

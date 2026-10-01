@@ -20,7 +20,14 @@
 -- Se hace con un self-join y no con una funcion de ventana RANGE porque el
 -- ancho del RANGE de ClickHouse tiene que ser un literal y aqui es un parametro.
 --
--- Parametros: lote, dias_ventana, minutos_rafaga, min_pedidos_rafaga, limite.
+-- IDS_PEDIDOS. La columna ids_pedidos son los pedidos de la senal, los
+-- {max_pedidos} mas recientes, para llenar senal_fraude_pedido (migracion 031,
+-- etapa 5 del refactor de fraude). El backend copia este texto en
+-- hallazgos-evento-fraude-detector.service.ts; si se cambia uno, el otro tambien.
+-- En F2 son los pedidos de la peor rafaga.
+--
+-- Parametros: lote, dias_ventana, minutos_rafaga, min_pedidos_rafaga,
+-- max_pedidos, limite.
 -- El alias es `momento` y no `fecha` a proposito: ClickHouse deja que un alias
 -- del SELECT tape a la columna del mismo nombre en el WHERE, y con
 -- "min(fecha) AS fecha" el filtro de fecha se convertia en un agregado dentro
@@ -36,11 +43,14 @@ SELECT
     id_usuario,
     max(en_ventana)                 AS pedidos_en_la_peor_rafaga,
     argMax(desde, en_ventana)       AS empezo,
-    any(total)                      AS pedidos_en_el_periodo
+    any(total)                      AS pedidos_en_el_periodo,
+    arraySlice(arrayReverseSort(argMax(ids_en_ventana, en_ventana)), 1, {max_pedidos:UInt32}) AS ids_pedidos
 FROM (
     SELECT p.id_usuario AS id_usuario, p.momento AS desde,
            countIf(q.momento >= p.momento
-                   AND q.momento < p.momento + toIntervalMinute({minutos_rafaga:UInt32})) AS en_ventana
+                   AND q.momento < p.momento + toIntervalMinute({minutos_rafaga:UInt32})) AS en_ventana,
+           groupArrayIf(q.id_pedido, q.momento >= p.momento
+                   AND q.momento < p.momento + toIntervalMinute({minutos_rafaga:UInt32})) AS ids_en_ventana
       FROM pedidos AS p
      INNER JOIN pedidos AS q ON q.id_usuario = p.id_usuario
      GROUP BY p.id_usuario, p.id_pedido, p.momento

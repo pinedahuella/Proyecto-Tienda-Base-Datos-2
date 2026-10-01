@@ -3,7 +3,47 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-29**.
+Ultima actualizacion: **2026-09-30**.
+
+**EMPIEZA AQUI (30-09, noche). Escrito, PROBADO en vivo y commiteado.** Se jalo 7453ffe de David, el refactor de
+fraude a un solo modelo de senales (`senal_fraude`), con merge 880073f junto a la 029 y la 030, que siguen sin push.
+Su backend ya solo lee y escribe las tablas nuevas y no traia migracion. De este lado:
+
+```
+migraciones     031_senales_fraude, 032_evidencia_y_aviso_por_senal, 033_sin_llaves_viejas_de_fraude, de sus .sql de
+                referencia. La copia de las tablas viejas y la 032 corren UNA vez, mientras exista
+                evidencia_caso_fraude.id_anillo_fraude, que la 033 quita. La 018 y la 026 llevan un \if de psql para
+                no cortar el arranque siguiente (la unica edicion de migraciones corridas, en migrations/README.md)
+pruebas         casos_fraude_fusion y _granja siembran senales; anillos, anillos_familia_b, alertas_login y
+                ofertas_paginadas leen senal_fraude. alertas_login mide cuanto SUBE total_detecciones
+demos           demo-evento-fraude y demo-fraude-pais leen y limpian senales
+clickhouse      F2, F3 y F5 con ids_pedidos, max_pedidos=50 en parametros.txt
+panel           login dice "N veces" y "Ultima vez"
+docs            ER (generar-er.py, con evento_catalogo que faltaba), base-de-datos, ARQUITECTURA, preguntas 57, 92,
+                93, 120 y la 122, BACKEND-PENDIENTE, PENDIENTES 31 y 32
+```
+
+Sin levantar nada tambien dio 0 el parser de PowerShell, svelte-check (219 archivos) y el tsc del backend.
+`arrancar.ps1` entero el 01-10 de madrugada: exit 0, sin fallos, con la 031 a la 033 dentro. Todo apagado al final.
+**Probado en vivo el 30 a las 22 h**, prendiendo solo lo que cada paso pedia. Respaldo previo en
+`respaldos/antes_031_20260930_2208.dump` (git lo ignora). Medido:
+
+```
+esquema          dos pasadas enteras de 001 a 033, las dos limpias; la segunda pasa la 018 y la 026. Re-correr la
+                 031 no pisa una senal revisada (probado y devuelto)
+copia            67 anillos a 67 senales, 190 alertas de login a 28 senales con 1622 detecciones, evidencia 163 a 71
+                 (el mismo hecho contado varias veces en un caso), notificaciones 925 a 125. Ninguna evidencia sin senal
+ER               74 tablas y 96 llaves foraneas, sin cajas pisadas
+backend          compila y arranca; el agrupador lee las senales (13 casos de 71 hallazgos)
+pruebas          alertas_login 52 OK, ofertas_paginadas 40 OK, anillos 27 OK, anillos_familia_b 37 OK,
+                 casos_fraude_fusion 0 FALLA (C1 sigue como DECISION), casos_fraude_granja 6 OK,
+                 clickhouse/correr_consultas.sh bien con ids_pedidos. 0 FALLA en todas
+demos            demo-evento-fraude con fuerza_bruta_cuenta y multi_cuenta_ip; el -Limpiar de demo-fraude-pais borro
+                 tambien 7 senales de IPs de Tor de demos viejas (es lo que hace -Limpiar)
+```
+
+El borrado de las tablas viejas (`refactor-fraude-senales-etapa8-borrado.sql`) no se hizo: la 016, la 019, la 023 y
+la 025 las vuelven a crear en cada arranque.
 
 **EMPIEZA AQUI (29-09).** De las propuestas del profesor se empezo por la decision 5, comprar sin MongoDB. La
 base quedo hecha y probada en vivo: `migrations/029_catalogo_en_oferta.sql` (seis columnas en `oferta`, la funcion

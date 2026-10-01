@@ -38,6 +38,9 @@ minutos_rafaga=15
 min_pedidos_rafaga=5
 min_cuentas_por_ip=4
 ips_de_confianza=['::1','::ffff:127.0.0.1']
+# Cuantos ids de pedido devuelven F2, F3 y F5 por fila (MAX_PEDIDOS_POR_SENAL
+# del backend).
+max_pedidos=50
 min_unidades_acaparadas=20
 max_tasa_compra_acaparador=0.2
 min_devoluciones=3

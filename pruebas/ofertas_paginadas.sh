@@ -63,7 +63,7 @@
 # contador de multi_cuenta_ip de Redis (identificadores distintos desde la
 # misma ip en 300 s; cuenta el login que entra igual que el que falla). Con
 # otros dos identificadores probados desde esta maquina en esos 5 minutos,
-# nace una alerta en alerta_fraude. No borra nada de eso, porque es
+# nace una senal en senal_fraude. No borra nada de eso, porque es
 # uso real: son logins de verdad con cuentas de verdad. Pero al final dice si
 # nacio (o se engordo) alguna multi_cuenta_ip mientras corria, con sus cuentas,
 # para que nadie la tome por un ataque.
@@ -79,7 +79,7 @@ LIMITE_RECORRIDO="${LIMITE_RECORRIDO:-37}"
 PG="${PG:-mesh-postgres}"
 
 # El usuario y la base de PostgreSQL, del .env de la raiz como en
-# pruebas/alertas_login.sh. Solo para el aviso de alerta_fraude del final.
+# pruebas/alertas_login.sh. Solo para el aviso de senal_fraude del final.
 if [ -f "$RAIZ/.env" ]; then
     set -a
     . "$RAIZ/.env"
@@ -130,22 +130,28 @@ sql() { docker exec "$PG" psql -U "$PG_USUARIO" -d "$PG_BASE" -qtAc "$1" 2>/dev/
 
 # El aviso de LO QUE ESCRIBE (cabecera): las multi_cuenta_ip que nacieron o se
 # engordaron mientras corria el arnes, con las cuentas de su detalle. Solo
-# mira, no borra nada. Nacio es id mayor que el max de antes; se engordo es una
-# de antes con fecha_actualizacion desde INICIO, porque la llave del UPSERT es
-# (tipo, ip, minuto) y un login en un minuto que ya tenia fila suma en esa.
+# mira, no borra nada.
+#
+# Desde el refactor de fraude (migraciones 031 a 033) es UNA senal por
+# (tipo, ip) en senal_fraude, y cada deteccion suma 1 a total_detecciones.
+# Nacio es id mayor que el max de antes. Se engordo es una de antes cuya
+# ultima_deteccion es de INICIO en adelante; ultima_deteccion es el inicio de
+# la ventana, truncado al minuto, asi que se compara con INICIO truncado igual.
 INICIO=""; MAX_ANTES=""; LOGINS="no"; AVISADO="no"
 avisar_alertas() {
     AVISADO="si"
     if [ -z "$INICIO" ] || [ -z "$MAX_ANTES" ]; then
-        echo "  (no se pudo leer alerta_fraude con docker: no se sabe si los logins dejaron una alerta)"
+        echo "  (no se pudo leer senal_fraude con docker: no se sabe si los logins dejaron una senal)"
         return
     fi
-    _donde="a.id_tipo_alerta_fraude = 3
-            AND (a.id_alerta_fraude > $MAX_ANTES OR a.fecha_actualizacion >= '$INICIO')"
+    _donde="t.tipo_senal_fraude_nombre = 'multi_cuenta_ip'
+            AND (s.id_senal_fraude > $MAX_ANTES
+                 OR s.ultima_deteccion >= date_trunc('minute', '$INICIO'::timestamptz))"
+    _desde="senal_fraude s JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude)"
     # Vacio es que la base no contesto; 0 es que no hubo ninguna.
-    _n=$(sql "SELECT count(*) FROM alerta_fraude a WHERE $_donde")
+    _n=$(sql "SELECT count(*) FROM $_desde WHERE $_donde")
     if [ -z "$_n" ]; then
-        echo "  (no se pudo leer alerta_fraude al final: no se sabe si los logins dejaron una alerta)"
+        echo "  (no se pudo leer senal_fraude al final: no se sabe si los logins dejaron una senal)"
         return
     fi
     if [ "$_n" = "0" ]; then
@@ -153,17 +159,17 @@ avisar_alertas() {
         return
     fi
     echo "  (aviso) $_n multi_cuenta_ip nacieron o se engordaron mientras corria el arnes:"
-    sql "SELECT a.id_alerta_fraude
-                ||CASE WHEN a.id_alerta_fraude > $MAX_ANTES THEN ' nacio' ELSE ' se engordo' END
-                ||' (ip '||a.clave||', contador '||a.contador||'): '
+    sql "SELECT s.id_senal_fraude
+                ||CASE WHEN s.id_senal_fraude > $MAX_ANTES THEN ' nacio' ELSE ' se engordo' END
+                ||' (ip '||s.clave||', '||s.total_detecciones||' deteccion(es)): '
                 ||coalesce((SELECT string_agg(x, ', ')
                               FROM jsonb_array_elements_text(
-                                   CASE WHEN jsonb_typeof(a.detalle->'identificadores') = 'array'
-                                        THEN a.detalle->'identificadores' ELSE '[]'::jsonb END) x),
+                                   CASE WHEN jsonb_typeof(s.detalle->'identificadores') = 'array'
+                                        THEN s.detalle->'identificadores' ELSE '[]'::jsonb END) x),
                            'sin cuentas en el detalle')
-           FROM alerta_fraude a
+           FROM $_desde
           WHERE $_donde
-          ORDER BY a.id_alerta_fraude" | sed 's/^/          /'
+          ORDER BY s.id_senal_fraude" | sed 's/^/          /'
     echo "          Los logins de $VENDEDOR_USUARIO y $TIENDA_USUARIO suman para esa senal. Si"
     echo "          estan en la lista, la alerta es en parte de este arnes. No se borra: son"
     echo "          logins de verdad y la alerta dice justo lo que paso."
@@ -362,9 +368,9 @@ OK "el backend contesta en $API"
 
 # Antes de los dos logins: con esto se sabe al final que alerta nacio o se toco
 # mientras corria (ver LO QUE ESCRIBE en la cabecera). INICIO es del reloj de
-# PostgreSQL, el mismo que llena fecha_actualizacion.
+# PostgreSQL.
 INICIO=$(sql "SELECT now()")
-MAX_ANTES=$(sql "SELECT coalesce(max(id_alerta_fraude), 0) FROM alerta_fraude")
+MAX_ANTES=$(sql "SELECT coalesce(max(id_senal_fraude), 0) FROM senal_fraude")
 
 LOGINS="si"
 C=$(entrar "$VENDEDOR_USUARIO" "$VENDEDOR_CLAVE" "$TARRO_VENDEDOR")

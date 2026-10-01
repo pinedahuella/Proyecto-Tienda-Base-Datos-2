@@ -8,9 +8,9 @@
 #
 # QUE PRUEBA
 #
-#   Parte 0  que el terreno este: el backend, alerta_fraude con sus dos
-#            catalogos, la plantilla de Elasticsearch y el campo ip del indice
-#            de tipo ip. Si falta algo se para, porque lo de abajo mediria
+#   Parte 0  que el terreno este: el backend, senal_fraude con su catalogo
+#            de tipos y el de estados, la plantilla de Elasticsearch y el campo
+#            ip del indice de tipo ip. Si falta algo se para, porque lo de abajo mediria
 #            sobre otra cosa.
 #   Parte 1  un login fallido deja su evento en MongoDB, el worker lo copia a
 #            Elasticsearch con el mismo _id, y el 401 no dice POR QUE fallo.
@@ -29,8 +29,18 @@
 #
 # UN UMBRAL SE PRUEBA POR LOS DOS LADOS. "Con 5 fallos hay alerta" pasaria
 # igual con un umbral de 1. Por eso cada deteccion comprueba primero que con
-# uno menos NO hay alerta, y despues que la alerta nace con contador 1: si
-# hubiera nacido un intento antes, el que la cruza la habria subido a 2.
+# uno menos la senal NO suma ninguna deteccion, y despues que el intento que
+# cruza suma exactamente UNA: si hubiera saltado un intento antes, el que cruza
+# la habria subido dos.
+#
+# UNA SENAL POR (TIPO, CLAVE). Desde el refactor de fraude (7453ffe, migraciones
+# 031 a 033) el login ya no escribe en alerta_fraude, que tenia una fila por
+# minuto. Escribe en senal_fraude, una fila por (tipo, clave) para siempre, y
+# cada vez que el detector la vuelve a ver suma 1 a total_detecciones. Por eso
+# esta prueba mide cuanto SUBE total_detecciones, y no si nace una fila: las
+# dos senales de ip tienen como clave la ip de todo el trafico local, y en una
+# base usada ya existen de antes. La de cuenta si nace, porque su clave es un
+# identificador inventado de esta corrida.
 #
 # LA IP ES UNA SOLA PARA TODO. El backend no tiene trustProxy, asi que
 # request.ip es la del proceso que conecta, y en local todo llega desde la
@@ -45,24 +55,27 @@
 # cuenta de nadie). Ademas cada peticion va con el user-agent
 # mesh-prueba-alertas, que el backend guarda en el evento. Con eso la limpieza
 # encuentra casi todo lo suyo sin guardar ningun id, incluido lo que haya dejado
-# una corrida anterior que murio. Casi: las dos alertas de ip no llevan la marca
+# una corrida anterior que murio. Casi: las dos senales de ip no llevan la marca
 # en la clave, que es la ip (ver mas abajo).
 #
-# LO QUE BORRA AL TERMINAR, aunque algo falle: las filas de alerta_fraude que
-# nacieron de esta prueba, sus claves de Redis, sus eventos de MongoDB y sus
-# documentos de Elasticsearch. Lo que NO borra: los logins que SI entraron (el
-# admin y el comprador de la parte 5), que son uso real y no suciedad.
+# LO QUE BORRA AL TERMINAR, aunque algo falle: las senales que nacieron de esta
+# prueba (con sus cuentas, sus ip y sus avisos, que se van en cascada), sus
+# claves de Redis, sus eventos de MongoDB y sus documentos de Elasticsearch. Lo
+# que NO borra: los logins que SI entraron (el admin y el comprador de la parte
+# 5), que son uso real y no suciedad, y las senales de ip que ya existian antes
+# de empezar. A esas la prueba les suma detecciones y les cambia el detalle; se
+# avisa con su id al final.
 #
 # "Aunque algo falle" es el trap de salida, y el trap no corre si el proceso
 # muere de golpe: Windows lo mata cuando se queda sin RAM, o lo corta un tope de
-# tiempo. Entonces las dos alertas de ip se quedarian para siempre, porque la
-# de fuerza_bruta_ip no tiene NADA de la prueba (clave la ip, detalle dos
-# numeros). Por eso cada alerta se anota en .mesh-alertas-nacidas.txt, en la
-# raiz del repo, apenas nace, y la corrida siguiente, al empezar, borra lo
-# anotado solo si la fila sigue con la misma clave y la misma
-# fecha_actualizacion. Si cambio, alguien la engordo despues y ya no es solo de
-# la prueba: se queda. Queda un hueco de un instante, entre que la alerta nace y
-# se anota; si muere justo ahi, esa fila la tiene que borrar una persona.
+# tiempo. Entonces una senal de ip nacida en la corrida se quedaria para
+# siempre, porque la de fuerza_bruta_ip no tiene NADA de la prueba (clave la ip,
+# detalle dos numeros). Por eso cada senal que nace se anota en
+# .mesh-alertas-nacidas.txt, en la raiz del repo, y la corrida siguiente, al
+# empezar, borra lo anotado solo si la senal sigue con la misma clave y el mismo
+# total_detecciones. Si subio, alguien la vio despues y ya no es solo de la
+# prueba: se queda. Queda un hueco de un instante, entre que la senal nace y se
+# anota; si muere justo ahi, esa fila la tiene que borrar una persona.
 #
 # No instala nada: curl, docker y python, que ya estan.
 
@@ -213,36 +226,36 @@ esperar() {
     done
 }
 
-# ---------- ayudantes de las alertas ----------
+# ---------- ayudantes de las senales ----------
 
 ahora_pg() { sql "SELECT now()"; }
 
-# Filas de un tipo y una clave tocadas desde un instante. Se mira
-# fecha_actualizacion y no fecha_creacion porque el UPSERT la mueve: una fila
-# que ya existia y que esta prueba engordo tambien cuenta como "hubo alerta".
-# El instante sale del reloj de PostgreSQL, el mismo que llena esa columna.
-alertas_desde() {
-    sql "SELECT count(*) FROM alerta_fraude
-          WHERE id_tipo_alerta_fraude = $1 AND clave = '$2'
-            AND fecha_actualizacion >= '$3'"
-}
-hay_alerta() { [ "$(alertas_desde "$1" "$2" "$3")" -ge 1 ] 2>/dev/null; }
+# Desde la migracion 031 todo va por senal_fraude y el tipo se nombra por su
+# nombre en el catalogo unico, no por un id. El FROM de todas las consultas.
+DESDE_SENAL="senal_fraude s JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude)"
 
-# La fila de la alerta: id|contador|id_usuario|detalle. id_usuario va como
-# "nulo" cuando no hay cuenta, para que el campo no quede vacio y corra los
-# demas.
-fila_alerta() {
-    sql "SELECT id_alerta_fraude||'|'||contador||'|'||coalesce(id_usuario::text,'nulo')||'|'||detalle::text
-           FROM alerta_fraude
-          WHERE id_tipo_alerta_fraude = $1 AND clave = '$2'
-            AND fecha_actualizacion >= '$3'
-          ORDER BY id_alerta_fraude"
+# Cuantas veces se detecto la senal (tipo, clave). 0 si no existe. Es lo que
+# miden las partes 2 a 4: cuanto sube entre antes y despues.
+#   $1 tipo   $2 clave
+detecciones() {
+    sql "SELECT coalesce(sum(s.total_detecciones), 0) FROM $DESDE_SENAL
+          WHERE t.tipo_senal_fraude_nombre = '$1' AND s.clave = '$2'"
 }
-contador_alerta_llega() {
-    _c=$(sql "SELECT max(contador) FROM alerta_fraude
-               WHERE id_tipo_alerta_fraude = $1 AND clave = '$2'
-                 AND fecha_actualizacion >= '$3'")
-    [ -n "$_c" ] && [ "$_c" -ge "$4" ] 2>/dev/null
+# Sale con 0 cuando la senal ya sumo N detecciones desde BASE.
+#   $1 tipo   $2 clave   $3 base   $4 n
+sube_al_menos() {
+    _d=$(detecciones "$1" "$2")
+    [ -n "$_d" ] && [ $((_d - $3)) -ge "$4" ] 2>/dev/null
+}
+
+# La senal: id|total_detecciones|cuentas|detalle. cuentas es cuantas tiene en
+# senal_fraude_cuenta (las victimas del login).
+fila_senal() {
+    sql "SELECT s.id_senal_fraude||'|'||s.total_detecciones||'|'
+                ||(SELECT count(*) FROM senal_fraude_cuenta c WHERE c.id_senal_fraude = s.id_senal_fraude)
+                ||'|'||s.detalle::text
+           FROM $DESDE_SENAL
+          WHERE t.tipo_senal_fraude_nombre = '$1' AND s.clave = '$2'"
 }
 
 # Redis: el valor de un contador (vacio si no existe) y el tamano de un conjunto.
@@ -265,112 +278,54 @@ reiniciar_contadores() {
     fi
 }
 
-# La fila de alerta_fraude nace del minuto truncado (ventana_inicio). Si el
-# intento que cruza el umbral cae en un minuto y el siguiente en el otro, nace
-# una fila nueva a proposito, y la comprobacion de "una sola fila, contador 2"
-# fallaria sin que nada este mal. Se espera a estar lejos del cambio de minuto.
-# El reloj es el de esta maquina porque es el del backend, que corre aqui.
-lejos_del_cambio_de_minuto() {
-    _s=$((10#$(date +%S)))
-    if [ "$_s" -ge 40 ]; then
-        echo "  (segundo $_s del minuto: se espera al siguiente para no partir la ventana)"
-        while [ "$((10#$(date +%S)))" -ge 40 ]; do sleep 0.5; done
-    fi
-}
+# Ya no hace falta esperar a un minuto sin alerta ni alejarse del cambio de
+# minuto. Con alerta_fraude la llave era (tipo, clave, minuto): partir el
+# minuto abria otra fila, y una fila ajena del mismo minuto se engordaba. La
+# senal es una por (tipo, clave) siempre, asi que el minuto no cambia nada.
 
-# LA LLAVE DEL UPSERT ES (tipo, clave, minuto). Si en el minuto en curso ya hay
-# una fila de ese tipo para la ip, de trafico ajeno o de una corrida que murio,
-# el cruce de la prueba no crea fila propia: ENGORDA esa (contador, detalle y
-# fecha_actualizacion). La prueba mide entonces otra cosa, y en multi_cuenta_ip
-# es peor: el detalle nuevo trae solo identificadores marcados y la fila ajena
-# queda con toda la pinta de ser de la prueba. Asi que antes de cada deteccion
-# se busca un minuto sin ninguna, y si no lo hay se espera al siguiente.
-#
-# El minuto sale del reloj de esta maquina, como en lejos_del_cambio_de_minuto:
-# el backend trunca ventana_inicio con su new Date(), no con el now() de
-# PostgreSQL, y el reloj del contenedor puede ir corrido unos segundos, que es
-# justo lo que importa cerca del cambio de minuto.
-#
-# Se llama ANTES de borrar los contadores y de mandar nada: el contador de
-# fallos por ip dura 60 s, y esperar un minuto a mitad de la subida lo dejaria
-# caducar antes de cruzar el umbral.
-#   $1 tipos separados por coma   $2 clave, o vacio para cualquier clave
-# Sale con 1 si en tres minutos seguidos siempre habia una.
-minuto_sin_alerta() {
-    _cond_clave=""
-    [ -n "${2:-}" ] && _cond_clave="AND clave = '$2'"
-    for _vuelta in 1 2 3; do
-        lejos_del_cambio_de_minuto
-        _s=$(date +%s); _m=$(( _s - _s % 60 ))
-        # count y lista juntos: vacio es que la base no contesto, que no es
-        # lo mismo que "0:" (no hay ninguna).
-        _hay=$(sql "SELECT count(*)||':'||coalesce(string_agg(id_alerta_fraude::text, ', ' ORDER BY id_alerta_fraude), '')
-                      FROM alerta_fraude
-                     WHERE id_tipo_alerta_fraude IN ($1) $_cond_clave
-                       AND ventana_inicio = to_timestamp($_m)")
-        case "$_hay" in
-            "0:") return 0 ;;
-            "")   echo "  (no se pudo mirar si este minuto ya tiene alerta; se sigue)"; return 0 ;;
-        esac
-        echo "  (este minuto ya tiene la alerta ${_hay#*:} de ${2:-alguna ip}, que no es de la prueba;"
-        echo "   se espera al minuto siguiente para no engordarla)"
-        while [ "$(date +%s)" -lt $(( _m + 60 )) ]; do sleep 0.5; done
-    done
-    return 1
-}
-
-# Si en tres minutos seguidos habia una alerta ajena, alguien mas esta fallando
-# logins contra el backend, y medir ahora solo engordaria sus filas.
-#   $1 nombre de la senal para el mensaje
-sin_minuto_libre() {
-    FALLA "tres minutos seguidos con una alerta $1 que no es de la prueba"
-    echo "        Hay alguien mas fallando logins contra el backend. Correlo solo."
-    exit 1
-}
-
-# Una alerta que la prueba encontro tiene que ser suya, es decir, nacida despues
-# de empezar. Si su id es de antes, la prueba engordo una fila ajena en vez de
-# crear la suya: se dice, y NO se anota ni se cuenta como de la prueba, para que
-# nada la borre.
+# Una senal que la prueba hizo saltar es propia si nacio en esta corrida, con
+# id mayor que el max de antes. Si ya existia, la prueba le sumo detecciones:
+# es lo normal con las de ip, se dice y no se cuenta como de la prueba, para
+# que nada la borre.
 #   $1 id   $2 nombre de la senal
-alerta_propia() {
+senal_propia() {
     if [ -n "$1" ] && [ "$1" -le "$MAX_ANTES" ] 2>/dev/null; then
-        FALLA "la alerta $2 $1 es de antes de empezar (max id $MAX_ANTES): la prueba la engordo"
-        echo "        en vez de crear la suya. No se borra; su contador y su detalle quedaron tocados."
+        echo "  (la senal $2 $1 ya existia antes de empezar: la prueba le sumo detecciones"
+        echo "   y le cambio el detalle. No se borra al final)"
         return 1
     fi
     return 0
 }
 
-# Anota una alerta apenas nace: id|clave|fecha_actualizacion. Solo si nacio en
+# Anota una senal apenas nace: id|clave|total_detecciones. Solo si nacio en
 # esta corrida; una de antes de empezar no se anota nunca, porque lo anotado lo
 # borra la corrida siguiente.
-anotar_alerta() {
+anotar_senal() {
     [ -n "${1:-}" ] && [ -n "$MAX_ANTES" ] || return 0
-    sql "SELECT id_alerta_fraude||'|'||clave||'|'||fecha_actualizacion::text
-           FROM alerta_fraude
-          WHERE id_alerta_fraude = $1 AND id_alerta_fraude > $MAX_ANTES" >> "$ANOTADAS"
+    sql "SELECT id_senal_fraude||'|'||clave||'|'||total_detecciones
+           FROM senal_fraude
+          WHERE id_senal_fraude = $1 AND id_senal_fraude > $MAX_ANTES" >> "$ANOTADAS"
 }
 
-# Borra las alertas anotadas que siguen tal como se anotaron: mismo id, misma
-# clave y misma fecha_actualizacion. Escribe cuantas borro, o nada si la base
-# no contesto. La fecha se compara como timestamptz y no como texto: el texto
-# que sale de ::text vuelve a entrar sin perder los microsegundos.
+# Borra las senales anotadas que siguen tal como se anotaron: mismo id, misma
+# clave y el mismo total_detecciones. Escribe cuantas borro, o nada si la base
+# no contesto.
 borrar_anotadas() {
     if [ ! -s "$ANOTADAS" ]; then echo 0; return; fi
     _cond=""
-    while IFS='|' read -r _id _clave _fecha; do
+    while IFS='|' read -r _id _clave _total; do
         # Lo que no tenga forma de linea anotada no llega al SQL.
         case "$_id" in ''|*[!0-9]*) continue ;; esac
-        case "$_clave$_fecha" in *"'"*|*\\*) continue ;; esac
-        [ -n "$_clave" ] && [ -n "$_fecha" ] || continue
-        _cond="$_cond OR (id_alerta_fraude = $_id AND clave = '$_clave' AND fecha_actualizacion = '$_fecha'::timestamptz)"
+        case "$_total" in ''|*[!0-9]*) continue ;; esac
+        case "$_clave" in *"'"*|*\\*) continue ;; esac
+        [ -n "$_clave" ] || continue
+        _cond="$_cond OR (id_senal_fraude = $_id AND clave = '$_clave' AND total_detecciones = $_total)"
     done < "$ANOTADAS"
     if [ -z "$_cond" ]; then echo 0; return; fi
-    sql "WITH d AS (DELETE FROM alerta_fraude WHERE false $_cond RETURNING 1) SELECT count(*) FROM d"
+    sql "WITH d AS (DELETE FROM senal_fraude WHERE false $_cond RETURNING 1) SELECT count(*) FROM d"
 }
 
-# Un valor del detalle jsonb de una fila leida con fila_alerta.
+# Un valor del detalle jsonb de una fila leida con fila_senal.
 detalle() { printf '%s' "$1" | cut -d'|' -f4- | campo "$2"; }
 
 # ============================================================
@@ -387,33 +342,26 @@ detalle() { printf '%s' "$1" | cut -d'|' -f4- | campo "$2"; }
 # de borrar se espera a que no quede ninguno pendiente, para que el worker no
 # este a medio copiar uno cuando se borra el indice.
 #
-# En alerta_fraude la clave de dos de los tres tipos es la ip, que es la de
-# todo el trafico local. Por eso se borra asi:
-#   fuerza_bruta_cuenta  la clave es el identificador marcado: se borra
-#                        siempre, sea de esta corrida o de una que murio.
-#   las dos de ip        solo las que nacieron DESPUES del max id leido al
+# En senal_fraude la clave de dos de los tres tipos es la ip, que es la de
+# todo el trafico local. Por eso se borra asi, solo en la familia login:
+#   clave con la marca   se borra siempre, sea de esta corrida o de una que
+#                        murio. Es fuerza_bruta_cuenta y cualquier otra senal
+#                        cuya clave sea un identificador inventado.
+#   clave = la ip        solo las que nacieron DESPUES del max id leido al
 #                        empezar. Antes de cada deteccion se borraron sus
 #                        contadores, asi que lo que nace en la corrida es de la
 #                        corrida. Si en esos segundos alguien mas fallo 8 veces
-#                        desde la misma ip, esa fila tambien se va: no hay forma
-#                        de distinguirla, y queda dicho aqui.
-#   multi_cuenta_ip      por su detalle (TODOS los identificadores de la marca)
-#   por el detalle       solo si nacio en esta corrida, con id mayor que el max
-#                        leido al empezar. Una de antes NO se borra nunca por
-#                        su detalle: si la prueba cruzo el umbral en un minuto
-#                        en que ya habia una fila ajena de la ip, el UPSERT
-#                        engordo esa y le dejo un detalle con solo
-#                        identificadores marcados. Parece de la prueba y no lo
-#                        es. Antes de cada deteccion se espera a un minuto sin
-#                        fila (minuto_sin_alerta), y si aun asi una fila de
-#                        antes se toco durante la corrida, se AVISA con su id.
-#                        La sobra de una corrida que murio sin trap se va por
-#                        $ANOTADAS, que si sabe cual es.
-#                        Historia: el 2026-09-10 una version anterior borraba
-#                        toda fila con un identificador marcado, y se llevo dos
-#                        que habian nacido de una sonda a mano MAS logins reales.
+#                        desde la misma ip, esa senal tambien se va: no hay
+#                        forma de distinguirla, y queda dicho aqui.
+# Las senales de ip que ya existian NO se borran nunca: no nacieron de la
+# prueba. Se avisa con su id y su total.
+# Sus cuentas, sus ip y sus avisos se van en cascada. La fila de direccion_ip
+# se borra solo si nacio en la corrida y ya ninguna senal la usa.
 IP=""
 MAX_ANTES=""
+MAX_IP_ANTES=""
+PROPIA_MULTI=""
+PROPIA_IP=""
 INICIO=""
 LIMPIADO="no"
 
@@ -430,69 +378,73 @@ FILTRO_MARCA_MONGO='{$or: [{identificador_intentado: {$regex: /'"$RE_MARCA"'/}},
 # CASE no sobra: jsonb_array_elements_text revienta con algo que no sea una
 # lista, y un AND no garantiza en SQL que se evalue primero el tipo.
 solo_marcados() {
-    printf '%s' "(detalle->>'identificadores' LIKE '%\"${MARCA}%'
-             AND CASE WHEN jsonb_typeof(detalle->'identificadores') = 'array'
+    printf '%s' "(s.detalle->>'identificadores' LIKE '%\"${MARCA}%'
+             AND CASE WHEN jsonb_typeof(s.detalle->'identificadores') = 'array'
                       THEN NOT EXISTS (
-                           SELECT 1 FROM jsonb_array_elements_text(detalle->'identificadores') x
+                           SELECT 1 FROM jsonb_array_elements_text(s.detalle->'identificadores') x
                             WHERE x NOT LIKE '${MARCA}%')
                       ELSE false END)"
 }
+
+# Las senales de la familia login.
+DE_LOGIN="t.id_familia_senal_fraude = (SELECT id_familia_senal_fraude FROM familia_senal_fraude
+                                         WHERE familia_senal_fraude_nombre = 'login')"
 
 limpiar() {
     LIMPIADO="si"
 
     _filtro_ip="false"
-    _nacida="false"
     if [ -n "$IP" ] && [ -n "$MAX_ANTES" ]; then
-        _filtro_ip="(id_tipo_alerta_fraude IN (1, 3) AND clave = '$IP' AND id_alerta_fraude > $MAX_ANTES)"
-    fi
-    if [ -n "$MAX_ANTES" ]; then
-        _nacida="id_alerta_fraude > $MAX_ANTES"
+        _filtro_ip="(s.clave = '$IP' AND s.id_senal_fraude > $MAX_ANTES)"
     fi
     _anotadas=$(borrar_anotadas)
     _alertas=$(sql "WITH d AS (
-                      DELETE FROM alerta_fraude
-                       WHERE clave LIKE '${MARCA}%'
-                          OR $_filtro_ip
-                          OR (id_tipo_alerta_fraude = 3 AND $_nacida AND $(solo_marcados))
+                      DELETE FROM senal_fraude s USING tipo_senal_fraude t
+                       WHERE t.id_tipo_senal_fraude = s.id_tipo_senal_fraude AND $DE_LOGIN
+                         AND (s.clave LIKE '${MARCA}%' OR $_filtro_ip)
                    RETURNING 1)
                     SELECT count(*) FROM d")
     if [ -n "$_alertas" ] && [ -n "$_anotadas" ]; then
-        echo "  alerta_fraude: $((_alertas + _anotadas)) fila(s) de la prueba borradas ($_anotadas por lo anotado)"
+        echo "  senal_fraude: $((_alertas + _anotadas)) senal(es) de la prueba borradas ($_anotadas por lo anotado)"
         # Solo si las dos contestaron. Si no, el archivo se queda y lo intenta
         # la corrida siguiente.
         rm -f "$ANOTADAS"
     else
-        echo "  alerta_fraude: la base no contesto (${_alertas:-?} y ${_anotadas:-?}); $ANOTADAS se queda"
+        echo "  senal_fraude: la base no contesto (${_alertas:-?} y ${_anotadas:-?}); $ANOTADAS se queda"
+    fi
+    if [ -n "$MAX_IP_ANTES" ]; then
+        sql "DELETE FROM direccion_ip d WHERE d.id_direccion_ip > $MAX_IP_ANTES
+               AND NOT EXISTS (SELECT 1 FROM senal_fraude_ip x WHERE x.id_direccion_ip = d.id_direccion_ip)" > /dev/null
     fi
 
-    # Lo que NO se borra, pero se dice.
+    # Lo que NO se borra, pero se dice. ultima_deteccion es el inicio de la
+    # ventana, truncado al minuto, asi que se compara con INICIO truncado igual.
     if [ -n "$IP" ] && [ -n "$MAX_ANTES" ] && [ -n "$INICIO" ]; then
-        _tocadas=$(sql "SELECT string_agg(a.id_alerta_fraude||' '||t.tipo_alerta_fraude_nombre||' contador '||a.contador, ', ' ORDER BY a.id_alerta_fraude)
-                          FROM alerta_fraude a
-                          JOIN tipo_alerta_fraude t ON t.id_tipo_alerta_fraude = a.id_tipo_alerta_fraude
-                         WHERE a.id_tipo_alerta_fraude IN (1, 3) AND a.clave = '$IP'
-                           AND a.id_alerta_fraude <= $MAX_ANTES
-                           AND a.fecha_actualizacion >= '$INICIO'")
+        _tocadas=$(sql "SELECT string_agg(s.id_senal_fraude||' '||t.tipo_senal_fraude_nombre||' con '||s.total_detecciones||' detecciones', ', ' ORDER BY s.id_senal_fraude)
+                          FROM $DESDE_SENAL
+                         WHERE $DE_LOGIN AND s.clave = '$IP'
+                           AND s.id_senal_fraude <= $MAX_ANTES
+                           AND s.ultima_deteccion >= date_trunc('minute', '$INICIO'::timestamptz)")
         if [ -n "$_tocadas" ]; then
-            echo "  (aviso) filas de ANTES de empezar que se tocaron durante la corrida: $_tocadas."
-            echo "          Si fue la prueba, les subio el contador y les cambio el detalle."
+            echo "  (aviso) senales de ANTES de empezar que se detectaron durante la corrida: $_tocadas."
+            echo "          Si fue la prueba, les sumo detecciones y les cambio el detalle."
             echo "          No se borran: no nacieron de ella."
         fi
     fi
     if [ -n "$MAX_ANTES" ] && [ -n "$INICIO" ]; then
-        _viejas=$(sql "SELECT string_agg(id_alerta_fraude::text, ', ' ORDER BY id_alerta_fraude)
-                         FROM alerta_fraude
-                        WHERE id_tipo_alerta_fraude = 3 AND id_alerta_fraude <= $MAX_ANTES
-                          AND fecha_actualizacion < '$INICIO' AND $(solo_marcados)")
+        _viejas=$(sql "SELECT string_agg(s.id_senal_fraude::text, ', ' ORDER BY s.id_senal_fraude)
+                         FROM $DESDE_SENAL
+                        WHERE t.tipo_senal_fraude_nombre = 'multi_cuenta_ip' AND s.id_senal_fraude <= $MAX_ANTES
+                          AND s.ultima_deteccion < date_trunc('minute', '$INICIO'::timestamptz) AND $(solo_marcados)")
         if [ -n "$_viejas" ]; then
             echo "  (aviso) multi_cuenta_ip de antes de empezar con solo identificadores de la marca: $_viejas."
-            echo "          Puede ser sobra de una corrida que murio sin anotarla, o una fila ajena que"
-            echo "          una corrida engordo. No se borran solas; si se sabe que son de la prueba:"
-            echo "          DELETE FROM alerta_fraude WHERE id_alerta_fraude IN ($_viejas);"
+            echo "          Puede ser una senal ajena cuyo ultimo detalle dejo una corrida anterior,"
+            echo "          o la sobra de una que murio sin anotarla. No se borran solas; si se sabe"
+            echo "          que son de la prueba: DELETE FROM senal_fraude WHERE id_senal_fraude IN ($_viejas);"
         fi
     fi
 
+    _claves=0
     _claves=0
     for _k in $(rcli --scan --pattern "mesh:fraude:fallos_cuenta:${MARCA}*"); do
         rcli DEL "$_k" > /dev/null; _claves=$((_claves+1))
@@ -557,35 +509,33 @@ else
     exit 1
 fi
 
-EXISTE_TABLA=$(sql "SELECT to_regclass('public.alerta_fraude') IS NOT NULL")
+EXISTE_TABLA=$(sql "SELECT to_regclass('public.senal_fraude') IS NOT NULL")
 if [ "$EXISTE_TABLA" = "t" ]; then
-    OK "existe la tabla alerta_fraude"
+    OK "existe la tabla senal_fraude"
 else
-    FALLA "no existe la tabla alerta_fraude"
-    echo "        Corre  .\\arrancar.ps1  que aplica migrations/016_alerta_fraude.sql"
+    FALLA "no existe la tabla senal_fraude"
+    echo "        Corre  .\\arrancar.ps1  que aplica migrations/031_senales_fraude.sql"
 fi
 
-# Nombre por id, porque el backend fija los ids en models/alerta-fraude.ts y no
-# los consulta. Si un catalogo tuviera los tres nombres con los ids cruzados,
-# las alertas saldrian con el tipo equivocado sin ningun error.
-TIPOS=$(sql "SELECT string_agg(id_tipo_alerta_fraude||'='||tipo_alerta_fraude_nombre, ' ' ORDER BY id_tipo_alerta_fraude) FROM tipo_alerta_fraude")
-ESTADOS=$(sql "SELECT string_agg(id_estado_alerta_fraude||'='||estado_alerta_fraude_nombre, ' ' ORDER BY id_estado_alerta_fraude) FROM estado_alerta_fraude")
-# Los ids esperados se LEEN del modelo del backend y no se copian aqui. Estaban
-# copiados (los tres del primer dia) y el 2026-09-18 David amplio el catalogo a
-# nueve senales: el arnes se paro en el terreno diciendo que la base estaba mal,
-# cuando el viejo era el arnes. Cada constante ID_TIPO_ALERTA_FRAUDE_<NOMBRE> = <n>
-# es un tipo, y su nombre es el sufijo en minusculas.
-ESPERADOS=$(grep -oE "ID_TIPO_ALERTA_FRAUDE_[A-Z_]+ = [0-9]+" "$RAIZ/backend/src/models/alerta-fraude.ts" \
-    | sed -E 's/ID_TIPO_ALERTA_FRAUDE_([A-Z_]+) = ([0-9]+)/\2=\1/' | tr 'A-Z' 'a-z' \
-    | sort -t= -k1,1n | paste -sd' ')
+# Los tipos de login que el backend registra salen de su modelo, no se copian
+# aqui: el tipo TipoAlertaFraude de backend/src/models/alerta-fraude.ts. Desde el
+# refactor de fraude registrarAlertaFraude busca cada uno por su NOMBRE en
+# tipo_senal_fraude; si falta uno, ese registro falla. Antes se comparaban ids
+# fijos (ID_TIPO_ALERTA_FRAUDE_*), que ya no existen.
+TIPOS=$(sql "SELECT string_agg(t.tipo_senal_fraude_nombre, ' ' ORDER BY t.tipo_senal_fraude_nombre COLLATE \"C\")
+               FROM tipo_senal_fraude t WHERE $DE_LOGIN")
+ESPERADOS=$(sed -n '/export type TipoAlertaFraude/,/;/p' "$RAIZ/backend/src/models/alerta-fraude.ts" \
+    | grep -oE "'[a-z_]+'" | tr -d "'" | LC_ALL=C sort | paste -sd' ')
 if [ -z "$ESPERADOS" ]; then
-    FALLA "no se pudieron leer los ids de los tipos de alerta de backend/src/models/alerta-fraude.ts"
+    FALLA "no se pudieron leer los tipos de alerta de backend/src/models/alerta-fraude.ts"
 fi
 if [ -n "$ESPERADOS" ] && [ "$TIPOS" = "$ESPERADOS" ]; then
-    OK "tipo_alerta_fraude tiene las $(echo "$ESPERADOS" | wc -w) filas con los ids del backend ($TIPOS)"
+    OK "tipo_senal_fraude tiene los $(echo "$ESPERADOS" | wc -w) tipos de login del backend"
 else
-    FALLA "tipo_alerta_fraude dice '$TIPOS', el backend espera '$ESPERADOS'"
+    FALLA "tipo_senal_fraude tiene de login '$TIPOS', el backend registra '$ESPERADOS'"
 fi
+# Los estados si siguen con id fijo en el backend (ID_ESTADO_ALERTA_FRAUDE_*).
+ESTADOS=$(sql "SELECT string_agg(id_estado_alerta_fraude||'='||estado_alerta_fraude_nombre, ' ' ORDER BY id_estado_alerta_fraude) FROM estado_alerta_fraude")
 # La 026 (casos de fraude) agrega `confirmada` como cuarta fila. Las alertas de login
 # solo usan las tres primeras, que son las que el backend fija por id.
 if [ "$ESTADOS" = "1=pendiente 2=revisada 3=descartada" ] || [ "$ESTADOS" = "1=pendiente 2=revisada 3=descartada 4=confirmada" ]; then
@@ -640,20 +590,21 @@ if [ -f "$ANOTADAS" ]; then
     _anotadas=$(grep -c . "$ANOTADAS")
     _borradas=$(borrar_anotadas)
     if [ -n "$_borradas" ]; then
-        echo "  (una corrida anterior murio sin limpiar y dejo $_anotadas alerta(s) anotada(s):"
+        echo "  (una corrida anterior murio sin limpiar y dejo $_anotadas senal(es) anotada(s):"
         echo "   se borraron $_borradas; si falta alguna, cambio despues de anotarse y se queda)"
         rm -f "$ANOTADAS"
     else
-        echo "  (hay alertas anotadas de una corrida que murio y la base no dejo borrarlas;"
+        echo "  (hay senales anotadas de una corrida que murio y la base no dejo borrarlas;"
         echo "   $ANOTADAS se queda y se vuelve a intentar en la limpieza)"
     fi
 fi
 
-# INICIO sale del reloj de PostgreSQL, el mismo que llena fecha_actualizacion:
-# con el se sabe al final que filas de antes toco la corrida.
+# INICIO sale del reloj de PostgreSQL: con el se sabe al final que senales de
+# antes detecto la corrida.
 INICIO=$(ahora_pg)
-MAX_ANTES=$(sql "SELECT coalesce(max(id_alerta_fraude), 0) FROM alerta_fraude")
-echo "  (max id de alerta_fraude antes de empezar: $MAX_ANTES; marca de esta corrida: $PREFIJO)"
+MAX_ANTES=$(sql "SELECT coalesce(max(id_senal_fraude), 0) FROM senal_fraude")
+MAX_IP_ANTES=$(sql "SELECT coalesce(max(id_direccion_ip), 0) FROM direccion_ip")
+echo "  (max id de senal_fraude antes de empezar: $MAX_ANTES; marca de esta corrida: $PREFIJO)"
 
 SOBRAS=$(mongo_num 'db.eventos_autenticacion.countDocuments({identificador_intentado: {$regex: /'"$RE_MARCA"'/}})')
 if [ "${SOBRAS:-0}" != "0" ]; then
@@ -669,10 +620,9 @@ ID_EVENTO="${PREFIJO}evento@mesh.test"
 
 # Estos dos fallos van sin borrar antes los contadores, porque la ip todavia no
 # se sabe: sale del evento que dejan. Si otro trafico ya tenia los contadores de
-# la ip por encima del umbral, estos dos cruzarian y engordarian su fila del
-# minuto. Como no hay ip por la que preguntar, se busca un minuto sin ninguna
-# alerta de ip, de la clave que sea.
-minuto_sin_alerta "1, 3" "" || sin_minuto_libre "de ip"
+# la ip por encima del umbral, estos dos cruzarian y sumarian una deteccion a su
+# senal de ip. No cambia lo que mide esta parte, y las partes 3 y 4 cuentan
+# desde lo que haya cuando empiezan.
 
 T_LOGIN=$(ms)
 C_INVENTADO=$(intentar_login "$ID_EVENTO" "$CLAVE_MALA")
@@ -782,15 +732,18 @@ titulo "2. FUERZA BRUTA CONTRA UNA CUENTA: $UMBRAL_CUENTA fallos en ${VENTANA_CU
 ID_CUENTA="${PREFIJO}cuenta@mesh.test"
 CLAVE_CUENTA="mesh:fraude:fallos_cuenta:$ID_CUENTA"
 
-lejos_del_cambio_de_minuto
 reiniciar_contadores "$ID_CUENTA"
-T2=$(ahora_pg)
+# Lo que habia antes de esta parte. La de cuenta empieza en 0 (su clave es de
+# esta corrida); las dos de ip, en lo que traigan, para ver que no se movieron.
+B_CUENTA=$(detecciones fuerza_bruta_cuenta "$ID_CUENTA")
+B_IP=$(detecciones fuerza_bruta_ip "$IP")
+B_MULTI=$(detecciones multi_cuenta_ip "$IP")
 
 ANTES=$((UMBRAL_CUENTA - 1))
 for _n in $(seq 1 "$ANTES"); do intentar_login "$ID_CUENTA" "$CLAVE_MALA" > /dev/null; done
 
 # El punto de sincronia es el contador: cuando dice N, el intento N ya paso por
-# el servicio. El segundo de despues es para darle tiempo al UPSERT que NO
+# el servicio. El segundo de despues es para darle tiempo al registro que NO
 # deberia llegar; sin el, un umbral roto se veria verde por mirar demasiado
 # pronto.
 esperar 6 contador_llega "$CLAVE_CUENTA" "$ANTES"
@@ -801,63 +754,63 @@ else
     FALLA "el contador $CLAVE_CUENTA dice '$VALOR' tras $ANTES fallos"
 fi
 sleep 1
-N=$(alertas_desde 2 "$ID_CUENTA" "$T2")
-if [ "$N" = "0" ]; then
-    OK "con $ANTES fallos NO hay alerta (= $N)"
+N=$(detecciones fuerza_bruta_cuenta "$ID_CUENTA")
+if [ "$N" = "$B_CUENTA" ]; then
+    OK "con $ANTES fallos NO hay senal (detecciones = $N)"
 else
-    FALLA "con $ANTES fallos ya hay $N alerta(s): el umbral se cruza antes de tiempo"
+    FALLA "con $ANTES fallos la senal ya tiene $N deteccion(es): el umbral se cruza antes de tiempo"
 fi
 
 intentar_login "$ID_CUENTA" "$CLAVE_MALA" > /dev/null
-if esperar 8 hay_alerta 2 "$ID_CUENTA" "$T2"; then
-    FILA=$(fila_alerta 2 "$ID_CUENTA" "$T2")
-    FILAS=$(echo "$FILA" | grep -c .)
-    ALERTA_CUENTA=$(echo "$FILA" | head -1 | cut -d'|' -f1)
-    # Mas abajo el fallo de mas la engorda a proposito y lo anotado deja de
-    # coincidir. No importa: su clave lleva la marca y la borra la limpieza.
-    anotar_alerta "$ALERTA_CUENTA"
-    CONTADOR=$(echo "$FILA" | head -1 | cut -d'|' -f2)
-    USUARIO_FILA=$(echo "$FILA" | head -1 | cut -d'|' -f3)
-    if [ "$FILAS" = "1" ] && [ "$CONTADOR" = "1" ]; then
-        OK "el fallo $UMBRAL_CUENTA SI deja la alerta $ALERTA_CUENTA, con contador 1 (${ESPERO} s)"
+if esperar 8 sube_al_menos fuerza_bruta_cuenta "$ID_CUENTA" "$B_CUENTA" 1; then
+    FILA=$(fila_senal fuerza_bruta_cuenta "$ID_CUENTA")
+    ALERTA_CUENTA=$(echo "$FILA" | cut -d'|' -f1)
+    # Mas abajo el fallo de mas le suma otra deteccion a proposito y lo anotado
+    # deja de coincidir. No importa: su clave lleva la marca y la borra la
+    # limpieza.
+    anotar_senal "$ALERTA_CUENTA"
+    TOTAL=$(echo "$FILA" | cut -d'|' -f2)
+    CUENTAS_FILA=$(echo "$FILA" | cut -d'|' -f3)
+    if [ "$((TOTAL - B_CUENTA))" = "1" ] 2>/dev/null; then
+        OK "el fallo $UMBRAL_CUENTA SI deja la senal $ALERTA_CUENTA, con 1 deteccion (${ESPERO} s)"
     else
-        FALLA "tras el fallo $UMBRAL_CUENTA hay $FILAS fila(s) y contador '$CONTADOR', se esperaba 1 y 1"
+        FALLA "tras el fallo $UMBRAL_CUENTA la senal tiene '$TOTAL' detecciones, se esperaba 1"
     fi
-    FALLOS_DET=$(detalle "$(echo "$FILA" | head -1)" fallos)
-    if [ "$FALLOS_DET" = "$UMBRAL_CUENTA" ] && [ "$USUARIO_FILA" = "nulo" ]; then
-        OK "detalle.fallos = $FALLOS_DET y sin cuenta, porque el identificador no existe"
+    FALLOS_DET=$(detalle "$FILA" fallos)
+    if [ "$FALLOS_DET" = "$UMBRAL_CUENTA" ] && [ "$CUENTAS_FILA" = "0" ]; then
+        OK "detalle.fallos = $FALLOS_DET y sin cuenta victima, porque el identificador no existe"
     else
-        FALLA "detalle.fallos = '$FALLOS_DET' y id_usuario '$USUARIO_FILA'"
+        FALLA "detalle.fallos = '$FALLOS_DET' y $CUENTAS_FILA cuenta(s) victima"
     fi
 else
     ALERTA_CUENTA=""
-    FALLA "tras el fallo $UMBRAL_CUENTA no aparecio ninguna alerta fuerza_bruta_cuenta en 8 s"
+    FALLA "tras el fallo $UMBRAL_CUENTA no aparecio ninguna senal fuerza_bruta_cuenta en 8 s"
 fi
 
-# Un fallo mas en el mismo minuto: la misma fila, con contador 2.
+# Un fallo mas: la misma senal, con 2 detecciones. Ya no importa si cae en otro
+# minuto: la senal es una por (tipo, clave).
 intentar_login "$ID_CUENTA" "$CLAVE_MALA" > /dev/null
-if esperar 6 contador_alerta_llega 2 "$ID_CUENTA" "$T2" 2; then
-    FILA=$(fila_alerta 2 "$ID_CUENTA" "$T2")
-    FILAS=$(echo "$FILA" | grep -c .)
-    CONTADOR=$(echo "$FILA" | head -1 | cut -d'|' -f2)
-    if [ "$FILAS" = "1" ] && [ "$CONTADOR" = "2" ]; then
-        OK "un fallo mas en el mismo minuto sube el contador a 2 y no abre otra fila"
+if esperar 6 sube_al_menos fuerza_bruta_cuenta "$ID_CUENTA" "$B_CUENTA" 2; then
+    FILAS=$(fila_senal fuerza_bruta_cuenta "$ID_CUENTA" | grep -c .)
+    TOTAL=$(detecciones fuerza_bruta_cuenta "$ID_CUENTA")
+    if [ "$FILAS" = "1" ] && [ "$((TOTAL - B_CUENTA))" = "2" ] 2>/dev/null; then
+        OK "un fallo mas sube la senal a 2 detecciones y no abre otra fila"
     else
-        FALLA "tras otro fallo hay $FILAS fila(s) con contador '$CONTADOR'"
+        FALLA "tras otro fallo hay $FILAS fila(s) con $TOTAL detecciones"
     fi
 else
-    FALLA "otro fallo en el mismo minuto no subio el contador de la alerta"
-    fila_alerta 2 "$ID_CUENTA" "$T2" | sed 's/^/          /'
+    FALLA "otro fallo no le sumo una deteccion a la senal"
+    fila_senal fuerza_bruta_cuenta "$ID_CUENTA" | sed 's/^/          /'
 fi
 
 # Las otras dos senales no se disparan con esto: son independientes.
-A_IP=$(alertas_desde 1 "$IP" "$T2")
-A_MULTI=$(alertas_desde 3 "$IP" "$T2")
+A_IP=$(( $(detecciones fuerza_bruta_ip "$IP") - B_IP ))
+A_MULTI=$(( $(detecciones multi_cuenta_ip "$IP") - B_MULTI ))
 OTRAS="$A_IP+$A_MULTI"
 if [ "$OTRAS" = "0+0" ]; then
     OK "y ni fuerza_bruta_ip ni multi_cuenta_ip se enteraron ($((UMBRAL_CUENTA + 1)) fallos, 1 cuenta)"
 else
-    FALLA "$UMBRAL_CUENTA fallos contra una cuenta dispararon alertas de ip (fuerza_bruta_ip+multi = $OTRAS)"
+    FALLA "$UMBRAL_CUENTA fallos contra una cuenta dispararon senales de ip (fuerza_bruta_ip+multi = $OTRAS)"
 fi
 
 # ============================================================
@@ -869,9 +822,8 @@ MULTI=()
 for _n in $(seq 1 "$UMBRAL_MULTI"); do MULTI+=("${PREFIJO}multi${_n}@mesh.test"); done
 CLAVE_MULTI="mesh:fraude:cuentas_ip:$IP"
 
-minuto_sin_alerta 3 "$IP" || sin_minuto_libre "multi_cuenta_ip de la ip $IP"
 reiniciar_contadores "${MULTI[@]}"
-T3=$(ahora_pg)
+B_MULTI=$(detecciones multi_cuenta_ip "$IP")
 
 ANTES=$((UMBRAL_MULTI - 1))
 for _n in $(seq 0 $((ANTES - 1))); do intentar_login "${MULTI[$_n]}" "$CLAVE_MALA" > /dev/null; done
@@ -886,29 +838,30 @@ else
     echo "        no midio lo suyo. Vuelve a correrla sola."
 fi
 sleep 1
-N=$(alertas_desde 3 "$IP" "$T3")
-if [ "$N" = "0" ]; then
-    OK "con $ANTES cuentas distintas NO hay alerta (= $N)"
+N=$(detecciones multi_cuenta_ip "$IP")
+if [ "$N" = "$B_MULTI" ]; then
+    OK "con $ANTES cuentas distintas la senal multi_cuenta_ip no suma (detecciones = $N)"
 else
-    FALLA "con $ANTES cuentas distintas ya hay $N alerta(s) multi_cuenta_ip"
+    FALLA "con $ANTES cuentas distintas la senal multi_cuenta_ip ya sumo $((N - B_MULTI))"
 fi
 
 intentar_login "${MULTI[$ANTES]}" "$CLAVE_MALA" > /dev/null
-if esperar 8 hay_alerta 3 "$IP" "$T3"; then
-    FILA=$(fila_alerta 3 "$IP" "$T3" | head -1)
+if esperar 8 sube_al_menos multi_cuenta_ip "$IP" "$B_MULTI" 1; then
+    FILA=$(fila_senal multi_cuenta_ip "$IP")
     ALERTA_MULTI=$(echo "$FILA" | cut -d'|' -f1)
-    if alerta_propia "$ALERTA_MULTI" multi_cuenta_ip; then
-        anotar_alerta "$ALERTA_MULTI"
-    else
-        ALERTA_MULTI=""
+    PROPIA_MULTI=""
+    if senal_propia "$ALERTA_MULTI" multi_cuenta_ip; then
+        anotar_senal "$ALERTA_MULTI"
+        PROPIA_MULTI="$ALERTA_MULTI"
     fi
-    CONTADOR=$(echo "$FILA" | cut -d'|' -f2)
-    if [ "$CONTADOR" = "1" ]; then
-        OK "la cuenta $UMBRAL_MULTI SI deja la alerta $ALERTA_MULTI, clave $IP, contador 1 (${ESPERO} s)"
+    TOTAL=$(echo "$FILA" | cut -d'|' -f2)
+    if [ "$((TOTAL - B_MULTI))" = "1" ] 2>/dev/null; then
+        OK "la cuenta $UMBRAL_MULTI SI le suma 1 deteccion a la senal $ALERTA_MULTI, clave $IP (${ESPERO} s)"
     else
-        FALLA "la alerta multi_cuenta_ip nacio con contador '$CONTADOR', se esperaba 1"
+        FALLA "la senal multi_cuenta_ip subio de $B_MULTI a '$TOTAL', se esperaba 1 mas"
     fi
     # Los identificadores del detalle son la evidencia que va a leer el admin.
+    # El detalle es el de la ultima deteccion, la de esta prueba.
     FALTAN=$(printf '%s' "$FILA" | cut -d'|' -f4- | python -c "
 import sys, json
 d = json.load(sys.stdin)
@@ -921,8 +874,8 @@ print(' '.join(i for i in sys.argv[1:] if i not in vistos))" "${MULTI[@]}")
         FALLA "el detalle dice cuentas_distintas '$DISTINTAS' y le faltan: $FALTAN"
     fi
 else
-    ALERTA_MULTI=""
-    FALLA "la cuenta $UMBRAL_MULTI no dejo ninguna alerta multi_cuenta_ip en 8 s"
+    ALERTA_MULTI=""; PROPIA_MULTI=""
+    FALLA "la cuenta $UMBRAL_MULTI no le sumo ninguna deteccion a multi_cuenta_ip en 8 s"
 fi
 
 # ============================================================
@@ -943,9 +896,11 @@ else
     for _n in $(seq 1 "$K"); do VARIOS+=("${PREFIJO}ip${_n}@mesh.test"); done
     CLAVE_IP="mesh:fraude:fallos_ip:$IP"
 
-    minuto_sin_alerta 1 "$IP" || sin_minuto_libre "fuerza_bruta_ip de la ip $IP"
     reiniciar_contadores "${VARIOS[@]}"
-    T4=$(ahora_pg)
+    B_IP=$(detecciones fuerza_bruta_ip "$IP")
+    B_MULTI=$(detecciones multi_cuenta_ip "$IP")
+    B_CUENTAS=""
+    for _i in "${VARIOS[@]}"; do B_CUENTAS="$B_CUENTAS $(detecciones fuerza_bruta_cuenta "$_i")"; done
 
     ANTES=$((UMBRAL_IP - 1))
     for _n in $(seq 0 $((ANTES - 1))); do intentar_login "${VARIOS[$((_n % K))]}" "$CLAVE_MALA" > /dev/null; done
@@ -959,46 +914,49 @@ else
         echo "        Si dice mas, alguien mas estaba fallando logins contra el backend."
     fi
     sleep 1
-    N=$(alertas_desde 1 "$IP" "$T4")
-    if [ "$N" = "0" ]; then
-        OK "con $ANTES fallos NO hay alerta (= $N)"
+    N=$(detecciones fuerza_bruta_ip "$IP")
+    if [ "$N" = "$B_IP" ]; then
+        OK "con $ANTES fallos la senal fuerza_bruta_ip no suma (detecciones = $N)"
     else
-        FALLA "con $ANTES fallos ya hay $N alerta(s) fuerza_bruta_ip"
+        FALLA "con $ANTES fallos la senal fuerza_bruta_ip ya sumo $((N - B_IP))"
     fi
 
     intentar_login "${VARIOS[$((ANTES % K))]}" "$CLAVE_MALA" > /dev/null
-    if esperar 8 hay_alerta 1 "$IP" "$T4"; then
-        FILA=$(fila_alerta 1 "$IP" "$T4" | head -1)
+    if esperar 8 sube_al_menos fuerza_bruta_ip "$IP" "$B_IP" 1; then
+        FILA=$(fila_senal fuerza_bruta_ip "$IP")
         ALERTA_IP=$(echo "$FILA" | cut -d'|' -f1)
-        if alerta_propia "$ALERTA_IP" fuerza_bruta_ip; then
-            anotar_alerta "$ALERTA_IP"
-        else
-            ALERTA_IP=""
+        PROPIA_IP=""
+        if senal_propia "$ALERTA_IP" fuerza_bruta_ip; then
+            anotar_senal "$ALERTA_IP"
+            PROPIA_IP="$ALERTA_IP"
         fi
-        CONTADOR=$(echo "$FILA" | cut -d'|' -f2)
+        TOTAL=$(echo "$FILA" | cut -d'|' -f2)
         FALLOS_DET=$(detalle "$FILA" fallos)
-        if [ "$CONTADOR" = "1" ] && [ "$FALLOS_DET" = "$UMBRAL_IP" ]; then
-            OK "el fallo $UMBRAL_IP SI deja la alerta $ALERTA_IP, clave $IP, contador 1, detalle.fallos $FALLOS_DET (${ESPERO} s)"
+        if [ "$((TOTAL - B_IP))" = "1" ] 2>/dev/null && [ "$FALLOS_DET" = "$UMBRAL_IP" ]; then
+            OK "el fallo $UMBRAL_IP SI le suma 1 deteccion a la senal $ALERTA_IP, clave $IP, detalle.fallos $FALLOS_DET (${ESPERO} s)"
         else
-            FALLA "la alerta fuerza_bruta_ip nacio con contador '$CONTADOR' y detalle.fallos '$FALLOS_DET'"
+            FALLA "la senal fuerza_bruta_ip subio de $B_IP a '$TOTAL' y detalle.fallos es '$FALLOS_DET'"
         fi
     else
-        ALERTA_IP=""
-        FALLA "el fallo $UMBRAL_IP no dejo ninguna alerta fuerza_bruta_ip en 8 s"
+        ALERTA_IP=""; PROPIA_IP=""
+        FALLA "el fallo $UMBRAL_IP no le sumo ninguna deteccion a fuerza_bruta_ip en 8 s"
     fi
 
-    # Los :-x no sobran: si una consulta vuelve vacia, una suma sobre nada es
+    # Los :-x no sobran: si una consulta vuelve vacia, una resta sobre nada es
     # un error de sintaxis de bash y no un cero, y la comprobacion tiene que
     # fallar en vez de romper el arnes.
-    CRUZADAS=$(alertas_desde 3 "$IP" "$T4")
+    _m=$(detecciones multi_cuenta_ip "$IP")
+    CRUZADAS="$(( ${_m:-0} - B_MULTI ))"
+    set -- $B_CUENTAS
     for _i in "${VARIOS[@]}"; do
-        _a=$(alertas_desde 2 "$_i" "$T4")
-        CRUZADAS="${CRUZADAS:-x}+${_a:-x}"
+        _a=$(detecciones fuerza_bruta_cuenta "$_i")
+        CRUZADAS="$CRUZADAS+$(( ${_a:-0} - ${1:-0} ))"
+        shift
     done
     if [ -z "$(printf '%s' "$CRUZADAS" | tr -d '0+')" ]; then
         OK "y no disparo ni fuerza_bruta_cuenta ni multi_cuenta_ip"
     else
-        FALLA "el reparto disparo alertas de las otras senales (multi+cuentas = $CRUZADAS)"
+        FALLA "el reparto disparo las otras senales (multi+cuentas = $CRUZADAS)"
     fi
 fi
 
@@ -1020,11 +978,29 @@ else
     FALLA "no se pudo iniciar sesion como admin (HTTP $C)"
 fi
 
-MIAS="${ALERTA_CUENTA:-},${ALERTA_MULTI:-},${ALERTA_IP:-}"
+# Las tres senales que la prueba hizo saltar. Un "-" es una que no salto. El id
+# de la ruta (id_alerta_fraude) es el de la senal desde el refactor de fraude.
+MIAS="${ALERTA_CUENTA:--},${ALERTA_MULTI:--},${ALERTA_IP:--}"
+
+# Las de esas que estan en un estado, segun PostgreSQL. Las dos de ip pueden
+# venir de antes y estar revisadas o descartadas: la prueba les suma una
+# deteccion, pero solo las reabre si trae evidencia nueva (ver
+# registrar-alerta-fraude.ts). Por eso los filtros se comparan con lo que dice
+# la base y no con "pendiente" a secas.
+#   $1 estado   $2 "si" las que estan en ese estado, "no" las que no
+mias_en() {
+    _ids=$(echo "$MIAS" | tr ',' '\n' | grep -E '^[0-9]+$' | paste -sd,)
+    [ -n "$_ids" ] || return 0
+    _op="="; [ "$2" = "no" ] && _op="<>"
+    sql "SELECT string_agg(s.id_senal_fraude::text, ',' ORDER BY s.id_senal_fraude)
+           FROM senal_fraude s JOIN estado_alerta_fraude e USING (id_estado_alerta_fraude)
+          WHERE s.id_senal_fraude IN ($_ids) AND e.estado_alerta_fraude_nombre $_op '$1'"
+}
 
 # Revisa una respuesta de la ruta.
-#   $1 archivo   $2 ids que tienen que estar (coma)   $3 estado que deben tener
-#   todas, o vacio   $4 "no" si los ids NO tienen que estar
+#   $1 archivo   $2 ids que tienen que estar (coma; "-" es una que no salto)
+#   $3 estado que deben tener todas, o vacio   $4 "no" si los ids NO tienen que
+#   estar
 revisar_lista() {
     python - "$1" "$2" "$3" "${4:-si}" <<'PY'
 import sys, json, math
@@ -1035,14 +1011,14 @@ except Exception as e:
     print('respuesta ilegible'); sys.exit()
 lista = d['alertas']
 por_id = {a['id_alerta_fraude']: a for a in lista}
-quiero = [i for i in ids.split(',') if i]
+quiero = [i for i in ids.split(',') if i and i != '-']
 malas = []
-# Si alguna alerta no llego a nacer, no hay nada que buscar, y "estan todas" o
+# Si alguna senal no llego a saltar, no hay nada que buscar, y "estan todas" o
 # "no esta ninguna" saldrian verdes sobre una lista vacia. Medido con el
 # indice unico borrado: las tres de abajo daban OK con "0 de 0".
-vacias = len(ids.split(',')) - len(quiero)
+vacias = ids.split(',').count('-')
 if vacias:
-    malas.append('%d de las alertas de esta prueba no nacieron, no hay que buscar' % vacias)
+    malas.append('%d de las senales de esta prueba no saltaron, no hay que buscar' % vacias)
 if deben_estar == 'si':
     malas += ['falta la %s' % i for i in quiero if i not in por_id]
 else:
@@ -1059,7 +1035,7 @@ PY
 C=$(pedir "/admin/fraude/alertas-login?limite=100" "$TARRO_ADMIN")
 R=$(revisar_lista "$CUERPO" "$MIAS" "")
 if [ "$C" = "200" ] && [ "${R#bien}" != "$R" ]; then
-    OK "como admin trae las 3 alertas de esta prueba ($R)"
+    OK "como admin trae las 3 senales de esta prueba ($R)"
 else
     FALLA "como admin: HTTP $C, $R"
 fi
@@ -1084,10 +1060,13 @@ else
     FALLA "tipos y claves: '$TIPOS_API', se esperaba '$ESPERADO_API'"
 fi
 
+# La ruta lista de a 100. Las de esta prueba son las mas recientes, pero una
+# senal de ip vieja se ordena por su fecha de revision y puede quedar fuera de
+# la primera pagina; con limite 100 y una base de desarrollo no pasa.
 C=$(pedir "/admin/fraude/alertas-login?estado=pendiente&limite=100" "$TARRO_ADMIN")
-R=$(revisar_lista "$CUERPO" "$MIAS" "pendiente")
+R=$(revisar_lista "$CUERPO" "$(mias_en pendiente si)" "pendiente")
 if [ "$C" = "200" ] && [ "${R#bien}" != "$R" ]; then
-    OK "estado=pendiente las trae, y todo lo que trae esta pendiente ($R)"
+    OK "estado=pendiente trae las de esta prueba que estan pendientes, y todo lo que trae lo esta ($R)"
 else
     FALLA "estado=pendiente: HTTP $C, $R"
 fi
@@ -1095,9 +1074,9 @@ fi
 # El otro lado del filtro. Sin esto, un filtro que no filtra nada pasaria la
 # comprobacion de arriba.
 C=$(pedir "/admin/fraude/alertas-login?estado=revisada&limite=100" "$TARRO_ADMIN")
-R=$(revisar_lista "$CUERPO" "$MIAS" "revisada" "no")
+R=$(revisar_lista "$CUERPO" "$(mias_en revisada no)" "revisada" "no")
 if [ "$C" = "200" ] && [ "${R#bien}" != "$R" ]; then
-    OK "estado=revisada NO las trae ($R)"
+    OK "estado=revisada NO trae las que no estan revisadas ($R)"
 else
     FALLA "estado=revisada: HTTP $C, $R"
 fi
@@ -1290,16 +1269,17 @@ titulo "LIMPIEZA"
 
 limpiar
 
-QUEDAN_PG=$(sql "SELECT count(*) FROM alerta_fraude
+# Solo las propias: las de ip que ya existian se quedan a proposito.
+QUEDAN_PG=$(sql "SELECT count(*) FROM senal_fraude
                   WHERE clave LIKE '${MARCA}%'
-                     OR id_alerta_fraude IN (${ALERTA_CUENTA:-0}, ${ALERTA_MULTI:-0}, ${ALERTA_IP:-0})")
+                     OR id_senal_fraude IN (${ALERTA_CUENTA:-0}, ${PROPIA_MULTI:-0}, ${PROPIA_IP:-0})")
 if [ "$QUEDAN_PG" = "0" ]; then
-    OK "no quedo ninguna alerta de la prueba en alerta_fraude (= $QUEDAN_PG)"
+    OK "no quedo ninguna senal de la prueba en senal_fraude (= $QUEDAN_PG)"
 else
-    FALLA "quedaron $QUEDAN_PG alerta(s) de la prueba en alerta_fraude"
+    FALLA "quedaron $QUEDAN_PG senal(es) de la prueba en senal_fraude"
 fi
 if [ ! -e "$ANOTADAS" ]; then
-    OK "y no quedo el archivo de alertas anotadas: la corrida siguiente no tiene nada que borrar"
+    OK "y no quedo el archivo de senales anotadas: la corrida siguiente no tiene nada que borrar"
 else
     FALLA "quedo $ANOTADAS con $(grep -c . "$ANOTADAS") linea(s): la limpieza no pudo con lo anotado"
 fi
@@ -1336,7 +1316,7 @@ if [ "$fallo" -gt 0 ]; then
     echo "  El fraude de login no esta haciendo lo que se dijo. La base quedo limpia igual."
     exit 1
 fi
-echo "  Un fallo deja su evento y llega a Elasticsearch, las tres alertas nacen"
+echo "  Un fallo deja su evento y llega a Elasticsearch, las tres senales saltan"
 echo "  justo en su umbral y no antes, la ruta solo la ve el admin, y la"
 echo "  agregacion encuentra la ip que tecleo muchos identificadores."
 exit 0

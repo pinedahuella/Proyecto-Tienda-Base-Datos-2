@@ -4,6 +4,61 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-09-30: tu refactor de fraude (7453ffe), hecho migracion
+
+Jalado y conectado de este lado. Tus tres `.sql` de referencia son ahora las
+migraciones **031, 032 y 033** (tu documento dice "029", pero la 029 y la 030
+ya eran de comprar sin MongoDB):
+
+```
+031_senales_fraude.sql               refactor-fraude-senales.sql (etapas 1 a 5)
+032_evidencia_y_aviso_por_senal.sql  refactor-fraude-senales-etapa7.sql
+033_sin_llaves_viejas_de_fraude.sql  refactor-fraude-senales-etapa8.sql
+```
+
+Dos cosas que no estaban en tus `.sql` y que hacian falta porque `arrancar.ps1`
+vuelve a correr todo el esquema en cada arranque:
+
+- **La copia corre una sola vez.** Tu `ON CONFLICT DO UPDATE` de la seccion 6
+  a 8, repetido en cada arranque, volvia a poner en la senal el estado y el
+  detalle de la tabla vieja: lo que el admin reviso se perdia y una senal
+  borrada volvia a nacer. La copia y la 032 corren solo mientras exista
+  `evidencia_caso_fraude.id_anillo_fraude`, que la 033 quita en ese mismo
+  arranque. En tu base, que ya paso por tu etapa 8, se saltan solas.
+- **La 018 y la 026 llevan un `\if`.** Crean un indice sobre
+  `notificacion_fraude.id_alerta_fraude` y las tres llaves viejas de la
+  evidencia; despues de la 033 cortaban el arranque con "column does not exist".
+
+`refactor-fraude-senales-etapa8-borrado.sql` **no** se hizo migracion: falta
+decidirlo en equipo, y ojo, la 016, la 019, la 023 y la 025 vuelven a crear las
+tablas viejas vacias en cada arranque, asi que borrarlas pide algo mas que ese
+archivo.
+
+Lo que tu documento dejaba "al companero", hecho:
+
+- `pruebas/casos_fraude_fusion.cjs` y `casos_fraude_granja.cjs` siembran y leen
+  senales; `anillos.sh`, `anillos_familia_b.sh`, `alertas_login.sh` y
+  `ofertas_paginadas.sh` leen `senal_fraude`. `alertas_login.sh` mide cuanto
+  sube `total_detecciones`, porque las senales de la IP local ya existen.
+- `demo-evento-fraude.ps1` y `demo-fraude-pais.ps1` leen y limpian senales.
+- `clickhouse/consultas/` F2, F3 y F5 traen `ids_pedidos`, con `max_pedidos=50`
+  en `parametros.txt`.
+- El ER (`docs/generar-er.py`), `docs/base-de-datos.md`, `docs/ARQUITECTURA.md`
+  y las preguntas de sustentacion (57, 92, 93, 120 y la nueva 122).
+- En el panel de login, "N veces en ese minuto" pasa a "N veces" y "Cuando" a
+  "Ultima vez", porque `contador` es ya `total_detecciones`.
+
+**Probado en vivo el 2026-09-30 en la noche** con tu backend compilado: las
+dos pasadas del esquema limpias, alertas_login 52 OK, anillos 27 OK (las 3
+FALLA que mediste ya pasan), anillos_familia_b 37 OK, ofertas_paginadas 40 OK,
+casos_fraude_fusion 0 FALLA, casos_fraude_granja 6 OK. Lo que queda de tu lado
+de este refactor:
+
+- la etapa 6 (`deteccion_fraude` en ClickHouse), opcional, como dice tu
+  documento;
+- el PATCH de las tres rutas del admin no guarda quien reviso
+  (`id_usuario_reviso` queda en NULL, la columna ya existe).
+
 ## LO NUEVO DEL 2026-09-29: comprar sin MongoDB, LO PRIMERO
 
 Se eligio la decision 5, la del profesor. La base ya esta hecha y probada: la
@@ -31,14 +86,13 @@ seccion de abajo donde esta el detalle.
 | # | Que | Donde esta el detalle | Importa |
 |---|---|---|---|
 | C1 | Al guardar, una alerta de login que toca dos anillos une sus casos, aunque el agrupador dice que el login nunca fusiona. Decidir si se quiere. Mientras se una, el puntaje del caso sale solo del ultimo grupo guardado (32,5 en la prueba; con toda su evidencia, 36,4) | seccion del 26 en la noche | media, decision |
-| C4 | La recencia del puntaje mide cuando el admin reviso, no cuando paso el fraude | seccion del 26 en la noche | media |
 | C9 | Lo que dijiste en 14e5084: un hallazgo que ya era evidencia de un caso y despues se descarta sigue en `evidencia_caso_fraude`, sumando los mismos puntos, hasta que el caso se quede sin otra evidencia | tu nota en agrupador-fraude.md | baja |
 | 2 | Las senales y los detalles que faltan del fraude del login | seccion del 11, puntos 4 y 5 | media |
 | 4 | El estante de mas vendidos ya se arma al arrancar, pero al cambiar un precio sigue tardando hasta 10 minutos | seccion del 23, punto 1 | baja |
 
 Hechos en de5de2a y probados en vivo de este lado el 2026-09-28: C6 (`node pruebas/casos_fraude_granja.cjs`, 6 OK, y saboteada da 2 FALLA), C7 (el agrupador corre al arrancar, 10 casos de 126 hallazgos, y el backend tarda unos 2 s mas en escuchar), el 8 (el 409 ya no lleva la ruta), el 9 (el panel del vendedor dice "hasta las 22:40" en el descuento y en la venta relampago, visto en Edge) y el NaN de la regularidad de B.3 (misma prueba). Una nota sobre C6: `anillo_fraude_resena` incluye anillos que el admin descarto, asi que esas resenas tampoco cuentan para el umbral. No cambia nada mientras C5 deje fuera los descartados. Queda pedido, si puedes, `POST /admin/fraude/casos/recalcular`.
 
-Las propuestas nuevas del profesor (modelo unico de senales, nombre en `oferta`, carrito con la foto del cliente) estan en `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`. Son para decidir en equipo, todavia no son pedidos.
+Las propuestas nuevas del profesor estan en `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`. El modelo unico de senales ya lo hiciste (7453ffe, arriba) y cerro el C4: la recencia sale de `ultima_deteccion`, que solo mueve el detector.
 
 Hechos en 14e5084 y probados de este lado con `node pruebas/casos_fraude_fusion.cjs`, que ahora da 0 FALLA: C2 (el caso fusionado queda confirmado), C3 (quedan las 5 cuentas), y por tu nota C5 y C8. La prueba marca C1 como DECISION y no como falla.
 

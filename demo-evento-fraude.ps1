@@ -105,15 +105,41 @@ function Intentar-Login([string]$identificador, [string]$contrasena) {
 }
 
 # ------------------------------------------------------------
-# La alerta recien creada, leida directo de PostgreSQL -- mas rapido y mas
-# confiable que loguearse como admin solo para leer una tabla.
+# La senal, leida directo de PostgreSQL -- mas rapido y mas confiable que
+# loguearse como admin solo para leer una tabla.
+#
+# Desde el refactor de fraude (migraciones 031 a 033) el login ya no escribe
+# en la tabla vieja de alertas: cada (tipo, clave) es UNA fila de senal_fraude,
+# y cada vez que el detector la vuelve a ver suma 1 a total_detecciones.
+# ultima_deteccion es el inicio de la ventana (truncada al minuto), asi que no
+# sirve para saber si la senal salio de ESTA corrida. Lo que si sirve es el
+# total: se cuenta antes de disparar y se compara despues.
 # ------------------------------------------------------------
-function Ver-UltimaAlerta([string]$tipoAlerta, [string]$clave) {
-    $sql = "SELECT contador, detalle::text, to_char(fecha_creacion, 'HH24:MI:SS') " +
-           "FROM alerta_fraude af JOIN tipo_alerta_fraude t USING (id_tipo_alerta_fraude) " +
-           "WHERE t.tipo_alerta_fraude_nombre = '$tipoAlerta' AND af.clave = '$clave' " +
-           "ORDER BY af.fecha_actualizacion DESC LIMIT 1"
+function Psql([string]$sql) {
     (docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -tAc $sql 2>$null) -join ''
+}
+
+function Filtro-Senal([string]$tipo, [string]$clave) {
+    $f = "t.tipo_senal_fraude_nombre = '$tipo'"
+    if ($clave) { $f += " AND s.clave = '$clave'" }
+    $f
+}
+
+function Detecciones([string]$tipo, [string]$clave) {
+    $n = Psql ("SELECT coalesce(sum(s.total_detecciones), 0) FROM senal_fraude s " +
+               "JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude) WHERE " + (Filtro-Senal $tipo $clave))
+    if ($n -match '^\d+$') { [int]$n } else { -1 }
+}
+
+# Si el total subio desde $antes, la senal con su clave, sus detecciones, sus
+# cuentas y su detalle. Si no subio, vacio.
+function Ver-Senal([string]$tipo, [string]$clave, [int]$antes) {
+    $despues = Detecciones $tipo $clave
+    if ($despues -le $antes) { return '' }
+    Psql ("SELECT 'clave ' || s.clave || ', ' || s.total_detecciones || ' deteccion(es), ' || " +
+          "(SELECT count(*) FROM senal_fraude_cuenta c WHERE c.id_senal_fraude = s.id_senal_fraude) || ' cuenta(s), ' || " +
+          "s.detalle::text FROM senal_fraude s JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude) " +
+          "WHERE " + (Filtro-Senal $tipo $clave) + " ORDER BY s.ultima_deteccion DESC, s.id_senal_fraude DESC LIMIT 1")
 }
 
 Write-Host ""
@@ -125,18 +151,20 @@ Write-Host "=============================================================="
 switch ($Tipo) {
     'fuerza_bruta_cuenta' {
         Paso "6 fallos contra $Cuenta (umbral 5, en 60s)"
+        $antes = Detecciones 'fuerza_bruta_cuenta' $Cuenta
         for ($i = 1; $i -le 6; $i++) {
             $codigo = Intentar-Login $Cuenta "clave-mala-$i"
             Write-Host "   intento $i de 6: $codigo" -ForegroundColor DarkGray
         }
         Start-Sleep -Seconds 1
-        $vista = Ver-UltimaAlerta 'fuerza_bruta_cuenta' $Cuenta
-        if ($vista) { Ok "Alerta confirmada en Postgres: $vista" } else { Mal "No aparecio la alerta -- revisa que $Cuenta exista." }
+        $vista = Ver-Senal 'fuerza_bruta_cuenta' $Cuenta $antes
+        if ($vista) { Ok "Senal confirmada en Postgres: $vista" } else { Mal "No aparecio la senal -- revisa que $Cuenta exista." }
     }
 
     'fuerza_bruta_ip' {
         Paso "8 fallos repartidos en 2 identificadores (umbral 8, en 60s)"
         $identificadorB = 'demo.fuerza.ip@mesh.test'
+        $antes = Detecciones 'fuerza_bruta_ip' ''
         for ($i = 1; $i -le 4; $i++) {
             $codigo = Intentar-Login $Cuenta "clave-mala-a-$i"
             Write-Host "   $Cuenta -- intento $i de 4: $codigo" -ForegroundColor DarkGray
@@ -148,13 +176,10 @@ switch ($Tipo) {
         Start-Sleep -Seconds 1
         # fuerza_bruta_ip no guarda el identificador como clave -- guarda la
         # IP de origen, que en esta maquina siempre es 127.0.0.1 (o su forma
-        # IPv6, ::ffff:127.0.0.1, segun como Node vea el socket).
-        $sql = "SELECT clave, contador, to_char(fecha_creacion, 'HH24:MI:SS') " +
-               "FROM alerta_fraude af JOIN tipo_alerta_fraude t USING (id_tipo_alerta_fraude) " +
-               "WHERE t.tipo_alerta_fraude_nombre = 'fuerza_bruta_ip' " +
-               "ORDER BY af.fecha_actualizacion DESC LIMIT 1"
-        $vista = (docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -tAc $sql 2>$null) -join ''
-        if ($vista) { Ok "Alerta confirmada en Postgres: $vista" } else { Mal "No aparecio la alerta." }
+        # IPv6, ::ffff:127.0.0.1, segun como Node vea el socket). Por eso se
+        # cuenta sobre todas las senales del tipo.
+        $vista = Ver-Senal 'fuerza_bruta_ip' '' $antes
+        if ($vista) { Ok "Senal confirmada en Postgres: $vista" } else { Mal "No aparecio la senal." }
     }
 
     'multi_cuenta_ip' {
@@ -164,18 +189,15 @@ switch ($Tipo) {
             exit 1
         }
         Paso "1 fallo cada una, con $($unicas.Count) cuentas distintas (umbral 4, en 300s)"
+        $antes = Detecciones 'multi_cuenta_ip' ''
         foreach ($id in $unicas) {
             $codigo = Intentar-Login $id 'clave-mala'
             Write-Host "   probado: $id -- $codigo" -ForegroundColor DarkGray
         }
         Start-Sleep -Seconds 1
         # La clave de multi_cuenta_ip es la IP, igual que fuerza_bruta_ip.
-        $sql = "SELECT clave, detalle::text, to_char(fecha_creacion, 'HH24:MI:SS') " +
-               "FROM alerta_fraude af JOIN tipo_alerta_fraude t USING (id_tipo_alerta_fraude) " +
-               "WHERE t.tipo_alerta_fraude_nombre = 'multi_cuenta_ip' " +
-               "ORDER BY af.fecha_actualizacion DESC LIMIT 1"
-        $vista = (docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -tAc $sql 2>$null) -join ''
-        if ($vista) { Ok "Alerta confirmada en Postgres: $vista" } else { Mal "No aparecio la alerta." }
+        $vista = Ver-Senal 'multi_cuenta_ip' '' $antes
+        if ($vista) { Ok "Senal confirmada en Postgres: $vista" } else { Mal "No aparecio la senal." }
     }
 }
 

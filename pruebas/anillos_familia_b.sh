@@ -12,6 +12,9 @@
 # Neo4j, sembrando a mano. El backend (PatronesFraudeDetectorService, desde el
 # 2026-09-24) tiene sus propias copias, con una ventana de 60 dias que las del
 # repositorio no llevan, y las guarda en anillo_fraude con los tipos 4 a 10.
+# Desde el refactor de fraude (migraciones 031 a 033) las guarda como senales,
+# en senal_fraude con la familia patron_resenas, y el id_anillo_fraude de la API
+# es senal_fraude.id_senal_fraude.
 # Esta prueba pasa por el camino completo, igual que pruebas/anillos.sh para
 # A.1: cuentas, ofertas, compras y resenas reales por HTTP, y el caso leido por
 # GET /admin/fraude/alertas-resenas.
@@ -122,8 +125,9 @@ titulo "0. Todo arriba"
     && OK "el backend sirve /carrito" || { echo "  El backend no responde en $API."; exit 1; }
 ADMIN=$(entrar "admin@mesh.com" "Admin123")
 [ -n "$ADMIN" ] && OK "sesion de admin" || { echo "  No se pudo entrar como admin."; exit 1; }
-tipos=$(sql "SELECT count(*) FROM tipo_anillo_fraude WHERE id_tipo_anillo_fraude BETWEEN 4 AND 10;")
-[ "$tipos" = "7" ] && OK "la 023 esta aplicada, tipos 4 a 10" || { echo "  Faltan los tipos 4 a 10 en tipo_anillo_fraude ($tipos). Corre .\\arrancar.ps1."; exit 1; }
+tipos=$(sql "SELECT count(*) FROM tipo_senal_fraude t JOIN familia_senal_fraude f USING (id_familia_senal_fraude)
+             WHERE f.familia_senal_fraude_nombre = 'patron_resenas';")
+[ "$tipos" = "7" ] && OK "la 031 esta aplicada, los 7 tipos de la familia B" || { echo "  Faltan tipos de patron_resenas en tipo_senal_fraude ($tipos de 7). Corre .\\arrancar.ps1."; exit 1; }
 
 
 titulo "1. Cuatro cuentas nuevas, prefijo $PREF"
@@ -200,7 +204,7 @@ esperar_caso favor_devuelto "${PREF}1,${PREF}2" "$ESPERA"
 ID_FAVOR="$CASO"
 [ -n "$ID_FAVOR" ] && OK "caso favor_devuelto $ID_FAVOR con ${PREF}1 y ${PREF}2" || FALLA "no aparecio el favor_devuelto de ${PREF}1 y ${PREF}2 en $ESPERA s"
 if [ -n "$ID_FAVOR" ]; then
-    n=$(sql "SELECT count(*) FROM anillo_fraude_resena WHERE id_anillo_fraude=$ID_FAVOR;")
+    n=$(sql "SELECT count(*) FROM senal_fraude_resena WHERE id_senal_fraude=$ID_FAVOR;")
     [ "$n" = "2" ] && OK "la evidencia son las 2 resenas del intercambio" || FALLA "la evidencia guardada es de $n resenas"
 fi
 
@@ -216,7 +220,7 @@ ID_COORD="$CASO"
 [ -n "$ID_COORD" ] && OK "caso coordinados $ID_COORD con ${PREF}3 y ${PREF}4, sin el vendedor" \
     || FALLA "no aparecio un coordinados con exactamente ${PREF}3 y ${PREF}4 en $ESPERA s"
 if [ -n "$ID_COORD" ]; then
-    n=$(sql "SELECT count(*) FROM anillo_fraude_resena WHERE id_anillo_fraude=$ID_COORD;")
+    n=$(sql "SELECT count(*) FROM senal_fraude_resena WHERE id_senal_fraude=$ID_COORD;")
     [ "$n" = "6" ] && OK "la evidencia son las 6 resenas, tres de cada una" || FALLA "la evidencia guardada es de $n resenas"
 fi
 
@@ -228,8 +232,8 @@ ID_MUTUO="$CASO"
 if [ -n "$ID_MUTUO" ] && [ -n "$ID_FAVOR" ]; then
     [ "$ID_MUTUO" != "$ID_FAVOR" ] && OK "el mutuo ($ID_MUTUO) y el favor_devuelto ($ID_FAVOR) son filas distintas" \
         || FALLA "el mutuo y el favor_devuelto son la misma fila"
-    claves=$(sql "SELECT count(DISTINCT clave) || '|' || count(*) FROM anillo_fraude WHERE id_anillo_fraude IN ($ID_MUTUO, $ID_FAVOR);")
-    [ "$claves" = "1|2" ] && OK "con la misma clave, que la 023 permite por (tipo, clave)" || FALLA "claves y filas, $claves"
+    claves=$(sql "SELECT count(DISTINCT clave) || '|' || count(*) FROM senal_fraude WHERE id_senal_fraude IN ($ID_MUTUO, $ID_FAVOR);")
+    [ "$claves" = "1|2" ] && OK "con la misma clave, que senal_fraude permite por (tipo, clave)" || FALLA "claves y filas, $claves"
 else
     FALLA "falta el mutuo ($ID_MUTUO) o el favor_devuelto ($ID_FAVOR) para comparar"
 fi

@@ -65,8 +65,20 @@ CREATE INDEX IF NOT EXISTS idx_notificacion_fraude_usuario
 
 -- GET /admin/fraude/alertas-login: por cada alerta, quienes son sus
 -- afectados y si ya la leyeron.
+--
+-- Desde la 033 la notificacion cuelga de la senal (senal_fraude) y la columna
+-- id_alerta_fraude ya no existe. Este archivo se vuelve a correr en cada
+-- arranque, y este indice cortaba el arranque con "column does not exist".
+-- El \if lo salta cuando la columna ya no esta; el indice nuevo lo crea la 032.
+SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name   = 'notificacion_fraude'
+                  AND column_name  = 'id_alerta_fraude') AS notificacion_con_alerta
+\gset
+\if :notificacion_con_alerta
 CREATE INDEX IF NOT EXISTS idx_notificacion_fraude_alerta
     ON notificacion_fraude (id_alerta_fraude);
+\endif
 
 
 -- ------------------------------------------------------------

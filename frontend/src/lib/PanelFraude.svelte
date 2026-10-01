@@ -626,13 +626,14 @@
 	}
 
 	/**
-	 * Cuantas veces salto dentro del mismo minuto. El backend junta en una
-	 * fila los cruces del umbral de un mismo minuto y aqui se dice cuantos
-	 * fueron, porque una sola vez y cuarenta no son la misma alerta.
+	 * Cuantas veces se detecto. Desde el refactor de fraude (migraciones 031 a
+	 * 033) la alerta es una senal por (tipo, clave) y `contador` es su
+	 * total_detecciones de siempre, ya no los cruces de un minuto. Una sola vez y
+	 * cuarenta no son la misma alerta.
 	 */
 	function veces(a: AlertaLogin): string {
 		const n = entero(a.contador) ?? 1;
-		return n === 1 ? 'Una vez en ese minuto' : `${n} veces en ese minuto`;
+		return n === 1 ? 'Una vez' : `${n} veces`;
 	}
 
 	/** El texto de la etiqueta del titulo: "12 alertas", "3 pendientes". */
@@ -1863,7 +1864,7 @@
 							<dd>{veces(a)}</dd>
 						</div>
 						<div>
-							<dt>Cuando</dt>
+							<dt>Ultima vez</dt>
 							<dd>{fecha(a.ventana_inicio)}</dd>
 						</div>
 					</dl>

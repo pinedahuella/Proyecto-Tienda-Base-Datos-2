@@ -37,7 +37,7 @@ flowchart TB
     FE -- "HTTP + cookie de sesion" --> BE
 
     subgraph persistencia[PERSISTENCIA]
-        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>56 tablas, con reglas de descuento,<br/>hallazgos F1 a F6 y vectores")]
+        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>74 tablas, con reglas de descuento,<br/>senales de fraude y vectores")]
         MG[("MongoDB :27018<br/><b>CATALOGO, HISTORIAL Y LOG DE LOGIN</b><br/>productos, productos_eventos, categorias,<br/>eventos_autenticacion")]
         RD[("Redis :6379<br/><b>TRANSITORIO Y ATOMICO</b><br/>carrito, reservas, candado,<br/>contadores de fraude del login,<br/>vencimiento de descuentos, rankings<br/>y recomendaciones ya calculadas")]
         N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>163 nodos y 281 relaciones,<br/>4 tipos de arista,<br/>anillos y familia B de patrones")]
@@ -45,7 +45,7 @@ flowchart TB
         CH[("ClickHouse :8123<br/><b>EVENTOS EN EL TIEMPO</b><br/>seis tablas de eventos de producto y buscador,<br/>copia de logueos y resumen diario,<br/>tendencias y recomendaciones")]
     end
 
-    BE -- "pedidos, pagos, ofertas,<br/>stock, resenas, usuarios,<br/>alerta_fraude" --> PG
+    BE -- "pedidos, pagos, ofertas,<br/>stock, resenas, usuarios,<br/>senal_fraude" --> PG
     BE -- "catalogo, historial,<br/>cada intento de login" --> MG
     BE -- "carrito, reservas,<br/>candado de checkout,<br/>contadores del login" --> RD
     BE -- "panel de fraude<br/>(solo lectura)" --> N4
@@ -58,7 +58,7 @@ flowchart TB
     MG -. "worker cada 5 s<br/>BANDERA pendiente_elastic" .-> ES
     PG -. "etl/cargar_eventos.sh<br/>INCREMENTAL por marca de agua<br/>CONGELADA desde el 2026-09-10" .-> CH
     PG -. "etl/cargar_compras.sh<br/>compras y devoluciones, en cada arranque" .-> CH
-    N4 -. "detectores de anillos y familia B,<br/>cada 15 min y al llegar una resena<br/>anillo_fraude" .-> PG
+    N4 -. "detectores de anillos y familia B,<br/>cada 15 min y al llegar una resena<br/>senal_fraude" .-> PG
     CH -. "mas vendidos y mas vistos cada 10 min,<br/>tambien vieron y para ti cada 15 min" .-> RD
     CH -. "disparador de reglas automaticas,<br/>cada 60 s, cuenta ventas recientes" .-> PG
     RD -. "clave de descuento vencida,<br/>cada minuto se quita de oferta" .-> PG
@@ -97,9 +97,9 @@ vez**, y los dos existen por razones distintas:
 login -> MongoDB eventos_autenticacion -> worker cada 5 s -> Elasticsearch
          (cada intento, con su motivo)    (pendiente_elastic)  mesh_eventos_autenticacion
 
-login -> Redis, tres contadores --- cruza un umbral ---> PostgreSQL alerta_fraude
-         (fallos por IP, fallos por cuenta,               (UPSERT por tipo, clave
-          identificadores por IP)                          y minuto)
+login -> Redis, tres contadores --- cruza un umbral ---> PostgreSQL senal_fraude
+         (fallos por IP, fallos por cuenta,               (una fila por tipo y
+          identificadores por IP)                          clave, suma detecciones)
 ```
 
 **El primero es la historia, y es para investigar despues.** MongoDB guarda
@@ -113,8 +113,10 @@ nacio con `ip` de tipo texto.
 **El segundo es la deteccion en el momento, y olvida.** Los contadores de Redis
 viven 60 o 300 segundos: sirven para decir "esto esta pasando ahora" sin
 consultar nada, en el mismo camino del login. Cuando uno cruza su umbral, lo
-unico que queda es una fila en `alerta_fraude`, en PostgreSQL, que es donde un
-admin la revisa y la lee `GET /admin/fraude/alertas-login`.
+unico que queda es una senal en `senal_fraude`, en PostgreSQL, que es donde un
+admin la revisa y la lee `GET /admin/fraude/alertas-login`. Hasta la migracion
+033 era una fila por minuto en `alerta_fraude`; desde ahi es una sola por tipo y
+clave, y cada vez que se vuelve a ver suma una deteccion.
 
 **Una flecha que falta a proposito: ninguna ruta lee `mesh_eventos_autenticacion`.**
 El indice se llena y nadie lo consulta; las rutas de agregacion son de
@@ -275,6 +277,7 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **2026-09-20** | Entra **Kibana** 8.15.3, la misma version que Elasticsearch, como ventana de inspeccion (`127.0.0.1:5601`, tope de memoria de 1 GB), y el contenedor de un solo uso `mesh-kibana-vistas`, que crea sus dos vistas de datos en cada `docker compose up`. Solo en el Mermaid; el `.drawio` falta |
 | **2026-09-24 y 25** | Reglas de descuento automaticas y por fecha en **PostgreSQL** (migraciones 021 y 022). El disparador de las automaticas cuenta ventas en **ClickHouse** cada 60 segundos y el vencimiento de cada descuento vive como clave con TTL en **Redis**. La familia B de patrones de resenas corre sobre **Neo4j** y guarda en `anillo_fraude` (migracion 023). Tendencias T1 a T3 y recomendaciones R1 a R3 salen de **ClickHouse**, y R2, R3 y lo mas visto quedan calculados en **Redis**. El `.drawio` y el Mermaid se pusieron al dia. La evaluacion de NewSQL para pagos esta en `DECISION-NEWSQL-PAGOS.md` (ADR-8) |
 | **Entrega final (2026-09-25)** | Entra **pgvector** sobre el mismo PostgreSQL: `producto_vector` con indice HNSW y `productos_similares()` (migracion 024, reescrita en la 027 para que de verdad use el indice). Los vectores los calcula **Ollama** con `paraphrase-multilingual` desde el texto de **MongoDB** (`etl/cargar_vectores.ps1`, flujo 11). Ollama es el de la PC si lo tiene o el contenedor `mesh-ollama`, que solo se levanta si hace falta. **Redis** pasa de una contrasena sola a tres usuarios de ACL |
+| **2026-09-30** | El refactor de fraude que pidio el profesor (7453ffe de Jose David, migraciones 031 a 033). Los tres detectores, Neo4j, ClickHouse y el login, guardan en una sola tabla, `senal_fraude`, una fila por tipo y clave con sus cuentas, resenas, productos, pedidos e IP. Los casos y los avisos al usuario cuelgan de la senal. `anillo_fraude`, `hallazgo_evento_fraude` y `alerta_fraude` quedan sin escrituras. Solo el Mermaid y el `.drawio` cambian de nombre de tabla; no hay flecha nueva |
 
 El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el
 compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. Cuando toco no

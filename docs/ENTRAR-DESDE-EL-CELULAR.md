@@ -22,7 +22,7 @@ y el tunel corren ocultos hasta el `-Cerrar`.
 
 La diferencia entre las dos formas es solo el backend:
 
-| | Backend | IP que queda en Mongo, Elastic y `alerta_fraude` |
+| | Backend | IP que queda en Mongo, Elastic y `senal_fraude` |
 |---|---|---|
 | `-ConCopia` | una copia de `backend/` fuera del repo, en el 3100, con `trustProxy: 'loopback'` | la del celular |
 | sin nada | el `backend/` del repo, en el 3000 | `127.0.0.1` para todos, hasta que el backend lleve la linea |

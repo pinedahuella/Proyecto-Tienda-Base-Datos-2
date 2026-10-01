@@ -53,10 +53,23 @@ cualquier otro error corta el arranque con exit 1.
 
 Cada archivo hace una sola cosa y se puede leer solo.
 
-## Los veinticinco archivos de esquema
+**La excepcion de la 018 y la 026.** Las dos se editaron despues de corridas,
+el 2026-09-30, y es la unica vez. La 033 quita columnas que ellas usan en
+indices y llaves, y como el esquema se reejecuta en cada arranque, el arranque
+siguiente se cortaba en ellas con `column does not exist`. Ahora esa parte va
+dentro de un `\if` de psql que la salta cuando la columna ya no existe. Lo que
+crean en una base nueva no cambio. Una migracion que despues quite algo que una
+vieja crea fuera de un `IF NOT EXISTS` tiene el mismo problema.
+
+**Una copia de datos dentro del esquema corre una sola vez.** Si una migracion
+copia de una tabla vieja a una nueva con `ON CONFLICT DO UPDATE`, en el arranque
+siguiente vuelve a pisar la nueva con lo viejo. La 031 y la 032 copian solo
+mientras exista la columna que la 033 quita, y ese es su marcador.
+
+## Los treinta y tres archivos de esquema
 
 Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
-"los catorce" con quince en la carpeta, y "los veinte" con veintiuno. Es la misma trampa que este documento
+"los catorce" con quince en la carpeta, "los veinte" con veintiuno, y "los veinticinco" con treinta y tres. Es la misma trampa que este documento
 avisa mas abajo para las comprobaciones: una lista escrita a mano caduca sin
 avisar. Antes de creerle a esta, cuentalos:
 
@@ -98,6 +111,9 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `028_vencimiento_oferta.sql` | `oferta.fecha_vencimiento_descuento` y `oferta.fecha_vencimiento_venta_limitada`, NULL es permanente. Desde aqui el vencimiento lo decide PostgreSQL y no una clave de Redis, que un Redis vaciado se llevaba con los descuentos permanentes. SQL de referencia de Jose David (37ad2e6), copiado tal cual |
 | `029_catalogo_en_oferta.sql` | La oferta guarda una copia de lo que el checkout le pedia a MongoDB: `nombre_producto`, `nombre_variante`, `imagen_variante`, `producto_visible`, `variante_activa` y `catalogo_copiado_en`. La funcion `copiar_catalogo_a_oferta(jsonb)` es la unica forma de escribirla, y el trigger `oferta_tocar_fecha` ya no mueve la fecha cuando solo cambia la copia. La llena el paso 7e de arrancar.ps1. Decision 5, plan en `docs/PLAN-COMPRAR-SIN-MONGO.md` |
 | `030_evento_catalogo.sql` | La cola de outbox `evento_catalogo`, igual a `evento_grafo`. Dos triggers sobre `oferta` anotan el producto cuando una oferta nace, se borra o cambia su precio, descuento, stock o estado, en la misma transaccion. Un worker del backend la vacia y recalcula los numeros de la tarjeta en MongoDB. No se vacia en el arranque. Prueba en `pruebas/evento_catalogo.sql` |
+| `031_senales_fraude.sql` | El refactor de fraude de Jose David (7453ffe). Un solo modelo para las tres familias: `senal_fraude`, una fila por (tipo, clave), con sus catalogos (`familia_senal_fraude`, `fuente_senal_fraude`, `tipo_senal_fraude` con los 25 tipos, `rol_cuenta_senal` autor o victima) y sus pivotes de cuentas, resenas, productos, pedidos e IP (`direccion_ip`). Copia una sola vez lo que habia en `anillo_fraude`, `hallazgo_evento_fraude` y `alerta_fraude` |
+| `032_evidencia_y_aviso_por_senal.sql` | `evidencia_caso_fraude` y `notificacion_fraude` ganan `id_senal_fraude` y se enlaza lo que ya existia. Queda una notificacion por (senal, cuenta) y no una por ventana. Corre una sola vez |
+| `033_sin_llaves_viejas_de_fraude.sql` | Se quitan las llaves viejas de esas dos tablas e `id_senal_fraude` pasa a NOT NULL. Se detiene si queda una fila sin senal. Las tablas viejas NO se borran, quedan sin escrituras |
 
 De la 011 a la 015 son de la Entrega 2, la 016 a la 023 de la Entrega 3, la 024 de la Entrega final, la 025 otra vez de la Entrega 3, y merecen una
 linea mas de la que caben en la tabla.

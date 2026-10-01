@@ -18,12 +18,15 @@
 -- La comparacion es por texto (toString(ip)) porque asi se escribe la lista a
 -- mano; una IPv4 queda guardada como '::ffff:a.b.c.d'.
 --
--- Parametros: lote, dias_ventana, min_cuentas_por_ip, ips_de_confianza, limite.
+-- Parametros: lote, dias_ventana, min_cuentas_por_ip, ips_de_confianza,
+-- max_pedidos, limite.
 SELECT
     toString(ip)                           AS ip,
     uniqExact(id_usuario)                  AS cuentas_distintas,
     arraySort(groupUniqArray(id_usuario))  AS cuentas,
     uniqExact(id_pedido)                   AS pedidos,
+    -- Los pedidos de esa IP (ver IDS_PEDIDOS en F2).
+    arraySlice(arrayReverseSort(groupUniqArray(id_pedido)), 1, {max_pedidos:UInt32}) AS ids_pedidos,
     min(fecha)                             AS primera,
     max(fecha)                             AS ultima
 FROM compra_producto FINAL

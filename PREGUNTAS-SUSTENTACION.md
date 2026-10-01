@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 121 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 122 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las líneas son las del código en main al 20 de septiembre de 2026, salvo las preguntas 32 a 34 y la 119, que están al 23 de septiembre. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
 
@@ -482,16 +482,16 @@ No. Al crear la reseña el backend llama a `procesarAhora` para proyectarla al g
 - Por qué así. La reseña nueva es la única arista nueva del grafo, así que un ciclo que no pase por ella ya lo vio una corrida anterior. Está encadenado porque necesita que la reseña ya esté en Neo4j.
 
 ### 57. ¿Dónde se guardan los anillos que se detectan?
-En PostgreSQL, en las tablas anillo_fraude y anillo_fraude_resena. Hay una fila por anillo, con una clave que son los ids de las cuentas ordenados y unidos con guion, y una tabla pivote con las reseñas que son la evidencia. Un UPSERT por clave refresca la fecha de última vez activo si el anillo se vuelve a encontrar.
+En PostgreSQL, como una señal en `senal_fraude`, la misma tabla donde van las de compras y las de login. Hay una fila por tipo y clave, y la clave son los ids de las cuentas ordenados y unidos con guion. Las cuentas van en `senal_fraude_cuenta`, todas como autor, y las reseñas que son la evidencia en `senal_fraude_resena`. Si el detector vuelve a encontrar el anillo es la misma fila, suma una detección y mueve `ultima_deteccion`. Hasta la migración 033 iban a `anillo_fraude` y `anillo_fraude_resena`, que siguen en la base sin escrituras.
 
-- Dónde se ve. `migrations/019_anillo_fraude.sql` lineas 78 a 98, la tabla anillo_fraude, y lineas 119 a 129, el pivote. `backend/src/helpers/registrar-anillo-fraude.ts` lineas 44 a 76, el UPSERT y la inserción de evidencia.
-- Lo que pide el profesor. Entrega 2, un panel visible para el equipo administrativo que señale la manipulación de reseñas. Se lee por `GET /admin/fraude/alertas-resenas`, solo para admin.
-- Por qué así. El anillo es algo que existe ahora en el grafo, no un umbral cruzado en un momento como las alertas de login. Las cuentas se sacan con un join contra resena y no se guardan aparte.
+- Dónde se ve. `migrations/031_senales_fraude.sql` línea 168, la tabla `senal_fraude`, con su UNIQUE de tipo y clave en la 204, y lineas 232 y 265, los pivotes de cuentas y reseñas. `backend/src/helpers/registrar-anillo-fraude.ts` lineas 90 a 177, la función registrarSenalDelAnillo.
+- Lo que pide el profesor. Entrega 2, un panel visible para el equipo administrativo que señale la manipulación de reseñas. Se lee por `GET /admin/fraude/alertas-resenas`, solo para admin. Y en la revisión del 28-09, que todo el fraude se guarde con un solo modelo.
+- Por qué así. Las cuentas salen de la clave, que es exactamente el conjunto que encontró el detector. Antes se sacaban con un join contra reseña, y en coordinados metía al vendedor, que no es sospechoso.
 
 ### 58. ¿Qué significan los estados pendiente, revisada y descartada?
 Todo anillo nuevo nace pendiente. Un admin lo puede pasar a revisada o a descartada con un PATCH. Solo se puede cambiar si sigue pendiente, y si no, contesta 409. Aunque el worker vuelva a encontrar el mismo anillo, no lo reabre.
 
-- Dónde se ve. `backend/src/services/fraude/fraude-anillos-persistidos.service.ts` lineas 191 a 221, el cambio de estado con su condición. `backend/src/helpers/registrar-anillo-fraude.ts` lineas 54 a 60, el UPSERT que no toca el estado. `backend/src/models/alerta-fraude.ts` lineas 30 a 32, los tres ids.
+- Dónde se ve. `backend/src/services/fraude/fraude-anillos-persistidos.service.ts` línea 215, el UPDATE de la señal con su condición, y la 238, la distinción entre 404 y 409. `backend/src/helpers/registrar-anillo-fraude.ts` lineas 135 a 141, el INSERT con ON CONFLICT que no toca el estado. `backend/src/models/alerta-fraude.ts` lineas 16 a 18, los tres ids.
 - Lo que pide el profesor. Entrega 2, un panel para el equipo administrativo. La revisión humana es parte del flujo.
 - Por qué así. Si el worker reabriera lo ya descartado, un falso positivo volvería cada 15 minutos. Los tres estados son el mismo catálogo que usan las alertas de login.
 
@@ -759,23 +759,23 @@ Un worker corre cada 15 minutos y revisa las últimas 24 horas con tres señales
 - Por qué así. El disparo inmediato y el worker usan el mismo tipo y la misma hora, así que se juntan en una sola alerta y no se duplican. El worker queda de respaldo si Elasticsearch estaba caído en ese instante.
 
 ### 92. ¿Cómo se guarda una alerta sin duplicarla y qué es la llave de conflicto?
-La alerta se guarda con un INSERT con ON CONFLICT sobre las columnas tipo, clave y ventana de inicio. Si la misma señal vuelve a cruzar el umbral dentro de la misma ventana, no crea otra fila y solo suma uno al contador. La ventana es el minuto para Redis y la hora para los patrones lentos.
+Cada alerta es una señal en `senal_fraude`, y la llave es el tipo y la clave, por ejemplo fuerza bruta por IP y la IP. Si la misma señal vuelve a cruzar el umbral no nace otra fila, se le suma una detección en `total_detecciones` y se refrescan el detalle y `ultima_deteccion`. Hasta la migración 033 la llave llevaba además el minuto, y cada minuto nacía una fila nueva en `alerta_fraude`. Ahora hay una sola y la historia es el contador.
 
-- Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` lineas 67 a 85, el UPSERT. Lineas 15 a 23, el comentario de la llave. `migrations/016_alerta_fraude.sql` línea 177, el UNIQUE de esas tres columnas, y lineas 263 a 279, el candado que falla la migración si falta. Las ventanas salen de `backend/src/services/fraude-login/fraude-login.service.ts` lineas 294 a 296 y de `backend/src/services/fraude-login/fraude-login-retrospectivo.service.ts` lineas 473 a 477.
-- Lo que pide el profesor. Nada literal, es decisión de diseño sobre PostgreSQL relacional.
-- Por qué así. Sin la llave, un ataque de mil intentos dejaría mil filas. Al pasar a la ventana siguiente nace una fila nueva a propósito, y el conflicto no toca el estado, así que una alerta ya revisada no se reabre sola.
+- Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` lineas 193 a 322, la función registrarSenalDeLaAlerta, con el INSERT en la 227 y la suma en la 244. `migrations/031_senales_fraude.sql` línea 204, el UNIQUE de tipo y clave.
+- Lo que pide el profesor. En la revisión del 28-09, un solo modelo para todo el fraude en vez de una tabla por detector.
+- Por qué así. Sin la llave, un ataque de mil intentos dejaría mil filas. El conflicto no toca el estado, así que una alerta ya revisada solo vuelve a pendiente si llega evidencia nueva, una cuenta o IP que no tenía, una métrica más alta o un episodio nuevo después de una hora. Una confirmada nunca se reabre.
 
-### 93. ¿Cuándo se crea una notificación y cómo se sabe que la alerta acaba de nacer?
-Cada alerta puede tener varias cuentas afectadas. La tabla notificacion_fraude guarda una fila por alerta y por cuenta, con su propia fecha de lectura. Las filas se crean solo cuando la alerta nace, no cuando el conflicto solo suma el contador. Se sabe porque en una fila recién insertada xmax vale 0.
+### 93. ¿Cuándo se crea una notificación y cuándo se vuelve a avisar?
+La tabla `notificacion_fraude` guarda una fila por señal y por cuenta afectada, con su propia fecha de lectura. La fila nace la primera vez que la cuenta aparece en la señal. Si la señal se reabre por evidencia nueva, la notificación vuelve a quedar sin leer y sube en la lista del usuario. Antes había una por cada minuto en que saltaba la alerta, y al usuario le llegaba el mismo aviso varias veces.
 
-- Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` línea 76, el xmax igual a 0. Lineas 90 a 104, el bucle que inserta las notificaciones. Lineas 25 a 30, el porqué. `migrations/018_notificacion_fraude.sql` lineas 35 a 53, la tabla con UNIQUE por alerta y usuario.
-- Lo que pide el profesor. Entrega final, panel administrativo que consume varias fuentes. La migración anota que el profesor pidió que también el usuario afectado vea sus alertas.
-- Por qué así. Una columna en alerta_fraude no puede apuntar a varias cuentas, una tabla sí, lineas 17 a 23 de la migración. Todo va en una sola transacción, así no queda una alerta a medio notificar.
+- Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` lineas 268 a 275, el INSERT de la notificación, y lineas 313 a 320, cuando se reabre. `migrations/032_evidencia_y_aviso_por_senal.sql` línea 181, el índice único de señal y usuario, y `migrations/033_sin_llaves_viejas_de_fraude.sql`, donde la llave a la señal pasa a ser obligatoria.
+- Lo que pide el profesor. Entrega final, panel administrativo que consume varias fuentes. La migración 018 anota que el profesor pidió que también el usuario afectado vea sus alertas.
+- Por qué así. Una columna no puede apuntar a varias cuentas, una tabla sí. Todo va en la misma transacción que la señal, así no queda una alerta a medio notificar.
 
 ### 94. ¿Cómo decide el sistema a qué cuentas les llega una alerta?
 Depende de la forma de la alerta. Si trae una cuenta resuelta, le llega a esa cuenta. Si trae una lista de identificadores, como multi cuenta por IP, se busca cada uno por usuario o por correo y le llega a todas las cuentas reales. Si no trae ninguna de las dos, como fuerza bruta por IP, no le llega a nadie y queda solo para el panel del admin.
 
-- Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` lineas 119 a 146, la función resolverCuentasDestino. Lineas 32 a 47, el comentario con los tres casos.
+- Dónde se ve. `backend/src/helpers/registrar-alerta-fraude.ts` línea 80, la función resolverCuentasDestino. Esas cuentas quedan en `senal_fraude_cuenta` con el rol víctima.
 - Lo que pide el profesor. Nada literal, es la parte de notificar del pedido del profesor sobre el fraude de login.
 - Por qué así. Un correo inventado no genera fila porque no hay cuenta a quien avisar. Mira la forma de detalle y no el nombre del tipo, así una señal nueva con la misma forma queda cubierta sin tocar el archivo.
 
@@ -794,7 +794,7 @@ El sistema solo avisa, nunca frena el login. Cruzar un umbral deja una alerta pa
 - Por qué así. Una regla automática bloquearía a un usuario legítimo con VPN o a todo el equipo probando desde la misma máquina. Un fallo de Redis tampoco debe tumbar el login. El humano decide con la evidencia a la vista.
 
 ### 97. ¿Cómo se ve cada alerta desglosada en el panel del admin?
-Cada alerta es una tarjeta con qué pasó y su estado. Muestra la IP o la cuenta intentada, las cuentas afectadas con un punto que dice si ya la leyeron, y lo que se vio en una frase. Muestra cuántas veces saltó en ese minuto, cuándo fue, y la lista de correos o usuarios tecleados o de IPs vistas. En viaje imposible añade de dónde a dónde.
+Cada alerta es una tarjeta con qué pasó y su estado. Muestra la IP o la cuenta intentada, las cuentas afectadas con un punto que dice si ya la leyeron, y lo que se vio en una frase. Muestra cuántas veces se detectó, la última vez, y la lista de correos o usuarios tecleados o de IPs vistas. En viaje imposible añade de dónde a dónde.
 
 - Dónde se ve. `frontend/src/lib/PanelFraude.svelte` lineas 1016 a 1070, los campos de la tarjeta. Lineas 1072 a 1091, la lista de tecleados. El backend la arma en `backend/src/services/fraude-login/fraude-login.service.ts` lineas 381 a 396, con las cuentas afectadas de las lineas 44 a 53. La ruta es `backend/src/controllers/fraude/fraude.controller.ts` lineas 22 a 37, solo admin.
 - Lo que pide el profesor. Entrega final, panel administrativo que consume múltiples fuentes. Este panel junta PostgreSQL, Redis y Elasticsearch.
@@ -803,7 +803,7 @@ Cada alerta es una tarjeta con qué pasó y su estado. Muestra la IP o la cuenta
 ### 98. ¿Qué estados tiene una alerta y cómo pasa de pendiente a revisada o descartada?
 Tiene tres estados, pendiente, revisada y descartada. Nace pendiente. El admin pulsa Marcar revisada o Descartar y solo se permite el cambio desde pendiente. Si la alerta ya no está pendiente el backend contesta 409, y si no existe contesta 404.
 
-- Dónde se ve. `migrations/016_alerta_fraude.sql` lineas 109 a 122, el catálogo de estados. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 58 a 73, el PATCH. `backend/src/services/fraude-login/fraude-login-exploracion.service.ts` lineas 236 a 284, el UPDATE con condición y la distinción entre 404 y 409. `frontend/src/lib/PanelFraude.svelte` lineas 1093 a 1112, los botones.
+- Dónde se ve. `migrations/016_alerta_fraude.sql` lineas 109 a 122, el catálogo de estados, que ahora usa `senal_fraude`. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 58 a 73, el PATCH. `backend/src/services/fraude-login/fraude-login-exploracion.service.ts` línea 242, el UPDATE de la señal con condición, y la 265, la distinción entre 404 y 409. `frontend/src/lib/PanelFraude.svelte` lineas 1093 a 1112, los botones.
 - Lo que pide el profesor. Nada literal, es el triage del panel administrativo.
 - Por qué así. La condición de estado pendiente va dentro del propio UPDATE, así dos admins a la vez no se pisan y el segundo recibe el 409. Los estados son una tabla catálogo y no un texto libre.
 
@@ -984,10 +984,19 @@ Las cuatro familias de detección (anillos y patrones de reseñas en Neo4j, comp
 
 - Dónde se ve. `backend/src/services/fraude/agrupador-fraude.service.ts` linea 60 (agrupar) y 156 (las cuentas concentradoras). `puntaje-fraude.service.ts` linea 65. `agrupador-fraude-worker.service.ts` linea 68, la corrida al arrancar. `migrations/026_casos_fraude.sql` lineas 48, 102 y 152, el caso, su evidencia y sus cuentas. En la app, el panel de Fraude, pestaña Casos. Pruebas `node pruebas/casos_fraude_fusion.cjs` y `node pruebas/casos_fraude_granja.cjs`.
 - Ojo si preguntan por el vendedor de una granja. Una cuenta con más de 10 contrapartes en reseñas es concentradora y nunca es núcleo. Antes contaban también las reseñas del propio fraude, así que el vendedor que armaba una granja de 11 cuentas quedaba fuera del núcleo de su caso. Ahora esas reseñas no cuentan para el umbral, y la prueba de la granja lo demuestra (saboteada falla).
-- Lo que queda abierto. Si una IP compartida debe unir casos (C1) y que la recencia use la fecha del detector y no la del admin (C4). Están en `docs/BACKEND-PENDIENTE.md` y la propuesta de fondo en `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`.
+- Desde el refactor de fraude. El agrupador ya no tiene tres adaptadores, lee una sola tabla, `senal_fraude` (`hallazgo-fraude-adaptador.service.ts` línea 79). La evidencia del caso apunta a la señal, y la recencia sale de `ultima_deteccion`, que solo mueve el detector, así que revisar algo viejo ya no lo rejuvenece (era el C4).
+- Lo que queda abierto. Si una IP compartida debe unir casos (C1). Está en `docs/BACKEND-PENDIENTE.md`.
 
 ### 121. ¿Dónde vive el vencimiento de un descuento y qué pasa si se vacía Redis?
 En PostgreSQL. La oferta guarda `fecha_vencimiento_descuento` y `fecha_vencimiento_venta_limitada`, y nulo quiere decir que no vence. Un worker del backend revisa cada minuto las que ya pasaron su fecha y las apaga. Hasta el 26 de septiembre el vencimiento era una clave de Redis con TTL, y un Redis vaciado se llevaba los descuentos. Ahora Redis solo lleva el contador de la venta relámpago. El panel del vendedor muestra hasta cuándo dura cada uno, y si la venta relámpago vence sola se lleva también el descuento, así que la etiqueta muestra la fecha que llega primero.
 
 - Dónde se ve. `migrations/028_vencimiento_oferta.sql` lineas 44 y 45. `backend/src/services/vendedores/ventas-limitadas.service.ts` lineas 364 y 422. `frontend/src/lib/descuento.ts` linea 76 y `OfertasVendedor.svelte` linea 571. En vivo, `.\demo-descuentos-solos.ps1 -Parte manual`, que muestra la fecha en PostgreSQL, por la ruta del vendedor y el worker quitándolo.
 - Por qué así. Una fecha en la base de verdad no se pierde con un FLUSHALL, y el worker puede saber qué venció sin preguntarle a Redis.
+
+### 122. ¿Por qué todo el fraude se guarda en una sola tabla de señales?
+Porque cada detector guardaba a su manera. Los anillos en `anillo_fraude`, las compras en `hallazgo_evento_fraude` y el login en `alerta_fraude`, con tres catálogos de tipo que no se hablaban. El agrupador de casos necesitaba tres adaptadores y la evidencia de un caso tenía tres llaves, de las que solo una podía ir llena. Ahora todo es una señal en `senal_fraude`, una fila por tipo y clave, con catálogos de familia, fuente, tipo y rol, y pivotes para las cuentas, reseñas, productos, pedidos e IP. El caso y el aviso al usuario cuelgan de la señal con una sola llave.
+
+- Dónde se ve. `migrations/031_senales_fraude.sql`, las tablas y la copia de lo que había. `migrations/032_evidencia_y_aviso_por_senal.sql` y `migrations/033_sin_llaves_viejas_de_fraude.sql`, la evidencia y las notificaciones. El diseño por etapas en `backend/elementos Generales/plan pendiente/refactor-fraude-senales.md` y el resumen en `docs/base-de-datos.md`, sección Un solo modelo de señales de fraude.
+- Lo que pide el profesor. Lo pidió en la revisión del 28-09, decisiones menos genéricas en el fraude (`docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md` sección 1).
+- Ojo si preguntan por las tablas viejas. Siguen en la base, sin escrituras. No se borraron porque las migraciones viejas se vuelven a correr en cada arranque y las volverían a crear vacías; borrarlas es una decisión aparte.
+- Por qué así. La detección del detector y la revisión del admin quedan en fechas distintas, `ultima_deteccion` y `fecha_actualizacion`. Un mismo patrón visto diez veces es una fila con diez detecciones, no diez filas que el agrupador contaba como evidencia distinta.

@@ -12,13 +12,15 @@
 -- Se exige un minimo absoluto ademas de la tasa: 1 devuelta de 1 comprada es
 -- el 100 % y no dice nada.
 --
--- Parametros: lote, dias_ventana, min_devoluciones, min_tasa_devolucion_cuenta, limite.
+-- Parametros: lote, dias_ventana, min_devoluciones, min_tasa_devolucion_cuenta,
+-- max_pedidos, limite.
 WITH
     k AS (SELECT id_usuario, sum(cantidad) AS compradas, uniqExact(id_pedido) AS pedidos
             FROM compra_producto FINAL
            WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
            GROUP BY id_usuario),
-    d AS (SELECT id_usuario, sum(cantidad) AS devueltas
+    d AS (SELECT id_usuario, sum(cantidad) AS devueltas,
+                 groupUniqArray(id_pedido) AS pedidos_devueltos
             FROM devolucion_producto FINAL
            WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
            GROUP BY id_usuario)
@@ -27,7 +29,9 @@ SELECT
     k.pedidos                             AS pedidos,
     k.compradas                           AS compradas,
     d.devueltas                           AS devueltas,
-    round(d.devueltas / greatest(k.compradas, 1), 2) AS tasa_devolucion
+    round(d.devueltas / greatest(k.compradas, 1), 2) AS tasa_devolucion,
+    -- Los pedidos devueltos (ver IDS_PEDIDOS en F2).
+    arraySlice(arrayReverseSort(d.pedidos_devueltos), 1, {max_pedidos:UInt32}) AS ids_pedidos
 FROM d LEFT JOIN k ON k.id_usuario = d.id_usuario
 WHERE d.devueltas >= {min_devoluciones:UInt32}
   AND tasa_devolucion >= {min_tasa_devolucion_cuenta:Float64}

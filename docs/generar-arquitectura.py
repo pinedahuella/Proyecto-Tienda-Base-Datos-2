@@ -45,12 +45,12 @@ CAJAS = [
         "cadena, favor devuelto, coordinados",
     ], "#E1D5E7", "#9673A6"),
     ("pg", "PostgreSQL 18", "FUENTE DE VERDAD", [
-        "56 tablas y 73 llaves foráneas",
+        "74 tablas y 96 llaves foráneas",
         "pedidos, pagos, ofertas, stock",
         "reglas de descuento automáticas",
         "y por fecha, hallazgos F1 a F6",
         "vectores de productos con pgvector",
-        "reseñas, alertas y anillos de fraude",
+        "reseñas y señales de fraude",
         "cola evento_grafo",
     ], "#DAE8FC", "#6C8EBF"),
     ("mongo", "MongoDB", "CATÁLOGO Y LOG DE LOGIN", [
@@ -89,13 +89,13 @@ CAJAS = [
 FLUJOS = [
     (1, "pg", "mongo", "PostgreSQL a MongoDB, etl/cargar.js por lotes, conserva lo que el vendedor edita desde la aplicación"),
     (2, "pg", "neo4j", "PostgreSQL a Neo4j, cada reseña tocada entra en la cola evento_grafo y un worker la vacía cada 10 segundos"),
-    (3, "neo4j", "pg", "Neo4j a PostgreSQL, los detectores de anillos y de la familia B corren cada 15 minutos, B también al llegar una reseña, y guardan lo que encuentran en anillo_fraude"),
+    (3, "neo4j", "pg", "Neo4j a PostgreSQL, los detectores de anillos y de la familia B corren cada 15 minutos, B también al llegar una reseña, y guardan lo que encuentran en senal_fraude"),
     (4, "mongo", "es", "MongoDB a Elasticsearch, la marca pendiente_busqueda cada 10 segundos y los intentos de login cada 5"),
-    (5, "es", "pg", "Elasticsearch a PostgreSQL, el análisis retrospectivo cada 15 minutos deja alertas en alerta_fraude"),
-    (6, "redis", "pg", "Redis a PostgreSQL, un contador de fallos de login que cruza su umbral deja una fila en alerta_fraude"),
+    (5, "es", "pg", "Elasticsearch a PostgreSQL, el análisis retrospectivo cada 15 minutos deja señales en senal_fraude"),
+    (6, "redis", "pg", "Redis a PostgreSQL, un contador de fallos de login que cruza su umbral deja o suma una señal en senal_fraude"),
     (7, "pg", "ch", "PostgreSQL a ClickHouse, etl/cargar_compras.sh copia compras y devoluciones en cada arranque"),
     (8, "ch", "redis", "ClickHouse a Redis, cada 10 minutos se recalculan más vendidos y más vistos, y cada 15 también vieron y para ti"),
-    (9, "ch", "pg", "ClickHouse a PostgreSQL, cada 60 segundos el disparador cuenta las ventas recientes y aplica la regla automática, y una vez al día los hallazgos F1 a F6 van a hallazgo_evento_fraude"),
+    (9, "ch", "pg", "ClickHouse a PostgreSQL, cada 60 segundos el disparador cuenta las ventas recientes y aplica la regla automática, y una vez al día los hallazgos F1 a F6 van a senal_fraude"),
     (10, "redis", "pg", "Redis a PostgreSQL, cada minuto un descuento cuya clave de vencimiento ya no existe se quita de oferta"),
     (11, "mongo", "pg", "MongoDB a PostgreSQL, etl/cargar_vectores.ps1 le pide a Ollama el vector de cada producto y lo guarda en producto_vector"),
 ]

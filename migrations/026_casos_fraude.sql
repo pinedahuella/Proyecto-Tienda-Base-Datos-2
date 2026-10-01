@@ -110,6 +110,18 @@ CREATE TABLE IF NOT EXISTS evidencia_caso_fraude (
     CHECK (num_nonnulls(id_anillo_fraude, id_hallazgo_evento_fraude, id_alerta_fraude) = 1)
 );
 
+-- Desde la 033 la evidencia tiene una sola llave, a senal_fraude, y estas tres
+-- columnas ya no existen. Este archivo se vuelve a correr en cada arranque, y
+-- las llaves y los indices de abajo lo cortaban con "column does not exist".
+-- El \if salta todo el bloque cuando la columna ya no esta; la llave y el
+-- indice nuevos los ponen la 032 y la 033.
+SELECT EXISTS (SELECT 1 FROM information_schema.columns
+                WHERE table_schema = 'public'
+                  AND table_name   = 'evidencia_caso_fraude'
+                  AND column_name  = 'id_anillo_fraude') AS evidencia_con_llaves_viejas
+\gset
+\if :evidencia_con_llaves_viejas
+
 -- La base del companero ya tiene la tabla con las tres llaves SIN cascada,
 -- de antes de esta migracion. El CREATE de arriba no las cambia si la tabla
 -- existe, asi que se rehacen aqui. Es idempotente: cada corrida las quita y
@@ -137,6 +149,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_evidencia_caso_fraude_hallazgo_evento
     ON evidencia_caso_fraude (id_hallazgo_evento_fraude) WHERE id_hallazgo_evento_fraude IS NOT NULL;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_evidencia_caso_fraude_alerta
     ON evidencia_caso_fraude (id_alerta_fraude) WHERE id_alerta_fraude IS NOT NULL;
+\endif
 
 COMMENT ON TABLE evidencia_caso_fraude IS 'Enlaza UN hallazgo real (de anillo_fraude, hallazgo_evento_fraude o alerta_fraude -- exactamente una de las tres) a su caso. NO copia tipo/clave/metricas: se leen con JOIN a la fuente real';
 COMMENT ON COLUMN evidencia_caso_fraude.puntos IS 'Cuantos puntos aporta ESTE hallazgo al puntaje del caso -- esto si es un dato nuevo, calculado por las reglas de puntaje (seccion 3), no una copia de nada que ya exista';

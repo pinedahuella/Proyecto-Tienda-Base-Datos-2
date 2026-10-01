@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Dibuja el diagrama entidad relacion de Mesh a partir del esquema VIVO.
 
-    python generar-er.py                  el diagrama completo, las 56 tablas
+    python generar-er.py                  el diagrama completo, las 74 tablas
     python generar-er.py --modulo fraude  solo un modulo, para el informe
 
 Escribe docs/diagrama-general.drawio (editable en diagrams.net) y, si encuentra
@@ -105,7 +105,7 @@ MODULOS = {
     "ofertas": ("Ofertas e inventario", "#FFE6CC", "#D79B00",
                 ["oferta", "estado_oferta", "precio_historial", "stock_movimiento",
                  "motivo_movimiento", "propuesta_producto", "rechazo_producto", "rechazo_oferta",
-                 "regla_descuento_automatico", "regla_descuento_periodo"]),
+                 "regla_descuento_automatico", "regla_descuento_periodo", "evento_catalogo"]),
     "pedidos": ("Pedidos y pagos", "#FFF2CC", "#D6B656",
                 ["pedido", "estado_pedido", "pedido_producto", "pago", "estado_pago", "metodo_pago"]),
     "resenas": ("Resenas", "#E1D5E7", "#9673A6",
@@ -115,7 +115,11 @@ MODULOS = {
                 "anillo_fraude", "tipo_anillo_fraude", "anillo_fraude_resena", "evento_grafo",
                 "hallazgo_evento_fraude", "hallazgo_evento_fraude_cuenta", "tipo_hallazgo_evento",
                 "caso_fraude", "nivel_caso_fraude", "caso_fraude_regla", "regla_casi_confirmado",
-                "evidencia_caso_fraude", "evidencia_caso_fraude_cuenta"]),
+                "evidencia_caso_fraude", "evidencia_caso_fraude_cuenta",
+                # el modelo unico de senales (031 a 033)
+                "senal_fraude", "familia_senal_fraude", "fuente_senal_fraude", "tipo_senal_fraude",
+                "rol_cuenta_senal", "senal_fraude_cuenta", "senal_fraude_resena",
+                "senal_fraude_producto", "senal_fraude_pedido", "direccion_ip", "senal_fraude_ip"]),
 }
 
 # columnas del diagrama completo, de izquierda a derecha
@@ -127,13 +131,20 @@ DISPOSICION = [
      "resena", "comentario", "likes", "|", "alerta_fraude", "notificacion_fraude", "|",
      "hallazgo_evento_fraude_cuenta"],
     ["rechazo_producto", "|", "estado_oferta", "rechazo_oferta", "motivo_movimiento",
-     "regla_descuento_automatico", "regla_descuento_periodo", "|",
+     "regla_descuento_automatico", "regla_descuento_periodo", "evento_catalogo", "|",
      "estado_pedido", "pedido_producto", "pago", "|", "anillo_fraude_resena", "anillo_fraude",
      "|", "tipo_alerta_fraude", "estado_alerta_fraude", "tipo_anillo_fraude", "evento_grafo",
      "|", "hallazgo_evento_fraude", "tipo_hallazgo_evento"],
     ["metodo_pago", "estado_pago", "|", "evidencia_caso_fraude", "evidencia_caso_fraude_cuenta"],
     # los casos de fraude (026): juntan anillos, hallazgos de eventos y alertas
     ["caso_fraude", "nivel_caso_fraude", "|", "caso_fraude_regla", "regla_casi_confirmado"],
+    # las senales (031 a 033): desde la 033 la evidencia y los avisos cuelgan de
+    # senal_fraude, y las tablas viejas de alertas, anillos y hallazgos quedan
+    # sin escrituras
+    ["senal_fraude_cuenta", "senal_fraude_resena", "senal_fraude_pedido", "|", "senal_fraude",
+     "rol_cuenta_senal"],
+    ["tipo_senal_fraude", "familia_senal_fraude", "fuente_senal_fraude", "|",
+     "senal_fraude_producto", "senal_fraude_ip", "direccion_ip"],
 ]
 
 # el catalogo es una isla: ninguna de sus tablas tiene llave foranea hacia el
@@ -154,6 +165,15 @@ VISTAS = {
         ["alerta_fraude", "notificacion_fraude"],
         ["tipo_alerta_fraude", "estado_alerta_fraude", "anillo_fraude", "tipo_anillo_fraude",
          "anillo_fraude_resena", "evento_grafo"],
+    ]),
+    "senales": ("Senales de fraude, casos y avisos (031 a 033)", [
+        ["usuarios", "|", "resena", "pedido"],
+        ["senal_fraude_cuenta", "senal_fraude_resena", "senal_fraude_pedido", "|",
+         "notificacion_fraude"],
+        ["senal_fraude", "estado_alerta_fraude", "|", "evidencia_caso_fraude",
+         "evidencia_caso_fraude_cuenta", "caso_fraude"],
+        ["tipo_senal_fraude", "familia_senal_fraude", "fuente_senal_fraude", "rol_cuenta_senal",
+         "|", "senal_fraude_producto", "senal_fraude_ip", "direccion_ip"],
     ]),
 }
 

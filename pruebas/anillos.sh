@@ -192,7 +192,9 @@ en_a=${en_control%% *}; en_b=${en_control##* }
 
 if [ -n "$ID_ANILLO" ]; then
     # Confirmacion, solo lectura. Las resenas del anillo quedaron en la tabla pivote.
-    resenas_pg=$(sql "SELECT count(*) FROM anillo_fraude_resena WHERE id_anillo_fraude=$ID_ANILLO;")
+    # Desde el refactor de fraude (migraciones 031 a 033) el anillo es una senal:
+    # el id_anillo_fraude de la API es senal_fraude.id_senal_fraude.
+    resenas_pg=$(sql "SELECT count(*) FROM senal_fraude_resena WHERE id_senal_fraude=$ID_ANILLO;")
     [ "$resenas_pg" = "3" ] && OK "PostgreSQL guardo las 3 resenas de evidencia" || FALLA "la evidencia guardada es de $resenas_pg resenas"
 
     titulo "5. El detalle sale de Neo4j, y el caso se trabaja como una cola"
@@ -212,18 +214,20 @@ print(len(d.get('resenas') or []))")
     codigo=$(curl -s -o /dev/null -w '%{http_code}' -X PATCH "$API/admin/fraude/alertas-resenas/$ID_ANILLO" \
         -H "Content-Type: application/json" -H "Cookie: $ADMIN" -d '{"estado":"descartada"}')
     [ "$codigo" = "409" ] && OK "moverlo otra vez desde revisado da 409" || FALLA "moverlo otra vez dio $codigo y no 409"
-    estado_pg=$(sql "SELECT e.estado_alerta_fraude_nombre FROM anillo_fraude a JOIN estado_alerta_fraude e USING(id_estado_alerta_fraude) WHERE a.id_anillo_fraude=$ID_ANILLO;")
+    estado_pg=$(sql "SELECT e.estado_alerta_fraude_nombre FROM senal_fraude s JOIN estado_alerta_fraude e USING(id_estado_alerta_fraude) WHERE s.id_senal_fraude=$ID_ANILLO;")
     [ "$estado_pg" = "revisada" ] && OK "PostgreSQL confirma el estado, revisada" || FALLA "el estado guardado es '$estado_pg'"
 fi
 
 pend_desp=$(curl -s "$API/admin/fraude/alertas-resenas?estado=pendiente&pagina=1&limite=1" -H "Cookie: $ADMIN" | campo payload.total_anillos)
 # Las cadenas abiertas de la familia B que toca el control nacen pendientes y son de esta
 # prueba. Se descuentan para comparar solo lo que no es de ella.
-pend_b=$(sql "SELECT count(*) FROM anillo_fraude a JOIN estado_alerta_fraude e USING (id_estado_alerta_fraude)
-               JOIN tipo_anillo_fraude t USING (id_tipo_anillo_fraude)
-              WHERE e.estado_alerta_fraude_nombre = 'pendiente' AND t.tipo_anillo_fraude_nombre NOT IN ('mutuo','ciclo','reiterado')
+# La familia B es patron_resenas en el catalogo unico de senales.
+pend_b=$(sql "SELECT count(*) FROM senal_fraude s JOIN estado_alerta_fraude e USING (id_estado_alerta_fraude)
+               JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude)
+               JOIN familia_senal_fraude f USING (id_familia_senal_fraude)
+              WHERE e.estado_alerta_fraude_nombre = 'pendiente' AND f.familia_senal_fraude_nombre = 'patron_resenas'
                 AND EXISTS (SELECT 1 FROM usuarios u WHERE u.usuario LIKE '$PREF%'
-                             AND u.id_usuario::text = ANY (string_to_array(a.clave, '-')));")
+                             AND u.id_usuario::text = ANY (string_to_array(s.clave, '-')));")
 [ -n "$pend_b" ] && pend_desp=$((pend_desp - pend_b))
 [ "$pend_desp" = "$pend_antes" ] && OK "los anillos pendientes quedaron como estaban ($pend_antes), el de la prueba ya esta revisado" \
     || FALLA "pendientes, $pend_antes antes y $pend_desp despues"

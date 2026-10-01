@@ -13,6 +13,11 @@
 // prueba mide algo) y despues como evidencia de un anillo `satelites` (ya no tiene que
 // serlo, y el agrupador lo tiene que poner en el nucleo).
 //
+// Desde el refactor de fraude (7453ffe, migraciones 031 a 033) el anillo se siembra
+// como senal: senal_fraude con su tipo `satelites`, sus resenas en senal_fraude_resena
+// (que es lo que mira el agrupador para C6) y sus cuentas en senal_fraude_cuenta. Antes
+// iba a anillo_fraude, que el backend ya no lee.
+//
 // La regularidad de B.3 (los "menores"). Neo4j da NaN con media 0, JSON lo guarda como
 // null y Number(null) es 0, que sumaba los +5 de "regular". Un null ya no suma y un
 // 0,1 de verdad si.
@@ -68,21 +73,28 @@ const SATELITES = 11;
 
   const cuentas = [vendedor, ...satelites];
   const [anillo] = await filas(
-    `INSERT INTO anillo_fraude (id_tipo_anillo_fraude, clave, id_estado_alerta_fraude)
-     VALUES ((SELECT id_tipo_anillo_fraude FROM tipo_anillo_fraude WHERE tipo_anillo_fraude_nombre = 'satelites'),
+    `INSERT INTO senal_fraude (id_tipo_senal_fraude, clave, id_estado_alerta_fraude)
+     VALUES ((SELECT id_tipo_senal_fraude FROM tipo_senal_fraude WHERE tipo_senal_fraude_nombre = 'satelites'),
              $1,
              (SELECT id_estado_alerta_fraude FROM estado_alerta_fraude WHERE estado_alerta_fraude_nombre = 'pendiente'))
-     RETURNING id_anillo_fraude`,
+     RETURNING id_senal_fraude`,
     [[...cuentas].sort((a, b) => a - b).join('-')],
   );
   for (const r of resenas) {
-    await filas(`INSERT INTO anillo_fraude_resena (id_anillo_fraude, id_resena) VALUES ($1, $2)`, [anillo.id_anillo_fraude, r]);
+    await filas(`INSERT INTO senal_fraude_resena (id_senal_fraude, id_resena) VALUES ($1, $2)`, [anillo.id_senal_fraude, r]);
+  }
+  for (const c of cuentas) {
+    await filas(
+      `INSERT INTO senal_fraude_cuenta (id_senal_fraude, id_usuario, id_rol_cuenta_senal)
+       VALUES ($1, $2, (SELECT id_rol_cuenta_senal FROM rol_cuenta_senal WHERE rol_cuenta_senal_nombre = 'autor'))`,
+      [anillo.id_senal_fraude, c],
+    );
   }
 
   mira(!(await concentradoras()).has(vendedor), 'C6: con sus resenas como evidencia de un anillo ya no es concentrador');
 
   const hallazgo = {
-    fuente: 'grafo', idOrigen: Number(anillo.id_anillo_fraude), tipo: 'satelites', cuentas,
+    fuente: 'grafo', idOrigen: Number(anillo.id_senal_fraude), tipo: 'satelites', cuentas,
     clave: [...cuentas].sort((a, b) => a - b).join('-'), metricas: {}, ultimaEvidencia: new Date(),
   };
   const [grupo] = await agrupador.agrupar([hallazgo]);

@@ -62,17 +62,30 @@ if (-not (docker ps --format '{{.Names}}' | Select-String -Quiet 'mesh-postgres'
 Ok "Docker y los contenedores mesh-* estan arriba"
 
 # --- -Limpiar: borrar lo sembrado por la demo, marcado con su user-agent ---
-# Primero se leen las IPs de Mongo (las alertas por IP llevan la IP como clave),
+# Primero se leen las IPs de Mongo (las senales por IP llevan la IP como clave),
 # despues se borra en Postgres, Mongo y Elastic. Sin comillas dobles en el
 # JavaScript: PowerShell 5.1 las rompe al pasarlas a docker.
+#
+# En Postgres se borran las senales de login de la demo (senal_fraude, desde
+# las migraciones 031 a 033). Sus cuentas, sus IP, sus avisos y su evidencia en
+# un caso se van en cascada. Solo las de la familia login: una senal de
+# compras (F3, F6) tambien lleva una IP como clave y no es de esta demo. Las
+# filas de direccion_ip de esas IPs se borran si ya ninguna senal las usa.
 if ($Limpiar) {
     Paso "Borrando los datos de la demo"
     $js = "db.eventos_autenticacion.distinct('ip',{user_agent:'$marca'}).join(',')"
     $ips = (docker exec mesh-mongo mongosh --quiet -u $MU -p $MP --authenticationDatabase admin $MD --eval $js 2>$null) -join ''
     $claves = @($ips.Split(',') | Where-Object { $_ -match '^[0-9a-fA-F:.]+$' } | ForEach-Object { "'$_'" })
-    $enIps = if ($claves.Count) { "clave IN ($($claves -join ',')) OR " } else { '' }
-    $sql = "WITH d AS (DELETE FROM alerta_fraude WHERE $enIps clave LIKE 'demo.%@mesh.test' RETURNING 1) SELECT count(*) FROM d"
+    $enIps = if ($claves.Count) { "s.clave IN ($($claves -join ',')) OR " } else { '' }
+    $sql = "WITH d AS (DELETE FROM senal_fraude s USING tipo_senal_fraude t, familia_senal_fraude f " +
+           "WHERE t.id_tipo_senal_fraude = s.id_tipo_senal_fraude AND f.id_familia_senal_fraude = t.id_familia_senal_fraude " +
+           "AND f.familia_senal_fraude_nombre = 'login' AND ($enIps s.clave LIKE 'demo.%@mesh.test') RETURNING 1) SELECT count(*) FROM d"
     $nPg = docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -tAc $sql 2>$null
+    if ($claves.Count) {
+        $sql = "DELETE FROM direccion_ip d WHERE host(d.ip) IN ($($claves -join ',')) " +
+               "AND NOT EXISTS (SELECT 1 FROM senal_fraude_ip x WHERE x.id_direccion_ip = d.id_direccion_ip)"
+        docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -tAc $sql *> $null
+    }
     $js = "print(db.eventos_autenticacion.deleteMany({user_agent:'$marca'}).deletedCount)"
     $nMongo = docker exec mesh-mongo mongosh --quiet -u $MU -p $MP --authenticationDatabase admin $MD --eval $js 2>$null
     $nEs = '?'
@@ -83,7 +96,7 @@ if ($Limpiar) {
         $nEs = $r.deleted
     } catch {}
     Ok "IPs de la demo: $(if ($ips) { $ips } else { 'ninguna' })"
-    Ok "Postgres: $nPg alerta(s); Mongo: $nMongo evento(s); Elastic: $nEs documento(s)"
+    Ok "Postgres: $nPg senal(es); Mongo: $nMongo evento(s); Elastic: $nEs documento(s)"
     exit 0
 }
 
@@ -230,7 +243,11 @@ if ($ipsVistas | Where-Object { $_ -in @('127.0.0.1', '::1', '::ffff:127.0.0.1')
 $alertas = ''; $consultaOk = $true
 if ($ipsVistas.Count) {
     $enIps = ($ipsVistas | ForEach-Object { "'$_'" }) -join ','
-    $sql = "SELECT string_agg(t.tipo_alerta_fraude_nombre || ' (' || a.clave || ')', ', ') FROM alerta_fraude a JOIN tipo_alerta_fraude t USING (id_tipo_alerta_fraude) WHERE a.clave IN ($enIps)"
+    # Las senales de esas IPs: por su clave (fuerza_bruta_ip, multi_cuenta_ip)
+    # o por su pivote de IP (las que traen la IP en el detalle).
+    $sql = "SELECT string_agg(t.tipo_senal_fraude_nombre || ' (' || s.clave || ')', ', ') FROM senal_fraude s " +
+           "JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude) WHERE s.clave IN ($enIps) " +
+           "OR s.id_senal_fraude IN (SELECT x.id_senal_fraude FROM senal_fraude_ip x JOIN direccion_ip d USING (id_direccion_ip) WHERE host(d.ip) IN ($enIps))"
     $alertas = ((docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -v ON_ERROR_STOP=1 -tAc $sql 2>&1) -join ' ').Trim()
     $consultaOk = $LASTEXITCODE -eq 0
 }
@@ -239,15 +256,15 @@ if (-not $consultaOk -or -not $alertas) {
     # distingue "no hay alerta" de "no pude preguntar" miente (paso aqui mismo,
     # con una columna mal escrita).
     if (-not $ipsVistas.Count) { Mal "El backend no registro ningun intento de esta corrida." }
-    elseif ($consultaOk) { Mal "No quedo ninguna alerta con la IP $($ipsVistas -join ', ')." }
-    else { Mal "No pude consultar alerta_fraude: $alertas" }
+    elseif ($consultaOk) { Mal "No quedo ninguna senal con la IP $($ipsVistas -join ', ')." }
+    else { Mal "No pude consultar senal_fraude: $alertas" }
     Mal "Respuestas del backend: $($codigos -join ' ')"
     Salir-Demo 1
 }
 $ipSalida = $ipsVistas -join ', '
 Ok "8 intentos con 4 correos distintos (respuestas del backend: $(($codigos | Select-Object -Unique) -join ','))"
 Ok "El backend los registro con la IP $ipSalida"
-Ok "Alertas: $alertas"
+Ok "Senales: $alertas"
 
 # --- el link para entrar TU MISMO desde ese pais ---
 # Tor sigue vivo (es el mismo de los intentos): se le pone el link con el nombre del pais

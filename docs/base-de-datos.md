@@ -1054,6 +1054,11 @@ describe `docs/frontend.md`.
 
 ## Las alertas de fraude del login (migracion 016)
 
+> **Desde la 033 esta tabla ya no recibe filas.** El login escribe en
+> `senal_fraude`, una fila por (tipo, clave) y no una por minuto. Lo de abajo
+> cuenta como era, y sigue sirviendo para leer las filas viejas. El modelo nuevo
+> esta en "Un solo modelo de senales de fraude", mas abajo.
+
 **Entraron la noche del 2026-09-10**, detras del codigo que las usa. El backend
 cuenta en Redis tres senales en el propio camino del login, y cuando una cruza
 su umbral deja una fila aqui:
@@ -1268,6 +1273,10 @@ pausada hasta que venza o el vendedor la reabra. El descuento no se pierde.
 
 ## Los patrones B de resenas (migracion 023)
 
+> Desde la 033 los anillos y los patrones B tambien van a `senal_fraude`, con las
+> familias `anillo_resenas` y `patron_resenas`. `anillo_fraude` queda sin
+> escrituras.
+
 La 019 guardaba los anillos mutuo, ciclo y reiterado. La 023 deja guardar
 tambien seis de los siete patrones B (`neo4j/consultas/B1..B7`) en la misma
 `anillo_fraude`, sin tabla nueva. Sale del SQL de referencia del companero
@@ -1286,6 +1295,88 @@ tambien seis de los siete patrones B (`neo4j/consultas/B1..B7`) en la misma
 - **En `coordinados` el vendedor no es sospechoso.** Son dos autores que
   califican lo mismo a la vez; las cuentas del caso son ellos dos. No cambia
   la tabla, lo resuelve la consulta que deriva las cuentas.
+
+## Un solo modelo de senales de fraude (migraciones 031 a 033)
+
+**Lo pidio el profesor en la revision del 28-09** (seccion 1 de
+`docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`) y lo hizo Jose David en el backend
+(7453ffe). Antes cada detector guardaba a su manera:
+
+```
+anillos y patrones de resenas   Neo4j        anillo_fraude, anillo_fraude_resena
+compras y navegacion F1 a F6    ClickHouse   hallazgo_evento_fraude, _cuenta
+login                           Redis, Elasticsearch y MongoDB   alerta_fraude
+```
+
+Tres catalogos de tipo que no se hablaban, tres adaptadores en el agrupador de
+casos y una `evidencia_caso_fraude` con tres llaves de las que solo una podia
+ir llena. Ahora todo es una senal:
+
+```
+familia_senal_fraude   anillo_resenas, patron_resenas, compras_navegacion, login
+fuente_senal_fraude    neo4j, clickhouse, login
+tipo_senal_fraude      los 25 tipos, con su familia y su fuente
+rol_cuenta_senal       autor o victima
+senal_fraude           UNA fila por (tipo, clave)
+  detalle                 jsonb, las metricas de la ultima deteccion
+  primera_deteccion       la mueve solo el detector
+  ultima_deteccion        la mueve solo el detector
+  total_detecciones       cuantas veces se vio
+  id_estado_alerta_fraude pendiente, revisada, descartada, confirmada
+  id_usuario_reviso, fecha_revision
+  fecha_actualizacion     la mueve solo la revision del admin
+senal_fraude_cuenta    las cuentas, con su rol
+senal_fraude_resena    las resenas que son la evidencia
+senal_fraude_producto  los productos (de Mongo, sin llave foranea)
+senal_fraude_pedido    los pedidos, con llave foranea
+direccion_ip           una fila por IP
+senal_fraude_ip        las IP de cada senal
+```
+
+**Si el detector la vuelve a ver es la MISMA fila.** Sube
+`total_detecciones` y se refrescan `detalle` y `ultima_deteccion`. Una senal
+revisada o descartada solo vuelve a pendiente si llega evidencia nueva (una
+cuenta, IP, producto o pedido que no tenia, o la metrica principal mas alta);
+una confirmada nunca. Las reglas estan en los `registrar-*` del backend y en
+`backend/elementos Generales/plan pendiente/refactor-fraude-senales.md`.
+
+**Dos fechas, a proposito.** `ultima_deteccion` es del detector y
+`fecha_actualizacion` del admin. Antes eran la misma, y revisar algo viejo lo
+"rejuvenecia" en el puntaje del caso (el C4 de BACKEND-PENDIENTE).
+
+**La evidencia de un caso y el aviso al usuario cuelgan de la senal.**
+`evidencia_caso_fraude` y `notificacion_fraude` tienen una sola llave,
+`id_senal_fraude`, NOT NULL. Queda un aviso por (senal, cuenta) y no uno por
+cada minuto: se avisa cuando la cuenta aparece en la senal y cuando la senal se
+reabre.
+
+### Tres migraciones, y la copia corre una sola vez
+
+```
+031  las tablas nuevas, y la copia de anillo_fraude, hallazgo_evento_fraude
+     y alerta_fraude (sus filas por dia o por minuto se juntan en una senal)
+032  evidencia_caso_fraude y notificacion_fraude ganan id_senal_fraude y se
+     enlaza lo que ya habia
+033  se quitan las tres llaves viejas de esas dos tablas
+```
+
+Como el esquema se reejecuta en cada arranque, la copia de la 031 volveria a
+pisar la senal con lo de la tabla vieja: lo que el admin reviso despues se
+perderia, y una senal borrada volveria a nacer. Por eso la copia y la 032 corren
+solo mientras exista `evidencia_caso_fraude.id_anillo_fraude`, la columna que
+la 033 quita en ese mismo arranque. Van con `\if` de psql.
+
+Por lo mismo se tocaron la 018 y la 026, la unica vez que se edita una migracion
+ya corrida (ver `migrations/README.md`): crean indices y llaves sobre las
+columnas que la 033 quita, y cortaban el arranque siguiente.
+
+### Las tablas viejas no se borran
+
+`anillo_fraude`, `hallazgo_evento_fraude`, `alerta_fraude`, sus pivotes y sus
+tres catalogos de tipo quedan quietas, sin escrituras. Borrarlas es
+`refactor-fraude-senales-etapa8-borrado.sql`, que esta sin decidir. Antes de
+hacerlo hay que saber que la 016, la 019, la 023 y la 025 las vuelven a crear
+vacias en cada arranque.
 
 ## Los historiales no llevan estado
 
