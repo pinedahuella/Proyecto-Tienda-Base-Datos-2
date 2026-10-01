@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { redis } from '../../database/redis';
 import { pool } from '../../database/postgres';
-import { mongoDb } from '../../database/mongo';
 import {
   ErrorConflicto,
   ErrorNoEncontrado,
@@ -9,7 +8,6 @@ import {
 } from '../../helpers/errores';
 import { manejarErrorRedis } from '../../helpers/manejar-error-redis';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
-import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
 import { validarYCobrarTarjeta } from '../../helpers/validaciones-tarjeta';
 import { validarCantidadCarrito } from '../../helpers/validaciones-carrito';
@@ -31,7 +29,6 @@ import {
   ResumenCarrito,
 } from '../../models/carrito';
 import { METODO_PAGO_TARJETA } from '../../models/metodo-pago';
-import { Producto } from '../../models/producto';
 import { ProductosService } from '../productos/productos.service';
 import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
 import { EventosService } from '../eventos/eventos.service';
@@ -66,18 +63,15 @@ interface FilaOferta {
   estado_oferta_nombre: string;
   vendedor_usuario: string;
   vendedor_nombre: string;
-}
-
-/** Solo lo que hace falta de un producto para pintar una linea del carrito. */
-interface ProductoLigero {
-  _id: number;
-  nombre: string;
-  variantes: {
-    id_producto_variante: number;
-    nombre_variante: string;
-    estado: string;
-    imagenes: string[];
-  }[];
+  /**
+   * Del catalogo copiado a PostgreSQL (`producto_catalogo` /
+   * `variante_catalogo`, LEFT JOIN): NULL si esa variante todavia no esta
+   * en la copia. `imagen` es solo la portada.
+   */
+  nombre_producto: string | null;
+  nombre_variante: string | null;
+  estado_variante: string | null;
+  imagen: string | null;
 }
 
 /**
@@ -119,25 +113,26 @@ interface LineaCarritoRedis {
  *     mesh:carrito:<id_usuario>   HASH   { <id_oferta>: <linea JSON>, ... }
  *
  * Cada campo guarda la cantidad JUNTO con una foto de nombre, precio,
- * imagen, vendedor y stock (`LineaCarritoRedis`), tomada de PostgreSQL/Mongo
+ * imagen, vendedor y stock (`LineaCarritoRedis`), tomada de PostgreSQL (la
+ * oferta y la copia del catalogo, `producto_catalogo`/`variante_catalogo`)
  * la ultima vez que se agrego o se cambio la cantidad de esa linea. Es a
  * proposito: el profesor pidio que el carrito "resista por si solo", es
- * decir que verlo (`GET /carrito`) nunca dependa de que Postgres o Mongo
- * esten arriba -- a cambio, lo que se ve ahi puede estar desactualizado
+ * decir que verlo (`GET /carrito`) nunca dependa de que Postgres
+ * este arriba -- a cambio, lo que se ve ahi puede estar desactualizado
  * hasta por las 24 h de vida del carrito (el nombre pudo cambiar, el precio
  * tambien). El checkout es la excepcion: paga con datos en vivo, nunca con
  * esta foto (ver `verCarritoEnVivo`).
  *
  *
- * Que toca PostgreSQL/Mongo y que no
+ * Que toca PostgreSQL y que no (Mongo ya no interviene)
  * ============================================================
- *   PUT /carrito/lineas/:idOferta            -> SI toca Postgres + Mongo,
+ *   PUT /carrito/lineas/:idOferta            -> SI toca Postgres,
  *       una vez, para tomar la foto de esa UNA linea (`construirSnapshot`).
  *       Es la unica escritura que consulta afuera.
  *   DELETE /carrito/lineas/:idOferta, DELETE /carrito -> Redis puro
  *       (HDEL/DEL + EXPIRE). Devuelven un resumen calculado solo con Redis.
  *   GET /carrito                             -> Redis puro (HGETALL). Nunca
- *       consulta Postgres ni Mongo -- lee las fotos ya guardadas.
+ *       consulta Postgres -- lee las fotos ya guardadas.
  *   POST /carrito/comprar                    -> consulta en vivo (igual que
  *       antes de este cambio) para el error itemizado por linea y el aviso
  *       de cambio de precio, ANTES de cobrar (`verCarritoEnVivo`). El cobro
@@ -179,8 +174,8 @@ export class CarritoService {
 
   /**
    * El carrito completo, tal como esta GUARDADO en Redis -- nunca toca
-   * Postgres ni Mongo (pedido del profesor: `GET /carrito` tiene que
-   * resistir aunque las otras bases esten caidas). Nombre, precio, imagen,
+   * Postgres (pedido del profesor: `GET /carrito` tiene que resistir aunque
+   * las otras bases esten caidas). Nombre, precio, imagen,
    * vendedor y stock son la foto que tomo el `PUT` que agrego o cambio cada
    * linea (`LineaCarritoRedis`), no el dato de ahora mismo. Renueva el TTL
    * (mirar el carrito cuenta como actividad).
@@ -269,7 +264,7 @@ export class CarritoService {
   }
 
   /**
-   * La misma forma que `verCarrito`, pero EN VIVO contra Postgres/Mongo --
+   * La misma forma que `verCarrito`, pero EN VIVO contra Postgres --
    * usada solo por el checkout (`ejecutarCompraCarrito`), nunca por
    * `GET /carrito`. Es deliberadamente la logica que `verCarrito` tenia
    * antes de guardar la foto en Redis: el checkout ya tiene que tocar
@@ -277,8 +272,9 @@ export class CarritoService {
    * linea y detectar si el precio cambio desde la ultima foto que vio el
    * cliente -- eso no se puede saber sin consultar el dato real.
    *
-   * Dos consultas en lote, sin importar cuantas lineas: una a `oferta` y
-   * una a `productos` de Mongo. Renueva el TTL, igual que `verCarrito`
+   * Una sola consulta en lote, sin importar cuantas lineas: `oferta` con
+   * la copia del catalogo (`variante_catalogo`/`producto_catalogo`) unida,
+   * sin Mongo. Renueva el TTL, igual que `verCarrito`
    * (intentar pagar tambien cuenta como actividad).
    */
   private async verCarritoEnVivo(idUsuario: string): Promise<Carrito> {
@@ -292,10 +288,6 @@ export class CarritoService {
     await this.renovarTtl(idUsuario);
 
     const ofertas = await this.consultarOfertas(idsOferta);
-    const idsProducto = [
-      ...new Set([...ofertas.values()].map((o) => Number(o.id_producto_mongo))),
-    ];
-    const productos = await this.consultarProductos(idsProducto);
 
     const lineas: CarritoLinea[] = await Promise.all(
       idsOferta.map(async (idOferta) => {
@@ -329,16 +321,12 @@ export class CarritoService {
 
         const idProducto = Number(oferta.id_producto_mongo);
         const idVariante = Number(oferta.id_producto_variante_mongo);
-        const producto = productos.get(idProducto);
-        const variante = producto?.variantes.find(
-          (v) => v.id_producto_variante === idVariante,
-        );
 
         const subtotal = (Number(oferta.precio_final) * cantidad).toFixed(2);
         let { disponible, motivo } = this.evaluarDisponibilidad(
           oferta,
           cantidad,
-          variante?.estado,
+          oferta.estado_variante ?? undefined,
         );
 
         // Para una linea de inventario limitado, el stock de PostgreSQL
@@ -364,10 +352,9 @@ export class CarritoService {
           cantidad,
           id_producto: idProducto,
           id_producto_variante: idVariante,
-          nombre_producto: producto?.nombre ?? '(producto no encontrado)',
-          nombre_variante:
-            variante?.nombre_variante ?? '(variante no encontrada)',
-          imagen: variante?.imagenes[0] ?? null,
+          nombre_producto: oferta.nombre_producto ?? '(producto no encontrado)',
+          nombre_variante: oferta.nombre_variante ?? '(variante no encontrada)',
+          imagen: oferta.imagen,
           precio: oferta.precio_final,
           porcentaje_descuento: oferta.porcentaje_descuento,
           subtotal,
@@ -403,7 +390,7 @@ export class CarritoService {
    * Fija la cantidad ABSOLUTA de una oferta en el carrito (no un +1/-1). Si
    * la clave del carrito no existe, `HSET` la crea. Renueva el TTL.
    *
-   * A diferencia de antes, esto SI consulta Postgres + Mongo -- una vez, y
+   * A diferencia de antes, esto SI consulta Postgres -- una vez, y
    * solo para ESTA linea (`construirSnapshot`) -- para tomar la foto
    * (nombre, precio, imagen, vendedor, stock, disponibilidad) que
    * `GET /carrito` va a servir despues sin volver a preguntar. Es la unica
@@ -689,7 +676,7 @@ export class CarritoService {
 
     // Las lineas en el formato que espera agregar_linea (dentro de
     // comprar_carrito). El nombre del producto/variante ya lo resolvio
-    // verCarrito desde Mongo; el del vendedor lo pone la propia funcion.
+    // verCarrito desde la copia del catalogo en PostgreSQL; el del vendedor lo pone la propia funcion.
     const lineas = carrito.lineas.map((linea) => ({
       id_oferta: linea.id_oferta,
       cantidad: linea.cantidad,
@@ -747,8 +734,11 @@ export class CarritoService {
       })),
     });
 
-    const idsProducto = compra.stock.map((linea) => linea.id_producto);
-    await this.productosService.recalcularCamposCalculados(idsProducto);
+    // Los campos calculados del catalogo en Mongo (precio, stock...) ya NO se
+    // recalculan aqui: los triggers de `oferta` dejaron los productos en
+    // `evento_producto` dentro de la transaccion de la compra, y
+    // `EventoProductoSyncService` los recalcula aparte. Mongo no interviene
+    // en la respuesta del checkout.
 
     return {
       comprado: true,
@@ -879,8 +869,8 @@ export class CarritoService {
   }
 
   /**
-   * Arma la foto de una linea (`LineaCarritoRedis`) consultando Postgres +
-   * Mongo UNA vez, para guardarla en el carrito de Redis. Es el unico lugar
+   * Arma la foto de una linea (`LineaCarritoRedis`) consultando Postgres
+   * UNA vez, para guardarla en el carrito de Redis. Es el unico lugar
    * donde `definirCantidad` toca algo fuera de Redis.
    *
    * Si la oferta no existe (id inventado en el `PUT`), igual arma una foto
@@ -915,25 +905,20 @@ export class CarritoService {
 
     const idProducto = Number(oferta.id_producto_mongo);
     const idVariante = Number(oferta.id_producto_variante_mongo);
-    const productos = await this.consultarProductos([idProducto]);
-    const producto = productos.get(idProducto);
-    const variante = producto?.variantes.find(
-      (v) => v.id_producto_variante === idVariante,
-    );
 
     const { disponible, motivo } = this.evaluarDisponibilidad(
       oferta,
       cantidad,
-      variante?.estado,
+      oferta.estado_variante ?? undefined,
     );
 
     return {
       cantidad,
       id_producto: idProducto,
       id_producto_variante: idVariante,
-      nombre_producto: producto?.nombre ?? '(producto no encontrado)',
-      nombre_variante: variante?.nombre_variante ?? '(variante no encontrada)',
-      imagen: variante?.imagenes[0] ?? null,
+      nombre_producto: oferta.nombre_producto ?? '(producto no encontrado)',
+      nombre_variante: oferta.nombre_variante ?? '(variante no encontrada)',
+      imagen: oferta.imagen,
       precio: oferta.precio_final,
       porcentaje_descuento: oferta.porcentaje_descuento,
       vendedor_usuario: oferta.vendedor_usuario,
@@ -1149,7 +1134,7 @@ export class CarritoService {
       return { disponible: false, motivo: 'oferta_no_disponible' };
     }
     // La variante puede haberse desactivado en el catalogo despues de
-    // agregarla. Si el producto no aparece en Mongo, `estadoVariante` es
+    // agregarla. Si la variante no esta en `variante_catalogo`, `estadoVariante` es
     // undefined y se deja pasar (el nombre ya sale como "(no encontrada)").
     if (estadoVariante != null && estadoVariante !== 'activa') {
       return { disponible: false, motivo: 'variante_no_disponible' };
@@ -1173,10 +1158,19 @@ export class CarritoService {
                 ${expresionPrecioFinal('o')}::text AS precio_final,
                 o.stock, eo.estado_oferta_nombre,
                 u.usuario AS vendedor_usuario,
-                u.nombre || COALESCE(' ' || u.apellido, '') AS vendedor_nombre
+                u.nombre || COALESCE(' ' || u.apellido, '') AS vendedor_nombre,
+                pc.nombre AS nombre_producto,
+                vc.nombre_variante,
+                vc.estado AS estado_variante,
+                vc.imagen
            FROM oferta o
            JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
            JOIN usuarios u ON u.id_usuario = o.id_usuario
+           LEFT JOIN variante_catalogo vc
+                  ON vc.id_producto_mongo = o.id_producto_mongo
+                 AND vc.id_producto_variante_mongo = o.id_producto_variante_mongo
+           LEFT JOIN producto_catalogo pc
+                  ON pc.id_producto_mongo = o.id_producto_mongo
           WHERE o.id_oferta = ANY($1::bigint[])`,
         [idsOferta],
       );
@@ -1185,32 +1179,6 @@ export class CarritoService {
       );
     } catch (error) {
       manejarErrorConexion(this.logger, error);
-    }
-  }
-
-  private async consultarProductos(
-    idsProducto: number[],
-  ): Promise<Map<number, ProductoLigero>> {
-    try {
-      const docs = await mongoDb
-        .collection<Producto>('productos')
-        .find<ProductoLigero>(
-          { _id: { $in: idsProducto } },
-          {
-            projection: {
-              _id: 1,
-              nombre: 1,
-              'variantes.id_producto_variante': 1,
-              'variantes.nombre_variante': 1,
-              'variantes.estado': 1,
-              'variantes.imagenes': 1,
-            },
-          },
-        )
-        .toArray();
-      return new Map(docs.map((doc) => [doc._id, doc]));
-    } catch (error) {
-      manejarErrorConexionMongo(this.logger, error);
     }
   }
 

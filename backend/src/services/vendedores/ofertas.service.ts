@@ -346,8 +346,6 @@ export class OfertasVendedorService {
       }
     }
 
-    await this.productosService.recalcularCamposCalculados([idProducto]);
-
     return {
       id_oferta: filaOferta.id_oferta,
       id_producto: idProducto,
@@ -541,9 +539,6 @@ export class OfertasVendedorService {
     }
 
     const filaFinal = await this.obtenerFilaPropia(idOferta, idUsuario);
-    await this.productosService.recalcularCamposCalculados([
-      Number(filaFinal.id_producto_mongo),
-    ]);
     return this.armarOfertaPropia(filaFinal);
   }
 
@@ -608,7 +603,6 @@ export class OfertasVendedorService {
     const porcentaje = validarPorcentajeDescuento(datos.porcentaje_descuento);
     const duracion = validarDuracionVencimiento(datos.duracion_segundos);
 
-    let idProductoMongo: number;
     const cliente = await pool.connect();
     try {
       await cliente.query('BEGIN');
@@ -636,7 +630,6 @@ export class OfertasVendedorService {
         idOferta,
         mecanismo,
       );
-      idProductoMongo = Number(fila.id_producto_mongo);
 
       await cliente.query(
         `UPDATE oferta
@@ -661,7 +654,6 @@ export class OfertasVendedorService {
       cliente.release();
     }
 
-    await this.productosService.recalcularCamposCalculados([idProductoMongo]);
     await this.registroOfertasRedis.sincronizar(idOferta);
     return this.armarOfertaPropia(
       await this.obtenerFilaPropia(idOferta, idUsuario),
@@ -697,7 +689,6 @@ export class OfertasVendedorService {
     }
     const idOferta = Number(idOfertaParametro);
 
-    let idProductoMongo: number;
     const cliente = await pool.connect();
     try {
       await cliente.query('BEGIN');
@@ -727,7 +718,6 @@ export class OfertasVendedorService {
           `La oferta ${idOferta} esta en una venta relampago: cierra la venta relampago antes de quitar el descuento`,
         );
       }
-      idProductoMongo = Number(fila.id_producto_mongo);
 
       await cliente.query(
         `UPDATE oferta
@@ -750,7 +740,6 @@ export class OfertasVendedorService {
       cliente.release();
     }
 
-    await this.productosService.recalcularCamposCalculados([idProductoMongo]);
     await this.registroOfertasRedis.sincronizar(idOferta);
     return this.armarOfertaPropia(
       await this.obtenerFilaPropia(idOferta, idUsuario),
@@ -802,8 +791,6 @@ export class OfertasVendedorService {
     const razon =
       decision === 'rechazar' ? validarRazonRechazo(datos.razon) : null;
 
-    let idProductoMongo: number;
-
     const cliente = await pool.connect();
     try {
       await cliente.query('BEGIN');
@@ -834,7 +821,6 @@ export class OfertasVendedorService {
           `Esta oferta no esta pendiente de revision (esta ${estadoActual})`,
         );
       }
-      idProductoMongo = Number(fila.id_producto_mongo);
 
       if (decision === 'aprobar') {
         // `id_usuario_aprobo` es quien REVISA, no la cuenta efectiva: se
@@ -876,8 +862,6 @@ export class OfertasVendedorService {
     } finally {
       cliente.release();
     }
-
-    await this.productosService.recalcularCamposCalculados([idProductoMongo]);
 
     return this.armarOfertaPropia(await this.obtenerFilaPorId(idOferta));
   }

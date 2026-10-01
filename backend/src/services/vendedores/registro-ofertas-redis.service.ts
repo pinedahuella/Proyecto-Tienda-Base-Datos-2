@@ -80,8 +80,8 @@ interface ProductoLigero {
  *   - Los 4 escritos que pueden cambiar `porcentaje_descuento` o
  *     `es_inventario_limitado`: `OfertasVendedorService.aplicarDescuento`/
  *     `quitarDescuento`, `VentasLimitadasService.abrir`/`cerrar` -- ahi
- *     mismo, justo despues de comitear la transaccion, mismo momento en que
- *     ya se llama a `ProductosService.recalcularCamposCalculados`.
+ *     mismo, justo despues de comitear la transaccion (los campos calculados
+ *     de Mongo los recalcula aparte `EventoProductoSyncService`).
  *   - `RegistroOfertasSyncService` (worker), para reparar una oferta cuyo
  *     escrito reactivo se perdio.
  */
