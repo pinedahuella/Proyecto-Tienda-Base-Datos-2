@@ -2755,55 +2755,56 @@ if ($proximoId -notmatch '^\d+$') {
 
 
 # ------------------------------------------------------------
-# 7e. La copia del catalogo dentro de cada oferta
+# 7e. La copia del catalogo en PostgreSQL
 # ------------------------------------------------------------
-# Migracion 029. Cada oferta guarda el nombre del producto y de la variante, la
-# imagen y si se puede comprar, para que el checkout no dependa de MongoDB.
+# Migracion 029, el diseno de Jose David. producto_catalogo y variante_catalogo
+# guardan el nombre del producto, el de la variante, su estado y su portada,
+# para que el carrito y el checkout no dependan de MongoDB. El backend las
+# escribe al crear y editar un producto; aqui se ponen al dia enteras, para
+# lo que entra por fuera del backend (migrations/datos/, los lotes, el ETL).
+#
 # PostgreSQL no puede leer MongoDB, asi que la copia se lleva desde aqui:
-# etl/extraer_catalogo_oferta.js arma una llamada a copiar_catalogo_a_oferta()
-# dentro de mesh-mongo, se copia a mesh-postgres y se corre alli.
+# etl/extraer_catalogo_postgres.js arma el SQL dentro de mesh-mongo, se copia a
+# mesh-postgres y se corre alli. Solo escribe lo que cambio, asi que en un
+# arranque normal dice 0 y 0.
 #
 # Va despues del catalogo (7) y de los lotes (5c y 6b), que son los que crean
-# ofertas sin copia. En un arranque normal no cambia ninguna fila, porque la
-# funcion solo escribe lo que difiere.
+# productos y ofertas.
 #
-# NO corta el arranque. Mientras el backend no lea estas columnas nada depende
-# de ellas, y cuando las lea, una oferta sin copia (catalogo_copiado_en NULL)
-# vuelve a pedirle el dato a MongoDB. Pero avisa en rojo, porque sin la copia
-# el checkout sigue cayendo con MongoDB.
-#
-# Las ofertas que quedan sin copia despues de esto son ofertas sobre una
-# variante que ya no existe en MongoDB. Se cuentan aparte porque no es un fallo
-# de la copia, es un dato huerfano que ya estaba ahi.
-Paso "Copiando el catalogo a las ofertas"
+# NO corta el arranque, pero avisa en rojo: sin la copia, el carrito y el
+# checkout no encuentran el nombre ni el estado de la variante. Las ofertas
+# cuya variante no esta en variante_catalogo se cuentan aparte: son ofertas
+# sobre algo que ya no existe en MongoDB, un dato huerfano que ya estaba ahi.
+Paso "Copiando el catalogo a PostgreSQL"
 
-$tmpCatalogo = Join-Path $env:TEMP "mesh-catalogo-oferta"
+$tmpCatalogo = Join-Path $env:TEMP "mesh-catalogo-postgres"
 New-Item -ItemType Directory -Force -Path $tmpCatalogo | Out-Null
-$sqlCatalogo = Join-Path $tmpCatalogo "mesh-catalogo-oferta.sql"
+$sqlCatalogo = Join-Path $tmpCatalogo "mesh-catalogo-postgres.sql"
 
 $copiaOk = $false
-docker cp "$PSScriptRoot\etl\extraer_catalogo_oferta.js" "mesh-mongo:/tmp/extraer_catalogo_oferta.js" 2>&1 | Out-Null
+docker cp "$PSScriptRoot\etl\extraer_catalogo_postgres.js" "mesh-mongo:/tmp/extraer_catalogo_postgres.js" 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) {
-    Error1 "No se pudo copiar extraer_catalogo_oferta.js a Mongo"
+    Error1 "No se pudo copiar extraer_catalogo_postgres.js a Mongo"
 } else {
-    $salidaCatalogo = docker exec mesh-mongo sh -c (Comando-Mongo "--file /tmp/extraer_catalogo_oferta.js") 2>&1 | Out-String
+    $salidaCatalogo = docker exec mesh-mongo sh -c (Comando-Mongo "--file /tmp/extraer_catalogo_postgres.js") 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-        Error1 "No se pudo leer el catalogo de MongoDB para las ofertas:"
+        Error1 "No se pudo leer el catalogo de MongoDB:"
         Write-Host $salidaCatalogo -ForegroundColor Red
     } else {
         $partes = $salidaCatalogo.Trim() -split '\s+'
-        docker cp "mesh-mongo:/tmp/mesh-catalogo-oferta.sql" "$sqlCatalogo" 2>&1 | Out-Null
-        if ($LASTEXITCODE -ne 0) { Error1 "No se pudo traer mesh-catalogo-oferta.sql de Mongo" }
+        docker cp "mesh-mongo:/tmp/mesh-catalogo-postgres.sql" "$sqlCatalogo" 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Error1 "No se pudo traer mesh-catalogo-postgres.sql de Mongo" }
         else {
-            docker cp "$sqlCatalogo" "mesh-postgres:/tmp/mesh-catalogo-oferta.sql" 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar mesh-catalogo-oferta.sql a PostgreSQL" }
+            docker cp "$sqlCatalogo" "mesh-postgres:/tmp/mesh-catalogo-postgres.sql" 2>&1 | Out-Null
+            if ($LASTEXITCODE -ne 0) { Error1 "No se pudo copiar mesh-catalogo-postgres.sql a PostgreSQL" }
             else {
-                $cambiadas = (docker exec mesh-postgres sh -c "psql -U $($env_['DB_USER']) -d $($env_['DB_NAME']) -qtAX -v ON_ERROR_STOP=1 -f /tmp/mesh-catalogo-oferta.sql" 2>&1 | Out-String).Trim()
-                if ($LASTEXITCODE -ne 0 -or $cambiadas -notmatch '^\d+$') {
-                    Error1 "copiar_catalogo_a_oferta() fallo:"
-                    Write-Host $cambiadas -ForegroundColor Red
+                # Dos numeros, uno por linea: productos y variantes escritos.
+                $escritos = (docker exec mesh-postgres sh -c "psql -U $($env_['DB_USER']) -d $($env_['DB_NAME']) -qtAX -v ON_ERROR_STOP=1 -f /tmp/mesh-catalogo-postgres.sql" 2>&1 | Out-String).Trim() -split '\s+'
+                if ($LASTEXITCODE -ne 0 -or $escritos.Count -ne 2 -or $escritos[0] -notmatch '^\d+$' -or $escritos[1] -notmatch '^\d+$') {
+                    Error1 "La copia del catalogo a PostgreSQL fallo:"
+                    Write-Host ($escritos -join ' ') -ForegroundColor Red
                 } else {
-                    Ok "$($partes[1]) variantes de $($partes[0]) productos leidas de MongoDB, $cambiadas oferta(s) puestas al dia"
+                    Ok "$($partes[0]) productos y $($partes[1]) variantes leidos de MongoDB; escritos $($escritos[0]) y $($escritos[1])"
                     $copiaOk = $true
                 }
             }
@@ -2813,17 +2814,17 @@ if ($LASTEXITCODE -ne 0) {
 Remove-Item -Recurse -Force $tmpCatalogo -ErrorAction SilentlyContinue
 
 if ($copiaOk) {
-    $sinCopia = ("SELECT count(*) FROM oferta WHERE catalogo_copiado_en IS NULL;" |
+    $sinCopia = ("SELECT count(*) FROM oferta o WHERE NOT EXISTS (SELECT 1 FROM variante_catalogo v WHERE v.id_producto_mongo = o.id_producto_mongo AND v.id_producto_variante_mongo = o.id_producto_variante_mongo);" |
         docker exec -i mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX 2>&1 | Out-String).Trim()
     if ($sinCopia -notmatch '^\d+$') {
-        Aviso "No se pudo contar las ofertas sin copia del catalogo"
+        Aviso "No se pudo contar las ofertas sin su variante en variante_catalogo"
     } elseif ([int]$sinCopia -gt 0) {
-        Aviso "$sinCopia oferta(s) apuntan a una variante que no existe en MongoDB y quedaron sin copia"
+        Aviso "$sinCopia oferta(s) apuntan a una variante que no existe en MongoDB"
     } else {
-        Ok "todas las ofertas tienen su copia del catalogo"
+        Ok "todas las ofertas tienen su variante en variante_catalogo"
     }
 } else {
-    Error1 "Las ofertas no tienen la copia del catalogo. El checkout seguira dependiendo de MongoDB."
+    Error1 "El catalogo no quedo copiado en PostgreSQL. El carrito y el checkout no encontraran el nombre de la variante."
     Error1 "   Se reintenta arrancando de nuevo; el motivo esta justo arriba."
 }
 

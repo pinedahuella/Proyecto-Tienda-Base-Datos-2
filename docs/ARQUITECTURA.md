@@ -37,7 +37,7 @@ flowchart TB
     FE -- "HTTP + cookie de sesion" --> BE
 
     subgraph persistencia[PERSISTENCIA]
-        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>74 tablas, con reglas de descuento,<br/>senales de fraude y vectores")]
+        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>76 tablas, con reglas de descuento,<br/>senales de fraude, copia del catalogo y vectores")]
         MG[("MongoDB :27018<br/><b>CATALOGO, HISTORIAL Y LOG DE LOGIN</b><br/>productos, productos_eventos, categorias,<br/>eventos_autenticacion")]
         RD[("Redis :6379<br/><b>TRANSITORIO Y ATOMICO</b><br/>carrito, reservas, candado,<br/>contadores de fraude del login,<br/>vencimiento de descuentos, rankings<br/>y recomendaciones ya calculadas")]
         N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>163 nodos y 281 relaciones,<br/>4 tipos de arista,<br/>anillos y familia B de patrones")]
@@ -53,6 +53,8 @@ flowchart TB
     BE -- "vista de producto (escribe),<br/>tendencias y fraude por IP (lee)" --> CH
 
     PG -. "etl/cargar.js<br/>POR LOTES" .-> MG
+    PG -. "worker<br/>COLA evento_producto" .-> MG
+    MG -. "backend al editar y paso 7e<br/>COPIA producto_catalogo y variante_catalogo" .-> PG
     PG -. "etl/cargar_grafo.sh + worker<br/>COLA evento_grafo" .-> N4
     MG -. "etl/cargar_busqueda.sh + worker<br/>BANDERA pendiente_busqueda" .-> ES
     MG -. "worker cada 5 s<br/>BANDERA pendiente_elastic" .-> ES
@@ -278,6 +280,7 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **2026-09-24 y 25** | Reglas de descuento automaticas y por fecha en **PostgreSQL** (migraciones 021 y 022). El disparador de las automaticas cuenta ventas en **ClickHouse** cada 60 segundos y el vencimiento de cada descuento vive como clave con TTL en **Redis**. La familia B de patrones de resenas corre sobre **Neo4j** y guarda en `anillo_fraude` (migracion 023). Tendencias T1 a T3 y recomendaciones R1 a R3 salen de **ClickHouse**, y R2, R3 y lo mas visto quedan calculados en **Redis**. El `.drawio` y el Mermaid se pusieron al dia. La evaluacion de NewSQL para pagos esta en `DECISION-NEWSQL-PAGOS.md` (ADR-8) |
 | **Entrega final (2026-09-25)** | Entra **pgvector** sobre el mismo PostgreSQL: `producto_vector` con indice HNSW y `productos_similares()` (migracion 024, reescrita en la 027 para que de verdad use el indice). Los vectores los calcula **Ollama** con `paraphrase-multilingual` desde el texto de **MongoDB** (`etl/cargar_vectores.ps1`, flujo 11). Ollama es el de la PC si lo tiene o el contenedor `mesh-ollama`, que solo se levanta si hace falta. **Redis** pasa de una contrasena sola a tres usuarios de ACL |
 | **2026-09-30** | El refactor de fraude que pidio el profesor (7453ffe de Jose David, migraciones 031 a 033). Los tres detectores, Neo4j, ClickHouse y el login, guardan en una sola tabla, `senal_fraude`, una fila por tipo y clave con sus cuentas, resenas, productos, pedidos e IP. Los casos y los avisos al usuario cuelgan de la senal. `anillo_fraude`, `hallazgo_evento_fraude` y `alerta_fraude` quedan sin escrituras. Solo el Mermaid y el `.drawio` cambian de nombre de tabla; no hay flecha nueva |
+| **2026-10-01** | Comprar sin MongoDB, del diseno de Jose David (6f89237, migraciones 029 y 030). El nombre, el estado y la portada de cada variante se copian a **PostgreSQL** (`producto_catalogo` y `variante_catalogo`), y el recalculo del catalogo en **MongoDB** va por la cola `evento_producto` con un worker. El checkout ya solo necesita PostgreSQL y Redis; medido con MongoDB parado en `pruebas/falla_checkout.sh` |
 
 El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el
 compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. Cuando toco no

@@ -3,7 +3,30 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-09-30**.
+Ultima actualizacion: **2026-10-01**.
+
+**EMPIEZA AQUI (01-10, madrugada). Comprar sin MongoDB queda con el diseno de David, probado y pusheado.** David subio
+6f89237 sin conocer nuestra 029 y 030, que nunca se habian subido, con otro diseno. Por decision de Meme se quedo el suyo:
+
+```
+migraciones     029_catalogo_en_postgres (producto_catalogo y variante_catalogo) y 030_evento_producto (outbox, una
+                fila pendiente por producto, triggers en oferta y resena). Las nuestras (columnas en oferta y
+                evento_catalogo) se borraron del repo, junto con pruebas/evento_catalogo.sql y docs/PLAN-COMPRAR-SIN-MONGO.md
+arrancar 7e     etl/extraer_catalogo_postgres.js, dentro de los contenedores, solo escribe lo que cambio
+base local      limpieza UNA vez de lo viejo (columnas de oferta, evento_catalogo, sus triggers y funciones) y
+                oferta_tocar_fecha() devuelta a la de la 005, que la 029 vieja habia reescrito y nada restauraba.
+                Respaldo previo en respaldos/antes_029david_20261001_0543.dump
+pruebas         falla_checkout.sh escenario B ahora EXIGE comprar con Mongo parado (regla debe-comprar).
+                descuentos.sh espera a que evento_producto procese el producto antes de mirar Mongo
+docs            CONSISTENCIA-CHECKOUT filas 8 y 11 (resuelta), base-de-datos, ARQUITECTURA (Mermaid, linea de tiempo,
+                diagrama), ER, migrations/README, BACKEND-PENDIENTE, PENDIENTES 12
+```
+
+Medido, prendiendo solo lo necesario: dos pasadas del esquema limpias; paso 7e con 3105 productos y 6232 variantes en
+3 s, la segunda vuelta escribe 0 y 0, 0 ofertas sin su variante de 16915. `falla_checkout.sh` 32 OK, 0 FALLA: con
+Mongo parado COMPRA y las cuatro tablas se mueven juntas; el worker vacio evento_producto (3 recalculados, 0 errores).
+`descuentos.sh` 98 OK. ER 76 tablas y 97 llaves. Todo apagado al final. Lo que queda de David: la llave foranea de
+oferta a variante_catalogo (su etapa 2) y `PedidosCompradorService.agregarLinea`.
 
 **EMPIEZA AQUI (30-09, noche). Escrito, PROBADO en vivo y commiteado.** Se jalo 7453ffe de David, el refactor de
 fraude a un solo modelo de senales (`senal_fraude`), con merge 880073f junto a la 029 y la 030, que siguen sin push.

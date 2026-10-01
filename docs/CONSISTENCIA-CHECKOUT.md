@@ -2,8 +2,8 @@
 
 **Mesh -- Bases de Datos 2, Universidad del Istmo. Entrega 3.**
 
-Fecha: 2026-09-04. Ultima actualizacion: 2026-09-11, con la fila 11 (MongoDB
-caido durante el checkout). Todo lo que dice este documento sale de codigo que
+Fecha: 2026-09-04. Ultima actualizacion: 2026-10-01, la fila 11 (MongoDB
+caido durante el checkout) queda resuelta. Todo lo que dice este documento sale de codigo que
 corre hoy y de mediciones contra la base viva. Donde algo no esta resuelto, se
 dice que no lo esta.
 
@@ -133,10 +133,10 @@ pide el enunciado.
 | 5 | La compra sale bien y falla Redis al confirmar | se sigue, la venta esta cerrada | ventana aceptada |
 | 6 | El proceso muere entre el COMMIT y el vaciado del carrito | el carrito vence solo por TTL | ventana aceptada |
 | 7 | Dos compras a la vez sobre la misma oferta | `FOR UPDATE` con orden fijo | serializacion |
-| 8 | Los numeros del catalogo de Mongo quedan viejos | se recalculan al final, y el ETL los rehace | ventana aceptada |
+| 8 | Los numeros del catalogo de Mongo quedan viejos | cola `evento_producto` (migracion 030): el trigger anota el producto en la misma transaccion y un worker los recalcula | **reintento idempotente** |
 | 9 | El grafo de Neo4j queda viejo | cola `evento_grafo` + worker cada 10 s | **reintento idempotente** |
 | 10 | El indice de busqueda queda viejo | se reconstruye entero con el ETL | ventana aceptada |
-| 11 | MongoDB cae durante el checkout | 503 antes de escribir nada; falla en unos 5 s | todo o nada, sin escritura parcial. **Como manejarlo sigue por decidir** |
+| 11 | MongoDB cae durante el checkout | la compra sale igual: el nombre, el estado y la portada de la variante estan copiados en `producto_catalogo` y `variante_catalogo` (migracion 029), y el recalculo va por la cola de la fila 8 | **resuelto** (6f89237 de Jose David). La copia la escribe el backend al editar un producto y el paso 7e de arrancar la pone al dia; queda la ventana de un proceso que muere entre escribir Mongo y el COMMIT de la copia |
 
 ### 1. El doble cobro, que ya paso
 
@@ -300,6 +300,15 @@ ensena a la persona sale en vivo, y la copia existe para **filtrar y ordenar** e
 catalogo, que es una operacion masiva que no se puede hacer en vivo.
 
 ### 11. MongoDB cae durante el checkout
+
+**Resuelta el 2026-09-30 (6f89237 de Jose David, migraciones 029 y 030).** El
+carrito y las dos rutas de compra leen el nombre, el estado y la portada de la
+variante de `producto_catalogo` y `variante_catalogo`, una copia en PostgreSQL
+que Mongo sigue mandando. El recalculo del catalogo despues de cobrar ya no se
+espera: el trigger de `oferta` anota el producto en `evento_producto` dentro de
+la misma transaccion y un worker lo hace despues. El escenario B de
+`pruebas/falla_checkout.sh` exige ahora que la compra salga con Mongo parado.
+Lo de abajo es como estaba y como se midio antes.
 
 **Agregada el 2026-09-11.** Salio como hallazgo de la prueba de falla de la
 seccion 4 bis, y Jose David la midio por su lado el 2026-09-07. Su documento es

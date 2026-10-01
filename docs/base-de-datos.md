@@ -847,6 +847,39 @@ llevan estado.
 
 ---
 
+## Una copia del catalogo para comprar sin MongoDB (migraciones 029 y 030)
+
+El carrito y el checkout leian de MongoDB el nombre del producto, el de la
+variante y su estado. Con MongoDB caido la compra daba 503, aunque esa base no
+participa del `COMMIT`. Desde el diseno de Jose David (6f89237) se copia a
+PostgreSQL solo eso:
+
+```
+producto_catalogo   id_producto_mongo (PK), nombre
+variante_catalogo   (id_producto_mongo, id_producto_variante_mongo) PK,
+                    nombre_variante, estado (activa o inactiva), imagen (la portada)
+```
+
+**Dos tablas y no columnas en `oferta`.** El nombre es de la variante, no de la
+oferta, y una variante puede tener varias ofertas de vendedores distintos. En
+`oferta` se repetiria en cada una y un renombre tocaria todas. La variante se
+identifica por el PAR de ids, porque en MongoDB las variantes van embebidas y
+dos productos pueden repetir el id de variante.
+
+**MongoDB sigue mandando.** La copia la escribe el backend al crear y editar un
+producto, y el paso 7e de `arrancar.ps1` la pone al dia entera desde MongoDB
+para lo que entra por fuera del backend (la semilla, los lotes). La llave
+foranea de `oferta` a `variante_catalogo` todavia no existe: pide que la
+semilla y el ETL inserten el catalogo antes que las ofertas.
+
+**Lo que se recalcula en MongoDB va por una cola.** La tarjeta del catalogo
+(precio, stock, ofertas, descuento, nota) se calculaba con `await` despues de
+cobrar, y con MongoDB caido la respuesta tardaba segundos. Ahora un trigger de
+`oferta` y otro de `resena` anotan el producto en `evento_producto` dentro de la
+misma transaccion, y un worker lo recalcula despues. Hay una sola fila
+pendiente por producto: cincuenta cambios seguidos se resuelven con un solo
+recalculo.
+
 ## La resena es del VENDEDOR sobre un PRODUCTO, no de la oferta
 
 **Esto cambio, y hay que leerlo con cuidado porque va al informe: aqui se

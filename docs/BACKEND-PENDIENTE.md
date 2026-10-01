@@ -59,21 +59,28 @@ de este refactor:
 - el PATCH de las tres rutas del admin no guarda quien reviso
   (`id_usuario_reviso` queda en NULL, la columna ya existe).
 
-## LO NUEVO DEL 2026-09-29: comprar sin MongoDB, LO PRIMERO
+## LO NUEVO DEL 2026-10-01: comprar sin MongoDB (6f89237), hecho migracion
 
-Se eligio la decision 5, la del profesor. La base ya esta hecha y probada: la
-migracion 029 copia en `oferta` el nombre del producto, el de la variante, la
-imagen y si se puede comprar, y el paso 7e de arrancar la llena (16908 ofertas,
-0 sin copia). Lo tuyo son los pasos 3.1 a 3.9 de `docs/PLAN-COMPRAR-SIN-MONGO.md`,
-en ese orden: primero escribir la copia al crear una oferta y al editar un
-producto, despues leerla en el carrito y en el pedido en vez de ir a MongoDB.
-Decidido con el equipo el 29: editar un producto es SINCRONO (PostgreSQL y
-MongoDB en la misma peticion, las dos o ninguna, paso 3.2), y el precio y la
-cantidad van a MongoDB por el outbox `evento_catalogo` de la migracion 030, que
-ya existe con sus triggers y su prueba. Te toca el worker que la vacia (3.8,
-copiado de GrafoSyncService) y quitar los `await` de despues de comprar (3.9).
-Cada funcion con su linea esta en el plan. Cuando lo subas, yo ajusto
-`pruebas/falla_checkout.sh` y cierro la fila 12.
+Tu diseno se queda. De este lado habia una 029 con columnas en `oferta` y una
+030 con otro outbox, que nunca se subieron; se quitaron y quedan las tuyas:
+
+```
+029_catalogo_en_postgres.sql   tu catalogo-en-postgres.sql (producto_catalogo y variante_catalogo)
+030_evento_producto.sql        tu evento-producto.sql, con su verificacion final
+```
+
+El paso 7e de `arrancar.ps1` hace lo de tu `catalogo-en-postgres-sembrar.cjs`
+con `etl/extraer_catalogo_postgres.js`, dentro de los contenedores (sin node ni
+el `.env` del backend en la maquina), y solo escribe lo que cambio. Despues
+cuenta las ofertas cuya variante no esta en `variante_catalogo`.
+
+`pruebas/falla_checkout.sh`, escenario B, ahora EXIGE que la compra salga con
+MongoDB parado, y la fila 11 de `docs/CONSISTENCIA-CHECKOUT.md` queda resuelta.
+
+Queda de tu lado: la etapa 2 (la llave foranea de `oferta` a
+`variante_catalogo`), cuando `migrations/datos/` y el ETL inserten el catalogo
+antes que las ofertas, y `PedidosCompradorService.agregarLinea`, que segun tu
+plan sigue leyendo MongoDB.
 
 ## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-28 en la noche)
 

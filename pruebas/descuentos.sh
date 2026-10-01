@@ -196,9 +196,26 @@ esperado_desde_raiz()     { sql "SELECT COALESCE(MIN($FORMULA)::text, 'null') FR
 esperado_tienda_variante() { sql "SELECT COALESCE(MAX($FORMULA)::text, 'null') FROM oferta o JOIN usuarios u ON u.id_usuario=o.id_usuario
                                   WHERE o.id_producto_mongo=$PRODUCTO AND o.id_producto_variante_mongo=$VARIANTE AND u.correo_electronico='tienda@mesh.com';"; }
 
+# Desde 6f89237 (migracion 030) los numeros del producto en Mongo ya no se
+# recalculan dentro de la peticion: el trigger de oferta anota el producto en
+# evento_producto y un worker lo recalcula unos segundos despues. Mirar Mongo
+# antes de que el worker pase mide el instante y no el resultado, asi que se
+# espera a que no quede ninguna fila pendiente de ese producto, con tope.
+esperar_recalculo() {
+    local n
+    for _ in $(seq 1 60); do
+        n=$(sql "SELECT count(*) FROM evento_producto WHERE id_producto_mongo=$PRODUCTO AND procesado_en IS NULL;")
+        [ "$n" = "0" ] && return 0
+        sleep 0.5
+    done
+    FALLA "el producto $PRODUCTO sigue pendiente en evento_producto despues de 30 s: el worker no lo recalculo"
+    return 1
+}
+
 # Revisa Mongo contra PostgreSQL. $1 = el hay_descuento que se espera.
 revisar_mongo() {
     local foto hd_r hd_v pd_v pd_r pt_v
+    esperar_recalculo
     foto=$(mongo_producto)
     if [ -z "$foto" ] || [ "$foto" = "sin-producto" ]; then
         FALLA "no se pudo leer el producto $PRODUCTO en MongoDB ($foto)"

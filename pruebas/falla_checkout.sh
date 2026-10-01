@@ -142,7 +142,7 @@
 #
 #   linea base    HTTP 201  comprado true   pedido 108, stock 12 -> 11
 #   Redis parado  HTTP 503  "No se pudo conectar con Redis"
-#   Mongo parado  HTTP 503  "No se pudo conectar con MongoDB"
+#   Mongo parado  HTTP 503  "No se pudo conectar con MongoDB"   (hasta 6f89237)
 #   PG parado     HTTP 503  "No se pudo conectar con PostgreSQL"
 #   recuperacion  HTTP 201  comprado true   pedido 109, stock 11 -> 10
 #
@@ -167,6 +167,12 @@
 # Que Redis pare la venta era de esperar, porque el carrito vive ahi. Que
 # PostgreSQL la pare tambien, porque es la base que manda. Que MongoDB la pare
 # es lo unico que no se sigue del diseno escrito.
+#
+# CERRADO CON 6f89237 (Jose David, 2026-09-30). El nombre, el estado y la
+# portada de la variante se copian a PostgreSQL (migracion 029,
+# producto_catalogo y variante_catalogo) y el recalculo del catalogo en Mongo
+# va por el outbox evento_producto (migracion 030). Desde ahi el escenario B
+# EXIGE que la compra salga con MongoDB parado, y es FALLA si no sale.
 
 set -u
 
@@ -582,8 +588,10 @@ fi
 #   $1  el contenedor que se para
 #   $2  como se llama en pantalla
 #   $3  la funcion que dice si ya revivio
-#   $4  la regla, y solo tiene dos valores
+#   $4  la regla, y tiene tres valores
 #         no-debe-comprar        comprar sin el seria un fallo grave
+#         debe-comprar           esa base no hace falta para cobrar; no
+#                                comprar sin ella es FALLA
 #         el-documento-no-dice   pase lo que pase se declara como hallazgo
 #   $5  por que esa regla, para el que lea la salida sin leer este archivo
 escenario() {
@@ -655,12 +663,16 @@ escenario() {
         [ -n "$_id" ] && PEDIDOS_CREADOS="$PEDIDOS_CREADOS $_id"
         if [ "$_regla" = "no-debe-comprar" ]; then
             FALLA "compro con $_cont parado, y sin el no deberia haber podido"
+        elif [ "$_regla" = "debe-comprar" ]; then
+            OK "compro con $_cont parado, que es lo que se pide: esa base no hace falta para cobrar"
         else
             HALLAZGO "el checkout compra con $_cont parado. Esa base no hace falta para cobrar"
         fi
     else
         if [ "$_regla" = "no-debe-comprar" ]; then
             OK "no compro con $_cont parado, que es lo unico correcto"
+        elif [ "$_regla" = "debe-comprar" ]; then
+            FALLA "no compro con $_cont parado, y esa base ya no deberia hacer falta para cobrar"
         else
             HALLAZGO "$_cont parado impide comprar, y esa base no participa del COMMIT"
         fi
@@ -740,18 +752,18 @@ escenario "$REDIS" \
 # 3. ESCENARIO B. MONGODB PARADO
 # ============================================================
 #
-# Este es el escenario que contesta un hueco declarado del documento.
+# Antes de 6f89237 MongoDB entraba en el checkout dos veces, sin estar en el
+# COMMIT: ponia el nombre del producto y de la variante, y al final se le
+# recalculaban los agregados del catalogo. Con Mongo parado la compra daba 503.
 #
-# Segun docs/CONSISTENCIA-CHECKOUT.md, MongoDB entra en el checkout dos veces y
-# NINGUNA de las dos esta dentro del COMMIT: aporta el nombre del producto y de
-# la variante al armar el carrito, y al final se le recalculan los agregados
-# del catalogo. El documento no dice que pasa si esta caido, asi que aqui no se
-# exige ninguna conducta. Se mide y se declara.
+# Ahora los nombres salen de producto_catalogo y variante_catalogo (029) y el
+# recalculo va por el outbox evento_producto (030), asi que la compra TIENE que
+# salir. Es la fila 11 de docs/CONSISTENCIA-CHECKOUT.md, cerrada.
 escenario "$MONGO" \
     "3. ESCENARIO B. MONGODB PARADO A LA HORA DE PAGAR" \
     vivo_mongo \
-    "el-documento-no-dice" \
-    "MongoDB no participa del COMMIT. Solo pone nombres y recalcula agregados."
+    "debe-comprar" \
+    "MongoDB no participa del COMMIT, y los nombres y el estado ya estan copiados en PostgreSQL."
 
 
 # ============================================================
