@@ -32,28 +32,44 @@ import {
 } from '../../dto/paginar-hallazgos-evento-fraude';
 
 /**
- * Las cuentas del hallazgo, derivadas de `hallazgo_evento_fraude_cuenta` +
- * `usuarios` -- mismo patron que `SQL_CUENTAS_DE_ANILLO`
- * (`fraude-anillos-persistidos.service.ts`), mas simple: aqui la relacion
- * ya es directa (una tabla de pivote real), sin unir dos mitades por tipo.
+ * Las cuentas del hallazgo, del pivote `senal_fraude_cuenta` + `usuarios` --
+ * mismo patron que `SQL_CUENTAS_DE_ANILLO`
+ * (`fraude-anillos-persistidos.service.ts`). Necesita `s` (`senal_fraude`) en
+ * el scope de quien use esta expresion.
  */
 const SQL_CUENTAS_DE_HALLAZGO = `(
   SELECT COALESCE(json_agg(jsonb_build_object(
            'id_usuario', u.id_usuario::text, 'usuario', u.usuario,
-           'es_nucleo', hc.es_nucleo
+           'es_nucleo', sc.es_nucleo
          ) ORDER BY u.usuario), '[]'::json)
-    FROM hallazgo_evento_fraude_cuenta hc
-    JOIN usuarios u ON u.id_usuario = hc.id_usuario
-   WHERE hc.id_hallazgo_evento_fraude = h.id_hallazgo_evento_fraude
+    FROM senal_fraude_cuenta sc
+    JOIN usuarios u ON u.id_usuario = sc.id_usuario
+   WHERE sc.id_senal_fraude = s.id_senal_fraude
 )`;
+
+/** El producto (Mongo) del hallazgo -- F1 y F4 son los unicos con uno, y de
+ * uno solo; el resto da NULL. */
+const SQL_PRODUCTO_DE_HALLAZGO = `(
+  SELECT min(sp.id_producto_mongo)
+    FROM senal_fraude_producto sp
+   WHERE sp.id_senal_fraude = s.id_senal_fraude
+)`;
+
+/** Solo las senales de ClickHouse: compras y navegacion (F1-F6). */
+const SQL_SOLO_EVENTOS = `f.familia_senal_fraude_nombre = 'compras_navegacion'`;
 
 /**
  * `GET`/`PATCH /admin/fraude/alertas-eventos` -- el panel de admin sobre
- * `hallazgo_evento_fraude`/`hallazgo_evento_fraude_cuenta`
- * (`elementos Generales/plan pendiente/hallazgos-evento-fraude.sql`), los
- * hallazgos de F1-F6 que ya detecto y guardo
- * `HallazgosEventoFraudeDetectorService`. Nombrado en paralelo con
- * `alertas-login`/`alertas-resenas`: mismo sustantivo, distinto dominio.
+ * `senal_fraude` (la familia `compras_navegacion`, F1-F6,
+ * `elementos Generales/plan pendiente/refactor-fraude-senales.md`), los
+ * hallazgos que ya detecto y guardo `HallazgosEventoFraudeDetectorService`.
+ * Nombrado en paralelo con `alertas-login`/`alertas-resenas`: mismo
+ * sustantivo, distinto dominio.
+ *
+ * Desde la etapa 7 del refactor el `id_hallazgo_evento_fraude` de la API es
+ * el id de la SENAL, `contador` sale de `total_detecciones` y
+ * `ventana_inicio` de `ultima_deteccion` (la ultima vez que el detector lo
+ * vio).
  *
  * Sin ruta de "detalle" propia -- a diferencia de los anillos (que piden el
  * detalle real a Neo4j), toda la evidencia de un hallazgo de eventos ya
@@ -113,7 +129,7 @@ export class HallazgosEventoFraudePersistidosService {
         ? ''
         : `AND eaf.estado_alerta_fraude_nombre = '${estado}'`;
     const condicionTipo =
-      tipo === null ? '' : `AND the.tipo_hallazgo_evento_nombre = '${tipo}'`;
+      tipo === null ? '' : `AND t.tipo_senal_fraude_nombre = '${tipo}'`;
 
     const cliente = await pool.connect();
     try {
@@ -123,28 +139,34 @@ export class HallazgosEventoFraudePersistidosService {
 
       const conteo = await cliente.query<{ total: string }>(
         `SELECT count(*) AS total
-           FROM hallazgo_evento_fraude h
-           JOIN tipo_hallazgo_evento the
-             ON the.id_tipo_hallazgo_evento = h.id_tipo_hallazgo_evento
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
            JOIN estado_alerta_fraude eaf
-             ON eaf.id_estado_alerta_fraude = h.id_estado_alerta_fraude
-          WHERE true ${condicionEstado} ${condicionTipo}`,
+             ON eaf.id_estado_alerta_fraude = s.id_estado_alerta_fraude
+          WHERE ${SQL_SOLO_EVENTOS} ${condicionEstado} ${condicionTipo}`,
       );
 
       const pagina = await cliente.query<FilaHallazgoEventoFraude>(
-        `SELECT h.id_hallazgo_evento_fraude,
-                the.tipo_hallazgo_evento_nombre AS tipo,
-                h.clave, ${SQL_CUENTAS_DE_HALLAZGO} AS cuentas,
-                h.id_producto_mongo, h.detalle, h.contador, h.ventana_inicio,
+        `SELECT s.id_senal_fraude AS id_hallazgo_evento_fraude,
+                t.tipo_senal_fraude_nombre AS tipo,
+                s.clave, ${SQL_CUENTAS_DE_HALLAZGO} AS cuentas,
+                ${SQL_PRODUCTO_DE_HALLAZGO} AS id_producto_mongo, s.detalle,
+                s.total_detecciones AS contador,
+                s.ultima_deteccion AS ventana_inicio,
                 eaf.estado_alerta_fraude_nombre AS estado,
-                h.fecha_creacion, h.fecha_actualizacion
-           FROM hallazgo_evento_fraude h
-           JOIN tipo_hallazgo_evento the
-             ON the.id_tipo_hallazgo_evento = h.id_tipo_hallazgo_evento
+                s.fecha_creacion, s.fecha_actualizacion
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
            JOIN estado_alerta_fraude eaf
-             ON eaf.id_estado_alerta_fraude = h.id_estado_alerta_fraude
-          WHERE true ${condicionEstado} ${condicionTipo}
-          ORDER BY h.fecha_actualizacion DESC, h.id_hallazgo_evento_fraude DESC
+             ON eaf.id_estado_alerta_fraude = s.id_estado_alerta_fraude
+          WHERE ${SQL_SOLO_EVENTOS} ${condicionEstado} ${condicionTipo}
+          ORDER BY s.fecha_actualizacion DESC, s.id_senal_fraude DESC
           LIMIT $1 OFFSET $2`,
         [limite, saltar],
       );
@@ -191,11 +213,16 @@ export class HallazgosEventoFraudePersistidosService {
     let actualizado;
     try {
       actualizado = await pool.query(
-        `UPDATE hallazgo_evento_fraude
+        `UPDATE senal_fraude s
             SET id_estado_alerta_fraude = $2, fecha_actualizacion = now()
-          WHERE id_hallazgo_evento_fraude = $1
-            AND id_estado_alerta_fraude = $3
-          RETURNING id_hallazgo_evento_fraude`,
+           FROM tipo_senal_fraude t
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+          WHERE t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+            AND ${SQL_SOLO_EVENTOS}
+            AND s.id_senal_fraude = $1
+            AND s.id_estado_alerta_fraude = $3
+          RETURNING s.id_senal_fraude`,
         [id, idEstadoDestino, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
       );
     } catch (error) {
@@ -214,7 +241,13 @@ export class HallazgosEventoFraudePersistidosService {
     let existente;
     try {
       existente = await pool.query(
-        'SELECT 1 FROM hallazgo_evento_fraude WHERE id_hallazgo_evento_fraude = $1',
+        `SELECT 1
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+          WHERE ${SQL_SOLO_EVENTOS} AND s.id_senal_fraude = $1`,
         [id],
       );
     } catch (error) {
@@ -233,18 +266,22 @@ export class HallazgosEventoFraudePersistidosService {
     let fila;
     try {
       fila = await pool.query<FilaHallazgoEventoFraude>(
-        `SELECT h.id_hallazgo_evento_fraude,
-                the.tipo_hallazgo_evento_nombre AS tipo,
-                h.clave, ${SQL_CUENTAS_DE_HALLAZGO} AS cuentas,
-                h.id_producto_mongo, h.detalle, h.contador, h.ventana_inicio,
+        `SELECT s.id_senal_fraude AS id_hallazgo_evento_fraude,
+                t.tipo_senal_fraude_nombre AS tipo,
+                s.clave, ${SQL_CUENTAS_DE_HALLAZGO} AS cuentas,
+                ${SQL_PRODUCTO_DE_HALLAZGO} AS id_producto_mongo, s.detalle,
+                s.total_detecciones AS contador,
+                s.ultima_deteccion AS ventana_inicio,
                 eaf.estado_alerta_fraude_nombre AS estado,
-                h.fecha_creacion, h.fecha_actualizacion
-           FROM hallazgo_evento_fraude h
-           JOIN tipo_hallazgo_evento the
-             ON the.id_tipo_hallazgo_evento = h.id_tipo_hallazgo_evento
+                s.fecha_creacion, s.fecha_actualizacion
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
            JOIN estado_alerta_fraude eaf
-             ON eaf.id_estado_alerta_fraude = h.id_estado_alerta_fraude
-          WHERE h.id_hallazgo_evento_fraude = $1`,
+             ON eaf.id_estado_alerta_fraude = s.id_estado_alerta_fraude
+          WHERE ${SQL_SOLO_EVENTOS} AND s.id_senal_fraude = $1`,
         [id],
       );
     } catch (error) {

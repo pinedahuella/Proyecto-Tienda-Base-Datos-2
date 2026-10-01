@@ -11,8 +11,11 @@ export interface PaginarAlertasFraudeUsuarioQuery {
  * (la del admin): sin `cuentas_afectadas` (el resto de afectados no es
  * asunto de esta cuenta) ni nada del lado de la investigación del admin
  * (`estado`, `fecha_actualizacion`). `fecha_lectura` es la de SU propia
- * notificación (`notificacion_fraude`), no de la alerta -- cada afectado
- * tiene la suya. `detalle` viene redactado en `multi_cuenta_ip`/
+ * notificación (`notificacion_fraude`, una por señal y cuenta), no de la
+ * señal -- cada afectado tiene la suya. `id_alerta_fraude` es el id de la
+ * SEÑAL (`senal_fraude`), `contador` sus detecciones y `fecha_creacion` la
+ * última vez que se le avisó a esta cuenta (sube cuando la señal se reabre).
+ * `detalle` viene redactado en `multi_cuenta_ip`/
  * `multi_cuenta_ip_lenta` (sin `identificadores`, las demás cuentas
  * afectadas) -- ver `detalleParaUsuario` en `fraude-login.service.ts`.
  */

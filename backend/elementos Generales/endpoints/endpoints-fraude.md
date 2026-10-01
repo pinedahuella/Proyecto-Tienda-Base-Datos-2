@@ -1,5 +1,41 @@
 # Endpoints del panel de fraude
 
+> **Cambio del refactor de fraude (2026-09-30, etapa 7, parte 2 --
+> `plan pendiente/refactor-fraude-senales.md`).** Las tres rutas de admin por
+> fuente (`alertas-resenas`, `alertas-eventos` y `alertas-login`) y el
+> agrupador de casos ya **no leen las tablas viejas** (`anillo_fraude`,
+> `hallazgo_evento_fraude`, `alerta_fraude`) sino `senal_fraude`, una sola
+> tabla de señales. Las URL, los filtros, los códigos de error y la forma de
+> las respuestas **no cambian**, pero cambia lo que significan algunos campos:
+>
+> - **El id es el de la señal.** `id_anillo_fraude`, `id_hallazgo_evento_fraude`
+>   e `id_alerta_fraude` son ahora `senal_fraude.id_senal_fraude`. Un id de
+>   una familia pedido por la ruta de otra da `404` (por ejemplo, el id de una
+>   alerta de login en `PATCH /alertas-resenas/:id`).
+> - **Una señal junta todas sus ventanas.** Ya no hay una fila por minuto, por
+>   hora o por día: `contador` es `total_detecciones` (cuántas veces la vio un
+>   detector) y `ventana_inicio` es la última vez que se detectó. En los
+>   anillos, `ultima_vez_confirmado_activo` es esa misma última detección.
+> - **Se revisa la señal entera.** `PATCH` marca revisada o descartada la
+>   señal; si después llega evidencia nueva (una cuenta, una IP, un producto o
+>   un pedido que no tenía, o una métrica mayor), el detector la vuelve a
+>   `pendiente` sola.
+> - **`cuentas_afectadas` (login):** `fecha_lectura` es la de la notificación
+>   de esa cuenta para esa señal (`null` si no la ha leído).
+> - **Las rutas del usuario también cambian (parte 3):** `GET` y
+>   `PATCH /perfil/alertas-fraude` leen la notificación de la señal
+>   (`notificacion_fraude.id_senal_fraude`). Mismas URL y misma forma de
+>   respuesta, pero `id_alerta_fraude` es el id de la **señal**, `contador` son
+>   sus detecciones y `fecha_creacion` es la última vez que se le avisó a esa
+>   cuenta. Se avisa **una vez por señal y cuenta** (ya no en cada ventana de
+>   un minuto u hora): la notificación nace la primera vez que la cuenta
+>   aparece en la señal, y si la señal se reabre por evidencia nueva vuelve a
+>   quedar **sin leer** y sube en la lista. Marcar una alerta de otra cuenta
+>   sigue dando `404`.
+>
+> Los ejemplos de respuesta de abajo son de antes del cambio: los ids y los
+> contadores de esas muestras son de las tablas viejas.
+
 Once rutas de admin, más dos rutas de usuario (agregadas 2026-09-15, ver
 más abajo). El panel de fraude en reseñas y la conciliación tocan el grafo
 de **Neo4j**; el de fraude de login es **solo Elasticsearch + Redis**, sin

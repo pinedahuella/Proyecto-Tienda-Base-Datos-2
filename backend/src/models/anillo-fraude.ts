@@ -1,33 +1,5 @@
 import { EstadoAlertaFraude } from './alerta-fraude';
 
-/**
- * Catalogo de `tipo_anillo_fraude` (ver
- * `elementos Generales/plan pendiente/anillos-fraude-persistencia.sql`).
- *
- * El orden del INSERT fija los ids -- mismo criterio que
- * `ID_TIPO_ALERTA_FRAUDE_*` en `models/alerta-fraude.ts`: un catalogo tan
- * chico no cambia sin una migracion nueva, asi que es seguro fijarlos aqui
- * en vez de consultarlos cada vez.
- */
-export const ID_TIPO_ANILLO_FRAUDE_MUTUO = 1;
-export const ID_TIPO_ANILLO_FRAUDE_CICLO = 2;
-export const ID_TIPO_ANILLO_FRAUDE_REITERADO = 3;
-
-/**
- * B.1-B.7 (`neo4j/consultas/B1..B7`, ver
- * `elementos Generales/plan pendiente/anillos-fraude-familia-b.md`).
- * `anillo_en_el_tiempo` (B.4) no se persiste como fila propia -- es
- * enriquecimiento del detalle de un `ciclo`/`reiterado` ya existente -- pero
- * su id de catalogo (7) queda reservado por si esa decision cambia.
- */
-export const ID_TIPO_ANILLO_FRAUDE_CADENA_ABIERTA = 4;
-export const ID_TIPO_ANILLO_FRAUDE_SATELITES = 5;
-export const ID_TIPO_ANILLO_FRAUDE_PERSISTENTE = 6;
-export const ID_TIPO_ANILLO_FRAUDE_ANILLO_EN_EL_TIEMPO = 7;
-export const ID_TIPO_ANILLO_FRAUDE_FAVOR_DEVUELTO = 8;
-export const ID_TIPO_ANILLO_FRAUDE_COORDINADOS = 9;
-export const ID_TIPO_ANILLO_FRAUDE_REPUTACION_EXPRES = 10;
-
 export type TipoAnilloFraude =
   | 'mutuo'
   | 'ciclo'

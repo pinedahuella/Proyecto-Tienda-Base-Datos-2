@@ -30,21 +30,13 @@ import {
   ID_ESTADO_ALERTA_FRAUDE_PENDIENTE,
   ID_ESTADO_ALERTA_FRAUDE_REVISADA,
 } from '../../models/alerta-fraude';
+import {
+  SQL_SELECT_ALERTA_LOGIN,
+  SQL_SOLO_LOGIN,
+} from './fraude-login.service';
 
 const INDICE =
   process.env.ELASTIC_INDICE_EVENTOS ?? 'mesh_eventos_autenticacion';
-
-/** Copia verbatim de `SQL_CUENTAS_AFECTADAS` en `fraude-login.service.ts` -- se duplica (chica) por el mismo motivo que el resto de este modulo, ver el comentario de clase. */
-const SQL_CUENTAS_AFECTADAS = `(
-  SELECT COALESCE(json_agg(json_build_object(
-           'id_usuario', nf.id_usuario::text,
-           'usuario', u.usuario,
-           'fecha_lectura', nf.fecha_lectura
-         ) ORDER BY u.usuario), '[]'::json)
-    FROM notificacion_fraude nf
-    JOIN usuarios u ON u.id_usuario = nf.id_usuario
-   WHERE nf.id_alerta_fraude = af.id_alerta_fraude
-)`;
 
 interface FuenteEventoElastic {
   tipo: string;
@@ -247,11 +239,16 @@ export class FraudeLoginExploracionService {
     let actualizado;
     try {
       actualizado = await pool.query(
-        `UPDATE alerta_fraude
+        `UPDATE senal_fraude s
             SET id_estado_alerta_fraude = $2, fecha_actualizacion = now()
-          WHERE id_alerta_fraude = $1
-            AND id_estado_alerta_fraude = $3
-          RETURNING id_alerta_fraude`,
+           FROM tipo_senal_fraude t
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+          WHERE t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+            AND ${SQL_SOLO_LOGIN}
+            AND s.id_senal_fraude = $1
+            AND s.id_estado_alerta_fraude = $3
+          RETURNING s.id_senal_fraude`,
         [id, idEstadoDestino, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
       );
     } catch (error) {
@@ -270,7 +267,13 @@ export class FraudeLoginExploracionService {
     let existente;
     try {
       existente = await pool.query(
-        'SELECT 1 FROM alerta_fraude WHERE id_alerta_fraude = $1',
+        `SELECT 1
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+          WHERE ${SQL_SOLO_LOGIN} AND s.id_senal_fraude = $1`,
         [id],
       );
     } catch (error) {
@@ -287,17 +290,8 @@ export class FraudeLoginExploracionService {
     let fila;
     try {
       fila = await pool.query<FilaAlertaFraude>(
-        `SELECT af.id_alerta_fraude, ta.tipo_alerta_fraude_nombre AS tipo_alerta,
-                af.clave, af.detalle, af.contador,
-                af.ventana_inicio, ea.estado_alerta_fraude_nombre AS estado,
-                af.fecha_creacion, af.fecha_actualizacion,
-                ${SQL_CUENTAS_AFECTADAS} AS cuentas_afectadas
-           FROM alerta_fraude af
-           JOIN tipo_alerta_fraude ta
-             ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
-           JOIN estado_alerta_fraude ea
-             ON ea.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-          WHERE af.id_alerta_fraude = $1`,
+        `${SQL_SELECT_ALERTA_LOGIN}
+          WHERE ${SQL_SOLO_LOGIN} AND s.id_senal_fraude = $1`,
         [id],
       );
     } catch (error) {

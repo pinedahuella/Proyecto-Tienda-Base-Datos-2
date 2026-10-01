@@ -10,15 +10,11 @@ export type FuenteHallazgo = 'grafo' | 'eventos' | 'login';
 export interface Hallazgo {
   fuente: FuenteHallazgo;
   /**
-   * El id real en su tabla de origen (`anillo_fraude` /
-   * `hallazgo_evento_fraude` / `alerta_fraude`, segun `fuente`) -- para
-   * poder enlazarlo despues en `evidencia_caso_fraude`
-   * (`id_anillo_fraude`/`id_hallazgo_evento_fraude`/`id_alerta_fraude`,
-   * exactamente una de las tres).
+   * El id de la senal (`senal_fraude.id_senal_fraude`) -- para poder
+   * enlazarla despues en `evidencia_caso_fraude.id_senal_fraude`.
    */
   idOrigen: number;
-  /** El nombre del tipo en su propio catalogo (`tipo_anillo_fraude_nombre`,
-   * `tipo_hallazgo_evento_nombre` o `tipo_alerta_fraude_nombre`). */
+  /** El nombre del tipo en el catalogo unico (`tipo_senal_fraude_nombre`). */
   tipo: string;
   /** Los ids de usuario involucrados, sin duplicados, sin ordenar. */
   cuentas: number[];

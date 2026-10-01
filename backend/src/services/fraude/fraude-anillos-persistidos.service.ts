@@ -38,46 +38,42 @@ import {
 } from '../../dto/paginar-anillos-fraude';
 
 /**
- * Las cuentas del caso, derivadas de sus resenas (ver el comentario de
- * `CuentaDeAnillo`). El vendedor de la evidencia (`id_usuario_vendedor`) se
- * suma como sospechoso SALVO en `coordinados` (B.6): ahi los dos autores
- * coinciden calificando a un vendedor que es un tercero ajeno al patron, no
- * un sospechoso -- sumarlo aca lo implicaria por error. Necesita `taf`
- * (join a `tipo_anillo_fraude`) en el scope de quien use esta expresion.
+ * Las cuentas del anillo, del pivote `senal_fraude_cuenta` (ver el
+ * comentario de `CuentaDeAnillo`). El pivote ya trae la regla de
+ * `coordinados` (B.6): ahi el vendedor calificado es un tercero ajeno al
+ * patron y no entra, porque las cuentas salen de la `clave` de la senal.
+ * Necesita `s` (`senal_fraude`) en el scope de quien use esta expresion.
  */
 const SQL_CUENTAS_DE_ANILLO = `(
   SELECT COALESCE(json_agg(jsonb_build_object(
            'id_usuario', u.id_usuario::text, 'usuario', u.usuario
          ) ORDER BY u.usuario), '[]'::json)
-    FROM (
-      SELECT r.id_usuario AS id_usuario
-        FROM anillo_fraude_resena afr
-        JOIN resena r ON r.id_resena = afr.id_resena
-       WHERE afr.id_anillo_fraude = af.id_anillo_fraude
-      UNION
-      SELECT r.id_usuario_vendedor
-        FROM anillo_fraude_resena afr
-        JOIN resena r ON r.id_resena = afr.id_resena
-       WHERE afr.id_anillo_fraude = af.id_anillo_fraude
-         AND taf.tipo_anillo_fraude_nombre <> 'coordinados'
-    ) cuentas
-    JOIN usuarios u ON u.id_usuario = cuentas.id_usuario
+    FROM senal_fraude_cuenta sc
+    JOIN usuarios u ON u.id_usuario = sc.id_usuario
+   WHERE sc.id_senal_fraude = s.id_senal_fraude
 )`;
 
 /** Los ids de resena que son la evidencia del anillo, ordenados. */
 const SQL_RESENAS_DE_ANILLO = `(
-  SELECT COALESCE(json_agg(afr.id_resena ORDER BY afr.id_resena), '[]'::json)
-    FROM anillo_fraude_resena afr
-   WHERE afr.id_anillo_fraude = af.id_anillo_fraude
+  SELECT COALESCE(json_agg(sr.id_resena ORDER BY sr.id_resena), '[]'::json)
+    FROM senal_fraude_resena sr
+   WHERE sr.id_senal_fraude = s.id_senal_fraude
 )`;
+
+/** Solo las senales de Neo4j: los anillos (A) y los patrones de resenas (B). */
+const SQL_SOLO_ANILLOS = `f.familia_senal_fraude_nombre IN ('anillo_resenas', 'patron_resenas')`;
 
 /**
  * `GET`/`PATCH /admin/fraude/alertas-resenas` -- el panel de admin sobre
- * `anillo_fraude`/`anillo_fraude_resena`
- * (`elementos Generales/plan pendiente/anillos-fraude-persistencia.sql`),
- * los anillos `mutuo`/`ciclo`/`reiterado` que ya detectó y guardó
- * `AnillosDetectorService`. Nombrado en paralelo con `alertas-login`: mismo
- * sustantivo, distinto dominio.
+ * `senal_fraude` (las familias `anillo_resenas` y `patron_resenas`,
+ * `elementos Generales/plan pendiente/refactor-fraude-senales.md`), los
+ * anillos y patrones que ya detectó y guardó `AnillosDetectorService` /
+ * `PatronesFraudeDetectorService`. Nombrado en paralelo con `alertas-login`:
+ * mismo sustantivo, distinto dominio.
+ *
+ * Desde la etapa 7 del refactor el `id_anillo_fraude` de la API es el id de
+ * la SENAL (`senal_fraude.id_senal_fraude`), y `ultima_vez_confirmado_activo`
+ * sale de `ultima_deteccion`.
  */
 @Injectable()
 export class FraudeAnillosPersistidosService {
@@ -132,7 +128,7 @@ export class FraudeAnillosPersistidosService {
         ? ''
         : `AND eaf.estado_alerta_fraude_nombre = '${estado}'`;
     const condicionTipo =
-      tipo === null ? '' : `AND taf.tipo_anillo_fraude_nombre = '${tipo}'`;
+      tipo === null ? '' : `AND t.tipo_senal_fraude_nombre = '${tipo}'`;
 
     const cliente = await pool.connect();
     try {
@@ -142,28 +138,34 @@ export class FraudeAnillosPersistidosService {
 
       const conteo = await cliente.query<{ total: string }>(
         `SELECT count(*) AS total
-           FROM anillo_fraude af
-           JOIN tipo_anillo_fraude taf
-             ON taf.id_tipo_anillo_fraude = af.id_tipo_anillo_fraude
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
            JOIN estado_alerta_fraude eaf
-             ON eaf.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-          WHERE true ${condicionEstado} ${condicionTipo}`,
+             ON eaf.id_estado_alerta_fraude = s.id_estado_alerta_fraude
+          WHERE ${SQL_SOLO_ANILLOS} ${condicionEstado} ${condicionTipo}`,
       );
 
       const pagina = await cliente.query<FilaAnilloFraude>(
-        `SELECT af.id_anillo_fraude, taf.tipo_anillo_fraude_nombre AS tipo,
-                af.clave, ${SQL_CUENTAS_DE_ANILLO} AS cuentas,
+        `SELECT s.id_senal_fraude AS id_anillo_fraude,
+                t.tipo_senal_fraude_nombre AS tipo,
+                s.clave, ${SQL_CUENTAS_DE_ANILLO} AS cuentas,
                 ${SQL_RESENAS_DE_ANILLO} AS resenas,
                 eaf.estado_alerta_fraude_nombre AS estado,
-                af.fecha_creacion, af.ultima_vez_confirmado_activo,
-                af.fecha_actualizacion
-           FROM anillo_fraude af
-           JOIN tipo_anillo_fraude taf
-             ON taf.id_tipo_anillo_fraude = af.id_tipo_anillo_fraude
+                s.fecha_creacion,
+                s.ultima_deteccion AS ultima_vez_confirmado_activo,
+                s.fecha_actualizacion
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
            JOIN estado_alerta_fraude eaf
-             ON eaf.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-          WHERE true ${condicionEstado} ${condicionTipo}
-          ORDER BY af.ultima_vez_confirmado_activo DESC, af.id_anillo_fraude DESC
+             ON eaf.id_estado_alerta_fraude = s.id_estado_alerta_fraude
+          WHERE ${SQL_SOLO_ANILLOS} ${condicionEstado} ${condicionTipo}
+          ORDER BY s.ultima_deteccion DESC, s.id_senal_fraude DESC
           LIMIT $1 OFFSET $2`,
         [limite, saltar],
       );
@@ -210,11 +212,16 @@ export class FraudeAnillosPersistidosService {
     let actualizado;
     try {
       actualizado = await pool.query(
-        `UPDATE anillo_fraude
+        `UPDATE senal_fraude s
             SET id_estado_alerta_fraude = $2, fecha_actualizacion = now()
-          WHERE id_anillo_fraude = $1
-            AND id_estado_alerta_fraude = $3
-          RETURNING id_anillo_fraude`,
+           FROM tipo_senal_fraude t
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+          WHERE t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+            AND ${SQL_SOLO_ANILLOS}
+            AND s.id_senal_fraude = $1
+            AND s.id_estado_alerta_fraude = $3
+          RETURNING s.id_senal_fraude`,
         [id, idEstadoDestino, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
       );
     } catch (error) {
@@ -233,7 +240,13 @@ export class FraudeAnillosPersistidosService {
     let existente;
     try {
       existente = await pool.query(
-        'SELECT 1 FROM anillo_fraude WHERE id_anillo_fraude = $1',
+        `SELECT 1
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+          WHERE ${SQL_SOLO_ANILLOS} AND s.id_senal_fraude = $1`,
         [id],
       );
     } catch (error) {
@@ -250,18 +263,22 @@ export class FraudeAnillosPersistidosService {
     let fila;
     try {
       fila = await pool.query<FilaAnilloFraude>(
-        `SELECT af.id_anillo_fraude, taf.tipo_anillo_fraude_nombre AS tipo,
-                af.clave, ${SQL_CUENTAS_DE_ANILLO} AS cuentas,
+        `SELECT s.id_senal_fraude AS id_anillo_fraude,
+                t.tipo_senal_fraude_nombre AS tipo,
+                s.clave, ${SQL_CUENTAS_DE_ANILLO} AS cuentas,
                 ${SQL_RESENAS_DE_ANILLO} AS resenas,
                 eaf.estado_alerta_fraude_nombre AS estado,
-                af.fecha_creacion, af.ultima_vez_confirmado_activo,
-                af.fecha_actualizacion
-           FROM anillo_fraude af
-           JOIN tipo_anillo_fraude taf
-             ON taf.id_tipo_anillo_fraude = af.id_tipo_anillo_fraude
+                s.fecha_creacion,
+                s.ultima_deteccion AS ultima_vez_confirmado_activo,
+                s.fecha_actualizacion
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
            JOIN estado_alerta_fraude eaf
-             ON eaf.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-          WHERE af.id_anillo_fraude = $1`,
+             ON eaf.id_estado_alerta_fraude = s.id_estado_alerta_fraude
+          WHERE ${SQL_SOLO_ANILLOS} AND s.id_senal_fraude = $1`,
         [id],
       );
     } catch (error) {
@@ -293,13 +310,15 @@ export class FraudeAnillosPersistidosService {
         clave: string;
         id_resena: string;
       }>(
-        `SELECT taf.tipo_anillo_fraude_nombre AS tipo, af.clave, afr.id_resena
-           FROM anillo_fraude af
-           JOIN tipo_anillo_fraude taf
-             ON taf.id_tipo_anillo_fraude = af.id_tipo_anillo_fraude
-           LEFT JOIN anillo_fraude_resena afr
-             ON afr.id_anillo_fraude = af.id_anillo_fraude
-          WHERE af.id_anillo_fraude = $1`,
+        `SELECT t.tipo_senal_fraude_nombre AS tipo, s.clave, sr.id_resena
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+           LEFT JOIN senal_fraude_resena sr
+             ON sr.id_senal_fraude = s.id_senal_fraude
+          WHERE ${SQL_SOLO_ANILLOS} AND s.id_senal_fraude = $1`,
         [id],
       );
     } catch (error) {

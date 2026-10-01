@@ -2,14 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { clickhouse } from '../../database/clickhouse';
 import { registrarHallazgoEventoFraude } from '../../helpers/registrar-hallazgo-evento-fraude';
-import {
-  ID_TIPO_HALLAZGO_EVENTO_CARRITO_ACAPARADOR,
-  ID_TIPO_HALLAZGO_EVENTO_COMPRAS_EN_RAFAGA,
-  ID_TIPO_HALLAZGO_EVENTO_DEVOLUCIONES_SERIALES,
-  ID_TIPO_HALLAZGO_EVENTO_GRANJA_DE_REGISTROS,
-  ID_TIPO_HALLAZGO_EVENTO_IP_MULTICUENTA_COMPRAS,
-  ID_TIPO_HALLAZGO_EVENTO_VISTAS_INFLADAS,
-} from '../../models/hallazgo-evento-fraude';
+import {} from '../../models/hallazgo-evento-fraude';
 
 // Los seis .sql de referencia (clickhouse/consultas/F1..F6, obra del
 // companero) y sus umbrales (clickhouse/consultas/parametros.txt) -- las
@@ -31,6 +24,11 @@ const MIN_TASA_DEVOLUCION_CUENTA = 0.5;
 const MINUTOS_REGISTRO = 60;
 const MIN_REGISTROS_POR_IP = 5;
 const LIMITE = 10;
+// Cuantos ids de pedido guarda F2/F3/F5 por senal (los mas recientes). Las
+// tres consultas agregan `ids_pedidos` al texto del .sql del companero para
+// llenar `senal_fraude_pedido` (etapa 5 del refactor de fraude); esa es la
+// unica diferencia con sus F2, F3 y F5 de clickhouse/consultas/.
+const MAX_PEDIDOS_POR_SENAL = 50;
 
 interface FilaF1 {
   id_producto: string;
@@ -46,6 +44,7 @@ interface FilaF2 {
   pedidos_en_la_peor_rafaga: string;
   empezo: string;
   pedidos_en_el_periodo: string;
+  ids_pedidos: string[];
 }
 
 interface FilaF3 {
@@ -53,6 +52,7 @@ interface FilaF3 {
   cuentas_distintas: string;
   cuentas: string[];
   pedidos: string;
+  ids_pedidos: string[];
   primera: string;
   ultima: string;
 }
@@ -72,6 +72,7 @@ interface FilaF5 {
   compradas: string;
   devueltas: string;
   tasa_devolucion: string;
+  ids_pedidos: string[];
 }
 
 interface FilaF6 {
@@ -206,7 +207,7 @@ export class HallazgosEventoFraudeDetectorService {
 
     for (const fila of filas) {
       await registrarHallazgoEventoFraude({
-        idTipoHallazgo: ID_TIPO_HALLAZGO_EVENTO_VISTAS_INFLADAS,
+        tipo: 'vistas_infladas',
         clave: fila.id_producto,
         cuentas: [],
         idProductoMongo: Number(fila.id_producto),
@@ -236,11 +237,14 @@ export class HallazgosEventoFraudeDetectorService {
                     id_usuario,
                     max(en_ventana)                 AS pedidos_en_la_peor_rafaga,
                     argMax(desde, en_ventana)       AS empezo,
-                    any(total)                      AS pedidos_en_el_periodo
+                    any(total)                      AS pedidos_en_el_periodo,
+                    arraySlice(arrayReverseSort(argMax(ids_en_ventana, en_ventana)), 1, {max_pedidos:UInt32}) AS ids_pedidos
                 FROM (
                     SELECT p.id_usuario AS id_usuario, p.momento AS desde,
                            countIf(q.momento >= p.momento
-                                   AND q.momento < p.momento + toIntervalMinute({minutos_rafaga:UInt32})) AS en_ventana
+                                   AND q.momento < p.momento + toIntervalMinute({minutos_rafaga:UInt32})) AS en_ventana,
+                           groupArrayIf(q.id_pedido, q.momento >= p.momento
+                                   AND q.momento < p.momento + toIntervalMinute({minutos_rafaga:UInt32})) AS ids_en_ventana
                       FROM pedidos AS p
                      INNER JOIN pedidos AS q ON q.id_usuario = p.id_usuario
                      GROUP BY p.id_usuario, p.id_pedido, p.momento
@@ -255,6 +259,7 @@ export class HallazgosEventoFraudeDetectorService {
         dias_ventana: DIAS_VENTANA,
         minutos_rafaga: MINUTOS_RAFAGA,
         min_pedidos_rafaga: MIN_PEDIDOS_RAFAGA,
+        max_pedidos: MAX_PEDIDOS_POR_SENAL,
         limite: LIMITE,
       },
       format: 'JSONEachRow',
@@ -263,9 +268,10 @@ export class HallazgosEventoFraudeDetectorService {
 
     for (const fila of filas) {
       await registrarHallazgoEventoFraude({
-        idTipoHallazgo: ID_TIPO_HALLAZGO_EVENTO_COMPRAS_EN_RAFAGA,
+        tipo: 'compras_en_rafaga',
         clave: fila.id_usuario,
         cuentas: [fila.id_usuario],
+        pedidos: fila.ids_pedidos,
         idProductoMongo: null,
         detalle: {
           pedidos_en_la_peor_rafaga: Number(fila.pedidos_en_la_peor_rafaga),
@@ -288,6 +294,7 @@ export class HallazgosEventoFraudeDetectorService {
                   uniqExact(id_usuario)                  AS cuentas_distintas,
                   arraySort(groupUniqArray(id_usuario))  AS cuentas,
                   uniqExact(id_pedido)                   AS pedidos,
+                  arraySlice(arrayReverseSort(groupUniqArray(id_pedido)), 1, {max_pedidos:UInt32}) AS ids_pedidos,
                   min(fecha)                             AS primera,
                   max(fecha)                             AS ultima
                 FROM compra_producto FINAL
@@ -304,6 +311,7 @@ export class HallazgosEventoFraudeDetectorService {
         dias_ventana: DIAS_VENTANA,
         min_cuentas_por_ip: MIN_CUENTAS_POR_IP,
         ips_de_confianza: IPS_DE_CONFIANZA,
+        max_pedidos: MAX_PEDIDOS_POR_SENAL,
         limite: LIMITE,
       },
       format: 'JSONEachRow',
@@ -312,9 +320,10 @@ export class HallazgosEventoFraudeDetectorService {
 
     for (const fila of filas) {
       await registrarHallazgoEventoFraude({
-        idTipoHallazgo: ID_TIPO_HALLAZGO_EVENTO_IP_MULTICUENTA_COMPRAS,
+        tipo: 'ip_multicuenta_compras',
         clave: fila.ip,
         cuentas: fila.cuentas,
+        pedidos: fila.ids_pedidos,
         idProductoMongo: null,
         detalle: {
           cuentas_distintas: Number(fila.cuentas_distintas),
@@ -368,7 +377,7 @@ export class HallazgosEventoFraudeDetectorService {
 
     for (const fila of filas) {
       await registrarHallazgoEventoFraude({
-        idTipoHallazgo: ID_TIPO_HALLAZGO_EVENTO_CARRITO_ACAPARADOR,
+        tipo: 'carrito_acaparador',
         clave: `${fila.id_usuario}-${fila.id_producto}`,
         cuentas: [fila.id_usuario],
         idProductoMongo: Number(fila.id_producto),
@@ -394,7 +403,8 @@ export class HallazgosEventoFraudeDetectorService {
                           FROM compra_producto FINAL
                          WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
                          GROUP BY id_usuario),
-                  d AS (SELECT id_usuario, sum(cantidad) AS devueltas
+                  d AS (SELECT id_usuario, sum(cantidad) AS devueltas,
+                               groupUniqArray(id_pedido) AS pedidos_devueltos
                           FROM devolucion_producto FINAL
                          WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
                          GROUP BY id_usuario)
@@ -403,7 +413,8 @@ export class HallazgosEventoFraudeDetectorService {
                   k.pedidos                             AS pedidos,
                   k.compradas                           AS compradas,
                   d.devueltas                           AS devueltas,
-                  round(d.devueltas / greatest(k.compradas, 1), 2) AS tasa_devolucion
+                  round(d.devueltas / greatest(k.compradas, 1), 2) AS tasa_devolucion,
+                  arraySlice(arrayReverseSort(d.pedidos_devueltos), 1, {max_pedidos:UInt32}) AS ids_pedidos
                 FROM d LEFT JOIN k ON k.id_usuario = d.id_usuario
                WHERE d.devueltas >= {min_devoluciones:UInt32}
                  AND tasa_devolucion >= {min_tasa_devolucion_cuenta:Float64}
@@ -414,6 +425,7 @@ export class HallazgosEventoFraudeDetectorService {
         dias_ventana: DIAS_VENTANA,
         min_devoluciones: MIN_DEVOLUCIONES,
         min_tasa_devolucion_cuenta: MIN_TASA_DEVOLUCION_CUENTA,
+        max_pedidos: MAX_PEDIDOS_POR_SENAL,
         limite: LIMITE,
       },
       format: 'JSONEachRow',
@@ -422,9 +434,10 @@ export class HallazgosEventoFraudeDetectorService {
 
     for (const fila of filas) {
       await registrarHallazgoEventoFraude({
-        idTipoHallazgo: ID_TIPO_HALLAZGO_EVENTO_DEVOLUCIONES_SERIALES,
+        tipo: 'devoluciones_seriales',
         clave: fila.id_usuario,
         cuentas: [fila.id_usuario],
+        pedidos: fila.ids_pedidos,
         idProductoMongo: null,
         detalle: {
           pedidos: Number(fila.pedidos),
@@ -483,7 +496,7 @@ export class HallazgosEventoFraudeDetectorService {
 
     for (const fila of filas) {
       await registrarHallazgoEventoFraude({
-        idTipoHallazgo: ID_TIPO_HALLAZGO_EVENTO_GRANJA_DE_REGISTROS,
+        tipo: 'granja_de_registros',
         clave: fila.ip,
         cuentas: fila.cuentas,
         idProductoMongo: null,

@@ -50,9 +50,8 @@ export interface CuentaCasoFraude {
   es_nucleo: boolean;
 }
 
-/** Un hallazgo de evidencia, ya resuelto contra su tabla de origen real
- * (`anillo_fraude`/`hallazgo_evento_fraude`/`alerta_fraude`, exactamente
- * una segun `fuente`). */
+/** Un hallazgo de evidencia, ya resuelto contra su senal (`senal_fraude`);
+ * `fuente` sale de la familia de la senal. */
 export interface EvidenciaCasoFraude {
   id_evidencia_caso_fraude: number;
   fuente: 'grafo' | 'eventos' | 'login';

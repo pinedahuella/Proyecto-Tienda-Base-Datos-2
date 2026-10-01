@@ -2,11 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { elasticClient } from '../../database/elastic';
 import { registrarAlertaFraude } from '../../helpers/registrar-alerta-fraude';
-import {
-  ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA_LENTA,
-  ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA_LENTA,
-  ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP_LENTA,
-} from '../../models/alerta-fraude';
+import {} from '../../models/alerta-fraude';
 
 const INDICE =
   process.env.ELASTIC_INDICE_EVENTOS ?? 'mesh_eventos_autenticacion';
@@ -140,7 +136,7 @@ export class FraudeLoginRetrospectivoService {
     const ventanaInicio = horaTruncada();
     for (const bucket of respuesta.aggregations?.por_cuenta.buckets ?? []) {
       await registrarAlertaFraude({
-        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA_LENTA,
+        tipo: 'fuerza_bruta_cuenta_lenta',
         clave: bucket.key,
         idUsuario: bucket.id_usuario_visto?.buckets[0]?.key ?? null,
         detalle: {
@@ -204,7 +200,7 @@ export class FraudeLoginRetrospectivoService {
     const ventanaInicio = horaTruncada();
     for (const bucket of respuesta.aggregations?.por_ip.buckets ?? []) {
       await registrarAlertaFraude({
-        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP_LENTA,
+        tipo: 'multi_cuenta_ip_lenta',
         clave: bucket.key,
         idUsuario: null, // el origen es la IP, no una cuenta -- mismo criterio que multi_cuenta_ip en Redis
         detalle: {
@@ -270,7 +266,7 @@ export class FraudeLoginRetrospectivoService {
     const ventanaInicio = horaTruncada();
     for (const bucket of respuesta.aggregations?.por_cuenta.buckets ?? []) {
       await registrarAlertaFraude({
-        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA_LENTA,
+        tipo: 'ip_rotacion_cuenta_lenta',
         clave: bucket.key,
         idUsuario: bucket.id_usuario_visto?.buckets[0]?.key ?? null,
         detalle: {
@@ -346,7 +342,7 @@ export class FraudeLoginRetrospectivoService {
       count >= FraudeLoginRetrospectivoService.UMBRAL_FUERZA_BRUTA_CUENTA_LENTA
     ) {
       await registrarAlertaFraude({
-        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA_LENTA,
+        tipo: 'fuerza_bruta_cuenta_lenta',
         clave: identificador,
         idUsuario,
         detalle: { fallos: count, ventana_horas: 24 },
@@ -394,7 +390,7 @@ export class FraudeLoginRetrospectivoService {
       FraudeLoginRetrospectivoService.UMBRAL_MULTICUENTA_IP_LENTA
     ) {
       await registrarAlertaFraude({
-        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP_LENTA,
+        tipo: 'multi_cuenta_ip_lenta',
         clave: ip,
         idUsuario: null,
         detalle: {
@@ -448,7 +444,7 @@ export class FraudeLoginRetrospectivoService {
       ipsDistintas >= FraudeLoginRetrospectivoService.UMBRAL_IP_ROTACION_CUENTA
     ) {
       await registrarAlertaFraude({
-        idTipoAlerta: ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA_LENTA,
+        tipo: 'ip_rotacion_cuenta_lenta',
         clave: identificador,
         idUsuario,
         detalle: {

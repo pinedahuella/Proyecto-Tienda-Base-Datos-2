@@ -28,29 +28,68 @@ import {
   EstadoAlertaFraude,
   FilaAlertaFraude,
   TipoAlertaFraude,
-  ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA,
-  ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_IP,
-  ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA,
-  ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP,
 } from '../../models/alerta-fraude';
 
 /**
- * El agregado de `notificacion_fraude` + `usuarios` para UNA alerta, como
- * subconsulta correlacionada contra `af` -- reusado tal cual en las dos
- * consultas de admin de este archivo (listado y, via
- * `fraude-login-exploracion.service.ts`, el `PATCH`). `json_agg` sobre
- * cero filas da `NULL`, de ahi el `COALESCE` a `'[]'`.
+ * Las cuentas afectadas de UNA senal de login, como subconsulta correlacionada
+ * contra `s` (`senal_fraude`) y `t` (`tipo_senal_fraude`) -- reusado en las dos
+ * consultas de admin (listado y, via `fraude-login-exploracion.service.ts`,
+ * el `PATCH`). Las cuentas salen del pivote `senal_fraude_cuenta` (victimas).
+ *
+ * La `fecha_lectura` de cada una sale de SU notificacion de la senal
+ * (`notificacion_fraude`, una por senal y cuenta); `null` si no la ha leido.
+ * `json_agg` sobre cero filas da `NULL`, de ahi el `COALESCE` a `'[]'`.
  */
-const SQL_CUENTAS_AFECTADAS = `(
+export const SQL_CUENTAS_AFECTADAS = `(
   SELECT COALESCE(json_agg(json_build_object(
-           'id_usuario', nf.id_usuario::text,
+           'id_usuario', sc.id_usuario::text,
            'usuario', u.usuario,
            'fecha_lectura', nf.fecha_lectura
          ) ORDER BY u.usuario), '[]'::json)
-    FROM notificacion_fraude nf
-    JOIN usuarios u ON u.id_usuario = nf.id_usuario
-   WHERE nf.id_alerta_fraude = af.id_alerta_fraude
+    FROM senal_fraude_cuenta sc
+    JOIN usuarios u ON u.id_usuario = sc.id_usuario
+    LEFT JOIN notificacion_fraude nf
+      ON nf.id_senal_fraude = sc.id_senal_fraude
+     AND nf.id_usuario = sc.id_usuario
+   WHERE sc.id_senal_fraude = s.id_senal_fraude
 )`;
+
+/** El SELECT de una notificacion del USUARIO con la forma de
+ * `AlertaFraudeUsuario`; quien lo use pone su propio `WHERE`/`ORDER BY`.
+ * `id_alerta_fraude` es el id de la SENAL y `fecha_creacion` la de la
+ * notificacion (la ultima vez que se le aviso a esta cuenta: sube cuando la
+ * senal se reabre). */
+const SQL_SELECT_ALERTA_USUARIO = `SELECT s.id_senal_fraude AS id_alerta_fraude,
+                t.tipo_senal_fraude_nombre AS tipo_alerta,
+                s.clave, s.detalle, s.total_detecciones AS contador,
+                s.ultima_deteccion AS ventana_inicio,
+                nf.fecha_creacion, nf.fecha_lectura
+           FROM notificacion_fraude nf
+           JOIN senal_fraude s ON s.id_senal_fraude = nf.id_senal_fraude
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude`;
+
+/** Solo las senales de login. Necesita `f` (`familia_senal_fraude`). */
+export const SQL_SOLO_LOGIN = `f.familia_senal_fraude_nombre = 'login'`;
+
+/** El SELECT de una senal de login con la forma de `AlertaFraude`; quien lo
+ * use pone su propio `WHERE`/`ORDER BY`. `id_alerta_fraude` es el id de la
+ * SENAL, `contador` sale de `total_detecciones` y `ventana_inicio` de
+ * `ultima_deteccion` (la ultima vez que se detecto). */
+export const SQL_SELECT_ALERTA_LOGIN = `SELECT s.id_senal_fraude AS id_alerta_fraude,
+                t.tipo_senal_fraude_nombre AS tipo_alerta,
+                s.clave, s.detalle, s.total_detecciones AS contador,
+                s.ultima_deteccion AS ventana_inicio,
+                ea.estado_alerta_fraude_nombre AS estado,
+                s.fecha_creacion, s.fecha_actualizacion,
+                ${SQL_CUENTAS_AFECTADAS} AS cuentas_afectadas
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+           JOIN estado_alerta_fraude ea
+             ON ea.id_estado_alerta_fraude = s.id_estado_alerta_fraude`;
 
 /**
  * Deteccion de fraude en el propio camino del login -- punto 4 de
@@ -165,15 +204,10 @@ export class FraudeLoginService {
     );
 
     if (fallos >= FraudeLoginService.UMBRAL_FALLOS_IP) {
-      await this.registrarAlerta(
-        ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_IP,
-        ip,
-        null,
-        {
-          fallos,
-          ventana_segundos: FraudeLoginService.VENTANA_FALLOS_IP_SEGUNDOS,
-        },
-      );
+      await this.registrarAlerta('fuerza_bruta_ip', ip, null, {
+        fallos,
+        ventana_segundos: FraudeLoginService.VENTANA_FALLOS_IP_SEGUNDOS,
+      });
     }
   }
 
@@ -191,7 +225,7 @@ export class FraudeLoginService {
 
     if (fallos >= FraudeLoginService.UMBRAL_FALLOS_CUENTA) {
       await this.registrarAlerta(
-        ID_TIPO_ALERTA_FRAUDE_FUERZA_BRUTA_CUENTA,
+        'fuerza_bruta_cuenta',
         identificador,
         idUsuario,
         {
@@ -220,19 +254,14 @@ export class FraudeLoginService {
 
     if (cuentasDistintas >= FraudeLoginService.UMBRAL_MULTICUENTA) {
       const identificadores = await redis.smembers(clave);
-      await this.registrarAlerta(
-        ID_TIPO_ALERTA_FRAUDE_MULTI_CUENTA_IP,
-        ip,
-        null,
-        {
-          cuentas_distintas: cuentasDistintas,
-          ventana_segundos: FraudeLoginService.VENTANA_MULTICUENTA_SEGUNDOS,
-          // Tope de 20: es evidencia para el admin, no un conteo -- ese ya
-          // esta en cuentas_distintas. Sin tope, un ataque real de miles de
-          // identificadores dejaria un jsonb enorme por nada.
-          identificadores: identificadores.slice(0, 20),
-        },
-      );
+      await this.registrarAlerta('multi_cuenta_ip', ip, null, {
+        cuentas_distintas: cuentasDistintas,
+        ventana_segundos: FraudeLoginService.VENTANA_MULTICUENTA_SEGUNDOS,
+        // Tope de 20: es evidencia para el admin, no un conteo -- ese ya
+        // esta en cuentas_distintas. Sin tope, un ataque real de miles de
+        // identificadores dejaria un jsonb enorme por nada.
+        identificadores: identificadores.slice(0, 20),
+      });
     }
   }
 
@@ -265,7 +294,7 @@ export class FraudeLoginService {
     if (ipsDistintas >= FraudeLoginService.UMBRAL_ROTACION_IP) {
       const ips = await redis.smembers(clave);
       await this.registrarAlerta(
-        ID_TIPO_ALERTA_FRAUDE_IP_ROTACION_CUENTA,
+        'ip_rotacion_cuenta',
         identificador,
         idUsuario,
         {
@@ -286,7 +315,7 @@ export class FraudeLoginService {
    * `FraudeLoginRetrospectivoService`).
    */
   private async registrarAlerta(
-    idTipoAlerta: number,
+    tipo: TipoAlertaFraude,
     clave: string,
     idUsuario: string | null,
     detalle: Record<string, unknown>,
@@ -295,7 +324,7 @@ export class FraudeLoginService {
     ventanaInicio.setSeconds(0, 0);
 
     await registrarAlertaFraude({
-      idTipoAlerta,
+      tipo,
       clave,
       idUsuario,
       detalle,
@@ -360,7 +389,7 @@ export class FraudeLoginService {
     const condicionEstado =
       estado === null ? '' : `AND ea.estado_alerta_fraude_nombre = '${estado}'`;
     const condicionTipo =
-      tipo === null ? '' : `AND ta.tipo_alerta_fraude_nombre = '${tipo}'`;
+      tipo === null ? '' : `AND t.tipo_senal_fraude_nombre = '${tipo}'`;
 
     const cliente = await pool.connect();
     try {
@@ -370,27 +399,20 @@ export class FraudeLoginService {
 
       const conteo = await cliente.query<{ total: string }>(
         `SELECT count(*) AS total
-           FROM alerta_fraude af
-           JOIN tipo_alerta_fraude ta
-             ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
+           FROM senal_fraude s
+           JOIN tipo_senal_fraude t
+             ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
+           JOIN familia_senal_fraude f
+             ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
            JOIN estado_alerta_fraude ea
-             ON ea.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-          WHERE true ${condicionEstado} ${condicionTipo}`,
+             ON ea.id_estado_alerta_fraude = s.id_estado_alerta_fraude
+          WHERE ${SQL_SOLO_LOGIN} ${condicionEstado} ${condicionTipo}`,
       );
 
       const pagina = await cliente.query<FilaAlertaFraude>(
-        `SELECT af.id_alerta_fraude, ta.tipo_alerta_fraude_nombre AS tipo_alerta,
-                af.clave, af.detalle, af.contador,
-                af.ventana_inicio, ea.estado_alerta_fraude_nombre AS estado,
-                af.fecha_creacion, af.fecha_actualizacion,
-                ${SQL_CUENTAS_AFECTADAS} AS cuentas_afectadas
-           FROM alerta_fraude af
-           JOIN tipo_alerta_fraude ta
-             ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
-           JOIN estado_alerta_fraude ea
-             ON ea.id_estado_alerta_fraude = af.id_estado_alerta_fraude
-          WHERE true ${condicionEstado} ${condicionTipo}
-          ORDER BY af.fecha_actualizacion DESC, af.id_alerta_fraude DESC
+        `${SQL_SELECT_ALERTA_LOGIN}
+          WHERE ${SQL_SOLO_LOGIN} ${condicionEstado} ${condicionTipo}
+          ORDER BY s.fecha_actualizacion DESC, s.id_senal_fraude DESC
           LIMIT $1 OFFSET $2`,
         [limite, saltar],
       );
@@ -462,20 +484,16 @@ export class FraudeLoginService {
       );
 
       const conteo = await cliente.query<{ total: string }>(
-        `SELECT count(*) AS total FROM notificacion_fraude WHERE id_usuario = $1`,
+        `SELECT count(*) AS total
+           FROM notificacion_fraude
+          WHERE id_usuario = $1 AND id_senal_fraude IS NOT NULL`,
         [idUsuario],
       );
 
       const pagina = await cliente.query<FilaAlertaFraudeUsuario>(
-        `SELECT af.id_alerta_fraude, ta.tipo_alerta_fraude_nombre AS tipo_alerta,
-                af.clave, af.detalle, af.contador, af.ventana_inicio,
-                af.fecha_creacion, nf.fecha_lectura
-           FROM notificacion_fraude nf
-           JOIN alerta_fraude af ON af.id_alerta_fraude = nf.id_alerta_fraude
-           JOIN tipo_alerta_fraude ta
-             ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
+        `${SQL_SELECT_ALERTA_USUARIO}
           WHERE nf.id_usuario = $1
-          ORDER BY af.fecha_creacion DESC, af.id_alerta_fraude DESC
+          ORDER BY nf.fecha_creacion DESC, s.id_senal_fraude DESC
           LIMIT $2 OFFSET $3`,
         [idUsuario, limite, saltar],
       );
@@ -509,7 +527,7 @@ export class FraudeLoginService {
       actualizado = await pool.query(
         `UPDATE notificacion_fraude
             SET fecha_lectura = COALESCE(fecha_lectura, now())
-          WHERE id_alerta_fraude = $1 AND id_usuario = $2
+          WHERE id_senal_fraude = $1 AND id_usuario = $2
           RETURNING id_notificacion`,
         [id, idUsuario],
       );
@@ -533,14 +551,8 @@ export class FraudeLoginService {
     let fila;
     try {
       fila = await pool.query<FilaAlertaFraudeUsuario>(
-        `SELECT af.id_alerta_fraude, ta.tipo_alerta_fraude_nombre AS tipo_alerta,
-                af.clave, af.detalle, af.contador, af.ventana_inicio,
-                af.fecha_creacion, nf.fecha_lectura
-           FROM notificacion_fraude nf
-           JOIN alerta_fraude af ON af.id_alerta_fraude = nf.id_alerta_fraude
-           JOIN tipo_alerta_fraude ta
-             ON ta.id_tipo_alerta_fraude = af.id_tipo_alerta_fraude
-          WHERE af.id_alerta_fraude = $1 AND nf.id_usuario = $2`,
+        `${SQL_SELECT_ALERTA_USUARIO}
+          WHERE s.id_senal_fraude = $1 AND nf.id_usuario = $2`,
         [id, idUsuario],
       );
     } catch (error) {
