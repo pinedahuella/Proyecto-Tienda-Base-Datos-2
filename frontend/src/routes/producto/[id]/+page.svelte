@@ -5,17 +5,6 @@
 	import Pie from '$lib/Pie.svelte';
 	import Resenas from '$lib/Resenas.svelte';
 	import { conJson, mensajeUtil, pedir } from '$lib/api';
-	import {
-		agregarLinea,
-		crearPedido,
-		guardarPedidoAbierto,
-		leerPedidoAbierto,
-		olvidarPedidoAbierto,
-		pedidoCaduco,
-		traerPedido,
-		traerDirecciones,
-		direccionEnUnaLinea
-	} from '$lib/pedido';
 	import { carrito } from '$lib/estadoCarrito.svelte';
 	import { registrarVista, registrarCarrito, type OrigenVista } from '$lib/eventos';
 	import { textoPorcentaje, tieneDescuento } from '$lib/descuento';
@@ -440,19 +429,14 @@
 	let totalResenas = $state<number | null>(null);
 
 
-	// ------------------------------------------------------------- al pedido
+	// ------------------------------------------------------------ al carrito
 	/**
-	 * Agregar una presentacion al pedido abierto, con las rutas de
-	 * /comprador/pedidos (ver $lib/pedido.ts).
-	 *
-	 * Si todavia no hay pedido abierto se abre uno aqui mismo, con la primera
-	 * direccion del usuario: obligar a ir al panel a abrirlo y volver seria
-	 * perder la ficha que se estaba mirando. Sin ninguna direccion no se puede,
-	 * y se dice donde se crea.
+	 * Agregar una presentacion al carrito de la cuenta, que vive en Redis
+	 * (/carrito). La compra sale del carrito con el checkout; el flujo viejo
+	 * de abrir un pedido y llenarlo linea por linea ya no se usa.
 	 */
 	let haySesion = $state(false);
 	let cantidades = $state<Record<number, number | string | undefined>>({});
-	/** El id de la variante que se esta agregando ahora mismo; 0 = ninguna. */
 	/** La OFERTA que se esta agregando ahora mismo; '' = ninguna. */
 	let agregando = $state('');
 	let avisoPedido = $state('');
@@ -465,13 +449,6 @@
 	 * que "agregala en tu panel" sin enlace obliga a adivinar la ruta.
 	 */
 	let salidaDelError = $state<{ texto: string; href: string } | null>(null);
-	/**
-	 * A donde va el pedido que se acaba de abrir, y si habia mas de una para
-	 * elegir. Solo se llena cuando el pedido se abre AQUI: si ya venia abierto
-	 * de antes, la ficha no sabe (ni le hace falta) cual lleva puesta.
-	 */
-	let direccionDelPedido = $state('');
-	let hayVariasDirecciones = $state(false);
 	/**
 	 * De que presentacion habla el aviso. Sin esto el mensaje salia arriba de
 	 * todas, a varios cientos de pixeles del boton que se pulso: en un producto
@@ -556,59 +533,6 @@
 	}
 
 	onMount(mirarSesion);
-
-	/** El pedido abierto, abriendo uno si hace falta. null si no se pudo. */
-	async function pedidoAbierto(): Promise<string | null> {
-		const guardado = leerPedidoAbierto();
-		if (guardado) return guardado;
-
-		const rDirecciones = await traerDirecciones();
-
-		// "No pude preguntar" y "no tienes ninguna" son cosas distintas, y
-		// mandar a agregar una direccion cuando lo que se cayo fue el servidor
-		// manda a la persona a arreglar algo que no esta roto.
-		if (rDirecciones.estado === 401) {
-			haySesion = false;
-			errorPedido = 'Se acabo tu sesion. Vuelve a entrar para seguir.';
-			salidaDelError = { texto: 'Iniciar sesion', href: '/entrar' };
-			return null;
-		}
-		if (!rDirecciones.ok || !rDirecciones.payload) {
-			errorPedido =
-				rDirecciones.estado === 0
-					? 'No se pudo conectar con el servidor'
-					: rDirecciones.mensaje;
-			return null;
-		}
-		if (rDirecciones.payload.length === 0) {
-			// Antes decia "Agrega una en tu panel" y ahi se acababa: no habia
-			// enlace, y desde la ficha no hay ningun campo de direccion, asi que
-			// la persona quedaba sin saber adonde ir.
-			errorPedido = 'Para abrir un pedido hace falta una direccion de entrega.';
-			salidaDelError = { texto: 'Agregar una direccion', href: '/panel?s=cuenta' };
-			return null;
-		}
-
-		// Se abre con la PRIMERA direccion, pero eso ya no queda invisible.
-		//
-		// Antes se tomaba `payload[0]` y ahi se acababa: quien tuviera tres
-		// direcciones veia su pedido salir hacia una que, desde su punto de
-		// vista, era al azar -- y no habia ni donde mirarla ni donde cambiarla.
-		// Elegir aqui obligaria a meter un selector en la ficha, que no es el
-		// sitio; asi que se usa la primera, SE DICE cual es, y se cambia al
-		// pagar, que es cuando de verdad importa.
-		const elegida = rDirecciones.payload[0];
-		const rPedido = await crearPedido(elegida.id_direccion);
-		if (!rPedido.ok || !rPedido.payload) {
-			errorPedido = rPedido.estado === 0 ? 'No se pudo conectar con el servidor' : rPedido.mensaje;
-			return null;
-		}
-
-		guardarPedidoAbierto(rPedido.payload.id_pedido);
-		direccionDelPedido = direccionEnUnaLinea(elegida);
-		hayVariasDirecciones = rDirecciones.payload.length > 1;
-		return rPedido.payload.id_pedido;
-	}
 
 	/**
 	 * Se agrega una OFERTA, no una variante: la misma presentacion la pueden
@@ -1086,15 +1010,6 @@
 										{#if ofertaDelAviso === o.id_oferta && avisoPedido}
 											<p class="aviso-pedido ok" role="status">
 												{avisoPedido}
-												<!-- A donde va, solo cuando el pedido se acaba de abrir
-												     aqui: antes se tomaba la primera direccion en
-												     silencio y quien tuviera tres no sabia cual se uso. -->
-												{#if direccionDelPedido}
-													<span class="destino">
-														Se entrega en <strong>{direccionDelPedido}</strong>{#if hayVariasDirecciones}
-															&mdash; puedes cambiarla al pagar{/if}.
-													</span>
-												{/if}
 											</p>
 										{/if}
 										{#if ofertaDelAviso === o.id_oferta && errorPedido}
@@ -1789,14 +1704,6 @@
 	/* El enlace que saca del error. Va en linea con el texto, y subrayado:
 	   dentro de un recuadro rojo, algo que solo cambia de color no se lee
 	   como pulsable. */
-	/* A donde se entrega, debajo del aviso y en gris: es contexto, no la
-	   respuesta a lo que la persona acaba de pulsar. */
-	.destino {
-		display: block;
-		margin-top: 0.35rem;
-		color: var(--gris);
-	}
-
 	.salida {
 		display: inline-block;
 		margin-left: 0.35rem;

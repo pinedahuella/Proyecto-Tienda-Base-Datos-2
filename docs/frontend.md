@@ -100,8 +100,7 @@ es el backend, que responde 403 o 404.
 | `src/lib/OfertasVendedor.svelte` | las ofertas: verlas, editar precio/estado/stock, publicar y abrir o cerrar la venta relampago. Con `administraLaTienda` entra por el catalogo paginado en vez de traerlas todas |
 | `src/lib/PanelVendedor.svelte` | el catalogo compartido (alta, edicion e historial por fecha), solo para la tienda o un admin |
 | `src/lib/Direcciones.svelte` | direcciones, dentro del panel |
-| `src/lib/Pedido.svelte` | el pedido abierto y sus lineas, dentro del panel |
-| `src/lib/pedido.ts` | las cuatro rutas de `/comprador/pedidos` y el id del pedido abierto |
+| `src/lib/pedido.ts` | las rutas de `/comprador/pedidos` que se usan (lista, detalle, direccion, comprar, cancelar). La compra sale del carrito de Redis; abrir un pedido vacio y llenarlo linea por linea ya no existe en el frontend |
 | `src/lib/api.ts` | `pedir()`, la unica forma de hablar con el backend. Pide a `/api`, y el proxy de `vite.config.ts` lo pasa al backend (ver `docs/ENTRAR-DESDE-EL-CELULAR.md`) |
 | `src/lib/Cabecera.svelte` | cabecera pegada arriba |
 | `src/lib/Pie.svelte` | pie |

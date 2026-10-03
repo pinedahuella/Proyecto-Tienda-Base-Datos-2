@@ -1,20 +1,20 @@
 import { browser } from '$app/environment';
-import { pedir, conJson, type RespuestaApi } from './api';
+import { pedir, conJson } from './api';
 
 /**
- * El pedido abierto, y todo lo que hace falta para hablar con
- * /comprador/pedidos.
+ * Todo lo que hace falta para hablar con /comprador/pedidos.
  *
- * Las ocho rutas (ninguna pide un rol, solo sesion: comprar no es privilegio
+ * La compra sale del carrito de Redis (/carrito y el checkout). Las rutas
+ * viejas para abrir un pedido vacio y llenarlo linea por linea siguen en el
+ * backend, pero ninguna pantalla las usa, asi que aqui ya no estan.
+ *
+ * Las rutas que se usan (ninguna pide un rol, solo sesion: comprar no es privilegio
  * de nadie, cualquiera con cuenta compra -- tambien un vendedor o un admin):
  *
- *   POST   /comprador/pedidos                         abre un pedido
  *   GET    /comprador/pedidos                         los mios, resumidos
  *   GET    /comprador/pedidos/metodos-pago            el catalogo de formas de pago
  *   GET    /comprador/pedidos/:id                     el pedido, su direccion y sus lineas
  *   PATCH  /comprador/pedidos/:id                     cambia la direccion de entrega
- *   POST   /comprador/pedidos/:id/detalles            agrega (o suma) una linea
- *   DELETE /comprador/pedidos/:id/detalles/:idDetalle quita una linea
  *   POST   /comprador/pedidos/:id/comprar             cierra la compra
  *   POST   /comprador/pedidos/:id/cancelar            cancela (y devuelve stock si ya se compro)
  *
@@ -26,13 +26,8 @@ import { pedir, conJson, type RespuestaApi } from './api';
  */
 
 /**
- * El id del pedido abierto vive en localStorage, no en una cookie ni en la
- * URL: no es un secreto (el backend comprueba que el pedido sea tuyo y da 404
- * si no lo es) y tiene que sobrevivir a recargar la pagina.
- *
- * Ya existe `GET /comprador/pedidos`, asi que perderlo dejo de ser fatal: se
- * puede volver a encontrar el pendiente en esa lista. Se sigue guardando
- * porque evita esa consulta en cada carga.
+ * Donde el flujo viejo guardaba el id del pedido abierto. Ya nadie la
+ * escribe; solo se borra (ver olvidarPedidoAbierto).
  */
 const LLAVE = 'mesh.pedido';
 
@@ -156,17 +151,6 @@ export interface ResumenPedido {
 	fecha_cancelacion: string | null;
 }
 
-/** Lo que devuelve POST /comprador/pedidos/:id/detalles. */
-export interface LineaAgregada {
-	id_pedido: number;
-	id_oferta: number;
-	id_usuario_vendedor: number;
-	id_pedido_producto: number;
-	/** La cantidad ACUMULADA de esa variante en el pedido, no la de esta llamada. */
-	cantidad: number;
-	stock_disponible: number;
-}
-
 export interface MetodoPago {
 	id_metodo_pago: number;
 	/** Esto es lo que hay que mandar en `metodo_pago` al comprar, NO el id. */
@@ -225,19 +209,11 @@ export interface ResultadoCancelacion {
 	stock: StockResultante[];
 }
 
-// ------------------------------------------------------------ el id guardado
-export function leerPedidoAbierto(): string | null {
-	if (!browser) return null;
-	return localStorage.getItem(LLAVE);
-}
-
-export function guardarPedidoAbierto(idPedido: string) {
-	if (!browser) return;
-	localStorage.setItem(LLAVE, idPedido);
-}
-
+// ------------------------------------------------------------ limpieza
 export function olvidarPedidoAbierto() {
 	if (!browser) return;
+	// LLAVE ya no la escribe nadie: era del pedido abierto del flujo viejo.
+	// Se borra por la misma razon que la de abajo.
 	localStorage.removeItem(LLAVE);
 	// LLAVE_MARCADAS ya no la escribe nadie: era del carrito viejo, que se
 	// borro con `Carrito.svelte`. Se sigue BORRANDO a proposito, porque en los
@@ -407,18 +383,6 @@ export function traerOfertaEnFecha(idOferta: string | number, fecha: string) {
 	);
 }
 
-/** Abre un pedido nuevo sobre una direccion del usuario. */
-export function crearPedido(idDireccion: string | number) {
-	return pedir<{ id_pedido: string }>(
-		'/comprador/pedidos',
-		// Se manda TAL CUAL, sin Number(). El backend lo declara `number | string`
-		// a proposito (dto/cambiar-direccion-pedido.ts) y lo resuelve el mismo:
-		// es un bigint que el driver entrega como texto para no perder precision,
-		// y convertirlo aqui vuelve a meter justo la perdida que el backend evita.
-		conJson('POST', { id_direccion: idDireccion })
-	);
-}
-
 /** Todos los pedidos propios, resumidos, del mas nuevo al mas viejo. */
 export function listarPedidos() {
 	return pedir<ResumenPedido[]>('/comprador/pedidos');
@@ -444,31 +408,6 @@ export function cambiarDireccionPedido(idPedido: string, idDireccion: string | n
 		`/comprador/pedidos/${idPedido}`,
 		conJson('PATCH', { id_direccion: idDireccion })
 	);
-}
-
-/**
- * Agrega una OFERTA al pedido, no un producto.
- *
- * Desde el giro multi-vendedor la misma variante la puede vender media
- * docena de personas, cada una a su precio: hay que decir a cual se le
- * compra. El backend resuelve solo el producto, la variante, el nombre y el
- * precio a partir de la oferta, asi que desde aqui no se manda ninguno --
- * y por eso nadie puede mandar un precio falso.
- */
-export function agregarLinea(
-	idPedido: string,
-	linea: { id_oferta: number; cantidad: number }
-) {
-	return pedir<LineaAgregada>(
-		`/comprador/pedidos/${idPedido}/detalles`,
-		conJson('POST', linea)
-	);
-}
-
-export function quitarLinea(idPedido: string, idDetalle: string) {
-	return pedir<null>(`/comprador/pedidos/${idPedido}/detalles/${idDetalle}`, {
-		method: 'DELETE'
-	});
 }
 
 /**
@@ -522,16 +461,4 @@ export function totalPedido(detalles: LineaPedido[]): number {
 
 export function quetzales(n: number): string {
 	return 'Q' + n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-}
-
-/**
- * true si la respuesta dice que el pedido guardado ya no sirve.
- *
- * El backend da 404 tanto si el pedido no existe como si es de otra persona
- * (no confirma por esta via que exista uno ajeno). En los dos casos lo que
- * hay guardado en este navegador esta caduco y hay que olvidarlo, o la
- * pantalla se queda pidiendo para siempre un pedido que nunca va a llegar.
- */
-export function pedidoCaduco(r: RespuestaApi<unknown>): boolean {
-	return r.estado === 404;
 }

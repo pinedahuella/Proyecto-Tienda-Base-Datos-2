@@ -849,6 +849,16 @@ y dos ni figuraban en la lista: `restarLinea` (con su interfaz `LineaRestada`),
 sigue BORRANDO a proposito, porque en los navegadores que usaron el carrito
 viejo quedo escrita y solo se va por ahi.
 
+**AL DIA 2026-10-02: el flujo viejo del pedido abierto se fue entero.** Desde
+que el boton Agregar de la ficha va al carrito de Redis, nadie abria un pedido
+vacio ni le agregaba lineas. Se midio otra vez con `grep` y se borraron
+`Pedido.svelte` (la caja "Tu pedido / Abrir pedido" de `/pedidos`, que todavia
+salia), `pedidoAbierto()` de la ficha y su aviso de direccion, y de `pedido.ts`
+`leerPedidoAbierto`, `guardarPedidoAbierto`, `crearPedido`, `agregarLinea`,
+`quitarLinea`, `pedidoCaduco` y `LineaAgregada`. `olvidarPedidoAbierto` se
+queda para borrar la llave vieja del localStorage. En el backend las rutas
+`POST /comprador/pedidos` y `/detalles` siguen; son de David.
+
 **La leccion, que es la de siempre en este proyecto:** una lista de codigo
 muerto escrita a mano caduca sin avisar. Antes de borrar, se mide -- un `grep`
 por nombre cuesta un minuto y aqui evito romper cinco archivos.

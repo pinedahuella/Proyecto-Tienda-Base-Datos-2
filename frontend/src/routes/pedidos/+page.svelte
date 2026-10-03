@@ -3,13 +3,13 @@
 	import { goto } from '$app/navigation';
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
-	import Pedido from '$lib/Pedido.svelte';
 	import MisPedidos from '$lib/MisPedidos.svelte';
 	import { cerrarSesion, SesionIndeterminada, verificarSesion } from '$lib/sesion';
 	import { carrito } from '$lib/estadoCarrito.svelte';
 
 	/**
-	 * Mis pedidos: el que esta abierto y todos los anteriores.
+	 * Mis pedidos: todo lo que se ha comprado. La compra sale del carrito, asi
+	 * que ya no hay un pedido abierto que llenar aqui.
 	 *
 	 * Pagina propia, y no una seccion mas del panel. Antes vivian los dos
 	 * dentro de /panel, debajo del perfil y de las direcciones: comprar y
@@ -65,11 +65,7 @@
 		{:else}
 			<div class="saludo">
 				<h1>Mis pedidos</h1>
-				<p>El que tienes abierto y todo lo que has comprado antes.</p>
-			</div>
-
-			<div class="bloque">
-				<Pedido alExpirarSesion={expiro} />
+				<p>Todo lo que has comprado.</p>
 			</div>
 
 			<div class="bloque">

@@ -3,7 +3,32 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-01**.
+Ultima actualizacion: **2026-10-02**.
+
+**EMPIEZA AQUI (02-10). El frontend ya no tiene el flujo viejo del pedido abierto. SIN commitear.** GitHub no
+traia nada nuevo (main = origin en 66ea178). Se borro lo que quedaba de abrir un pedido vacio y llenarlo linea por
+linea, que ya nadie usaba porque el boton Agregar va al carrito de Redis:
+
+```
+frontend        lib/Pedido.svelte borrado (la caja "Tu pedido / Abrir pedido" que salia en /pedidos);
+                producto/[id] sin pedidoAbierto() ni el aviso "Se entrega en"; pedido.ts sin leerPedidoAbierto,
+                guardarPedidoAbierto, crearPedido, agregarLinea, quitarLinea, pedidoCaduco ni LineaAgregada.
+                olvidarPedidoAbierto se queda (borra la llave vieja del localStorage)
+docs            frontend.md, PENDIENTES 3, BACKEND-PENDIENTE (agregarLinea ya no le toca a David; las rutas
+                POST /comprador/pedidos y /detalles quedan sin uso, el decide si las borra)
+```
+
+Medido: svelte-check 0 en 218 archivos, `npm run build` bien, `arrancar.ps1` entero exit 0 (033 migraciones, 3105
+de 3105 con vector, todas las ofertas con su variante en variante_catalogo, grafo cuadrado). Backend y frontend
+con `panel-comandos\servicios.ps1`. En Edge sin ventana como admin: Agregar en la ficha deja la linea en el carrito
+de Redis, `/pedidos` muestra solo "Pedidos anteriores" y 0 errores en consola. Se borro despues la linea del carrito
+y los 2 eventos de la prueba en ClickHouse (vista_producto, carrito_producto y vistas_por_producto_dia del dia).
+Quedo TODO LEVANTADO. De David solo queda la llave foranea de `oferta` a `variante_catalogo`.
+
+Ideas del equipo sin decidir (02-10): tendencias con las palabras de las resenas (significant_text de
+Elasticsearch, con la calificacion como peso y sin cuentas con senal_fraude); detectar cuentas con muchas resenas
+de 5 estrellas casi iguales por vector (senal nueva de fraude, con largo minimo); buscar por intencion sobre el
+texto de las resenas. Opinion dada: mantener pgvector y copiar el vector a Elasticsearch (ADR-17), no mudarlo.
 
 **EMPIEZA AQUI (01-10, madrugada). Comprar sin MongoDB queda con el diseno de David, probado y pusheado.** David subio
 6f89237 sin conocer nuestra 029 y 030, que nunca se habian subido, con otro diseno. Por decision de Meme se quedo el suyo:

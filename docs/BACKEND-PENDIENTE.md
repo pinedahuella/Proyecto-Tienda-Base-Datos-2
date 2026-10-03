@@ -79,8 +79,13 @@ MongoDB parado, y la fila 11 de `docs/CONSISTENCIA-CHECKOUT.md` queda resuelta.
 
 Queda de tu lado: la etapa 2 (la llave foranea de `oferta` a
 `variante_catalogo`), cuando `migrations/datos/` y el ETL inserten el catalogo
-antes que las ofertas, y `PedidosCompradorService.agregarLinea`, que segun tu
-plan sigue leyendo MongoDB.
+antes que las ofertas.
+
+`PedidosCompradorService.agregarLinea` sigue leyendo MongoDB, pero ya no
+importa: desde el 2026-10-02 ninguna pantalla abre un pedido vacio ni le agrega
+lineas (todo pasa por el carrito de Redis y el checkout), y el frontend borro
+ese flujo. Las rutas `POST /comprador/pedidos`, `POST` y `DELETE
+/comprador/pedidos/:id/detalles` quedan sin uso; tu decides si las borras.
 
 ## LO QUE TE TOCA, EN UNA LISTA (al 2026-09-28 en la noche)
 
