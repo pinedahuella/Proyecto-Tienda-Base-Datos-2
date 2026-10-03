@@ -43,6 +43,8 @@ import { CarritoService } from './services/carrito/carrito.service';
 import { FraudeController } from './controllers/fraude/fraude.controller';
 import { AnillosDetectorService } from './services/fraude/anillos-detector.service';
 import { PatronesFraudeDetectorService } from './services/fraude/patrones-fraude-detector.service';
+import { ResenasRepetidasDetectorService } from './services/fraude/resenas-repetidas-detector.service';
+import { AnilloDeTextoDetectorService } from './services/fraude/anillo-de-texto-detector.service';
 import { HallazgosEventoFraudeDetectorService } from './services/fraude/hallazgos-evento-fraude-detector.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
 import { AdminReportesService } from './services/admin/admin-reportes.service';
@@ -59,6 +61,8 @@ import { BuscadorFacetadoController } from './controllers/buscador/facetado.cont
 import { BuscadorFacetadoService } from './services/buscador/facetado.service';
 import { BuscadorSugerenciasController } from './controllers/buscador/sugerencias.controller';
 import { BuscadorSugerenciasService } from './services/buscador/sugerencias.service';
+import { BuscadorIntencionController } from './controllers/buscador/intencion.controller';
+import { BuscadorIntencionService } from './services/buscador/intencion.service';
 import { BuscadorSyncService } from './services/buscador/buscador-sync.service';
 import { EventoProductoSyncService } from './services/productos/evento-producto-sync.service';
 import { EventosAutenticacionSyncService } from './services/eventos-autenticacion/eventos-autenticacion-sync.service';
@@ -103,6 +107,7 @@ import { TambienVieronService } from './services/productos/tambien-vieron.servic
 import { SimilaresController } from './controllers/productos/similares.controller';
 import { SimilaresService } from './services/productos/similares.service';
 import { VectoresSyncService } from './services/productos/vectores-sync.service';
+import { EventoComentarioSyncService } from './services/resenas/evento-comentario-sync.service';
 import { ParaTiController } from './controllers/productos/para-ti.controller';
 import { ParaTiService } from './services/productos/para-ti.service';
 import { ReglasDescuentoAutomaticoController } from './controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller';
@@ -151,6 +156,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BuscadorProductosController,
     BuscadorFacetadoController,
     BuscadorSugerenciasController,
+    BuscadorIntencionController,
     AdminFraudeLoginController,
     AdminFraudeAnillosController,
     AdminCasosFraudeController,
@@ -192,6 +198,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     CarritoService,
     AnillosDetectorService,
     PatronesFraudeDetectorService,
+    ResenasRepetidasDetectorService,
+    AnilloDeTextoDetectorService,
     HallazgosEventoFraudeDetectorService,
     AdminReportesService,
     InventarioLimitadoService,
@@ -201,6 +209,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BuscadorProductosService,
     BuscadorFacetadoService,
     BuscadorSugerenciasService,
+    BuscadorIntencionService,
     BuscadorSyncService,
     EventoProductoSyncService,
     EventosAutenticacionSyncService,
@@ -232,6 +241,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     TambienVieronService,
     SimilaresService,
     VectoresSyncService,
+    EventoComentarioSyncService,
     ParaTiService,
     ReglasDescuentoAutomaticoService,
     ReglasDescuentoPeriodoService,

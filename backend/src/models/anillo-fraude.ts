@@ -10,7 +10,9 @@ export type TipoAnilloFraude =
   | 'anillo_en_el_tiempo'
   | 'favor_devuelto'
   | 'coordinados'
-  | 'reputacion_expres';
+  | 'reputacion_expres'
+  | 'resenas_repetidas'
+  | 'anillo_de_texto';
 
 /**
  * Una cuenta del anillo, derivada -- NO hay tabla `anillo_fraude_cuenta`:

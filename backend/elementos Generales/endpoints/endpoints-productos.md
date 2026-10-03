@@ -977,27 +977,33 @@ que algo las toque de nuevo o pase el resto de su vida útil sin que ocurra.
 
 Recomendacion semantica de la Entrega final (5 puntos): productos parecidos
 por el **significado** de nombre + categoria + descripcion, no por
-categoria/precio como R2/R3. La parte de datos es del compañero
-(`migrations/024_vectores_productos.sql`, pgvector, funcion
-`productos_similares(id, limite)`; `etl/cargar_vectores.ps1` llena
-`producto_vector` pidiendole el vector a **Ollama**, modelo
-`paraphrase-multilingual`, 768 dimensiones) -- de este lado solo esta la
-ruta, la bandera y el worker que la mantiene al dia.
+categoria/precio como R2/R3. El vector (pedido a **Ollama**, modelo
+`paraphrase-multilingual`, 768 dimensiones) vive desde el 2026-10-02 en el
+documento de `mesh_productos` (**Elasticsearch**, campo `dense_vector`
+`vector`, con `vector_hash`, `vector_grupo` y `vector_modelo`). Antes vivia
+en `producto_vector` (PostgreSQL, pgvector, migraciones 024 y 027, funcion
+`productos_similares(id, limite)`); esa tabla y esa funcion ya no las usa el
+backend. De este lado estan la ruta, la bandera y el worker que lo mantiene
+al dia.
 
 **Pública, sin sesión**, igual que `tambien-vieron`. Valida el `:id` con el
-mismo `REGEX_ID` que el resto de rutas de producto. Por dentro es una sola
-consulta:
+mismo `REGEX_ID` que el resto de rutas de producto. Por dentro son dos
+consultas a Elasticsearch:
 
-```sql
-SELECT id_producto, similitud FROM productos_similares($1, 6);
-```
+1. `GET mesh_productos/_doc/:id` con `vector` y `vector_grupo`.
+2. Una busqueda `knn` con ese vector (`k` 200, `num_candidates` 400) y de
+   filtro `estado: activo`, sin el propio producto y sin ninguno de su mismo
+   `vector_grupo`. Del resultado se queda con uno por grupo (el mas
+   cercano) y corta en 6 -- las mismas reglas de `productos_similares()`.
+   `similitud` es el coseno: Elasticsearch puntua `(1 + coseno) / 2`, y se
+   devuelve a `2 * puntaje - 1`, la misma escala que daba pgvector.
 
 y el mismo enriquecido con Mongo (`$in` de ids) que ya usa
-`TambienVieronSyncService` -- si un id de Postgres no tiene documento en
+`TambienVieronSyncService` -- si un id del indice no tiene documento en
 Mongo, sale con `producto: null` en vez de romper la respuesta. Si el
-producto pedido no tiene vector todavia (no lo alcanzo
-`cargar_vectores.ps1`, o el worker de abajo), `productos_similares()`
-devuelve vacio y la ruta contesta `[]`, nunca un error.
+producto pedido no existe en el indice o no tiene vector todavia (no lo
+alcanzo la carga, o el worker de abajo), la ruta contesta `[]`, nunca un
+error. Si Elasticsearch no responde, `503`.
 
 **200**
 
@@ -1040,19 +1046,42 @@ diferencia de una vista o una busqueda reciente):
    nombre, descripcion, categoria.nombre, estado).
 2. Arma el mismo texto que `cargar_vectores.ps1`
    (`"nombre. Categoria X. descripcion"`) y calcula su hash MD5.
-3. Compara contra `producto_vector.texto_hash` en Postgres:
+3. Compara contra el `vector_hash` que ya tiene el documento en
+   Elasticsearch (un `mget`):
    - **Hash igual** (la bandera se puso por un cambio de estado, o de
      caracteristicas/variantes que no afectan el texto): **no llama a
-     Ollama**, solo actualiza `activo`/`grupo` si de verdad cambiaron
-     (`UPDATE producto_vector SET activo = ..., grupo = ...`).
-   - **Hash distinto** (o el producto no tenia vector): pide los vectores a
-     Ollama en lotes de 32 (`/api/embed`) y hace el mismo
-     `INSERT ... ON CONFLICT (id_producto) DO UPDATE` que el script del
-     compañero -- conviven sin problema, el `ON CONFLICT` deja la ultima
-     escritura.
+     Ollama**, solo actualiza `vector_grupo` si de verdad cambio. El
+     "activo" ya no se guarda aparte: es el `estado` del documento.
+   - **Hash distinto**: pide los vectores a Ollama en lotes de 32
+     (`/api/embed`) y los escribe con un `_bulk` de actualizaciones
+     parciales (`vector`, `vector_hash`, `vector_grupo`, `vector_modelo`).
+   - **El documento no existe todavia en el indice**: se deja pendiente.
 4. Baja la bandera en Mongo solo de los productos que sí quedaron al día;
-   los que fallan (Ollama caido, Postgres caido) se reintentan solos en el
-   siguiente ciclo, sin tumbar el resto del lote.
+   los que fallan (Ollama caido, Elasticsearch caido) se reintentan solos en
+   el siguiente ciclo, sin tumbar el resto del lote.
+
+`BuscadorSyncService` actualiza ahora el documento con `update`
+(`doc_as_upsert`) y no con `index`, para no borrar el vector que escribe
+este worker: cada uno toca solo sus campos.
+
+### Cambio a Elasticsearch -- probado 2026-10-02
+
+Contra Elasticsearch 8.15.3, MongoDB y el Ollama reales, con los 102
+productos locales.
+
+| Caso | Resultado |
+|---|---|
+| Los 102 productos marcados `pendiente_vector` y una corrida del worker | `102 pendiente(s), 102 recalculado(s), 0 solo grupo, 102 al dia`, en unos 16 s; los 102 documentos con `vector`; `pendiente_vector` en 0 |
+| Producto 1: `vector_hash`, `vector_grupo` y vector contra `producto_vector` | identicos |
+| `BuscadorSyncService` sobre el producto 1 | el documento conserva el vector |
+| `SimilaresService` para el producto 1 | los mismos 6 que `productos_similares(1, 6)`, en el mismo orden salvo dos puestos casi empatados (3 y 7); similitudes a menos de 0,002 de las de pgvector (el indice cuantiza a int8) |
+| `SimilaresService` para el producto 50 | los mismos 6 en el mismo orden |
+| `SimilaresService` para un id inexistente (99999) | `[]` |
+
+Hay que agregar los 4 campos al mapping de `elastic/001_indice.json` (lo
+lleva otra persona), y `etl/cargar_busqueda.sh` reconstruye el indice entero
+y borra los vectores: despues hay que marcar `pendiente_vector` en todo el
+catalogo y dejar correr el worker.
 
 ### Probado en vivo -- 2026-09-26
 

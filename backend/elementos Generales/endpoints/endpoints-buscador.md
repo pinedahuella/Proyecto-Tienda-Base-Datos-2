@@ -7,6 +7,12 @@ de `backend/`, no se toca desde aca) -- esto solo documenta la ruta.
 Código: `src/controllers/buscador/productos.controller.ts` +
 `src/services/buscador/productos.service.ts`.
 
+Hay cinco rutas: la búsqueda por nombre (`GET /buscador/productos`), la de admin
+(`.../admin`), el buscador facetado (`.../facetado`), el autocompletado
+(`.../sugerencias`) y, desde 2026-10-02, la **búsqueda por intención**
+(`.../intencion`), que busca por significado y no por palabras. La sección
+"Cuándo usar cuál", dentro de esta última, dice cuál elegir.
+
 `GET /buscador` (la comprobacion de conexion con Elasticsearch, mismo patron
 que `GET /db`, `/documental`, `/clave-valor` y `/grafo`) esta documentada en
 `endpoints.md`, no aca.
@@ -49,6 +55,8 @@ Detalle completo en
 ## GET /buscador/productos
 
 **Pública**, sin sesión -- igual que el resto del catálogo (`/productos`).
+Busca por **palabras**; para buscar por lo que se quiere lograr ("mi ventana
+está muy solitaria") está `GET /buscador/productos/intencion`, más abajo.
 **Siempre** trae solo productos `activo`: el filtro va fijo en
 `BuscadorProductosService.buscar()` (`bool.filter` sobre `estado`), no es
 un query param y no se le puede pedir que lo quite. Para ver cualquier otro
@@ -292,6 +300,162 @@ del buscador.
 | `?prefijo=lap&limite=1` | 1 resultado |
 | `?prefijo=a&limite=999` | topado en `20` |
 | `npx tsc --noEmit` y `npx eslint "src/**/*.ts"` sobre el repo completo | limpios |
+
+## GET /buscador/productos/intencion (agregado 2026-10-02)
+
+La **búsqueda por intención**: la persona dice lo que quiere lograr, con sus
+palabras ("mi ventana está muy solitaria"), y se le muestran productos cuyas
+**reseñas o descripción se parecen en significado**, aunque no compartan ni una
+palabra. Con la reseña de una maceta que dice "decora muy bien la ventana", esa
+frase encuentra la maceta, cosa que `GET /buscador/productos` (que busca
+palabras) no puede hacer.
+(`BuscadorIntencionService`, `controllers/buscador/intencion.controller.ts`.)
+
+### Cuándo usar cuál
+
+| Quiero... | Ruta |
+|---|---|
+| Encontrar un producto del que sé el nombre (con errores de tecleo) | `GET /buscador/productos?nombre=` |
+| Completar el nombre mientras escribo | `GET /buscador/productos/sugerencias?prefijo=` |
+| Filtrar el catálogo por categoría, precio o nota | `GET /buscador/productos/facetado` |
+| Encontrar algo por lo que quiero lograr o por cómo lo usaría | **`GET /buscador/productos/intencion?q=`** |
+
+### Cómo funciona
+
+La frase se convierte en un vector con el mismo modelo de Ollama
+(`paraphrase-multilingual`, 768 dimensiones) que ya vectoriza el catálogo y las
+reseñas, y se hacen dos búsquedas kNN en Elasticsearch:
+
+1. **Sobre las reseñas** (`mesh_comentarios`; solo las raíz, no las respuestas, y
+   de calificación `calificacion_minima` o más). Es la fuente principal: la gente
+   cuenta para qué le sirvió algo, y así se busca. También es la que dice
+   **por qué** salió un producto (`motivo`).
+2. **Sobre los productos activos** (`mesh_productos`): nombre, categoría y
+   descripción.
+
+Se juntan por producto: el `puntaje` es el mayor de los dos parecidos (0 a 1, coseno)
+y por él se ordena. Cada parecido tiene un **umbral** por debajo del cual no
+cuenta (0,45 para reseñas, 0,40 para productos; son constantes del servicio): sin
+él, la búsqueda devolvería siempre algo, aunque fuera ruido.
+
+**Pública**, sin sesión. **Siempre** trae solo productos `activo`: el filtro va
+fijo en el código, igual que en `GET /buscador/productos`, y se comprueba también
+para los productos que salen solo por una reseña.
+
+| Query param | Obligatorio | Qué hace |
+|---|---|---|
+| `q` | sí | Lo que la persona quiere, con sus palabras. No vacío, hasta 250 caracteres (el mismo tope que una reseña: el modelo ve 512 tokens) |
+| `limite` | no | Cuántos resultados como máximo. Por defecto 10, tope 30 |
+| `calificacion_minima` | no | De 1 a 5. Solo cuentan las reseñas con esa nota o más. Por defecto 4: se busca lo que a otros les funcionó |
+
+```
+GET /buscador/productos/intencion?q=mi ventana esta muy solitaria
+GET /buscador/productos/intencion?q=me duele la espalda de estar sentado todo el dia&limite=5
+GET /buscador/productos/intencion?q=mi ventana esta muy solitaria&calificacion_minima=1
+```
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Productos obtenidos",
+  "payload": [
+    {
+      "id_producto": 40,
+      "nombre": "Farol solar de jardin Luciernaga",
+      "estado": "activo",
+      "categoria": "Iluminacion",
+      "precio_desde": 203,
+      "precio_tienda": 203,
+      "hay_descuento": false,
+      "stock_total": 64,
+      "resenas_promedio": 3.5,
+      "resenas_total": 2,
+      "puntaje": 0.582,
+      "origen": ["resenas", "producto"],
+      "motivo": {
+        "id_resena": 182,
+        "calificacion": 5,
+        "comentario": "Lo puse en la ventana de mi cuarto y la decora muy bien, ya no se ve tan sola ni tan vacia.",
+        "similitud": 0.582
+      },
+      "resenas_coincidentes": 1,
+      "similitud_resenas": 0.582,
+      "similitud_producto": 0.431
+    }
+  ]
+}
+```
+
+Los campos hasta `resenas_total` son los mismos que devuelve
+`GET /buscador/productos`. Los nuevos:
+
+| Campo | Qué es |
+|---|---|
+| `puntaje` | El mayor entre `similitud_resenas` y `similitud_producto`. Por aquí se ordena |
+| `origen` | De dónde viene la coincidencia: `resenas`, `producto`, o las dos |
+| `motivo` | La reseña más cercana a lo pedido (`id_resena`, `calificacion`, `comentario`, `similitud`), o `null` si el producto salió solo por su descripción. Sirve para mostrar "por qué te lo recomendamos" |
+| `resenas_coincidentes` | Cuántas reseñas del producto pasan del umbral |
+| `similitud_resenas` | El parecido de la mejor reseña, o `null` si ninguna pasó el umbral |
+| `similitud_producto` | El parecido con el nombre, la categoría y la descripción del producto, o `null` |
+
+Una búsqueda sin coincidencias suficientes devuelve `200` con `payload: []`, no
+un error.
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "Escribe lo que quieres lograr o buscar", "payload": null }
+{ "ok": false, "mensaje": "La busqueda no puede tener mas de 250 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La calificacion minima debe ser un numero entero de 1 a 5", "payload": null }
+```
+
+**503**, si Elasticsearch o Ollama no responden (`"No se pudo conectar con
+Elasticsearch"` / `"No se pudo conectar con Ollama"`). A diferencia de
+`GET /buscador/productos`, esta ruta **necesita Ollama en cada búsqueda**, para
+convertir la frase en vector (espera hasta 8 s).
+
+### Probado en vivo -- 2026-10-02
+
+Contra el servidor, Elasticsearch y el Ollama reales. El catálogo **no tiene
+ninguna maceta**: el ejemplo se probó con una reseña de prueba, escrita a
+propósito, sobre un producto de decoración que sí existe (el farol solar de
+jardín). Las reseñas de prueba (cuatro, de cuentas de prueba) se borraron al
+terminar.
+
+| Caso | Resultado |
+|---|---|
+| `q=mi ventana esta muy solitaria` | el farol primero, `puntaje` 0,582, `origen` reseñas + producto, con `motivo` "Lo puse en la ventana de mi cuarto y la decora muy bien..." |
+| `q=me duele la espalda de estar sentado todo el dia` | la silla ergonómica, 0,64, solo por su reseña ("Mi espalda ya no me duele después de ocho horas...") |
+| `q=quiero preparar bebidas rapido` | la cafetera (0,57, solo por descripción) y la licuadora (0,533, reseña + descripción, con su `motivo`) |
+| `q=xyzzy qwerty asdf` (sin sentido) | `200` con `[]` |
+| `q=mi ventana esta muy solitaria&calificacion_minima=1` | la reseña de 2 estrellas ("se ve bonito en la ventana pero dejó de funcionar...") también cuenta, y el farol sube a 0,613 |
+| `q=` vacío o con espacios | `400` |
+| `calificacion_minima=9` | `400` |
+| `q=un regalo para mi mama que le gusta cocinar` | los productos de Cocina, solo por descripción |
+| `q=quiero leer una historia de aventuras` | los de Literatura |
+| `npx tsc --noEmit` y `npx eslint` | limpios |
+
+### Límites conocidos
+
+- **Los umbrales se calibraron a mano con unas pocas frases**, no con datos
+  reales. Los de los productos dan parecidos más bajos que los de las reseñas,
+  porque una descripción comercial se parece menos a una frase de una persona.
+- **Por descripción hay ruido.** `q=quiero preparar bebidas rapido` también
+  devolvió dos perfumes (0,52), y `q=mi ventana esta muy solitaria` una silla de
+  comedor y un monitor (0,46): el modelo no está hecho para "pregunta contra
+  documento", sino para comparar frases parecidas. Lo que sale por una **reseña**
+  es mucho más confiable, y por eso el `motivo` es lo que hay que mostrar.
+- Las reseñas de los datos del generador usan solo 20 textos distintos y casi
+  todas hablan de envío o de empaque, así que con ellas la ruta casi no
+  encuentra nada por intención. Va a lucir con reseñas reales y variadas (el
+  compañero cambia el generador).
+- Cuando un producto no sale aunque debería (por ejemplo, "organizar mis libros en
+  la sala" no devolvió el librero), es el modelo, no un filtro: no hay forma de
+  forzarlo desde aquí.
+- No registra el evento `busqueda_realizada` de analítica, a diferencia de
+  `GET /buscador/productos`.
 
 ## Una cosa que conviene saber antes de leer resultados raros
 

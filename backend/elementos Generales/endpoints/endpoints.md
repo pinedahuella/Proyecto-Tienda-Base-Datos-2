@@ -163,15 +163,16 @@ caida, solo como "no hay nada que buscar". Timeout de 6 s -> 503.
 ```
 
 > La ruta que de verdad **busca productos**, `GET /buscador/productos`, esta
-> documentada aparte, en `endpoints-buscador.md`.
+> documentada aparte, en `endpoints-buscador.md`, junto con la busqueda por
+> intencion (`GET /buscador/productos/intencion`, desde 2026-10-02).
 
 ---
 
 ## GET /vectores (agregado 2026-09-26)
 
 Comprueba la conexion con **Ollama** (la recomendacion semantica de la
-Entrega final -- similitud por contenido, `producto_vector`/pgvector en
-PostgreSQL). Mismo patron que `GET /documental`, `GET /clave-valor`,
+Entrega final -- similitud por contenido, vectores en `mesh_productos`,
+Elasticsearch). Mismo patron que `GET /documental`, `GET /clave-valor`,
 `GET /grafo` y `GET /buscador`, pero sin contar documentos: en vez de eso
 confirma si el modelo de embeddings ya esta descargado en ese Ollama.
 `OLLAMA_URL` apunta al que haya quedado arriba tras `arrancar.ps1` (el de

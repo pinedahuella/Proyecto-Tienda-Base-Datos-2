@@ -249,7 +249,12 @@ export class PatronesFraudeDetectorService {
 type HallazgoTipado = {
   tipo: Exclude<
     TipoAnilloFraude,
-    'mutuo' | 'ciclo' | 'reiterado' | 'anillo_en_el_tiempo'
+    | 'mutuo'
+    | 'ciclo'
+    | 'reiterado'
+    | 'anillo_en_el_tiempo'
+    | 'resenas_repetidas'
+    | 'anillo_de_texto'
   >;
   fila: FilaHallazgo;
 };

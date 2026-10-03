@@ -45,7 +45,8 @@ PostgreSQL**, sobre lo que las demás rutas ya detectaron y persistieron:
 
 - **`GET`/`PATCH /admin/fraude/casos` y `GET .../casos/:id`** — el
   **agrupador de casos de fraude**: junta en un solo caso, con puntaje y
-  nivel combinados, los hallazgos de las tres fuentes de abajo cuando
+  nivel combinados, los hallazgos de las tres fuentes de abajo (más una
+  cuarta desde 2026-10-02, `elastic`: el texto de las reseñas) cuando
   comparten cuentas. No reemplaza los tres paneles individuales, los
   junta. Ver la sección "El agrupador de casos de fraude", al final.
 - **`GET`/`PATCH /admin/fraude/alertas-resenas` y
@@ -1064,6 +1065,20 @@ dos workers corren cada 15 min sobre una ventana de **60 días** y tienen su
 propio chequeo acotado por reseña (excepto `satelites`/`reputacion_expres`,
 que agrupan por vendedor y solo corren en el periódico).
 
+**Desde 2026-10-02 hay un tercero:** `ResenasRepetidasDetectorService`
+(tipo `resenas_repetidas`, familia `patron_resenas`), que no usa el grafo sino
+el texto de las reseñas en Elasticsearch (`mesh_comentarios`): una cuenta con
+5 o más reseñas casi iguales (coseno 0,92) de al menos 40 caracteres, en los
+últimos 180 días. Una señal por cuenta (`clave` = su id). Corre cada 15 min y
+no tiene chequeo acotado por reseña. Ver
+`plan pendiente/resenas-repetidas.md`. Y su hermano `AnilloDeTextoDetectorService`
+(tipo `anillo_de_texto`, también fuente `elastic`): 3 o más cuentas distintas con
+reseñas casi iguales sobre el mismo vendedor, con 30 días o menos de diferencia;
+una señal por anillo (`clave` = sus cuentas ordenadas, unidas con guion). Ver
+`plan pendiente/anillo-de-texto.md`. Sus señales salen en esta lista y en
+`detalle-grafo` como las demás (la lista de reseñas de la evidencia se consulta
+en el grafo igual).
+
 A.4 (misma dirección) y B.4 (anillo en el tiempo) **no** están en esta
 tabla: A.4 no depende de reseñas, así que no tiene un disparador natural con
 el mecanismo actual (ver `plan pendiente/anillos-fraude-persistencia.md`);
@@ -1083,7 +1098,7 @@ reglas que el resto del proyecto). Dos filtros opcionales e independientes:
 - `estado=pendiente|revisada|descartada` -- reusa el mismo catálogo y las
   mismas funciones de validación que `alertas-login`
   (`validarFiltroEstadoAlerta`), sin duplicar nada.
-- `tipo=mutuo|ciclo|reiterado|cadena_abierta|satelites|persistente|favor_devuelto|coordinados|reputacion_expres`
+- `tipo=mutuo|ciclo|reiterado|cadena_abierta|satelites|persistente|favor_devuelto|coordinados|reputacion_expres|resenas_repetidas|anillo_de_texto`
   (`anillo_en_el_tiempo`, B.4, no está porque no se persiste como caso propio).
 - sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
   ordenados por `ultima_vez_confirmado_activo DESC` (los que siguen activos
@@ -1143,7 +1158,7 @@ de un admin. Detalle completo del razonamiento en
 
 ```json
 { "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
-{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, cadena_abierta, satelites, persistente, favor_devuelto, coordinados, reputacion_expres", "payload": null }
+{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, cadena_abierta, satelites, persistente, favor_devuelto, coordinados, reputacion_expres, resenas_repetidas, anillo_de_texto", "payload": null }
 ```
 
 ### 401 / 403
@@ -1441,9 +1456,10 @@ arriba: `AdminCasosFraudeController` + `CasosFraudeService`
 `src/services/fraude/casos-fraude.service.ts`). **Solo admin**. No
 reemplaza ninguno de los tres paneles individuales (`alertas-resenas`,
 `alertas-eventos`, `alertas-login`) -- los junta: agrupa por cuentas
-compartidas los hallazgos de las tres fuentes que hoy no se hablan entre
+compartidas los hallazgos de las fuentes que hoy no se hablan entre
 sí (`anillo_fraude` del grafo, `hallazgo_evento_fraude` de ClickHouse,
-`alerta_fraude` del login) en un solo "caso" con un puntaje y un nivel
+`alerta_fraude` del login y, desde 2026-10-02, el texto de las reseñas en
+Elasticsearch, `fuente: "elastic"`) en un solo "caso" con un puntaje y un nivel
 combinados, para que el admin no tenga que revisar tres paneles sueltos y
 armar la conexión a mano. Diseño completo, decisiones y la propuesta
 original del compañero en
@@ -1567,7 +1583,9 @@ resueltas contra `usuarios` (nunca el id crudo solo), con `es_nucleo` (en
 centro del anillo de la periferia. `evidencia` -- cada hallazgo real,
 resuelto contra su tabla de origen (exactamente una según `fuente`:
 `grafo`=`anillo_fraude`, `eventos`=`hallazgo_evento_fraude`,
-`login`=`alerta_fraude`), con `metricas` igual a la `detalle` jsonb de esa
+`login`=`alerta_fraude`; desde 2026-10-02 también `elastic`, las señales
+`resenas_repetidas` que salen del texto de las reseñas -- ver
+`plan pendiente/resenas-repetidas.md`), con `metricas` igual a la `detalle` jsonb de esa
 fila (las cuentas de la evidencia individual **nunca** van en `metricas`,
 ya están en `cuentas` a nivel de caso). `puntos` es el aporte de ESE
 hallazgo al puntaje total del caso (`PuntajeFraudeService.puntosDeHallazgo`),
@@ -1647,6 +1665,32 @@ de pruebas anteriores de login + el hallazgo de `reputacion_expres` con
 | `PATCH .../casos/13` con `{ "estado": "pendiente" }` | `400` (no es un destino válido) |
 | `PATCH .../casos/13` con `{ "estado": "descartada" }` sin `motivo` | `400` |
 | `PATCH .../casos/999999` | `404` |
+
+### Pruebas -- hechas el 2026-10-02 (señales de texto, fuente `elastic`)
+
+Contra el servidor y la base local, con sesión de admin real. Las dos señales
+nuevas de reseñas (`resenas_repetidas` y `anillo_de_texto`, ver
+`plan pendiente/resenas-repetidas.md` y `plan pendiente/anillo-de-texto.md`)
+no tienen ruta propia: entran por las rutas de arriba, porque son de la
+familia `patron_resenas`, y el agrupador las junta en casos como a cualquier
+otra señal. Las cuentas de la segunda y tercera fila eran de prueba hechas a
+propósito (cinco reseñas casi iguales; tres cuentas con una plantilla sobre el
+mismo vendedor), ya borradas.
+
+| Caso | Resultado |
+|---|---|
+| `GET .../alertas-resenas?tipo=resenas_repetidas` | `200`, 2 señales (las cuentas 3 y 7 del generador), `pendiente`, con su lista de reseñas |
+| `GET .../alertas-resenas?tipo=anillo_de_texto` | `200`, lista vacía cuando no hay un anillo; con el anillo de prueba, 1 señal con `clave` `53-54-55` |
+| `GET .../alertas-resenas?tipo=xxx` | `400`, el mensaje lista los dos tipos nuevos |
+| `GET .../alertas-resenas/:id/detalle-grafo` de una señal `resenas_repetidas` | `200`, sus 5 reseñas |
+| Agrupador con una cuenta de prueba con `resenas_repetidas` y nada más | caso propio: 15 puntos, nivel `informativo`, evidencia `fuente: "elastic"`, la cuenta como periferia (`es_nucleo: false`) |
+| Agrupador con el anillo de prueba de tres cuentas | caso propio: 25 puntos, nivel `revisar`, evidencia `elastic` / `anillo_de_texto`, las tres cuentas como periferia |
+| `GET .../casos/13` | las dos señales de las cuentas 3 y 7 se unieron al caso que ya existía (comparten cuentas con otras señales): evidencia `elastic:resenas_repetidas` x2 junto a `grafo`, `login`; puntaje 32,5 con tres motores (x1,6) |
+
+`es_nucleo` sale `false` porque ninguna de las dos señales está en
+`TIPOS_FUERTES`: una cuenta solo es núcleo si aparece en 2 o más hallazgos del
+caso o en uno "fuerte". Se dejó así a propósito hasta ver cómo se comportan con
+datos reales.
 | `PATCH .../casos/13` con `{ "estado": "revisada", "motivo": "..." }` | `200`, el caso actualizado con `estado: "revisada"` |
 | `PATCH .../casos/13` de nuevo | `409` |
 | `npx tsc --noEmit` y `npx eslint` sobre los archivos tocados | limpios |

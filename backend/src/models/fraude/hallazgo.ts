@@ -5,7 +5,7 @@
  * agrupador de casos junta despues (union por cuentas compartidas,
  * puntaje, niveles) -- todavia no es un caso.
  */
-export type FuenteHallazgo = 'grafo' | 'eventos' | 'login';
+export type FuenteHallazgo = 'grafo' | 'eventos' | 'login' | 'elastic';
 
 export interface Hallazgo {
   fuente: FuenteHallazgo;
