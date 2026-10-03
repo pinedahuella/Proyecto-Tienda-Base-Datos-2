@@ -1,0 +1,90 @@
+Clasificador de resenas, 2026-10-02 21:56
+Vectores paraphrase-multilingual, 768 numeros, generados 2026-10-02T21:52:07
+Entrenar 280, validar 60, prueba 60, casos unicos 80 (estos dos ultimos nunca se usan para aprender)
+
+== A. Regresion logistica (a mano)
+   lam 0.1    validacion perdida 0.5693  exactitud 98.3%  (291 pasos)
+   lam 0.03   validacion perdida 0.8606  exactitud 50.0%  (50000 pasos)
+   lam 0.01   validacion perdida 0.4329  exactitud 76.7%  (50000 pasos)
+   lam 0.003  validacion perdida 0.1739  exactitud 96.7%  (303 pasos)
+   lam 0.001  validacion perdida 0.1137  exactitud 98.3%  (836 pasos)
+   Elegido lam 0.001
+   prueba                 exactitud 100.0%   F1 de "mala" 1.000   perdida 0.078
+                          buenas bien 30, buenas tomadas por malas 0, malas bien 30, malas tomadas por buenas 0
+   casos unicos           exactitud 90.0%   F1 de "mala" 0.905   perdida 0.220
+                          buenas bien 34, buenas tomadas por malas 4, malas bien 38, malas tomadas por buenas 4
+   Contra scikit-learn: diferencia maxima de probabilidad 2.09e-07, misma respuesta en 100% de los casos unicos
+
+== B. Red neuronal 768 > 32 ReLU > 1 sigmoide (a mano)
+   Gradient check del backpropagation: error relativo maximo 1.9e-07 (bien)
+   Mejor momento en la vuelta 236 de 386 (parada temprana), validacion perdida 0.0383
+   prueba                 exactitud 100.0%   F1 de "mala" 1.000   perdida 0.013
+                          buenas bien 30, buenas tomadas por malas 0, malas bien 30, malas tomadas por buenas 0
+   casos unicos           exactitud 91.2%   F1 de "mala" 0.914   perdida 0.195
+                          buenas bien 36, buenas tomadas por malas 2, malas bien 37, malas tomadas por buenas 5
+   Referencia, MLP de scikit-learn con la misma forma: prueba 95.0%, casos unicos 87.5%
+
+== Casos unicos por tipo (aciertos regresion / red)
+   actualizacion_a_buena        1/2  2/2
+   actualizacion_a_mala         2/2  2/2
+   calo_chapin                  4/4  4/4
+   comparacion_buena            1/2  1/2
+   comparacion_mala             1/2  1/2
+   comprador_recurrente         2/2  2/2
+   dos_productos                2/2  2/2
+   elogio_generico              2/2  2/2
+   elogio_menor_en_mala         1/1  1/1
+   emocion_muy_negativa         1/1  1/1
+   emocion_muy_positiva         1/1  1/1
+   errores_de_dedo              2/2  2/2
+   estacional                   2/2  2/2
+   expectativa_alta_defraudada  1/1  1/1
+   expectativa_baja_superada    1/1  1/1
+   historia_personal            2/2  2/2
+   ironia_positiva              0/1  0/1
+   llamada_a_la_accion          2/2  2/2
+   llego_otro_producto          2/2  2/2
+   mayusculas                   2/2  2/2
+   mixta_buena                  2/2  2/2
+   mixta_mala                   2/2  2/2
+   negacion_negativa            2/2  2/2
+   negacion_positiva            2/2  2/2
+   nino_o_adulto_mayor          2/2  2/2
+   nota_no_cuadra               6/6  6/6
+   precio_justifica             1/1  1/1
+   precio_no_justifica          1/1  0/1
+   pregunta_retorica            2/2  2/2
+   producto_falso               2/2  2/2
+   queja_menor_en_buena         1/1  1/1
+   regalo                       2/2  2/2
+   resuelto_por_vendedor        1/2  2/2
+   sarcasmo                     0/3  0/3
+   sin_tildes                   4/4  4/4
+   solo_envio_malo              2/2  2/2
+   spanglish                    2/2  2/2
+   tecnico_detallado            2/2  2/2
+   uso_profesional              2/2  2/2
+   vendedor_excelente           1/1  1/1
+   vendedor_grosero             1/1  1/1
+
+   Fallos (probabilidad de mala segun regresion / red)
+   u014 actualizacion_a_buena      era buena  0.56 / 0.41
+   u021 resuelto_por_vendedor      era buena  0.50 / 0.25
+   u027 sarcasmo                   era mala   0.37 / 0.22
+   u028 sarcasmo                   era mala   0.32 / 0.08
+   u029 sarcasmo                   era mala   0.16 / 0.02
+   u034 comparacion_buena          era buena  0.61 / 0.76
+   u035 comparacion_mala           era mala   0.40 / 0.27
+   u060 precio_no_justifica        era mala   0.51 / 0.49
+   u080 ironia_positiva            era buena  0.56 / 0.57
+
+== Nota que no cuadra con el texto (umbral 0.8)
+   u043 5 estrellas, texto mala: regresion 0.97 MARCA, red 1.00 MARCA
+   u044 5 estrellas, texto mala: regresion 0.95 MARCA, red 1.00 MARCA
+   u045 1 estrellas, texto buena: regresion 0.01 MARCA, red 0.00 MARCA
+   u046 5 estrellas, texto mala: regresion 0.99 MARCA, red 1.00 MARCA
+   u047 1 estrellas, texto buena: regresion 0.02 MARCA, red 0.00 MARCA
+   u048 5 estrellas, texto mala: regresion 1.00 MARCA, red 1.00 MARCA
+
+== Recomendado para el backend: red_neuronal
+Escritos en modelo/: regresion_logistica.json, red_neuronal.json, verificacion.json, reporte.txt
