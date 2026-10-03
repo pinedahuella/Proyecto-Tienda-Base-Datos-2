@@ -153,7 +153,8 @@ export interface Producto {
   pendiente_busqueda?: true;
   /**
    * Bandera de sincronizacion con el vector de recomendacion semantica
-   * (Entrega final, `producto_vector` en PostgreSQL). Mismo patron "cola sin
+   * (Entrega final, campo `vector` de `mesh_productos` en Elasticsearch).
+   * Mismo patron "cola sin
    * cola" que `pendiente_busqueda`, pero NO en los mismos sitios: solo se
    * pone donde nombre, descripcion, categoria o estado pueden cambiar
    * (`crear`, `proponer`, `editar`, `revisarPropuesta`, `reenviarPropuesta`

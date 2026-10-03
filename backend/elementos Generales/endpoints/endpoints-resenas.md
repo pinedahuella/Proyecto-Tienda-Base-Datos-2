@@ -283,7 +283,16 @@ POST /resenas
 | `id_producto` | Sí | El `_id` de Mongo. Entero > 0. Mismo mensaje que en las rutas de ofertas y productos |
 | `correo_vendedor` | Sí | Correo de una cuenta real. Se recorta |
 | `calificacion` | Sí | Entero de 1 a 5 |
-| `comentario` | Sí | Texto no vacío, hasta 2000 caracteres. Se guarda recortado |
+| `comentario` | Sí | Texto no vacío, hasta 250 caracteres. Se guarda recortado |
+
+> **Cambio 2026-10-02:** el límite del texto bajó de 2000 a **250 caracteres**
+> (antes: `El comentario no puede tener mas de 2000 caracteres`). Se cuenta
+> **después de recortar** los espacios de los extremos: 250 letras con espacios
+> alrededor pasan, 251 letras dan `400`. Es la misma función
+> (`validarComentarioResena`) para `POST /resenas` y
+> `POST /resenas/:id/respuestas`, así que el límite y el mensaje son idénticos
+> en las dos rutas. Los comentarios que ya existían no se tocan (el más largo
+> de la base local tiene 74 caracteres).
 
 ### 201
 
@@ -305,7 +314,7 @@ con `GET` después), pero sirven para depurar.
 { "ok": false, "mensaje": "El correo del vendedor es obligatorio", "payload": null }
 { "ok": false, "mensaje": "La calificacion debe ser un numero entero de 1 a 5", "payload": null }
 { "ok": false, "mensaje": "El comentario es obligatorio y no puede estar vacio", "payload": null }
-{ "ok": false, "mensaje": "El comentario no puede tener mas de 2000 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El comentario no puede tener mas de 250 caracteres", "payload": null }
 { "ok": false, "mensaje": "No puedes calificarte a ti mismo", "payload": null }
 ```
 
@@ -370,7 +379,7 @@ POST /resenas/61/respuestas
 
 | Campo | Obligatorio | Regla |
 | --- | --- | --- |
-| `comentario` | Sí | Texto no vacío, hasta 2000 caracteres. Se guarda recortado. Mismas reglas que el texto de una reseña |
+| `comentario` | Sí | Texto no vacío, hasta 250 caracteres. Se guarda recortado. Mismas reglas que el texto de una reseña |
 
 ### 201
 
@@ -387,7 +396,7 @@ POST /resenas/61/respuestas
 ```json
 { "ok": false, "mensaje": "El id no es valido", "payload": null }
 { "ok": false, "mensaje": "El comentario es obligatorio y no puede estar vacio", "payload": null }
-{ "ok": false, "mensaje": "El comentario no puede tener mas de 2000 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El comentario no puede tener mas de 250 caracteres", "payload": null }
 { "ok": false, "mensaje": "No hay sesion activa", "payload": null }
 ```
 

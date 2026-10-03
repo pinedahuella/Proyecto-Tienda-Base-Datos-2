@@ -1,0 +1,44 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+
+    "analysis": {
+      "analyzer": {
+        "espanol_llano": {
+          "tokenizer": "standard",
+          "filter": ["lowercase", "asciifolding"]
+        }
+      }
+    }
+  },
+
+  "mappings": {
+    "properties": {
+      "id_comentario": { "type": "long" },
+      "id_comentario_padre": { "type": "long" },
+      "id_raiz": { "type": "long" },
+      "id_resena": { "type": "long" },
+      "id_producto": { "type": "long" },
+      "id_usuario": { "type": "long" },
+
+      "es_respuesta": { "type": "boolean" },
+      "calificacion": { "type": "short" },
+
+      "comentario": {
+        "type": "text",
+        "analyzer": "espanol_llano"
+      },
+      "fecha_publicacion": { "type": "date" },
+
+      "vector": {
+        "type": "dense_vector",
+        "dims": 768,
+        "index": true,
+        "similarity": "cosine"
+      },
+      "vector_hash": { "type": "keyword" },
+      "vector_modelo": { "type": "keyword" }
+    }
+  }
+}

@@ -62,7 +62,10 @@ export class ReglasCasiConfirmadoService {
     }
 
     if (
-      grupo.hallazgos.some((hallazgo) => hallazgo.fuente === 'grafo') && // "el caso tiene otro hallazgo de resenas"
+      grupo.hallazgos.some(
+        (hallazgo) =>
+          hallazgo.fuente === 'grafo' || hallazgo.fuente === 'elastic',
+      ) && // "el caso tiene otro hallazgo de resenas"
       (await this.tieneCompraYDevolucion(nucleo))
     ) {
       reglas.push('R-CASI-3');

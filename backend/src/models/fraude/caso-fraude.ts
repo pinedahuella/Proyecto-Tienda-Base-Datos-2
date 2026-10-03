@@ -51,10 +51,10 @@ export interface CuentaCasoFraude {
 }
 
 /** Un hallazgo de evidencia, ya resuelto contra su senal (`senal_fraude`);
- * `fuente` sale de la familia de la senal. */
+ * `fuente` sale de la fuente del tipo de la senal. */
 export interface EvidenciaCasoFraude {
   id_evidencia_caso_fraude: number;
-  fuente: 'grafo' | 'eventos' | 'login';
+  fuente: 'grafo' | 'eventos' | 'login' | 'elastic';
   tipo: string;
   clave: string;
   puntos: number;

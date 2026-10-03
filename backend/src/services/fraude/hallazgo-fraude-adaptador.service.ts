@@ -33,21 +33,24 @@ const TIPOS_LOGIN_INCLUIDOS = [
 ];
 
 /**
- * De que familia de `senal_fraude` viene cada fuente del agrupador. Los
- * anillos (A) y los patrones de resenas (B) son las dos familias de Neo4j y
- * entran TODOS los tipos.
+ * La fuente del agrupador de cada tipo de senal, segun la fuente que el
+ * catalogo (`tipo_senal_fraude.id_fuente_senal_fraude`) le asigna. Los
+ * anillos (A) y los patrones de resenas (B) entran TODOS los tipos. La fuente
+ * `elastic` (el texto de las resenas, `resenas_repetidas`) cuenta como un
+ * motor aparte en el puntaje, igual que el grafo, ClickHouse o el login.
  */
-const FUENTE_POR_FAMILIA: Record<string, FuenteHallazgo> = {
-  anillo_resenas: 'grafo',
-  patron_resenas: 'grafo',
-  compras_navegacion: 'eventos',
+const FUENTE_POR_CATALOGO: Record<string, FuenteHallazgo> = {
+  neo4j: 'grafo',
+  clickhouse: 'eventos',
   login: 'login',
+  elastic: 'elastic',
 };
 
 interface FilaSenal {
   id: string;
   tipo: string;
   familia: string;
+  fuente: string;
   detalle: Record<string, unknown>;
   ultima_deteccion: Date;
   cuentas: string[];
@@ -82,6 +85,7 @@ export class HallazgoFraudeAdaptadorService {
         `SELECT s.id_senal_fraude AS id,
                 t.tipo_senal_fraude_nombre AS tipo,
                 f.familia_senal_fraude_nombre AS familia,
+                fu.fuente_senal_fraude_nombre AS fuente,
                 s.detalle, s.ultima_deteccion,
                 array_agg(c.id_usuario) AS cuentas
            FROM senal_fraude s
@@ -89,6 +93,8 @@ export class HallazgoFraudeAdaptadorService {
              ON t.id_tipo_senal_fraude = s.id_tipo_senal_fraude
            JOIN familia_senal_fraude f
              ON f.id_familia_senal_fraude = t.id_familia_senal_fraude
+           JOIN fuente_senal_fraude fu
+             ON fu.id_fuente_senal_fraude = t.id_fuente_senal_fraude
            JOIN senal_fraude_cuenta c
              ON c.id_senal_fraude = s.id_senal_fraude
           WHERE s.id_estado_alerta_fraude <> (
@@ -98,13 +104,14 @@ export class HallazgoFraudeAdaptadorService {
             AND (f.familia_senal_fraude_nombre IN ('anillo_resenas', 'patron_resenas')
                  OR t.tipo_senal_fraude_nombre = ANY($1))
           GROUP BY s.id_senal_fraude, t.tipo_senal_fraude_nombre,
-                   f.familia_senal_fraude_nombre, s.detalle, s.ultima_deteccion`,
+                   f.familia_senal_fraude_nombre, fu.fuente_senal_fraude_nombre,
+                   s.detalle, s.ultima_deteccion`,
         [[...TIPOS_EVENTO_INCLUIDOS, ...TIPOS_LOGIN_INCLUIDOS]],
       );
       return resultado.rows.map((fila) => {
         const cuentas = [...new Set(fila.cuentas.map(Number))];
         return {
-          fuente: FUENTE_POR_FAMILIA[fila.familia],
+          fuente: FUENTE_POR_CATALOGO[fila.fuente],
           idOrigen: Number(fila.id),
           tipo: fila.tipo,
           cuentas,

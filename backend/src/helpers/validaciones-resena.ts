@@ -9,7 +9,7 @@ import { esTextoNoVacio } from './validaciones-perfil';
  * productos, por la regla de validaciones consistentes).
  */
 
-const LONGITUD_MAXIMA_COMENTARIO = 2000;
+const LONGITUD_MAXIMA_COMENTARIO = 250;
 
 /** El correo del vendedor al que se califica: obligatorio, no vacio. Se recorta. */
 export function validarCorreoVendedor(valor: unknown): string {
@@ -35,7 +35,7 @@ export function validarCalificacion(valor: unknown): number {
 }
 
 /**
- * El texto de la resena: obligatorio, no vacio, hasta 2000 caracteres. Se
+ * El texto de la resena: obligatorio, no vacio, hasta 250 caracteres. Se
  * guarda recortado; `comentario.comentario` ademas tiene un CHECK de
  * no-vacio en la base, esto da el 400 amable antes de llegar ahi.
  */

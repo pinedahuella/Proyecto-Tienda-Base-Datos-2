@@ -46,4 +46,6 @@ export const TIPOS_ANILLO_FRAUDE_VALIDOS: TipoAnilloFraude[] = [
   'favor_devuelto',
   'coordinados',
   'reputacion_expres',
+  'resenas_repetidas',
+  'anillo_de_texto',
 ];

@@ -29,19 +29,23 @@ import {
 } from '../../models/fraude/caso-fraude';
 import { construirClave } from './hallazgo-fraude-adaptador.service';
 
-/** La `fuente` que muestra la API (`grafo`/`eventos`/`login`) sale de la
- * familia de la senal -- mismo mapa que `FUENTE_POR_FAMILIA` del adaptador. */
-const SQL_FUENTE_DE_FAMILIA = `CASE f.familia_senal_fraude_nombre
-           WHEN 'compras_navegacion' THEN 'eventos'
+/** La `fuente` que muestra la API (`grafo`/`eventos`/`login`/`elastic`) sale
+ * de la fuente del tipo de la senal (`tipo_senal_fraude`) -- mismo mapa que
+ * `FUENTE_POR_CATALOGO` del adaptador. Necesita el alias `t` en la consulta. */
+const SQL_FUENTE_DEL_TIPO = `(SELECT CASE fu.fuente_senal_fraude_nombre
+           WHEN 'clickhouse' THEN 'eventos'
            WHEN 'login' THEN 'login'
-           ELSE 'grafo' END`;
+           WHEN 'elastic' THEN 'elastic'
+           ELSE 'grafo' END
+           FROM fuente_senal_fraude fu
+          WHERE fu.id_fuente_senal_fraude = t.id_fuente_senal_fraude)`;
 
 /** La misma evidencia, resuelta contra su senal -- `senal_fraude` no se
  * toca, solo se lee (`evidencia_caso_fraude.id_senal_fraude`). */
 const SQL_EVIDENCIA = `(
   SELECT COALESCE(json_agg(jsonb_build_object(
            'id_evidencia_caso_fraude', ev.id_evidencia_caso_fraude,
-           'fuente', ${SQL_FUENTE_DE_FAMILIA},
+           'fuente', ${SQL_FUENTE_DEL_TIPO},
            'tipo', t.tipo_senal_fraude_nombre,
            'clave', s.clave,
            'metricas', s.detalle,
@@ -275,7 +279,7 @@ export class CasosFraudeService {
         cuentas: string[];
       }>(
         `SELECT
-           ${SQL_FUENTE_DE_FAMILIA} AS fuente,
+           ${SQL_FUENTE_DEL_TIPO} AS fuente,
            t.tipo_senal_fraude_nombre AS tipo,
            array_agg(DISTINCT ec.id_usuario::text) AS cuentas
          FROM evidencia_caso_fraude ev
