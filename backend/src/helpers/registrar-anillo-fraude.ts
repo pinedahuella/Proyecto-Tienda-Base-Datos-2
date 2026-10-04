@@ -51,6 +51,10 @@ export async function registrarAnilloFraude(datos: {
   tipo: TipoAnilloFraude;
   clave: string;
   resenas: number[];
+  /** Los productos de la senal (`senal_fraude_producto`), si es de un
+   * producto. Su `clave` no debe ser solo digitos (`p12`): las cuentas salen de
+   * los numeros de la `clave`, y un id de producto no es una cuenta. */
+  productos?: number[];
   /** Las metricas del hallazgo (horas, minutos de vida, regularidad, etc.)
    * -- solo `favor_devuelto`/`reputacion_expres`/`persistente` la traen hoy
    * (ver `PatronesFraudeDetectorService`); el resto se queda con el `{}` por
@@ -93,6 +97,7 @@ async function registrarSenalDelAnillo(
     tipo: TipoAnilloFraude;
     clave: string;
     resenas: number[];
+    productos?: number[];
     detalle?: Record<string, unknown>;
   },
 ): Promise<void> {
@@ -156,6 +161,15 @@ async function registrarSenalDelAnillo(
        VALUES ($1, $2)
        ON CONFLICT (id_senal_fraude, id_resena) DO NOTHING`,
       [idSenal, idResena],
+    );
+  }
+
+  for (const idProducto of datos.productos ?? []) {
+    await cliente.query(
+      `INSERT INTO senal_fraude_producto (id_senal_fraude, id_producto_mongo)
+       VALUES ($1, $2)
+       ON CONFLICT DO NOTHING`,
+      [idSenal, idProducto],
     );
   }
 

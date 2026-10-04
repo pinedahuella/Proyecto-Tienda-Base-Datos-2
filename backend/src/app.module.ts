@@ -44,6 +44,8 @@ import { FraudeController } from './controllers/fraude/fraude.controller';
 import { AnillosDetectorService } from './services/fraude/anillos-detector.service';
 import { PatronesFraudeDetectorService } from './services/fraude/patrones-fraude-detector.service';
 import { ResenasRepetidasDetectorService } from './services/fraude/resenas-repetidas-detector.service';
+import { NotasIncoherentesDetectorService } from './services/fraude/notas-incoherentes-detector.service';
+import { ResenasParecidasDetectorService } from './services/fraude/resenas-parecidas-detector.service';
 import { AnilloDeTextoDetectorService } from './services/fraude/anillo-de-texto-detector.service';
 import { HallazgosEventoFraudeDetectorService } from './services/fraude/hallazgos-evento-fraude-detector.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
@@ -108,6 +110,7 @@ import { SimilaresController } from './controllers/productos/similares.controlle
 import { SimilaresService } from './services/productos/similares.service';
 import { VectoresSyncService } from './services/productos/vectores-sync.service';
 import { EventoComentarioSyncService } from './services/resenas/evento-comentario-sync.service';
+import { ValoracionComentariosService } from './services/resenas/valoracion-comentarios.service';
 import { ParaTiController } from './controllers/productos/para-ti.controller';
 import { ParaTiService } from './services/productos/para-ti.service';
 import { ReglasDescuentoAutomaticoController } from './controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller';
@@ -199,6 +202,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     AnillosDetectorService,
     PatronesFraudeDetectorService,
     ResenasRepetidasDetectorService,
+    NotasIncoherentesDetectorService,
+    ResenasParecidasDetectorService,
     AnilloDeTextoDetectorService,
     HallazgosEventoFraudeDetectorService,
     AdminReportesService,
@@ -242,6 +247,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     SimilaresService,
     VectoresSyncService,
     EventoComentarioSyncService,
+    ValoracionComentariosService,
     ParaTiService,
     ReglasDescuentoAutomaticoService,
     ReglasDescuentoPeriodoService,

@@ -1,6 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { elasticClient } from '../../database/elastic';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
+import {
+  pedirCorreccion,
+  textoCorregido,
+} from '../../helpers/correccion-busqueda';
 import { ResultadoBusquedaProducto } from '../../dto/buscar-productos';
 import {
   BuscarProductosFacetadoQuery,
@@ -136,6 +140,13 @@ export class BuscadorFacetadoService {
       return {
         resultados: respuesta.hits.hits.map((hit) => this.aResultado(hit)),
         total: this.aNumeroTotal(respuesta.hits.total),
+        quisiste_decir:
+          texto === ''
+            ? null
+            : textoCorregido(
+                texto,
+                respuesta.suggest as Parameters<typeof textoCorregido>[1],
+              ),
         facetas: this.aFacetas(
           respuesta.aggregations as unknown as Agregaciones,
         ),
@@ -176,6 +187,7 @@ export class BuscadorFacetadoService {
 
     return {
       size: tamano,
+      suggest: texto === '' ? undefined : pedirCorreccion(texto),
       query: {
         bool: {
           must: [textoQuery],

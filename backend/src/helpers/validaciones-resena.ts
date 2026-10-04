@@ -9,7 +9,13 @@ import { esTextoNoVacio } from './validaciones-perfil';
  * productos, por la regla de validaciones consistentes).
  */
 
-const LONGITUD_MAXIMA_COMENTARIO = 250;
+const LONGITUD_MAXIMA_COMENTARIO = 350;
+/**
+ * Solo el texto de una RESENA tiene minimo: las senales de fraude por texto
+ * solo analizan resenas largas (ver nota 2026-10-04). Una respuesta puede ser
+ * corta ("Gracias por tu compra").
+ */
+const LONGITUD_MINIMA_RESENA = 40;
 
 /** El correo del vendedor al que se califica: obligatorio, no vacio. Se recorta. */
 export function validarCorreoVendedor(valor: unknown): string {
@@ -35,11 +41,31 @@ export function validarCalificacion(valor: unknown): number {
 }
 
 /**
- * El texto de la resena: obligatorio, no vacio, hasta 250 caracteres. Se
- * guarda recortado; `comentario.comentario` ademas tiene un CHECK de
- * no-vacio en la base, esto da el 400 amable antes de llegar ahi.
+ * El texto de la resena: obligatorio, de 40 a 350 caracteres. Se guarda
+ * recortado (el largo se cuenta despues de recortar); `comentario.comentario`
+ * ademas tiene un CHECK de no-vacio en la base, esto da el 400 amable antes
+ * de llegar ahi.
  */
 export function validarComentarioResena(valor: unknown): string {
+  const recortado = validarTexto(valor);
+  if (recortado.length < LONGITUD_MINIMA_RESENA) {
+    throw new ErrorValidacion(
+      `El comentario debe tener al menos ${LONGITUD_MINIMA_RESENA} caracteres`,
+    );
+  }
+  return recortado;
+}
+
+/**
+ * El texto de una respuesta a una resena: obligatorio, no vacio, hasta 350
+ * caracteres, sin minimo. Mismo maximo y mismos mensajes que la resena.
+ */
+export function validarRespuestaResena(valor: unknown): string {
+  return validarTexto(valor);
+}
+
+/** Lo que comparten resenas y respuestas: no vacio y el maximo. */
+function validarTexto(valor: unknown): string {
   if (!esTextoNoVacio(valor)) {
     throw new ErrorValidacion(
       'El comentario es obligatorio y no puede estar vacio',

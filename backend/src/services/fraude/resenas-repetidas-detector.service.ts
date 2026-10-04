@@ -3,13 +3,14 @@ import { Interval } from '@nestjs/schedule';
 import { elasticClient } from '../../database/elastic';
 import { registrarAnilloFraude } from '../../helpers/registrar-anillo-fraude';
 import {
-  agruparPorParecido,
   cosenoEntre,
+  marcarConGemela,
   media,
   norma,
   redondear,
   VectorConNorma,
 } from '../../helpers/similitud-vectores';
+import { LARGO_MINIMO_VALORACION } from '../../helpers/valoracion-texto';
 
 const INDICE = process.env.ELASTIC_INDICE_COMENTARIOS ?? 'mesh_comentarios';
 
@@ -43,12 +44,15 @@ interface CuentaCandidata {
  *    ventana (sin contar las respuestas a otras resenas).
  * 2. De cada una se traen sus resenas con su vector, y se descartan las de
  *    menos de `MIN_CARACTERES`: un "Excelente producto" lo escribe cualquiera.
- * 3. Se comparan todas contra todas (coseno) y se unen las que pasan de
- *    `UMBRAL_COSENO` -- un grupo es un conjunto de resenas que se parecen
- *    entre si, directa o encadenadamente.
- * 4. Si algun grupo tiene `MIN_RESENAS` o mas, esa cuenta es una senal. Una
- *    senal por cuenta (`clave` = su id), con todas las resenas de sus grupos
- *    como evidencia.
+ * 3. Se comparan todas contra todas (coseno) y cada resena que tiene una
+ *    "gemela" suya (otra de la misma cuenta con coseno de `UMBRAL_COSENO` o mas)
+ *    se marca. No se encadena: cada una cuenta solo si tiene su propia gemela.
+ * 4. Si las marcadas son `MIN_RESENAS` o mas Y son el `PORCENTAJE_MINIMO` o mas
+ *    de las resenas analizadas de la cuenta, es una senal. Porcentaje y no solo
+ *    cantidad (desde 2026-10-04): quien escribe mucho repite alguna frase por
+ *    casualidad; lo raro es que una parte grande de lo que escribe sea copia.
+ *    Una senal por cuenta (`clave` = su id), con las resenas marcadas como
+ *    evidencia.
  *
  * Mismo molde que `PatronesFraudeDetectorService`: `@Interval`, una bandera
  * para que una corrida lenta no se pise con la siguiente, y un error de
@@ -71,11 +75,16 @@ export class ResenasRepetidasDetectorService {
    * hace anios seguiria "confirmandose activa" para siempre. */
   private static readonly VENTANA_DIAS = 180;
 
-  /** Resenas casi iguales que hacen falta para que una cuenta sea senal. */
+  /** Resenas con gemela que hacen falta para que una cuenta sea senal (ademas
+   * del porcentaje). Tambien es el minimo de resenas analizadas. */
   private static readonly MIN_RESENAS = 5;
 
-  /** Una resena de menos caracteres que esto no cuenta. */
-  private static readonly MIN_CARACTERES = 40;
+  /** Que parte de las resenas analizadas de la cuenta deben tener gemela. */
+  private static readonly PORCENTAJE_MINIMO = 30;
+
+  /** Una resena de menos caracteres que esto no cuenta. El mismo largo que
+   * usan las demas senales de texto (desde 2026-10-04: antes 40). */
+  private static readonly MIN_CARACTERES = LARGO_MINIMO_VALORACION;
 
   /** Coseno desde el cual dos resenas se consideran casi iguales. */
   private static readonly UMBRAL_COSENO = 0.92;
@@ -182,33 +191,38 @@ export class ResenasRepetidasDetectorService {
       return 0;
     }
 
-    // Dos resenas se unen si su coseno pasa del umbral; un grupo son las que
-    // se parecen entre si, directa o encadenadamente.
-    const grupos = agruparPorParecido(resenas.length, (a, b) => {
-      const coseno = cosenoEntre(resenas[a], resenas[b]);
-      return coseno >= ResenasRepetidasDetectorService.UMBRAL_COSENO
-        ? coseno
-        : null;
-    }).filter(
-      (g) => g.indices.length >= ResenasRepetidasDetectorService.MIN_RESENAS,
+    // Una resena se marca si tiene una gemela: otra con coseno sobre el umbral.
+    const { conGemela, similitudes } = marcarConGemela(
+      resenas.length,
+      (a, b) => {
+        const coseno = cosenoEntre(resenas[a], resenas[b]);
+        return coseno >= ResenasRepetidasDetectorService.UMBRAL_COSENO
+          ? coseno
+          : null;
+      },
     );
-    if (grupos.length === 0) {
+    const marcadas = resenas.filter((_, i) => conGemela[i]);
+    if (
+      marcadas.length < ResenasRepetidasDetectorService.MIN_RESENAS ||
+      marcadas.length * 100 <
+        resenas.length * ResenasRepetidasDetectorService.PORCENTAJE_MINIMO
+    ) {
       return 0;
     }
 
-    const idsResenas = grupos
-      .flatMap((g) => g.indices.map((i) => resenas[i].idResena))
-      .sort((a, b) => a - b);
-    const similitudes = grupos.flatMap((g) => g.valores);
+    const idsResenas = marcadas.map((r) => r.idResena).sort((a, b) => a - b);
     try {
       await registrarAnilloFraude({
         tipo: 'resenas_repetidas',
         clave: String(idUsuario),
         resenas: idsResenas,
         detalle: {
-          resenas_en_grupo: idsResenas.length,
-          total_resenas_cuenta: resenas.length,
-          grupos: grupos.map((g) => g.indices.length),
+          resenas_con_gemela: marcadas.length,
+          resenas_analizadas: resenas.length,
+          porcentaje:
+            Math.round((marcadas.length / resenas.length) * 1000) / 10,
+          porcentaje_minimo: ResenasRepetidasDetectorService.PORCENTAJE_MINIMO,
+          min_resenas: ResenasRepetidasDetectorService.MIN_RESENAS,
           similitud_media: redondear(media(similitudes)),
           similitud_minima: redondear(Math.min(...similitudes)),
           umbral_coseno: ResenasRepetidasDetectorService.UMBRAL_COSENO,

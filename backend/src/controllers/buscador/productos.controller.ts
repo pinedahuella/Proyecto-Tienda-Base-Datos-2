@@ -39,7 +39,7 @@ export class BuscadorProductosController {
     @Req() request: FastifyRequest,
   ) {
     try {
-      const resultados = await this.buscadorProductosService.buscar(
+      const respuesta = await this.buscadorProductosService.buscar(
         query.nombre,
         query.limite,
       );
@@ -52,13 +52,13 @@ export class BuscadorProductosController {
       if (typeof query.sesion === 'string' && query.sesion.trim() !== '') {
         void this.eventosService.registrarBusqueda({
           termino: query.nombre ?? '',
-          resultados: resultados.length,
+          resultados: respuesta.resultados.length,
           idUsuario: await idUsuarioDeCookieOpcional(request),
           sesion: query.sesion.trim(),
         });
       }
 
-      return exito(resultados, 'Busqueda completada');
+      return exito(respuesta, 'Busqueda completada');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo completar la busqueda');
     }

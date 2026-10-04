@@ -283,8 +283,21 @@ POST /resenas
 | `id_producto` | Sí | El `_id` de Mongo. Entero > 0. Mismo mensaje que en las rutas de ofertas y productos |
 | `correo_vendedor` | Sí | Correo de una cuenta real. Se recorta |
 | `calificacion` | Sí | Entero de 1 a 5 |
-| `comentario` | Sí | Texto no vacío, hasta 250 caracteres. Se guarda recortado |
+| `comentario` | Sí | Texto de **40 a 350 caracteres**, contados después de recortar. Se guarda recortado |
 
+> **Cambio 2026-10-04:** el texto de una **reseña** ahora debe tener de **40 a
+> 350 caracteres** (antes: hasta 250, sin mínimo). El mínimo existe porque las
+> señales de fraude por texto solo analizan reseñas largas; el máximo sube
+> a 350 para que quepan más reseñas en ese rango. Se cuenta **después de
+> recortar**: 38 letras con espacios alrededor dan `400`. La **respuesta**
+> (`POST /resenas/:id/respuestas`) tiene el mismo máximo de 350 pero **sin
+> mínimo** (1 carácter basta), porque "Gracias por tu compra" es una respuesta
+> normal y no lleva estrellas. Son dos funciones en
+> `helpers/validaciones-resena.ts`: `validarComentarioResena` (reseña) y
+> `validarRespuestaResena` (respuesta); el máximo y el mensaje de "muy largo"
+> son idénticos. Los comentarios que ya existen no se tocan, aunque midan menos
+> de 40. Nota 2026-10-02 de abajo = el cambio anterior.
+>
 > **Cambio 2026-10-02:** el límite del texto bajó de 2000 a **250 caracteres**
 > (antes: `El comentario no puede tener mas de 2000 caracteres`). Se cuenta
 > **después de recortar** los espacios de los extremos: 250 letras con espacios
@@ -314,7 +327,8 @@ con `GET` después), pero sirven para depurar.
 { "ok": false, "mensaje": "El correo del vendedor es obligatorio", "payload": null }
 { "ok": false, "mensaje": "La calificacion debe ser un numero entero de 1 a 5", "payload": null }
 { "ok": false, "mensaje": "El comentario es obligatorio y no puede estar vacio", "payload": null }
-{ "ok": false, "mensaje": "El comentario no puede tener mas de 250 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El comentario debe tener al menos 40 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El comentario no puede tener mas de 350 caracteres", "payload": null }
 { "ok": false, "mensaje": "No puedes calificarte a ti mismo", "payload": null }
 ```
 
@@ -379,7 +393,7 @@ POST /resenas/61/respuestas
 
 | Campo | Obligatorio | Regla |
 | --- | --- | --- |
-| `comentario` | Sí | Texto no vacío, hasta 250 caracteres. Se guarda recortado. Mismas reglas que el texto de una reseña |
+| `comentario` | Sí | Texto no vacío, hasta **350** caracteres, **sin mínimo** (desde 2026-10-04 la reseña tiene mínimo de 40 y la respuesta no). Se guarda recortado |
 
 ### 201
 
@@ -396,7 +410,7 @@ POST /resenas/61/respuestas
 ```json
 { "ok": false, "mensaje": "El id no es valido", "payload": null }
 { "ok": false, "mensaje": "El comentario es obligatorio y no puede estar vacio", "payload": null }
-{ "ok": false, "mensaje": "El comentario no puede tener mas de 250 caracteres", "payload": null }
+{ "ok": false, "mensaje": "El comentario no puede tener mas de 350 caracteres", "payload": null }
 { "ok": false, "mensaje": "No hay sesion activa", "payload": null }
 ```
 

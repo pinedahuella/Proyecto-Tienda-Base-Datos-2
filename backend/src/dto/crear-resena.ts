@@ -16,6 +16,6 @@ export interface CrearResenaPeticion {
   correo_vendedor: string;
   /** De 1 a 5. */
   calificacion: number;
-  /** El texto de la resena. Obligatorio y no vacio. */
+  /** El texto de la resena. Obligatorio, de 40 a 350 caracteres. */
   comentario: string;
 }

@@ -74,31 +74,79 @@ GET /buscador/productos?nombre=ambár&limite=5
 GET /buscador/productos?nombre=laptop&sesion=sesion-generada-en-el-navegador
 ```
 
-**200**
+**200** -- desde 2026-10-04 el `payload` es un objeto, ya no una lista sola
+(ver "Tal vez quisiste decir" abajo):
 
 ```json
 {
   "ok": true,
   "mensaje": "Busqueda completada",
-  "payload": [
-    {
-      "id_producto": 5,
-      "nombre": "Laptop Nimbo 13",
-      "estado": "activo",
-      "categoria": "Laptops",
-      "precio_desde": 3779,
-      "precio_tienda": 4100,
-      "stock_total": 62,
-      "resenas_promedio": 0,
-      "resenas_total": 0
-    }
-  ]
+  "payload": {
+    "resultados": [
+      {
+        "id_producto": 5,
+        "nombre": "Laptop Nimbo 13",
+        "estado": "activo",
+        "categoria": "Laptops",
+        "precio_desde": 3779,
+        "precio_tienda": 4100,
+        "stock_total": 62,
+        "resenas_promedio": 0,
+        "resenas_total": 0
+      }
+    ],
+    "quisiste_decir": null
+  }
 }
 ```
 
 `estado` en esta ruta **siempre** dice `"activo"` -- viaja en la respuesta
-solo para que la forma sea igual a la de `/admin` (mas abajo), no porque
-aca pueda variar.
+solo para que la forma de cada resultado sea igual a la de `/admin` (mas
+abajo), no porque aca pueda variar.
+
+### Tal vez quisiste decir (agregado 2026-10-04)
+
+`quisiste_decir` es el texto escrito con las palabras mal escritas ya
+corregidas, o `null` si no hay nada que corregir. **La busqueda se hace con lo
+que la persona escribio**, no con la correccion: la difusa (`fuzziness`) ya
+encuentra productos con un error de tecleo, y `quisiste_decir` solo le avisa
+a la pantalla que puede ofrecer "¿Quisiste decir **laptop**?".
+
+```
+GET /buscador/productos?nombre=labtop         -> quisiste_decir: "laptop"
+GET /buscador/productos?nombre=telefno movil  -> quisiste_decir: "telefono movil"
+GET /buscador/productos?nombre=laptop         -> quisiste_decir: null
+GET /buscador/productos?nombre=xyzqwk         -> quisiste_decir: null (no se parece a nada)
+```
+
+Como funciona (`helpers/correccion-busqueda.ts`):
+
+- Va **dentro de la misma consulta** a Elasticsearch (bloque `suggest`), no
+  hay una segunda peticion. Usa el *term suggester* sobre `nombre`, con
+  `suggest_mode: missing`: solo sugiere para palabras que no existen en
+  ningun nombre, y solo para palabras de 3 letras o mas.
+- **No toca el mapeo ni el ETL**: `espanol_llano` solo pasa a minusculas y
+  quita tildes, asi que lo que sugiere son palabras reales del catalogo.
+- Solo corrige **hacia palabras que ya estan en el indice**. Una palabra que
+  no se parece a nada ("televisro", "xyzqwk") se queda como esta y no hay
+  sugerencia.
+- Cambia solo las palabras mal escritas; las demas quedan como las escribio la
+  persona (`telefno Cuarzo` -> `telefono Cuarzo`). La palabra corregida sale
+  en minusculas y sin tilde, porque asi esta en el indice.
+
+Limites aceptados:
+
+- El indice guarda **todos los estados**, asi que la palabra sugerida puede
+  venir de un producto que no esta activo (por ejemplo un borrador). Resolverlo
+  pediria un campo aparte en el mapeo.
+- Una palabra bien escrita que solo aparece en una descripcion y se parece a
+  una palabra de un nombre podria recibir una sugerencia. Es un "tal vez": no
+  cambia lo que se busca.
+
+**Cambio de forma**: antes el `payload` era la lista de resultados; ahora es
+`{ resultados, quisiste_decir }`. Solo cambia esta ruta: `/admin` sigue
+devolviendo la lista sola, y `/facetado` ya devolvia un objeto (solo se le
+suma el campo `quisiste_decir`).
 
 **400**, si no viene `nombre` (o viene vacío):
 
@@ -120,7 +168,9 @@ aca pueda variar.
 un vendedor mas, mismo criterio que ya usa `GET /admin/fraude/anillos`.
 
 Mismos query params que la ruta pública (`nombre`, `limite`), pero **sin
-el filtro de estado** -- trae cualquier producto, en cualquier estado.
+el filtro de estado** -- trae cualquier producto, en cualquier estado. Sigue
+devolviendo la **lista sola** en el `payload` y **no** trae `quisiste_decir`
+(ese campo es solo de la ruta pública y de `/facetado`).
 Pensada para revisar el catálogo completo, incluyendo lo que no circula
 (propuestas en revisión, rechazadas, pausadas).
 
@@ -193,6 +243,7 @@ GET /buscador/productos/facetado?categoria=7          <- navegar solo por faceta
   "payload": {
     "resultados": [ "...mismo resumen que GET /buscador/productos..." ],
     "total": 217,
+    "quisiste_decir": null,
     "facetas": {
       "categoria":    [{ "id": 7, "nombre": "Laptops", "cantidad": 217 }],
       "precio":       [{ "clave": "250-500", "cantidad": 12 }],
@@ -202,6 +253,10 @@ GET /buscador/productos/facetado?categoria=7          <- navegar solo por faceta
   }
 }
 ```
+
+`quisiste_decir` es lo mismo que en la búsqueda simple (ver "Tal vez
+quisiste decir", arriba, desde 2026-10-04): el texto con las palabras mal
+escritas corregidas, o `null`. Es `null` también cuando `nombre` viene vacío.
 
 `total` es el total real de la búsqueda (`hits.total.value`), sin importar
 `limite`. `facetas.disponible` es un número (cuántos de los resultados
@@ -344,7 +399,7 @@ para los productos que salen solo por una reseña.
 
 | Query param | Obligatorio | Qué hace |
 |---|---|---|
-| `q` | sí | Lo que la persona quiere, con sus palabras. No vacío, hasta 250 caracteres (el mismo tope que una reseña: el modelo ve 512 tokens) |
+| `q` | sí | Lo que la persona quiere, con sus palabras. No vacío, hasta 250 caracteres (tope propio de esta ruta, no cambia con el de las reseñas: el modelo ve 512 tokens) |
 | `limite` | no | Cuántos resultados como máximo. Por defecto 10, tope 30 |
 | `calificacion_minima` | no | De 1 a 5. Solo cuentan las reseñas con esa nota o más. Por defecto 4: se busca lo que a otros les funcionó |
 

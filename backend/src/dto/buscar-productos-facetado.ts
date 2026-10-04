@@ -31,6 +31,8 @@ export interface FacetaRango {
 export interface RespuestaFacetada {
   resultados: ResultadoBusquedaProducto[];
   total: number;
+  /** Ver `RespuestaBusquedaProductos.quisiste_decir`. `null` sin texto. */
+  quisiste_decir: string | null;
   facetas: {
     categoria: FacetaCategoria[];
     precio: FacetaRango[];

@@ -1068,16 +1068,54 @@ que agrupan por vendedor y solo corren en el periódico).
 **Desde 2026-10-02 hay un tercero:** `ResenasRepetidasDetectorService`
 (tipo `resenas_repetidas`, familia `patron_resenas`), que no usa el grafo sino
 el texto de las reseñas en Elasticsearch (`mesh_comentarios`): una cuenta con
-5 o más reseñas casi iguales (coseno 0,92) de al menos 40 caracteres, en los
-últimos 180 días. Una señal por cuenta (`clave` = su id). Corre cada 15 min y
+5 o más reseñas que tienen una "gemela" suya (otra casi igual, coseno 0,92) **y**
+que son el **30 %** o más de sus reseñas de 100 caracteres o más, en los
+últimos 180 días (desde 2026-10-04 por porcentaje; antes un grupo de 5 de al
+menos 40 caracteres). Una señal por cuenta (`clave` = su id). Corre cada 15 min y
 no tiene chequeo acotado por reseña. Ver
 `plan pendiente/resenas-repetidas.md`. Y su hermano `AnilloDeTextoDetectorService`
 (tipo `anillo_de_texto`, también fuente `elastic`): 3 o más cuentas distintas con
-reseñas casi iguales sobre el mismo vendedor, con 30 días o menos de diferencia;
-una señal por anillo (`clave` = sus cuentas ordenadas, unidas con guion). Ver
+reseñas casi iguales (de 100 caracteres o más desde 2026-10-04) sobre el mismo
+vendedor, con 30 días o menos de diferencia; sigue por **cantidad de cuentas**,
+no por porcentaje; una señal por anillo (`clave` = sus cuentas ordenadas, unidas con guion). Ver
 `plan pendiente/anillo-de-texto.md`. Sus señales salen en esta lista y en
 `detalle-grafo` como las demás (la lista de reseñas de la evidencia se consulta
 en el grafo igual).
+
+**Desde 2026-10-04 hay dos más, de reseñas copiadas**
+(`ResenasParecidasDetectorService`, fuente `elastic`, familia `patron_resenas`):
+`resenas_parecidas_vendedor` (clave = id del vendedor) y
+`resenas_parecidas_producto` (clave = `p<id_producto>`). Una reseña tiene
+"gemela" si otra, de **otra cuenta**, se le parece (coseno ≥ 0,92) y se escribió
+con 30 días o menos de diferencia; las de la misma cuenta no cuentan (esa es
+`resenas_repetidas`). Piden 5 o más reseñas con gemela **y** que sean el
+**20 %** (vendedor) o el **40 %** (producto) de las analizadas (raíz, 100
+caracteres o más, 180 días). Son solo alerta para el admin: no forman casos ni
+suman puntos. Ver `plan pendiente/resenas-parecidas.md`.
+
+**Desde 2026-10-04 hay tres más, de reseñas "contradictorias"**
+(`NotasIncoherentesDetectorService`, fuente `elastic`, familia
+`patron_resenas`): una reseña es contradictoria si su **texto** es malo y tiene
+4 o 5 estrellas, o su texto es bueno y tiene 1 o 2 (el 3 nunca cuenta). El
+texto lo valora una regresión logística (`valoracion_texto` en
+`mesh_comentarios`, la pone `ValoracionComentariosService`). Solo cuentan
+reseñas raíz de 100 a 350 caracteres, de los últimos 180 días. Cada señal pide
+**5 o más** contradictorias **y** un porcentaje de las reseñas valoradas:
+
+| Tipo | Sobre quién | Porcentaje | `clave` | Entra a los casos |
+|---|---|---|---|---|
+| `notas_incoherentes_cuenta` | las reseñas que escribió una cuenta | 20 % | su id | **sí** (10 puntos, no es `TIPOS_FUERTES`) |
+| `notas_incoherentes_producto` | las reseñas que recibió un producto | 40 % | `p<id_producto>` | no, solo alerta |
+| `notas_incoherentes_vendedor` | las reseñas de los productos de un vendedor | 20 % | su id | no, solo alerta |
+
+La de producto y la de vendedor son **solo alerta para el admin** (salen en
+`GET /admin/fraude/alertas-resenas`, no forman casos ni suman puntos), porque
+una reseña contradictoria tanto puede venir de quien compra reseñas como de una
+campaña en contra del vendedor. En la de vendedor la cuenta sale en `cuentas`
+con rol `autor` solo porque así lo guarda `senal_fraude_cuenta`: aquí no
+significa culpable. La de producto no lleva cuentas (la `clave` empieza con `p`
+para que no se tome por una) y se liga en `senal_fraude_producto`. Ver
+`plan pendiente/notas-incoherentes.md`.
 
 A.4 (misma dirección) y B.4 (anillo en el tiempo) **no** están en esta
 tabla: A.4 no depende de reseñas, así que no tiene un disparador natural con
@@ -1098,7 +1136,7 @@ reglas que el resto del proyecto). Dos filtros opcionales e independientes:
 - `estado=pendiente|revisada|descartada` -- reusa el mismo catálogo y las
   mismas funciones de validación que `alertas-login`
   (`validarFiltroEstadoAlerta`), sin duplicar nada.
-- `tipo=mutuo|ciclo|reiterado|cadena_abierta|satelites|persistente|favor_devuelto|coordinados|reputacion_expres|resenas_repetidas|anillo_de_texto`
+- `tipo=mutuo|ciclo|reiterado|cadena_abierta|satelites|persistente|favor_devuelto|coordinados|reputacion_expres|resenas_repetidas|anillo_de_texto|notas_incoherentes_cuenta|notas_incoherentes_producto|notas_incoherentes_vendedor|resenas_parecidas_producto|resenas_parecidas_vendedor`
   (`anillo_en_el_tiempo`, B.4, no está porque no se persiste como caso propio).
 - sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
   ordenados por `ultima_vez_confirmado_activo DESC` (los que siguen activos
@@ -1158,7 +1196,7 @@ de un admin. Detalle completo del razonamiento en
 
 ```json
 { "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
-{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, cadena_abierta, satelites, persistente, favor_devuelto, coordinados, reputacion_expres, resenas_repetidas, anillo_de_texto", "payload": null }
+{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, cadena_abierta, satelites, persistente, favor_devuelto, coordinados, reputacion_expres, resenas_repetidas, anillo_de_texto, notas_incoherentes_cuenta, notas_incoherentes_producto, notas_incoherentes_vendedor, resenas_parecidas_producto, resenas_parecidas_vendedor", "payload": null }
 ```
 
 ### 401 / 403
@@ -1701,3 +1739,55 @@ Teardown: el caso real `13` se devolvió a `pendiente` por SQL directo
 worker sobre datos de pruebas anteriores, no algo sembrado para esta
 prueba, así que se dejó exactamente como estaba antes de probar el
 `PATCH`.
+
+### Pruebas -- hechas el 2026-10-04 (notas incoherentes)
+
+Contra el servidor y la base local, con sesión de admin real. Las seis
+situaciones salieron de 22 cuentas de prueba (`zz_nota_*`, 95 reseñas escritas a
+propósito: 85 de 100 a 192 caracteres y 10 de 45, ya borradas junto con sus señales, el
+caso y los nodos del grafo). El modelo valoró **todas** como se esperaba:
+24 malas, 61 buenas.
+
+| Situación de prueba | Resultado |
+|---|---|
+| Cuenta con 10 reseñas: 6 contradictorias (4 malas con 5★, 2 buenas con 1★) | `notas_incoherentes_cuenta`, 6 de 10 (60 %), 6 reseñas de evidencia; el vendedor de esas reseñas también: `notas_incoherentes_vendedor`, 6 de 10 |
+| Cuenta con 35 reseñas, 5 contradictorias (14 %) | **sin señal** (llega a 5 pero no al 20 %), tampoco su vendedor |
+| Producto con 10 reseñas de 10 cuentas distintas, 5 contradictorias (50 %) | `notas_incoherentes_producto` con `clave` `p50`, `senal_fraude_producto` = 50, sin cuentas; su vendedor (5 de 10) también |
+| Producto con 20 reseñas (dos vendedores), 5 contradictorias (25 %) | **sin señal** (menos del 40 %); sus vendedores, con 3 y 2, tampoco |
+| 10 reseñas de texto malo y bueno con 3 estrellas | **sin señal** (el 3 no cuenta) |
+| 10 reseñas de texto malo con 5 estrellas pero de 45 caracteres | **sin señal**: quedan `corta`, no se valoran |
+| `GET .../alertas-resenas?tipo=notas_incoherentes_cuenta` / `_producto` / `_vendedor` | `200`, 1 / 1 / 2 señales, `pendiente`; las de cuenta y vendedor con su cuenta, la de producto con `cuentas: []` |
+| `GET .../alertas-resenas?tipo=xxx` | `400`, el mensaje lista los tres tipos nuevos |
+| Agrupador (reinicio del backend) | la señal de cuenta formó un caso propio de **10 puntos**, nivel `informativo`; las de producto y vendedor **no están en ningún caso** |
+| `npx tsc --noEmit` | limpio |
+
+Las 97 reseñas locales originales son todas de menos de 100 caracteres: quedan
+`corta` y no producen ninguna señal.
+
+### Pruebas -- hechas el 2026-10-04 (reseñas parecidas)
+
+Contra el servidor y la base local, con sesión de admin real. 28 cuentas de prueba
+(`zz_par_*`) y 80 reseñas escritas a propósito, ya borradas junto con sus señales,
+casos y nodos del grafo. Hay 30 textos distintos (coseno máximo 0,67 entre
+sí) y 4 plantillas con pequeñas variaciones (coseno 0,97 o más entre sus copias
+y 0,56 o menos contra los distintos), todos de 117 a 161 caracteres, más 8 copias
+de 39 caracteres.
+
+| Situación de prueba | Resultado |
+|---|---|
+| Cuenta con 12 reseñas: 6 copias de una plantilla y 6 distintas (50 %) | `resenas_repetidas`, 6 de 12, 6 reseñas de evidencia; caso propio de 15 puntos |
+| Cuenta con 20 reseñas: 5 copias y 15 distintas (25 %) | **sin señal** (llega a 5 pero no al 30 %) |
+| Cuenta con 8 copias de menos de 100 caracteres | **sin señal** (no se analizan) |
+| Producto con 10 reseñas de 10 cuentas, 5 con gemela de otra cuenta (50 %) | `resenas_parecidas_producto` con `clave` `p41`, `senal_fraude_producto` = 41, sin cuentas |
+| El vendedor de ese producto (10 reseñas, las mismas 5 con gemela, 50 %) | `resenas_parecidas_vendedor`, 5 de 10 |
+| Producto con 20 reseñas, 5 con gemela (25 %) | **sin señal** (menos del 40 %) |
+| Su vendedor, con 30 reseñas y las mismas 5 con gemela (16,7 %) | **sin señal** (menos del 20 %) |
+| Las 5 cuentas de las copias sobre un vendedor | `anillo_de_texto` por cantidad de cuentas (sigue funcionando); los dos anillos de las mismas 5 cuentas comparten señal, con 10 reseñas de evidencia |
+| `GET .../alertas-resenas?tipo=resenas_parecidas_vendedor` / `_producto` | `200`, 1 señal cada una, `pendiente`; la de producto con `cuentas: []` |
+| Adaptador de casos | las dos señales `resenas_parecidas_*` **no** entran; `resenas_repetidas` y `anillo_de_texto` sí (casos de 15 y 25 puntos) |
+| Notas incoherentes sobre las mismas cuentas | ninguna señal (no hubo 5 contradictorias) |
+| `npx tsc --noEmit` y `npx eslint` sobre los archivos tocados | limpios |
+
+Las 97 reseñas locales originales miden menos de 100 caracteres: no producen
+señales de texto. Las señales viejas de `resenas_repetidas` de las cuentas 3 y 7
+(del generador) siguen en la base; el detector no cierra señales.

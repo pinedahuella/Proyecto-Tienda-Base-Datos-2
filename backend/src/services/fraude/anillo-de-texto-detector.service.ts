@@ -12,6 +12,8 @@ import {
   VectorConNorma,
 } from '../../helpers/similitud-vectores';
 
+import { LARGO_MINIMO_VALORACION } from '../../helpers/valoracion-texto';
+
 const INDICE = process.env.ELASTIC_INDICE_COMENTARIOS ?? 'mesh_comentarios';
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
@@ -84,8 +86,9 @@ export class AnilloDeTextoDetectorService {
   /** Cuentas distintas que hacen falta para que un grupo sea un anillo. */
   private static readonly MIN_CUENTAS = 3;
 
-  /** Una resena de menos caracteres que esto no cuenta. */
-  private static readonly MIN_CARACTERES = 40;
+  /** Una resena de menos caracteres que esto no cuenta. El mismo largo que usan
+   * las demas senales de texto (desde 2026-10-04: antes 40). */
+  private static readonly MIN_CARACTERES = LARGO_MINIMO_VALORACION;
 
   /** Coseno desde el cual dos resenas se consideran casi iguales. */
   private static readonly UMBRAL_COSENO = 0.92;

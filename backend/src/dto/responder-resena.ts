@@ -10,6 +10,6 @@
  * endpoints-resenas.md). No hace falta ser el vendedor calificado.
  */
 export interface ResponderResenaPeticion {
-  /** El texto de la respuesta. Obligatorio, no vacio, hasta 250 caracteres. */
+  /** El texto de la respuesta. Obligatorio, no vacio, hasta 350 caracteres, sin minimo. */
   comentario: string;
 }

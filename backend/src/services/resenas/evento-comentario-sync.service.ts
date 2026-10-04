@@ -30,6 +30,7 @@ interface FilaComentario {
   fecha_publicacion: Date;
   id_resena: string;
   id_producto_mongo: string;
+  id_usuario_vendedor: string;
   calificacion: number;
 }
 
@@ -69,6 +70,11 @@ interface PorIndexar {
  * Una respuesta muy corta ("gracias") casi no tiene significado: se indexa
  * para la busqueda de texto pero sin vector (`MIN_CARACTERES_RESPUESTA`). La
  * raiz de una resena siempre lleva vector.
+ *
+ * Cada documento lleva tambien el `id_vendedor` de su resena (para contar por
+ * vendedor con agregaciones). Y cuando el texto cambia y se recalcula el vector,
+ * se borran `valoracion_texto`, `prob_mala` y `valoracion_modelo`: los vuelve a
+ * poner `ValoracionComentariosService` desde el vector nuevo.
  *
  * La calificacion solo va en el documento de la raiz. Las respuestas guardan
  * el `id_resena` y el `id_producto` y no la copian: si la calificacion cambia,
@@ -221,7 +227,8 @@ export class EventoComentarioSyncService {
        )
        SELECT c.id_comentario, c.id_comentario_padre, s.actual AS id_raiz,
               c.id_usuario, c.comentario, c.fecha_publicacion,
-              r.id_resena, r.id_producto_mongo, r.calificacion
+              r.id_resena, r.id_producto_mongo, r.id_usuario_vendedor,
+              r.calificacion
          FROM subida s
          JOIN comentario c ON c.id_comentario = s.id
          JOIN resena r ON r.id_comentario = s.actual
@@ -313,6 +320,7 @@ export class EventoComentarioSyncService {
         id_raiz: Number(p.fila.id_raiz),
         id_resena: Number(p.fila.id_resena),
         id_producto: Number(p.fila.id_producto_mongo),
+        id_vendedor: Number(p.fila.id_usuario_vendedor),
         id_usuario: Number(p.fila.id_usuario),
         es_respuesta: p.fila.id_comentario_padre != null,
         calificacion:
@@ -326,6 +334,7 @@ export class EventoComentarioSyncService {
         doc.vector = null;
         doc.vector_hash = null;
         doc.vector_modelo = null;
+        this.borrarValoracion(doc);
       } else if (p.recalcular) {
         const vector = vectores.get(p.evento.id_comentario);
         if (vector == null) {
@@ -338,6 +347,9 @@ export class EventoComentarioSyncService {
         doc.vector = vector;
         doc.vector_hash = p.hash;
         doc.vector_modelo = OLLAMA_MODELO;
+        // El texto cambio: la valoracion que tenia ya no vale.
+        // `ValoracionComentariosService` la vuelve a calcular con el vector nuevo.
+        this.borrarValoracion(doc);
       }
       // Si el hash no cambio no se tocan los campos del vector.
 
@@ -350,6 +362,12 @@ export class EventoComentarioSyncService {
       });
     }
     return operaciones;
+  }
+
+  private borrarValoracion(doc: Record<string, unknown>): void {
+    doc.valoracion_texto = null;
+    doc.prob_mala = null;
+    doc.valoracion_modelo = null;
   }
 
   /** Solo si `fecha` sigue siendo la que se leyo: si el comentario cambio

@@ -6,6 +6,17 @@
 > el tipo `resenas_repetidas` en `tipo_senal_fraude`.
 > La señal 2 (varias cuentas con reseñas muy parecidas, un anillo de texto) ya
 > está hecha: ver `anillo-de-texto.md`.
+>
+> **Cambio 2026-10-04:** la regla pasó de "un grupo de 5 reseñas casi iguales"
+> a **porcentaje**: 5 o más reseñas con una gemela (otra de la misma cuenta con
+> coseno ≥ 0,92) **y** que sean el **30 %** o más de las reseñas analizadas de la
+> cuenta (`PORCENTAJE_MINIMO`). Sin encadenar grupos: cada reseña cuenta solo si
+> tiene su propia gemela. El largo mínimo subió de 40 a **100** caracteres (el
+> mismo de todas las señales de texto). El `detalle` cambió: ahora trae
+> `resenas_con_gemela`, `resenas_analizadas`, `porcentaje`, `porcentaje_minimo`
+> y `min_resenas` en vez de `resenas_en_grupo`, `total_resenas_cuenta` y
+> `grupos`. Las señales viejas se quedan como estaban hasta que el detector las
+> vuelva a encontrar (no se borran solas). Ver `resenas-parecidas.md`.
 
 ## De dónde viene esto
 
@@ -18,7 +29,8 @@ pega.
 
 ## La señal
 
-**Una cuenta con 5 o más reseñas casi iguales.** Se persiste como una señal
+**Una cuenta con 5 o más reseñas casi iguales, que son el 30 % o más de lo que
+escribió (desde 2026-10-04; antes bastaba un grupo de 5).** Se persiste como una señal
 más del catálogo único (`senal_fraude`), tipo `resenas_repetidas`, familia
 `patron_resenas`, fuente `elastic`. Una señal por cuenta: `clave` = el
 id de la cuenta, y la cuenta entra a `senal_fraude_cuenta` como `autor` (es la
@@ -30,7 +42,8 @@ grupos de parecidas.
 | Parámetro | Valor | Nota |
 |---|---|---|
 | Reseñas casi iguales mínimas | **5** | Constante `MIN_RESENAS` |
-| Largo mínimo de una reseña | **40 caracteres** | `MIN_CARACTERES`. El usuario pidió 40, bajar a 15 solo si las pruebas no lo permitían: lo permitieron (38 de 43 y 40 de 43 reseñas de las cuentas 7 y 3 ya pasan de 40) |
+| Porcentaje mínimo | **30 %** de las reseñas analizadas | `PORCENTAJE_MINIMO` (2026-10-04), a calibrar con datos reales |
+| Largo mínimo de una reseña | **100 caracteres** | `MIN_CARACTERES` = `LARGO_MINIMO_VALORACION` (2026-10-04; hasta entonces 40, que el usuario había pedido) |
 | Coseno mínimo | **0,92** | `UMBRAL_COSENO`, entre los vectores de dos reseñas |
 | Ventana | **180 días** | `VENTANA_DIAS`. Misma idea que los 60 días de `PatronesFraudeDetectorService`: sin ventana, una señal vieja se "confirmaría activa" para siempre. Mayor que 60 porque la repetición no caduca tan rápido |
 | Reseñas que se miran por cuenta | las 500 más recientes | `MAX_RESENAS_POR_CUENTA` |
@@ -48,16 +61,17 @@ conexión solo se loguean):
 
 1. Una agregación en `mesh_comentarios` saca las cuentas con al menos 5
    reseñas en la ventana.
-2. De cada una trae sus reseñas con su vector y descarta las de menos de 40
+2. De cada una trae sus reseñas con su vector y descarta las de menos de 100
    caracteres.
-3. Compara todas contra todas (coseno, calculado en el servicio) y une las que
-   pasan de 0,92, directa o encadenadamente (union-búsqueda) en grupos.
-4. Si algún grupo tiene 5 o más, la cuenta es una señal. Se persiste con el
-   mismo `registrarAnilloFraude` que los demás patrones (el helper no cambió).
+3. Compara todas contra todas (coseno, calculado en el servicio) y marca cada
+   reseña que tiene una gemela: otra con coseno de 0,92 o más.
+4. Si las marcadas son 5 o más y el 30 % o más de las analizadas, la cuenta es
+   una señal. Se persiste con el mismo `registrarAnilloFraude` que los demás
+   patrones.
 
-`detalle` de la señal: `resenas_en_grupo`, `total_resenas_cuenta`, `grupos`
-(el tamaño de cada grupo), `similitud_media`, `similitud_minima`,
-`umbral_coseno`, `min_caracteres`, `ventana_dias`.
+`detalle` de la señal: `resenas_con_gemela`, `resenas_analizadas`,
+`porcentaje`, `porcentaje_minimo`, `min_resenas`, `similitud_media`,
+`similitud_minima`, `umbral_coseno`, `min_caracteres`, `ventana_dias`.
 
 ### Dónde engancha lo que ya existía
 

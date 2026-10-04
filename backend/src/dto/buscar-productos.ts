@@ -13,6 +13,17 @@ export interface BuscarProductosQuery {
   sesion?: string;
 }
 
+/** La respuesta de GET /buscador/productos (la ruta publica). */
+export interface RespuestaBusquedaProductos {
+  resultados: ResultadoBusquedaProducto[];
+  /**
+   * El texto escrito con las palabras mal escritas ya corregidas ("tal vez
+   * quisiste decir ..."), o `null` si no hay nada que corregir. La busqueda
+   * se hizo con lo que la persona escribio, no con esto.
+   */
+  quisiste_decir: string | null;
+}
+
 /**
  * Un resultado de busqueda: el RESUMEN que guarda el indice de Elasticsearch
  * para encontrar y ordenar, no el producto completo (sin imagenes, sin

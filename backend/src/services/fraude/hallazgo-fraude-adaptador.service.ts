@@ -33,6 +33,22 @@ const TIPOS_LOGIN_INCLUIDOS = [
 ];
 
 /**
+ * Las senales de un producto y de un vendedor (notas incoherentes y resenas
+ * parecidas) son solo una ALERTA para el admin
+ * (`GET /admin/fraude/alertas-resenas`): un producto con textos contrarios a
+ * sus estrellas o con muchas resenas copiadas, o un vendedor al que le pasa en
+ * el 20 % de sus resenas, puede ser tanto quien compra resenas como la victima
+ * de una campana en contra. Por eso no forman casos ni suman puntos a la cuenta
+ * del vendedor. La de CUENTA (quien escribe) si entra.
+ */
+const TIPOS_SOLO_ALERTA = [
+  'notas_incoherentes_producto',
+  'notas_incoherentes_vendedor',
+  'resenas_parecidas_producto',
+  'resenas_parecidas_vendedor',
+];
+
+/**
  * La fuente del agrupador de cada tipo de senal, segun la fuente que el
  * catalogo (`tipo_senal_fraude.id_fuente_senal_fraude`) le asigna. Los
  * anillos (A) y los patrones de resenas (B) entran TODOS los tipos. La fuente
@@ -103,10 +119,14 @@ export class HallazgoFraudeAdaptadorService {
                 )
             AND (f.familia_senal_fraude_nombre IN ('anillo_resenas', 'patron_resenas')
                  OR t.tipo_senal_fraude_nombre = ANY($1))
+            AND NOT (t.tipo_senal_fraude_nombre = ANY($2))
           GROUP BY s.id_senal_fraude, t.tipo_senal_fraude_nombre,
                    f.familia_senal_fraude_nombre, fu.fuente_senal_fraude_nombre,
                    s.detalle, s.ultima_deteccion`,
-        [[...TIPOS_EVENTO_INCLUIDOS, ...TIPOS_LOGIN_INCLUIDOS]],
+        [
+          [...TIPOS_EVENTO_INCLUIDOS, ...TIPOS_LOGIN_INCLUIDOS],
+          TIPOS_SOLO_ALERTA,
+        ],
       );
       return resultado.rows.map((fila) => {
         const cuentas = [...new Set(fila.cuentas.map(Number))];

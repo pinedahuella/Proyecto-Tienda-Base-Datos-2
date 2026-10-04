@@ -255,6 +255,11 @@ type HallazgoTipado = {
     | 'anillo_en_el_tiempo'
     | 'resenas_repetidas'
     | 'anillo_de_texto'
+    | 'notas_incoherentes_cuenta'
+    | 'notas_incoherentes_producto'
+    | 'notas_incoherentes_vendedor'
+    | 'resenas_parecidas_producto'
+    | 'resenas_parecidas_vendedor'
   >;
   fila: FilaHallazgo;
 };

@@ -2,7 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { elasticClient } from '../../database/elastic';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import { ErrorValidacion } from '../../helpers/errores';
-import { ResultadoBusquedaProducto } from '../../dto/buscar-productos';
+import {
+  pedirCorreccion,
+  textoCorregido,
+} from '../../helpers/correccion-busqueda';
+import {
+  RespuestaBusquedaProductos,
+  ResultadoBusquedaProducto,
+} from '../../dto/buscar-productos';
 
 const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
 const LIMITE_DEFECTO = 20;
@@ -58,7 +65,7 @@ export class BuscadorProductosService {
   async buscar(
     nombre: string | undefined,
     limite: string | undefined,
-  ): Promise<ResultadoBusquedaProducto[]> {
+  ): Promise<RespuestaBusquedaProductos> {
     return this.ejecutar(nombre, limite, true);
   }
 
@@ -71,14 +78,19 @@ export class BuscadorProductosService {
     nombre: string | undefined,
     limite: string | undefined,
   ): Promise<ResultadoBusquedaProducto[]> {
-    return this.ejecutar(nombre, limite, false);
+    const { resultados } = await this.ejecutar(nombre, limite, false);
+    return resultados;
   }
 
+  /**
+   * `quisiste_decir` solo se calcula en la ruta publica: la de admin sigue
+   * devolviendo la lista sola.
+   */
   private async ejecutar(
     nombre: string | undefined,
     limite: string | undefined,
     soloActivos: boolean,
-  ): Promise<ResultadoBusquedaProducto[]> {
+  ): Promise<RespuestaBusquedaProductos> {
     const texto = (nombre ?? '').trim();
     if (!texto) {
       throw new ErrorValidacion('Escribe el nombre del producto que buscas');
@@ -96,6 +108,7 @@ export class BuscadorProductosService {
       const respuesta = await elasticClient.search<DocumentoIndice>({
         index: INDICE,
         size: this.aLimite(limite),
+        suggest: soloActivos ? pedirCorreccion(texto) : undefined,
         query: soloActivos
           ? {
               bool: {
@@ -106,7 +119,13 @@ export class BuscadorProductosService {
           : textoQuery,
       });
 
-      return respuesta.hits.hits.map((hit) => this.aResultado(hit));
+      return {
+        resultados: respuesta.hits.hits.map((hit) => this.aResultado(hit)),
+        quisiste_decir: textoCorregido(
+          texto,
+          respuesta.suggest as Parameters<typeof textoCorregido>[1],
+        ),
+      };
     } catch (error) {
       manejarErrorConexionElastic(this.logger, error);
     }

@@ -23,7 +23,7 @@ evidencia (`senal_fraude_resena`) son todas las reseñas del anillo.
 | Parámetro | Valor | Nota |
 |---|---|---|
 | Cuentas distintas mínimas | **3** | `MIN_CUENTAS` |
-| Largo mínimo de una reseña | **40 caracteres** | `MIN_CARACTERES`, el mismo que `resenas_repetidas` |
+| Largo mínimo de una reseña | **100 caracteres** | `MIN_CARACTERES` = `LARGO_MINIMO_VALORACION`, el mismo de todas las señales de texto (desde 2026-10-04; antes 40). El anillo se queda por **cantidad de cuentas**, no por porcentaje: una red pequeña de bots en un vendedor grande no debe pasar desapercibida |
 | Coseno mínimo | **0,92** | `UMBRAL_COSENO` |
 | Diferencia máxima entre dos reseñas unidas | **30 días** | `DIAS_ENTRE_RESENAS`: una plantilla repetida a lo largo de meses es otra cosa |
 | Ventana | **180 días** | `VENTANA_DIAS`, como la señal 1 |
@@ -45,7 +45,7 @@ el texto y su vector.
 1. PostgreSQL saca los vendedores con reseñas de 3 o más autores distintos en la
    ventana, y las reseñas de cada uno.
 2. De esas reseñas trae los vectores de Elasticsearch (solo reseñas raíz) y
-   descarta las de menos de 40 caracteres.
+   descarta las de menos de 100 caracteres.
 3. Dos reseñas se unen si son de **autores distintos**, de no más de 30 días de
    diferencia y de coseno 0,92 o más. Un grupo son las que se unen, directa o
    encadenadamente.

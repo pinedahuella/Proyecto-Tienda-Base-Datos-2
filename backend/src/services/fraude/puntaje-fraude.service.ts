@@ -26,6 +26,7 @@ const PUNTOS_BASE: Record<string, number> = {
   persistente: 15,
   resenas_repetidas: 15, // cuenta con 5+ resenas casi iguales (texto, Elasticsearch)
   anillo_de_texto: 25, // 3+ cuentas con resenas casi iguales sobre un vendedor (texto, Elasticsearch)
+  notas_incoherentes_cuenta: 10, // 5+ y 20 %+ de sus resenas con el texto contrario a las estrellas (texto, Elasticsearch)
   ip_multicuenta_compras: 20, // F3
   granja_de_registros: 20, // F6
   compras_en_rafaga: 15, // F2

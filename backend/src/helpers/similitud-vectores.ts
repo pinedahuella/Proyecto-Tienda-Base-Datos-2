@@ -31,6 +31,33 @@ export function redondear(valor: number): number {
 }
 
 /**
+ * Marca cada elemento que tiene al menos una "gemela": otro elemento con el que
+ * `sonGemelas` da un valor (no `null`). A diferencia de `agruparPorParecido` no
+ * encadena: A y C no quedan juntos porque ambos se parezcan a B, cada uno solo
+ * cuenta si tiene su propia gemela. Sirve para medir "que porcentaje de estas
+ * resenas tiene una copia" sin que un grupo grande infle el numero. Devuelve
+ * tambien el `valor` de cada par que paso la prueba.
+ */
+export function marcarConGemela(
+  cantidad: number,
+  sonGemelas: (a: number, b: number) => number | null,
+): { conGemela: boolean[]; similitudes: number[] } {
+  const conGemela = new Array<boolean>(cantidad).fill(false);
+  const similitudes: number[] = [];
+  for (let a = 0; a < cantidad; a++) {
+    for (let b = a + 1; b < cantidad; b++) {
+      const valor = sonGemelas(a, b);
+      if (valor != null) {
+        conGemela[a] = true;
+        conGemela[b] = true;
+        similitudes.push(valor);
+      }
+    }
+  }
+  return { conGemela, similitudes };
+}
+
+/**
  * Une en grupos los elementos que `sonParecidos` relaciona, directa o
  * encadenadamente (union-busqueda). Devuelve, de cada grupo, los indices de
  * sus elementos y los `valor` de los pares que pasaron la prueba dentro de el.

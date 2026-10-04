@@ -11,6 +11,7 @@ import {
   validarCalificacion,
   validarComentarioResena,
   validarCorreoVendedor,
+  validarRespuestaResena,
   validarValorVoto,
 } from '../../helpers/validaciones-resena';
 import { CrearResenaPeticion } from '../../dto/crear-resena';
@@ -371,7 +372,7 @@ export class ResenasService {
       throw new ErrorValidacion('El id no es valido');
     }
     const idResena = Number(idResenaParametro);
-    const comentario = validarComentarioResena(datos.comentario);
+    const comentario = validarRespuestaResena(datos.comentario);
 
     try {
       const resultado = await pool.query<{ id_comentario: string }>(
