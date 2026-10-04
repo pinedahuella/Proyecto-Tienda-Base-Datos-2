@@ -23,13 +23,17 @@ node predecir.mjs "llego roto y nadie contesta" --estrellas 5
 ## Que hay en cada carpeta
 
 ```
-datos/          480 resenas escritas a mano, todas de mas de 150 caracteres
+datos/          480 resenas escritas a mano, de hasta 250 caracteres (la app acepta de 40 a 350)
                 buenas_1 y buenas_2   200 buenas (4 y 5 estrellas)
                 malas_1 y malas_2     200 malas (1 y 2 estrellas)
                 casos_unicos          80 casos dificiles que NUNCA se usan para entrenar,
                                       cada uno con su campo `caso` (sarcasmo, sin tildes,
                                       calo chapin, actualizaciones, nota que no cuadra...)
 vectores/       el vector de cada resena (no se sube, se regenera)
+semilla/        generar.js escribe resenas.sql (las 480 sembradas como resenas de
+                verdad, de 40 cuentas con su compra pagada, cada una en el producto
+                del que habla su texto) y quitar.sql (la deshace). arrancar.ps1 corre
+                resenas.sql en cada arranque, en el paso Resenas del clasificador
 modelo/         regresion_logistica.json y red_neuronal.json, listos para el backend;
                 verificacion.json para comprobar que el backend calcula lo mismo;
                 reporte.txt con las notas de la ultima corrida

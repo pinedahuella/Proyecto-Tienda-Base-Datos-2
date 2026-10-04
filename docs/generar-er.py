@@ -101,7 +101,7 @@ MODULOS = {
                   "imagen_producto", "imagen_producto_producto", "caracteristica",
                   "caracteristica_variante", "tipo_dato", "categoria_caracteristica",
                   "categoria_caracteristica_variante", "producto_caracteristica",
-                  "producto_variante_caracteristica_variante", "producto_vector"]),
+                  "producto_variante_caracteristica_variante"]),
     "ofertas": ("Ofertas e inventario", "#FFE6CC", "#D79B00",
                 ["oferta", "estado_oferta", "precio_historial", "stock_movimiento",
                  "motivo_movimiento", "propuesta_producto", "rechazo_producto", "rechazo_oferta",
@@ -111,7 +111,9 @@ MODULOS = {
     "pedidos": ("Pedidos y pagos", "#FFF2CC", "#D6B656",
                 ["pedido", "estado_pedido", "pedido_producto", "pago", "estado_pago", "metodo_pago"]),
     "resenas": ("Resenas", "#E1D5E7", "#9673A6",
-                ["resena", "comentario", "likes"]),
+                # evento_comentario (034): la cola que lleva cada resena con su
+                # vector a mesh_comentarios de Elasticsearch
+                ["resena", "comentario", "likes", "evento_comentario"]),
     "fraude": ("Fraude y grafo", "#F8CECC", "#B85450",
                ["alerta_fraude", "tipo_alerta_fraude", "estado_alerta_fraude", "notificacion_fraude",
                 "anillo_fraude", "tipo_anillo_fraude", "anillo_fraude_resena", "evento_grafo",
@@ -130,7 +132,7 @@ DISPOSICION = [
     ["log_login", "log_registro", "direcciones", "direccion_historial"],
     ["rol_usuario", "usuarios", "estado_usuario"],
     ["propuesta_producto", "|", "precio_historial", "oferta", "stock_movimiento", "pedido", "|",
-     "resena", "comentario", "likes", "|", "alerta_fraude", "notificacion_fraude", "|",
+     "resena", "comentario", "likes", "evento_comentario", "|", "alerta_fraude", "notificacion_fraude", "|",
      "hallazgo_evento_fraude_cuenta"],
     ["rechazo_producto", "|", "estado_oferta", "rechazo_oferta", "motivo_movimiento",
      "regla_descuento_automatico", "regla_descuento_periodo", "evento_producto", "|",
@@ -158,7 +160,7 @@ DISPOSICION_CATALOGO = [
     ["categoria_caracteristica", "categoria_caracteristica_variante", "producto_caracteristica",
      "productos_historial", "productos_variantes"],
     ["producto_variante_caracteristica_variante", "productos_variantes_historial", "imagen_producto",
-     "imagen_producto_producto", "|", "producto_vector"],
+     "imagen_producto_producto"],
 ]
 
 # vistas recortadas para el informe. Solo se dibujan las lineas entre las tablas presentes.

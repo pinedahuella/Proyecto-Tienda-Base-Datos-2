@@ -1160,11 +1160,165 @@ function Correr-Etl {
 $ES_URL    = 'http://localhost:9200'
 $ES_INDICE = 'mesh_productos'
 
+# Donde Correr-EtlBusqueda deja los vectores de los productos antes de tirar
+# mesh_productos, para que etl/cargar_vectores.ps1 los devuelva sin Ollama. El
+# mismo nombre esta en cargar_vectores.ps1 y en etl/cargar_busqueda.sh.
+$ES_INDICE_VECTORES_PREVIOS = 'mesh_productos_vectores_previos'
+
+# El texto de las resenas y sus respuestas, con su vector (desde el 2026-10-02).
+# Mismo valor por defecto que ELASTIC_INDICE_COMENTARIOS del backend
+# (services/resenas/evento-comentario-sync.service.ts).
+$ES_INDICE_COMENTARIOS = 'mesh_comentarios'
+
 # El indice del log de autenticacion. Mismo valor por defecto que
 # ELASTIC_INDICE_EVENTOS en backend/src/services/eventos-autenticacion/: si
 # alli cambia, cambia aqui y en el index_patterns de
 # elastic/002_eventos_autenticacion.json.
 $ES_INDICE_EVENTOS = 'mesh_eventos_autenticacion'
+
+# Copia los campos del vector de cada producto (vector, vector_hash,
+# vector_grupo, vector_modelo) de mesh_productos a mesh_productos_vectores_previos,
+# justo antes de que Correr-EtlBusqueda tire el indice. Lo copia Elasticsearch
+# por dentro con _reindex: nada de los 768 numeros por producto pasa por
+# PowerShell. El indice de copia lleva el vector con index:false, sin el grafo
+# HNSW, porque solo se lee por id.
+#
+# Se rehace cada vez: lo que guarda es el estado justo antes de esta
+# reconstruccion. Si el indice no existe o no tiene ni un vector (la primera
+# vez, o un indice de antes del 2026-10-02) no hace nada y se queda la copia
+# anterior, que no estorba: cargar_vectores.ps1 solo devuelve un vector si su
+# hash coincide con el texto de hoy.
+#
+# Nunca corta: si falla, lo unico que se pierde es tiempo de Ollama despues.
+function Guardar-VectoresPrevios {
+    $conVector = 0
+    try {
+        $conVector = [int](Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_count" -ContentType 'application/json' `
+            -Body '{"query":{"exists":{"field":"vector"}}}' -TimeoutSec 20).count
+    } catch { return }
+    if ($conVector -eq 0) { return }
+
+    $mapeo = '{"settings":{"number_of_shards":1,"number_of_replicas":0},' +
+             '"mappings":{"dynamic":false,"properties":{' +
+             '"vector":{"type":"dense_vector","dims":768,"index":false},' +
+             '"vector_hash":{"type":"keyword"},"vector_grupo":{"type":"keyword"},"vector_modelo":{"type":"keyword"}}}}'
+    $copia = '{"source":{"index":"' + $ES_INDICE + '","_source":["vector","vector_hash","vector_grupo","vector_modelo"],' +
+             '"query":{"exists":{"field":"vector"}}},"dest":{"index":"' + $ES_INDICE_VECTORES_PREVIOS + '"}}'
+    try {
+        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_VECTORES_PREVIOS" -TimeoutSec 30 | Out-Null } catch { }
+        Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_VECTORES_PREVIOS" -ContentType 'application/json' -Body $mapeo -TimeoutSec 30 | Out-Null
+        $r = Invoke-RestMethod -Method Post -Uri "$ES_URL/_reindex?wait_for_completion=true&refresh=true" `
+            -ContentType 'application/json' -Body $copia -TimeoutSec 600
+        if ($r.failures.Count -gt 0 -or $r.created -ne $conVector) {
+            Aviso "Se guardaron $($r.created) de $conVector vectores antes de rehacer el indice; los que falten los recalcula Ollama"
+        } else {
+            Ok "$conVector vectores guardados en $ES_INDICE_VECTORES_PREVIOS antes de rehacer el indice"
+        }
+    } catch {
+        Aviso "No se pudieron guardar los vectores antes de rehacer el indice: $($_.Exception.Message)"
+        Aviso "   No corta nada; cargar_vectores.ps1 los vuelve a calcular con Ollama"
+    }
+}
+
+
+# El indice de los comentarios: el texto de cada resena y de sus respuestas,
+# con su vector. De el leen las senales de fraude por texto
+# (ResenasRepetidasDetectorService, AnilloDeTextoDetectorService) y
+# GET /buscador/productos/intencion.
+#
+# Al reves que mesh_productos, este NO se tira ni lo llena un ETL. Lo llena el
+# worker EventoComentarioSyncService desde la cola evento_comentario
+# (migracion 034), comentario por comentario. Y el worker no lo crea: con
+# update y doc_as_upsert, un indice que no existe nacia con mapeo dinamico y el
+# vector como floats sueltos. Por eso aqui se crea, con elastic/003_comentarios.json,
+# antes de que arranque el backend.
+#
+# Cuando lo crea, encola TODOS los comentarios que ya hay. En una base nueva
+# ya estaban encolados (la 034 corre antes que la semilla y sus triggers los
+# anotan), y el UPSERT de la cola los junta sin duplicar. En una base que ya
+# tenia comentarios antes de la 034, o despues de un -Reiniciar de solo
+# Elasticsearch, es lo unico que los lleva al indice.
+#
+# Si ya existe pero su vector no es dense_vector (un indice que el worker creo
+# solo, con mapeo dinamico), se tira, se rehace y se encola todo, igual que el
+# de eventos de autenticacion. Es una proyeccion: el original esta en
+# PostgreSQL.
+#
+# Y tambien si el vector esta con el indice HNSW y no con `flat`. Medido el
+# 2026-10-04 con 666 comentarios: hay textos repetidos (44 copias de uno, 24
+# de otro, de la semilla vieja y de las demos de fraude), y con vectores
+# identicos el grafo HNSW se atasca. Para "zapatos comodos para caminar todo
+# el dia", un kNN con 100 candidatos daba como mejor una resena con coseno
+# 0,30, y la busqueda exacta encontraba una de 0,81. `flat` compara contra
+# todos: exacto siempre, y con unos miles de resenas sigue tardando
+# milisegundos. El worker vuelve a calcular los vectores con Ollama.
+#
+# Devuelve $true si el indice queda con el mapeo bueno. Nunca lanza.
+function Preparar-IndiceComentarios {
+    $existe = $true
+    try {
+        Invoke-RestMethod -Method Head -Uri "$ES_URL/$ES_INDICE_COMENTARIOS" -TimeoutSec 20 | Out-Null
+    } catch {
+        $existe = $false
+    }
+
+    if ($existe) {
+        $tipo = $null
+        $opciones = $null
+        try {
+            $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_mapping/field/vector" -TimeoutSec 20
+            $primero = @($m.PSObject.Properties)[0]
+            if ($primero -and $primero.Value.mappings.vector) {
+                $tipo = $primero.Value.mappings.vector.mapping.vector.type
+                $opciones = $primero.Value.mappings.vector.mapping.vector.index_options.type
+            }
+        } catch { }
+        if ($tipo -eq 'dense_vector' -and $opciones -eq 'flat') {
+            # Los campos que se le suman al mapeo despues de creado (id_vendedor y la
+            # valoracion del clasificador, 3305cf3) no piden rehacerlo: un PUT
+            # _mapping agrega lo que falta y deja igual lo que ya estaba. Sin esto,
+            # el primer documento con valoracion_texto le pondria un mapeo dinamico
+            # (text en vez de keyword) y las agregaciones de las notas
+            # incoherentes dejarian de contar.
+            try {
+                $mapeo = (Get-Content "$PSScriptRoot\elastic\003_comentarios.json" -Raw | ConvertFrom-Json).mappings |
+                    ConvertTo-Json -Depth 20 -Compress
+                Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_mapping" -ContentType 'application/json' `
+                    -Body $mapeo -TimeoutSec 30 | Out-Null
+            } catch {
+                Aviso "No se pudo poner al dia el mapeo de comentarios: $($_.Exception.Message)"
+                Aviso "   Si un campo ya existe con otro tipo, hay que rehacer el indice: borrarlo y volver a arrancar"
+                return $false
+            }
+            $n = (Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_count" -TimeoutSec 20).count
+            Ok "Ya existe con el mapeo bueno ($n comentarios). Lo mantiene el worker del backend"
+            return $true
+        }
+        Aviso "El indice existia con el vector como $tipo / $opciones y no dense_vector / flat. Se rehace"
+        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_COMENTARIOS" -TimeoutSec 30 | Out-Null } catch { }
+    }
+
+    try {
+        Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_COMENTARIOS" -ContentType 'application/json' `
+            -InFile "$PSScriptRoot\elastic\003_comentarios.json" -TimeoutSec 60 | Out-Null
+    } catch {
+        Aviso "No se pudo crear el indice de comentarios: $($_.Exception.Message)"
+        return $false
+    }
+    Ok "indice creado con el mapeo de elastic/003_comentarios.json"
+
+    $encolar = 'INSERT INTO evento_comentario (id_comentario) SELECT id_comentario FROM comentario ' +
+               'ON CONFLICT (id_comentario) WHERE procesado_en IS NULL DO NOTHING; ' +
+               'SELECT count(*) FROM evento_comentario WHERE procesado_en IS NULL;'
+    $pendientes = "$(docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX -v ON_ERROR_STOP=1 -c $encolar 2>&1)".Trim()
+    if ($LASTEXITCODE -ne 0) {
+        Aviso "No se pudieron encolar los comentarios: $pendientes"
+        return $false
+    }
+    Ok "$pendientes comentarios en la cola; los indexa el worker del backend cuando arranque (necesita Ollama)"
+    return $true
+}
+
 
 # Hace lo mismo que etl/cargar_busqueda.sh sin depender de Git Bash, por la
 # misma razon que los otros dos: cuando esto llamaba a un .sh y no lo
@@ -1210,6 +1364,12 @@ function Correr-EtlBusqueda {
         # nada que no este en Mongo, y reconstruir es la unica forma de que
         # DESAPAREZCA lo que dejo de ser publico.
         #
+        # Con UNA excepcion desde el 2026-10-02: el vector de cada producto.
+        # Sale de Mongo tambien, pero calcularlo son unos 7 minutos de Ollama
+        # para el catalogo entero. Por eso antes de tirar el indice se guardan
+        # sus campos del vector aparte, y cargar_vectores.ps1 los devuelve.
+        Guardar-VectoresPrevios
+
         # El 404 del DELETE se traga a proposito: la primera vez no existe.
         try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE" -TimeoutSec 30 | Out-Null } catch { }
 
@@ -2260,6 +2420,45 @@ print('mongo_quedan=' + db.productos.countDocuments({}));
 
 
 # ------------------------------------------------------------
+# 5c. Las resenas del clasificador
+# ------------------------------------------------------------
+# Las 480 resenas escritas a mano para el clasificador de resenas
+# (clasificador-resenas/datos/), sembradas como resenas de verdad: 40 cuentas
+# de compradores, cada una con su compra pagada debajo. El SQL lo escribe
+# clasificador-resenas/semilla/generar.js, y ahi esta por que no planta
+# ninguno de los patrones de fraude de la Entrega 2.
+#
+# Corre en CADA arranque y no solo en una base vacia como migrations/datos/:
+# cada resena se reconoce por su autor y su texto, asi que entra una sola vez
+# y llega tambien a una base que ya estaba cargada. Va antes de Mongo, Neo4j y
+# Elasticsearch para que sus pasos ya la cuenten; los triggers la dejan en las
+# colas evento_grafo, evento_producto y evento_comentario.
+#
+# No corta el arranque: sin ellas la tienda funciona igual.
+Paso "Resenas del clasificador"
+$sqlResenas = "$PSScriptRoot\clasificador-resenas\semilla\resenas.sql"
+if (-not (Test-Path $sqlResenas)) {
+    Aviso "No esta clasificador-resenas\semilla\resenas.sql. Se genera con  node clasificador-resenas\semilla\generar.js"
+} else {
+    docker cp "$sqlResenas" "mesh-postgres:/tmp/resenas_clasificador.sql" 2>&1 | Out-Null
+    $salidaResenas = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -v ON_ERROR_STOP=1 -q `
+        -f /tmp/resenas_clasificador.sql 2>&1 | Out-String -Width 4096
+    if ($LASTEXITCODE -ne 0) {
+        Aviso "Las resenas del clasificador no entraron. El resto sigue:"
+        Write-Host $salidaResenas -ForegroundColor Yellow
+    } elseif ($salidaResenas -match 'resenas del clasificador: (\d+) nuevas, (\d+) sin oferta donde caer, (\d+) en el producto') {
+        if ([int]$Matches[2] -gt 0) {
+            Aviso "$($Matches[1]) nuevas, $($Matches[2]) sin una oferta con stock donde caer"
+        } elseif ([int]$Matches[1] -eq 0) {
+            Ok "Ya estaban todas"
+        } else {
+            Ok "$($Matches[1]) resenas nuevas, cada una con su compra pagada; $($Matches[3]) en el producto del que habla el texto"
+        }
+    }
+}
+
+
+# ------------------------------------------------------------
 # 6. MongoDB
 # ------------------------------------------------------------
 # El contenedor ya subio con el "docker compose up -d" de arriba. Aqui se
@@ -2829,34 +3028,10 @@ if ($copiaOk) {
 }
 
 
-# ------------------------------------------------------------
-# 7d. Los vectores de la recomendacion semantica
-# ------------------------------------------------------------
-# Va despues del catalogo porque lee de MongoDB y escribe en la tabla de la
-# migracion 024. Los calcula Ollama con el modelo paraphrase-multilingual. Solo
-# se calcula lo que falta o cambio, asi que en un arranque normal tarda un par
-# de segundos.
-#
-# Nadie instala Ollama a mano. cargar_vectores.ps1 usa el de esta PC si lo
-# tiene (y lo enciende si esta apagado), y si no levanta el contenedor
-# mesh-ollama del compose. El modelo lo baja solo la primera vez. En una PC sin
-# nada, la primera corrida baja la imagen y el modelo y calcula los 3105
-# vectores en la CPU: son varios minutos, una sola vez.
-#
-# NO corta el arranque, igual que ClickHouse y Elasticsearch. Sin Ollama la
-# tienda funciona entera y solo falta el estante de productos parecidos. Pero
-# no se queda callado, dice cuantos productos tienen vector y como se arregla.
-Paso "Vectores de la recomendacion semantica"
-& powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\etl\cargar_vectores.ps1"
-switch ($LASTEXITCODE) {
-    0 { }
-    2 {
-        Aviso "Sin Ollama no hay productos parecidos en la ficha. El resto funciona."
-        Aviso "   No hubo Ollama ni en esta PC ni en Docker. El motivo esta justo arriba."
-        Aviso "   Se reintenta solo con  .\etl\cargar_vectores.ps1"
-    }
-    default { Error1 "Los vectores no quedaron completos. Se puede reintentar con  .\etl\cargar_vectores.ps1" }
-}
+# (El paso 7d, los vectores de la recomendacion semantica, se mudo el
+# 2026-10-04 adentro del paso de Elasticsearch, despues del indice del
+# buscador: el vector ya no va a PostgreSQL sino al documento del producto, y
+# ese documento tiene que existir antes.)
 
 
 # ------------------------------------------------------------
@@ -3258,23 +3433,16 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
     # Se decide igual que el catalogo de Mongo: si lo que hay no cuadra con lo
     # que deberia haber, se reconstruye. Y -Etl lo fuerza.
     #
-    # Se compara contra los productos ACTIVOS de Mongo, que es exactamente lo
-    # que el extractor mete. Comparar contra el total dejaria el indice
-    # reconstruyendose en cada arranque, porque el rechazado nunca va a entrar.
+    # Se compara contra TODOS los productos de Mongo, que es exactamente lo
+    # que el extractor mete desde el 2026-09-04 (FILTRO = {} en
+    # etl/extraer_busqueda.js: el admin busca tambien los rechazados). Hasta el
+    # 2026-10-04 se comparaba contra los ACTIVOS, lo que el extractor metia
+    # antes. Con un solo producto que no estuviera activo no cuadraba nunca y
+    # el indice se rehacia en CADA arranque. Mientras era solo texto costaba
+    # unos segundos; con los vectores dentro del documento se los llevaba.
     Paso "Indice del buscador"
 
-    # La condicion va con una EXPRESION REGULAR y no con la cadena "activo",
-    # y no es por gusto. PowerShell 5.1 se come las comillas dobles al armar la
-    # linea del programa externo, asi que {estado:"activo"} le llega a mongosh
-    # como {estado:activo} y contesta "ReferenceError: activo is not defined".
-    # Medido. Es la misma regla que este archivo ya avisa mas arriba para
-    # mongosh y para cypher-shell, y la regex la esquiva sin comillas de
-    # ninguna clase.
-    #
-    # Con anclas a los dos lados para que sea igualdad exacta y no un "empieza
-    # por": un estado "activo_pendiente" que alguien invente manana no debe
-    # colarse en esta cuenta.
-    $activos = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.countDocuments({estado:/^activo`$/})'") 2>&1 | Out-String).Trim()
+    $enMongo = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.countDocuments({})'") 2>&1 | Out-String).Trim()
 
     $enIndice = '-1'
     try {
@@ -3284,13 +3452,70 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
         $enIndice = '0'
     }
 
-    if ($Etl -or ($activos -notmatch '^\d+$') -or ($enIndice -ne $activos)) {
+    # Y tambien si el indice existe pero nacio con el mapeo de antes del
+    # 2026-10-02, sin el campo vector: el ETL lo crea con el mapeo de hoy. Es
+    # lo que pone al dia una maquina del equipo que ya tenia el indice, sin
+    # -Etl (que rehace tambien el catalogo de Mongo).
+    $tipoVector = $null
+    try {
+        $mv = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_mapping/field/vector" -TimeoutSec 20
+        $pv = @($mv.PSObject.Properties)[0]
+        if ($pv -and $pv.Value.mappings.vector) { $tipoVector = $pv.Value.mappings.vector.mapping.vector.type }
+    } catch { }
+    if ($enIndice -ne '0' -and $tipoVector -ne 'dense_vector') {
+        Aviso "El indice no tiene el campo vector (mapeo de antes del 2026-10-02). Se rehace"
+    }
+
+    if ($Etl -or ($enMongo -notmatch '^\d+$') -or ($enIndice -ne $enMongo) -or ($tipoVector -ne 'dense_vector')) {
         if (-not (Correr-EtlBusqueda)) {
             Aviso "El indice del buscador no se pudo rehacer. El resto sigue."
             Aviso "   A mano:  bash etl/cargar_busqueda.sh"
         }
     } else {
-        Ok "Ya cargado ($enIndice de $activos productos activos). Para rehacerlo: .\arrancar.ps1 -Etl"
+        Ok "Ya cargado ($enIndice de $enMongo productos). Para rehacerlo: .\arrancar.ps1 -Etl"
+    }
+
+    # ------------------------------------------------------------
+    # 7d. Los vectores de la recomendacion semantica
+    # ------------------------------------------------------------
+    # Van en el documento de cada producto de mesh_productos (desde el
+    # 2026-10-02; antes en la tabla producto_vector, que retira la 036), asi
+    # que este paso va despues del indice del buscador. Los calcula Ollama con
+    # el modelo paraphrase-multilingual. Solo se calcula lo que falta o
+    # cambio, asi que en un arranque normal tarda unos segundos, y si el
+    # indice se acaba de rehacer devuelve los que Guardar-VectoresPrevios dejo
+    # aparte.
+    #
+    # Nadie instala Ollama a mano. cargar_vectores.ps1 usa el de esta PC si lo
+    # tiene (y lo enciende si esta apagado), y si no levanta el contenedor
+    # mesh-ollama del compose. El modelo lo baja solo la primera vez. En una PC
+    # sin nada, la primera corrida baja la imagen y el modelo y calcula los
+    # 3105 vectores en la CPU: son varios minutos, una sola vez.
+    #
+    # NO corta el arranque. Sin Ollama la tienda funciona entera y solo faltan
+    # los productos parecidos, la busqueda por intencion y las senales de
+    # fraude por texto. Pero no se queda callado.
+    Paso "Vectores de la recomendacion semantica"
+    & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\etl\cargar_vectores.ps1"
+    switch ($LASTEXITCODE) {
+        0 { }
+        2 {
+            Aviso "Sin Ollama no hay productos parecidos en la ficha. El resto funciona."
+            Aviso "   No hubo Ollama ni en esta PC ni en Docker. El motivo esta justo arriba."
+            Aviso "   Se reintenta solo con  .\etl\cargar_vectores.ps1"
+        }
+        default { Error1 "Los vectores no quedaron completos. Se puede reintentar con  .\etl\cargar_vectores.ps1" }
+    }
+
+    # ------------------------------------------------------------
+    # El indice de comentarios
+    # ------------------------------------------------------------
+    # Despues de las migraciones (necesita evento_comentario de la 034) y
+    # antes del backend. El como y el por que estan junto a
+    # Preparar-IndiceComentarios.
+    Paso "Indice de comentarios"
+    if (-not (Preparar-IndiceComentarios)) {
+        Aviso "Sin el indice de comentarios no hay senales de fraude por texto ni busqueda por intencion. El resto sigue."
     }
 
     # ------------------------------------------------------------

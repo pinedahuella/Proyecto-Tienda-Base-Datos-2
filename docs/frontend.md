@@ -725,6 +725,31 @@ pusieron cero" como para "nadie lo ha calificado", y esas dos cosas se leen muy
 distinto cuando estas eligiendo que comprar; se distinguen con
 `resenas_total`.
 
+### Lo que cambio el 2026-10-04: forma nueva, hibrida, intencion y quisiste decir
+
+- **`GET /buscador/productos` devuelve `{ resultados, quisiste_decir }`** desde
+  3305cf3, y ya no la lista sola. `buscarProductos` (`lib/buscador.ts`) acepta las
+  dos formas: la ruta de admin sigue devolviendo la lista. Leer solo la lista dejaba
+  la cabecera con cero resultados y sin ningun error, que es lo que paso al jalar
+  ese commit.
+- **"Tal vez quisiste decir"** sale en `/buscar` debajo del conteo, con enlace a la
+  busqueda corregida. No sale cuando lo escrito parece una frase (`pareceFrase`, tres
+  palabras o mas): el corrector cambia palabra por palabra y "algo para escuchar
+  musica mientras corro" salia como "alba pesa escuchar musica mientras cuero".
+- **La lista de `/buscar` sin filtros es la busqueda hibrida**,
+  `GET /buscador/productos/hibrida`: palabras y significado juntos, ordenados por
+  posicion. "labtop gamer" sale por las palabras y una frase por el significado; lo
+  que salio solo por el significado lleva la marca "Por lo que buscas". La facetada
+  se pide igual en paralelo: trae el panel de filtros y registra la busqueda para las
+  tendencias, cosa que la hibrida no hace. **Con un filtro elegido manda la
+  facetada**, que es la unica que sabe filtrar.
+- **Lo que cuentan otros compradores** es la busqueda por intencion,
+  `GET /buscador/productos/intencion`: productos cuyas resenas hablan de lo que se
+  busca, cada uno con la resena que lo explica. Va ARRIBA de la lista cuando lo
+  escrito parece una frase, y abajo si la busqueda normal no encontro nada. Solo se
+  ensena lo que vale (`vale()`): una resena con parecido de 0,5 o mas, o un producto
+  de 0,6 o mas. Con el umbral del backend (0,40), "xqzwv" traia seis productos.
+
 ### Detalles que costaron y no se deben deshacer
 
 - **La peticion vieja puede llegar despues que la nueva.** Se escribe `lam` y
@@ -1079,3 +1104,27 @@ no repetida en cada fila. En **Compras en ascenso** la barra es el periodo actua
 una marca vertical es el periodo anterior, con la etiqueta **nuevo** o **N veces**.
 La leyenda solo sale si alguna fila tiene marca. La tarjeta ancha reparte sus filas
 en columnas, dos en pantalla ancha. No hay ruta nueva en el backend.
+
+## Resenas, propuestas y fraude, lo del 2026-10-04
+
+**El formulario de resena** (`lib/Resenas.svelte`) tiene los topes del backend
+desde 3305cf3: una resena de 40 a 350 letras y una respuesta hasta 350, sin
+minimo. Lleva un contador debajo, que se pone en rojo mientras falte para 40. El
+minimo es porque el clasificador de resenas no sirve con textos muy cortos.
+
+**Al proponer un producto** (`lib/PanelVendedor.svelte`, la pestana Catalogo de un
+vendedor que no es la tienda) se piden sugerencias al salir del nombre o de la
+descripcion, no en cada tecla, porque cada llamada le pide un vector a Ollama:
+`POST /vendedor/productos/sugerencias`. Sale "Suele ir en" con las categorias como
+botones, y "Ya hay parecidos en la tienda" con enlace a cada uno; los que pueden ser
+el mismo producto dicen "Puede que ya exista". La primera categoria se elige sola
+solo si no se habia elegido ninguna. Si la ruta falla, el formulario sigue igual.
+
+**El panel de fraude** conoce los tipos nuevos de senal: resenas repetidas, anillo
+de texto, notas incoherentes (cuenta, producto y vendedor), resenas parecidas
+(vendedor y producto) y las dos de compras canceladas. En los casos, la evidencia
+de las fuentes `elastic` (Texto de las resenas) y `postgres` (Compras canceladas)
+se nombra igual que las de la pestana Resenas; antes salia el nombre crudo.
+
+**La ficha** sigue pidiendo `GET /productos/:id/similares` para Parecidos a este; lo
+que cambio es de donde salen: un kNN en Elasticsearch y no pgvector.

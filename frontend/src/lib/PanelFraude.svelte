@@ -700,7 +700,16 @@
 		| 'anillo_en_el_tiempo'
 		| 'favor_devuelto'
 		| 'coordinados'
-		| 'reputacion_expres';
+		| 'reputacion_expres'
+		| 'resenas_repetidas'
+		| 'anillo_de_texto'
+		| 'notas_incoherentes_cuenta'
+		| 'notas_incoherentes_producto'
+		| 'notas_incoherentes_vendedor'
+		| 'resenas_parecidas_vendedor'
+		| 'resenas_parecidas_producto'
+		| 'resena_positiva_cancelada'
+		| 'resenas_negativas_canceladas_vendedor';
 	type FiltroTipoAnillo = 'todos' | Exclude<TipoAnillo, 'anillo_en_el_tiempo'>;
 
 	interface CuentaDeAnillo {
@@ -759,7 +768,16 @@
 		anillo_en_el_tiempo: 'Anillo que vuelve con el tiempo',
 		favor_devuelto: 'Se devuelven la nota en horas',
 		coordinados: 'Califican juntas lo mismo',
-		reputacion_expres: 'Reputacion en minutos'
+		reputacion_expres: 'Reputacion en minutos',
+		resenas_repetidas: 'Repite la misma resena',
+		anillo_de_texto: 'Varias cuentas, la misma resena',
+		notas_incoherentes_cuenta: 'Sus estrellas contradicen sus textos',
+		notas_incoherentes_producto: 'Producto con notas que contradicen el texto',
+		notas_incoherentes_vendedor: 'Vendedor con notas que contradicen el texto',
+		resenas_parecidas_vendedor: 'Vendedor con resenas copiadas',
+		resenas_parecidas_producto: 'Producto con resenas copiadas',
+		resena_positiva_cancelada: 'Resena buena y compra cancelada',
+		resenas_negativas_canceladas_vendedor: 'Resenas malas y compras canceladas'
 	};
 
 	const FILTROS_TIPO_ANILLO: FiltroTipoAnillo[] = [
@@ -772,7 +790,16 @@
 		'persistente',
 		'favor_devuelto',
 		'coordinados',
-		'reputacion_expres'
+		'reputacion_expres',
+		'resenas_repetidas',
+		'anillo_de_texto',
+		'notas_incoherentes_cuenta',
+		'notas_incoherentes_producto',
+		'notas_incoherentes_vendedor',
+		'resenas_parecidas_vendedor',
+		'resenas_parecidas_producto',
+		'resena_positiva_cancelada',
+		'resenas_negativas_canceladas_vendedor'
 	];
 	const NOMBRE_FILTRO_TIPO_ANILLO: Record<FiltroTipoAnillo, string> = {
 		todos: 'Todos los tipos',
@@ -1174,7 +1201,7 @@
 
 	interface EvidenciaCaso {
 		id_evidencia_caso_fraude: number;
-		fuente: 'grafo' | 'eventos' | 'login';
+		fuente: 'grafo' | 'eventos' | 'login' | 'elastic' | 'postgres';
 		tipo: string;
 		clave: string;
 		/** numeric de PostgreSQL: puede llegar como texto. */
@@ -1237,11 +1264,17 @@
 	const NOMBRE_FUENTE: Record<EvidenciaCaso['fuente'], string> = {
 		grafo: 'Resenas',
 		eventos: 'Compras y navegacion',
-		login: 'Intentos de entrada'
+		login: 'Intentos de entrada',
+		elastic: 'Texto de las resenas',
+		postgres: 'Compras canceladas'
 	};
 
 	function tipoDeEvidencia(e: EvidenciaCaso): string {
-		if (e.fuente === 'grafo') return NOMBRE_TIPO_ANILLO[e.tipo as TipoAnillo] ?? e.tipo;
+		// Las senales de texto (elastic) y las de compras canceladas (postgres)
+		// son tipos de la misma lista que los anillos: salen en la pestana Resenas.
+		if (e.fuente === 'grafo' || e.fuente === 'elastic' || e.fuente === 'postgres') {
+			return NOMBRE_TIPO_ANILLO[e.tipo as TipoAnillo] ?? e.tipo;
+		}
 		if (e.fuente === 'eventos') return NOMBRE_TIPO_HALLAZGO[e.tipo as TipoHallazgo] ?? e.tipo;
 		return QUE_PASO[e.tipo as TipoAlerta] ?? e.tipo;
 	}
@@ -2499,7 +2532,11 @@
 	.tipo-reiterado,
 	.tipo-favor_devuelto,
 	.tipo-coordinados,
-	.tipo-reputacion_expres {
+	.tipo-reputacion_expres,
+	.tipo-anillo_de_texto,
+	.tipo-resenas_parecidas_vendedor,
+	.tipo-resenas_parecidas_producto,
+	.tipo-resena_positiva_cancelada {
 		color: var(--rojo);
 		background: var(--off);
 		border: 1px solid var(--rojo);
@@ -2509,7 +2546,12 @@
 	.tipo-cadena_abierta,
 	.tipo-satelites,
 	.tipo-persistente,
-	.tipo-anillo_en_el_tiempo {
+	.tipo-anillo_en_el_tiempo,
+	.tipo-resenas_repetidas,
+	.tipo-notas_incoherentes_cuenta,
+	.tipo-notas_incoherentes_producto,
+	.tipo-notas_incoherentes_vendedor,
+	.tipo-resenas_negativas_canceladas_vendedor {
 		color: var(--indigo);
 		background: var(--indigo-cl);
 		border: 1px solid var(--indigo);

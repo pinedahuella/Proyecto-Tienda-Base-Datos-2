@@ -372,6 +372,12 @@ Las Demos de la Entrega final:
   .\demo-entrega-final.ps1 -Parte facetas -Texto laptop       facetas, palabra mal escrita y sugerencias
   .\demo-entrega-final.ps1 -Parte vectores                    vectores, pendientes del worker y Ollama
   .\demo-entrega-final.ps1 -Parte rastro -Texto laptop        la fila de ClickHouse de una busqueda con filtros
+  .\demo-entrega-final.ps1 -Parte intencion -Texto "algo que me ayude a dormir mejor"   por lo que se quiere
+  .\demo-entrega-final.ps1 -Parte clasificador                como leyo el clasificador cada resena
+  .\demo-entrega-final.ps1 -Parte hibrida -Texto "labtop gamer"   palabras y significado en una lista
+  .\demo-entrega-final.ps1 -Parte sugerencias -Texto "Laptop ligera para estudiantes"   al proponer un producto
+  .\demo-resenas-texto.ps1                                    resenas copiadas, incoherentes y canceladas
+  .\demo-resenas-texto.ps1 -Caso cancelada                    una sola: copiadas, incoherentes, cancelada, negativas
 
 Cada parte habla primero directo con su base y al final pide lo mismo a la ruta del
 backend. Con el backend apagado ese ultimo paso solo avisa, salvo rastro, que lo

@@ -133,7 +133,13 @@ try:
     d = json.load(sys.stdin)
 except Exception:
     sys.exit(0)
-for r in (d.get('payload') or []):
+p = d.get('payload') or []
+# La ruta publica devuelve {resultados, quisiste_decir} desde 3305cf3; la de
+# admin sigue devolviendo la lista sola. Recorrer el objeto como lista daba sus
+# llaves y ningun id.
+if isinstance(p, dict):
+    p = p.get('resultados') or []
+for r in p:
     print(r.get('id_producto'))
 "
 }

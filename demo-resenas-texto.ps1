@@ -1,0 +1,330 @@
+# demo-resenas-texto.ps1
+# Arma en vivo el fraude de resenas que NO sale del grafo, con cuentas nuevas y
+# compras REALES, y confirma por la API del admin que cada senal quedo
+# guardada: lo que se ve en el TEXTO de las resenas (mesh_comentarios en
+# Elasticsearch) y las resenas de compras que despues se cancelaron.
+#
+#   .\demo-resenas-texto.ps1                          los cuatro casos
+#   .\demo-resenas-texto.ps1 -Caso copiadas           resenas copiadas
+#   .\demo-resenas-texto.ps1 -Caso incoherentes       notas incoherentes
+#   .\demo-resenas-texto.ps1 -Caso cancelada          resena buena y compra cancelada
+#   .\demo-resenas-texto.ps1 -Caso negativas          resenas malas y compras canceladas
+#   .\demo-resenas-texto.ps1 -SinAbrir                no abre el panel al final
+#
+# QUE ARMA CADA CASO
+# ==================================================
+#   copiadas. Un vendedor nuevo y seis compradoras que le dejan casi la misma
+#     resena, con un par de palabras cambiadas. Salen resenas_parecidas_vendedor
+#     y anillo_de_texto (3 o mas cuentas con la misma plantilla).
+#   incoherentes. Una cuenta compra cinco productos y les pone 5 estrellas con
+#     textos que dicen que todo salio mal; el clasificador los lee como malos.
+#     Salen notas_incoherentes_cuenta y notas_incoherentes_vendedor.
+#   cancelada. Una cuenta compra, le pone 5 estrellas al vendedor y cancela el
+#     pedido: se le devuelve el dinero y la resena buena se queda. Sale
+#     resena_positiva_cancelada; una sola vez basta.
+#   negativas. Cinco cuentas compran, le ponen 1 o 2 estrellas al mismo
+#     vendedor y cancelan. Sale resenas_negativas_canceladas_vendedor, con el
+#     vendedor como victima.
+#
+# COMO SALE TAN RAPIDO
+# Desde 1f1f480 el backend revisa al momento: al escribir una resena indexa,
+# valora y evalua solo esa resena en las senales de texto, y al cancelar un
+# pedido revisa la resena de esa compra. La demo espera a que cada senal salga
+# sola y dice cuanto tardo. Si alguna no sale en 30 s, corre una vez los
+# detectores con pruebas/correr_detectores_resenas.cjs, el mismo codigo del
+# backend, y vuelve a mirar.
+#
+# Las resenas de texto pasan de 100 caracteres: las senales de texto no miran
+# las mas cortas. Cada corrida usa un prefijo nuevo, asi que se puede repetir.
+# Las senales quedan PENDIENTES en Fraude, Resenas en anillo.
+#
+# NO ES REVERSIBLE, igual que demo-patrones-resenas.ps1: deja cuentas,
+# ofertas, pedidos, pagos y kardex reales.
+
+param(
+    [ValidateSet('todos', 'copiadas', 'incoherentes', 'cancelada', 'negativas')]
+    [string]$Caso = 'todos',
+
+    [ValidatePattern('^[A-Za-z0-9]{0,20}$')]
+    [string]$Prefijo = '',
+
+    [int]$Espera = 120,
+    [switch]$SinAbrir,
+    [string]$Backend = 'http://localhost:3000',
+    [string]$Frontend = 'http://localhost:5173',
+    [string]$Elastic = 'http://localhost:9200'
+)
+
+function Paso($t) { Write-Host "`n>> $t" -ForegroundColor Cyan }
+function Ok($t)   { Write-Host "   $t" -ForegroundColor Green }
+function Av($t)   { Write-Host "   $t" -ForegroundColor Yellow }
+function Mal($t)  { Write-Host "   $t" -ForegroundColor Red }
+
+# Productos del catalogo curado, los mismos de las otras demos de resenas.
+$PRODUCTOS = @(
+    @{ id = 83; variante = 166; nombre = 'Cartas al puerto seco' },
+    @{ id = 76; variante = 158; nombre = 'Cuerda de salto Relampago' },
+    @{ id = 81; variante = 170; nombre = 'Antologia del ruido' },
+    @{ id = 69; variante = 149; nombre = 'Candado plegable Cerrojo F8' },
+    @{ id = 79; variante = 151; nombre = 'Tapete de yoga Raiz 6 mm' }
+)
+$CONTRASENA = 'Desarrollo123!'
+if ($Prefijo -eq '') { $Prefijo = 'txt' + (Get-Date -Format 'MMddHHmmss') }
+
+# La plantilla copiada: la misma resena con una o dos palabras distintas.
+$COPIADAS = @(
+    'Excelente compra, el producto llego rapidisimo y en perfecto estado. El vendedor es muy confiable y atento, lo recomiendo a todos sin dudarlo.',
+    'Excelente compra, el producto llego rapidisimo y en perfecto estado. El vendedor es muy confiable y amable, lo recomiendo a todos sin dudarlo.',
+    'Excelente compra, el producto llego rapido y en perfecto estado. El vendedor es muy confiable y atento, lo recomiendo a todos sin dudarlo.',
+    'Excelente compra, el producto llego rapidisimo y en excelente estado. El vendedor es muy confiable y atento, lo recomiendo a todos sin dudarlo.',
+    'Muy buena compra, el producto llego rapidisimo y en perfecto estado. El vendedor es muy confiable y atento, lo recomiendo a todos sin dudarlo.',
+    'Excelente compra, el producto llego rapidisimo y en perfecto estado. El vendedor es muy confiable y atento, se lo recomiendo a todos sin dudarlo.'
+)
+
+# Textos claramente malos, cada uno distinto, que van con 5 estrellas.
+$MALAS = @(
+    'Llego roto y con piezas faltantes. Escribi tres veces al vendedor y nunca me contesto. Perdi mi dinero, no lo compren por nada del mundo.',
+    'Pesima calidad, se desarmo a los dos dias de uso. Parece una copia barata y no se parece en nada a la foto. Una estafa total, me arrepiento.',
+    'Nunca funciono bien desde que lo saque de la caja. Pedi la devolucion y me la negaron sin explicacion. La peor compra que he hecho este ano.',
+    'El paquete llego abierto, sucio y con un mes de retraso. El producto estaba usado y rayado. Muy decepcionado, no vuelvo a comprar aqui jamas.',
+    'Material malisimo, huele a quimico y se rompio la primera vez que lo use. El vendedor se burlo cuando reclame. No lo recomiendo para nada.'
+)
+
+# Las negativas de compras canceladas: cortas y distintas entre si, para que no
+# se mezclen con las senales de texto.
+$NEGATIVAS = @(
+    'No me gusto nada, la calidad es muy baja para el precio que tiene.',
+    'Tardo demasiado y el vendedor nunca respondio mis mensajes.',
+    'Vino incompleto y la caja estaba golpeada, mala experiencia.',
+    'No era lo que mostraban las fotos, me senti enganado con esto.',
+    'Se rompio enseguida, no lo volveria a comprar a este vendedor.'
+)
+
+function Cuerpo($obj) { $obj | ConvertTo-Json -Depth 6 -Compress }
+
+function Llamar([string]$Metodo, [string]$Ruta, $Datos, $Sesion) {
+    $args_ = @{ Method = $Metodo; Uri = "$Backend$Ruta"; ContentType = 'application/json; charset=utf-8'; TimeoutSec = 20; WebSession = $Sesion }
+    if ($null -ne $Datos) { $args_.Body = [Text.Encoding]::UTF8.GetBytes((Cuerpo $Datos)) }
+    try {
+        return Invoke-RestMethod @args_
+    } catch {
+        $codigo = 0
+        if ($_.Exception.Response) { $codigo = [int]$_.Exception.Response.StatusCode }
+        Mal "$Metodo $Ruta contesto $codigo $($_.ErrorDetails.Message)"
+        throw
+    }
+}
+
+function Entrar([string]$Correo, [string]$Clave) {
+    $s = $null
+    Invoke-RestMethod -Method Post -Uri "$Backend/usuario/login" -ContentType 'application/json' `
+        -Body (Cuerpo @{ identificador = $Correo; contrasena = $Clave }) -SessionVariable s -TimeoutSec 20 | Out-Null
+    return $s
+}
+
+# Igual que en demo-patrones-resenas.ps1: registra, pasa a vendedor si hace
+# falta, entra DESPUES del cambio de rol y le crea direccion.
+function NuevaCuenta([string]$Usuario, [bool]$Vendedor) {
+    $correo = "$Usuario@mesh.com"
+    Invoke-RestMethod -Method Post -Uri "$Backend/usuario/registro" -ContentType 'application/json' `
+        -Body (Cuerpo @{
+            correo_electronico = $correo; usuario = $Usuario; nombre = 'Demo'
+            apellido = 'Texto'; contrasena = $CONTRASENA
+        }) -TimeoutSec 20 | Out-Null
+    $sesion = Entrar $correo $CONTRASENA
+    $yo = Invoke-RestMethod -Uri "$Backend/usuario/yo" -WebSession $sesion -TimeoutSec 20
+    if ($Vendedor) {
+        Llamar PATCH "/admin/usuarios/$($yo.payload.id_usuario)" @{ id_rol_usuario = 2 } $script:admin | Out-Null
+        $sesion = Entrar $correo $CONTRASENA
+    }
+    Llamar POST '/direccion-usuario' @{
+        pais = 'Guatemala'; departamento = 'Guatemala'; ciudad = 'Guatemala'
+        direccion_exacta = "Direccion de la demo de resenas, $Usuario"; codigo_postal = '01001'
+    } $sesion | Out-Null
+    $dirs = Invoke-RestMethod -Uri "$Backend/direccion-usuario" -WebSession $sesion -TimeoutSec 20
+    Ok "$correo$(if ($Vendedor) { ', vendedor' } else { '' })"
+    return [pscustomobject]@{
+        Usuario = $Usuario; Correo = $correo; Sesion = $sesion; Id = [long]$yo.payload.id_usuario
+        Direccion = $dirs.payload[0].id_direccion; Ofertas = @{}
+    }
+}
+
+function Publicar($Cuenta, $Producto) {
+    $r = Llamar POST '/vendedor/ofertas' @{
+        id_producto = $Producto.id; id_producto_variante = $Producto.variante
+        precio = '15.00'; stock_inicial = 20
+    } $Cuenta.Sesion
+    Llamar PATCH "/vendedor/ofertas/$($r.payload.id_oferta)/revision" @{ decision = 'aprobar' } $script:admin | Out-Null
+    $Cuenta.Ofertas[$Producto.id] = $r.payload.id_oferta
+}
+
+# Compra, resena y devuelve el id del pedido.
+function ComprarYResenar($Comprador, $Vendedor, $Producto, [int]$Nota, [string]$Texto) {
+    Llamar PUT "/carrito/lineas/$($Vendedor.Ofertas[$Producto.id])" @{ cantidad = 1 } $Comprador.Sesion | Out-Null
+    $c = Llamar POST '/carrito/comprar' @{ id_direccion = $Comprador.Direccion; metodo_pago = 'efectivo contra entrega' } $Comprador.Sesion
+    if (-not $c.payload.comprado) { throw "$($Comprador.Usuario) no pudo comprarle a $($Vendedor.Usuario)" }
+    Llamar POST '/resenas' @{
+        id_producto = $Producto.id; correo_vendedor = $Vendedor.Correo; calificacion = $Nota; comentario = $Texto
+    } $Comprador.Sesion | Out-Null
+    Ok "$($Comprador.Usuario) le compro $($Producto.nombre) a $($Vendedor.Usuario) y le puso $Nota"
+    return $c.payload.id_pedido
+}
+
+function Cancelar($Comprador, $IdPedido) {
+    Llamar POST "/comprador/pedidos/$IdPedido/cancelar" @{} $Comprador.Sesion | Out-Null
+    Ok "$($Comprador.Usuario) cancelo el pedido $IdPedido y se le devolvio el dinero"
+}
+
+# Espera a que las resenas de esas cuentas esten en mesh_comentarios con su
+# valoracion del clasificador.
+function EsperarValoradas([long[]]$Ids, [int]$Cuantas) {
+    $consulta = Cuerpo @{ query = @{ bool = @{ filter = @(
+        @{ terms = @{ id_usuario = $Ids } }, @{ term = @{ es_respuesta = $false } }, @{ exists = @{ field = 'valoracion_texto' } }
+    ) } } }
+    for ($i = 0; $i -lt $Espera; $i += 3) {
+        try {
+            $n = (Invoke-RestMethod -Method Post -Uri "$Elastic/mesh_comentarios/_count" -ContentType 'application/json' -Body $consulta -TimeoutSec 10).count
+            if ($n -ge $Cuantas) { return $true }
+        } catch { }
+        Start-Sleep -Seconds 3
+    }
+    return $false
+}
+
+function HaySenal([string]$Tipo, [string]$Clave) {
+    try {
+        $r = Invoke-RestMethod -Uri "$Backend/admin/fraude/alertas-resenas?tipo=$Tipo&pagina=1&limite=200" -WebSession $script:admin -TimeoutSec 20
+        foreach ($a in $r.payload.anillos) { if ("$($a.clave)" -eq $Clave) { return $true } }
+    } catch { }
+    return $false
+}
+
+$esperadas = @()
+
+Paso 'Revisando que Mesh este arriba'
+try { Invoke-RestMethod -Uri "$Backend/db" -TimeoutSec 5 -UseBasicParsing *> $null }
+catch { Mal "El backend no contesta en $Backend"; exit 1 }
+try { Invoke-RestMethod -Uri "$Elastic/mesh_comentarios/_count" -TimeoutSec 5 | Out-Null }
+catch { Mal "No esta el indice mesh_comentarios. Corre .\arrancar.ps1"; exit 1 }
+$admin = Entrar 'admin@mesh.com' 'Admin123'
+Ok 'Backend y Elasticsearch arriba, sesion de admin lista'
+
+Write-Host ''
+Write-Host '=============================================================='
+Write-Host " Fraude de resenas fuera del grafo, cuentas $Prefijo..." -ForegroundColor Yellow
+Write-Host ' Hace compras y resenas REALES. No se deshace.' -ForegroundColor Yellow
+Write-Host '=============================================================='
+
+$idsTexto = @()
+$totalTexto = 0
+$inicio = Get-Date
+try {
+    if ($Caso -in 'todos', 'copiadas') {
+        Paso 'Resenas copiadas: seis cuentas, la misma resena, el mismo vendedor'
+        $v = NuevaCuenta "${Prefijo}v1" $true
+        Publicar $v $PRODUCTOS[0]
+        $compradoras = @()
+        for ($k = 0; $k -lt $COPIADAS.Count; $k++) {
+            $c = NuevaCuenta "${Prefijo}c$($k + 1)" $false
+            ComprarYResenar $c $v $PRODUCTOS[0] 5 $COPIADAS[$k] | Out-Null
+            $compradoras += $c
+            $idsTexto += $c.Id
+            $totalTexto++
+        }
+        $esperadas += [pscustomobject]@{ Tipo = 'resenas_parecidas_vendedor'; Clave = "$($v.Id)"; Que = "el vendedor $($v.Usuario)" }
+        $claveAnillo = (@($compradoras | ForEach-Object { $_.Id }) | Sort-Object) -join '-'
+        $esperadas += [pscustomobject]@{ Tipo = 'anillo_de_texto'; Clave = $claveAnillo; Que = 'las seis compradoras' }
+    }
+
+    if ($Caso -in 'todos', 'incoherentes') {
+        Paso 'Notas incoherentes: cinco estrellas con textos que dicen que todo salio mal'
+        $w = NuevaCuenta "${Prefijo}v2" $true
+        foreach ($p in $PRODUCTOS) { Publicar $w $p }
+        $b = NuevaCuenta "${Prefijo}m1" $false
+        for ($k = 0; $k -lt $PRODUCTOS.Count; $k++) {
+            ComprarYResenar $b $w $PRODUCTOS[$k] 5 $MALAS[$k] | Out-Null
+            $totalTexto++
+        }
+        $idsTexto += $b.Id
+        $esperadas += [pscustomobject]@{ Tipo = 'notas_incoherentes_cuenta'; Clave = "$($b.Id)"; Que = "la cuenta $($b.Usuario)" }
+        $esperadas += [pscustomobject]@{ Tipo = 'notas_incoherentes_vendedor'; Clave = "$($w.Id)"; Que = "el vendedor $($w.Usuario)" }
+    }
+
+    if ($Caso -in 'todos', 'cancelada') {
+        Paso 'Resena buena y compra cancelada: cinco estrellas y despues devuelve'
+        $x = NuevaCuenta "${Prefijo}v3" $true
+        Publicar $x $PRODUCTOS[1]
+        $r = NuevaCuenta "${Prefijo}r1" $false
+        $pedido = ComprarYResenar $r $x $PRODUCTOS[1] 5 'Muy buen producto y el vendedor atendio rapido, lo recomiendo.'
+        Cancelar $r $pedido
+        $esperadas += [pscustomobject]@{ Tipo = 'resena_positiva_cancelada'; Clave = "$($r.Id)"; Que = "la cuenta $($r.Usuario)" }
+    }
+
+    if ($Caso -in 'todos', 'negativas') {
+        Paso 'Resenas malas y compras canceladas: cinco cuentas contra el mismo vendedor'
+        $y = NuevaCuenta "${Prefijo}v4" $true
+        Publicar $y $PRODUCTOS[2]
+        for ($k = 0; $k -lt $NEGATIVAS.Count; $k++) {
+            $n = NuevaCuenta "${Prefijo}n$($k + 1)" $false
+            $pedido = ComprarYResenar $n $y $PRODUCTOS[2] (1 + ($k % 2)) $NEGATIVAS[$k]
+            Cancelar $n $pedido
+        }
+        $esperadas += [pscustomobject]@{ Tipo = 'resenas_negativas_canceladas_vendedor'; Clave = "$($y.Id)"; Que = "el vendedor $($y.Usuario), como victima" }
+    }
+} catch {
+    Mal "La demo se detuvo: $($_.Exception.Message)"
+    exit 1
+}
+
+if ($totalTexto -gt 0) {
+    Paso "Esperando que las $totalTexto resenas de texto lleguen a Elasticsearch con su valoracion, hasta $Espera s"
+    if (EsperarValoradas $idsTexto $totalTexto) {
+        Ok "Las $totalTexto estan en mesh_comentarios con su vector y su valoracion"
+    } else {
+        Mal 'No llegaron todas. Mira que el backend este corriendo y que Ollama conteste (GET /vectores)'
+        exit 1
+    }
+}
+
+Paso 'Esperando que cada senal salga sola, hasta 30 s'
+$faltan = @($esperadas)
+for ($i = 0; $i -lt 30 -and $faltan.Count -gt 0; $i += 2) {
+    $siguen = @()
+    foreach ($e in $faltan) {
+        if (HaySenal $e.Tipo $e.Clave) {
+            Ok ("{0}, {1}, a los {2:N0} s de empezar" -f $e.Tipo, $e.Que, ((Get-Date) - $inicio).TotalSeconds)
+        } else {
+            $siguen += $e
+        }
+    }
+    $faltan = $siguen
+    if ($faltan.Count -gt 0) { Start-Sleep -Seconds 2 }
+}
+
+if ($faltan.Count -gt 0) {
+    Av "$($faltan.Count) no salieron solas. Corro los detectores una vez, sin esperar los 15 minutos"
+    & node (Join-Path $PSScriptRoot 'pruebas\correr_detectores_resenas.cjs')
+}
+
+$fallos = 0
+foreach ($e in $faltan) {
+    if (HaySenal $e.Tipo $e.Clave) {
+        Ok "$($e.Tipo), $($e.Que), con los detectores"
+    } else {
+        Mal "No aparecio $($e.Tipo) para $($e.Que)"
+        $fallos++
+    }
+}
+
+Write-Host ''
+Write-Host '=============================================================='
+if ($fallos -eq 0) {
+    Write-Host " Listo. $($esperadas.Count) de $($esperadas.Count) senales guardadas." -ForegroundColor Green
+} else {
+    Write-Host " $fallos de $($esperadas.Count) senales no aparecieron." -ForegroundColor Red
+}
+Write-Host ' Verlas: panel del admin, Fraude, Resenas en anillo, filtro por tipo.' -ForegroundColor Yellow
+Write-Host '=============================================================='
+if (-not $SinAbrir) { Start-Process "$Frontend/panel?s=fraude&t=resenas" }
+if ($fallos -gt 0) { exit 1 }
+exit 0

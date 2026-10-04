@@ -159,9 +159,9 @@
 
 	/**
 	 * Recomendacion semantica de la Entrega final, "parecidos por descripcion":
-	 * GET /productos/:id/similares. La ruta solo tiene que llamar a
-	 * productos_similares() de la migracion 024 y traer cada producto de Mongo,
-	 * igual que tambien-vieron. Mientras no exista contesta 404 y el estante no sale.
+	 * GET /productos/:id/similares. La ruta busca con kNN sobre el vector de cada
+	 * producto en mesh_productos (Elasticsearch, desde el 2026-10-02) y trae cada
+	 * producto de Mongo, igual que tambien-vieron. Si contesta 404 el estante no sale.
 	 */
 	let similares = $state<Recomendado[]>([]);
 

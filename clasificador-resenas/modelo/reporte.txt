@@ -1,5 +1,5 @@
-Clasificador de resenas, 2026-10-02 21:56
-Vectores paraphrase-multilingual, 768 numeros, generados 2026-10-02T21:52:07
+Clasificador de resenas, 2026-10-04 10:52
+Vectores paraphrase-multilingual, 768 numeros, generados 2026-10-04T10:52:53
 Entrenar 280, validar 60, prueba 60, casos unicos 80 (estos dos ultimos nunca se usan para aprender)
 
 == A. Regresion logistica (a mano)
@@ -11,7 +11,7 @@ Entrenar 280, validar 60, prueba 60, casos unicos 80 (estos dos ultimos nunca se
    Elegido lam 0.001
    prueba                 exactitud 100.0%   F1 de "mala" 1.000   perdida 0.078
                           buenas bien 30, buenas tomadas por malas 0, malas bien 30, malas tomadas por buenas 0
-   casos unicos           exactitud 90.0%   F1 de "mala" 0.905   perdida 0.220
+   casos unicos           exactitud 90.0%   F1 de "mala" 0.905   perdida 0.221
                           buenas bien 34, buenas tomadas por malas 4, malas bien 38, malas tomadas por buenas 4
    Contra scikit-learn: diferencia maxima de probabilidad 2.09e-07, misma respuesta en 100% de los casos unicos
 

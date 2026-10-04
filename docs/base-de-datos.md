@@ -43,7 +43,10 @@ a 025) y se genera, no se dibuja a mano**: `python docs/generar-er.py` lo lee de
 la base viva y falla si una tabla o una llave foranea se queda sin dibujo. Las dos
 tablas de reglas de descuento (021 y 022) van en el modulo de ofertas, los
 hallazgos F1 a F6 (025) en el de fraude y `producto_vector` (024) en la isla del
-catalogo, porque apunta a MongoDB por id y no por llave foranea. El ER de la
+catalogo, porque apunta a MongoDB por id y no por llave foranea. Al 2026-10-04
+son 76 tablas y 97 llaves foraneas (migraciones 001 a 039): `producto_vector` ya
+no esta (la 036 la retira, el vector vive en Elasticsearch) y `evento_comentario`
+(034) va con las resenas, sin llaves, como las otras colas. El ER de la
 Entrega 1, con sus notas de la migracion a MongoDB, se conserva en
 `diagrama-general-entrega1.drawio`. Lo que se dice arriba de "42 tablas" es la
 foto de la Entrega 1.
@@ -1329,6 +1332,38 @@ tambien seis de los siete patrones B (`neo4j/consultas/B1..B7`) en la misma
   califican lo mismo a la vez; las cuentas del caso son ellos dos. No cambia
   la tabla, lo resuelve la consulta que deriva las cuentas.
 
+## Las resenas en Elasticsearch y las senales que no salen del grafo (034 a 039)
+
+Desde el 2026-10-02 cada resena y cada respuesta tiene su copia en el indice
+`mesh_comentarios` de Elasticsearch, con su vector de Ollama. La lleva la cola
+`evento_comentario` (034), con el mismo molde que `evento_producto`: dos
+triggers en la misma transaccion (uno sobre el texto de `comentario`, otro sobre
+la calificacion y el producto de `resena`), una sola fila pendiente por
+comentario, y un worker que mira si el comentario sigue existiendo. Un like no
+encola nada. Un clasificador entrenado para esto (`clasificador-resenas/`) le
+pone a cada resena de mas de 100 letras si su texto es malo o bueno.
+
+De ahi salen senales que el grafo no ve, porque el grafo sabe quien resena a
+quien y no lo que dice:
+
+```
+resenas_repetidas               una cuenta repite sus propias resenas         035
+anillo_de_texto                 3 o mas cuentas, misma plantilla, mismo vendedor 035
+notas_incoherentes_cuenta       estrellas que contradicen el texto, por cuenta  037
+notas_incoherentes_producto     lo mismo por producto, solo alerta             037
+notas_incoherentes_vendedor     lo mismo por vendedor, solo alerta             037
+resenas_parecidas_vendedor      muchas resenas con una gemela de otra cuenta   038
+resenas_parecidas_producto      lo mismo por producto                          038
+resena_positiva_cancelada       resena de 4 o 5 y la compra cancelada despues  039
+resenas_negativas_canceladas_vendedor  5 o mas de 1 o 2 canceladas, el vendedor
+                                como victima                                   039
+```
+
+Las de compras canceladas salen de PostgreSQL, sin Elasticsearch: cruzan el
+`stock_movimiento` de motivo devolucion con la resena del mismo comprador, al
+mismo vendedor y por el mismo producto. Las migraciones solo ponen el catalogo;
+lo que detecta esta en el backend.
+
 ## Un solo modelo de senales de fraude (migraciones 031 a 033)
 
 **Lo pidio el profesor en la revision del 28-09** (seccion 1 de
@@ -1347,8 +1382,10 @@ ir llena. Ahora todo es una senal:
 
 ```
 familia_senal_fraude   anillo_resenas, patron_resenas, compras_navegacion, login
-fuente_senal_fraude    neo4j, clickhouse, login
-tipo_senal_fraude      los 25 tipos, con su familia y su fuente
+fuente_senal_fraude    neo4j, clickhouse, login, y desde el 02 y el 04-10 elastic
+                       (el texto de las resenas) y postgres (compras canceladas)
+tipo_senal_fraude      los 25 tipos de la 031 y 9 mas de la 035, 037, 038 y 039,
+                       con su familia y su fuente
 rol_cuenta_senal       autor o victima
 senal_fraude           UNA fila por (tipo, clave)
   detalle                 jsonb, las metricas de la ultima deteccion

@@ -11,7 +11,13 @@
 		nota,
 		marcaDeEstado,
 		MINIMO_LETRAS,
+		buscarPorIntencion,
+		buscarHibrida,
+		pareceFrase,
+		vale,
 		type ResultadoBusqueda,
+		type ResultadoIntencion,
+		type ResultadoHibrido,
 		type Facetas,
 		type Elegidos
 	} from '$lib/buscador';
@@ -86,7 +92,14 @@
 		};
 	}
 
-	let resultados = $state<ResultadoBusqueda[]>([]);
+	let resultados = $state<(ResultadoBusqueda | ResultadoHibrido)[]>([]);
+	/**
+	 * Si la lista de abajo es la de la busqueda hibrida. Lo es cuando no hay
+	 * ningun filtro elegido: entiende nombres y frases a la vez. Con un filtro
+	 * manda la facetada, que es la unica que sabe filtrar.
+	 */
+	let esHibrida = $state(false);
+	let quisisteDecir = $state<string | null>(null);
 	let facetas = $state<Facetas | null>(null);
 	let total = $state(0);
 	let error = $state('');
@@ -94,6 +107,27 @@
 
 	/** Ya se contesto a la consulta que hay ahora en la direccion. */
 	let resuelta = $state('');
+
+	/**
+	 * La busqueda por intencion, debajo de la de siempre. Se pide cuando lo
+	 * escrito parece una frase o cuando la busqueda por nombre no encontro
+	 * nada: "mi ventana esta muy solitaria" no es el nombre de ningun
+	 * producto, pero la resena de una maceta puede decir justo eso. Si la ruta
+	 * falla no se ensena nada, la busqueda de arriba sigue sirviendo sola.
+	 */
+	let intencion = $state<ResultadoIntencion[]>([]);
+	let buscandoIntencion = $state(false);
+	let ultimaIntencion = 0;
+
+	function pedirIntencion(texto: string) {
+		const mia = ++ultimaIntencion;
+		buscandoIntencion = true;
+		buscarPorIntencion(texto, 12).then((salida) => {
+			if (mia !== ultimaIntencion) return;
+			intencion = salida.resultados.filter(vale).slice(0, 6);
+			buscandoIntencion = false;
+		});
+	}
 
 	/** Ver el comentario de ultimaConsulta en BuscadorCabecera.svelte. */
 	let ultimaConsulta = 0;
@@ -124,10 +158,17 @@
 			error = '';
 			cargando = false;
 			resuelta = texto;
+			intencion = [];
+			ultimaIntencion++;
 			return;
 		}
 
 		cargando = true;
+		intencion = [];
+		ultimaIntencion++;
+		// La del admin no: busca para revisar el catalogo, no para comprar.
+		const porFrase = !todo && pareceFrase(texto);
+		if (porFrase) pedirIntencion(texto);
 
 		// El admin busca por su ruta, que tambien trae lo no activo y no lleva facetas.
 		const pedido = todo
@@ -137,17 +178,47 @@
 					total: s.resultados.length
 				}))
 			: buscarFacetado(texto, filtros, TOPE);
+		// La hibrida va en paralelo y solo sin filtros. La facetada se pide igual:
+		// trae el panel de filtros y registra la busqueda para las tendencias.
+		const sinFiltros =
+			filtros.categoria.length + filtros.precio.length + filtros.calificacion.length === 0 &&
+			!filtros.disponible;
+		const hibrida = !todo && sinFiltros ? buscarHibrida(texto, TOPE) : Promise.resolve(null);
 
-		pedido.then((salida) => {
+		Promise.all([pedido, hibrida]).then(([salida, h]) => {
 			if (mia !== ultimaConsulta) return;
-			resultados = salida.resultados;
+			const usarHibrida = h !== null && h.error === '' && h.resultados.length > 0;
+			esHibrida = usarHibrida;
+			resultados = usarHibrida ? h!.resultados : salida.resultados;
+			quisisteDecir = salida.quisiste_decir ?? null;
 			facetas = salida.facetas;
 			total = salida.total;
 			error = salida.error;
 			cargando = false;
 			resuelta = texto;
+			if (!todo && !porFrase && salida.error === '' && salida.resultados.length === 0) {
+				pedirIntencion(texto);
+			}
 		});
 	});
+
+	/**
+	 * Con una frase la seccion de intencion va ARRIBA de la lista: para "algo
+	 * para salir a pedalear" la busqueda por nombre devuelve cincuenta cosas
+	 * que solo comparten una palabra, y lo que sirve es lo de las resenas.
+	 * Con un nombre ("laptop") no se pide, y si no encuentra nada va abajo.
+	 */
+	let fraseArriba = $derived(!verTodo && pareceFrase(consulta));
+
+	/** Si un resultado de la hibrida salio solo por el significado y no por las palabras. */
+	function soloPorSignificado(r: ResultadoBusqueda | ResultadoHibrido): boolean {
+		return esHibrida && 'origen' in r && r.origen.length === 1 && r.origen[0] === 'significado';
+	}
+
+	/** Las estrellas de una resena, sin emojis: 4 de 5. */
+	function estrellas(n: number): string {
+		return `${n} de 5`;
+	}
 
 	/** Marca o desmarca una opcion y lo deja en la direccion. */
 	function alternar(clave: 'cat' | 'precio' | 'nota', valor: string) {
@@ -174,9 +245,9 @@
 
 	/** Como se lee el conteo. Sin "resultado(s)" ni parentesis. */
 	let cuantos = $derived.by(() => {
-		const n = facetas ? total : resultados.length;
+		const n = esHibrida ? resultados.length : facetas ? total : resultados.length;
 		const texto = n === 1 ? '1 producto encontrado' : `${n} productos encontrados`;
-		return facetas && total > resultados.length
+		return !esHibrida && facetas && total > resultados.length
 			? `${texto}, se ven los ${resultados.length} mas parecidos`
 			: texto;
 	});
@@ -186,6 +257,38 @@
 	<title>{consulta ? `${consulta} en Mesh` : 'Buscar en Mesh'}</title>
 </svelte:head>
 
+{#snippet seccionIntencion()}
+{#if consulta.length >= MINIMO_LETRAS && (intencion.length > 0 || buscandoIntencion)}
+	<section class="intencion" class:arriba={fraseArriba} aria-label="Lo que cuentan otros compradores">
+		<h2>Lo que cuentan otros compradores</h2>
+		<p class="sub">Productos cuyas resenas hablan de lo que buscas, aunque no usen tus palabras.</p>
+		{#if buscandoIntencion && intencion.length === 0}
+			<p class="vacio">Leyendo resenas</p>
+		{:else}
+			<ul class="tarjetas">
+				{#each intencion as r (r.id_producto)}
+					<li>
+						<a class="tarjeta" href="/producto/{r.id_producto}">
+							<span class="nombre">{r.nombre}</span>
+							{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
+							{#if r.motivo}
+								<blockquote>
+									<span class="cita">{r.motivo.comentario}</span>
+									<span class="quien">Le dio {estrellas(r.motivo.calificacion)}</span>
+								</blockquote>
+							{:else}
+								<span class="quien">Por su descripcion</span>
+							{/if}
+							{#if precioVisible(r)}<span class="precio">{precioVisible(r)}</span>{/if}
+						</a>
+					</li>
+				{/each}
+			</ul>
+		{/if}
+	</section>
+{/if}
+{/snippet}
+
 <Cabecera />
 
 <main class="env">
@@ -196,8 +299,21 @@
 
 		{#if !cargando && error === '' && consulta.length >= MINIMO_LETRAS && resuelta === consulta}
 			<p class="cuenta">{cuantos}</p>
+			<!-- Con una frase no: el corrector cambia palabra por palabra y medido el
+			     04-10 "algo para escuchar musica mientras corro" salia como "alba pesa
+			     escuchar musica mientras cuero". La lista ya la resuelve el significado. -->
+			{#if quisisteDecir && quisisteDecir !== consulta.toLowerCase() && !pareceFrase(consulta)}
+				<p class="quisiste">
+					Tal vez quisiste decir
+					<a href="/buscar?q={encodeURIComponent(quisisteDecir)}">{quisisteDecir}</a>
+				</p>
+			{/if}
 		{/if}
 	</header>
+
+	{#if fraseArriba}
+		{@render seccionIntencion()}
+	{/if}
 
 	{#if consulta.length < MINIMO_LETRAS}
 		<p class="vacio">
@@ -216,6 +332,9 @@
 			</p>
 			<a class="boton" href="/">Ir al catalogo</a>
 		</div>
+	{:else if resultados.length === 0 && !hayElegidos && (intencion.length > 0 || buscandoIntencion)}
+		<!-- La busqueda por nombre no encontro nada pero la de intencion si:
+		     se ensena solo esta, sin el aviso de "no hay productos". -->
 	{:else if resultados.length === 0 && !hayElegidos}
 		<div class="malo suave">
 			<p>No hay productos que se parezcan a {consulta}.</p>
@@ -331,6 +450,7 @@
 												<span class="estado">{marcaDeEstado(r)}</span>
 											{/if}
 											{#if r.hay_descuento}<span class="descuento">Con descuento</span>{/if}
+											{#if soloPorSignificado(r)}<span class="significado">Por lo que buscas</span>{/if}
 											{#if nota(r)}<span class="dato">{nota(r)}</span>{/if}
 											<span class="dato" class:agotado={r.stock_total <= 0}>
 												{r.stock_total > 0 ? `${r.stock_total} disponibles` : 'Sin existencias'}
@@ -363,11 +483,99 @@
 			</div>
 		</div>
 	{/if}
+
+	{#if !fraseArriba}
+		{@render seccionIntencion()}
+	{/if}
 </main>
 
 <Pie />
 
 <style>
+	.intencion {
+		margin-top: 2.5rem;
+		padding-top: 1.5rem;
+		border-top: 1px solid var(--linea);
+	}
+
+	.intencion.arriba {
+		margin: 0 0 2rem;
+		padding: 0 0 1.75rem;
+		border-top: none;
+		border-bottom: 1px solid var(--linea);
+	}
+
+	.intencion h2 {
+		margin: 0;
+		font-size: var(--f-lg);
+		font-weight: 600;
+		color: var(--tinta);
+	}
+
+	.intencion .sub {
+		margin: 0.35rem 0 1.25rem;
+		font-size: var(--f-ms);
+		color: var(--gris);
+	}
+
+	.tarjetas {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+		gap: 14px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	.tarjeta {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		height: 100%;
+		padding: 16px;
+		color: inherit;
+		text-decoration: none;
+		background: var(--panel);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+	}
+
+	.tarjeta:hover {
+		border-color: var(--tinta);
+	}
+
+	.tarjeta .nombre {
+		font-weight: 600;
+		color: var(--tinta);
+	}
+
+	.tarjeta .cat,
+	.tarjeta .quien {
+		font-size: var(--f-sm);
+		color: var(--gris);
+	}
+
+	.tarjeta blockquote {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin: 4px 0 0;
+		padding-left: 10px;
+		border-left: 2px solid var(--linea);
+	}
+
+	.tarjeta .cita {
+		font-size: var(--f-ms);
+		color: var(--tinta);
+		overflow-wrap: anywhere;
+	}
+
+	.tarjeta .precio {
+		margin-top: auto;
+		font-weight: 600;
+		color: var(--tinta);
+	}
+
 	main {
 		min-height: 60vh;
 		padding: 2rem 24px 3.5rem;
@@ -384,6 +592,21 @@
 		color: var(--tinta);
 		/* Lo que se busco puede ser larguisimo si alguien pega un parrafo. */
 		overflow-wrap: anywhere;
+	}
+
+	.significado {
+		font-size: var(--f-sm);
+		color: var(--indigo);
+	}
+
+	.quisiste {
+		margin: 0.35rem 0 0;
+		font-size: var(--f-base);
+		color: var(--tinta);
+	}
+
+	.quisiste a {
+		font-weight: 600;
 	}
 
 	.cuenta {

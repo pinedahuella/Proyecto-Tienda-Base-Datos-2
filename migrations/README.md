@@ -66,10 +66,10 @@ copia de una tabla vieja a una nueva con `ON CONFLICT DO UPDATE`, en el arranque
 siguiente vuelve a pisar la nueva con lo viejo. La 031 y la 032 copian solo
 mientras exista la columna que la 033 quita, y ese es su marcador.
 
-## Los treinta y tres archivos de esquema
+## Los treinta y nueve archivos de esquema
 
 Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
-"los catorce" con quince en la carpeta, "los veinte" con veintiuno, y "los veinticinco" con treinta y tres. Es la misma trampa que este documento
+"los catorce" con quince en la carpeta, "los veinte" con veintiuno, y "los veinticinco" con treinta y tres, y "los treinta y tres" con treinta y nueve. Es la misma trampa que este documento
 avisa mas abajo para las comprobaciones: una lista escrita a mano caduca sin
 avisar. Antes de creerle a esta, cuentalos:
 
@@ -114,6 +114,19 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `031_senales_fraude.sql` | El refactor de fraude de Jose David (7453ffe). Un solo modelo para las tres familias: `senal_fraude`, una fila por (tipo, clave), con sus catalogos (`familia_senal_fraude`, `fuente_senal_fraude`, `tipo_senal_fraude` con los 25 tipos, `rol_cuenta_senal` autor o victima) y sus pivotes de cuentas, resenas, productos, pedidos e IP (`direccion_ip`). Copia una sola vez lo que habia en `anillo_fraude`, `hallazgo_evento_fraude` y `alerta_fraude` |
 | `032_evidencia_y_aviso_por_senal.sql` | `evidencia_caso_fraude` y `notificacion_fraude` ganan `id_senal_fraude` y se enlaza lo que ya existia. Queda una notificacion por (senal, cuenta) y no una por ventana. Corre una sola vez |
 | `033_sin_llaves_viejas_de_fraude.sql` | Se quitan las llaves viejas de esas dos tablas e `id_senal_fraude` pasa a NOT NULL. Se detiene si queda una fila sin senal. Las tablas viejas NO se borran, quedan sin escrituras |
+| `034_evento_comentario.sql` | La cola `evento_comentario` y sus dos triggers (sobre `comentario` y sobre `resena`), hermana de `evento_producto`: lleva cada resena y cada respuesta, con su vector, al indice `mesh_comentarios` de Elasticsearch. Un like no encola nada. Del SQL de referencia de fa3281c, sin cambios |
+| `035_senales_fraude_por_texto.sql` | La fuente `elastic` y los tipos `resenas_repetidas` y `anillo_de_texto`, en la familia `patron_resenas`. Salen del texto de las resenas en `mesh_comentarios` |
+| `036_sin_producto_vector.sql` | Retira `producto_vector` y `productos_similares()`: desde fa3281c el vector de cada producto vive en su documento de `mesh_productos`. La 024 y la 027 no se editan; vuelven a crear la tabla vacia en cada arranque y esta la quita justo despues. La extension `vector` se queda |
+| `037_senales_notas_incoherentes.sql` | Los tipos `notas_incoherentes_cuenta`, `_producto` y `_vendedor` (3305cf3): resenas cuyas estrellas contradicen su texto segun el clasificador de resenas |
+| `038_senales_resenas_parecidas.sql` | Los tipos `resenas_parecidas_vendedor` y `_producto` (3305cf3): muchas resenas con una gemela de otra cuenta |
+| `039_senales_resenas_canceladas.sql` | La fuente `postgres` y los tipos `resena_positiva_cancelada` y `resenas_negativas_canceladas_vendedor` (1f1f480): resenar y despues cancelar la compra |
+
+**De la 034 a la 039, las senales que no salen del grafo.** Son del 2 al 4 de
+octubre y siguen un mismo molde: el backend las detecta y la migracion solo
+pone el catalogo (fuente y tipo, con `WHERE NOT EXISTS` para no quemar la
+secuencia en cada arranque). Los SQL de referencia de Jose David usaban
+`ON CONFLICT DO NOTHING`; es lo unico que cambia. Los ids quedan del 26 al 34
+en una base nueva, pero el backend busca los tipos por nombre.
 
 De la 011 a la 015 son de la Entrega 2, la 016 a la 023 de la Entrega 3, la 024 de la Entrega final, la 025 otra vez de la Entrega 3, y merecen una
 linea mas de la que caben en la tabla.

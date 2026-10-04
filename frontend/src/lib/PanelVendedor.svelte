@@ -541,6 +541,54 @@
 		};
 	}
 
+	/**
+	 * Sugerencias al proponer, POST /vendedor/productos/sugerencias (1f1f480):
+	 * en que categoria suele ir algo asi y que productos parecidos ya hay, para
+	 * no proponer uno que ya existe. Se pide al salir del nombre o de la
+	 * descripcion, no en cada tecla: cada llamada le pide un vector a Ollama.
+	 * Es una ayuda: si falla, el formulario sigue igual.
+	 */
+	interface CategoriaSugerida {
+		id_categoria: number;
+		nombre: string;
+		puntaje: number;
+	}
+	interface ProductoParecido {
+		id_producto: number;
+		nombre: string;
+		categoria: string;
+		similitud: number;
+		posible_duplicado: boolean;
+	}
+	let sugeridas = $state<CategoriaSugerida[]>([]);
+	let parecidos = $state<ProductoParecido[]>([]);
+	let pidiendoSugerencias = $state(false);
+	let ultimaSugerencia = '';
+
+	async function sugerir() {
+		if (editando !== null) return;
+		const n = nombre.trim();
+		const clave = `${n}|${descripcion.trim()}`;
+		if (n.length < 3 || clave === ultimaSugerencia) return;
+		ultimaSugerencia = clave;
+		pidiendoSugerencias = true;
+		const r = await pedir<{ categorias: CategoriaSugerida[]; productos_similares: ProductoParecido[] }>(
+			'/vendedor/productos/sugerencias',
+			conJson('POST', { nombre: n, descripcion: descripcion.trim() || undefined })
+		);
+		pidiendoSugerencias = false;
+		if (ultimaSugerencia !== clave) return;
+		sugeridas = r.ok ? (r.payload?.categorias ?? []) : [];
+		parecidos = r.ok ? (r.payload?.productos_similares ?? []) : [];
+		// Se preselecciona la primera solo si todavia no se habia elegido ninguna.
+		if (r.ok && idCategoria === '' && sugeridas.length > 0) elegirCategoria(sugeridas[0].id_categoria);
+	}
+
+	function elegirCategoria(id: number) {
+		idCategoria = String(id);
+		traerPaleta(idCategoria);
+	}
+
 	async function guardar() {
 		errorForma = '';
 		let cuerpo: ReturnType<typeof cuerpoDelFormulario>;
@@ -1039,13 +1087,49 @@
 
 				<div class="campo">
 					<label for="v-nom">Nombre del producto</label>
-					<input id="v-nom" type="text" maxlength="200" bind:value={nombre} />
+					<input id="v-nom" type="text" maxlength="200" bind:value={nombre} onblur={sugerir} />
 				</div>
 
 				<div class="campo">
 					<label for="v-desc">Descripcion</label>
-					<textarea id="v-desc" rows="2" bind:value={descripcion}></textarea>
+					<textarea id="v-desc" rows="2" bind:value={descripcion} onblur={sugerir}></textarea>
 				</div>
+
+				{#if editando === null && (pidiendoSugerencias || sugeridas.length > 0 || parecidos.length > 0)}
+					<div class="sugerencias">
+						{#if pidiendoSugerencias}
+							<p class="menor">Buscando productos parecidos</p>
+						{:else}
+							{#if sugeridas.length > 0}
+								<p class="menor">Suele ir en</p>
+								<div class="chips">
+									{#each sugeridas as c (c.id_categoria)}
+										<button
+											type="button"
+											class="chip"
+											class:elegida={idCategoria === String(c.id_categoria)}
+											onclick={() => elegirCategoria(c.id_categoria)}
+										>
+											{c.nombre}
+										</button>
+									{/each}
+								</div>
+							{/if}
+							{#if parecidos.length > 0}
+								<p class="menor">Ya hay parecidos en la tienda</p>
+								<ul class="parecidos">
+									{#each parecidos as p (p.id_producto)}
+										<li class:duplicado={p.posible_duplicado}>
+											<a href="/producto/{p.id_producto}" target="_blank" rel="noopener">{p.nombre}</a>
+											<span>{p.categoria}</span>
+											{#if p.posible_duplicado}<strong>Puede que ya exista</strong>{/if}
+										</li>
+									{/each}
+								</ul>
+							{/if}
+						{/if}
+					</div>
+				{/if}
 
 				{#if proponiendo}
 					<!-- El vendedor no elige el estado: una propuesta nace `en_revision`
@@ -1737,5 +1821,59 @@
 			flex-direction: column;
 			align-items: flex-start;
 		}
+	}
+	.sugerencias {
+		margin: -4px 0 14px;
+		padding: 12px 14px;
+		background: var(--panel);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+	}
+
+	.sugerencias .menor {
+		margin: 0 0 6px;
+	}
+
+	.chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin-bottom: 10px;
+	}
+
+	.chip {
+		padding: 4px 12px;
+		font-size: var(--f-sm);
+		border: 1px solid var(--linea);
+		border-radius: 999px;
+		background: transparent;
+		cursor: pointer;
+	}
+
+	.chip.elegida {
+		color: var(--indigo);
+		border-color: var(--indigo);
+	}
+
+	.parecidos {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+		font-size: var(--f-sm);
+	}
+
+	.parecidos li {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px 10px;
+		padding: 3px 0;
+	}
+
+	.parecidos span {
+		color: var(--gris);
+	}
+
+	.parecidos .duplicado strong {
+		color: var(--rojo);
 	}
 </style>

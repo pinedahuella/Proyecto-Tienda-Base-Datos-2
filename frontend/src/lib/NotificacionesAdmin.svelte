@@ -27,7 +27,16 @@
 			| 'anillo_en_el_tiempo'
 			| 'favor_devuelto'
 			| 'coordinados'
-			| 'reputacion_expres';
+			| 'reputacion_expres'
+			| 'resenas_repetidas'
+			| 'anillo_de_texto'
+			| 'notas_incoherentes_cuenta'
+			| 'notas_incoherentes_producto'
+			| 'notas_incoherentes_vendedor'
+			| 'resenas_parecidas_vendedor'
+			| 'resenas_parecidas_producto'
+			| 'resena_positiva_cancelada'
+			| 'resenas_negativas_canceladas_vendedor';
 		cuentas: { usuario: string }[];
 		fecha_creacion: string;
 	}
@@ -47,7 +56,16 @@
 		anillo_en_el_tiempo: 'Anillo de resenas que vuelve con el tiempo',
 		favor_devuelto: 'Dos cuentas se devuelven la nota en horas',
 		coordinados: 'Dos cuentas califican juntas lo mismo',
-		reputacion_expres: 'Vendedor nuevo con resenas de cuentas nuevas'
+		reputacion_expres: 'Vendedor nuevo con resenas de cuentas nuevas',
+		resenas_repetidas: 'Una cuenta escribe la misma resena una y otra vez',
+		anillo_de_texto: 'Varias cuentas escriben casi la misma resena al mismo vendedor',
+		notas_incoherentes_cuenta: 'Una cuenta pone estrellas que contradicen lo que escribe',
+		notas_incoherentes_producto: 'Un producto con muchas notas que contradicen su texto',
+		notas_incoherentes_vendedor: 'Un vendedor con muchas notas que contradicen su texto',
+		resenas_parecidas_vendedor: 'Un vendedor con muchas resenas copiadas de otras cuentas',
+		resenas_parecidas_producto: 'Un producto con muchas resenas copiadas de otras cuentas',
+		resena_positiva_cancelada: 'Una cuenta reseno con buena nota y despues cancelo la compra',
+		resenas_negativas_canceladas_vendedor: 'Un vendedor con muchas resenas malas de compras que se cancelaron'
 	};
 
 	const LIMITE = 20;

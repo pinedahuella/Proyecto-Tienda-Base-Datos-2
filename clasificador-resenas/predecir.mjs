@@ -10,7 +10,7 @@
 // --verificar comprueba que dan lo mismo que Python con los vectores guardados.
 
 import { readFileSync, existsSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const RAIZ = dirname(fileURLToPath(import.meta.url));
@@ -131,4 +131,8 @@ async function main() {
   }
 }
 
-main().catch((e) => { console.error(e.message); process.exit(1); });
+// Solo como programa. Importado como modulo (por una prueba, o al pasarlo al
+// backend) da las funciones de arriba sin correr la linea de comandos.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((e) => { console.error(e.message); process.exit(1); });
+}

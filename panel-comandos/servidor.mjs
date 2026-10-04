@@ -322,7 +322,7 @@ const CATALOGO = [
   },
   {
     id: 'final-semantica', grupo: 'Demos de la Entrega final', titulo: 'Productos parecidos por su descripcion',
-    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen segun su descripcion, con el porcentaje de parecido y cuanto tardo la base. Al final se los pide a la ruta de la ficha, GET /productos/:id/similares, y comprueba que sean los mismos. Si el backend esta apagado, ese ultimo paso solo avisa.',
+    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen segun su descripcion, con el porcentaje de parecido. El vector vive en el documento del producto en Elasticsearch: compara cuanto tarda con el indice HNSW y comparando contra todos, y que den lo mismo. Al final se los pide a la ruta de la ficha, GET /productos/:id/similares, y comprueba que sean los mismos. Si el backend esta apagado, ese ultimo paso solo avisa.',
     script: 'demo-entrega-final.ps1', confirmar: null,
     campos: [
       { nombre: 'producto', etiqueta: 'Palabra del nombre', tipo: 'texto', patron: '^[A-Za-z0-9 ]{2,30}$', defecto: 'laptop' },
@@ -340,7 +340,7 @@ const CATALOGO = [
   },
   {
     id: 'final-vectores', grupo: 'Demos de la Entrega final', titulo: 'Quien mantiene los vectores al dia',
-    explica: 'Cuantos productos tienen vector en PostgreSQL, cuantos esperan al worker del backend (los que un vendedor creo o edito) y si el backend llega a Ollama con el modelo descargado. Solo lee.',
+    explica: 'Cuantos productos tienen vector en Elasticsearch, cuantas resenas tienen el suyo en mesh_comentarios, cuantos esperan a los workers del backend (los que un vendedor creo o edito, las resenas nuevas) y si el backend llega a Ollama con el modelo descargado. Solo lee.',
     script: 'demo-entrega-final.ps1', confirmar: null,
     campos: [],
     construir: () => ['-Parte', 'vectores'],
@@ -353,6 +353,52 @@ const CATALOGO = [
       { nombre: 'texto', etiqueta: 'Que buscar', tipo: 'texto', patron: '^[A-Za-z0-9 ]{3,30}$', defecto: 'laptop' },
     ],
     construir: (v) => ['-Parte', 'rastro', '-Texto', v.texto],
+  },
+
+  // --- Demos de resenas ---------------------------------------------------
+  {
+    id: 'resenas-intencion', grupo: 'Demos de resenas', titulo: 'Buscar por lo que se quiere, no por el nombre',
+    explica: 'Escribe lo que quieres lograr con tus palabras y ensena los productos cuyas resenas hablan de eso, cada uno con la resena que lo explica. Al lado, lo que da la busqueda por nombre con la misma frase. Es lo que sale arriba en /buscar cuando escribes una frase. Solo lee.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [
+      { nombre: 'texto', etiqueta: 'Que quieres lograr', tipo: 'texto', patron: '^[A-Za-z0-9 ]{3,80}$', defecto: 'algo que me ayude a dormir mejor' },
+    ],
+    construir: (v) => ['-Parte', 'intencion', '-Texto', v.texto],
+  },
+  {
+    id: 'buscar-hibrida', grupo: 'Demos de resenas', titulo: 'Buscador que entiende nombres y frases',
+    explica: 'La busqueda hibrida, la lista de /buscar: cada producto con su lugar en la busqueda por palabras y en la de significado, combinados por posicion. labtop gamer sale por las palabras aunque este mal escrito, y una frase sale por el significado. Al lado, la misma busqueda solo por palabras y el tal vez quisiste decir. Solo lee.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [
+      { nombre: 'texto', etiqueta: 'Que buscar', tipo: 'texto', patron: '^[A-Za-z0-9 ]{2,80}$', defecto: 'labtop gamer' },
+    ],
+    construir: (v) => ['-Parte', 'hibrida', '-Texto', v.texto],
+  },
+  {
+    id: 'proponer-sugerencias', grupo: 'Demos de resenas', titulo: 'Sugerencias al proponer un producto',
+    explica: 'Lo que ve un vendedor al escribir el nombre de un producto que quiere proponer: en que categoria suele ir y que productos parecidos ya hay, marcando los que pueden ser el mismo. No crea nada.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [
+      { nombre: 'texto', etiqueta: 'Nombre del producto', tipo: 'texto', patron: '^[A-Za-z0-9 ]{3,80}$', defecto: 'Laptop ligera para estudiantes' },
+    ],
+    construir: (v) => ['-Parte', 'sugerencias', '-Texto', v.texto],
+  },
+  {
+    id: 'resenas-clasificador', grupo: 'Demos de resenas', titulo: 'Lo que lee el clasificador de resenas',
+    explica: 'Cuantas resenas leyo el clasificador como malas, buenas, dudosas o muy cortas, algunas cuyas estrellas contradicen lo que dice el texto, y cuantas senales de notas incoherentes hay por cuenta, vendedor y producto. Solo lee.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Parte', 'clasificador'],
+  },
+  {
+    id: 'resenas-texto', grupo: 'Demos de resenas', titulo: 'Resenas copiadas, incoherentes y canceladas',
+    explica: 'Cuentas nuevas que compran y resenan de verdad. copiadas: seis cuentas le dejan casi la misma resena a un vendedor nuevo (Vendedor con resenas copiadas y Varias cuentas, la misma resena). incoherentes: una cuenta pone 5 estrellas a cinco productos con textos que dicen que todo salio mal (Sus estrellas contradicen sus textos, y la del vendedor). cancelada: una cuenta pone 5 estrellas y cancela la compra (Resena buena y compra cancelada). negativas: cinco cuentas ponen 1 o 2 estrellas al mismo vendedor y cancelan (Resenas malas y compras canceladas, el vendedor como victima). Cada senal sale sola en unos segundos y la demo dice cuanto tardo. Tarda uno o dos minutos.',
+    script: 'demo-resenas-texto.ps1', confirmar: 'SI',
+    peligro: 'Deja cuentas, pedidos y movimientos de inventario reales. No hay como deshacerlo.',
+    campos: [
+      { nombre: 'caso', etiqueta: 'Caso', tipo: 'opcion', opciones: ['todos', 'copiadas', 'incoherentes', 'cancelada', 'negativas'], defecto: 'todos' },
+    ],
+    construir: (v) => ['-Caso', v.caso],
   },
 ];
 

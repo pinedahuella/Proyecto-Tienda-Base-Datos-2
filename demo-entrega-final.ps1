@@ -9,6 +9,10 @@
 #   .\demo-entrega-final.ps1 -Parte facetas -Texto laptop       filtros facetados y tolerancia
 #   .\demo-entrega-final.ps1 -Parte vectores                    quien mantiene los vectores al dia
 #   .\demo-entrega-final.ps1 -Parte rastro -Texto laptop        lo que ClickHouse guarda de una busqueda con filtros
+#   .\demo-entrega-final.ps1 -Parte intencion -Texto "algo para salir a pedalear"   buscar por lo que se quiere
+#   .\demo-entrega-final.ps1 -Parte clasificador                como leyo el clasificador cada resena
+#   .\demo-entrega-final.ps1 -Parte hibrida -Texto "labtop gamer"   palabras y significado en una lista
+#   .\demo-entrega-final.ps1 -Parte sugerencias -Texto "Laptop ligera para estudiantes"   al proponer un producto
 #
 # QUE ENSENA CADA PARTE
 # ==================================================
@@ -17,12 +21,26 @@
 #              a Redis con ACL DRYRUN si lo dejaria pasar. Escribe una sola clave
 #              bajo mesh:demo:acceso y la borra al final
 #   semantica  Busca un producto por nombre y pide sus parecidos a
-#              productos_similares() de la migracion 024, con la similitud de
-#              cada uno y el plan que prueba que se usa el indice HNSW
+#              Elasticsearch con la misma consulta kNN que SimilaresService
+#              (el vector vive en el documento de mesh_productos desde el
+#              2026-10-02), con la similitud de cada uno, y la compara con la
+#              busqueda exacta contra todos para ensenar lo que ahorra el HNSW
 #   facetas    La consulta de elastic/pruebas/facetas.py contra el indice real.
 #              Solo lee
-#   vectores   Cuantos productos tienen vector, cuantos esperan al worker del
-#              backend y si el backend llega a Ollama con el modelo. Solo lee
+#   vectores   Cuantos productos y cuantas resenas tienen vector, cuantos
+#              esperan a los workers del backend y si el backend llega a
+#              Ollama con el modelo. Solo lee
+#   intencion  Pide la frase a GET /buscador/productos/intencion y ensena cada
+#              producto con la resena que lo explica, y al lado lo que da la
+#              busqueda por nombre con la misma frase. Solo lee
+#   clasificador  Cuantas resenas leyo el clasificador como malas, buenas,
+#              dudosas o cortas, algunas cuyas estrellas contradicen el texto, y
+#              cuantas senales de notas incoherentes hay. Solo lee
+#   hibrida    GET /buscador/productos/hibrida: cada producto con su lugar en la
+#              busqueda por palabras y en la de significado, y la misma frase
+#              solo por palabras al lado. Solo lee
+#   sugerencias  POST /vendedor/productos/sugerencias con la sesion del admin: en
+#              que categoria suele ir y que parecidos ya hay. No crea nada
 #   rastro     Hace UNA busqueda con filtros por el backend, ensena la fila que
 #              quedo en ClickHouse con sus facetas y la borra al final, para
 #              que no cuente en las tendencias
@@ -31,7 +49,7 @@
 # va a Mongo o a PostgreSQL viaja como archivo con docker cp.
 
 param(
-    [ValidateSet('acceso', 'semantica', 'facetas', 'vectores', 'rastro')]
+    [ValidateSet('acceso', 'semantica', 'facetas', 'vectores', 'rastro', 'intencion', 'clasificador', 'hibrida', 'sugerencias')]
     [string]$Parte = 'acceso',
     [string]$Producto = 'laptop',
     [string]$Texto = 'laptop',
@@ -85,6 +103,29 @@ function ClickHouse([string]$sql) {
         --database $env_['CLICKHOUSE_DB'] --query $sql 2>&1
     if ($LASTEXITCODE -ne 0) { Mal "ClickHouse contesto con error. $salida"; exit 1 }
     return @($salida | ForEach-Object { "$_" } | Where-Object { $_.Trim() -ne '' })
+}
+
+$ES_URL = 'http://localhost:9200'
+$ES_INDICE = 'mesh_productos'
+$ES_INDICE_COMENTARIOS = 'mesh_comentarios'
+
+# Un POST a Elasticsearch leido como UTF-8. Invoke-RestMethod de PowerShell 5.1
+# no siempre respeta el charset de la respuesta y las tildes del texto de una
+# resena salian rotas ("venA-a" por "venia").
+function Es-Post([string]$ruta, [string]$cuerpo) {
+    $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$ES_URL$ruta" -ContentType 'application/json' -Body $cuerpo -TimeoutSec 30
+    $bytes = $r.RawContentStream.ToArray()
+    return ([Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json)
+}
+
+function Contar-ConVector {
+    try {
+        return [int](Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_count" -ContentType 'application/json' `
+            -Body '{"query":{"exists":{"field":"vector"}}}' -TimeoutSec 20).count
+    } catch {
+        Mal "Elasticsearch no contesto o no existe el indice $ES_INDICE. Corre .rrancar.ps1"
+        exit 1
+    }
 }
 
 function Mongo([string]$js) {
@@ -170,12 +211,12 @@ if ($Parte -eq 'acceso') {
 # semantica
 # ============================================================
 if ($Parte -eq 'semantica') {
-    Contenedor 'mesh-postgres'
+    Contenedor 'mesh-elastic'
     Contenedor 'mesh-mongo'
 
-    $conVector = @(Psql "SELECT count(*) FROM producto_vector;")[0]
-    if ([int]$conVector -eq 0) {
-        Mal "No hay vectores. Corre .\arrancar.ps1, que los calcula en el paso 7d"
+    $conVector = Contar-ConVector
+    if ($conVector -eq 0) {
+        Mal "No hay vectores en $ES_INDICE. Corre .\arrancar.ps1, que los calcula en el paso 7d"
         exit 1
     }
 
@@ -189,18 +230,53 @@ db.productos.find({ nombre: { `$regex: $patron, `$options: 'i' }, estado: 'activ
   });
 "@
     if ($candidatos.Count -eq 0) { Mal "Ningun producto activo dice '$Producto'. Prueba con otra palabra"; exit 1 }
-    $ids = ($candidatos | ForEach-Object { [long]$_.id }) -join ','
-    $elegido = @(Psql "SELECT id_producto FROM producto_vector WHERE activo AND id_producto IN ($ids) ORDER BY id_producto LIMIT 1;")
-    if (-not $elegido) { Mal "Esos productos todavia no tienen vector. Corre .\etl\cargar_vectores.ps1"; exit 1 }
-    $id = [long]$elegido[0]
-    $base = $candidatos | Where-Object { [long]$_.id -eq $id } | Select-Object -First 1
+    $base = $null
+    $doc = $null
+    foreach ($c in $candidatos) {
+        try {
+            $d = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_doc/$($c.id)?_source_includes=vector,vector_grupo" -TimeoutSec 20
+            if ($d.found -and $d._source.vector) { $base = $c; $doc = $d; break }
+        } catch { }
+    }
+    if (-not $base) { Mal "Esos productos todavia no tienen vector. Corre .\etl\cargar_vectores.ps1"; exit 1 }
+    $id = [long]$base.id
     Ok "$($base.nombre), de $($base.cat) (id $id)"
 
+    # La misma consulta que SimilaresService del backend: kNN sobre `vector`
+    # con 200 candidatos, solo activos, sin el propio ni su grupo, y despues
+    # uno por grupo. Elasticsearch puntua (1 + coseno) / 2; se vuelve al coseno.
+    $filtro = @{ bool = @{ filter = @(@{ term = @{ estado = 'activo' } }); must_not = @(@{ ids = @{ values = @("$id") } }) } }
+    if ($doc._source.vector_grupo) { $filtro.bool.must_not += @{ term = @{ vector_grupo = $doc._source.vector_grupo } } }
+    $knn = @{
+        size = 200; _source = @('vector_grupo')
+        knn = @{ field = 'vector'; query_vector = $doc._source.vector; k = 200; num_candidates = 400; filter = $filtro }
+    } | ConvertTo-Json -Depth 10 -Compress
+    # Exacto, comparando contra TODOS: script_score con cosineSimilarity. Es lo
+    # que el indice HNSW se ahorra.
+    $exacto = @{
+        size = 200; _source = @('vector_grupo')
+        query = @{ script_score = @{ query = $filtro; script = @{ source = "cosineSimilarity(params.v, 'vector') + 1.0"; params = @{ v = $doc._source.vector } } } }
+    } | ConvertTo-Json -Depth 10 -Compress
+
+    function Uno-PorGrupo($hits) {
+        $vistos = @{}
+        $r = [ordered]@{}
+        foreach ($h in $hits) {
+            $clave = if ($h._source.vector_grupo) { $h._source.vector_grupo } else { "id:$($h._id)" }
+            if ($vistos.ContainsKey($clave)) { continue }
+            $vistos[$clave] = $true
+            $r[[long]$h._id] = $h._score
+            if ($r.Count -eq 6) { break }
+        }
+        return $r
+    }
+
     Paso "Los mas parecidos por su descripcion"
-    $filas = Psql "SELECT id_producto || '|' || round((similitud * 100)::numeric, 1) FROM productos_similares($id, 6);"
-    if (-not $filas) { Av "No salio ninguno parecido"; exit 0 }
-    $sim = [ordered]@{}
-    foreach ($f in $filas) { $p = $f.Split('|'); $sim[[long]$p[0]] = $p[1] }
+    # Dos veces cada una: la primera paga la carga del indice en memoria.
+    $null = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $knn -TimeoutSec 60
+    $rKnn = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $knn -TimeoutSec 60
+    $sim = Uno-PorGrupo $rKnn.hits.hits
+    if ($sim.Count -eq 0) { Av "No salio ninguno parecido"; exit 0 }
     $nombres = @{}
     Mongo @"
 db.productos.find({ _id: { `$in: [$(($sim.Keys) -join ',')] } }, { nombre: 1, 'categoria.nombre': 1 }).forEach(function (d) {
@@ -214,38 +290,24 @@ db.productos.find({ _id: { `$in: [$(($sim.Keys) -join ',')] } }, { nombre: 1, 'c
         if ($nombre.Length -gt 45) { $nombre = $nombre.Substring(0, 45) }
         $cat = if ($n) { $n.cat } else { '' }
         $color = if ($n -and $n.cat -eq $base.cat) { 'Green' } else { 'Gray' }
-        Write-Host ("   {0,8}% {1,-46} {2}" -f $sim[$k], $nombre, $cat) -ForegroundColor $color
+        $coseno = [math]::Round((2 * [double]$sim[$k] - 1) * 100, 1)
+        Write-Host ("   {0,8}% {1,-46} {2}" -f $coseno, $nombre, $cat) -ForegroundColor $color
     }
     Write-Host "   En verde, los de la misma categoria. Nadie le dijo la categoria al modelo, solo leyo el texto" -ForegroundColor DarkGray
 
-    Paso "Como lo resuelve PostgreSQL, el plan de adentro de productos_similares()"
-    # EXPLAIN de la funcion solo diria "Function Scan". auto_explain ensena el
-    # plan de la consulta de adentro, que es la que importa. Se pide dos veces
-    # porque la primera paga la carga del indice en memoria.
-    $plan = Psql @"
-LOAD 'auto_explain';
-SET auto_explain.log_min_duration = 0;
-SET auto_explain.log_nested_statements = on;
-SET auto_explain.log_analyze = on;
-SET auto_explain.log_timing = on;
-SET auto_explain.log_level = notice;
-SET client_min_messages = notice;
-SELECT count(*) FROM productos_similares($id, 6);
-SELECT count(*) FROM productos_similares($id, 6);
-"@
-    $nodo = @($plan | Where-Object { $_ -match 'Index Scan using idx_producto_vector_hnsw|Seq Scan on producto_vector v ' }) | Select-Object -Last 1
-    $duracion = @($plan | Where-Object { $_ -match 'duration: ([\d.]+) ms\s+plan:' } | ForEach-Object { [double]([regex]::Match($_, 'duration: ([\d.]+) ms').Groups[1].Value) }) | Select-Object -Last 1
-    if ($nodo -match 'idx_producto_vector_hnsw') {
-        Ok "Index Scan using idx_producto_vector_hnsw, la consulta de adentro tardo $duracion ms"
-    } elseif ($nodo) {
-        Mal "La funcion recorrio la tabla entera. Falta la migracion 027"
+    Paso "Como lo resuelve Elasticsearch, con el indice HNSW o comparando contra todos"
+    $null = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $exacto -TimeoutSec 60
+    $rExacto = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $exacto -TimeoutSec 60
+    $simExacto = Uno-PorGrupo $rExacto.hits.hits
+    Ok "kNN con el indice HNSW, $($rKnn.took) ms. Comparando contra los $conVector, $($rExacto.took) ms"
+    if ((@($sim.Keys) -join ',') -eq (@($simExacto.Keys) -join ',')) {
+        Ok "Los dos dan los mismos $($sim.Count), en el mismo orden"
     } else {
-        Av "No se pudo leer el plan. auto_explain no contesto"
+        Av "El indice dio otros que la busqueda exacta: HNSW es aproximado. Exacto $(@($simExacto.Keys) -join ','), indice $(@($sim.Keys) -join ',')"
     }
-    Ok "$conVector productos con vector de 768 dimensiones, en la tabla producto_vector"
-    Ok "El indice HNSW recorre un grafo de vecinos y no compara contra todos"
-    Write-Host "   Medido sobre los 3103 activos, el indice tarda 3,8 ms por producto y recorrer todo 32 ms," -ForegroundColor DarkGray
-    Write-Host "   y da los mismos seis que la busqueda exacta en 3099 de 3103. Ver migrations\027" -ForegroundColor DarkGray
+    Ok "$conVector productos con vector de 768 dimensiones, dentro de su documento de $ES_INDICE"
+    Write-Host "   El indice HNSW recorre un grafo de vecinos y no compara contra todos. El vector vive en el" -ForegroundColor DarkGray
+    Write-Host "   mismo documento que el texto y los filtros, asi que una sola consulta los combina" -ForegroundColor DarkGray
 
     Paso "Lo mismo por la app, GET /productos/$id/similares"
     $api = Api "/productos/$id/similares"
@@ -259,7 +321,7 @@ SELECT count(*) FROM productos_similares($id, 6);
         if (($idsApi -join ',') -eq ($idsBase -join ',')) {
             Ok "La ruta devuelve los mismos $($idsApi.Count), en el mismo orden. Es el estante Parecidos a este de la ficha"
         } else {
-            Mal "La ruta devolvio otros ids. Base $($idsBase -join ','), ruta $($idsApi -join ',')"
+            Mal "La ruta devolvio otros ids. Aqui $($idsBase -join ','), ruta $($idsApi -join ',')"
         }
     }
     exit 0
@@ -270,15 +332,39 @@ SELECT count(*) FROM productos_similares($id, 6);
 # vectores
 # ============================================================
 if ($Parte -eq 'vectores') {
-    Contenedor 'mesh-postgres'
+    Contenedor 'mesh-elastic'
     Contenedor 'mesh-mongo'
 
-    Paso "Los vectores que hay en PostgreSQL"
-    $f = @(Psql "SELECT count(*) || '|' || count(*) FILTER (WHERE activo) || '|' || count(DISTINCT grupo) || '|' || COALESCE(max(modelo), '') || '|' || COALESCE(to_char(max(fecha_calculo), 'YYYY-MM-DD HH24:MI'), '') FROM producto_vector;")[0].Split('|')
-    Ok "$($f[0]) productos con vector, $($f[1]) activos, en $($f[2]) grupos distintos"
-    Ok "Modelo $($f[3]). El ultimo se calculo el $($f[4])"
+    Paso "Los vectores que hay en Elasticsearch"
+    $total = [int](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_count" -TimeoutSec 20).count
+    $conVector = Contar-ConVector
+    $agg = @{
+        size = 0; query = @{ exists = @{ field = 'vector' } }
+        aggs = @{
+            activos = @{ filter = @{ term = @{ estado = 'activo' } } }
+            grupos = @{ cardinality = @{ field = 'vector_grupo' } }
+            modelos = @{ terms = @{ field = 'vector_modelo'; size = 5 } }
+        }
+    } | ConvertTo-Json -Depth 10 -Compress
+    $a = (Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $agg -TimeoutSec 30).aggregations
+    Ok "$conVector de $total documentos de $ES_INDICE con vector, $($a.activos.doc_count) activos, en $($a.grupos.value) grupos distintos"
+    Ok "Modelo $((@($a.modelos.buckets) | ForEach-Object { $_.key }) -join ', ')"
 
-    Paso "Los que esperan al worker del backend"
+    Paso "Los vectores de las resenas, en $ES_INDICE_COMENTARIOS"
+    try {
+        $c = [int](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_count" -TimeoutSec 20).count
+        $cv = [int](Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_count" -ContentType 'application/json' `
+            -Body '{"query":{"exists":{"field":"vector"}}}' -TimeoutSec 20).count
+        Ok "$c comentarios indexados, $cv con vector (las respuestas de menos de 15 letras van sin vector)"
+    } catch {
+        Av "El indice $ES_INDICE_COMENTARIOS no existe. Lo crea .\arrancar.ps1 en el paso Indice de comentarios"
+    }
+    if (docker ps --filter "name=^mesh-postgres$" --format "{{.Names}}") {
+        $cola = @(Psql "SELECT count(*) FILTER (WHERE procesado_en IS NULL) || '|' || count(*) FILTER (WHERE procesado_en IS NULL AND intentos > 0) FROM evento_comentario;")[0].Split('|')
+        Ok "$($cola[0]) comentarios esperan al worker en evento_comentario, $($cola[1]) con algun fallo"
+    }
+
+    Paso "Los productos que esperan al worker del backend"
     $m = Mongo @"
 print(JSON.stringify({
   total: db.productos.countDocuments({}),
@@ -299,6 +385,169 @@ print(JSON.stringify({
             Av "El backend llega a Ollama en $($api.url), pero no tiene $($api.modelo). Lo baja etl\cargar_vectores.ps1"
         }
     }
+    exit 0
+}
+
+
+# ============================================================
+# intencion
+# ============================================================
+if ($Parte -eq 'intencion') {
+    Contenedor 'mesh-elastic'
+
+    Paso "Lo que la persona quiere, con sus palabras: '$Texto'"
+    try {
+        $r = Invoke-RestMethod -Uri "$Backend/buscador/productos/intencion?q=$([uri]::EscapeDataString($Texto))&limite=12" -TimeoutSec 30
+    } catch {
+        Mal "El backend no contesto la busqueda por intencion. $($_.Exception.Message)"
+        exit 1
+    }
+    $lista = @($r.payload)
+    if ($lista.Count -eq 0) { Av 'No salio nada parecido. Prueba con una frase mas concreta'; exit 0 }
+    $conResena = @($lista | Where-Object { $_.motivo })
+    Ok "$($lista.Count) productos; $($conResena.Count) salen por una resena que habla de eso"
+    foreach ($f in ($lista | Select-Object -First 6)) {
+        Write-Host ("   {0,5}%  {1}" -f [math]::Round($f.puntaje * 100), $f.nombre) -ForegroundColor White
+        if ($f.motivo) {
+            $cita = $f.motivo.comentario
+            if ($cita.Length -gt 110) { $cita = $cita.Substring(0, 110) + '...' }
+            Write-Host "          Resena de $($f.motivo.calificacion) de 5: $cita" -ForegroundColor DarkGray
+        } else {
+            Write-Host '          Por su descripcion' -ForegroundColor DarkGray
+        }
+    }
+
+    Paso 'Lo mismo por nombre, la busqueda de siempre'
+    $n = Api "/buscador/productos?nombre=$([uri]::EscapeDataString($Texto))&limite=5"
+    $porNombre = if ($n -is [array]) { @($n) } else { @($n.resultados) }
+    Ok "Por nombre salen $($porNombre.Count), y casi nunca son lo que se busca:"
+    foreach ($f in $porNombre) { Write-Host "          $($f.nombre)" -ForegroundColor DarkGray }
+    Write-Host '   La frase se vuelve vector con Ollama y se compara contra el vector de cada resena' -ForegroundColor DarkGray
+    Write-Host '   (mesh_comentarios) y de cada producto (mesh_productos). En /buscar sale arriba.' -ForegroundColor DarkGray
+    exit 0
+}
+
+
+# ============================================================
+# clasificador
+# ============================================================
+if ($Parte -eq 'clasificador') {
+    Contenedor 'mesh-elastic'
+
+    Paso 'Como leyo el clasificador cada resena de mesh_comentarios'
+    $agg = @{
+        size = 0; query = @{ term = @{ es_respuesta = $false } }
+        aggs = @{ v = @{ terms = @{ field = 'valoracion_texto'; size = 10 } } }
+    } | ConvertTo-Json -Depth 10 -Compress
+    $a = Es-Post "/$ES_INDICE_COMENTARIOS/_search" $agg
+    foreach ($b in $a.aggregations.v.buckets) {
+        $que = switch ($b.key) { 'mala' { 'el texto es malo' } 'buena' { 'el texto es bueno' } 'dudosa' { 'no esta seguro' } 'corta' { 'menos de 100 letras, no se lee' } default { '' } }
+        Ok ("{0,4} {1,-7} {2}" -f $b.doc_count, $b.key, $que)
+    }
+
+    Paso 'Resenas cuyas estrellas contradicen el texto'
+    $q = @{
+        size = 8; _source = @('comentario', 'calificacion', 'prob_mala')
+        query = @{ bool = @{ should = @(
+            @{ bool = @{ filter = @(@{ term = @{ valoracion_texto = 'mala' } }, @{ range = @{ calificacion = @{ gte = 4 } } }) } },
+            @{ bool = @{ filter = @(@{ term = @{ valoracion_texto = 'buena' } }, @{ range = @{ calificacion = @{ lte = 2 } } }) } }
+        ); minimum_should_match = 1 } }
+    } | ConvertTo-Json -Depth 12 -Compress
+    $r = Es-Post "/$ES_INDICE_COMENTARIOS/_search" $q
+    Ok "$($r.hits.total.value) en total. Algunas:"
+    foreach ($h in $r.hits.hits) {
+        $t = $h._source.comentario
+        if ($t.Length -gt 100) { $t = $t.Substring(0, 100) + '...' }
+        Write-Host ("   {0} estrellas, probabilidad de mala {1:N2}" -f $h._source.calificacion, [double]$h._source.prob_mala) -ForegroundColor White
+        Write-Host "          $t" -ForegroundColor DarkGray
+    }
+    Write-Host '   El modelo es una regresion logistica entrenada a mano con 400 resenas escritas para esto.' -ForegroundColor DarkGray
+    Write-Host '   En 80 casos dificiles que nunca vio acierta el 90 %. No entiende el sarcasmo: por eso' -ForegroundColor DarkGray
+    Write-Host '   la senal va al admin y nunca bloquea sola. Ver clasificador-resenas\modelo\reporte.txt' -ForegroundColor DarkGray
+
+    Paso 'Las senales de notas incoherentes, por la API del admin'
+    try {
+        $s = Invoke-RestMethod -Method Post -Uri "$Backend/usuario/login" -ContentType 'application/json' `
+            -Body '{"identificador":"admin@mesh.com","contrasena":"Admin123"}' -SessionVariable sesion -TimeoutSec 20
+        foreach ($tipo in 'notas_incoherentes_cuenta', 'notas_incoherentes_vendedor', 'notas_incoherentes_producto') {
+            $x = Invoke-RestMethod -Uri "$Backend/admin/fraude/alertas-resenas?tipo=$tipo&pagina=1&limite=1" -WebSession $sesion -TimeoutSec 20
+            Ok ("{0,-28} {1}" -f $tipo, $x.payload.total_anillos)
+        }
+        Write-Host '   Hace falta 5 o mas contradictorias y una parte de las suyas. Para ver una salir en vivo,' -ForegroundColor DarkGray
+        Write-Host '   la demo Resenas copiadas y notas incoherentes las arma con cuentas nuevas.' -ForegroundColor DarkGray
+    } catch {
+        Av "El backend no contesto. $($_.Exception.Message)"
+    }
+    exit 0
+}
+
+
+# ============================================================
+# hibrida
+# ============================================================
+if ($Parte -eq 'hibrida') {
+    Contenedor 'mesh-elastic'
+
+    Paso "Busqueda hibrida, palabras y significado juntos: '$Texto'"
+    try {
+        $r = Invoke-RestMethod -Uri "$Backend/buscador/productos/hibrida?q=$([uri]::EscapeDataString($Texto))&limite=10" -TimeoutSec 30
+    } catch {
+        Mal "El backend no contesto la busqueda hibrida. $($_.Exception.Message)"
+        exit 1
+    }
+    $p = $r.payload
+    if ($p.modo -eq 'solo_texto') { Av 'Ollama no contesto: salio solo por las palabras' } else { Ok "Modo $($p.modo)" }
+    Write-Host ("   {0,-7} {1,-9} {2,-11} {3}" -f 'PUNTAJE', 'PALABRAS', 'SIGNIFICADO', 'PRODUCTO') -ForegroundColor DarkGray
+    foreach ($f in @($p.resultados) | Select-Object -First 8) {
+        $pt = if ($null -ne $f.posicion_texto) { "#$($f.posicion_texto)" } else { '-' }
+        $ps = if ($null -ne $f.posicion_significado) { "#$($f.posicion_significado)" } else { '-' }
+        $color = if (@($f.origen).Count -eq 2) { 'Green' } else { 'Gray' }
+        Write-Host ("   {0,-7} {1,-9} {2,-11} {3}" -f ([math]::Round($f.puntaje, 3)), $pt, $ps, $f.nombre) -ForegroundColor $color
+    }
+    Write-Host '   En verde, los que salieron por las dos. Se combinan por posicion (RRF), no por puntaje:' -ForegroundColor DarkGray
+    Write-Host '   la relevancia de las palabras y el coseno estan en escalas distintas. Es la lista de /buscar.' -ForegroundColor DarkGray
+
+    Paso 'La misma busqueda solo por palabras'
+    $n = Api "/buscador/productos?nombre=$([uri]::EscapeDataString($Texto))&limite=5"
+    $porNombre = if ($n -is [array]) { @($n) } else { @($n.resultados) }
+    Ok "Por palabras salen $($porNombre.Count)"
+    foreach ($f in $porNombre) { Write-Host "          $($f.nombre)" -ForegroundColor DarkGray }
+    if ($n -and $n.quisiste_decir) { Ok "Y dice: tal vez quisiste decir $($n.quisiste_decir)" }
+    exit 0
+}
+
+
+# ============================================================
+# sugerencias
+# ============================================================
+if ($Parte -eq 'sugerencias') {
+    Contenedor 'mesh-elastic'
+
+    Paso "Un vendedor va a proponer '$Texto'"
+    try {
+        Invoke-RestMethod -Method Post -Uri "$Backend/usuario/login" -ContentType 'application/json' `
+            -Body '{"identificador":"admin@mesh.com","contrasena":"Admin123"}' -SessionVariable sesion -TimeoutSec 20 | Out-Null
+        $cuerpo = [Text.Encoding]::UTF8.GetBytes((@{ nombre = $Texto } | ConvertTo-Json -Compress))
+        $r = Invoke-RestMethod -Method Post -Uri "$Backend/vendedor/productos/sugerencias" -ContentType 'application/json; charset=utf-8' `
+            -Body $cuerpo -WebSession $sesion -TimeoutSec 30
+    } catch {
+        Mal "El backend no contesto las sugerencias. $($_.Exception.Message)"
+        exit 1
+    }
+    $cats = @($r.payload.categorias)
+    $sim = @($r.payload.productos_similares)
+    if ($cats.Count -eq 0) { Av 'Nada del catalogo se le parece: no hay categoria que sugerir'; exit 0 }
+    Ok 'Suele ir en'
+    foreach ($c in $cats) {
+        Write-Host ("          {0,-18} {1,3}% de los parecidos, el mas cercano {2:N2}" -f $c.nombre, [math]::Round($c.puntaje * 100), [double]$c.mejor_similitud) -ForegroundColor White
+    }
+    Ok 'Ya hay parecidos en la tienda'
+    foreach ($s in $sim) {
+        $marca = if ($s.posible_duplicado) { '  PUEDE QUE YA EXISTA' } else { '' }
+        Write-Host ("          {0:N2}  {1} ({2}){3}" -f [double]$s.similitud, $s.nombre, $s.categoria, $marca) -ForegroundColor $(if ($s.posible_duplicado) { 'Yellow' } else { 'Gray' })
+    }
+    Write-Host '   Es lo que sale en el formulario de proponer un producto al terminar de escribir el nombre.' -ForegroundColor DarkGray
+    Write-Host '   La primera categoria se elige sola si no habias elegido ninguna. No crea nada.' -ForegroundColor DarkGray
     exit 0
 }
 

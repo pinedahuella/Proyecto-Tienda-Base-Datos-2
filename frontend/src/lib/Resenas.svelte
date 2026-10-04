@@ -328,6 +328,16 @@
 		if (puedeCalificar.length === 1) vendedorElegido = puedeCalificar[0].correo;
 	}
 
+	/**
+	 * Los topes del backend desde 3305cf3 (validaciones-resena.ts): una resena
+	 * de 40 a 350 letras y una respuesta hasta 350, sin minimo. El minimo es
+	 * porque el clasificador de resenas no sirve con textos muy cortos. El
+	 * backend los vuelve a revisar; aqui es para avisar antes de enviar.
+	 */
+	const MINIMO_RESENA = 40;
+	const MAXIMO_TEXTO = 350;
+	let largoNuevo = $derived(String(textoNuevo ?? '').trim().length);
+
 	async function enviar(evento: SubmitEvent) {
 		evento.preventDefault();
 		errorFormulario = '';
@@ -341,6 +351,10 @@
 		// function". Ya paso en este proyecto.
 		if (!String(textoNuevo ?? '').trim()) {
 			errorFormulario = 'Escribe tu comentario';
+			return;
+		}
+		if (largoNuevo < MINIMO_RESENA) {
+			errorFormulario = `Escribe al menos ${MINIMO_RESENA} letras`;
 			return;
 		}
 
@@ -612,7 +626,10 @@
 
 				<div class="campo">
 					<label for="r-texto">Tu comentario</label>
-					<textarea id="r-texto" rows="4" bind:value={textoNuevo}></textarea>
+					<textarea id="r-texto" rows="4" maxlength={MAXIMO_TEXTO} bind:value={textoNuevo}></textarea>
+					<span class="largo" class:corto={largoNuevo > 0 && largoNuevo < MINIMO_RESENA}>
+						{largoNuevo} de {MAXIMO_TEXTO}{largoNuevo < MINIMO_RESENA ? `, minimo ${MINIMO_RESENA}` : ''}
+					</span>
 				</div>
 
 				<div class="botones">
@@ -717,7 +734,7 @@
 
 						{#if contestando === resena.id_resena}
 							<div class="responder">
-								<textarea rows="2" bind:value={textoRespuesta} placeholder="Tu respuesta"
+								<textarea rows="2" maxlength={MAXIMO_TEXTO} bind:value={textoRespuesta} placeholder="Tu respuesta"
 								></textarea>
 								<button type="button" class="principal" onclick={() => responder(resena)}>
 									Publicar respuesta
@@ -1082,6 +1099,18 @@
 	}
 
 	select:focus,
+	.largo {
+		display: block;
+		margin-top: 4px;
+		font-size: var(--f-sm);
+		color: var(--gris);
+		text-align: right;
+	}
+
+	.largo.corto {
+		color: var(--rojo);
+	}
+
 	textarea:focus {
 		outline: none;
 		border-color: var(--indigo);

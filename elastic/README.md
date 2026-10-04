@@ -136,9 +136,52 @@ proposito dos veces. La prueba detecto las dos.
 
 ```bash
 bash etl/cargar_busqueda.sh
+powershell -File etl/cargar_vectores.ps1
 ```
 
-Y sale solo con `.\arrancar.ps1` cuando el indice esta vacio o desfasado.
+Y sale solo con `.\arrancar.ps1` cuando el indice esta vacio o desfasado: cuando
+sus documentos no son los de MongoDB (TODOS, no solo los activos: hasta el
+2026-10-04 se comparaba contra los activos y se rehacia en cada arranque), o
+cuando nacio sin el campo `vector`.
+
+## El vector de cada producto vive aqui (desde el 2026-10-02)
+
+`001_indice.json` trae cuatro campos mas: `vector` (`dense_vector` de 768, coseno),
+`vector_hash` (md5 del texto con que se calculo), `vector_grupo` (md5 de categoria
+y descripcion, para no recomendar las copias del generador) y `vector_modelo`. Los
+escribe `etl/cargar_vectores.ps1` al arrancar y `VectoresSyncService` del backend
+al editar un producto, cada uno con actualizaciones parciales, sin pisar el texto
+que mantiene el worker del buscador. Los parecidos de la ficha salen de un kNN
+sobre este campo.
+
+**Rehacer el indice no pierde los vectores.** Antes de tirarlo, el ETL (arrancar y
+`cargar_busqueda.sh`) copia esos cuatro campos con `_reindex` a
+`mesh_productos_vectores_previos` (el vector con `index: false`, sin grafo), y
+`cargar_vectores.ps1` los devuelve sin Ollama si el texto no cambio. Medido: 48 s
+en vez de unos 7 minutos.
+
+## El tercer indice: las resenas (desde el 2026-10-02)
+
+`003_comentarios.json` es `mesh_comentarios`: el texto de cada resena y de cada
+respuesta con su vector, el id de la resena, del producto, del vendedor y del autor,
+y la valoracion del clasificador de resenas (`valoracion_texto`, `prob_mala`,
+`valoracion_modelo`). Lo llena el worker del backend desde la cola
+`evento_comentario` (migracion 034); ningun ETL lo tira. Lo crea arrancar antes del
+backend y, la vez que lo crea, encola todos los comentarios que ya hay. Si ya
+existe, le agrega con un `PUT _mapping` los campos que le falten.
+
+**El vector va en `flat`, no en HNSW.** Medido el 2026-10-04: con textos repetidos
+(44 copias de uno) el grafo HNSW cuantizado que Elasticsearch pone por defecto se
+atascaba, y para "zapatos comodos para caminar todo el dia" un kNN con 100
+candidatos daba 0,30 contra el 0,81 de la busqueda exacta. `flat` compara contra
+todos; con unos miles de resenas sigue tardando milisegundos. arrancar rehace el
+indice si lo encuentra en HNSW.
+
+**Un campo que llega antes que su mapeo se mapea mal.** El 2026-10-04 el backend
+escribio `valoracion_texto` antes de que el mapeo lo tuviera y Elasticsearch lo
+creo como `text`: las agregaciones de las notas incoherentes no cuentan sobre
+`text`. Se arreglo rehaciendo el indice. Por eso el mapeo de este archivo tiene que
+llegar ANTES que el codigo que escribe el campo.
 
 ## Lo que NO esta aqui
 

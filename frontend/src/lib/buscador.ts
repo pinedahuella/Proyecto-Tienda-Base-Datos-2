@@ -64,6 +64,12 @@ export interface Busqueda {
 	resultados: ResultadoBusqueda[];
 	/** Vacio cuando la consulta salio bien, aunque no haya encontrado nada. */
 	error: string;
+	/**
+	 * "Tal vez quisiste decir": lo escrito con las palabras mal tecleadas
+	 * cambiadas por la sugerencia de Elasticsearch, o null si estaba bien. Lo
+	 * manda el backend desde 3305cf3; la ruta de admin no lo trae.
+	 */
+	quisiste_decir?: string | null;
 }
 
 /** Lo minimo que se escribe antes de molestar al servidor. */
@@ -109,17 +115,117 @@ export async function buscarProductos(
 		ruta += `&sesion=${encodeURIComponent(sesionAnalitica())}`;
 	}
 
-	const respuesta = await pedir<ResultadoBusqueda[]>(ruta);
+	const respuesta = await pedir<ResultadoBusqueda[] | { resultados?: ResultadoBusqueda[]; quisiste_decir?: string | null }>(ruta);
 
 	if (!respuesta.ok) {
 		return { resultados: [], error: mensajeUtil(respuesta) };
 	}
 
-	// El payload de un 200 siempre es una lista, pero se comprueba: si el dia
-	// de manana llega otra cosa, es preferible una busqueda sin resultados a
-	// un `.map is not a function` que tumba la pagina entera.
-	const lista = Array.isArray(respuesta.payload) ? respuesta.payload : [];
-	return { resultados: lista, error: '' };
+	// La ruta publica devuelve { resultados, quisiste_decir } desde 3305cf3, y
+	// la de admin sigue devolviendo la lista sola. Se aceptan las dos formas:
+	// leer solo la lista dejaba la cabecera con cero resultados y sin ningun
+	// error, que es justo lo que paso al jalar ese commit.
+	const p = respuesta.payload;
+	if (Array.isArray(p)) return { resultados: p, error: '' };
+	return {
+		resultados: Array.isArray(p?.resultados) ? p.resultados : [],
+		error: '',
+		quisiste_decir: p?.quisiste_decir ?? null
+	};
+}
+
+/** Un resultado de la busqueda hibrida: el resumen de siempre y por donde salio. */
+export interface ResultadoHibrido extends ResultadoBusqueda {
+	puntaje: number;
+	/** 'texto' por las palabras, 'significado' por el vector, o los dos. */
+	origen: ('texto' | 'significado')[];
+	similitud: number | null;
+}
+
+/**
+ * La busqueda hibrida, GET /buscador/productos/hibrida (3305cf3 y 1f1f480):
+ * las palabras y el significado juntos en una sola lista, ordenada por
+ * posicion en las dos (RRF). "labtop gamer" sale por las palabras y "algo
+ * para escuchar musica mientras corro" por el significado.
+ *
+ * `modo` es 'solo_texto' cuando Ollama no contesto: la lista sale igual, solo
+ * con las palabras. No registra el evento de analitica; por eso /buscar la pide
+ * junto con la facetada, que si lo registra y trae los filtros.
+ */
+export async function buscarHibrida(
+	texto: string,
+	limite = 50
+): Promise<{ resultados: ResultadoHibrido[]; error: string; modo: string | null }> {
+	const consulta = texto.trim();
+	if (consulta.length < MINIMO_LETRAS) return { resultados: [], error: '', modo: null };
+	const respuesta = await pedir<{ modo?: string; resultados?: ResultadoHibrido[] }>(
+		`/buscador/productos/hibrida?q=${encodeURIComponent(consulta)}&limite=${limite}`
+	);
+	if (!respuesta.ok) return { resultados: [], error: mensajeUtil(respuesta), modo: null };
+	const p = respuesta.payload ?? {};
+	return { resultados: Array.isArray(p.resultados) ? p.resultados : [], error: '', modo: p.modo ?? null };
+}
+
+/** La resena que explica por que un producto salio en la busqueda por intencion. */
+export interface MotivoIntencion {
+	id_resena: number;
+	calificacion: number;
+	comentario: string;
+	/** Que tan cerca esta de lo que se pidio, de 0 a 1. */
+	similitud: number;
+}
+
+export interface ResultadoIntencion extends ResultadoBusqueda {
+	puntaje: number;
+	origen: ('resenas' | 'producto')[];
+	/** null si el producto salio solo por su descripcion. */
+	motivo: MotivoIntencion | null;
+	resenas_coincidentes: number;
+}
+
+/**
+ * Cuando lo escrito parece una frase y no el nombre de un producto. Con tres
+ * palabras o mas ("algo para salir a pedalear") la busqueda por nombre casi
+ * nunca acierta, y es justo el caso de la busqueda por intencion.
+ */
+export function pareceFrase(texto: string): boolean {
+	return texto.trim().split(/\s+/).filter((p) => p.length > 1).length >= 3;
+}
+
+/**
+ * Que resultado de la busqueda por intencion vale la pena ensenar.
+ *
+ * El backend deja pasar un producto con parecido 0,40 a su descripcion, y
+ * medido el 2026-10-04 eso es poco: "xqzwv", que no significa nada, traia seis
+ * productos con 0,41. Y como no agrupa las copias del generador, una frase
+ * sobre ciclismo llenaba la lista con el mismo maillot cinco veces. Aqui se
+ * pide mas: una resena que se parezca de verdad (0,5 o mas), o un producto que
+ * se parezca mucho (0,6 o mas). Se le dejo dicho a Jose David en
+ * docs/BACKEND-PENDIENTE.md para que lo resuelva en la ruta.
+ */
+export function vale(r: ResultadoIntencion): boolean {
+	return (r.motivo !== null && r.motivo.similitud >= 0.5) || r.puntaje >= 0.6;
+}
+
+/**
+ * La busqueda por intencion, GET /buscador/productos/intencion.
+ *
+ * Quien busca dice lo que quiere lograr y salen productos cuyas resenas (o
+ * descripcion) se parecen en significado, aunque no compartan una palabra. Lo
+ * resuelve el backend con los vectores que ya viven en Elasticsearch, y cada
+ * resultado trae la resena que lo explica (`motivo`).
+ *
+ * Nunca rompe la pagina: si la ruta no existe o Ollama no contesta, devuelve
+ * la lista vacia con el error, y quien llama decide si lo ensena.
+ */
+export async function buscarPorIntencion(texto: string, limite = 6): Promise<{ resultados: ResultadoIntencion[]; error: string }> {
+	const consulta = texto.trim();
+	if (consulta.length < MINIMO_LETRAS) return { resultados: [], error: '' };
+	const respuesta = await pedir<ResultadoIntencion[]>(
+		`/buscador/productos/intencion?q=${encodeURIComponent(consulta)}&limite=${limite}`
+	);
+	if (!respuesta.ok) return { resultados: [], error: mensajeUtil(respuesta) };
+	return { resultados: Array.isArray(respuesta.payload) ? respuesta.payload : [], error: '' };
 }
 
 /** Los quetzales se escriben igual en todas partes que en el catalogo. */
@@ -237,6 +343,7 @@ export interface BusquedaFacetada extends Busqueda {
 interface PayloadFacetado {
 	resultados?: ResultadoBusqueda[];
 	total?: number;
+	quisiste_decir?: string | null;
 	facetas?: {
 		categoria?: { id: number | string; nombre: string; cantidad: number }[];
 		precio?: { clave: string; cantidad: number }[];
@@ -283,5 +390,5 @@ export async function buscarFacetado(texto: string, elegidos: Elegidos, limite =
 				disponible: f.disponible ?? 0
 			}
 		: null;
-	return { resultados, error: '', facetas, total: p.total ?? resultados.length };
+	return { resultados, error: '', facetas, total: p.total ?? resultados.length, quisiste_decir: p.quisiste_decir ?? null };
 }

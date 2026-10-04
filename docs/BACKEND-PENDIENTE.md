@@ -4,6 +4,156 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-10-04 EN LA TARDE: 3305cf3 y 1f1f480, conectados y medidos
+
+Jalados los dos, compilados y probados en vivo. De tus listas de "Pendiente de
+otros" no queda nada:
+
+```
+037_senales_notas_incoherentes.sql   tus tres tipos de notas incoherentes
+038_senales_resenas_parecidas.sql    tus dos tipos de resenas parecidas
+039_senales_resenas_canceladas.sql   la fuente postgres y tus dos tipos de canceladas
+elastic/003_comentarios.json         id_vendedor y la valoracion (prob_mala,
+                                     valoracion_texto, valoracion_modelo)
+frontend                             /buscador/productos con la forma nueva y el
+                                     quisiste decir; /buscar con la hibrida sin
+                                     filtros; las sugerencias al proponer; el
+                                     formulario de resena de 40 a 350; tus 7 tipos
+                                     nuevos en el panel de Fraude, y la evidencia de
+                                     las fuentes elastic y postgres en los casos
+pruebas/busqueda.sh                  lee payload.resultados
+demos                                demo-resenas-texto.ps1 (copiadas, incoherentes,
+                                     cancelada, negativas) y en demo-entrega-final.ps1
+                                     las partes intencion, clasificador, hibrida y
+                                     sugerencias, todas en el panel de comandos
+docs y sustentacion                  ARQUITECTURA, base-de-datos, frontend,
+                                     elastic/README, migrations/README, preguntas
+                                     123 a 131, y los dos diagramas regenerados
+```
+
+Medido en vivo con la demo: cada senal sale sola, por tu chequeo inmediato, a
+los 3 o 4 segundos (las de texto y las dos de canceladas). Y despues de sembrar
+las 480 resenas del clasificador en 40 cuentas, ninguna de tus senales nuevas
+marca a esas cuentas.
+
+Lo que encontramos y es tuyo:
+
+1. **`valoracion_texto` se mapeo como texto.** Tu `ValoracionComentariosService`
+   escribio el campo antes de que el mapeo lo tuviera, y Elasticsearch lo creo
+   como `text`; las agregaciones de las notas incoherentes no cuentan sobre eso.
+   De este lado: el mapeo ya lo trae, arrancar se lo agrega con `PUT _mapping` a un
+   indice que ya existe, y el indice local se rehizo. Nada que cambiar, pero el
+   orden importa: el campo nuevo primero en `elastic/`, despues en el codigo.
+2. **El quisiste decir con frases sale basura.** "algo para escuchar musica
+   mientras corro" da "alba pesa escuchar musica mientras cuero". El frontend no lo
+   ensena cuando lo escrito tiene tres palabras o mas; quiza conviene no mandarlo.
+3. **La hibrida y la de intencion no agrupan las copias del generador.** "labtop
+   gamer" llena la lista con "Laptop Cumbre 17 Gamer L1-0983, L2-0012..." y
+   "Monitor Vertice 27 Gamer L2-1881...". `SimilaresService` ya lo resuelve con uno
+   por `vector_grupo`; lo mismo serviria aqui.
+4. **Lo de antes que sigue:** el umbral de producto de la intencion (0,40 deja
+   pasar "xqzwv") y los nodos de producto huerfanos del grafo (abajo, puntos 3 y 4).
+
+---
+
+## LO NUEVO DEL 2026-10-04: tu fa3281c hecho migracion, conectado y medido
+
+Jalado, conectado y probado en vivo con tu backend compilado. De tu lista de
+"Pendiente fuera de `backend/`" no queda nada:
+
+```
+034_evento_comentario.sql        tu evento-comentario.sql, sin cambiar lo que crea
+035_senales_fraude_por_texto.sql resenas-repetidas.sql y anillo-de-texto.sql juntas
+036_sin_producto_vector.sql      retira producto_vector y productos_similares()
+037 y 038                        tus notas incoherentes y resenas parecidas (3305cf3, ver arriba)
+elastic/001_indice.json          los 4 campos del vector
+elastic/003_comentarios.json     tu comentarios-indice.json, con el vector en flat (punto 2)
+etl/cargar_vectores.ps1          escribe en Elasticsearch con _bulk, ya no en PostgreSQL
+arrancar.ps1                     crea mesh_comentarios y encola los comentarios que ya habia
+demo-entrega-final.ps1           -Parte semantica y -Parte vectores contra Elasticsearch
+pruebas/                         recomendacion_semantica.py (15 OK) y vectores_worker.cjs (5 OK)
+frontend                         tus dos senales en el panel de Fraude, y la busqueda por
+                                 intencion en /buscar
+```
+
+Tres cosas que no estaban en tu lista y hacian falta:
+
+- **El indice de productos se rehacia en cada arranque.** arrancar comparaba
+  sus documentos contra los productos ACTIVOS de Mongo, y el extractor mete
+  todos desde el 04-09. Con un solo producto no activo no cuadraba nunca.
+  Mientras era texto costaba segundos; con tu vector dentro se llevaba los 3105
+  vectores, unos 7 minutos de Ollama. Ahora compara contra el total.
+- **Rehacer el indice ya no pierde los vectores.** Antes de tirarlo, el ETL
+  (arrancar y `cargar_busqueda.sh`) copia los campos del vector a
+  `mesh_productos_vectores_previos` con `_reindex`, y `cargar_vectores.ps1` los
+  devuelve sin Ollama si el texto no cambio. Medido: 48 s en vez de 7 minutos,
+  y los vectores devueltos son identicos.
+- **La 036 no edita la 024 ni la 027.** Como el esquema se reejecuta, esas dos
+  vuelven a crear la tabla vacia y la funcion, y la 036 las quita justo
+  despues. La extension `vector` se queda.
+
+Y algo de nuestro lado que te sirve para probar: las **480 resenas del
+clasificador** quedaron sembradas como resenas de verdad, de 40 cuentas con su
+compra pagada, en el producto del que habla cada texto
+(`clasificador-resenas/semilla/`). Antes la semilla tenia 20 textos repetidos.
+Corrimos tus tres detectores despues de sembrar: **ninguna** de las 40 cuentas
+sale en una senal.
+
+### 1. El clasificador de resenas
+
+Lo conectaste tu en 3305cf3 (las notas incoherentes). Ver la seccion de arriba.
+
+### 2. `mesh_comentarios` no encontraba las resenas buenas (arreglado de este lado)
+
+Tu indice de comentarios se creo con el vector en HNSW cuantizado
+(`int8_hnsw`, lo que Elasticsearch pone por defecto). Hay textos repetidos
+muchas veces (44 copias de uno, 24 de otro: la semilla vieja y las demos de
+fraude) y con vectores identicos el grafo se atasca. Medido para "zapatos
+comodos para caminar todo el dia":
+
+```
+kNN, num_candidates 100    mejor resena 0,30   (la repetida, "Excelente vendedor...")
+kNN, num_candidates 400    mejor resena 0,81   (la de unos zapatos comodos)
+busqueda exacta            mejor resena 0,81
+```
+
+Por eso tu ruta de intencion devolvia `similitud_resenas` nulo en todo. Lo
+arreglamos en el mapeo: el vector va con `index_options: flat`, que compara
+contra todos. Con miles de resenas sigue tardando milisegundos, y arrancar
+rehace el indice si lo encuentra en HNSW. No tienes que cambiar nada.
+
+### 3. La busqueda por intencion: dos ajustes de la ruta
+
+Con el punto 2 arreglado las resenas ya cuentan. Quedan dos cosas de
+`BuscadorIntencionService`, medidas:
+
+- **El umbral de producto (0,40) deja pasar cualquier cosa.** "xqzwv", que no
+  significa nada, trae seis productos con 0,41. Sugerimos 0,55 o 0,6 para lo
+  que sale solo por la descripcion.
+- **No agrupa las copias del generador.** "Algo para salir a pedalear" trae el
+  mismo maillot cinco veces (L1-0050, L1-0057...). `SimilaresService` ya lo
+  resuelve con uno por `vector_grupo`; aqui serviria lo mismo.
+
+Mientras tanto el frontend filtra (`vale()` en `frontend/src/lib/buscador.ts`):
+ensena una resena con 0,5 o mas, o un producto con 0,6 o mas. Cuando la ruta lo
+haga, ese filtro se puede quitar.
+
+### 4. El grafo deja productos huerfanos
+
+Al quitar resenas (lo hicimos para cambiar el reparto de la siembra), tu worker
+del grafo borra la resena de Neo4j pero no el `Producto` que se queda sin
+ninguna. Quedaron 100 nodos de producto contra 95 productos con resena en
+PostgreSQL. No rompe ningun detector, pero el conteo de arrancar ya no cuadra
+exacto.
+
+### 5. Lo opcional que dejaste anotado
+
+`VectoresSyncService` una vez al arrancar, como `MasVendidosSyncService`, sigue
+siendo buena idea: si alguien rehace el indice con `cargar_busqueda.sh` y no
+corre `cargar_vectores.ps1`, la ficha se queda sin parecidos hasta 3 horas.
+
+---
+
 ## LO NUEVO DEL 2026-09-30: tu refactor de fraude (7453ffe), hecho migracion
 
 Jalado y conectado de este lado. Tus tres `.sql` de referencia son ahora las

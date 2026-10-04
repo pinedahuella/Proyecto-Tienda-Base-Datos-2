@@ -255,6 +255,12 @@ relacional no puede preguntar que busquedas guardadas coinciden con este documen
 
 ## 5. Elasticsearch y la base vectorial
 
+> **Decidido el 2026-10-02, distinto a esta propuesta.** El vector no se copio a
+> Elasticsearch: se mudo. Vive en el documento de cada producto de `mesh_productos`,
+> los parecidos salen de un kNN y la migracion 036 retira `producto_vector`. Las
+> resenas tambien tienen el suyo, en `mesh_comentarios`. El porque esta en
+> `docs/ARQUITECTURA.md`, despues del historial.
+
 Hoy los vectores estan en PostgreSQL con pgvector, 768 dimensiones calculadas con Ollama, indice HNSW, 3,8 ms por
 producto. Sirven para Parecidos a este y los mantiene el ETL al arrancar y el worker de David cada 3 horas.
 

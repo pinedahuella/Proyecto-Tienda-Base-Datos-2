@@ -49,9 +49,9 @@ CAJAS = [
         "pedidos, pagos, ofertas, stock",
         "reglas de descuento automáticas",
         "y por fecha, hallazgos F1 a F6",
-        "vectores de productos con pgvector",
+        "copia del catálogo para comprar",
         "reseñas y señales de fraude",
-        "cola evento_grafo",
+        "colas de grafo, producto y comentarios",
     ], "#DAE8FC", "#6C8EBF"),
     ("mongo", "MongoDB", "CATÁLOGO Y LOG DE LOGIN", [
         "productos 3105, productos_eventos",
@@ -59,10 +59,12 @@ CAJAS = [
         "atributos que varían por categoría",
         "historial por eventos",
     ], "#D5E8D4", "#82B366"),
-    ("es", "Elasticsearch 8", "BÚSQUEDA DE TEXTO", [
-        "mesh_productos, 3105 documentos",
+    ("es", "Elasticsearch 8", "BÚSQUEDA DE TEXTO Y POR SIGNIFICADO", [
+        "mesh_productos, 3105 con su vector",
+        "mesh_comentarios, reseñas con vector",
         "mesh_eventos_autenticacion",
         "búsqueda difusa que ignora tildes",
+        "parecidos y por intención con kNN",
     ], "#FFF2CC", "#D6B656"),
     ("ch", "ClickHouse", "EVENTOS EN EL TIEMPO", [
         "base columnar, mesh_eventos",
@@ -90,14 +92,15 @@ FLUJOS = [
     (1, "pg", "mongo", "PostgreSQL a MongoDB, etl/cargar.js por lotes, conserva lo que el vendedor edita desde la aplicación, y la cola evento_producto, que un worker vacía recalculando precio, stock y nota del producto que cambió"),
     (2, "pg", "neo4j", "PostgreSQL a Neo4j, cada reseña tocada entra en la cola evento_grafo y un worker la vacía cada 10 segundos"),
     (3, "neo4j", "pg", "Neo4j a PostgreSQL, los detectores de anillos y de la familia B corren cada 15 minutos, B también al llegar una reseña, y guardan lo que encuentran en senal_fraude"),
-    (4, "mongo", "es", "MongoDB a Elasticsearch, la marca pendiente_busqueda cada 10 segundos y los intentos de login cada 5"),
-    (5, "es", "pg", "Elasticsearch a PostgreSQL, el análisis retrospectivo cada 15 minutos deja señales en senal_fraude"),
+    (4, "mongo", "es", "MongoDB a Elasticsearch, la marca pendiente_busqueda cada 10 segundos, los intentos de login cada 5, y el vector de cada producto, que etl/cargar_vectores.ps1 y un worker le piden a Ollama y guardan en su documento"),
+    (5, "es", "pg", "Elasticsearch a PostgreSQL, el análisis retrospectivo del login y los detectores sobre el texto de las reseñas (repetidas, parecidas, anillo de texto y notas incoherentes) corren cada 15 minutos y dejan señales en senal_fraude"),
     (6, "redis", "pg", "Redis a PostgreSQL, un contador de fallos de login que cruza su umbral deja o suma una señal en senal_fraude"),
     (7, "pg", "ch", "PostgreSQL a ClickHouse, etl/cargar_compras.sh copia compras y devoluciones en cada arranque"),
     (8, "ch", "redis", "ClickHouse a Redis, cada 10 minutos se recalculan más vendidos y más vistos, y cada 15 también vieron y para ti"),
     (9, "ch", "pg", "ClickHouse a PostgreSQL, cada 60 segundos el disparador cuenta las ventas recientes y aplica la regla automática, y una vez al día los hallazgos F1 a F6 van a senal_fraude"),
     (10, "redis", "pg", "Redis a PostgreSQL, cada minuto un descuento cuya clave de vencimiento ya no existe se quita de oferta"),
-    (11, "mongo", "pg", "MongoDB a PostgreSQL, etl/cargar_vectores.ps1 le pide a Ollama el vector de cada producto y lo guarda en producto_vector, y el nombre, estado y portada de cada variante se copian a variante_catalogo para comprar sin MongoDB"),
+    (11, "mongo", "pg", "MongoDB a PostgreSQL, el nombre, estado y portada de cada variante se copian a variante_catalogo para comprar sin MongoDB"),
+    (12, "pg", "es", "PostgreSQL a Elasticsearch, cada reseña o respuesta tocada entra en la cola evento_comentario y un worker la indexa en mesh_comentarios con su vector de Ollama"),
 ]
 
 # lo que el backend hace con cada motor, escrito sobre su flecha
@@ -105,7 +108,7 @@ USO = {
     "neo4j": "lee el panel de fraude",
     "pg": "pedidos, pagos, ofertas, reglas, reseñas",
     "mongo": "catálogo, historial, intentos de login",
-    "es": "busca productos y eventos",
+    "es": "busca productos, parecidos y por intención",
     "ch": "escribe eventos, lee rankings y recomendaciones",
     "redis": "carrito, reservas, candado, descuentos",
 }
@@ -252,7 +255,7 @@ def construir():
     x0 = 40
 
     L.texto(x0, 14, 1500, 30, "Mesh, arquitectura políglota con seis motores de persistencia", 20, negrita=True)
-    L.texto(x0, 48, 1700, 24, "Estado al 25 de septiembre de 2026. Las flechas continuas son lo que hace el backend, "
+    L.texto(x0, 48, 1700, 24, "Estado al 4 de octubre de 2026. Las flechas continuas son lo que hace el backend, "
             "las punteadas y numeradas son datos que viajan de un motor a otro, y su mecanismo está en la leyenda.",
             11, gris=True)
 
@@ -264,7 +267,8 @@ def construir():
            "<b>Workers del backend</b><br>grafo 10 s, buscador 10 s, login a Elasticsearch 5 s, anillos y familia B 15 min, "
            "fraude retrospectivo 15 min, hallazgos F1 a F6 cada día, más vendidos y más vistos 10 min, también vieron y para ti 15 min, "
            "vencimientos de venta relámpago y descuento 1 min, reglas automáticas 60 s, reglas por fecha 15 min, "
-           "registro de ofertas en Redis 10 min",
+           "registro de ofertas en Redis 10 min, reseñas a Elasticsearch 10 s, clasificador de reseñas 30 s, "
+           "señales de texto y de compras canceladas 15 min y al momento",
            "#FFFFFF", "#888888", sizes=11, dash=True, alinea="left")
     L.rect("backend", x0, 216, ancho_be, 56,
            "<b>Backend</b>, NestJS con Fastify, puerto 3000. Escribe en cinco motores y lee de los seis",
@@ -284,7 +288,7 @@ def construir():
     # flujos numerados. Adyacentes van por el hueco, los saltados por debajo.
     orden = [k for k, *_ in CAJAS]
     y_bajo = {5: Y_DB + ALTO_DB + 34, 6: Y_DB + ALTO_DB + 62, 7: Y_DB + ALTO_DB + 90,
-              9: Y_DB + ALTO_DB + 118, 10: Y_DB + ALTO_DB + 146}
+              9: Y_DB + ALTO_DB + 118, 10: Y_DB + ALTO_DB + 146, 12: Y_DB + ALTO_DB + 174}
     for n, a, b, _ in FLUJOS:
         ia, ib = orden.index(a), orden.index(b)
         etiqueta = str(n)
@@ -302,7 +306,7 @@ def construir():
                      puntos=[(xa, y), (xb, y)], punteada=True, color=col)
 
     # leyenda
-    y_ley = Y_DB + ALTO_DB + 196
+    y_ley = Y_DB + ALTO_DB + 224
     L.texto(x0, y_ley, 800, 24, "Leyenda de las flechas punteadas", 13, negrita=True)
     y = y_ley + 30
     for n, a, b, texto in FLUJOS:

@@ -3,7 +3,37 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-02**.
+Ultima actualizacion: **2026-10-04**.
+
+**EMPIEZA AQUI (04-10). Los vectores y las resenas viven en Elasticsearch, y las senales de David estan conectadas.
+TODO commiteado y pusheado, todo apagado.** Se jalaron y conectaron tres commits de David, fa3281c, 3305cf3 y
+1f1f480; todo lo que dejo como "Pendiente de otros" esta hecho. El detalle, con lo medido y lo que le toca a el, esta
+al principio de `docs/BACKEND-PENDIENTE.md`.
+
+```
+migraciones     034 cola evento_comentario, 035 senales de texto, 036 quita producto_vector, 037 notas
+                incoherentes, 038 resenas parecidas, 039 resenas canceladas (fuente postgres)
+elastic         001 con el vector de cada producto; 003_comentarios.json, el indice mesh_comentarios con el
+                vector en flat (HNSW no encontraba las mejores con textos repetidos)
+arrancar        el indice de productos compara contra TODOS los de Mongo (se rehacia en cada arranque); antes de
+                rehacerlo guarda los vectores en mesh_productos_vectores_previos; el paso 7d va despues del
+                buscador; paso Indice de comentarios; paso Resenas del clasificador (480 resenas de 40 cuentas)
+etl             cargar_vectores.ps1 escribe en Elasticsearch y devuelve los guardados sin Ollama (48 s y no 7 min)
+frontend        /buscar con la hibrida, el quisiste decir y Lo que cuentan otros compradores; formulario de
+                resena de 40 a 350; sugerencias al proponer; los tipos nuevos en Fraude
+demos           demo-resenas-texto.ps1 y cuatro partes nuevas de demo-entrega-final.ps1, todas en el panel
+pruebas         recomendacion_semantica.py 15 OK, vectores_worker.cjs 5 OK, clasificador_en_elastic.mjs 3 OK,
+                correr_detectores_resenas.cjs para no esperar los 15 minutos
+```
+
+Medido: arrancar entero exit 0 tres veces seguidas, svelte-check 0, la demo de resenas da cada senal sola a los 3 o
+4 segundos. Respaldo de antes de la 034 en `respaldos/antes_034_20261004.dump`. Lo que queda abierto es de David:
+el quisiste decir con frases, las copias del generador en la hibrida y la intencion, el umbral de 0,40 y los nodos
+de producto huerfanos del grafo. El informe de la Entrega final (`contenido-entrega-final.json`) sigue diciendo
+pgvector en la seccion 2.1: no se toco porque es un entregable.
+
+**Trampa nueva:** los procesos que se lanzan con Start-Process desde una sesion de Claude se mueren al cerrarse la
+llamada. Backend, frontend y panel se levantaron con Invoke-CimMethod Win32_Process Create.
 
 **EMPIEZA AQUI (02-10). El frontend ya no tiene el flujo viejo del pedido abierto. SIN commitear.** GitHub no
 traia nada nuevo (main = origin en 66ea178). Se borro lo que quedaba de abrir un pedido vacio y llenarlo linea por

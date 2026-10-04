@@ -20,7 +20,11 @@ DATOS = RAIZ / 'datos'
 VECTORES = RAIZ / 'vectores' / 'vectores.json'
 MODELO = RAIZ / 'modelo'
 
-LARGO_MINIMO = 150
+# Las resenas de entrenamiento son de hasta 250 caracteres. Dentro de lo que
+# acepta la app (backend/src/helpers/validaciones-resena.ts, de 40 a 350 desde
+# 3305cf3), asi que todas se pueden sembrar como resenas de verdad.
+LARGO_MINIMO = 40
+LARGO_MAXIMO = 250
 ETIQUETAS = {'buena': 0, 'mala': 1}   # el modelo da la probabilidad de "mala"
 
 
@@ -64,8 +68,8 @@ def cargar_resenas():
             if r.get('etiqueta') not in ETIQUETAS:
                 problemas.append(f'{donde}: etiqueta "{r.get("etiqueta")}" no es buena ni mala')
             texto = r.get('texto', '')
-            if len(texto) <= LARGO_MINIMO:
-                problemas.append(f'{donde}: tiene {len(texto)} caracteres, pide mas de {LARGO_MINIMO}')
+            if not LARGO_MINIMO <= len(texto) <= LARGO_MAXIMO:
+                problemas.append(f'{donde}: tiene {len(texto)} caracteres, van de {LARGO_MINIMO} a {LARGO_MAXIMO}')
             if r.get('id') in ids:
                 problemas.append(f'{donde}: id repetido')
             if texto in textos:

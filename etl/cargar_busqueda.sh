@@ -88,8 +88,30 @@ if [ ! -s "$TMP/busqueda.ndjson" ]; then
 fi
 
 # ------------------------------------------------------------------
-# 2. Borrar el indice y crearlo con su mapeo
+# 2. Guardar los vectores, borrar el indice y crearlo con su mapeo
 # ------------------------------------------------------------------
+# Desde el 2026-10-02 el documento de cada producto lleva su vector (vector,
+# vector_hash, vector_grupo, vector_modelo), y calcularlos todos son unos 7
+# minutos de Ollama. Antes de borrar se copian aparte con _reindex, por dentro
+# de Elasticsearch, y etl/cargar_vectores.ps1 los devuelve sin Ollama si el
+# texto del producto no cambio. Lo mismo hace Guardar-VectoresPrevios en
+# arrancar.ps1. Si falla no corta: lo unico que se pierde es tiempo de Ollama.
+PREVIOS="${PREVIOS:-mesh_productos_vectores_previos}"
+CON_VECTOR=$(curl -s -X POST "$ES/$INDICE/_count" -H 'Content-Type: application/json' \
+    -d '{"query":{"exists":{"field":"vector"}}}' | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
+if [ -n "$CON_VECTOR" ] && [ "$CON_VECTOR" != "0" ]; then
+    # Con > /dev/null y no con -o /dev/null: arriba se exporta
+    # MSYS_NO_PATHCONV=1, y el curl de Windows no encuentra /dev/null y sale
+    # con 23 aunque la peticion se haya hecho.
+    curl -s -X DELETE "$ES/$PREVIOS" > /dev/null || true
+    curl -s -X PUT "$ES/$PREVIOS" -H 'Content-Type: application/json' \
+        -d '{"settings":{"number_of_shards":1,"number_of_replicas":0},"mappings":{"dynamic":false,"properties":{"vector":{"type":"dense_vector","dims":768,"index":false},"vector_hash":{"type":"keyword"},"vector_grupo":{"type":"keyword"},"vector_modelo":{"type":"keyword"}}}}' > /dev/null
+    COPIADOS=$(curl -s -X POST "$ES/_reindex?wait_for_completion=true&refresh=true" -H 'Content-Type: application/json' \
+        -d "{\"source\":{\"index\":\"$INDICE\",\"_source\":[\"vector\",\"vector_hash\",\"vector_grupo\",\"vector_modelo\"],\"query\":{\"exists\":{\"field\":\"vector\"}}},\"dest\":{\"index\":\"$PREVIOS\"}}" \
+        | sed -n 's/.*"created":\([0-9]*\).*/\1/p')
+    echo "    $COPIADOS de $CON_VECTOR vectores guardados en $PREVIOS"
+fi
+
 # El DELETE se traga el 404 a proposito: la primera vez el indice no existe y
 # eso no es un fallo.
 curl -s -o /dev/null -X DELETE "$ES/$INDICE" || true
@@ -140,3 +162,4 @@ if [ "$EN_INDICE" != "$ESPERADOS" ]; then
 fi
 
 echo "==> listo, $EN_INDICE productos buscables"
+echo "    Los vectores: powershell -File etl/cargar_vectores.ps1 (devuelve los guardados y calcula el resto)"

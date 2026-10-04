@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 122 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 131 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las líneas son las del código en main al 20 de septiembre de 2026, salvo las preguntas 32 a 34 y la 119, que están al 23 de septiembre. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
 
@@ -887,14 +887,14 @@ El panel es una sola pantalla con pestañas para el admin y cada pestaña llama 
 - Por qué así. Cada pestaña usa la base que mejor contesta su pregunta, y el navegador nunca sabe de cuál sale el dato porque toda respuesta trae ok, mensaje y payload.
 
 ### 108. ¿Dónde está el diagrama de arquitectura final y cómo se generó?
-Está en docs/diagrama-arquitectura.drawio con su PNG. Dibuja los seis motores, lo que hace el backend con cada uno y ocho rutas de datos entre motores. Lo genera un script de Python que al final comprueba que cada flecha nombre cajas que existen. Desde la Entrega final dibuja también los vectores de productos en PostgreSQL y la ruta 11, que lleva el texto de MongoDB a Ollama y el vector a `producto_vector`.
+Está en docs/diagrama-arquitectura.drawio con su PNG. Dibuja los seis motores, lo que hace el backend con cada uno y ocho rutas de datos entre motores. Lo genera un script de Python que al final comprueba que cada flecha nombre cajas que existen. Desde la Entrega final dibuja también la ruta 11, que lleva el texto de MongoDB a Ollama. Desde el 4 de octubre el vector ya no termina en PostgreSQL sino en el documento del producto en Elasticsearch, y las reseñas llegan a `mesh_comentarios` por la cola `evento_comentario`.
 
 - Dónde se ve. `docs/generar-arquitectura.py` lineas 1 a 18. `docs/ARQUITECTURA.md` lineas 3 a 14. El diagrama entidad relación es otro archivo, `docs/diagrama-general.drawio`, que dibuja `docs/generar-er.py` leyendo la base viva, lineas 1 a 19.
 - Lo que pide el profesor. Entrega final, diagrama de arquitectura completo y correcto (3 pts). Las entregas 2 y 3 también piden actualizarlo.
 - Por qué así. El ER se genera de la base porque el dibujado a mano se quedó en 42 cajas cuando ya había 50 tablas.
 
 ### 109. ¿Dónde está el registro de decisiones arquitectónicas y qué estructura tiene?
-Está repartido en docs. base-de-datos.md trae cinco ADR sobre catálogo, ofertas, imágenes, proponente y lo social. DECISION-GRAFOS-VS-COLUMNAR.md sigue los campos que pide el enunciado y además dice cuándo estaría justificada la alternativa no elegida. La consistencia del checkout tiene su propio documento. DECISION-NEWSQL-PAGOS.md es el ADR-8, no migrar los pagos a una NewSQL. Los de la Entrega final están en el informe, el ADR-10 de pgvector en la sección 2.1 y el ADR-11 del control de acceso en Redis en la 3.1.
+Está repartido en docs. base-de-datos.md trae cinco ADR sobre catálogo, ofertas, imágenes, proponente y lo social. DECISION-GRAFOS-VS-COLUMNAR.md sigue los campos que pide el enunciado y además dice cuándo estaría justificada la alternativa no elegida. La consistencia del checkout tiene su propio documento. DECISION-NEWSQL-PAGOS.md es el ADR-8, no migrar los pagos a una NewSQL. Los de la Entrega final están en el informe, el ADR-10 de los vectores en la sección 2.1 y el ADR-11 del control de acceso en Redis en la 3.1. El ADR-10 se replanteó el 4 de octubre, de pgvector a Elasticsearch, y el porqué está en `docs/ARQUITECTURA.md`.
 
 - Dónde se ve. `docs/base-de-datos.md` lineas 561, 571, 581, 591 y 990, encabezados de ADR-1 a ADR-5. `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 14 (contexto), 66 (alternativas) y 256 (consecuencias). `docs/CONSISTENCIA-CHECKOUT.md` linea 122, los puntos de falla.
 - Lo que pide el profesor. Sección 5.3, un registro breve con contexto, alternativas (al menos dos, incluida no cambiar), decisión, justificación y consecuencias.
@@ -959,18 +959,21 @@ Sí, en Redis. Hay tres usuarios de ACL, cada uno con lo justo. `default` es el 
 - Por qué así. Redis es el que guarda lo más delicado en caliente, el carrito, los contadores de fraude y las ventas relámpago, y un FLUSHALL por error se lleva todo eso. Además sigue la autorización por rol en la API, con 401 y 403, en `backend/src/guards/sesion.guard.ts` lineas 41 a 98.
 
 ### 117. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
-Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector y un índice HNSW. `productos_similares()` devuelve los seis más cercanos por distancia coseno, sin el propio producto, sin inactivos y sin copias del generador. El backend trae esos ids y pide a MongoDB cómo se ven. Los 3105 productos tienen vector.
+Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en el documento del producto en Elasticsearch, campo `vector` de tipo `dense_vector` con similitud coseno. `SimilaresService` pide los vecinos con una búsqueda kNN que en la misma consulta filtra los inactivos, el propio producto y las copias del generador, y se queda con uno por grupo. Después pide a MongoDB cómo se ven. Los 3105 productos tienen vector. Hasta el 4 de octubre vivía en PostgreSQL con pgvector.
 
-- Dónde se ve. `migrations/024_vectores_productos.sql` lineas 58 (la tabla), 77 (el índice HNSW) y 85 (la función). `migrations/027_similares_con_indice.sql`, la función reescrita para que use el índice, con la medición en su cabecera. `etl/cargar_vectores.ps1`, paso 7d de arrancar. `backend/src/services/productos/similares.service.ts` linea 37, la ruta `GET /productos/:id/similares`, y `vectores-sync.service.ts`, que recalcula cada 3 horas los productos editados. `frontend/src/routes/producto/[id]/+page.svelte` linea 179. `pruebas/recomendacion_semantica.py`, 15 OK. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`.
+- Dónde se ve. `elastic/001_indice.json`, los cuatro campos del vector. `etl/cargar_vectores.ps1`, paso 7d de arrancar, que escribe con `_bulk`. `backend/src/services/productos/similares.service.ts`, la ruta `GET /productos/:id/similares` con el kNN, y `vectores-sync.service.ts`, que recalcula cada 3 horas los productos editados. `migrations/036_sin_producto_vector.sql`, que retira la tabla y la función de pgvector. `pruebas/recomendacion_semantica.py`, 15 OK. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`, que compara el kNN con la búsqueda exacta contra todos.
 - Lo que pide el profesor. Entrega final, recomendación por similitud semántica de la descripción con representaciones vectoriales (5 pts). La sección 5.2 da como referencia una extensión vectorial sobre PostgreSQL.
-- Por qué así. pgvector vive en el PostgreSQL que ya estaba, así que no hubo otro motor ni otra copia de los ids. Ojo si preguntan por el índice. La primera versión de la función nunca lo usaba, porque comparaba con un JOIN y el HNSW solo ordena por distancia a un vector fijo. La 027 lo arregla, y medido sobre los 3103 activos el índice tarda 3,8 ms por producto contra 32 ms de recorrer todo, con los mismos seis en 3099 de 3103.
+- Por qué así. En Elasticsearch el vector vive en el mismo documento que el nombre, el estado y las facetas, así que una sola consulta los combina y no hay una tabla aparte con otra copia de los ids que se pueda quedar atrás. Con pgvector el buscador de texto y el de vectores eran dos motores. Medido en la demo, el kNN con el índice HNSW tarda unos 17 ms y la búsqueda exacta contra los 3105 unos 27 ms, y dan los mismos seis.
+- Ojo si preguntan qué pasa al reconstruir el índice. El ETL del buscador lo tira y lo rehace, y con él se irían los vectores, unos 7 minutos de Ollama. Antes de tirarlo se copian con `_reindex` a `mesh_productos_vectores_previos` y `cargar_vectores.ps1` los devuelve sin Ollama si el texto no cambió. Medido, 48 segundos.
+- Ojo si preguntan por pgvector. Se usó del 25 de septiembre al 4 de octubre. Su índice HNSW nunca se usaba en la primera versión de la función porque comparaba con un JOIN; la 027 lo arregló (3,8 ms contra 32 ms). Esa historia sigue en las migraciones 024 y 027.
 
 ### 118. ¿Qué decisiones de arquitectura se sostendrían y cuáles se replantearían? (retrospectiva)
-Está en el capítulo 5 del informe de la Entrega final. Son siete decisiones que sostendríamos, entre ellas el dinero y el stock en PostgreSQL sin migrar a NewSQL, el catálogo en MongoDB, Elasticsearch como copia reconstruible y pgvector sobre el mismo PostgreSQL. Y seis que replantearíamos, cada una con lo que pasó y lo que haríamos distinto. Un ejemplo que sirve para contarlo es la base columnar, que se rechazó el 3 de septiembre con dos números medidos y entró el 6 como ClickHouse porque el dato cambió.
+Está en el capítulo 5 del informe de la Entrega final. Son siete decisiones que sostendríamos, entre ellas el dinero y el stock en PostgreSQL sin migrar a NewSQL, el catálogo en MongoDB y Elasticsearch como copia reconstruible. Y seis que replantearíamos, cada una con lo que pasó y lo que haríamos distinto. Un ejemplo que sirve para contarlo es la base columnar, que se rechazó el 3 de septiembre con dos números medidos y entró el 6 como ClickHouse porque el dato cambió.
 
 - Dónde se ve. `Reporte Entrega Final - DABD2 - Mesh.docx`, capítulo 5, que sale de `contenido-entrega-final.json`. `docs/ARQUITECTURA.md` lineas 143 a 156 (la columnar y el cambio) y 219 a 234 (lo que el diagrama no esconde). `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 256, consecuencias.
 - Lo que pide el profesor. Entrega final, documento de retrospectiva con las decisiones que se sostendrían y las que se replantearían, justificadas en ambos casos (4 pts).
 - Por qué así. El cambio de la columnar muestra el criterio, la decisión se sostuvo con números y se revisó cuando el volumen de eventos cambió.
+- Ojo, una que el informe da por sostenida se replanteó después. El informe sostiene pgvector sobre el mismo PostgreSQL, y el 4 de octubre los vectores se mudaron a Elasticsearch, cuando aparecieron las reseñas con vector y la búsqueda por intención. Es el mismo criterio: la decisión cambió cuando cambió lo que había que buscar.
 
 ### 119. ¿Cómo funciona el descuento de una oferta y por qué una venta relámpago lo exige?
 La oferta guarda su precio de lista y aparte un porcentaje de descuento que puede ser nulo. El precio final no se guarda en ninguna columna, se calcula en cada consulta con `ROUND(precio * (1 - COALESCE(porcentaje_descuento, 0) / 100), 2)`. El trigger del historial escucha el precio y el porcentaje, así que cambiar solo el descuento deja una fila nueva en `precio_historial`, y la compra cobra el precio final. Una venta relámpago no se puede abrir sin descuento (409), y el descuento no se puede quitar con la venta abierta (409).
@@ -1000,3 +1003,61 @@ Porque cada detector guardaba a su manera. Los anillos en `anillo_fraude`, las c
 - Lo que pide el profesor. Lo pidió en la revisión del 28-09, decisiones menos genéricas en el fraude (`docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md` sección 1).
 - Ojo si preguntan por las tablas viejas. Siguen en la base, sin escrituras. No se borraron porque las migraciones viejas se vuelven a correr en cada arranque y las volverían a crear vacías; borrarlas es una decisión aparte.
 - Por qué así. La detección del detector y la revisión del admin quedan en fechas distintas, `ultima_deteccion` y `fecha_actualizacion`. Un mismo patrón visto diez veces es una fila con diez detecciones, no diez filas que el agrupador contaba como evidencia distinta.
+
+### 123. ¿Cómo llegan las reseñas a Elasticsearch con su vector?
+Por una cola en PostgreSQL, igual que el grafo. La tabla `evento_comentario` la llenan dos triggers en la misma transacción que el comentario o la reseña, con una sola fila pendiente por comentario. Un worker del backend cada 10 segundos toma las pendientes, mira si el comentario todavía existe, le pide el vector a Ollama solo si el texto cambió y lo escribe en el índice `mesh_comentarios`, o lo borra si ya no existe.
+
+- Dónde se ve. `migrations/034_evento_comentario.sql`, la cola y los triggers. `elastic/003_comentarios.json`, el mapeo. `backend/src/services/resenas/evento-comentario-sync.service.ts`, el worker. En `arrancar.ps1`, el paso Índice de comentarios crea el índice antes del backend y encola los comentarios que ya había.
+- Por qué así. Un like no encola nada, porque el trigger solo mira la columna del texto. Las respuestas cortas, de menos de 15 letras, se indexan sin vector.
+- Ojo si preguntan por el tipo de índice. El vector de `mesh_comentarios` va en `flat`, que compara contra todos, y no en HNSW. Medido el 4 de octubre, con 44 copias de un mismo texto el grafo HNSW se atascaba: para "zapatos cómodos para caminar todo el día" daba como mejor una reseña con coseno 0,30, y la búsqueda exacta encontraba una de 0,81. Con unos miles de reseñas `flat` sigue tardando milisegundos.
+
+### 124. ¿Qué señales de fraude salen del texto de las reseñas?
+Cuatro familias, todas con los vectores de `mesh_comentarios` y en la tabla de señales. `resenas_repetidas`, una cuenta con 5 o más reseñas que tienen una gemela suya y el 30 % o más de las que escribe. `anillo_de_texto`, tres o más cuentas con reseñas casi iguales sobre el mismo vendedor. `resenas_parecidas_vendedor` y `_producto`, muchas reseñas con una gemela de otra cuenta. Y las `notas_incoherentes`, que usan el clasificador de la pregunta 125. Una gemela es otra reseña con coseno de 0,92 o más; solo cuentan las de más de 100 caracteres.
+
+- Dónde se ve. `migrations/035_senales_fraude_por_texto.sql` y `migrations/038_senales_resenas_parecidas.sql`, los tipos. Los detectores en `backend/src/services/fraude/`, uno por familia, cada 15 minutos. El panel de Fraude del admin las enseña con su nombre.
+- Por qué así. El grafo de Neo4j ve quién reseña a quién; esto ve lo que dicen. Las de cuenta son por porcentaje y no por cantidad, porque quien escribe mucho repite alguna frase por casualidad.
+- Ojo si preguntan si dan falsos positivos. Se midió sembrando las 480 reseñas del clasificador en 40 cuentas: ninguna sale en una señal. Las dos cuentas compradoras de la semilla vieja sí salen en `resenas_repetidas`, y con razón: sus reseñas salen de 20 textos que se repiten.
+
+### 125. ¿Qué hace el clasificador de reseñas y cómo se entrenó?
+Lee el texto de una reseña y da la probabilidad de que sea mala. Son dos modelos hechos a mano con numpy sobre el vector de Ollama, una regresión logística y una red de 768 entradas, 32 neuronas y una salida. Se entrenaron con 400 reseñas escritas a mano, y se probaron con otras 80 difíciles que nunca se usaron para aprender: la red acierta el 91,2 % y la regresión el 90 %. Con eso el backend marca la nota incoherente, un texto malo con 4 o 5 estrellas o uno bueno con 1 o 2, y la cuenta por cuenta, producto y vendedor.
+
+- Dónde se ve. `clasificador-resenas/`, los datos, el entrenamiento y `modelo/reporte.txt`. `predecir.mjs`, la misma cuenta en JavaScript, que da lo mismo que Python. El backend usa la regresión en `backend/src/helpers/valoracion-texto.ts` y guarda la valoración en `mesh_comentarios`. `migrations/037_senales_notas_incoherentes.sql`, los tres tipos. `pruebas/clasificador_en_elastic.mjs` comprueba que con el vector de Elasticsearch da lo mismo que con el del entrenamiento.
+- Ojo si preguntan por sus límites. No entiende el sarcasmo (0 de 3), porque lee palabras. Por eso la señal va al admin y nunca bloquea sola.
+- Ojo si preguntan de dónde salen las reseñas de la tienda. Las mismas 480 están sembradas como reseñas de verdad, de 40 cuentas con su compra pagada, cada una en el producto del que habla su texto (`clasificador-resenas/semilla/`).
+
+### 126. ¿Qué es la búsqueda por intención?
+Buscar por lo que la persona quiere lograr y no por el nombre del producto. "Algo para salir a pedalear" no es el nombre de nada, pero la reseña de unos guantes de ciclismo habla de eso. La frase se convierte en vector y se buscan las reseñas y los productos más parecidos, y cada resultado trae la reseña que lo explica.
+
+- Dónde se ve. `GET /buscador/productos/intencion` en el backend. En `/buscar`, cuando lo escrito parece una frase, sale arriba la sección Lo que cuentan otros compradores.
+- Por qué así. Las reseñas hablan como alguien que usó el producto y la descripción habla como vendedor, así que para una intención las reseñas encuentran mejor.
+
+### 127. ¿Qué cambió en el buscador y en las reseñas el 4 de octubre?
+El buscador dice "Tal vez quisiste decir" cuando una palabra está mal escrita, con el sugeridor de términos de Elasticsearch en la misma consulta. Y el texto de una reseña pasó a ser de 40 a 350 caracteres, y el de una respuesta de hasta 350, sin mínimo.
+
+- Dónde se ve. `backend/src/helpers/correccion-busqueda.ts` y `validaciones-resena.ts`. En el frontend, `/buscar` y el formulario de reseñas, con su contador.
+- Por qué el mínimo. El clasificador no sirve con textos muy cortos. Las señales de texto solo miran reseñas de más de 100 caracteres.
+
+### 128. ¿Qué es la búsqueda híbrida y por qué combina por posición?
+Junta en una sola lista la búsqueda por palabras y la búsqueda por significado. "labtop gamer" encuentra por las palabras aunque esté mal escrito, y "algo para escuchar música mientras corro" encuentra por el significado. Es la lista de `/buscar` cuando no hay filtros elegidos.
+
+- Dónde se ve. `GET /buscador/productos/hibrida` en el backend. En vivo, `.\demo-entrega-final.ps1 -Parte hibrida`, que enseña el lugar de cada producto en las dos búsquedas.
+- Por qué por posición. La relevancia de las palabras y el coseno están en escalas distintas y no se pueden sumar. Se usa RRF: cada búsqueda aporta uno entre sesenta más su posición, y un producto que sale bien en las dos sube. Si Ollama no contesta, la lista sale solo con las palabras y no se cae.
+- Ojo si preguntan por los filtros. Con un filtro elegido manda la búsqueda facetada, que es la única que sabe filtrar y la que registra la búsqueda para las tendencias.
+
+### 129. ¿Cómo se evita que un vendedor proponga un producto que ya existe?
+Al escribir el nombre del producto que va a proponer, el formulario le dice en qué categoría suele ir algo así y qué productos parecidos ya hay, y marca los que pueden ser el mismo. El nombre se vuelve vector y se miran los 30 productos activos más cercanos: sus categorías votan, ponderadas por el parecido.
+
+- Dónde se ve. `POST /vendedor/productos/sugerencias` en el backend y el formulario de proponer en el panel del vendedor. En vivo, `.\demo-entrega-final.ps1 -Parte sugerencias`.
+- Por qué así. Es una ayuda y no un bloqueo: la decisión es de quien propone. Se pide al terminar de escribir y no en cada tecla, porque cada llamada le pide un vector a Ollama.
+
+### 130. ¿Qué pasa si alguien reseña y después cancela la compra?
+Antes la reseña se quedaba y nadie lo veía. Ahora es una señal. Una reseña de 4 o 5 estrellas con la compra cancelada después, dentro de 72 horas, basta para la señal `resena_positiva_cancelada`, que es fuerte y entra a los casos. Cinco o más de 1 o 2 estrellas contra el mismo vendedor dan `resenas_negativas_canceladas_vendedor`, con el vendedor como víctima.
+
+- Dónde se ve. `migrations/039_senales_resenas_canceladas.sql`, la fuente `postgres` y los dos tipos. El detector en `backend/src/services/fraude/resenas-canceladas-detector.service.ts` cruza el kardex de devoluciones con la reseña. En vivo, `.\demo-resenas-texto.ps1 -Caso cancelada` y `-Caso negativas`.
+- Por qué al cancelar y no al reseñar. Al escribir la reseña la cancelación todavía no pasó. Se revisa en cuanto se cancela, y la señal sale en unos 3 segundos.
+- Ojo si preguntan cómo evitarlo. Pedir que el pedido esté entregado para reseñar lo cerraría de raíz, porque un pedido entregado ya no se cancela. Queda como mejora.
+
+### 131. ¿Las señales de texto esperan 15 minutos?
+No. Al escribir una reseña el backend la indexa, la valora y la evalúa en las señales de texto en ese momento, sin hacer esperar a quien la escribe, y el worker de cada 15 minutos recoge lo que haya fallado. Medido en la demo, las señales salen a los 3 o 4 segundos.
+
+- Dónde se ve. `backend/src/services/fraude/chequeo-texto-inmediato.service.ts`. En vivo, `.\demo-resenas-texto.ps1`, que dice cuántos segundos tardó cada señal.
