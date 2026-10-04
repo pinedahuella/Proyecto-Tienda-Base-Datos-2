@@ -37,6 +37,7 @@ import { DetallePedido } from '../../models/pedido-producto';
 import { MetodoPago, METODO_PAGO_TARJETA } from '../../models/metodo-pago';
 import { ProductosService } from '../productos/productos.service';
 import { EventosService } from '../eventos/eventos.service';
+import { ResenasCanceladasDetectorService } from '../fraude/resenas-canceladas-detector.service';
 import { expresionPrecioFinal } from '../../helpers/precio-descuento';
 
 const REGEX_ID = /^\d+$/;
@@ -69,6 +70,7 @@ export class PedidosCompradorService {
   constructor(
     private readonly productosService: ProductosService,
     private readonly eventosService: EventosService,
+    private readonly resenasCanceladasDetectorService: ResenasCanceladasDetectorService,
   ) {}
 
   /**
@@ -728,6 +730,10 @@ export class PedidosCompradorService {
             WHERE pp.id_pedido = $1`,
           [idPedido],
         );
+        // Deteccion de fraude: reseñar y cancelar la compra. Es la cancelacion
+        // la que completa el patron (al escribir la reseña todavia no pasaba).
+        // Fire-and-forget: no retrasa la respuesta, un error solo se loguea.
+        void this.resenasCanceladasDetectorService.detectarInmediato(idPedido);
         void this.eventosService.registrarDevolucion({
           idUsuario,
           idPedido,

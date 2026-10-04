@@ -15,6 +15,16 @@ interface DocumentoResena {
   id_resena: number;
 }
 
+/** La reseña recien escrita, con lo que hace falta para saber si es contradictoria. */
+interface DocumentoNuevo {
+  es_respuesta: boolean;
+  valoracion_texto?: string | null;
+  calificacion?: number | null;
+  id_usuario: number;
+  id_producto: number;
+  id_vendedor?: number | null;
+}
+
 interface Candidato {
   key: number;
   doc_count: number;
@@ -180,6 +190,71 @@ export class NotasIncoherentesDetectorService {
     }
   }
 
+  /**
+   * El chequeo de UNA reseña recien escrita: la llama `ChequeoTextoInmediatoService`
+   * cuando ya esta indexada y valorada. Solo si esa reseña es contradictoria (una
+   * que no lo es solo puede bajar un porcentaje, no subirlo), vuelve a evaluar su
+   * cuenta, su producto y su vendedor. Las agregaciones las hace Elasticsearch,
+   * acotadas a esas tres llaves. Un error se loguea; lo recoge la proxima pasada
+   * de `detectar()`.
+   */
+  async detectarInmediato(idComentario: number): Promise<void> {
+    try {
+      const modelo = modeloValoracion();
+      if (modelo == null) {
+        return;
+      }
+      const respuesta = await elasticClient.get<DocumentoNuevo>(
+        {
+          index: INDICE,
+          id: String(idComentario),
+          _source: [
+            'es_respuesta',
+            'valoracion_texto',
+            'calificacion',
+            'id_usuario',
+            'id_producto',
+            'id_vendedor',
+          ],
+        },
+        { ignore: [404] },
+      );
+      const nueva = respuesta.found ? respuesta._source : undefined;
+      if (nueva == null || !this.esContradictoria(nueva)) {
+        return;
+      }
+
+      for (const dimension of DIMENSIONES) {
+        const llave = nueva[dimension.campo];
+        if (llave == null) {
+          continue;
+        }
+        const candidatos = await this.buscarCandidatos(
+          [dimension],
+          [{ term: { [dimension.campo]: llave } }],
+        );
+        for (const candidato of candidatos.get(dimension.tipo) ?? []) {
+          await this.registrar(dimension, candidato, modelo.version);
+        }
+      }
+    } catch (error) {
+      this.logger.warn(
+        `chequeo acotado de notas incoherentes interrumpido (comentario ${idComentario}): ${mensajeCorto(error)}`,
+      );
+    }
+  }
+
+  /** Lo mismo que `CONTRADICTORIA`, para una sola reseña ya en memoria. */
+  private esContradictoria(r: DocumentoNuevo): boolean {
+    if (r.es_respuesta || r.calificacion == null) {
+      return false;
+    }
+    return (
+      (r.valoracion_texto === 'mala' && r.calificacion >= 4) ||
+      (r.valoracion_texto === 'buena' && r.calificacion <= 2)
+    );
+  }
+
   /** Las resenas que cuentan: raiz, en la ventana y ya valoradas. */
   private filtroBase(): object[] {
     return [
@@ -200,11 +275,14 @@ export class NotasIncoherentesDetectorService {
    * cuenta, producto o vendedor, cuenta sus contradictorias en una sub-agregacion
    * y se queda solo con las que pasan las dos reglas (`bucket_selector`).
    * Ordenadas por contradictorias: si hubiera mas de `MAX_CANDIDATOS`, quedan
-   * las peores.
+   * las peores. Con `extra` (chequeo inmediato) la consulta se acota a una llave.
    */
-  private async buscarCandidatos(): Promise<Map<string, Candidato[]>> {
+  private async buscarCandidatos(
+    dimensiones: Dimension[] = DIMENSIONES,
+    extra: object[] = [],
+  ): Promise<Map<string, Candidato[]>> {
     const aggs: Record<string, object> = {};
-    for (const dimension of DIMENSIONES) {
+    for (const dimension of dimensiones) {
       aggs[dimension.tipo] = {
         terms: {
           field: dimension.campo,
@@ -227,12 +305,12 @@ export class NotasIncoherentesDetectorService {
     const respuesta = await elasticClient.search({
       index: INDICE,
       size: 0,
-      query: { bool: { filter: this.filtroBase() } },
+      query: { bool: { filter: [...this.filtroBase(), ...extra] } },
       aggs,
     });
 
     const resultado = new Map<string, Candidato[]>();
-    for (const dimension of DIMENSIONES) {
+    for (const dimension of dimensiones) {
       const agregado = respuesta.aggregations?.[dimension.tipo] as
         { buckets: Candidato[] } | undefined;
       resultado.set(dimension.tipo, agregado?.buckets ?? []);

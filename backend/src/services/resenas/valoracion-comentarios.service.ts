@@ -47,18 +47,45 @@ export class ValoracionComentariosService {
   private static readonly LOTE = 200;
   private static readonly MAX_PASADAS = 10;
 
-  private procesando = false;
+  /** La pasada en curso, o `null` si no hay ninguna. */
+  private pasada: Promise<void> | null = null;
 
   @Interval('valoracion-comentarios', ValoracionComentariosService.INTERVALO_MS)
   async valorar(): Promise<void> {
-    if (this.procesando) {
+    if (this.pasada != null) {
       return;
     }
+    await this.arrancarPasada();
+  }
+
+  /**
+   * Valora YA lo pendiente, sin esperar el reloj de 30 s, y termina cuando la
+   * valoracion ya se puede buscar. La llama el chequeo inmediato de una resena
+   * recien escrita (`ChequeoTextoInmediatoService`), despues de indexarla. Si ya
+   * hay una pasada en curso, espera a que termine y hace OTRA. No lanza: un
+   * fallo se loguea y lo toma la proxima pasada del reloj.
+   */
+  async valorarAhora(): Promise<void> {
+    while (this.pasada != null) {
+      await this.pasada;
+    }
+    await this.arrancarPasada();
+  }
+
+  private arrancarPasada(): Promise<void> {
+    const pasada = this.unaPasada().finally(() => {
+      this.pasada = null;
+    });
+    this.pasada = pasada;
+    return pasada;
+  }
+
+  /** Una pasada completa. No lanza: un fallo se loguea y queda para la proxima. */
+  private async unaPasada(): Promise<void> {
     const modelo = modeloValoracion();
     if (modelo == null) {
       return;
     }
-    this.procesando = true;
 
     try {
       let valoradas = 0;
@@ -127,7 +154,10 @@ export class ValoracionComentariosService {
           break;
         }
 
-        const resultado = await elasticClient.bulk({ operations: operaciones });
+        const resultado = await elasticClient.bulk({
+          operations: operaciones,
+          refresh: 'wait_for',
+        });
         for (const item of resultado.items) {
           const error = item.update?.error;
           if (error == null) {
@@ -159,8 +189,6 @@ export class ValoracionComentariosService {
       this.logger.warn(
         `valoracion de comentarios: corrida interrumpida -- ${mensajeCorto(error)}`,
       );
-    } finally {
-      this.procesando = false;
     }
   }
 }

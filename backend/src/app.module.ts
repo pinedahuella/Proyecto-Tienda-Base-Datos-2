@@ -46,6 +46,8 @@ import { PatronesFraudeDetectorService } from './services/fraude/patrones-fraude
 import { ResenasRepetidasDetectorService } from './services/fraude/resenas-repetidas-detector.service';
 import { NotasIncoherentesDetectorService } from './services/fraude/notas-incoherentes-detector.service';
 import { ResenasParecidasDetectorService } from './services/fraude/resenas-parecidas-detector.service';
+import { ResenasCanceladasDetectorService } from './services/fraude/resenas-canceladas-detector.service';
+import { ChequeoTextoInmediatoService } from './services/fraude/chequeo-texto-inmediato.service';
 import { AnilloDeTextoDetectorService } from './services/fraude/anillo-de-texto-detector.service';
 import { HallazgosEventoFraudeDetectorService } from './services/fraude/hallazgos-evento-fraude-detector.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
@@ -65,6 +67,10 @@ import { BuscadorSugerenciasController } from './controllers/buscador/sugerencia
 import { BuscadorSugerenciasService } from './services/buscador/sugerencias.service';
 import { BuscadorIntencionController } from './controllers/buscador/intencion.controller';
 import { BuscadorIntencionService } from './services/buscador/intencion.service';
+import { BuscadorHibridoController } from './controllers/buscador/hibrida.controller';
+import { BuscadorHibridoService } from './services/buscador/hibrida.service';
+import { SugerenciasPropuestaController } from './controllers/vendedores/sugerencias-propuesta.controller';
+import { SugerenciasPropuestaService } from './services/vendedores/sugerencias-propuesta.service';
 import { BuscadorSyncService } from './services/buscador/buscador-sync.service';
 import { EventoProductoSyncService } from './services/productos/evento-producto-sync.service';
 import { EventosAutenticacionSyncService } from './services/eventos-autenticacion/eventos-autenticacion-sync.service';
@@ -160,6 +166,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BuscadorFacetadoController,
     BuscadorSugerenciasController,
     BuscadorIntencionController,
+    BuscadorHibridoController,
+    SugerenciasPropuestaController,
     AdminFraudeLoginController,
     AdminFraudeAnillosController,
     AdminCasosFraudeController,
@@ -204,6 +212,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     ResenasRepetidasDetectorService,
     NotasIncoherentesDetectorService,
     ResenasParecidasDetectorService,
+    ResenasCanceladasDetectorService,
+    ChequeoTextoInmediatoService,
     AnilloDeTextoDetectorService,
     HallazgosEventoFraudeDetectorService,
     AdminReportesService,
@@ -215,6 +225,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BuscadorFacetadoService,
     BuscadorSugerenciasService,
     BuscadorIntencionService,
+    BuscadorHibridoService,
+    SugerenciasPropuestaService,
     BuscadorSyncService,
     EventoProductoSyncService,
     EventosAutenticacionSyncService,

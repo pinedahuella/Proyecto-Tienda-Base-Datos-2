@@ -31,6 +31,7 @@ import { ProductosService } from '../productos/productos.service';
 import { GrafoSyncService } from '../grafo/grafo-sync.service';
 import { AnillosDetectorService } from '../fraude/anillos-detector.service';
 import { PatronesFraudeDetectorService } from '../fraude/patrones-fraude-detector.service';
+import { ChequeoTextoInmediatoService } from '../fraude/chequeo-texto-inmediato.service';
 
 const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
@@ -95,6 +96,7 @@ export class ResenasService {
     private readonly grafoSyncService: GrafoSyncService,
     private readonly anillosDetectorService: AnillosDetectorService,
     private readonly patronesFraudeDetectorService: PatronesFraudeDetectorService,
+    private readonly chequeoTextoInmediatoService: ChequeoTextoInmediatoService,
   ) {}
 
   /**
@@ -325,6 +327,16 @@ export class ResenasService {
         const idResena = String(fila.id_resena);
         void this.anillosDetectorService.detectarInmediato(idResena);
         void this.patronesFraudeDetectorService.detectarInmediato(idResena);
+      });
+      // Fraude por texto: indexar la resena, valorarla y evaluar SOLO esta en
+      // las senales de texto (Elasticsearch). Sin await, igual que arriba: no
+      // retrasa la respuesta, y si algo falla lo recogen los workers de 15 min.
+      void this.chequeoTextoInmediatoService.ejecutar({
+        idComentario: Number(fila.id_comentario),
+        idResena: Number(fila.id_resena),
+        idUsuario: Number(idUsuario),
+        idVendedor: Number(idVendedor),
+        idProducto,
       });
       return {
         id_resena: Number(fila.id_resena),

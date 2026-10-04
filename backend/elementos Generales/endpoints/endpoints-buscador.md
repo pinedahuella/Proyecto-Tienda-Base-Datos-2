@@ -7,11 +7,13 @@ de `backend/`, no se toca desde aca) -- esto solo documenta la ruta.
 Código: `src/controllers/buscador/productos.controller.ts` +
 `src/services/buscador/productos.service.ts`.
 
-Hay cinco rutas: la búsqueda por nombre (`GET /buscador/productos`), la de admin
+Hay seis rutas: la búsqueda por nombre (`GET /buscador/productos`), la de admin
 (`.../admin`), el buscador facetado (`.../facetado`), el autocompletado
-(`.../sugerencias`) y, desde 2026-10-02, la **búsqueda por intención**
-(`.../intencion`), que busca por significado y no por palabras. La sección
-"Cuándo usar cuál", dentro de esta última, dice cuál elegir.
+(`.../sugerencias`), desde 2026-10-02 la **búsqueda por intención**
+(`.../intencion`), que busca por significado y no por palabras, y desde 2026-10-04
+la **búsqueda híbrida** (`.../hibrida`), que junta palabras y significado en una
+sola lista. Las secciones "Cuándo usar cuál", dentro de estas dos últimas, dicen
+cuál elegir.
 
 `GET /buscador` (la comprobacion de conexion con Elasticsearch, mismo patron
 que `GET /db`, `/documental`, `/clave-valor` y `/grafo`) esta documentada en
@@ -374,6 +376,7 @@ palabras) no puede hacer.
 | Completar el nombre mientras escribo | `GET /buscador/productos/sugerencias?prefijo=` |
 | Filtrar el catálogo por categoría, precio o nota | `GET /buscador/productos/facetado` |
 | Encontrar algo por lo que quiero lograr o por cómo lo usaría | **`GET /buscador/productos/intencion?q=`** |
+| Un cuadro de búsqueda que entienda nombres **y** frases, en una sola lista | `GET /buscador/productos/hibrida?q=` |
 
 ### Cómo funciona
 
@@ -511,6 +514,146 @@ terminar.
   forzarlo desde aquí.
 - No registra el evento `busqueda_realizada` de analítica, a diferencia de
   `GET /buscador/productos`.
+
+## GET /buscador/productos/hibrida (agregado 2026-10-04)
+
+La **búsqueda híbrida**: junta en una sola lista ordenada la búsqueda por
+**palabras** (la de `GET /buscador/productos`) y la búsqueda por **significado**
+(vectores, como `.../intencion`). Es la ruta para un buscador "normal" que además
+entiende frases: `labtop gamer` encuentra por las palabras, `algo para escuchar
+música mientras corro` encuentra por el significado, y las dos caben en el mismo
+cuadro de búsqueda.
+(`BuscadorHibridoService`, `controllers/buscador/hibrida.controller.ts`,
+`dto/buscar-hibrida.ts`.)
+
+**Pública**, sin sesión. **Siempre** solo productos `activo`, fijo en el código
+como en `GET /buscador/productos`.
+
+| Query param | Obligatorio | Qué hace |
+|---|---|---|
+| `q` | sí | Lo que la persona escribió: palabras o una frase. No vacío, hasta 250 caracteres (el modelo de vectores ve 512 tokens) |
+| `limite` | no | Cuántos resultados como máximo. Por defecto 20, tope 50 |
+
+```
+GET /buscador/productos/hibrida?q=laptop
+GET /buscador/productos/hibrida?q=algo para escuchar musica mientras corro&limite=10
+```
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Busqueda completada",
+  "payload": {
+    "modo": "hibrida",
+    "resultados": [
+      {
+        "id_producto": 6,
+        "nombre": "Laptop Bastion 16",
+        "estado": "activo",
+        "categoria": "Laptops",
+        "precio_desde": 9606,
+        "precio_tienda": 10052,
+        "hay_descuento": false,
+        "stock_total": 61,
+        "resenas_promedio": 1,
+        "resenas_total": 1,
+        "puntaje": 0.977,
+        "origen": ["texto", "significado"],
+        "posicion_texto": 4,
+        "posicion_significado": 1,
+        "puntaje_texto": 8.733,
+        "similitud": 0.743
+      }
+    ]
+  }
+}
+```
+
+Cada resultado trae el mismo resumen que `GET /buscador/productos` y, además, lo
+que explica por qué salió:
+
+| Campo | Qué es |
+|---|---|
+| `puntaje` | El puntaje combinado, de 0 a 1 (1 = primero en las dos búsquedas). **Por aquí se ordena.** Es relativo a esta búsqueda: sirve para comparar resultados entre sí, no con los de otra búsqueda |
+| `origen` | Por dónde salió: `texto`, `significado`, o los dos |
+| `posicion_texto` | Su lugar en la búsqueda por palabras (1 = el mejor), o `null` si no salió por ahí |
+| `posicion_significado` | Su lugar en la búsqueda por significado (1 = el más cercano), o `null` |
+| `puntaje_texto` | La relevancia de Elasticsearch en la búsqueda por palabras, o `null` |
+| `similitud` | El parecido de significado con lo escrito, de 0 a 1 (coseno), o `null` |
+
+`modo` dice cómo se hizo la búsqueda: **`hibrida`** (palabras + significado) o
+**`solo_texto`**, cuando Ollama no respondió y se contestó solo con las palabras
+(en ese caso todos los `origen` son `["texto"]` y `similitud` es `null`). Así la
+búsqueda principal no se cae porque un servicio de apoyo esté apagado.
+
+**400**
+
+```json
+{ "ok": false, "mensaje": "Escribe lo que buscas", "payload": null }
+{ "ok": false, "mensaje": "La busqueda no puede tener mas de 250 caracteres", "payload": null }
+```
+
+**503**, si Elasticsearch no responde: `"No se pudo completar la busqueda"`.
+
+### Cómo funciona
+
+1. **Por palabras:** el `multi_match` difuso de `GET /buscador/productos`
+   (tolera errores de tecleo, sin tildes, `nombre` pesa más que `descripcion` y
+   `variantes`), pero **más estricto**: con una o dos palabras deben estar todas, y
+   con más, el 70 % (`minimum_should_match: 2<70%`). Sin eso, una frase se llenaba
+   de productos que solo comparten "para" o "algo" y le ganaban a la búsqueda por
+   significado. Se piden 50 candidatos.
+2. **Por significado:** la frase se convierte en vector (el mismo modelo de
+   Ollama que usan los productos) y se piden los 50 productos activos más
+   cercanos (kNN). Los de coseno menor a **0,40** se descartan: por debajo es
+   ruido.
+3. **Se combinan por posición, no por puntaje** (RRF, *reciprocal rank
+   fusion*, constante 60): cada búsqueda aporta `1 / (60 + posición)` y se suman.
+   El puntaje de relevancia de las palabras y el coseno están en escalas
+   distintas y no se pueden sumar. Un producto que sale bien en las dos sube; uno
+   que sale en una sola queda donde esa lo pone. Se hace en el servicio y no con
+   el `retriever` rrf de Elasticsearch porque ese es de licencia de pago.
+
+### Cuándo usar cuál
+
+| Quiero... | Ruta |
+|---|---|
+| Un cuadro de búsqueda que entienda nombres **y** frases | **`GET /buscador/productos/hibrida?q=`** |
+| Buscar por nombre, con filtros por categoría, precio o nota | `GET /buscador/productos/facetado` |
+| Completar el nombre mientras escribo | `GET /buscador/productos/sugerencias?prefijo=` |
+| Saber **por qué** algo sirve (con la reseña que lo dice) | `GET /buscador/productos/intencion?q=` |
+
+### Probado en vivo -- 2026-10-04
+
+Contra el servidor y el catálogo local (102 productos):
+
+| Caso | Resultado |
+|---|---|
+| `q=laptop` | `200`, `modo: hibrida`, las 5 laptops primero, todas por `texto` + `significado` (puntaje 0,95 a 0,98) |
+| `q=labtop gamer` | `200`: la laptop gamer por palabras (a pesar del error) y un monitor gamer por significado |
+| `q=algo para escuchar musica mientras corro` | `200`, solo por `significado` (las palabras no llegan al 70 %): unos tenis, un rodillo y unos audífonos deportivos |
+| `q=telefono con buena camara` | `200`: el teléfono que coincide por palabras (Nautilo Pro) sube a 0,98 por salir en las dos; los demás teléfonos entran por significado |
+| `q=xyzqwk` | `200`, `resultados: []` |
+| `q=` (vacío), sin `q`, `q` de 300 caracteres | `400` |
+| Ollama apagado | no se probó apagándolo; el camino `solo_texto` está en el código (`vectorDe` devuelve `null`) |
+
+### Límites conocidos
+
+- **El modelo de vectores es el mismo de la búsqueda por intención, con los mismos
+  límites**: no está hecho para "pregunta contra documento", así que con frases la
+  parte de significado tiene ruido. En la prueba de la música, los audífonos
+  deportivos quedaron tercero, detrás de unos tenis. Con datos reales y variados
+  va a mejorar; el umbral de 0,40 se calibró a mano.
+- **Las dos búsquedas pesan igual.** Si en la práctica manda mucho una, se puede
+  cambiar sin tocar nada más (`RRF_K` y el peso de cada lista en `combinar`).
+- Con una sola palabra suelta el vector dice poco y manda la búsqueda por palabras.
+- No registra el evento `busqueda_realizada` de analítica, a diferencia de
+  `GET /buscador/productos` y `.../facetado`.
+- No trae `quisiste_decir` ni facetas; para eso están las otras rutas.
+
+---
 
 ## Una cosa que conviene saber antes de leer resultados raros
 

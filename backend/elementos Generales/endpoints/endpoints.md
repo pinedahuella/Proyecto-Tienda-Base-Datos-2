@@ -164,7 +164,10 @@ caida, solo como "no hay nada que buscar". Timeout de 6 s -> 503.
 
 > La ruta que de verdad **busca productos**, `GET /buscador/productos`, esta
 > documentada aparte, en `endpoints-buscador.md`, junto con la busqueda por
-> intencion (`GET /buscador/productos/intencion`, desde 2026-10-02).
+> intencion (`GET /buscador/productos/intencion`, desde 2026-10-02) y la
+> busqueda hibrida (`GET /buscador/productos/hibrida`, desde 2026-10-04). Las
+> sugerencias al proponer un producto (`POST /vendedor/productos/sugerencias`,
+> desde 2026-10-04) estan en `endpoints-vendedores.md`.
 
 ---
 

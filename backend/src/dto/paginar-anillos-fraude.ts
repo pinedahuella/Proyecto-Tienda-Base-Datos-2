@@ -53,4 +53,6 @@ export const TIPOS_ANILLO_FRAUDE_VALIDOS: TipoAnilloFraude[] = [
   'notas_incoherentes_vendedor',
   'resenas_parecidas_producto',
   'resenas_parecidas_vendedor',
+  'resena_positiva_cancelada',
+  'resenas_negativas_canceladas_vendedor',
 ];

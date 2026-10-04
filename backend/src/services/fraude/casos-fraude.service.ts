@@ -36,6 +36,7 @@ const SQL_FUENTE_DEL_TIPO = `(SELECT CASE fu.fuente_senal_fraude_nombre
            WHEN 'clickhouse' THEN 'eventos'
            WHEN 'login' THEN 'login'
            WHEN 'elastic' THEN 'elastic'
+           WHEN 'postgres' THEN 'postgres'
            ELSE 'grafo' END
            FROM fuente_senal_fraude fu
           WHERE fu.id_fuente_senal_fraude = t.id_fuente_senal_fraude)`;

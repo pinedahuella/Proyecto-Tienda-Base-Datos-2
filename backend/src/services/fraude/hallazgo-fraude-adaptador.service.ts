@@ -46,6 +46,7 @@ const TIPOS_SOLO_ALERTA = [
   'notas_incoherentes_vendedor',
   'resenas_parecidas_producto',
   'resenas_parecidas_vendedor',
+  'resenas_negativas_canceladas_vendedor',
 ];
 
 /**
@@ -60,6 +61,7 @@ const FUENTE_POR_CATALOGO: Record<string, FuenteHallazgo> = {
   clickhouse: 'eventos',
   login: 'login',
   elastic: 'elastic',
+  postgres: 'postgres',
 };
 
 interface FilaSenal {

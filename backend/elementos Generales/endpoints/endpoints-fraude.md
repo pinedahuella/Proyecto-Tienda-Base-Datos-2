@@ -1071,8 +1071,9 @@ el texto de las reseñas en Elasticsearch (`mesh_comentarios`): una cuenta con
 5 o más reseñas que tienen una "gemela" suya (otra casi igual, coseno 0,92) **y**
 que son el **30 %** o más de sus reseñas de 100 caracteres o más, en los
 últimos 180 días (desde 2026-10-04 por porcentaje; antes un grupo de 5 de al
-menos 40 caracteres). Una señal por cuenta (`clave` = su id). Corre cada 15 min y
-no tiene chequeo acotado por reseña. Ver
+menos 40 caracteres). Una señal por cuenta (`clave` = su id). Corre cada 15 min y, desde 2026-10-04, también
+se evalúa **al escribir cada reseña** (ver "Chequeo inmediato de las señales de
+texto" más abajo). Ver
 `plan pendiente/resenas-repetidas.md`. Y su hermano `AnilloDeTextoDetectorService`
 (tipo `anillo_de_texto`, también fuente `elastic`): 3 o más cuentas distintas con
 reseñas casi iguales (de 100 caracteres o más desde 2026-10-04) sobre el mismo
@@ -1081,6 +1082,37 @@ no por porcentaje; una señal por anillo (`clave` = sus cuentas ordenadas, unida
 `plan pendiente/anillo-de-texto.md`. Sus señales salen en esta lista y en
 `detalle-grafo` como las demás (la lista de reseñas de la evidencia se consulta
 en el grafo igual).
+
+**Chequeo inmediato de las señales de texto (desde 2026-10-04).** Las cuatro
+señales de texto (`resenas_repetidas`, `resenas_parecidas_*`, `anillo_de_texto` y
+`notas_incoherentes_*`) ya no esperan al worker de 15 minutos: al escribir una
+reseña, `ResenasService.crear` lanza **sin esperar** (`void`, igual que los
+anillos del grafo) `ChequeoTextoInmediatoService`, que (1) **indexa ya** la reseña
+en `mesh_comentarios` (`EventoComentarioSyncService.procesarAhora`, con su vector
+de Ollama), (2) **la valora ya** (`ValoracionComentariosService.valorarAhora`) y
+(3) **evalúa solo esa reseña** en las cuatro señales, en paralelo. La respuesta de
+`POST /resenas` no espera nada de esto. Si algo falla (Ollama o Elasticsearch
+caídos, un detector), no se reintenta ahí: el evento queda en la cola y los workers
+periódicos lo recogen en su próxima pasada. Cada detector corta pronto si la reseña
+nueva no puede cambiar su resultado (para `resenas_*` y `anillo_de_texto`, si no
+tiene una gemela; para `notas_incoherentes_*`, si no es contradictoria), así que no
+gasta CPU del backend en cada reseña. Ver `plan pendiente/chequeo-texto-inmediato.md`.
+
+**Desde 2026-10-04 hay dos más, de reseñar y cancelar la compra**
+(`ResenasCanceladasDetectorService`, familia `patron_resenas`, **fuente nueva
+`postgres`**): el comprador paga, reseña y cancela el pedido (se le reembolsa)
+poco después. Una "devolución" en este sistema es `cancelar_pedido()` sobre un
+pedido `comprado`; la reseña se queda y la compra que la justificaba ya no existe.
+`resena_positiva_cancelada` (clave = id de la cuenta): una reseña de 4-5 estrellas
+cuya compra se canceló dentro de las **72 horas** siguientes; **una sola vez ya es
+señal fuerte** (`TIPOS_FUERTES`, 20 puntos, entra a los casos).
+`resenas_negativas_canceladas_vendedor` (clave = id del vendedor): **5 o más**
+reseñas de 1-2 estrellas con compra cancelada; es del vendedor y no de una oferta,
+y es solo alerta (no forma casos); el vendedor sale en `cuentas` como `victima` y
+quienes reseñaron y cancelaron como `autor`. No cuenta una reseña cuyo autor tiene
+otra compra vigente del producto. Se dispara al **cancelar un pedido**
+(`PedidosService.cancelarPedido`, sin esperar) y cada 15 min. Ver
+`plan pendiente/resenas-canceladas.md`.
 
 **Desde 2026-10-04 hay dos más, de reseñas copiadas**
 (`ResenasParecidasDetectorService`, fuente `elastic`, familia `patron_resenas`):
@@ -1136,7 +1168,7 @@ reglas que el resto del proyecto). Dos filtros opcionales e independientes:
 - `estado=pendiente|revisada|descartada` -- reusa el mismo catálogo y las
   mismas funciones de validación que `alertas-login`
   (`validarFiltroEstadoAlerta`), sin duplicar nada.
-- `tipo=mutuo|ciclo|reiterado|cadena_abierta|satelites|persistente|favor_devuelto|coordinados|reputacion_expres|resenas_repetidas|anillo_de_texto|notas_incoherentes_cuenta|notas_incoherentes_producto|notas_incoherentes_vendedor|resenas_parecidas_producto|resenas_parecidas_vendedor`
+- `tipo=mutuo|ciclo|reiterado|cadena_abierta|satelites|persistente|favor_devuelto|coordinados|reputacion_expres|resenas_repetidas|anillo_de_texto|notas_incoherentes_cuenta|notas_incoherentes_producto|notas_incoherentes_vendedor|resenas_parecidas_producto|resenas_parecidas_vendedor|resena_positiva_cancelada|resenas_negativas_canceladas_vendedor`
   (`anillo_en_el_tiempo`, B.4, no está porque no se persiste como caso propio).
 - sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
   ordenados por `ultima_vez_confirmado_activo DESC` (los que siguen activos
@@ -1196,7 +1228,7 @@ de un admin. Detalle completo del razonamiento en
 
 ```json
 { "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
-{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, cadena_abierta, satelites, persistente, favor_devuelto, coordinados, reputacion_expres, resenas_repetidas, anillo_de_texto, notas_incoherentes_cuenta, notas_incoherentes_producto, notas_incoherentes_vendedor, resenas_parecidas_producto, resenas_parecidas_vendedor", "payload": null }
+{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, cadena_abierta, satelites, persistente, favor_devuelto, coordinados, reputacion_expres, resenas_repetidas, anillo_de_texto, notas_incoherentes_cuenta, notas_incoherentes_producto, notas_incoherentes_vendedor, resenas_parecidas_producto, resenas_parecidas_vendedor, resena_positiva_cancelada, resenas_negativas_canceladas_vendedor", "payload": null }
 ```
 
 ### 401 / 403
@@ -1791,3 +1823,50 @@ de 39 caracteres.
 Las 97 reseñas locales originales miden menos de 100 caracteres: no producen
 señales de texto. Las señales viejas de `resenas_repetidas` de las cuentas 3 y 7
 (del generador) siguen en la base; el detector no cierra señales.
+
+### Pruebas -- hechas el 2026-10-04 (reseñas canceladas)
+
+Contra el servidor y la base local, con sesión de admin real. 12 cuentas de prueba
+(`zz_can_*`) y 13 pedidos reales armados con `agregar_linea`, `comprar_pedido` y
+`cancelar_pedido` sobre ofertas existentes (vendedores 4 y 2), ya borrados junto con
+sus reseñas, señales, casos, movimientos de stock, eventos y nodos del grafo; el
+stock de las ofertas volvió a su valor (3: 24, 7: 33).
+
+| Situación de prueba | Resultado |
+|---|---|
+| Reseña de 5 estrellas y cancela la compra | `resena_positiva_cancelada` (una sola vez basta), 1 reseña de evidencia; caso propio de **20 puntos**, la cuenta como **núcleo** |
+| Reseña de 3 estrellas y cancela | **sin señal** (el 3 no cuenta) |
+| Reseña de 5 estrellas y **no** cancela | **sin señal** |
+| Dos compras del mismo producto, reseña de 5 estrellas, cancela **una** | **sin señal** (la otra compra la justifica) |
+| Reseña de 5 estrellas escrita hace 5 días, cancela hoy | **sin señal** (pasaron más de 72 horas) |
+| 6 compradores distintos, reseña de 1 o 2 estrellas y cancelan, al vendedor 2 | tras la cancelación 1 a 4, **sin señal**; tras la 5, `resenas_negativas_canceladas_vendedor` con 5 reseñas; tras la 6, la misma señal con 6 (no se duplica) |
+| Cuentas de esa señal | `mesh_tienda:victima` y los 5-6 compradores como `autor` |
+| Worker periódico (`detectar`) después | encuentra lo mismo, **sin duplicar** (1 positiva, 1 vendedor) |
+| Cancelar un pedido **por la API** (`POST /comprador/pedidos/:id/cancelar`) | la señal positiva aparece **sola a los 500 ms**, sin llamar al detector |
+| `GET .../alertas-resenas?tipo=resena_positiva_cancelada` y `...=resenas_negativas_canceladas_vendedor` | `200`; la positiva con su cuenta, la del vendedor con las 7 cuentas |
+| Adaptador de casos | la señal positiva **entra** (casos de 20 puntos); la del vendedor **no** entra a ningún caso |
+| `npx tsc --noEmit` y `npx eslint` sobre los archivos tocados | limpios |
+
+### Pruebas -- hechas el 2026-10-04 (chequeo inmediato de texto)
+
+Contra el servidor y la base local. 13 cuentas de prueba (`zz_tx_*`): 10 sembradas por
+SQL con historial y 3 que se registraron, entraron y **escribieron la reseña por la API
+real** (`POST /resenas`, con pedido pagado). El historial de cada escenario quedó **por
+debajo** de la regla (4 de 5 copias, 4 de 5 contradictorias, etc.) y se esperó a que los
+workers periódicos lo indexaran y valoraran (32 reseñas); antes de las reseñas por la
+API no había ninguna señal. Todo se borró al terminar, el stock volvió a su valor y el
+grafo cuadra.
+
+| Reseña escrita por la API | Resultado |
+|---|---|
+| Quinta copia de una plantilla en una cuenta con 12 reseñas (5 de 13 = 38 %) | `resenas_repetidas` de la cuenta, **a los ~2,1 s** de escribirla |
+| Quinta copia de otra plantilla, de una quinta cuenta, sobre el vendedor 4 / producto 1 | `resenas_parecidas_vendedor` (5 de 11), `resenas_parecidas_producto` (5 de 11) y `anillo_de_texto` (5 cuentas), **a los ~2,1 s** |
+| Quinta reseña mala con 5 estrellas en una cuenta con 10 reseñas (5 de 11 = 45 %) | `notas_incoherentes_cuenta` y `notas_incoherentes_vendedor` (la tienda, 5 de ~24), **a los ~2,6 s** |
+| Reseña normal (distinta, buena, 5 estrellas) | **ninguna señal nueva**; el chequeo corta sin gastar |
+| Respuesta de `POST /resenas` | 201 en **15 a 32 ms**: no espera la cadena |
+| `total_detecciones` de cada señal | **1** en todas: las puso el chequeo inmediato y no el worker de 15 min |
+| Log del backend | un solo evento indexado y un solo valorado por reseña, sin advertencias |
+| `npx tsc --noEmit` y `npx eslint` sobre los archivos tocados | limpios |
+
+No se probó apagar Ollama o Elasticsearch para ver el camino de fallo; está en el código
+(`ChequeoTextoInmediatoService` no lanza y deja la reseña a los workers).

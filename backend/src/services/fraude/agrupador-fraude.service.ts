@@ -20,6 +20,8 @@ const TIPOS_FUERTES = new Set([
   'reiterado',
   'satelites',
   'coordinados',
+  // Reseñar y cancelar la compra (se reembolsa): una sola vez ya basta.
+  'resena_positiva_cancelada',
 ]);
 
 /**

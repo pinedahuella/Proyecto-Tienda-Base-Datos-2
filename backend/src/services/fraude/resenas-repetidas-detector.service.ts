@@ -123,6 +123,23 @@ export class ResenasRepetidasDetectorService {
     }
   }
 
+  /**
+   * El chequeo de UNA reseña recien escrita: la llama `ChequeoTextoInmediatoService`
+   * cuando ya esta indexada. Solo mira a su autor, y solo hace la cuenta completa
+   * si la reseña nueva tiene una gemela: sin ella, el porcentaje de la cuenta no
+   * pudo subir y no hay nada nuevo que evaluar. Un error se loguea; lo recoge la
+   * proxima pasada de `detectar()`.
+   */
+  async revisarInmediato(idUsuario: number, idResena: number): Promise<void> {
+    try {
+      await this.revisarCuenta(idUsuario, idResena);
+    } catch (error) {
+      this.logger.warn(
+        `chequeo acotado de resenas repetidas interrumpido (resena ${idResena}): ${mensajeCorto(error)}`,
+      );
+    }
+  }
+
   private filtroBase(): object[] {
     return [
       { term: { es_respuesta: false } },
@@ -157,8 +174,15 @@ export class ResenasRepetidasDetectorService {
     return agregado?.buckets ?? [];
   }
 
-  /** Devuelve 1 si la cuenta quedo como senal, 0 si no. */
-  private async revisarCuenta(idUsuario: number): Promise<number> {
+  /**
+   * Devuelve 1 si la cuenta quedo como senal, 0 si no. Con `idResenaNueva`
+   * (chequeo inmediato) corta antes de la cuenta de todas contra todas si esa
+   * reseña no se analiza (corta, sin vector) o no tiene gemela.
+   */
+  private async revisarCuenta(
+    idUsuario: number,
+    idResenaNueva?: number,
+  ): Promise<number> {
     const respuesta = await elasticClient.search<DocumentoComentario>({
       index: INDICE,
       size: ResenasRepetidasDetectorService.MAX_RESENAS_POR_CUENTA,
@@ -189,6 +213,21 @@ export class ResenasRepetidasDetectorService {
     }
     if (resenas.length < ResenasRepetidasDetectorService.MIN_RESENAS) {
       return 0;
+    }
+
+    if (idResenaNueva != null) {
+      const nueva = resenas.find((r) => r.idResena === idResenaNueva);
+      if (
+        nueva == null ||
+        !resenas.some(
+          (r) =>
+            r !== nueva &&
+            cosenoEntre(nueva, r) >=
+              ResenasRepetidasDetectorService.UMBRAL_COSENO,
+        )
+      ) {
+        return 0;
+      }
     }
 
     // Una resena se marca si tiene una gemela: otra con coseno sobre el umbral.

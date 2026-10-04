@@ -17,7 +17,9 @@ export type TipoAnilloFraude =
   | 'notas_incoherentes_producto'
   | 'notas_incoherentes_vendedor'
   | 'resenas_parecidas_producto'
-  | 'resenas_parecidas_vendedor';
+  | 'resenas_parecidas_vendedor'
+  | 'resena_positiva_cancelada'
+  | 'resenas_negativas_canceladas_vendedor';
 
 /**
  * Una cuenta del anillo, derivada -- NO hay tabla `anillo_fraude_cuenta`:

@@ -163,6 +163,31 @@ export class ResenasParecidasDetectorService {
     }
   }
 
+  /**
+   * El chequeo de UNA reseña recien escrita: la llama `ChequeoTextoInmediatoService`
+   * cuando ya esta indexada. Mira solo el vendedor y el producto de esa reseña, y
+   * solo hace la cuenta completa si la reseña nueva tiene una gemela de otra
+   * cuenta: sin ella el porcentaje no pudo subir. Un error se loguea; lo recoge
+   * la proxima pasada de `detectar()`.
+   */
+  async revisarInmediato(
+    idVendedor: number,
+    idProducto: number,
+    idResena: number,
+  ): Promise<void> {
+    try {
+      for (const dimension of DIMENSIONES) {
+        const clave =
+          dimension.campo === 'id_vendedor' ? idVendedor : idProducto;
+        await this.revisar(dimension, clave, idResena);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `chequeo acotado de resenas parecidas interrumpido (resena ${idResena}): ${mensajeCorto(error)}`,
+      );
+    }
+  }
+
   private filtroBase(): object[] {
     return [
       { term: { es_respuesta: false } },
@@ -199,8 +224,16 @@ export class ResenasParecidasDetectorService {
     return agregado?.buckets ?? [];
   }
 
-  /** Devuelve 1 si el vendedor o producto quedo como senal, 0 si no. */
-  private async revisar(dimension: Dimension, clave: number): Promise<number> {
+  /**
+   * Devuelve 1 si el vendedor o producto quedo como senal, 0 si no. Con
+   * `idResenaNueva` (chequeo inmediato) corta antes de la cuenta de todas contra
+   * todas si esa reseña no se analiza o no tiene gemela.
+   */
+  private async revisar(
+    dimension: Dimension,
+    clave: number,
+    idResenaNueva?: number,
+  ): Promise<number> {
     const respuesta = await elasticClient.search<DocumentoComentario>({
       index: INDICE,
       size: ResenasParecidasDetectorService.MAX_RESENAS,
@@ -246,22 +279,31 @@ export class ResenasParecidasDetectorService {
 
     const msEntre =
       ResenasParecidasDetectorService.DIAS_ENTRE_RESENAS * MS_POR_DIA;
-    const { conGemela, similitudes } = marcarConGemela(
-      resenas.length,
-      (a, b) => {
-        const ra = resenas[a];
-        const rb = resenas[b];
-        if (ra.idUsuario === rb.idUsuario) {
-          return null; // una cuenta repetida es la senal de la cuenta
-        }
-        if (Math.abs(ra.fecha - rb.fecha) > msEntre) {
-          return null;
-        }
-        const coseno = cosenoEntre(ra, rb);
-        return coseno >= ResenasParecidasDetectorService.UMBRAL_COSENO
-          ? coseno
-          : null;
-      },
+    const sonGemelas = (
+      ra: ResenaParaComparar,
+      rb: ResenaParaComparar,
+    ): number | null => {
+      if (ra.idUsuario === rb.idUsuario) {
+        return null; // una cuenta repetida es la senal de la cuenta
+      }
+      if (Math.abs(ra.fecha - rb.fecha) > msEntre) {
+        return null;
+      }
+      const coseno = cosenoEntre(ra, rb);
+      return coseno >= ResenasParecidasDetectorService.UMBRAL_COSENO
+        ? coseno
+        : null;
+    };
+
+    if (idResenaNueva != null) {
+      const nueva = resenas.find((r) => r.idResena === idResenaNueva);
+      if (nueva == null || !resenas.some((r) => sonGemelas(nueva, r) != null)) {
+        return 0;
+      }
+    }
+
+    const { conGemela, similitudes } = marcarConGemela(resenas.length, (a, b) =>
+      sonGemelas(resenas[a], resenas[b]),
     );
     // `resenas` viene de la mas reciente a la mas vieja: la evidencia se queda
     // con las mas recientes.

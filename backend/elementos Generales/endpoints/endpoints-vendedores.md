@@ -35,6 +35,7 @@ de restricción, y no son lo mismo:
 | `GET /vendedor/productos/:id/historial` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `POST /vendedor/productos` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `POST /vendedor/productos/propuestas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin — el producto nace `en_revision` |
+| `POST /vendedor/productos/sugerencias` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin — no crea nada (200), sugiere categoría y productos parecidos |
 | `GET /vendedor/productos/propuestas` | vendedor **o** admin (2 o 3) | cualquier vendedor o admin — solo las **suyas** |
 | `GET /vendedor/productos/propuestas/sin-aprobar` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
 | `GET /vendedor/productos/propuestas/todas` | vendedor **o** admin (2 o 3) | **`tienda@mesh.com` o admin** |
@@ -622,6 +623,133 @@ sin sesión → 401, un admin también puede proponer; las validaciones dan los
 mismos 400 que `POST /vendedor/productos` sin escribir nada; y forzando un
 choque de id se confirmó que el producto de Mongo se deshace y la respuesta
 es 409.
+
+---
+
+## POST /vendedor/productos/sugerencias (agregado 2026-10-04)
+
+Las **sugerencias al proponer un producto**: antes de enviar la propuesta, el
+vendedor escribe el nombre (y la descripción si ya la tiene) y se le dice **en
+qué categoría suele ir** algo así y **qué productos parecidos ya hay** en el
+catálogo, para que vea si el suyo ya existe y no proponga un duplicado.
+(`SugerenciasPropuestaService`, `controllers/vendedores/sugerencias-propuesta.controller.ts`,
+`dto/sugerencias-propuesta.ts`.)
+
+**Cualquier vendedor o admin**, igual que `POST /vendedor/productos/propuestas`
+(el guard de la clase deja fuera a los compradores, 403). Es **POST** porque la
+descripción puede ser larga, pero **no crea ni cambia nada**: responde **200**, no
+201. No evita que se proponga: es una ayuda, la decisión es de quien propone.
+
+```json
+{
+  "nombre": "Laptop ligera para estudiantes",
+  "descripcion": "Computadora portatil de 14 pulgadas con 8 GB de memoria y bateria de larga duracion."
+}
+```
+
+| Campo | Obligatorio | Regla |
+| --- | --- | --- |
+| `nombre` | Sí | Las mismas reglas que el nombre de un producto: no vacío, hasta 200 caracteres (`validarNombreProducto`) |
+| `descripcion` | No | Un texto. Ayuda a acertar la categoría. Solo se usan los primeros 1000 caracteres |
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Sugerencias obtenidas",
+  "payload": {
+    "categorias": [
+      { "id_categoria": 7, "nombre": "Laptops", "puntaje": 0.91, "productos_parecidos": 7, "mejor_similitud": 0.776 }
+    ],
+    "productos_similares": [
+      { "id_producto": 6, "nombre": "Laptop Bastion 16", "id_categoria": 7, "categoria": "Laptops", "precio_tienda": 10052, "similitud": 0.776, "posible_duplicado": false }
+    ]
+  }
+}
+```
+
+**`categorias`** -- hasta 3, de la más a la menos probable. `id_categoria` es el
+que se manda en `POST /vendedor/productos/propuestas`, así que el formulario puede
+preseleccionar la primera.
+
+| Campo | Qué es |
+|---|---|
+| `puntaje` | Qué parte del parecido total de los productos cercanos aporta esta categoría, de 0 a 1. Por aquí se ordenan. Una categoría que aporta menos de 0,25 no se devuelve (salvo la primera) |
+| `productos_parecidos` | Cuántos de los productos cercanos son de esta categoría |
+| `mejor_similitud` | El parecido (coseno, de 0 a 1) del producto más cercano de esa categoría |
+
+**`productos_similares`** -- hasta 5 productos **activos**, del más al menos
+parecido, uno por grupo de copias (`vector_grupo`, igual que
+`GET /productos/:id/similares`).
+
+| Campo | Qué es |
+|---|---|
+| `similitud` | El parecido con lo escrito, de 0 a 1 (coseno) |
+| `posible_duplicado` | `true` si el nombre es **igual** (sin mayúsculas, tildes ni espacios de más) o la similitud es de **0,85 o más** |
+
+Si nada del catálogo se parece (coseno menor a 0,5), las dos listas vienen
+**vacías** y sigue siendo `200`.
+
+### 400 / 401 / 403 / 503
+
+```json
+{ "ok": false, "mensaje": "El nombre del producto es obligatorio", "payload": null }
+{ "ok": false, "mensaje": "El nombre del producto no puede tener mas de 200 caracteres", "payload": null }
+{ "ok": false, "mensaje": "La descripcion debe ser un texto", "payload": null }
+{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con Ollama", "payload": null }
+```
+
+`403` para un comprador. El `503` es porque, sin vector, no hay nada que sugerir
+(a diferencia de la búsqueda híbrida, aquí no hay un sustituto razonable). Un
+fallo de Elasticsearch da `503` con su mensaje de siempre.
+
+### Cómo funciona
+
+El texto (`"nombre. descripción"`) se convierte en vector con el mismo modelo de
+Ollama que usan los productos, y se piden los 30 productos **activos** más
+cercanos (kNN en `mesh_productos`). Esos vecinos se usan dos veces:
+
+- **Categorías:** cada vecino con coseno de 0,5 o más "vota" por su categoría,
+  ponderado por su parecido; la que junta más, va primero.
+- **Productos similares:** los mismos vecinos, uno por grupo de copias.
+
+El vector del catálogo se hizo con `"nombre. Categoria X. descripción"`; aquí la
+categoría no se conoce (es justo lo que se sugiere), así que el texto no la lleva.
+Por eso un nombre idéntico a uno existente da solo ~0,80 de coseno: de ahí que el
+**nombre igual cuente aparte** para `posible_duplicado`. Con el nombre **y** la
+descripción de un producto existente el coseno sube a ~0,98.
+
+### Probado en vivo -- 2026-10-04
+
+Con sesión de admin, contra el catálogo local:
+
+| Caso | Resultado |
+|---|---|
+| `Laptop ligera para estudiantes` + descripción | `Laptops` con 0,91 (la otra, `Telefonos`, no llega a 0,25 y se descarta); 5 laptops parecidas, ninguna duplicada |
+| `Audifonos inalambricos con cancelacion de ruido` | `Audifonos` 0,88; 4 audífonos y un teléfono |
+| `telefono   BRUMA mini` (mayúsculas y espacios de más) | `posible_duplicado: true` por el nombre (coseno 0,75) |
+| `Telefono Bruma Mini` + su descripción real | `posible_duplicado: true`, coseno 0,98 |
+| `Teléfono pequeño compacto` + la descripción de un producto existente | `posible_duplicado: true`, coseno 0,93 |
+| `Laptop Nimbo 13` (nombre exacto de uno existente) | `posible_duplicado: true`; las otras laptops (0,63 a 0,65) no |
+| `xyzqwk` | `200`, las dos listas vacías |
+| Sin `nombre` / nombre de 201 caracteres / `descripcion` numérica | `400` los tres |
+| Sin sesión | `401` |
+
+### Límites conocidos
+
+- **Si el catálogo no tiene algo parecido, sugiere la categoría "menos mala".**
+  `Maceta de ceramica para suculentas` devolvió `Cocina` (0,44): el catálogo no
+  tiene plantas, y el modelo ve "cerámica" y piensa en cocina. Cuando
+  `mejor_similitud` es bajo (menos de ~0,6) la sugerencia es débil; el formulario
+  puede mostrarla con menos énfasis.
+- **Los umbrales (0,5 para parecido, 0,85 para duplicado, 0,25 por categoría) se
+  calibraron a mano** con productos del catálogo local, no con datos reales.
+- Solo mira productos **activos**: no avisa si ya hay una propuesta igual en
+  revisión de otro vendedor.
+- Cuesta una llamada a Ollama por consulta (hasta 8 s de espera); el formulario no
+  debería pedirla en cada tecla, sino al terminar el nombre o al salir del campo.
 
 ---
 

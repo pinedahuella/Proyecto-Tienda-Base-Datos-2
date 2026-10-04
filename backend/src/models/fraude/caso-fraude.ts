@@ -54,7 +54,7 @@ export interface CuentaCasoFraude {
  * `fuente` sale de la fuente del tipo de la senal. */
 export interface EvidenciaCasoFraude {
   id_evidencia_caso_fraude: number;
-  fuente: 'grafo' | 'eventos' | 'login' | 'elastic';
+  fuente: 'grafo' | 'eventos' | 'login' | 'elastic' | 'postgres';
   tipo: string;
   clave: string;
   puntos: number;

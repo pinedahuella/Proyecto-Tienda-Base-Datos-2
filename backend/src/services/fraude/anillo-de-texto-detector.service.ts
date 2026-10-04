@@ -130,9 +130,32 @@ export class AnilloDeTextoDetectorService {
     }
   }
 
+  /**
+   * El chequeo de UNA reseña recien escrita: la llama `ChequeoTextoInmediatoService`
+   * cuando ya esta indexada. Solo mira a su vendedor, y solo hace la comparacion
+   * completa si la reseña nueva tiene una gemela de otra cuenta: sin ella no pudo
+   * formarse un anillo nuevo. Un error se loguea; lo recoge la proxima pasada de
+   * `detectar()`.
+   */
+  async revisarInmediato(idVendedor: number, idResena: number): Promise<void> {
+    try {
+      const porVendedor = await this.resenasPorVendedor(String(idVendedor));
+      const filas = porVendedor.get(String(idVendedor));
+      if (filas != null) {
+        await this.revisarVendedor(String(idVendedor), filas, idResena);
+      }
+    } catch (error) {
+      this.logger.warn(
+        `chequeo acotado de anillos de texto interrumpido (resena ${idResena}): ${mensajeCorto(error)}`,
+      );
+    }
+  }
+
   /** Las resenas de la ventana de cada vendedor con `MIN_CUENTAS` o mas autores
-   * distintos -- el resto no puede formar un anillo. */
-  private async resenasPorVendedor(): Promise<Map<string, FilaResena[]>> {
+   * distintos -- el resto no puede formar un anillo. Con `idVendedor`, solo el. */
+  private async resenasPorVendedor(
+    idVendedor?: string,
+  ): Promise<Map<string, FilaResena[]>> {
     const { rows } = await pool.query<FilaResena>(
       `WITH recientes AS (
          SELECT r.id_resena, r.id_usuario, r.id_usuario_vendedor,
@@ -147,10 +170,12 @@ export class AnilloDeTextoDetectorService {
                 SELECT id_usuario_vendedor FROM recientes
                  GROUP BY id_usuario_vendedor
                 HAVING count(DISTINCT id_usuario) >= $2)
+          AND ($3::bigint IS NULL OR id_usuario_vendedor = $3)
         ORDER BY id_usuario_vendedor, fecha_publicacion DESC`,
       [
         AnilloDeTextoDetectorService.VENTANA_DIAS,
         AnilloDeTextoDetectorService.MIN_CUENTAS,
+        idVendedor ?? null,
       ],
     );
     const porVendedor = new Map<string, FilaResena[]>();
@@ -162,10 +187,15 @@ export class AnilloDeTextoDetectorService {
     return porVendedor;
   }
 
-  /** Devuelve cuantos anillos quedaron como senal en este vendedor. */
+  /**
+   * Devuelve cuantos anillos quedaron como senal en este vendedor. Con
+   * `idResenaNueva` (chequeo inmediato) corta antes de la comparacion de todas
+   * contra todas si esa reseña no se analiza o no tiene gemela de otra cuenta.
+   */
   private async revisarVendedor(
     idVendedor: string,
     filas: FilaResena[],
+    idResenaNueva?: number,
   ): Promise<number> {
     const recientes = filas.slice(
       0,
@@ -179,9 +209,10 @@ export class AnilloDeTextoDetectorService {
 
     const msEntre =
       AnilloDeTextoDetectorService.DIAS_ENTRE_RESENAS * MS_POR_DIA;
-    const grupos = agruparPorParecido(resenas.length, (a, b) => {
-      const ra = resenas[a];
-      const rb = resenas[b];
+    const sonGemelas = (
+      ra: ResenaDelAnillo,
+      rb: ResenaDelAnillo,
+    ): number | null => {
       if (ra.idUsuario === rb.idUsuario) {
         return null; // una cuenta repetida es la otra senal
       }
@@ -192,7 +223,18 @@ export class AnilloDeTextoDetectorService {
       return coseno >= AnilloDeTextoDetectorService.UMBRAL_COSENO
         ? coseno
         : null;
-    });
+    };
+
+    if (idResenaNueva != null) {
+      const nueva = resenas.find((r) => r.idResena === idResenaNueva);
+      if (nueva == null || !resenas.some((r) => sonGemelas(nueva, r) != null)) {
+        return 0;
+      }
+    }
+
+    const grupos = agruparPorParecido(resenas.length, (a, b) =>
+      sonGemelas(resenas[a], resenas[b]),
+    );
 
     let anillos = 0;
     for (const grupo of grupos) {

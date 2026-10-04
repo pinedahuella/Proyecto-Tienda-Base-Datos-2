@@ -25,6 +25,12 @@ export function media(valores: number[]): number {
   return valores.reduce((s, v) => s + v, 0) / valores.length;
 }
 
+/** Elasticsearch puntua una busqueda kNN con coseno como `(1 + coseno) / 2`:
+ * esto lo devuelve al coseno, de -1 a 1. */
+export function cosenoDePuntaje(puntaje: number | null | undefined): number {
+  return 2 * (puntaje ?? 0) - 1;
+}
+
 /** A 3 decimales, para guardarlo en el `detalle` de una senal. */
 export function redondear(valor: number): number {
   return Math.round(valor * 1000) / 1000;

@@ -55,6 +55,12 @@ export async function registrarAnilloFraude(datos: {
    * producto. Su `clave` no debe ser solo digitos (`p12`): las cuentas salen de
    * los numeros de la `clave`, y un id de producto no es una cuenta. */
   productos?: number[];
+  /**
+   * Las cuentas de la senal con su rol, cuando no son las de la `clave` (que
+   * entran todas como `autor`). Por ejemplo, una senal sobre un vendedor al que
+   * le hacen algo: el vendedor `victima` y quienes lo hacen `autor`.
+   */
+  cuentas?: { idUsuario: number; rol: 'autor' | 'victima' }[];
   /** Las metricas del hallazgo (horas, minutos de vida, regularidad, etc.)
    * -- solo `favor_devuelto`/`reputacion_expres`/`persistente` la traen hoy
    * (ver `PatronesFraudeDetectorService`); el resto se queda con el `{}` por
@@ -98,6 +104,7 @@ async function registrarSenalDelAnillo(
     clave: string;
     resenas: number[];
     productos?: number[];
+    cuentas?: { idUsuario: number; rol: 'autor' | 'victima' }[];
     detalle?: Record<string, unknown>;
   },
 ): Promise<void> {
@@ -178,6 +185,21 @@ async function registrarSenalDelAnillo(
   // el conjunto de cuentas que detecto el detector: no de un join con las
   // resenas, que metia al vendedor en `coordinados` (B.6), donde es un
   // tercero ajeno al patron y no un sospechoso.
+  if (datos.cuentas != null) {
+    for (const cuenta of datos.cuentas) {
+      await cliente.query(
+        `INSERT INTO senal_fraude_cuenta (id_senal_fraude, id_usuario, id_rol_cuenta_senal)
+         SELECT $1::bigint, u.id_usuario, rol.id_rol_cuenta_senal
+           FROM usuarios u
+           JOIN rol_cuenta_senal rol ON rol.rol_cuenta_senal_nombre = $3
+          WHERE u.id_usuario = $2
+         ON CONFLICT DO NOTHING`,
+        [idSenal, cuenta.idUsuario, cuenta.rol],
+      );
+    }
+    return;
+  }
+
   const idsCuentas = datos.clave.split('-').filter((id) => /^\d+$/.test(id));
   await cliente.query(
     `INSERT INTO senal_fraude_cuenta (id_senal_fraude, id_usuario, id_rol_cuenta_senal)

@@ -103,15 +103,44 @@ export class EventoComentarioSyncService {
   /** Una respuesta con menos caracteres que esto no se vectoriza. */
   private static readonly MIN_CARACTERES_RESPUESTA = 15;
 
-  private procesando = false;
+  /** La pasada en curso, o `null` si no hay ninguna. */
+  private pasada: Promise<void> | null = null;
 
   @Interval('evento-comentario', EventoComentarioSyncService.INTERVALO_MS)
   async sincronizar(): Promise<void> {
-    if (this.procesando) {
+    if (this.pasada != null) {
       return;
     }
-    this.procesando = true;
+    await this.arrancarPasada();
+  }
 
+  /**
+   * Indexa YA lo pendiente, sin esperar el reloj de 10 s, y termina cuando el
+   * documento ya se puede buscar. La llama `ResenasService` justo despues de
+   * crear una resena, igual que `GrafoSyncService.procesarAhora()`. Si ya hay
+   * una pasada en curso, espera a que termine y hace OTRA: la resena nueva pudo
+   * quedar fuera de la que ya habia empezado.
+   *
+   * Si Ollama o Elasticsearch fallan no lanza nada: el evento queda pendiente y
+   * lo toma la proxima pasada del reloj.
+   */
+  async procesarAhora(): Promise<void> {
+    while (this.pasada != null) {
+      await this.pasada;
+    }
+    await this.arrancarPasada();
+  }
+
+  private arrancarPasada(): Promise<void> {
+    const pasada = this.unaPasada().finally(() => {
+      this.pasada = null;
+    });
+    this.pasada = pasada;
+    return pasada;
+  }
+
+  /** Una pasada completa. No lanza: un fallo se loguea y queda para la proxima. */
+  private async unaPasada(): Promise<void> {
     try {
       const { rows: eventos } = await pool.query<EventoPendiente>(
         `SELECT id_evento, id_comentario, fecha::text AS fecha
@@ -167,6 +196,9 @@ export class EventoComentarioSyncService {
       if (operaciones.length > 0) {
         const respuesta = await elasticClient.bulk({
           operations: operaciones.flatMap((o) => o.lineas),
+          // Que lo indexado se pueda buscar al terminar: lo que viene despues
+          // (la valoracion y los detectores) lo busca de inmediato.
+          refresh: 'wait_for',
         });
         respuesta.items.forEach((item, k) => {
           const evento = operaciones[k].evento;
@@ -194,8 +226,6 @@ export class EventoComentarioSyncService {
       this.logger.warn(
         `worker de comentarios: corrida interrumpida -- ${mensajeCorto(error)}`,
       );
-    } finally {
-      this.procesando = false;
     }
   }
 
