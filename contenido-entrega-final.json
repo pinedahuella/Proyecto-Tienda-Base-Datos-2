@@ -9,10 +9,10 @@
       "p": "Mesh es nuestra implementación de TiendaYa, una tienda en línea en la que varios vendedores comparten un mismo catálogo. Al llegar a esta entrega el sistema ya reparte sus datos entre seis motores. PostgreSQL es la fuente de verdad del dinero y del stock, MongoDB guarda el catálogo y su historial, Redis el carrito y la oferta limitada, Neo4j las relaciones entre cuentas y reseñas, ClickHouse los eventos en el tiempo y Elasticsearch el índice de búsqueda."
      },
      {
-      "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores guardados en el mismo PostgreSQL, y el control de acceso en Redis, con un usuario por servicio y permisos acotados. El informe incluye además el diagrama de arquitectura final y la retrospectiva sobre las decisiones de todo el semestre."
+      "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector y hoy viven en Elasticsearch, junto al texto de cada producto, y el control de acceso en Redis, con un usuario por servicio y permisos acotados. El informe incluye además el diagrama de arquitectura final, lo que se sumó después con esos mismos vectores y la retrospectiva sobre las decisiones de todo el semestre."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 251 commits sobre `main` entre el 15 de agosto y el 25 de septiembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 291 commits sobre `main` entre el 15 de agosto y el 4 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre. Esta versión, del 6 de octubre, la pone al día con lo que cambió después."
      }
     ]
    },
@@ -32,7 +32,7 @@
          "Funcionalidad de recomendación semántica",
          "5",
          "2",
-         "3105 productos con vector, función de búsqueda por similitud con índice HNSW y prueba con 15 comprobaciones en verde"
+         "3105 productos con vector en Elasticsearch, búsqueda de vecinos con filtro y prueba con 15 comprobaciones en verde"
         ],
         [
          "Control de acceso configurado en un componente NoSQL",
@@ -44,13 +44,13 @@
          "Diagrama de arquitectura final, completo y correcto",
          "3",
          "4",
-         "Diagrama generado con `docs/generar-arquitectura.py` con los seis motores, el componente vectorial, Ollama y los usuarios de Redis"
+         "Diagrama generado con `docs/generar-arquitectura.py` con los seis motores, los vectores en Elasticsearch, Ollama y los usuarios de Redis"
         ],
         [
          "Documento de retrospectiva",
          "4",
          "5",
-         "Siete decisiones que sostendríamos y seis que replantearíamos, cada una con lo que pasó de verdad"
+         "Siete decisiones que sostendríamos y siete que replantearíamos, cada una con lo que pasó de verdad"
         ],
         [
          "Presentación del proyecto",
@@ -81,11 +81,11 @@
         ],
         [
          "5.2 Componentes de referencia",
-         "Extensión vectorial sobre PostgreSQL, la opción de referencia del enunciado"
+         "Empezó con la extensión vectorial sobre PostgreSQL, la opción de referencia, y pasó a `dense_vector` de Elasticsearch, una alternativa con soporte de vectores que el enunciado admite"
         ],
         [
          "5.3 Registro de decisiones arquitectónicas",
-         "ADR-10 en 2.1 y ADR-11 en 3.1"
+         "ADR-10 en 2.1, su revisión en 2.2 y ADR-11 en 3.1"
         ],
         [
          "5.4 Documentación para levantar el sistema",
@@ -117,13 +117,28 @@
        "filas": [
         [
          "Recomendación semántica",
-         "La ruta que devuelve los parecidos de un producto",
-         "Migración 024, carga de vectores con Ollama, función de similitud, prueba y estante de la ficha"
+         "La ruta de parecidos, el worker que recalcula vectores y la mudanza del vector a Elasticsearch",
+         "Carga de vectores con Ollama, migraciones 024, 027 y 036, mapeo con el vector, copia de los vectores al rehacer el índice, prueba y estante de la ficha"
         ],
         [
          "Control de acceso",
          "Revisión de los comandos de Redis que usa el backend",
          "Usuarios de ACL en `docker-compose.yml`, contraseñas automáticas en el arranque y prueba de acceso"
+        ],
+        [
+         "Búsqueda híbrida y por intención",
+         "Las rutas híbrida, de intención y de sugerencias al proponer",
+         "La página de resultados, el índice de reseñas y lo que se muestra según la similitud"
+        ],
+        [
+         "Fraude en reseñas",
+         "Los detectores de reseñas repetidas, parecidas, con nota que no cuadra y canceladas",
+         "Migraciones 031 a 039, panel de Fraude y demos"
+        ],
+        [
+         "Clasificador de reseñas",
+         "Lo usa para las notas que no cuadran",
+         "Las 480 reseñas escritas, los dos modelos y su verificación"
         ],
         [
          "Arquitectura y retrospectiva",
@@ -150,12 +165,12 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "150"
+         "176"
         ],
         [
          "José David Navichoque Pineda",
          "pinedahuella",
-         "96"
+         "110"
         ],
         [
          "Juan Pablo Torres García",
@@ -165,7 +180,7 @@
         [
          "Total",
          "",
-         "251"
+         "291"
         ]
        ],
        "anchos": [
@@ -173,7 +188,7 @@
         2.4,
         1.2
        ],
-       "leyenda": "Commits por integrante en el historial de git al 25 de septiembre de 2026."
+       "leyenda": "Commits por integrante en el historial de git al 4 de octubre de 2026."
       }
      }
     ]
@@ -184,7 +199,7 @@
   "titulo": "RECOMENDACIÓN SEMÁNTICA DE PRODUCTOS",
   "subsecciones": [
    {
-    "titulo": "2.1. Por qué pgvector y su registro de decisión",
+    "titulo": "2.1. Por qué pgvector primero y su registro de decisión",
     "bloques": [
      {
       "p": "Hasta esta entrega la tienda solo sabía relacionar productos por su categoría o por lo que otros compradores miraron. Dos productos que sirven para lo mismo pero están descritos con otras palabras no se encontraban. El enunciado pide sugerencias basadas en la similitud semántica de la descripción, con representaciones vectoriales."
@@ -199,11 +214,30 @@
        "justificacion": "Por patrón de consulta, buscar los vecinos de un producto entre unos miles es justo lo que un índice HNSW resuelve en milisegundos. Por costo operativo, la imagen `pgvector/pgvector:pg18` venía en el sistema desde la Entrega 1, así que no hubo contenedor nuevo ni otra copia de los identificadores. Por consistencia, el vector vive junto a las ofertas y los pedidos y se puede cruzar con ellos en la misma consulta. Elasticsearch también servía, pero su índice se reconstruye entero cuando cambia el mapeo y los vectores tardan minutos en calcularse. La primera alternativa quedó descartada porque filtrar por campos no mide el significado del texto.",
        "consecuencias": "Ganamos la recomendación sin operar un motor más. Aceptamos que el vector es una copia derivada del texto de MongoDB y hay que recalcularlo cuando ese texto cambia, lo que el ETL resuelve comparando un hash. También que PostgreSQL recibe una consulta más por ficha y que calcular los vectores necesita un modelo local. A millones de productos la decisión se revisaría."
       }
+     },
+     {
+      "p": "Esta decisión se sostuvo hasta el 4 de octubre. La siguiente sección explica por qué la revisamos y dónde quedó el vector."
      }
     ]
    },
    {
-    "titulo": "2.2. Cómo se calcula el vector de cada producto",
+    "titulo": "2.2. La revisión, el vector pasa a Elasticsearch",
+    "bloques": [
+     {
+      "adr": {
+       "id": "ADR-10, revisión",
+       "titulo": "Dónde guardar y consultar los vectores, revisado",
+       "contexto": "Con pgvector, buscar parecidos que estuvieran activos y no fueran copias pedía una tabla aparte con su propia copia de los identificadores y del estado. El buscador de texto vivía en otro motor, y la búsqueda híbrida necesitaba el vector junto al texto y las facetas. Las reseñas también iban a tener vector, para buscar por intención y para detectar textos casi iguales.",
+       "alternativas": "Dejar pgvector como fuente y copiar el vector a Elasticsearch solo para la búsqueda. Mudar el vector a Elasticsearch. No cambiar nada y no hacer la búsqueda híbrida.",
+       "decision": "Mudar el vector a Elasticsearch. Cada producto lleva el suyo en su documento de `mesh_productos` y cada reseña en el índice nuevo `mesh_comentarios`. La migración 036 retira `producto_vector` y `productos_similares()`.",
+       "justificacion": "En Elasticsearch el vector vive en el mismo documento que el nombre, el estado y las facetas, así que una sola consulta los combina y no hay una segunda copia que se pueda quedar atrás. Copiarlo desde pgvector dejaba dos lugares con el mismo dato, que es justo lo que la retrospectiva marca como el error que más se repitió. El tipo `dense_vector` y la búsqueda de vecinos vienen en la licencia básica.",
+       "consecuencias": "Se pierde poder cruzar el vector con las compras en una consulta SQL, que hoy nadie usa. Rehacer el índice ya no pierde los vectores, porque antes se guardan en `mesh_productos_vectores_previos` y vuelven sin pasar por Ollama, en 48 segundos y no en 7 minutos. La imagen de PostgreSQL con pgvector se queda, porque cambiarla toca el volumen de datos."
+      }
+     }
+    ]
+   },
+   {
+    "titulo": "2.3. Cómo se calcula el vector de cada producto",
     "bloques": [
      {
       "p": "El texto de cada producto se arma con su nombre, su categoría y su descripción, leídos de MongoDB. Ese texto se convierte en un vector de 768 números con el modelo `paraphrase-multilingual`, que entiende español y está entrenado para que dos frases con el mismo sentido den vectores cercanos aunque usen palabras distintas."
@@ -213,43 +247,89 @@
      },
      {
       "vin": [
-       "`etl/cargar_vectores.ps1` guarda el md5 del texto con que se calculó cada vector. En un arranque normal solo recalcula los productos cuyo texto cambió y tarda unos segundos.",
+       "`etl/cargar_vectores.ps1` guarda en el índice el md5 del texto con que se calculó cada vector, en `vector_hash`. En un arranque normal solo recalcula los productos cuyo texto cambió y tarda unos segundos.",
        "Entre un arranque y otro, el backend recalcula cada tres horas los productos que un vendedor creó o editó, con el mismo texto y el mismo md5. Si solo cambiaron las variantes o el estado, no le pide nada a Ollama.",
        "La primera carga de los 3105 productos tardó 413 segundos.",
-       "El generador de datos de prueba copia productos con otro sufijo en el nombre y la misma descripción. Sin cuidarlo, los seis parecidos de un teléfono eran seis copias del mismo teléfono. La columna `grupo` guarda el md5 de la categoría y la descripción sin el nombre, y la consulta devuelve un solo producto por grupo."
+       "El generador de datos de prueba copia productos con otro sufijo en el nombre y la misma descripción. Sin cuidarlo, los seis parecidos de un teléfono eran seis copias del mismo teléfono. El campo `vector_grupo` guarda el md5 de la categoría y la descripción sin el nombre, y la consulta devuelve un solo producto por grupo."
       ]
      }
     ]
    },
    {
-    "titulo": "2.3. La consulta de productos parecidos",
+    "titulo": "2.4. La consulta de productos parecidos",
     "bloques": [
      {
-      "p": "La función `productos_similares(id, limite)` compara el vector del producto con los demás por distancia coseno y devuelve los más cercanos con su similitud, de 0 a 1. Deja fuera al propio producto, a los inactivos y a las copias del mismo grupo."
+      "p": "El backend lee el vector del producto y le pide a Elasticsearch sus vecinos más cercanos por coseno. El filtro va dentro de la misma búsqueda, solo productos activos, sin el propio producto y sin las copias de su grupo. Después se queda con el mejor de cada grupo y corta en seis."
      },
      {
-      "codigo": "SELECT v.id_producto, v.vector <=> base.vector AS distancia\n  FROM producto_vector v, base\n WHERE v.id_producto <> p_id_producto\n   AND v.activo\n   AND v.grupo IS DISTINCT FROM base.grupo\n ORDER BY v.vector <=> base.vector\n LIMIT 200",
-      "leyenda": "El núcleo de productos_similares() en migrations/024_vectores_productos.sql. El operador <=> es la distancia coseno de pgvector."
+      "codigo": "knn {\n  field          vector\n  query_vector   el vector del producto\n  k              200\n  num_candidates 400\n  filter         estado activo,\n                 sin el propio producto ni su vector_grupo\n}",
+      "leyenda": "El núcleo de la búsqueda de parecidos en backend/src/services/productos/similares.service.ts."
      },
      {
-      "p": "El índice HNSW recorre un grafo de vecinos y no compara contra todo el catálogo. Por defecto solo mira 40 candidatos, y con los filtros de activo y de grupo podían quedar menos de los pedidos, así que la función sube ese número a 200 solo mientras corre. Después elige el mejor de cada grupo y corta en el límite pedido."
+      "p": "Elasticsearch puntúa el coseno como uno más el coseno entre dos, así que el backend lo devuelve a la escala de 0 a 1 que usaba pgvector. La ficha enseña el mismo porcentaje que antes de la mudanza."
      },
-     {"p": "Al revisar el plan encontramos que la primera versión de la función nunca usaba el índice. Comparaba contra el vector base con un JOIN, y un índice HNSW solo sirve para ordenar por distancia a un vector ya conocido. La migración 027 lee primero ese vector y ordena por distancia a él. Aun así, el planificador estimaba que recorrer la tabla salía más barato, y lo medimos sobre los 3103 productos activos."},
-     {"tabla": {"cabecera": ["Camino", "Tiempo total", "Por producto", "Los seis iguales a la búsqueda exacta"], "filas": [["Comparar contra todos", "100 s", "32 ms", "Es la búsqueda exacta"], ["Índice HNSW", "11,7 s", "3,8 ms", "3099 de 3103 productos"]], "anchos": [1.9, 1.1, 1.1, 2.2], "leyenda": "Medición del 26 de septiembre sobre la misma base. En los cuatro casos distintos cambia un solo producto de los seis."}},
-     {"p": "La estimación estaba mal por un factor de ocho, así que la función fija enable_seqscan en off solo mientras corre. No toca ninguna otra consulta y no prohíbe recorrer la tabla, solo la encarece para que el planificador prefiera el índice. La demo enseña el plan de adentro de la función con auto_explain, y ahí aparece el índice idx_producto_vector_hnsw."}
+     {
+      "p": "Con pgvector aprendimos a revisar si el índice de vecinos se usa de verdad. La primera versión de la función nunca lo usaba, y la migración 027 lo corrigió, de 32 a 3,8 ms por producto. La misma revisión encontró un problema en el índice de reseñas. Con textos repetidos muchas veces, el grafo de vecinos se atascaba y no encontraba las mejores, así que ese índice compara contra todas las reseñas."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Búsqueda para zapatos cómodos para caminar todo el día",
+        "Mejor reseña encontrada"
+       ],
+       "filas": [
+        [
+         "Grafo de vecinos con 100 candidatos",
+         "0,30, una reseña repetida que no habla de zapatos"
+        ],
+        [
+         "Grafo de vecinos con 400 candidatos",
+         "0,81"
+        ],
+        [
+         "Comparar contra todas",
+         "0,81"
+        ]
+       ],
+       "anchos": [
+        3.4,
+        3.1
+       ],
+       "leyenda": "Medición del 4 de octubre en el índice de reseñas. Por eso el índice de reseñas compara contra todas."
+      }
+     }
     ]
    },
    {
-    "titulo": "2.4. Evidencia y dónde se ve",
+    "titulo": "2.5. Evidencia y dónde se ve",
     "bloques": [
      {
-      "p": "La prueba `python pruebas/recomendacion_semantica.py` corre contra las bases en funcionamiento y dio 15 comprobaciones en verde. Revisa que cada producto de MongoDB tenga su vector y que no sobre ninguno, que los parecidos compartan categoría mucho más seguido de lo que daría el azar, con ese azar medido sobre los mismos productos como control, que la función no devuelva el propio producto ni productos inactivos, y que un producto sin vector devuelva una lista vacía sin romper nada."
+      "p": "La prueba `python pruebas/recomendacion_semantica.py` corre contra las bases en funcionamiento y dio 15 comprobaciones en verde, ya con el vector en Elasticsearch. Revisa que cada producto de MongoDB tenga su vector y que no sobre ninguno, que los parecidos compartan categoría mucho más seguido de lo que daría el azar, con ese azar medido sobre los mismos productos como control, que la búsqueda no devuelva el propio producto ni productos inactivos, y que un producto sin vector devuelva una lista vacía sin romper nada. `node pruebas/vectores_worker.cjs` comprueba con 5 en verde que el worker del backend calcula el mismo vector que el ETL."
      },
      {
       "p": "Al modelo nunca se le dice la categoría como dato aparte, solo la lee dentro del texto. Que los parecidos caigan en la misma categoría es la señal de que el vector captura de qué trata el producto."
      },
      {
-      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo sin pasar por el backend está `.\\demo-entrega-final.ps1 -Parte semantica`, que busca un producto por nombre, muestra sus seis parecidos con el porcentaje de similitud y el plan de PostgreSQL con el índice en uso. Al final le pide lo mismo a la ruta y comprueba que devuelve los mismos productos en el mismo orden."
+      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo en clase están `.\\demo-entrega-final.ps1 -Parte semantica` y `-Parte vectores`, que buscan un producto por nombre, muestran sus seis parecidos con el porcentaje de similitud y comprueban que la ruta devuelve los mismos productos en el mismo orden."
+     }
+    ]
+   },
+   {
+    "titulo": "2.6. Búsqueda híbrida y por intención",
+    "bloques": [
+     {
+      "p": "Con el vector en el mismo índice que el texto, el buscador sumó dos formas de buscar. La híbrida corre la búsqueda por palabras y la búsqueda por significado de la frase, y mezcla las dos listas por posición con la fusión por rango recíproco, con la constante habitual de 60. Así una frase puede encontrar un producto aunque no comparta ninguna palabra con su nombre."
+     },
+     {
+      "p": "La búsqueda por intención compara la frase con el vector de los productos y también con el de las reseñas, y enseña lo que cuentan otros compradores. Los dos usan el mismo modelo de Ollama que la recomendación, así que la frase de la persona se convierte en vector en la misma máquina."
+     },
+     {
+      "vin": [
+       "La página de resultados solo enseña un producto con similitud de 0,6 o más y una reseña con 0,5 o más. Por debajo, la búsqueda por significado siempre devolvería algo, aunque no tenga relación.",
+       "La híbrida todavía no agrupa las copias del generador de datos como sí lo hace la recomendación, y eso queda como mejora.",
+       "Al proponer un producto, el vendedor recibe sugerencias de categoría y de productos parecidos con el mismo vector.",
+       "Se enseñan con las partes `hibrida`, `intencion` y `sugerencias` de `.\\demo-entrega-final.ps1`."
+      ]
      }
     ]
    }
@@ -376,12 +456,12 @@
     "titulo": "4.1. El diagrama de arquitectura",
     "bloques": [
      {
-      "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el flujo 11, que lleva el texto de cada producto de MongoDB a Ollama y guarda su vector en PostgreSQL, y la nota de los tres usuarios de Redis."
+      "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el flujo 11, que lleva el texto de cada producto de MongoDB a Ollama y guarda su vector en Elasticsearch, la cola `evento_comentario` que lleva cada reseña con su vector al índice de reseñas, y la nota de los tres usuarios de Redis."
      },
      {
       "figura": {
        "archivo": "diagrama-arquitectura.png",
-       "leyenda": "Arquitectura final de Mesh al 25 de septiembre de 2026, generada con docs/generar-arquitectura.py.",
+       "leyenda": "Arquitectura final de Mesh al 4 de octubre de 2026, generada con docs/generar-arquitectura.py.",
        "ancho": 9.0,
        "horizontal": true
       }
@@ -402,7 +482,7 @@
        "filas": [
         [
          "PostgreSQL 18",
-         "Cuentas, ofertas, stock, pedidos, pagos, reseñas, reglas de descuento, alertas y vectores",
+         "Cuentas, ofertas, stock, pedidos, pagos, reseñas, reglas de descuento, señales de fraude y la copia del catálogo que usa el checkout",
          "Fase inicial",
          "El dinero y el stock necesitan una transacción atómica"
         ],
@@ -432,15 +512,15 @@
         ],
         [
          "Elasticsearch",
-         "Índice de búsqueda del catálogo y copia del registro de inicios de sesión",
+         "Índice de búsqueda con el vector de cada producto, reseñas con su vector y copia del registro de inicios de sesión",
          "Entrega 3",
-         "Tolerancia a errores, relevancia y agregaciones para las facetas"
+         "Tolerancia a errores, relevancia, facetas y vecinos más cercanos en una sola consulta"
         ],
         [
          "pgvector",
-         "Un vector de 768 números por producto",
+         "Guardó los vectores del 25 de septiembre al 4 de octubre",
          "Entrega final",
-         "Vecinos más cercanos sin un motor aparte"
+         "Se retiró al mudar el vector, ver 2.2"
         ]
        ],
        "anchos": [
@@ -453,7 +533,7 @@
       }
      },
      {
-      "p": "El diagrama entidad relación se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones."
+      "p": "El diagrama entidad relación se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones. Hoy son 76 tablas y 97 llaves foráneas, de las migraciones 001 a 039."
      }
     ]
    },
@@ -461,7 +541,124 @@
     "titulo": "4.3. Cómo se levanta el sistema completo",
     "bloques": [
      {
-      "p": "Todo se levanta con `.\\arrancar.ps1`. El script prende los contenedores, corre las migraciones, carga los datos, reconstruye el catálogo en MongoDB, el índice de búsqueda y el grafo, calcula los vectores que falten y al final cuenta lo que quedó en cada base contra PostgreSQL en lugar de suponer que salió bien. Las contraseñas nuevas de Redis se agregan solas al `.env`. El backend y el frontend se arrancan después con `npm run start:dev` y `npm run dev`. La guía completa está en `docs/instalacion.md`."
+      "p": "Todo se levanta con `.\\arrancar.ps1`. El script prende los contenedores, corre las migraciones, carga los datos, reconstruye el catálogo en MongoDB, el índice de búsqueda, el índice de reseñas y el grafo, pone al día la copia del catálogo en PostgreSQL, calcula los vectores que falten y al final cuenta lo que quedó en cada base contra PostgreSQL en lugar de suponer que salió bien. Las contraseñas nuevas de Redis se agregan solas al `.env`. El backend y el frontend se arrancan después con `npm run start:dev` y `npm run dev`. La guía completa está en `docs/instalacion.md`."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "titulo": "FRAUDE EN RESEÑAS Y CLASIFICADOR",
+  "subsecciones": [
+   {
+    "titulo": "5.1. Un solo modelo de señales",
+    "bloques": [
+     {
+      "p": "En la revisión de la Entrega 3 el profesor señaló que cada familia de detección guardaba su resultado a su manera. Desde el 30 de septiembre todas guardan lo mismo, una señal en `senal_fraude` con su tipo, su fuente, su evidencia y cuántas veces se volvió a detectar. Las señales se agrupan en casos que el administrador revisa, confirma o descarta. Las migraciones 031 a 033 copiaron las tablas anteriores una sola vez."
+     },
+     {
+      "p": "Con los vectores de las reseñas en Elasticsearch, y con la reseña de nuevo en PostgreSQL, salieron señales que antes no se podían calcular."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Señal",
+        "Qué detecta",
+        "Fuente",
+        "Migración"
+       ],
+       "filas": [
+        [
+         "Reseñas repetidas",
+         "Una cuenta con 5 o más reseñas casi iguales, coseno de 0,92 o más",
+         "Elasticsearch",
+         "035"
+        ],
+        [
+         "Anillo de texto",
+         "Tres o más cuentas con reseñas casi iguales sobre el mismo vendedor en 30 días",
+         "Elasticsearch",
+         "035"
+        ],
+        [
+         "Notas incoherentes por cuenta, producto y vendedor",
+         "Texto malo con 4 o 5 estrellas o bueno con 1 o 2, según el clasificador, 5 o más",
+         "Elasticsearch",
+         "037"
+        ],
+        [
+         "Reseñas parecidas por producto y por vendedor",
+         "5 o más reseñas con una gemela de otra cuenta en 30 días",
+         "Elasticsearch",
+         "038"
+        ],
+        [
+         "Reseña positiva con compra cancelada",
+         "Una reseña de 4 o 5 estrellas y la compra cancelada dentro de 72 horas",
+         "PostgreSQL",
+         "039"
+        ],
+        [
+         "Reseñas negativas canceladas por vendedor",
+         "5 o más reseñas de 1 o 2 estrellas contra un vendedor con la compra cancelada, que sale como víctima",
+         "PostgreSQL",
+         "039"
+        ]
+       ],
+       "anchos": [
+        2.0,
+        2.6,
+        1.1,
+        0.8
+       ],
+       "leyenda": "Las señales nuevas por el texto de las reseñas."
+      }
+     },
+     {
+      "p": "La demo `.\\demo-resenas-texto.ps1` provoca cada una por separado, y cada señal aparece sola a los tres o cuatro segundos, porque se revisan al momento y no solo cada 15 minutos. Como control sembramos 480 reseñas escritas a mano en 40 cuentas con su compra pagada, y ninguna de esas cuentas sale en una señal."
+     }
+    ]
+   },
+   {
+    "titulo": "5.2. El clasificador de reseñas",
+    "bloques": [
+     {
+      "p": "La señal de nota incoherente necesita saber si el texto de una reseña es bueno o malo sin mirar las estrellas. Para eso entrenamos dos modelos sobre el mismo vector de 768 números, una regresión logística y una red neuronal pequeña de 768 entradas, 32 neuronas y una salida. Los dos están escritos a mano con numpy, y la regresión da lo mismo que la de scikit-learn."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Conjunto",
+        "Reseñas",
+        "Resultado"
+       ],
+       "filas": [
+        [
+         "Entrenamiento y prueba",
+         "200 buenas y 200 malas escritas a mano",
+         "Los dos aciertan el 100 por ciento de la prueba"
+        ],
+        [
+         "Casos difíciles que nunca entrenan",
+         "80, con sarcasmo, sin tildes y expresiones locales",
+         "La red acierta 91 por ciento y la regresión 90"
+        ],
+        [
+         "Sarcasmo",
+         "3",
+         "Los dos fallan las tres"
+        ]
+       ],
+       "anchos": [
+        2.0,
+        2.3,
+        2.2
+       ],
+       "leyenda": "Medición del 2 de octubre, en clasificador-resenas."
+      }
+     },
+     {
+      "p": "Por el sarcasmo y por los casos difíciles, la señal nunca bloquea sola. Solo se marca cuando la probabilidad de texto malo pasa de 0,8 con cuatro o cinco estrellas, o baja de 0,2 con una o dos, y va al administrador para que la revise."
      }
     ]
    }
@@ -471,7 +668,7 @@
   "titulo": "RETROSPECTIVA",
   "subsecciones": [
    {
-    "titulo": "5.1. Cómo la hicimos",
+    "titulo": "6.1. Cómo la hicimos",
     "bloques": [
      {
       "p": "Para cada decisión miramos qué prometía su registro y qué pasó después, con lo medido en las pruebas y lo que tuvimos que arreglar. Una decisión se sostiene si lo que prometió se cumplió y lo que aceptó como costo no nos cobró más de la cuenta. Se replantea si tuvimos que rodearla o si hoy la tomaríamos distinto con lo que sabemos."
@@ -482,7 +679,7 @@
     ]
    },
    {
-    "titulo": "5.2. Lo que sostendríamos",
+    "titulo": "6.2. Lo que sostendríamos",
     "bloques": [
      {
       "tabla": {
@@ -495,7 +692,7 @@
         [
          "El dinero y el stock en PostgreSQL, sin migrar las ofertas ni los pagos (ADR-2 y ADR-8)",
          "Es la única pieza donde un error cuesta dinero, y una transacción local es fácil de probar",
-         "Cero sobreventas y cero descuadres sobre 555 ofertas. La prueba de falla del checkout dio 31 en verde y ninguna caída cobra a medias"
+         "Cero sobreventas y cero descuadres sobre 555 ofertas. La prueba de falla del checkout dio 32 en verde y ninguna caída cobra a medias"
         ],
         [
          "La oferta limitada con un script Lua en Redis",
@@ -518,9 +715,9 @@
          "Se reconstruye entero en el arranque y la prueba de facetas dio 19 en verde"
         ],
         [
-         "pgvector sobre el mismo PostgreSQL (ADR-10)",
-         "Resolvió la recomendación sin un contenedor ni un ETL más",
-         "3105 vectores y la prueba de recomendación con 15 en verde"
+         "Calcular los vectores con Ollama en la misma máquina",
+         "Ningún texto sale a un servicio externo y no hay costo por consulta",
+         "3105 vectores y el worker del backend da el mismo vector que el ETL, con distancia cero"
         ],
         [
          "Un solo comando de arranque que cuenta lo que quedó",
@@ -542,7 +739,7 @@
     ]
    },
    {
-    "titulo": "5.3. Lo que replantearíamos",
+    "titulo": "6.3. Lo que replantearíamos",
     "bloques": [
      {
       "tabla": {
@@ -579,8 +776,13 @@
         ],
         [
          "El checkout leyendo de MongoDB sin que MongoDB esté en la transacción",
-         "La prueba de falla encontró que con MongoDB caído no se puede comprar, aunque el pedido se cobra solo en PostgreSQL",
-         "Que el checkout lea precio y stock solo de PostgreSQL y que MongoDB sea solo para pintar"
+         "La prueba de falla encontró que con MongoDB caído no se podía comprar. El 1 de octubre copiamos a PostgreSQL lo que el checkout lee y hoy se compra con MongoDB caído",
+         "Que desde la Entrega 1 todo lo que el checkout lee viva en PostgreSQL y MongoDB sea solo para pintar"
+        ],
+        [
+         "Guardar el vector en una tabla aparte de PostgreSQL (ADR-10)",
+         "Filtrar parecidos activos y sin copias pedía otra copia de identificadores y estado, y la búsqueda híbrida necesitaba el vector junto al texto. Lo mudamos a Elasticsearch el 4 de octubre",
+         "Poner el vector desde el principio en el documento que ya se busca, donde están el texto y las facetas"
         ]
        ],
        "anchos": [
@@ -592,12 +794,12 @@
       }
      },
      {
-      "p": "Las seis tienen algo en común. En casi todas una copia terminó comportándose como si fuera la verdad. El identificador de MongoDB, la clave de Redis, el evento que solo existía en ClickHouse. Cuando la copia se pierde o se adelanta, algo que debía reconstruirse se rompe. La regla que sacamos es que cada dato tenga un solo dueño escrito, y que todo lo demás se pueda borrar y volver a calcular sin perder nada."
+      "p": "Las siete tienen algo en común. En casi todas una copia terminó comportándose como si fuera la verdad. El identificador de MongoDB, la clave de Redis, el evento que solo existía en ClickHouse, la tabla de vectores con su propia copia del estado. Cuando la copia se pierde o se adelanta, algo que debía reconstruirse se rompe. La regla que sacamos es que cada dato tenga un solo dueño escrito, y que todo lo demás se pueda borrar y volver a calcular sin perder nada."
      }
     ]
    },
    {
-    "titulo": "5.4. Lo que aprendimos sobre la forma de trabajar",
+    "titulo": "6.4. Lo que aprendimos sobre la forma de trabajar",
     "bloques": [
      {
       "vin": [
@@ -615,10 +817,10 @@
   "titulo": "CONCLUSIONES",
   "subsecciones": [
    {
-    "titulo": "6.1. Conclusiones",
+    "titulo": "7.1. Conclusiones",
     "bloques": [
      {
-      "p": "La recomendación semántica encontró su lugar dentro de la base que ya teníamos. Un índice HNSW sobre 3105 vectores responde sin un motor aparte, y el vector se recalcula solo cuando cambia el texto del producto."
+      "p": "La recomendación semántica empezó en la base que ya teníamos y terminó en Elasticsearch, donde el vector vive junto al texto y las facetas. Esa mudanza abrió la búsqueda híbrida, la búsqueda por intención y las señales de fraude por el texto de las reseñas, todas con el mismo modelo local."
      },
      {
       "p": "El control de acceso en Redis cerró un riesgo que tuvimos todo el semestre sin notarlo. Hoy cada servicio entra con lo justo y la prueba demuestra cada negativa con su control."

@@ -3,7 +3,25 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-04**.
+Ultima actualizacion: **2026-10-06**.
+
+**EMPIEZA AQUI (06-10). Los dos informes, al dia. SIN commitear, sin levantar nada.** Solo se toco el contenido y
+la fecha de los informes, nada de codigo:
+
+```
+Entrega 3       16 paginas. Comprar con MongoDB caido (4.3 reescrita, falla_checkout 32 OK del 01-10), copia
+                del catalogo y cola evento_producto en 3.1 y 3.2, quisiste decir en 2.3, vector en el mapeo,
+                291 commits, 76 tablas y 97 llaves, diagrama al 04-10
+Entrega final   20 paginas. ADR-10 revisado (2.2, el vector pasa a Elasticsearch), consulta kNN de
+                SimilaresService (2.4), busqueda hibrida y por intencion (2.6), seccion 5 nueva con el modelo
+                unico de senales, las senales de resenas (035, 037 a 039) y el clasificador. Retrospectiva con
+                siete y siete; ya no dice pgvector como si siguiera
+Fecha           martes 6 de octubre en las dos portadas (FECHA de los dos generadores). Cambiarla el dia
+                que se entregue
+```
+
+Sin correr tras el 04-10, y lo que el informe da por bueno con la ultima medicion: `busqueda.sh`, `facetas.py`
+(19 OK del 28-09) y los arneses en serie. Correrlos antes de presentar.
 
 **EMPIEZA AQUI (04-10). Los vectores y las resenas viven en Elasticsearch, y las senales de David estan conectadas.
 TODO commiteado y pusheado, todo apagado.** Se jalaron y conectaron tres commits de David, fa3281c, 3305cf3 y

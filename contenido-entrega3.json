@@ -12,7 +12,7 @@
             "p": "La Entrega 3 agrega dos cosas. Un motor de búsqueda que tolera errores de escritura, ordena por relevancia y calcula filtros facetados con sus propias agregaciones, y una estrategia de consistencia para el checkout, que en este punto ya toca varias bases a la vez y puede fallar a medias. Hicimos además la evaluación opcional de un motor NewSQL para los pagos."
           },
           {
-            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 244 commits sobre `main` entre el 15 de agosto y el 25 de septiembre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce."
+            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 291 commits sobre `main` entre el 15 de agosto y el 4 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre. Esta versión, del 6 de octubre, la pone al día con lo que cambió después."
           }
         ]
       },
@@ -44,13 +44,13 @@
                   "Evidencia de la prueba de falla simulada y su manejo",
                   "4",
                   "4",
-                  "Prueba de falla del checkout con 31 comprobaciones en verde, corrida dos veces"
+                  "Prueba de falla del checkout con 32 comprobaciones en verde. Desde el 1 de octubre se compra aunque MongoDB esté caído"
                 ],
                 [
                   "Calidad del informe y del repositorio",
                   "1",
                   "6",
-                  "Diagrama de arquitectura al 25 de septiembre, diagrama entidad relación generado desde la base y arranque en un solo comando"
+                  "Diagrama de arquitectura al 4 de octubre, diagrama entidad relación generado desde la base y arranque en un solo comando"
                 ],
                 [
                   "Evaluación NewSQL para pagos, opcional",
@@ -121,14 +121,19 @@
                   "Mapeo del índice, analizador, ETL desde MongoDB, prueba del buscador y buscador de la cabecera"
                 ],
                 [
+                  "Corrección ortográfica",
+                  "El tal vez quisiste decir, calculado en la misma consulta de búsqueda",
+                  "La línea que lo muestra en la página de resultados"
+                ],
+                [
                   "Filtros facetados",
-                  "La ruta que sirve la consulta",
+                  "La ruta `GET /buscador/productos/facetado`, que lleva la consulta de facetas al backend",
                   "Consulta con agregaciones, su prueba y el panel de filtros de la página de resultados"
                 ],
                 [
                   "Checkout",
-                  "`CarritoService`, el candado, las reservas y los mensajes de error por base caída",
-                  "Función `comprar_carrito()`, documento de consistencia y prueba de falla simulada"
+                  "`CarritoService`, el candado, las reservas, los mensajes de error por base caída y la copia del catálogo en PostgreSQL para comprar sin MongoDB",
+                  "Función `comprar_carrito()`, migraciones 029 y 030 en el arranque, documento de consistencia y prueba de falla simulada"
                 ],
                 [
                   "NewSQL y arquitectura",
@@ -155,12 +160,12 @@
                 [
                   "José Manuel González Corado",
                   "José Manuel González Corado",
-                  "146"
+                  "176"
                 ],
                 [
                   "José David Navichoque Pineda",
                   "pinedahuella",
-                  "93"
+                  "110"
                 ],
                 [
                   "Juan Pablo Torres García",
@@ -170,10 +175,10 @@
                 [
                   "Total",
                   "",
-                  "244"
+                  "291"
                 ]
               ],
-              "leyenda": "Commits por integrante en el historial de git al 25 de septiembre de 2026.",
+              "leyenda": "Commits por integrante en el historial de git al 4 de octubre de 2026.",
               "anchos": [
                 2.4,
                 2.4,
@@ -250,6 +255,11 @@
                   "`precio_desde`, `resenas_promedio`, `stock_total`",
                   "double e integer",
                   "Los rangos de las facetas"
+                ],
+                [
+                  "`vector`, `vector_grupo`, `vector_hash`",
+                  "dense_vector de 768 y keyword",
+                  "La recomendación por significado de la Entrega final, que vive en el mismo documento"
                 ]
               ],
               "anchos": [
@@ -277,6 +287,12 @@
           },
           {
             "p": "Para el autocompletado el mapeo ya trae `nombre.escribiendo`, del tipo `search_as_you_type`. Probamos la consulta con `bool_prefix` sobre ese campo y con lap sugiere solo productos cuyo nombre empieza así, mientras que la búsqueda difusa con el mismo texto trae 507 productos de cualquier tipo. La consulta está en `elastic/pruebas/facetas.py`, en la función `autocompletar()`."
+          },
+          {
+            "p": "Cuando lo escrito no existe en el catálogo, la misma consulta pide una corrección con el `term` suggester sobre el nombre, solo para las palabras que no aparecen en el índice y de tres letras o más. La página de resultados la muestra como tal vez quisiste decir. Con frases de tres palabras o más la corrección sale poco útil, así que ahí no se muestra."
+          },
+          {
+            "p": "Después de esta entrega el buscador sumó una búsqueda híbrida, que mezcla las palabras con el significado de la frase. Se cuenta en el informe de la Entrega final, junto con los vectores que usa."
           }
         ]
       },
@@ -391,9 +407,9 @@
                   "no"
                 ],
                 [
-                  "MongoDB, catálogo",
-                  "Nombres de producto y variante",
-                  "no"
+                  "PostgreSQL, `producto_catalogo` y `variante_catalogo`",
+                  "Nombre, estado y portada de cada variante, copiados de MongoDB",
+                  "se leen en la misma base"
                 ],
                 [
                   "PostgreSQL, `comprar_carrito()`",
@@ -406,9 +422,9 @@
                   "sí"
                 ],
                 [
-                  "MongoDB, campos agregados",
-                  "Stock y ofertas por producto",
-                  "no"
+                  "MongoDB, campos calculados",
+                  "Precio, stock, ofertas y nota por producto, por la cola `evento_producto`",
+                  "no, la cola sí"
                 ],
                 [
                   "Neo4j y Elasticsearch",
@@ -426,6 +442,9 @@
           },
           {
             "p": "La función `comprar_carrito()` de la migración 012 crea el pedido, agrega cada línea y cobra en una sola llamada. Dentro, cada oferta se bloquea con `FOR UPDATE` y siempre en el mismo orden, así dos compras de los mismos productos no se esperan una a la otra para siempre. Si cualquier paso falla no queda ni pedido, ni pago, ni stock descontado."
+          },
+          {
+            "p": "Desde el 1 de octubre MongoDB ya no está en el camino de la compra. Lo que el checkout leía de ahí se copia a PostgreSQL con las migraciones 029 y 030, así que pagar solo necesita PostgreSQL y Redis. La sección 4.3 cuenta cómo se llegó a eso."
           }
         ]
       },
@@ -477,8 +496,8 @@
                 ],
                 [
                   "Los números del catálogo en MongoDB quedan viejos",
-                  "Se recalculan al final y el ETL los rehace",
-                  "ventana aceptada"
+                  "Cola `evento_producto` llenada por triggers en la misma transacción y un worker que los recalcula",
+                  "reintento idempotente"
                 ],
                 [
                   "El grafo de Neo4j queda viejo",
@@ -492,8 +511,8 @@
                 ],
                 [
                   "MongoDB cae durante el checkout",
-                  "Responde 503 antes de escribir nada",
-                  "todo o nada"
+                  "La compra sale igual con la copia del catálogo en PostgreSQL",
+                  "copia dentro de la transacción"
                 ]
               ],
               "anchos": [
@@ -505,7 +524,7 @@
             }
           },
           {
-            "p": "Usamos los tres mecanismos que menciona el enunciado. Los reintentos idempotentes cubren el doble cobro y el grafo, la compensación cubre las unidades apartadas de una compra que falla, y la ventana de consistencia eventual cubre todo lo que es copia, con su tiempo declarado."
+            "p": "Usamos los tres mecanismos que menciona el enunciado. Los reintentos idempotentes cubren el doble cobro, el grafo y los números del catálogo, la compensación cubre las unidades apartadas de una compra que falla, y la ventana de consistencia eventual cubre todo lo que es copia, con su tiempo declarado."
           }
         ]
       },
@@ -513,7 +532,7 @@
         "titulo": "3.3. Lo que la estrategia no resuelve",
         "bloques": [
           {
-            "p": "El precio no se congela al agregar al carrito. Se compara al pagar y, si cambió, el sistema pide confirmación en lugar de cobrar distinto sin avisar, pero la garantía fuerte no existe. La nota del catálogo se refresca cuando corre el ETL y no tiene cola propia. Y hay dos repartidores de identificadores de producto, PostgreSQL y el panel del vendedor, que el arranque vigila y avisa cuando el margen se acaba."
+            "p": "El precio no se congela al agregar al carrito. Se compara al pagar y, si cambió, el sistema pide confirmación en lugar de cobrar distinto sin avisar, pero la garantía fuerte no existe. Queda una ventana pequeña en la copia del catálogo, un proceso que muere entre escribir en MongoDB y guardar la copia en PostgreSQL, que el arranque corrige al ponerla al día. Y hay dos repartidores de identificadores de producto, PostgreSQL y el panel del vendedor, que el arranque vigila y avisa cuando el margen se acaba."
           }
         ]
       }
@@ -530,6 +549,9 @@
           },
           {
             "p": "Antes y después de cada escenario cuenta en PostgreSQL los pedidos, los pagos, el kardex y el stock de la oferta, y revisa el carrito en Redis y el candado de checkout."
+          },
+          {
+            "p": "Cada escenario lleva su regla. Con Redis o PostgreSQL parado la compra no debe salir, porque ahí viven el carrito, el dinero y el stock. Con MongoDB parado la compra sí debe salir desde el 1 de octubre, y la prueba falla si no sale."
           }
         ]
       },
@@ -559,9 +581,9 @@
                 ],
                 [
                   "MongoDB parado",
-                  "503, No se pudo conectar con MongoDB",
-                  "Intacto",
-                  "Entero"
+                  "201, comprado",
+                  "Pedido, pago, kardex y stock juntos",
+                  "Se vacía"
                 ],
                 [
                   "PostgreSQL parado",
@@ -582,11 +604,14 @@
                 1.9,
                 1.0
               ],
-              "leyenda": "Prueba de falla del checkout, 31 OK y 0 FALLA, corrida el 6 y el 11 de septiembre."
+              "leyenda": "Prueba de falla del checkout, 32 OK y 0 FALLA, corrida el 1 de octubre."
             }
           },
           {
-            "p": "Ninguna caída cobró a medias. En los tres escenarios PostgreSQL quedó con los mismos pedidos, pagos, kardex y stock que antes, el candado de Redis quedó suelto para reintentar de inmediato, y la persona recibió un mensaje que dice qué base falta. En la segunda corrida quedaron 42 pedidos, 42 pagos y 5666 filas de kardex en los tres escenarios."
+            "p": "Ninguna caída cobró a medias. Con Redis o PostgreSQL parado, PostgreSQL quedó con los mismos pedidos, pagos, kardex y stock que antes, el candado de Redis quedó suelto para reintentar de inmediato y la persona recibió un mensaje que dice qué base falta. Con MongoDB parado la compra salió y las cuatro tablas se movieron juntas, y al volver MongoDB el worker recalculó los productos que quedaron en la cola."
+          },
+          {
+            "p": "Las corridas del 6 y el 11 de septiembre dieron 31 OK con otra respuesta en ese escenario. Con MongoDB parado la compra contestaba 503 y no escribía nada. Esa diferencia es el hallazgo de la sección siguiente."
           }
         ]
       },
@@ -594,7 +619,13 @@
         "titulo": "4.3. El hallazgo",
         "bloques": [
           {
-            "p": "La prueba encontró una dependencia que el documento no tenía escrita. Con MongoDB parado no se puede comprar, aunque MongoDB no participa del COMMIT y solo aporta nombres para la pantalla. No hay inconsistencia, porque no se cobra nada, pero sí una dependencia que se puede aflojar. Quedó como el punto 11 de la tabla de fallas, con la medición y las salidas posibles."
+            "p": "La prueba encontró una dependencia que el documento no tenía escrita. Con MongoDB parado no se podía comprar, aunque MongoDB no participaba del COMMIT y solo aportaba el nombre y el estado de cada variante. No había inconsistencia, porque no se cobraba nada, pero sí una dependencia de disponibilidad."
+          },
+          {
+            "p": "La resolvimos el 1 de octubre. La migración 029 crea `producto_catalogo` y `variante_catalogo` en PostgreSQL con lo que el checkout lee, y el backend la escribe al editar un producto. La 030 agrega la cola `evento_producto`, que llenan triggers de oferta y reseña en la misma transacción, para que un worker recalcule después los números del catálogo en MongoDB. El arranque pone la copia al día en su paso 7e."
+          },
+          {
+            "p": "Después del cambio, el escenario de MongoDB en la prueba exige que la compra salga, y salió. Es el mismo instrumento que encontró el problema, midiendo que ya no está."
           }
         ]
       }
@@ -634,12 +665,12 @@
         "titulo": "6.1. El diagrama de arquitectura",
         "bloques": [
           {
-            "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el índice de búsqueda con su worker, y desde la entrega anterior se sumaron las reglas de descuento, los patrones de reseñas de la familia B y las recomendaciones que se calculan en ClickHouse y se guardan en Redis."
+            "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el índice de búsqueda con su worker. El diagrama está al 4 de octubre, así que también trae la copia del catálogo en PostgreSQL con su cola y lo que sumó la Entrega final."
           },
           {
             "figura": {
               "archivo": "diagrama-arquitectura.png",
-              "leyenda": "Arquitectura de Mesh al 25 de septiembre de 2026, generada con docs/generar-arquitectura.py.",
+              "leyenda": "Arquitectura de Mesh al 4 de octubre de 2026, generada con docs/generar-arquitectura.py.",
               "ancho": 9.0,
               "horizontal": true
             }
@@ -650,7 +681,7 @@
         "titulo": "6.2. El diagrama entidad relación",
         "bloques": [
           {
-            "p": "PostgreSQL tiene hoy 56 tablas y 73 llaves foráneas. El diagrama se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones."
+            "p": "PostgreSQL tiene hoy 76 tablas y 97 llaves foráneas, de las migraciones 001 a 039. El diagrama se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones."
           }
         ]
       },
@@ -674,7 +705,7 @@
             "p": "El motor de búsqueda resolvió algo que ninguna de las bases anteriores hacía bien, encontrar un producto aunque se escriba mal su nombre, y además calcula los filtros de la página de resultados con sus propias agregaciones. El mapeo se hizo campo por campo y el analizador se eligió mirando nuestros nombres de producto."
           },
           {
-            "p": "En el checkout aprendimos que la consistencia se decide punto por punto. El dinero y el stock quedaron en una sola transacción y todo lo demás tiene un mecanismo declarado. La prueba de falla confirmó que ninguna caída cobra a medias y además encontró una dependencia con MongoDB que no teníamos escrita."
+            "p": "En el checkout aprendimos que la consistencia se decide punto por punto. El dinero y el stock quedaron en una sola transacción y todo lo demás tiene un mecanismo declarado. La prueba de falla confirmó que ninguna caída cobra a medias, encontró una dependencia con MongoDB que no teníamos escrita, y después de quitarla midió que hoy se compra solo con PostgreSQL y Redis."
           },
           {
             "p": "La evaluación de NewSQL terminó en no migrar, y lo sostenemos con los mismos criterios que las decisiones anteriores. A este volumen un motor distribuido resolvería un problema que no tenemos y haría más lento el que sí tenemos."
