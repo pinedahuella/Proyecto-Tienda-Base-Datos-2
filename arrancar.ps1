@@ -2145,6 +2145,30 @@ if ($ProductosPedidos -gt 0) {
         exit 1
     }
 
+    # MONGO VACIO NO ES UN TOPE, ES UN CATALOGO QUE TODAVIA NO SE CARGA.
+    # Con -Reiniciar o -ReiniciarMongo, o en una PC que arranca por primera vez,
+    # este paso llega antes que la seccion 6, y Mongo esta vacio mientras
+    # PostgreSQL ya tiene sus 102. Pasarle 0 al generador lo hacia rechazar el
+    # lote ("max_mongo_producto = 0 va por detras", visto el 2026-10-07 con
+    # -Reiniciar -Productos 1000 en la PC de un amigo). Los ids salen de 1 en
+    # adelante, asi que 0 y 0 solo puede ser una coleccion sin documentos. Sin
+    # documentos no hay ningun producto de solo-Mongo con el que chocar, y la
+    # seccion 6 va a copiar a Mongo todo lo que haya en PostgreSQL, lote
+    # incluido. El tope real es el de PostgreSQL.
+    if ($topeProducto -eq '0' -and $topeVariante -eq '0') {
+        $sqlTopes = "SELECT (SELECT coalesce(max(id_producto), 0) FROM productos) || ' ' || (SELECT coalesce(max(id_producto_variante), 0) FROM productos_variantes)"
+        $topesPg = "$(docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX -c $sqlTopes 2>&1)".Trim()
+        if ($LASTEXITCODE -ne 0 -or $topesPg -notmatch '^(\d+) (\d+)$') {
+            Error1 "MongoDB esta vacio y no se pudo leer por que id va PostgreSQL."
+            Write-Host $topesPg -ForegroundColor Red
+            Error1 "Arranca una vez sin la bandera y repite despues:  .\arrancar.ps1 -Productos $ProductosPedidos"
+            exit 1
+        }
+        $topeProducto = $Matches[1]
+        $topeVariante = $Matches[2]
+        Ok "MongoDB esta vacio, su catalogo se carga mas abajo. Se sigue desde PostgreSQL"
+    }
+
     Ok "Mongo va por el producto $topeProducto y la variante $topeVariante"
 
     # SIN -Semilla SE ELIGE UNA LIBRE, y esta es la decision que hace que la
