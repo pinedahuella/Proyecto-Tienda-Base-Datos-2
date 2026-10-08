@@ -32,7 +32,10 @@ Corrimos todas las pruebas del repo con las bases en tu PC (el detalle esta en
 cdcded8. El 4 esta HECHO: en tu base ya hay anillos `ciclo` y `mutuo`, y
 `multi_cuenta_ip`, y `casos_fraude_fusion.cjs` da 0 FALLA (C1 sigue como
 decision). El 3 sigue igual: el clasificador marca 8 y el detector da 0 en las
-tres variantes. El 1 no se puede ver desde aqui hasta que lo subas. El 2 no se
+tres variantes. El 1 llego en f03636b a las 14:32 y esta HECHO: con una
+conexion sacada del pool y cortada con `pg_terminate_backend`, el proceso deja
+dos WARN "Se perdio una conexion en uso", la siguiente consulta responde y no
+muere. El 2 no se
 ve corrido: tus contenedores arrancaron a las 14:18 y el ultimo pedido es de
 las 12:14.
 
