@@ -32,3 +32,21 @@ export const pool = new Pool({
 pool.on('error', (error) => {
   logger.warn(`Se perdio una conexion en reposo: ${error.message}`);
 });
+
+/**
+ * Lo mismo para las conexiones que estan en uso. El "pool.on('error')" de arriba
+ * solo cubre las que estan en reposo dentro del pool; una sacada con
+ * pool.connect() (transacciones de ofertas, pedidos, fraude, grafo-sync...) no
+ * tiene listener mientras esta afuera, y si la red se corta justo ahi, pg emite
+ * "error" en el Client y Node mata el proceso.
+ *
+ * "connect" se dispara una vez por conexion fisica nueva, asi que el listener
+ * queda puesto toda su vida, dentro y fuera del pool. La consulta que estaba en
+ * curso sigue fallando (y su transaccion se pierde); lo que cambia es que el
+ * backend sigue vivo.
+ */
+pool.on('connect', (cliente) => {
+  cliente.on('error', (error) => {
+    logger.warn(`Se perdio una conexion en uso: ${error.message}`);
+  });
+});
