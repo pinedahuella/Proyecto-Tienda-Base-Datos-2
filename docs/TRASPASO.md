@@ -7,7 +7,9 @@ Ultima actualizacion: **2026-10-08, 16:00**.
 
 **EMPIEZA AQUI (08-10, 16:00). Con el arreglo de Postgres de David (f03636b), todo el repo en verde contra su PC.**
 Backend, frontend y Ollama en la PC de Meme; las seis bases en la de David por Tailscale. Su base ya tiene 1000
-productos exactos (102 curados + 898); en Mongo sobra el 1103, la propuesta rechazada que dejo `busqueda.sh`.
+productos exactos (102 curados + 898). En Mongo esta ademas el 1103, una propuesta rechazada que se deja A PROPOSITO
+para la parte 4 de `busqueda.sh` (sin ella queda SIN MEDIR); a las 16:20 se renombro a "Laptop Quetzal 13" para que
+no diga "prueba" en el panel, y la parte 4 sigue en verde.
 
 ```
 corte real      a las 15:37 hubo un microcorte de Tailscale (timeouts de Postgres y Mongo) y el backend NO se
