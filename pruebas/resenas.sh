@@ -144,7 +144,7 @@ import sys,json; print(len(json.load(sys.stdin)['payload']['puede_calificar']))"
 
 # --- POST resena
 r=$(curl -s -X POST "$API/resenas" -H "Content-Type: application/json" -H "Cookie: $C" \
-     -d "{\"id_producto\":$PRODUCTO,\"correo_vendedor\":\"$VENDEDOR\",\"calificacion\":4,\"comentario\":\"PRUEBA AUTOMATICA -- se borra sola.\"}")
+     -d "{\"id_producto\":$PRODUCTO,\"correo_vendedor\":\"$VENDEDOR\",\"calificacion\":4,\"comentario\":\"PRUEBA AUTOMATICA -- se borra sola al terminar la prueba de resenas.\"}")
 ID_RESENA=$(echo "$r" | campo payload.id_resena)
 ID_COM=$(echo "$r" | campo payload.id_comentario)
 [ -n "$ID_RESENA" ] && OK "POST /resenas (resena $ID_RESENA)" || { FALLA "POST /resenas: $(echo "$r" | campo mensaje)"; }

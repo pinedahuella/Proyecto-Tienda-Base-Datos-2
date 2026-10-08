@@ -125,8 +125,13 @@ titulo "0. Todo arriba"
     && OK "el backend sirve /carrito" || { echo "  El backend no responde en $API."; exit 1; }
 ADMIN=$(entrar "admin@mesh.com" "Admin123")
 [ -n "$ADMIN" ] && OK "sesion de admin" || { echo "  No se pudo entrar como admin."; exit 1; }
+# Por nombre y no contando la familia: desde la 035 a la 039 patron_resenas
+# tambien lleva las senales de texto (resenas repetidas, notas incoherentes...)
+# y ya son 16; los 7 de la familia B siguen siendo estos.
 tipos=$(sql "SELECT count(*) FROM tipo_senal_fraude t JOIN familia_senal_fraude f USING (id_familia_senal_fraude)
-             WHERE f.familia_senal_fraude_nombre = 'patron_resenas';")
+             WHERE f.familia_senal_fraude_nombre = 'patron_resenas'
+               AND t.tipo_senal_fraude_nombre IN ('cadena_abierta', 'satelites', 'persistente', 'anillo_en_el_tiempo',
+                                                  'favor_devuelto', 'coordinados', 'reputacion_expres');")
 [ "$tipos" = "7" ] && OK "la 031 esta aplicada, los 7 tipos de la familia B" || { echo "  Faltan tipos de patron_resenas en tipo_senal_fraude ($tipos de 7). Corre .\\arrancar.ps1."; exit 1; }
 
 

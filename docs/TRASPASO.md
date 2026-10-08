@@ -5,6 +5,34 @@ Son cinco minutos y te ahorra el dia.
 
 Ultima actualizacion: **2026-10-08**.
 
+**EMPIEZA AQUI (08-10, tarde). Las pruebas del repo corridas contra las bases de David.** Todo en verde menos lo
+que depende de sus datos o de su PC. Sin correr: falla_checkout.sh (apaga contenedores, va en la PC de las bases) y
+redis/prueba_concurrencia.sh (usa redis-benchmark dentro del contenedor). No se toco `backend/`:
+
+```
+en verde        carrito 25, resenas 15, recomendaciones 23, tendencias 53, tendencias_avanzadas 28,
+                reglas_descuento 44, reglas_periodo 61, ofertas_paginadas 40 (3 SIN MEDIR, sin pendientes),
+                descuentos 98, carrito_vencimiento 20, oferta_limitada 33 (60 compradores sobre 20 unidades),
+                eventos 31, alertas_login 52, anillos 27, anillos_familia_b 37, etl_mongo 21,
+                casos_fraude_granja 6, los 5 detectores de resenas corren (0 senales), mas_vendidos bien
+por los datos   notas.sh 9 OK y 1 FALLA: un worker del backend ya actualizo la nota antes de correr el ETL
+                (la prueba supone que nadie mas la toca). etl_compras.sh 18 OK y 1 FALLA: la parte 5 pide
+                una devolucion copiada por el ETL y en la base de David la unica la escribio el backend.
+                casos_fraude_fusion.cjs no corre: faltan dos senales de anillo y una multi_cuenta_ip, que
+                en la base de Meme dejaron las demos de fraude
+redis           prueba_carrito.sh: un TTL leido en 12 y no entre 13 y 15, por la latencia de llamar por la
+                red; la renovacion si se ve (de 5 a 12)
+pruebas viejas  resenas.sh mandaba un comentario de menos de 40 letras (la regla es del 04-10);
+                anillos_familia_b.sh contaba 7 tipos en patron_resenas y desde la 035 son 16, ahora busca los
+                7 de la familia B por nombre; etl_compras.sh tenia los pedidos 10, 11 y 18 fijos, ahora si no
+                estan elige otros de lo que copio el ETL
+backend         se cayo tres veces hoy con el mismo error de Postgres (abajo y en BACKEND-PENDIENTE.md)
+```
+
+Como se corrieron desde la PC de Meme: un `docker` falso que corre el comando de cada `docker exec` en esta PC, con
+el ambiente del contenedor y clientes que apuntan a 100.64.42.11 (psql y redis-cli en Node, mongosh 2.3.8 de npm,
+mongodump 100.10.0 y ClickHouse por HTTP). Vivio en la carpeta temporal de la sesion, no en el repo.
+
 **EMPIEZA AQUI (08-10). Todo lo de la Entrega 3 y la final probado con las bases en la PC de David.** Backend,
 frontend y Ollama en la PC de Meme. No se toco `backend/`:
 

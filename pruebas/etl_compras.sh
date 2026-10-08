@@ -65,6 +65,18 @@ ch() {
 }
 pg() { docker exec mesh-postgres psql -U "$DB_USER" -d "$DB_NAME" -qtAX -c "$1" | tr -d '\r'; }
 
+# Los pedidos de la parte 5 son los de la base de Meme (10, 11 y la devolucion
+# del 18). En otra base -- la de David, con su propio historial -- esos ids no
+# tienen filas y la parte no mediria nada. Si los fijos no estan, se eligen de
+# lo que ya copio el ETL (ip '::'), no de lo que escribio el backend, que la
+# parte 6 exige que no se mueva.
+if [ "$(ch "SELECT count() FROM compra_producto WHERE lote = 'real' AND id_pedido IN ($PEDIDOS_BORRADOS)")" = "0" ]; then
+    PEDIDOS_BORRADOS=$(ch "SELECT arrayStringConcat(groupArray(toString(id_pedido)), ', ') FROM (SELECT DISTINCT id_pedido FROM compra_producto WHERE lote = 'real' AND ip = toIPv6('::') ORDER BY id_pedido LIMIT 2)")
+fi
+if [ "$(ch "SELECT count() FROM devolucion_producto WHERE lote = 'real' AND id_pedido = $PEDIDO_DEVOLUCION")" = "0" ]; then
+    PEDIDO_DEVOLUCION=$(ch "SELECT toString(min(id_pedido)) FROM devolucion_producto WHERE lote = 'real' AND ip = toIPv6('::')")
+fi
+
 # Lo que PostgreSQL tiene, por motivo.
 PG_LINEAS="FROM stock_movimiento sm JOIN motivo_movimiento mm USING (id_motivo_movimiento) JOIN oferta o ON o.id_oferta = sm.id_oferta WHERE sm.id_pedido IS NOT NULL AND mm.motivo_nombre ="
 

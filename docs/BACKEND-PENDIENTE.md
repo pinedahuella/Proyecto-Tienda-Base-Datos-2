@@ -4,6 +4,32 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO QUE TE TOCA, 2026-10-08 en la tarde
+
+Corrimos todas las pruebas del repo con las bases en tu PC (el detalle esta en
+`docs/TRASPASO.md`). Lo que queda es tuyo, en este orden:
+
+1. **El corte de Postgres.** Ya tumbo el backend tres veces hoy (10:25, antes
+   de las 11:15 y la del 07-10). Son las tres lineas de `pool.on('connect')` de
+   la seccion del 2026-10-07. Es lo que mas riesgo tiene en la presentacion.
+2. **`falla_checkout.sh` en tu PC.** Apaga y prende los contenedores, asi que
+   solo corre donde estan las bases, y con el backend tambien ahi:
+   ```
+   cd backend ; npm run build ; node dist/main.js     (en otra ventana)
+   bash pruebas/falla_checkout.sh
+   ```
+   Esperado: la linea base compra, sin Redis no compra y avisa, sin MongoDB SI
+   compra (desde 6f89237), sin PostgreSQL no compra, y al volver compra otra vez.
+3. **Notas incoherentes en cero.** El clasificador marca 8 resenas cuya nota no
+   cuadra con el texto (`node pruebas/clasificador_en_elastic.mjs`), pero
+   `NotasIncoherentesDetectorService` da 0 en las tres variantes. Puede ser el
+   minimo por cuenta, producto o vendedor; si es a proposito, nada que hacer.
+4. **Datos para `casos_fraude_fusion.cjs`.** Necesita dos senales de anillo sin
+   cuentas en comun y una `multi_cuenta_ip`. Se siembran con
+   `.\demo-anillo-resenas.ps1` y `.\demo-fraude-login.ps1` en tu PC.
+
+---
+
 ## LO NUEVO DEL 2026-10-08: el corte volvio a pasar, y la hibrida mezcla cualquier cosa
 
 Probado con las bases en tu PC (1102 productos) y el backend en la de Meme.
