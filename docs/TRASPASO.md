@@ -3,7 +3,35 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-08**.
+Ultima actualizacion: **2026-10-08, 16:00**.
+
+**EMPIEZA AQUI (08-10, 16:00). Con el arreglo de Postgres de David (f03636b), todo el repo en verde contra su PC.**
+Backend, frontend y Ollama en la PC de Meme; las seis bases en la de David por Tailscale. Su base ya tiene 1000
+productos exactos (102 curados + 898); en Mongo sobra el 1103, la propuesta rechazada que dejo `busqueda.sh`.
+
+```
+corte real      a las 15:37 hubo un microcorte de Tailscale (timeouts de Postgres y Mongo) y el backend NO se
+                cayo: dejo "Se perdio una conexion en uso" y siguio con el mismo proceso. Antes moria. Tambien
+                probado a mano con pg_terminate_backend sobre una conexion sacada del pool
+en verde        carrito 25, resenas 15, recomendaciones 23, tendencias 53, tendencias_avanzadas 28,
+                reglas_descuento 44, reglas_periodo 61, ofertas_paginadas 40, descuentos 98,
+                carrito_vencimiento 20, oferta_limitada 33, eventos 31, alertas_login 52, anillos 27,
+                anillos_familia_b 37, etl_mongo 21, busqueda 10 (1 SIN MEDIR), casos_fraude_fusion 0 FALLA
+                (con las senales que sembro David), casos_fraude_granja 6, vectores_worker 5,
+                clasificador_en_elastic 3, facetas.py 19, recomendacion_semantica.py 15
+por los datos   notas.sh 9 y 1 (un worker actualiza la nota antes del ETL) y etl_compras.sh 18 y 1 (no hay
+                devolucion copiada por el ETL), los dos igual que en la manana
+de David        falla_checkout.sh en su PC, y NotasIncoherentesDetectorService sigue en 0 contra 8 del
+                clasificador
+```
+
+El `docker` falso de la manana se rehizo en la carpeta temporal de la sesion: `psql` (con `-v`, `:{?var}`, `\set`
+y `\if`, que usa extraer_eventos.sql) y `redis-cli` (con `-x` y `--scan`) en Node, mongosh 2.3.8 de npm,
+mongodump/mongorestore 100.10.0, y `clickhouse-client` por HTTP (con `INSERT ... FORMAT` por stdin). Trampas que
+costaron una vuelta: las pruebas exportan `MSYS_NO_PATHCONV=1`, asi que los clientes necesitan rutas `C:/...`;
+los .js de Mongo leen `/tmp/...` fijo, que para Node en Windows es `C:\tmp` (se resolvio con un junction temporal,
+ya borrado); `alertas_login.sh` y `busqueda.sh` piden `ES=http://100.64.42.11:9200`; y
+`recomendacion_semantica.py` llama a `docker` desde Python, que no ve un script de bash.
 
 **EMPIEZA AQUI (08-10, tarde). Las pruebas del repo corridas contra las bases de David.** Todo en verde menos lo
 que depende de sus datos o de su PC. Sin correr: falla_checkout.sh (apaga contenedores, va en la PC de las bases) y
