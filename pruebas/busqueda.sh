@@ -54,10 +54,12 @@ trap limpiar EXIT
 
 export MSYS_NO_PATHCONV=1
 
-ok=0; fallo=0
+ok=0; fallo=0; sin_medir=0
 
 OK()    { echo "  OK    $1"; ok=$((ok+1)); }
 FALLA() { echo "  FALLA $1"; fallo=$((fallo+1)); }
+# Lo que esta base no deja medir. No es un fallo, pero tampoco un OK.
+SIN_MEDIR() { echo "  SIN MEDIR $1"; sin_medir=$((sin_medir+1)); }
 titulo(){ echo; echo "=============================================================="; echo "$1"; echo "=============================================================="; }
 
 # Los nombres que devuelve una busqueda, uno por linea.
@@ -89,6 +91,14 @@ mongo_cuenta() {
         -u \"\$MONGO_INITDB_ROOT_USERNAME\" -p \"\$MONGO_INITDB_ROOT_PASSWORD\" \
         --authenticationDatabase admin \"\$MONGO_INITDB_DATABASE\" \
         --eval '$1'" 2>/dev/null | tr -d '\r \n'
+}
+
+# Igual que mongo_texto pero con todas las lineas, para listas de ids.
+mongo_lineas() {
+    docker exec "$MONGO" sh -c "mongosh --quiet \
+        -u \"\$MONGO_INITDB_ROOT_USERNAME\" -p \"\$MONGO_INITDB_ROOT_PASSWORD\" \
+        --authenticationDatabase admin \"\$MONGO_INITDB_DATABASE\" \
+        --eval '$1'" 2>/dev/null | tr -d '\r'
 }
 
 # Igual que mongo_cuenta pero para texto: NO se le quitan los espacios, que en
@@ -245,25 +255,30 @@ fi
 titulo "3. ESTAN LOS PRODUCTOS QUE NO TIENEN FILA EN POSTGRESQL"
 
 # Esta es la parte que se rompe si alguien reescribe el extractor contra
-# PostgreSQL. Los tres existen, estan activos y se venden.
-for par in "103:tecnokid" "104:barbuchin" "106:crepas"; do
-    ID="${par%%:*}"
-    NOMBRE="${par##*:}"
+# PostgreSQL. Se buscan en la base que haya, no por id fijo: hasta el
+# 2026-10-08 eran el 103, el 104 y el 106 de la base de Meme, y en otra base
+# (la de David, con el lote de 1000) esos ids son productos del lote que si
+# tienen fila. Una base recien cargada no tiene ninguno, porque solo nacen al
+# crear un producto desde el panel; entonces la parte se marca SIN MEDIR.
+IDS_PG=$(docker exec mesh-postgres psql -U meme -d mesh -qtAc \
+    "SELECT string_agg(id_producto::text, ',') FROM productos" 2>/dev/null | tr -d '\r ')
+SOLO_MONGO=""
+if [ -n "$IDS_PG" ]; then
+    SOLO_MONGO=$(mongo_lineas "db.productos.find({_id:{\$nin:[$IDS_PG]},estado:\"activo\"},{nombre:1}).limit(3).forEach(function(d){print(d._id)})")
+fi
 
-    EN_PG=$(docker exec mesh-postgres psql -U meme -d mesh -qtAc \
-        "SELECT count(*) FROM productos WHERE id_producto = $ID" 2>/dev/null | tr -d '\r ')
+if [ -z "$IDS_PG" ]; then
+    SIN_MEDIR "no se pudo leer la lista de productos de PostgreSQL"
+elif [ -z "$SOLO_MONGO" ]; then
+    SIN_MEDIR "esta base no tiene productos activos que vivan solo en MongoDB (se crean desde el panel)"
+fi
 
+for ID in $SOLO_MONGO; do
     ESTA=$(curl -s -o /dev/null -w '%{http_code}' "$ES/$INDICE/_doc/$ID")
-
-    if [ "$EN_PG" != "0" ]; then
-        echo "  (el $ID ya tiene fila en PostgreSQL, esta prueba dejo de medir lo suyo)"
-        continue
-    fi
-
     if [ "$ESTA" = "200" ]; then
-        OK "el $ID ($NOMBRE) esta en el indice, y NO tiene fila en PostgreSQL"
+        OK "el $ID esta en el indice, y NO tiene fila en PostgreSQL"
     else
-        FALLA "el $ID ($NOMBRE) NO esta en el indice (HTTP $ESTA)"
+        FALLA "el $ID NO esta en el indice (HTTP $ESTA)"
         echo "        Se vende y el buscador diria que no existe."
         echo "        Mira si etl/extraer_busqueda.js dejo de leer de MongoDB."
     fi
@@ -276,8 +291,8 @@ titulo "4. UN PRODUCTO RECHAZADO NO LO VE UN COMPRADOR"
 
 # ESTA PARTE CAMBIO DE REGLA, y por eso cambio de forma.
 #
-# Antes se comprobaba que el 105 NO estuviera en el indice (404), porque el
-# extractor filtraba `estado: activo` y lo rechazado no llegaba a entrar.
+# Antes se comprobaba que el rechazado NO estuviera en el indice (404), porque
+# el extractor filtraba `estado: activo` y lo rechazado no llegaba a entrar.
 #
 # Ahora el indice guarda TODOS los estados, a proposito: un admin necesita
 # poder buscar justo lo que no circula, que es lo que va a revisar. El filtro
@@ -288,28 +303,25 @@ titulo "4. UN PRODUCTO RECHAZADO NO LO VE UN COMPRADOR"
 # un fallo. Lo que hay que medir es la regla de verdad: que el documento SI
 # este, y que la RUTA PUBLICA no lo devuelva. Medir contra Elasticsearch a
 # secas dejaria de medir la regla que protege al comprador.
+#
+# El rechazado se busca en la base que haya. Hasta el 2026-10-08 era el 105
+# fijo, que solo es rechazado en la base de Meme; en otra base el 105 es un
+# producto activo y la prueba daba tres FALLA que no eran del buscador. Sin
+# ningun rechazado (una base recien cargada no tiene), la parte queda SIN
+# MEDIR: se consigue proponiendo un producto como vendedor y rechazandolo
+# desde el panel.
+RECHAZADO=$(mongo_texto 'db.productos.find({estado:"rechazado"},{_id:1}).limit(1).forEach(function(d){print(d._id)})')
 
-# Primero que EXISTE en Mongo. Sin esto, todo lo de abajo pasaria igual sobre
-# un id inventado y no estaria midiendo nada.
-EXISTE=$(mongo_cuenta 'db.productos.countDocuments({_id:105})')
-if [ "$EXISTE" = "1" ]; then
-    OK "el 105 existe en MongoDB, asi que lo de abajo significa algo"
+if [ -z "$RECHAZADO" ]; then
+    SIN_MEDIR "esta base no tiene ningun producto rechazado (se consigue rechazando una propuesta desde el panel)"
 else
-    FALLA "el 105 no esta en MongoDB: esta prueba no puede medir nada"
-fi
+    OK "el $RECHAZADO esta rechazado en MongoDB, asi que lo de abajo significa algo"
 
-# Y que sigue rechazado. Si alguien lo activo, esta prueba dejaria de probar
-# lo suyo y lo diria en verde, que es peor que fallar.
-ES_RECHAZADO=$(mongo_cuenta 'db.productos.countDocuments({_id:105,estado:"rechazado"})')
-if [ "$ES_RECHAZADO" != "1" ]; then
-    FALLA "el 105 ya no esta rechazado en MongoDB: esta prueba dejo de medir lo suyo"
-fi
+    NOMBRE_RECHAZADO=$(mongo_texto "db.productos.findOne({_id:$RECHAZADO},{nombre:1}).nombre")
 
-NOMBRE_105=$(mongo_texto 'db.productos.findOne({_id:105},{nombre:1}).nombre')
-
-# 4.1 En el indice SI esta, y con su estado
-DOC_105=$(curl -s "$ES/$INDICE/_doc/105")
-ESTADO_105=$(printf '%s' "$DOC_105" | python -c "
+    # 4.1 En el indice SI esta, y con su estado
+    DOC_RECHAZADO=$(curl -s "$ES/$INDICE/_doc/$RECHAZADO")
+    ESTADO_RECHAZADO=$(printf '%s' "$DOC_RECHAZADO" | python -c "
 import sys, json
 try:
     d = json.load(sys.stdin)
@@ -318,50 +330,51 @@ except Exception:
     print('no-esta')
 ")
 
-if [ "$ESTADO_105" = "rechazado" ]; then
-    OK "el 105 esta en el indice con estado 'rechazado', que es lo que se pidio"
-elif [ "$ESTADO_105" = "no-esta" ]; then
-    FALLA "el 105 no esta en el indice"
-    echo "        Con el cambio de 2026-09-04 tiene que estar: el filtro vive en el backend."
-    echo "        Corre 'bash etl/cargar_busqueda.sh' -- si sigue faltando, mira si"
-    echo "        etl/extraer_busqueda.js volvio a filtrar por estado."
-else
-    FALLA "el 105 esta en el indice pero con estado '$ESTADO_105', no 'rechazado'"
-fi
-
-# 4.2 Y la ruta PUBLICA del backend no lo devuelve. Esta es la que protege al
-#     comprador, y es la unica que sigue midiendo algo real.
-if [ -z "$NOMBRE_105" ]; then
-    FALLA "no se pudo leer el nombre del 105 en MongoDB: no hay con que buscarlo"
-elif ! backend_vivo; then
-    echo "  (el backend no responde en $API, las partes 4.2 y 4.3 no se corrieron)"
-    echo "        Levantalo con 'cd backend ; npm run start:dev' y vuelve a probar."
-else
-    PUBLICA=$(busca_backend '/buscador/productos' "$NOMBRE_105" '')
-    if printf '%s' "$PUBLICA" | grep -q '^105$'; then
-        FALLA "la ruta publica devuelve el 105, que esta rechazado"
-        echo "        Es el fallo que esta prueba existe para atrapar: un comprador"
-        echo "        viendo algo que no circula. Mira el filter fijo de"
-        echo "        backend/src/services/buscador/productos.service.ts"
+    if [ "$ESTADO_RECHAZADO" = "rechazado" ]; then
+        OK "el $RECHAZADO esta en el indice con estado 'rechazado', que es lo que se pidio"
+    elif [ "$ESTADO_RECHAZADO" = "no-esta" ]; then
+        FALLA "el $RECHAZADO no esta en el indice"
+        echo "        Con el cambio de 2026-09-04 tiene que estar: el filtro vive en el backend."
+        echo "        Corre 'bash etl/cargar_busqueda.sh' -- si sigue faltando, mira si"
+        echo "        etl/extraer_busqueda.js volvio a filtrar por estado."
     else
-        OK "la ruta publica NO devuelve el 105 buscando su propio nombre"
+        FALLA "el $RECHAZADO esta en el indice pero con estado '$ESTADO_RECHAZADO', no 'rechazado'"
     fi
 
-    # 4.3 El otro lado del filtro. Sin esto, la prueba de arriba pasaria
-    #     tambien si la busqueda estuviera rota del todo y no devolviera nada:
-    #     un negativo se prueba comprobando que el positivo SI ocurre.
-    if iniciar_sesion_admin; then
-        ADMIN=$(busca_backend '/buscador/productos/admin' "$NOMBRE_105" 'si')
-        if printf '%s' "$ADMIN" | grep -q '^105$'; then
-            OK "y la de admin SI lo devuelve, asi que lo de arriba es el filtro y no una busqueda rota"
-        else
-            FALLA "la ruta de admin tampoco devuelve el 105"
-            echo "        Entonces lo de arriba no probo el filtro: probo que la"
-            echo "        busqueda no encuentra ese producto por ningun lado."
-        fi
+    # 4.2 Y la ruta PUBLICA del backend no lo devuelve. Esta es la que protege al
+    #     comprador, y es la unica que sigue midiendo algo real.
+    if [ -z "$NOMBRE_RECHAZADO" ]; then
+        FALLA "no se pudo leer el nombre del $RECHAZADO en MongoDB: no hay con que buscarlo"
+    elif ! backend_vivo; then
+        echo "  (el backend no responde en $API, las partes 4.2 y 4.3 no se corrieron)"
+        echo "        Levantalo con 'cd backend ; npm run start:dev' y vuelve a probar."
     else
-        echo "  (no se pudo iniciar sesion como admin, la parte 4.3 no se corrio)"
-        echo "        Sin ella, la 4.2 no distingue 'filtrado' de 'no lo encuentra nadie'."
+        PUBLICA=$(busca_backend '/buscador/productos' "$NOMBRE_RECHAZADO" '')
+        if printf '%s' "$PUBLICA" | grep -q "^$RECHAZADO\$"; then
+            FALLA "la ruta publica devuelve el $RECHAZADO, que esta rechazado"
+            echo "        Es el fallo que esta prueba existe para atrapar: un comprador"
+            echo "        viendo algo que no circula. Mira el filter fijo de"
+            echo "        backend/src/services/buscador/productos.service.ts"
+        else
+            OK "la ruta publica NO devuelve el $RECHAZADO buscando su propio nombre"
+        fi
+
+        # 4.3 El otro lado del filtro. Sin esto, la prueba de arriba pasaria
+        #     tambien si la busqueda estuviera rota del todo y no devolviera nada:
+        #     un negativo se prueba comprobando que el positivo SI ocurre.
+        if iniciar_sesion_admin; then
+            ADMIN=$(busca_backend '/buscador/productos/admin' "$NOMBRE_RECHAZADO" 'si')
+            if printf '%s' "$ADMIN" | grep -q "^$RECHAZADO\$"; then
+                OK "y la de admin SI lo devuelve, asi que lo de arriba es el filtro y no una busqueda rota"
+            else
+                FALLA "la ruta de admin tampoco devuelve el $RECHAZADO"
+                echo "        Entonces lo de arriba no probo el filtro: probo que la"
+                echo "        busqueda no encuentra ese producto por ningun lado."
+            fi
+        else
+            echo "  (no se pudo iniciar sesion como admin, la parte 4.3 no se corrio)"
+            echo "        Sin ella, la 4.2 no distingue 'filtrado' de 'no lo encuentra nadie'."
+        fi
     fi
 fi
 
@@ -382,11 +395,15 @@ fi
 # RESULTADO
 # ============================================================
 titulo "RESULTADO"
-echo "  $ok OK, $fallo FALLA"
+echo "  $ok OK, $fallo FALLA, $sin_medir SIN MEDIR"
 if [ "$fallo" -gt 0 ]; then
     echo "  El buscador no esta haciendo lo que se dijo."
     exit 1
 fi
 echo "  Encuentra con la palabra mal escrita, con tilde de mas, y a medias."
-echo "  Y alcanza a los productos que solo viven en MongoDB."
+if [ "$sin_medir" -gt 0 ]; then
+    echo "  Lo marcado SIN MEDIR depende de los datos de esta base, no del buscador."
+else
+    echo "  Y alcanza a los productos que solo viven en MongoDB."
+fi
 exit 0

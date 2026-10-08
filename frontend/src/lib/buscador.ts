@@ -143,6 +143,29 @@ export interface ResultadoHibrido extends ResultadoBusqueda {
 }
 
 /**
+ * Que resultados de la busqueda hibrida vale la pena ensenar.
+ *
+ * La ruta intercala por posicion (RRF) lo que sale por las palabras y lo que
+ * sale por el significado, sin mirar que tan cerca esta lo segundo. Medido el
+ * 2026-10-08 con 1102 productos: "labtop" ponia una Lampara de escritorio Faro
+ * (0,46) despues de cada laptop, "labtop gamer" metia monitores (0,50) y
+ * "xqzwv" traia libreros (0,41). Lo que si sirve pasa de 0,6 cuando tambien
+ * hubo resultados por palabras ("camisa" 0,74, "zapatos para correr" 0,77,
+ * "lampara" 0,66), y ronda 0,52 a 0,54 cuando la frase no nombra ningun
+ * producto ("regalo para mama que le gusta cocinar" da la olla arrocera).
+ *
+ * Por eso dos umbrales: si las palabras encontraron algo, lo que sale solo por
+ * el significado necesita 0,6; si no encontraron nada, basta 0,5. Lo que sale
+ * por las palabras se queda siempre. Se le dejo dicho a Jose David en
+ * docs/BACKEND-PENDIENTE.md para que lo resuelva en la ruta.
+ */
+export function filtrarHibrida(lista: ResultadoHibrido[]): ResultadoHibrido[] {
+	const hayPorPalabras = lista.some((r) => r.origen.includes('texto'));
+	const minimo = hayPorPalabras ? 0.6 : 0.5;
+	return lista.filter((r) => r.origen.includes('texto') || (r.similitud ?? 0) >= minimo);
+}
+
+/**
  * La busqueda hibrida, GET /buscador/productos/hibrida (3305cf3 y 1f1f480):
  * las palabras y el significado juntos en una sola lista, ordenada por
  * posicion en las dos (RRF). "labtop gamer" sale por las palabras y "algo

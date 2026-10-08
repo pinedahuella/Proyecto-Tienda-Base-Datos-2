@@ -13,6 +13,7 @@
 		MINIMO_LETRAS,
 		buscarPorIntencion,
 		buscarHibrida,
+		filtrarHibrida,
 		pareceFrase,
 		vale,
 		type ResultadoBusqueda,
@@ -187,9 +188,10 @@
 
 		Promise.all([pedido, hibrida]).then(([salida, h]) => {
 			if (mia !== ultimaConsulta) return;
-			const usarHibrida = h !== null && h.error === '' && h.resultados.length > 0;
+			const hibridos = h !== null && h.error === '' ? filtrarHibrida(h.resultados) : [];
+			const usarHibrida = hibridos.length > 0;
 			esHibrida = usarHibrida;
-			resultados = usarHibrida ? h!.resultados : salida.resultados;
+			resultados = usarHibrida ? hibridos : salida.resultados;
 			quisisteDecir = salida.quisiste_decir ?? null;
 			facetas = salida.facetas;
 			total = salida.total;

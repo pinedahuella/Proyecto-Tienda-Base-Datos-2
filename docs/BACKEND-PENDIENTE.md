@@ -4,6 +4,39 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-10-08: el corte volvio a pasar, y la hibrida mezcla cualquier cosa
+
+Probado con las bases en tu PC (1102 productos) y el backend en la de Meme.
+
+**1. El backend se cayo otra vez, ahora sin que apagaras nada.** A las 10:25
+hubo un microcorte por Tailscale (Redis `EACCES`, Postgres `ECONNABORTED`, Mongo
+timeout); Redis y Mongo se reconectaron en 14 s y Postgres mato el proceso con
+el mismo `Connection terminated unexpectedly` de abajo. Con las bases en otra
+maquina pasa solo, asi que es lo primero antes de presentar: son las tres
+lineas de `pool.on('connect')` de la seccion siguiente.
+
+**2. La hibrida intercala lo que sale por significado aunque se parezca poco.**
+`BuscadorHibridoService` reparte por posicion (RRF) y no mira la similitud.
+Medido:
+
+```
+consulta                        solo por significado, la mejor   lo que pasa
+labtop                          Lampara de escritorio Faro 0,457  una lampara despues de cada laptop
+labtop gamer                    Monitor Vertice 27 Gamer 0,497    monitores entre las laptops
+xqzwv                           Librero Hoja 5 niveles 0,412      seis productos de la nada
+camisa                          Camisa de vestir 0,748            bien
+zapatos para correr             Tenis urbano Vereda 90 0,767      bien
+regalo para mama que cocina     Olla arrocera Grano 0,542         bien (ninguno sale por palabras)
+```
+
+Sugerencia: si las palabras encontraron algo, lo que sale solo por significado
+necesita 0,6; si no encontraron nada, 0,5. Es lo que hace hoy el frontend
+(`filtrarHibrida()` en `frontend/src/lib/buscador.ts`); cuando la ruta lo haga,
+ese filtro se puede quitar. Tampoco agrupa las copias del generador (punto 3 de
+la seccion del 2026-10-04), que sigue igual.
+
+---
+
 ## LO NUEVO DEL 2026-10-07: un corte de red con Postgres tumba el backend entero
 
 Visto en vivo con las bases en tu PC y el backend en la de Meme, por Tailscale

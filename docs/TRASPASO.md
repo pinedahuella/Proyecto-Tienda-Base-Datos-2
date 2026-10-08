@@ -3,7 +3,31 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-07**.
+Ultima actualizacion: **2026-10-08**.
+
+**EMPIEZA AQUI (08-10). Todo lo de la Entrega 3 y la final probado con las bases en la PC de David.** Backend,
+frontend y Ollama en la PC de Meme. No se toco `backend/`:
+
+```
+pruebas         facetas.py 19 OK, recomendacion_semantica.py 15 OK, vectores_worker.cjs 5 OK,
+                clasificador_en_elastic.mjs 3 OK, busqueda.sh 10 OK y 1 SIN MEDIR. De punta a punta por el
+                backend: buscar, filtros, autocompletado, quisiste decir, hibrida, intencion, parecidos,
+                login, carrito, comprar, historial y cancelar (el stock baja y vuelve)
+redis           prueba_acceso.sh 31 OK contra el Redis de David. Sus contrasenas de inspeccion y operador
+                NO son las del .env de Meme (su arrancar las genero): se pasan como variables de entorno
+sin correr      falla_checkout.sh, porque apaga contenedores y solo corre en la PC de las bases
+frontend        /buscar ya no ensena lo que la hibrida trae por significado con poca similitud: "labtop"
+                ponia una lampara despues de cada laptop. filtrarHibrida() en lib/buscador.ts, con los
+                numeros medidos; pedido a David en BACKEND-PENDIENTE.md
+busqueda.sh     las partes 3 y 4 buscan el producto en la base que haya en vez de los ids fijos 103 a 106
+                de la base de Meme (en la de David son del lote y daban 3 FALLA falsos); sin datos dicen
+                SIN MEDIR. En la base de David quedo el 1103, una propuesta rechazada para la parte 4
+backend         se cayo a las 10:25 por el corte de Postgres de abajo, ahora sin que David apagara nada. Lo
+                primero que tiene que arreglar antes de presentar
+Ollama          la busqueda por intencion, la hibrida y el worker de vectores lo piden en localhost:11434;
+                con las bases en otra PC hay que levantar el Ollama de Meme ("ollama serve")
+WARP            NO apagarlo: ya excluye 100.64.0.0/10 y es lo que deja salir el tunel de LEDKID en la U
+```
 
 **EMPIEZA AQUI (07-10). Las bases pueden vivir en otra PC.** La laptop de Meme llegaba al 95 % de RAM con todo
 arriba. Ahora David corre las seis bases en su PC y Meme solo el backend y el frontend, por Tailscale. Probado en vivo
