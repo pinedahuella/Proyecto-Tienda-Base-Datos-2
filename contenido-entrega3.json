@@ -12,7 +12,7 @@
             "p": "La Entrega 3 agrega dos cosas. Un motor de búsqueda que tolera errores de escritura, ordena por relevancia y calcula filtros facetados con sus propias agregaciones, y una estrategia de consistencia para el checkout, que en este punto ya toca varias bases a la vez y puede fallar a medias. Hicimos además la evaluación opcional de un motor NewSQL para los pagos."
           },
           {
-            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 291 commits sobre `main` entre el 15 de agosto y el 4 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre. Esta versión, del 6 de octubre, la pone al día con lo que cambió después."
+            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 304 commits sobre `main` entre el 15 de agosto y el 8 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre. Esta versión, del 6 de octubre, la pone al día con lo que cambió después."
           }
         ]
       },
@@ -160,12 +160,12 @@
                 [
                   "José Manuel González Corado",
                   "José Manuel González Corado",
-                  "176"
+                  "187"
                 ],
                 [
                   "José David Navichoque Pineda",
                   "pinedahuella",
-                  "110"
+                  "112"
                 ],
                 [
                   "Juan Pablo Torres García",
@@ -175,10 +175,10 @@
                 [
                   "Total",
                   "",
-                  "291"
+                  "304"
                 ]
               ],
-              "leyenda": "Commits por integrante en el historial de git al 4 de octubre de 2026.",
+              "leyenda": "Commits por integrante en el historial de git al 8 de octubre de 2026.",
               "anchos": [
                 2.4,
                 2.4,
@@ -286,7 +286,7 @@
             "leyenda": "Salida de la prueba del buscador, bash pruebas/busqueda.sh."
           },
           {
-            "p": "Para el autocompletado el mapeo ya trae `nombre.escribiendo`, del tipo `search_as_you_type`. Probamos la consulta con `bool_prefix` sobre ese campo y con lap sugiere solo productos cuyo nombre empieza así, mientras que la búsqueda difusa con el mismo texto trae 507 productos de cualquier tipo. La consulta está en `elastic/pruebas/facetas.py`, en la función `autocompletar()`."
+            "p": "Para el autocompletado el mapeo ya trae `nombre.escribiendo`, del tipo `search_as_you_type`. Probamos la consulta con `bool_prefix` sobre ese campo y con lap sugiere solo productos cuyo nombre empieza así, mientras que la búsqueda difusa con el mismo texto trae 169 productos de cualquier tipo. La consulta está en `elastic/pruebas/facetas.py`, en la función `autocompletar()`."
           },
           {
             "p": "Cuando lo escrito no existe en el catálogo, la misma consulta pide una corrección con el `term` suggester sobre el nombre, solo para las palabras que no aparecen en el índice y de tres letras o más. La página de resultados la muestra como tal vez quisiste decir. Con frases de tres palabras o más la corrección sale poco útil, así que ahí no se muestra."
@@ -300,7 +300,7 @@
         "titulo": "2.4. Filtros facetados con agregaciones",
         "bloques": [
           {
-            "p": "Los filtros de la página de resultados los calcula Elasticsearch con agregaciones, sobre los mismos resultados de la búsqueda. Hay cuatro facetas, categoría con `terms`, precio y calificación con `range`, y existencias con `filter`. Los tramos de precio salen de los percentiles medidos sobre los 3105 productos, con la mediana en Q496 y el percentil 90 en Q3500."
+            "p": "Los filtros de la página de resultados los calcula Elasticsearch con agregaciones, sobre los mismos resultados de la búsqueda. Hay cuatro facetas, categoría con `terms`, precio y calificación con `range`, y existencias con `filter`. Los tramos de precio salen de los percentiles del catálogo, con la mediana alrededor de Q500 y el percentil 90 alrededor de Q3600."
           },
           {
             "p": "El texto va en `query` y los filtros elegidos en `post_filter`, así recortan la lista sin recortar los conteos. Cada faceta es una agregación que aplica los filtros de las otras facetas y no el suyo. Por eso, con Laptops elegida, la faceta de categoría sigue diciendo cuántos productos hay en Monitores y la persona puede sumar esa categoría. Dentro de una faceta las opciones se suman y entre facetas se cruzan."

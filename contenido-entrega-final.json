@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector y hoy viven en Elasticsearch, junto al texto de cada producto, y el control de acceso en Redis, con un usuario por servicio y permisos acotados. El informe incluye además el diagrama de arquitectura final, lo que se sumó después con esos mismos vectores y la retrospectiva sobre las decisiones de todo el semestre."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 291 commits sobre `main` entre el 15 de agosto y el 4 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre. Esta versión, del 6 de octubre, la pone al día con lo que cambió después."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 304 commits sobre `main` entre el 15 de agosto y el 8 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre. Esta versión, del 6 de octubre, la pone al día con lo que cambió después."
      }
     ]
    },
@@ -32,7 +32,7 @@
          "Funcionalidad de recomendación semántica",
          "5",
          "2",
-         "3105 productos con vector en Elasticsearch, búsqueda de vecinos con filtro y prueba con 15 comprobaciones en verde"
+         "1000 productos activos con vector en Elasticsearch, búsqueda de vecinos con filtro y prueba con 15 comprobaciones en verde"
         ],
         [
          "Control de acceso configurado en un componente NoSQL",
@@ -165,12 +165,12 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "176"
+         "187"
         ],
         [
          "José David Navichoque Pineda",
          "pinedahuella",
-         "110"
+         "112"
         ],
         [
          "Juan Pablo Torres García",
@@ -180,7 +180,7 @@
         [
          "Total",
          "",
-         "291"
+         "304"
         ]
        ],
        "anchos": [
@@ -188,7 +188,7 @@
         2.4,
         1.2
        ],
-       "leyenda": "Commits por integrante en el historial de git al 4 de octubre de 2026."
+       "leyenda": "Commits por integrante en el historial de git al 8 de octubre de 2026."
       }
      }
     ]
@@ -208,7 +208,7 @@
       "adr": {
        "id": "ADR-10",
        "titulo": "Dónde guardar y consultar los vectores de los productos",
-       "contexto": "Cada producto necesita un vector que represente el significado de su texto y una consulta que encuentre los más cercanos a uno dado. El catálogo tiene 3105 productos activos y la consulta se hace una vez por cada ficha que se abre.",
+       "contexto": "Cada producto necesita un vector que represente el significado de su texto y una consulta que encuentre los más cercanos a uno dado. El catálogo tenía entonces 3105 productos activos y la consulta se hace una vez por cada ficha que se abre.",
        "alternativas": "No introducir cambios y recomendar por categoría y precio parecido, que ya se podía con MongoDB y ClickHouse. Un componente vectorial dedicado, como Qdrant o Milvus. El tipo `dense_vector` de Elasticsearch, que ya corre en el sistema. La extensión pgvector sobre el PostgreSQL existente.",
        "decision": "pgvector sobre el PostgreSQL existente, con una tabla `producto_vector`, un índice HNSW y la función `productos_similares()`.",
        "justificacion": "Por patrón de consulta, buscar los vecinos de un producto entre unos miles es justo lo que un índice HNSW resuelve en milisegundos. Por costo operativo, la imagen `pgvector/pgvector:pg18` venía en el sistema desde la Entrega 1, así que no hubo contenedor nuevo ni otra copia de los identificadores. Por consistencia, el vector vive junto a las ofertas y los pedidos y se puede cruzar con ellos en la misma consulta. Elasticsearch también servía, pero su índice se reconstruye entero cuando cambia el mapeo y los vectores tardan minutos en calcularse. La primera alternativa quedó descartada porque filtrar por campos no mide el significado del texto.",
@@ -249,7 +249,7 @@
       "vin": [
        "`etl/cargar_vectores.ps1` guarda en el índice el md5 del texto con que se calculó cada vector, en `vector_hash`. En un arranque normal solo recalcula los productos cuyo texto cambió y tarda unos segundos.",
        "Entre un arranque y otro, el backend recalcula cada tres horas los productos que un vendedor creó o editó, con el mismo texto y el mismo md5. Si solo cambiaron las variantes o el estado, no le pide nada a Ollama.",
-       "La primera carga de los 3105 productos tardó 413 segundos.",
+       "La primera carga, con el catálogo de 3105 productos de entonces, tardó 413 segundos.",
        "El generador de datos de prueba copia productos con otro sufijo en el nombre y la misma descripción. Sin cuidarlo, los seis parecidos de un teléfono eran seis copias del mismo teléfono. El campo `vector_grupo` guarda el md5 de la categoría y la descripción sin el nombre, y la consulta devuelve un solo producto por grupo."
       ]
      }
@@ -717,7 +717,7 @@
         [
          "Calcular los vectores con Ollama en la misma máquina",
          "Ningún texto sale a un servicio externo y no hay costo por consulta",
-         "3105 vectores y el worker del backend da el mismo vector que el ETL, con distancia cero"
+         "1000 vectores y el worker del backend da el mismo vector que el ETL, con distancia cero"
         ],
         [
          "Un solo comando de arranque que cuenta lo que quedó",
