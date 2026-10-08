@@ -3,7 +3,28 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-06**.
+Ultima actualizacion: **2026-10-07**.
+
+**EMPIEZA AQUI (07-10). Las bases pueden vivir en otra PC.** La laptop de Meme llegaba al 95 % de RAM con todo
+arriba. Ahora David corre las seis bases en su PC y Meme solo el backend y el frontend, por Tailscale. Probado en vivo
+en la red de la UNIS:
+
+```
+scripts         preparar-pc-bases.ps1 (la PC de las bases) y usar-bases-remotas.ps1 -Ip / -Local (la del
+                backend), commit 73dbb16. Como se usan, en instalacion.md, "Bases en otra PC"
+arrancar        -Reiniciar -Productos N ya no rechaza el lote con Mongo vacio (c52d22c)
+PC de David     desktop-kmf1be7, 100.64.42.11, compartida a la cuenta de Tailscale de Meme. 1102 productos
+                (102 curados + lote L1 de 1000), todos con vector; 570 resenas
+medido          las seis bases a ~10 ms, login 0,6 s, busqueda con quisiste decir 0,4 s; el worker de
+                comentarios lleno mesh_comentarios (598) en 30 s con el Ollama de Meme
+pendiente       de David: un corte de red con una conexion de Postgres en uso tumba el backend (paso cuando
+                apago su PC). Arreglo propuesto al principio de BACKEND-PENDIENTE.md, no se toco backend/
+```
+
+En la PC de Meme: el `backend/.env` quedo apuntando a 100.64.42.11 (copia en `.env.antes-remotas`). Para volver a lo
+local, `.\usar-bases-remotas.ps1 -Local`. Se quitaron de WARP cinco exclusiones de `*.tailscale.com` que hacian que la
+UNIS cortara Tailscale. Meme quiere 1000 productos exactos: no se borran los 102 curados (ventas, resenas, son las
+plantillas del generador); David corre `.\arrancar.ps1 -Borrar 102` y quedan 102 + 898.
 
 **EMPIEZA AQUI (06-10). Los dos informes, al dia. SIN commitear, sin levantar nada.** Solo se toco el contenido y
 la fecha de los informes, nada de codigo:

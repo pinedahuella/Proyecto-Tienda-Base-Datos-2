@@ -4,6 +4,48 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO NUEVO DEL 2026-10-07: un corte de red con Postgres tumba el backend entero
+
+Visto en vivo con las bases en tu PC y el backend en la de Meme, por Tailscale
+(ver "Bases en otra PC" en instalacion.md). Apagaste tu PC a las 18:51 y el
+backend de Meme murio:
+
+```
+Error: Connection terminated unexpectedly
+    at Connection.<anonymous> (node_modules\pg\lib\client.js:204:73)
+Emitted 'error' event on Client instance at:
+    at Client._handleErrorEvent (node_modules\pg\lib\client.js:422:10)
+```
+
+Redis y Mongo aguantaron el mismo corte y se reconectaron solos. Postgres no.
+
+Por que. `pool.on('error')` de `src/database/postgres.ts` solo cubre las
+conexiones EN REPOSO dentro del pool. Una conexion sacada con `pool.connect()`
+(hay unas 20: transacciones de ofertas, pedidos, fraude, grafo-sync, reglas de
+descuento, catalogo-postgres...) no tiene ese listener mientras esta afuera. Si
+la red se cae justo ahi, `pg` emite `error` en el Client, nadie lo escucha y
+Node mata el proceso. Un worker que corre cada pocos segundos casi siempre tiene
+una afuera, asi que con las bases en otra maquina cualquier corte lo tumba.
+
+Arreglo propuesto, tres lineas junto al `pool.on('error')` que ya existe:
+
+```ts
+pool.on('connect', (cliente) => {
+  cliente.on('error', (error) => logger.warn(`Se perdio una conexion en uso: ${error.message}`));
+});
+```
+
+`connect` se dispara una vez por conexion fisica nueva, asi que el listener
+queda puesto para toda su vida, dentro y fuera del pool. La consulta que estaba
+en curso sigue fallando (y su transaccion se pierde, que es lo correcto); lo que
+cambia es que el backend sigue vivo. No se toco: es tuyo.
+
+Como probarlo: con el backend arriba, `docker restart mesh-postgres` mientras
+corre un worker. Hoy muere con el error de arriba; con el arreglo solo deja un
+WARN y la siguiente corrida funciona.
+
+---
+
 ## LO NUEVO DEL 2026-10-04 EN LA TARDE: 3305cf3 y 1f1f480, conectados y medidos
 
 Jalados los dos, compilados y probados en vivo. De tus listas de "Pendiente de

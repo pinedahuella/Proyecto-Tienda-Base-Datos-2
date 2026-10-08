@@ -538,6 +538,84 @@ TypeScript
 
 Los scripts con nombre propio siempre llevan `run`. `npm start:dev` no existe.
 
+## Bases en otra PC (Tailscale)
+
+Para cuando una laptop no aguanta las seis bases. Una PC corre `arrancar.ps1` y
+nada mas; la otra corre solo el backend y el frontend, y llega a las bases por
+Tailscale, una red privada entre las dos que funciona desde cualquier lugar
+(casa, la U, datos del celular) sin abrir nada a internet. Elasticsearch no
+tiene contrasena, asi que abrir los puertos al internet o a la red local no es
+opcion.
+
+Probado el 2026-10-07: bases en la PC de David, backend y frontend en la de
+Meme, los dos en la red de la UNIS. Tailscale conecto directo, sin servidor de
+por medio, y las bases contestan en unos 10 ms.
+
+**En la PC de las bases**
+
+`preparar-pc-bases.ps1`, en la raiz, hace todo: instala Git, Docker Desktop y
+Tailscale 1.102.4 si faltan, clona o actualiza el repositorio, copia el `.env`
+que este al lado del script, abre en el firewall los seis puertos SOLO para
+`100.64.0.0/10` (el rango de Tailscale) y corre `arrancar.ps1`. Al final
+imprime la linea que hay que mandarle a la otra PC. `-Apagar` las apaga sin
+borrar nada.
+
+Si la PC ya tiene Git, Docker y el repo, basta con Tailscale y el firewall:
+
+```powershell
+Invoke-WebRequest https://pkgs.tailscale.com/stable/tailscale-setup-1.102.4-amd64.msi -OutFile $env:TEMP\tailscale.msi -UseBasicParsing
+Start-Process msiexec.exe -ArgumentList '/i', "$env:TEMP\tailscale.msi", '/qn', '/norestart' -Wait
+& "C:\Program Files\Tailscale\tailscale.exe" up --unattended
+New-NetFirewallRule -DisplayName "Mesh, bases por Tailscale" -Direction Inbound -Action Allow -Protocol TCP -LocalPort 5432,27018,6379,7687,9200,8123 -RemoteAddress 100.64.0.0/10 -Profile Any
+& "C:\Program Files\Tailscale\tailscale.exe" ip -4
+```
+
+El `-ArgumentList` va como lista y no como una sola cadena con comillas
+escapadas: copiado de un chat, el acento grave se pierde y PowerShell contesta
+"No se encuentra ningun parametro de posicion".
+
+**Las dos PC tienen que verse en Tailscale.** Si cada una entro con su propia
+cuenta, quedan en redes distintas y `tailscale ping` dice "no matching peer".
+La de las bases la comparte desde login.tailscale.com/admin/machines (los tres
+puntos, Share) y la otra acepta el enlace. Conserva su misma IP 100.x.
+
+**En la PC del backend**
+
+```powershell
+.\usar-bases-remotas.ps1 -Ip 100.x.y.z     # prueba los seis puertos y cambia los *_HOST de backend\.env
+.\panel-comandos\servicios.ps1 -Accion backend
+.\panel-comandos\servicios.ps1 -Accion frontend
+.\usar-bases-remotas.ps1 -Local            # de vuelta a las bases de esta PC
+```
+
+Si algun puerto no contesta, no toca el `.env`. La copia de antes queda en
+`backend\.env.antes-remotas`. Las contrasenas tienen que ser las mismas en las
+dos PC; las de una base ya creada son las de su primer arranque, y copiarle
+otro `.env` despues no las cambia.
+
+Lo que conviene saber:
+
+- **Ollama es el de la PC del backend.** El backend calcula ahi el vector de lo
+  que se busca y de cada resena nueva. El de la PC de las bases solo lo usa
+  `arrancar.ps1` para los vectores de los productos.
+- **`mesh_comentarios` lo llena el backend**, no `arrancar.ps1`. En una PC
+  recien preparada esta en 0 hasta que un backend apunte a ella y su worker
+  procese la cola `evento_comentario` (598 resenas en unos 30 segundos).
+- **Para medir tiempos no sirve.** Cada consulta cruza la red; lo que se mide es
+  la red. Las cifras del informe salen de una sola maquina.
+- **Si la PC de las bases se apaga, el backend se cae entero** por la conexion
+  de Postgres que esta en uso (pendiente de David en BACKEND-PENDIENTE.md,
+  07-10). Se vuelve a levantar con `servicios.ps1 -Accion backend`.
+- **Cloudflare WARP y la red de la U.** La UNIS corta Tailscale. Con WARP
+  encendido pasa, pero solo si `*.tailscale.com` NO esta en sus exclusiones
+  (habia cinco puestas a mano; se quitaron con `warp-cli tunnel host remove`).
+  `100.64.0.0/10` si tiene que seguir excluido, porque es por donde se llega a
+  la otra PC.
+- **`-Reiniciar -Productos N` en una sola corrida** rechazaba el lote antes del
+  07-10 ("max_mongo_producto = 0 va por detras"): con Mongo recien vaciado no
+  habia tope. Arreglado en c52d22c, con Mongo vacio se sigue desde los ids de
+  PostgreSQL.
+
 ## Errores comunes
 
 **Compass o el backend ven una base de Mongo vacia y sin contrasena**
