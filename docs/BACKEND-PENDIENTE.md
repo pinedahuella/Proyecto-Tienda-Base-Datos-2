@@ -28,6 +28,14 @@ Corrimos todas las pruebas del repo con las bases en tu PC (el detalle esta en
    cuentas en comun y una `multi_cuenta_ip`. Se siembran con
    `.\demo-anillo-resenas.ps1` y `.\demo-fraude-login.ps1` en tu PC.
 
+**Revisado a las 14:30 desde la PC de Meme.** Sin commits tuyos despues de
+cdcded8. El 4 esta HECHO: en tu base ya hay anillos `ciclo` y `mutuo`, y
+`multi_cuenta_ip`, y `casos_fraude_fusion.cjs` da 0 FALLA (C1 sigue como
+decision). El 3 sigue igual: el clasificador marca 8 y el detector da 0 en las
+tres variantes. El 1 no se puede ver desde aqui hasta que lo subas. El 2 no se
+ve corrido: tus contenedores arrancaron a las 14:18 y el ultimo pedido es de
+las 12:14.
+
 ---
 
 ## LO NUEVO DEL 2026-10-08: el corte volvio a pasar, y la hibrida mezcla cualquier cosa
