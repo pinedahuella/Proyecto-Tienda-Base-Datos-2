@@ -23,8 +23,10 @@ en verde        carrito 25, resenas 15, recomendaciones 23, tendencias 53, tende
                 clasificador_en_elastic 3, facetas.py 19, recomendacion_semantica.py 15
 por los datos   notas.sh 9 y 1 (un worker actualiza la nota antes del ETL) y etl_compras.sh 18 y 1 (no hay
                 devolucion copiada por el ETL), los dos igual que en la manana
-de David        falla_checkout.sh en su PC, y NotasIncoherentesDetectorService sigue en 0 contra 8 del
-                clasificador
+falla_checkout  corrida por David en su PC a las 16:40, 32 OK, 0 FALLA (3 pedidos nuevos y Postgres reiniciado
+                a las 16:39 en su base). Con eso la Entrega 3 y la final quedan completas
+de David        solo NotasIncoherentesDetectorService, en 0 contra 8 del clasificador, que no lo pide ninguna entrega
+informes        los dos regenerados el 08-10 con 1000 productos, 304 commits y portada del 8 de octubre
 ```
 
 El `docker` falso de la manana se rehizo en la carpeta temporal de la sesion: `psql` (con `-v`, `:{?var}`, `\set`
