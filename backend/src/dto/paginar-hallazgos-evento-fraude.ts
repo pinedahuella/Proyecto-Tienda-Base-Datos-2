@@ -32,7 +32,6 @@ export const TIPOS_HALLAZGO_EVENTO_VALIDOS: TipoHallazgoEvento[] = [
   'vistas_infladas',
   'compras_en_rafaga',
   'ip_multicuenta_compras',
-  'carrito_acaparador',
   'devoluciones_seriales',
   'granja_de_registros',
 ];

@@ -26,3 +26,42 @@ export function manejarErrorGrafo(logger: Logger, error: unknown): never {
 
   throw new ErrorConexion('No se pudo conectar con Neo4j');
 }
+
+/**
+ * Para los workers que llevan PostgreSQL al grafo (`GrafoSyncService`,
+ * `GrafoComprasSyncService`): `true` si el error es un problema de CONEXION
+ * (Neo4j o PostgreSQL caídos, la tabla de la cola desapareció) y no culpa del
+ * evento. En ese caso el worker corta la corrida sin gastar un intento y
+ * reintenta entera después.
+ *
+ * Un `Neo.ClientError.Statement.*` SÍ es culpa del evento (Cypher o
+ * parámetro inválido → dato torcido en la base): eso sí gasta intento.
+ */
+export function esFalloDeConexionGrafo(error: unknown): boolean {
+  if (error instanceof AggregateError) {
+    return true; // el driver de pg probó varias IPs y todas fallaron
+  }
+  const codigo = (error as { code?: string } | undefined)?.code;
+  if (typeof codigo !== 'string') {
+    return false;
+  }
+  if (codigo.startsWith('Neo.ClientError.Statement')) {
+    return false;
+  }
+  if (codigo.startsWith('Neo.') || codigo === 'ServiceUnavailable') {
+    return true; // ServiceUnavailable, SessionExpired, Neo.TransientError.*
+  }
+  return (
+    codigo.startsWith('08') || // clase de error de conexion de Postgres
+    codigo.startsWith('53') || // recursos insuficientes
+    codigo === '57P01' || // admin shutdown
+    codigo === '57P02' || // crash shutdown
+    codigo === '57P03' || // cannot connect now
+    codigo === '42P01' || // la tabla de la cola ya no existe
+    codigo === 'ECONNREFUSED' ||
+    codigo === 'ECONNRESET' ||
+    codigo === 'ETIMEDOUT' ||
+    codigo === 'ENOTFOUND' ||
+    codigo === 'EPIPE'
+  );
+}

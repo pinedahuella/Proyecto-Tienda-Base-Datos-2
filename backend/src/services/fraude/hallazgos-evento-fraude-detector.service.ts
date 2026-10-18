@@ -4,7 +4,7 @@ import { clickhouse } from '../../database/clickhouse';
 import { registrarHallazgoEventoFraude } from '../../helpers/registrar-hallazgo-evento-fraude';
 import {} from '../../models/hallazgo-evento-fraude';
 
-// Los seis .sql de referencia (clickhouse/consultas/F1..F6, obra del
+// Los .sql de referencia (clickhouse/consultas/F1, F2, F3 y F5, obra del
 // companero) y sus umbrales (clickhouse/consultas/parametros.txt) -- las
 // consultas de aqui abajo son copia textual de esos archivos, sin tocar una
 // coma (mismo criterio que el resto de detectores de ClickHouse: el propio
@@ -17,12 +17,8 @@ const MINUTOS_RAFAGA = 15;
 const MIN_PEDIDOS_RAFAGA = 5;
 const MIN_CUENTAS_POR_IP = 4;
 const IPS_DE_CONFIANZA = ['::1', '::ffff:127.0.0.1'];
-const MIN_UNIDADES_ACAPARADAS = 20;
-const MAX_TASA_COMPRA_ACAPARADOR = 0.2;
 const MIN_DEVOLUCIONES = 3;
 const MIN_TASA_DEVOLUCION_CUENTA = 0.5;
-const MINUTOS_REGISTRO = 60;
-const MIN_REGISTROS_POR_IP = 5;
 const LIMITE = 10;
 // Cuantos ids de pedido guarda F2/F3/F5 por senal (los mas recientes). Las
 // tres consultas agregan `ids_pedidos` al texto del .sql del companero para
@@ -57,15 +53,6 @@ interface FilaF3 {
   ultima: string;
 }
 
-interface FilaF4 {
-  id_usuario: string;
-  id_producto: string;
-  agregadas: string;
-  veces: string;
-  compradas: string | null;
-  tasa_compra: string | null;
-}
-
 interface FilaF5 {
   id_usuario: string;
   pedidos: string;
@@ -75,24 +62,21 @@ interface FilaF5 {
   ids_pedidos: string[];
 }
 
-interface FilaF6 {
-  ip: string;
-  cuentas_en_la_peor_ventana: string;
-  empezo: string;
-  cuentas: string[];
-}
-
 /**
- * Worker de F1-F6 (`docs/fraude-entrega3/03-consultas-clickhouse.md`):
- * hallazgos de fraude sobre eventos de ClickHouse (vistas, carritos,
- * compras, devoluciones, registros) que el grafo de Neo4j y el fraude de
- * login no pueden ver. Persiste cada hallazgo con
+ * Worker de F1, F2, F3 y F5 (`docs/fraude-entrega3/03-consultas-clickhouse.md`):
+ * hallazgos de fraude sobre eventos de ClickHouse (vistas, compras,
+ * devoluciones) que el grafo de Neo4j y el fraude de login no pueden ver.
+ * F4 (carrito acaparador) se quito: con la venta relampago reservando en
+ * PostgreSQL por 15 min, apartar sin comprar ya no deja unidades secuestradas
+ * por 24 h. F6 (granja de registros) se mudo a Elasticsearch
+ * (`FraudeLoginRetrospectivoService`): los registros ya no llegan a
+ * ClickHouse. Persiste cada hallazgo con
  * `registrarHallazgoEventoFraude()` -- ver
  * `elementos Generales/plan pendiente/hallazgos-evento-fraude.md` para el
  * diseno de esa tabla.
  *
  * Corre una vez al dia, no cada 15 min como los demas workers de fraude:
- * F2 y F6 hacen un self-join sobre `dias_ventana` (30) dias completos de
+ * F2 hace un self-join sobre `dias_ventana` (30) dias completos de
  * datos para calcular una ventana movil -- una consulta bastante mas
  * pesada que un simple `GROUP BY`, y `dias_ventana` es un corte diario, no
  * de minutos, asi que correr esto cada 15 min no encontraria nada nuevo la
@@ -104,9 +88,9 @@ interface FilaF6 {
  * `registrarHallazgoEventoFraude` suma `contador` en vez de duplicar; al
  * dia siguiente nace una fila nueva a proposito (es una deteccion nueva).
  *
- * Cada una de las seis consultas corre independiente, con su propio
- * try/catch: un fallo en una (ClickHouse parcialmente caido, un timeout)
- * se loguea y no impide que las otras cinco se procesen.
+ * Cada consulta corre independiente, con su propio try/catch: un fallo en
+ * una (ClickHouse parcialmente caido, un timeout) se loguea y no impide que
+ * las otras se procesen.
  */
 @Injectable()
 export class HallazgosEventoFraudeDetectorService {
@@ -139,14 +123,8 @@ export class HallazgosEventoFraudeDetectorService {
       await this.correr('F3 (IP multicuenta compras)', () =>
         this.detectarIpMulticuentaCompras(ventanaInicio),
       );
-      await this.correr('F4 (carrito acaparador)', () =>
-        this.detectarCarritoAcaparador(ventanaInicio),
-      );
       await this.correr('F5 (devoluciones seriales)', () =>
         this.detectarDevolucionesSeriales(ventanaInicio),
-      );
-      await this.correr('F6 (granja de registros)', () =>
-        this.detectarGranjaDeRegistros(ventanaInicio),
       );
     } finally {
       this.procesando = false;
@@ -337,62 +315,6 @@ export class HallazgosEventoFraudeDetectorService {
     return filas.length;
   }
 
-  /** F4_carrito_acaparador.sql, sin tocar. */
-  private async detectarCarritoAcaparador(
-    ventanaInicio: Date,
-  ): Promise<number> {
-    const resultado = await clickhouse.query({
-      query: `WITH
-                  carrito AS (SELECT id_usuario, id_producto, sum(cantidad) AS agregadas, count() AS veces
-                                FROM carrito_producto
-                               WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
-                               GROUP BY id_usuario, id_producto),
-                  compra  AS (SELECT id_usuario, id_producto, sum(cantidad) AS compradas
-                                FROM compra_producto FINAL
-                               WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
-                               GROUP BY id_usuario, id_producto)
-                SELECT
-                  c.id_usuario                              AS id_usuario,
-                  c.id_producto                             AS id_producto,
-                  c.agregadas                               AS agregadas,
-                  c.veces                                   AS veces,
-                  k.compradas                               AS compradas,
-                  round(k.compradas / c.agregadas, 2)       AS tasa_compra
-                FROM carrito AS c
-                LEFT JOIN compra AS k ON k.id_usuario = c.id_usuario AND k.id_producto = c.id_producto
-               WHERE c.agregadas >= {min_unidades_acaparadas:UInt32}
-                 AND tasa_compra <= {max_tasa_compra_acaparador:Float64}
-               ORDER BY c.agregadas DESC
-               LIMIT {limite:UInt32}`,
-      query_params: {
-        lote: LOTE,
-        dias_ventana: DIAS_VENTANA,
-        min_unidades_acaparadas: MIN_UNIDADES_ACAPARADAS,
-        max_tasa_compra_acaparador: MAX_TASA_COMPRA_ACAPARADOR,
-        limite: LIMITE,
-      },
-      format: 'JSONEachRow',
-    });
-    const filas = await resultado.json<FilaF4>();
-
-    for (const fila of filas) {
-      await registrarHallazgoEventoFraude({
-        tipo: 'carrito_acaparador',
-        clave: `${fila.id_usuario}-${fila.id_producto}`,
-        cuentas: [fila.id_usuario],
-        idProductoMongo: Number(fila.id_producto),
-        detalle: {
-          agregadas: Number(fila.agregadas),
-          veces: Number(fila.veces),
-          compradas: fila.compradas != null ? Number(fila.compradas) : 0,
-          tasa_compra: fila.tasa_compra != null ? Number(fila.tasa_compra) : 0,
-        },
-        ventanaInicio,
-      });
-    }
-    return filas.length;
-  }
-
   /** F5_devoluciones_seriales.sql, sin tocar. */
   private async detectarDevolucionesSeriales(
     ventanaInicio: Date,
@@ -444,65 +366,6 @@ export class HallazgosEventoFraudeDetectorService {
           compradas: Number(fila.compradas),
           devueltas: Number(fila.devueltas),
           tasa_devolucion: Number(fila.tasa_devolucion),
-        },
-        ventanaInicio,
-      });
-    }
-    return filas.length;
-  }
-
-  /** F6_granja_de_registros.sql, sin tocar. */
-  private async detectarGranjaDeRegistros(
-    ventanaInicio: Date,
-  ): Promise<number> {
-    const resultado = await clickhouse.query({
-      query: `WITH r AS (
-                    SELECT ip, id_usuario, fecha
-                      FROM evento_registro FINAL
-                     WHERE lote = {lote:String}
-                       AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
-                       AND NOT has({ips_de_confianza:Array(String)}, toString(ip))
-                       AND ip != toIPv6('::')
-                )
-                SELECT
-                    toString(ip)                                  AS ip,
-                    max(cuantas)                                  AS cuentas_en_la_peor_ventana,
-                    argMax(desde, cuantas)                        AS empezo,
-                    arraySort(argMax(cuentas_de_la_ventana, cuantas)) AS cuentas
-                FROM (
-                    SELECT a.ip AS ip, a.fecha AS desde,
-                           countIf(b.fecha >= a.fecha
-                                   AND b.fecha < a.fecha + toIntervalMinute({minutos_registro:UInt32})) AS cuantas,
-                           groupArrayIf(b.id_usuario, b.fecha >= a.fecha
-                                   AND b.fecha < a.fecha + toIntervalMinute({minutos_registro:UInt32})) AS cuentas_de_la_ventana
-                      FROM r AS a INNER JOIN r AS b ON b.ip = a.ip
-                     GROUP BY a.ip, a.id_usuario, a.fecha
-                )
-                GROUP BY ip
-               HAVING cuentas_en_la_peor_ventana >= {min_registros_por_ip:UInt32}
-                ORDER BY cuentas_en_la_peor_ventana DESC
-                LIMIT {limite:UInt32}`,
-      query_params: {
-        lote: LOTE,
-        dias_ventana: DIAS_VENTANA,
-        minutos_registro: MINUTOS_REGISTRO,
-        min_registros_por_ip: MIN_REGISTROS_POR_IP,
-        ips_de_confianza: IPS_DE_CONFIANZA,
-        limite: LIMITE,
-      },
-      format: 'JSONEachRow',
-    });
-    const filas = await resultado.json<FilaF6>();
-
-    for (const fila of filas) {
-      await registrarHallazgoEventoFraude({
-        tipo: 'granja_de_registros',
-        clave: fila.ip,
-        cuentas: fila.cuentas,
-        idProductoMongo: null,
-        detalle: {
-          cuentas_en_la_peor_ventana: Number(fila.cuentas_en_la_peor_ventana),
-          empezo: fila.empezo,
         },
         ventanaInicio,
       });

@@ -16,6 +16,20 @@ export class ErrorConflicto extends Error {}
 /** La base de datos no respondio. El controlador la traduce a HTTP 503. */
 export class ErrorConexion extends Error {}
 
+/**
+ * Redis no respondio. Sigue siendo un `ErrorConexion` (503 en el controlador,
+ * igual que antes), pero se puede distinguir: el carrito la usa para saber
+ * cuando seguir por PostgreSQL en vez de cortar (ver `esRedisInalcanzable`).
+ */
+export class ErrorConexionRedis extends ErrorConexion {
+  constructor(
+    mensaje: string,
+    readonly causa?: unknown,
+  ) {
+    super(mensaje);
+  }
+}
+
 /** El token de sesion no vino, no es valido o ya vencio. HTTP 401. */
 export class ErrorSesion extends Error {}
 

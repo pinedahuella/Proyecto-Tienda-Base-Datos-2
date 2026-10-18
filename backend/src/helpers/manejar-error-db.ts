@@ -35,8 +35,11 @@ export function manejarErrorConexion(logger: Logger, error: unknown): never {
  * con el mensaje `"Connection terminated unexpectedly"` -- verificado en
  * vivo el 2026-09-04, este caso se colaba como 500 en vez de 503 porque
  * no tenia codigo que revisar.
+ *
+ * Exportada para los workers que necesitan distinguir "se cayo la base" de
+ * "fallo esta fila" sin lanzar el 503 (`EventoComentarioSyncService`).
  */
-function esFalloDeConexion(error: unknown): boolean {
+export function esFalloDeConexion(error: unknown): boolean {
   if (error instanceof AggregateError) {
     return true;
   }
@@ -58,7 +61,10 @@ function esFalloDeConexion(error: unknown): boolean {
   return error instanceof Error && /connection terminated/i.test(error.message);
 }
 
-function describirError(error: unknown): string {
+/** El error en una linea, para el log. Un `AggregateError` (el driver probo
+ * varias direcciones y todas fallaron) no trae `message`: se arma con sus
+ * causas. */
+export function describirError(error: unknown): string {
   if (error instanceof AggregateError) {
     const causas = error.errors.map(describirError).filter(Boolean);
     return causas.join(' | ') || 'Error de conexion desconocido';

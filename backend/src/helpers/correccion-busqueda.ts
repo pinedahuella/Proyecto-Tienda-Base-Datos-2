@@ -15,6 +15,14 @@ import type { estypes } from '@elastic/elasticsearch';
  * podria recibir una sugerencia si se parece a un nombre; es un "tal vez",
  * no cambia la busqueda.
  *
+ * Una palabra bien escrita que NO esta en el catalogo tambien parece un
+ * error. Dos reglas lo acotan (medidas el 2026-10-17):
+ *   - `max_edits: 1`: solo se corrige a una letra de distancia (una de mas,
+ *     una de menos, una cambiada o dos cambiadas de lugar). Con 2, "comodos"
+ *     salia "comedor"; los errores de tipeo reales (labtop, camiza,
+ *     audifnos, impermiable, laptpo) son de una.
+ *   - El plural no es un error: "zapatos" no se corrige a "zapato".
+ *
  * Solo corrige hacia palabras que ya estan en el indice. Una palabra que no
  * se parece a nada del catalogo se queda como esta y no hay sugerencia. El
  * indice guarda todos los estados, asi que la palabra sugerida puede venir
@@ -33,7 +41,12 @@ export function pedirCorreccion(texto: string): estypes.SearchSuggester {
   return {
     text: texto,
     nombre: {
-      term: { field: 'nombre', suggest_mode: 'missing', min_word_length: 3 },
+      term: {
+        field: 'nombre',
+        suggest_mode: 'missing',
+        min_word_length: 3,
+        max_edits: 1,
+      },
     },
   };
 }
@@ -48,7 +61,12 @@ export function textoCorregido(
   suggest: Record<string, EntradaSugerencia[]> | undefined,
 ): string | null {
   const palabras = (suggest?.nombre ?? []).filter(
-    (entrada) => entrada.options.length > 0,
+    (entrada) =>
+      entrada.options.length > 0 &&
+      !esPlural(
+        texto.slice(entrada.offset, entrada.offset + entrada.length),
+        entrada.options[0].text,
+      ),
   );
   if (palabras.length === 0) {
     return null;
@@ -64,4 +82,12 @@ export function textoCorregido(
       corregido.slice(entrada.offset + entrada.length);
   }
   return corregido;
+}
+
+/** `a` y `b` son la misma palabra en singular y en plural (+s o +es). */
+function esPlural(a: string, b: string): boolean {
+  const llana = (p: string) =>
+    p.normalize('NFD').replace(/\p{M}/gu, '').toLowerCase();
+  const [x, y] = [llana(a), llana(b)];
+  return [x + 's', x + 'es'].includes(y) || [y + 's', y + 'es'].includes(x);
 }

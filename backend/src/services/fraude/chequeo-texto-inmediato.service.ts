@@ -19,11 +19,11 @@ export interface ResenaNueva {
  * El chequeo de fraude por texto de una reseña recien escrita, sin esperar a
  * los workers de 15 minutos. Es la misma estructura que los anillos del grafo
  * (`ResenasService.crear` espera a que la reseña llegue a Neo4j y lanza
- * `detectarInmediato`), pero para las senales de texto, que viven en
- * Elasticsearch:
+ * `detectarInmediato`), pero para las senales de texto, que comparan vectores
+ * en PostgreSQL (pgvector):
  *
- * 1. **Indexar ya** la reseña (`EventoComentarioSyncService.procesarAhora`):
- *    pide su vector a Ollama y la deja buscable.
+ * 1. **Calcular ya su vector** (`EventoComentarioSyncService.procesarAhora`):
+ *    se lo pide a Ollama y lo guarda en `vector_comentario`.
  * 2. **Valorarla ya** (`ValoracionComentariosService.valorarAhora`).
  * 3. **Evaluar solo esta reseña** en las cuatro senales de texto, en paralelo:
  *    `resenas_repetidas` (su cuenta), `resenas_parecidas_*` (su vendedor y su
@@ -31,11 +31,11 @@ export interface ResenaNueva {
  *    cuenta, producto y vendedor).
  *
  * Lo llama `ResenasService.crear` SIN `await`: no retrasa la respuesta. Si algo
- * falla (Ollama caido, Elasticsearch, un detector), no se lanza nada ni se
+ * falla (Ollama caido, PostgreSQL, un detector), no se lanza nada ni se
  * reintenta aqui: el evento de la reseña queda en la cola y los workers
  * periodicos de cada senal la recogen en sus proximas pasadas. Cada detector
  * corta pronto si la reseña nueva no puede cambiar su resultado (por ejemplo, si
- * no tiene gemela), para no gastar CPU del backend en cada reseña.
+ * no tiene gemela), para no hacer la cuenta completa en cada reseña.
  */
 @Injectable()
 export class ChequeoTextoInmediatoService {
@@ -56,7 +56,7 @@ export class ChequeoTextoInmediatoService {
       await this.valoracionComentariosService.valorarAhora();
     } catch (error) {
       this.logger.warn(
-        `chequeo de texto de la resena ${resena.idResena}: no se pudo indexar o valorar, lo recogen los workers (${error instanceof Error ? error.message : String(error)})`,
+        `chequeo de texto de la resena ${resena.idResena}: no se pudo calcular su vector o valorarla, lo recogen los workers (${error instanceof Error ? error.message : String(error)})`,
       );
       return;
     }

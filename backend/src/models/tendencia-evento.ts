@@ -28,3 +28,21 @@ export interface TendenciaTermino {
   termino: string;
   total: number;
 }
+
+/**
+ * Una fila de `GET /admin/eventos/busquedas-sin-resultados`: lo que se busco y
+ * no encontro nada, con las formas de escribirlo agrupadas (ver
+ * `AdminBusquedasSinResultadosService`).
+ */
+export interface BusquedaSinResultados {
+  /** La forma normalizada mas buscada del grupo; nombra al grupo. */
+  termino: string;
+  /** Sesiones distintas que buscaron cualquiera de las formas del grupo. */
+  sesiones: number;
+  /** Las formas normalizadas que se juntaron (errores de tecleo). */
+  terminos_agrupados: string[];
+  /** Como lo escribio la gente, tal cual (hasta 10). */
+  como_lo_escribieron: string[];
+  /** La busqueda mas reciente del grupo (ISO 8601). */
+  ultima_busqueda: string;
+}

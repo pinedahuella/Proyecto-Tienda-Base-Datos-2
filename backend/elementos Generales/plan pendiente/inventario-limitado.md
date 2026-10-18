@@ -1,5 +1,13 @@
 # Plan pendiente — Venta de inventario limitado (Redis)
 
+> **2026-10-17 — cambio de modelo:** las reservas ya no viven solo en Redis.
+> La verdad es `reserva_venta_relampago` en PostgreSQL; Redis sigue siendo la
+> puerta rapida. `redimensionar` se usa ahora del script original (la copia
+> provisional `redimensionar-reserva.lua` de este folder ya no se carga: no
+> comprobaba que la venta existiera). Abrir la venta usa `restaurar`
+> (`restaurar-venta-relampago.lua`) en vez de `sembrar`. Lo que este plan dice
+> de Redis como unico contador esta superado: ver `carrito-postgres-verdad.md`.
+>
 > **Estado (2026-09-03, noche): los pasos 1, 2, 3, 4 y 5 estan CERRADOS y
 > probados en vivo. El bloque de inventario limitado esta completo salvo
 > la "fase futura" (activacion automatica por calor, mas abajo), que no
@@ -217,7 +225,7 @@ no-op si no está).
 prueba destapó que dos `POST /carrito/comprar` idénticos y concurrentes
 creaban **dos pedidos** (cobrando dos veces) — no es de inventario
 limitado, afecta a cualquier carrito. Corregido con
-`CarritoService.conCandadoCheckout`: candado corto en Redis
+`CarritoRedisService.conCandadoCheckout`: candado corto en Redis
 `mesh:checkout:<id_usuario>` (`SET EX 30 NX`), 409 para el segundo. El otro
 camino de compra (`POST /comprador/pedidos/:id/comprar`) ya era seguro.
 Detalle en `endpoints-carrito.md` § "Candado de checkout".

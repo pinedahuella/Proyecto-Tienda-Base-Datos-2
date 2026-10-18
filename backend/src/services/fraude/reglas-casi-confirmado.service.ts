@@ -10,25 +10,18 @@ const MOTIVO_DEVOLUCION = 3;
 
 /**
  * Paso 3 (mitad reglas) del agrupador de casos de fraude: evalua las
- * cinco reglas R-CASI (seccion 4 del documento original,
- * `regla_casi_confirmado` en Postgres) sobre un `GrupoFraude` ya armado.
- * Cualquiera que cumpla sube el caso a `casi_confirmado` sin importar el
- * puntaje (`PuntajeFraudeService` es independiente de esto).
+ * reglas R-CASI (seccion 4 del documento original, `regla_casi_confirmado`
+ * en Postgres) sobre un `GrupoFraude` ya armado. Cualquiera que cumpla sube
+ * el caso a `casi_confirmado` sin importar el puntaje
+ * (`PuntajeFraudeService` es independiente de esto).
  *
- * R-CASI-1 exige, entre otras cosas, "comparten casa con calle (A.4)" --
- * **A.4 quedo DESCARTADO por completo** (decision del usuario,
- * 2026-09-26: nada que compare direcciones via Neo4j se va a construir,
- * no es que falte, es alcance que ya no se hace -- ver
- * `plan pendiente/agrupador-fraude.md`). La condicion se deja escrita
- * porque no estorba (ese tipo de hallazgo simplemente nunca va a
- * existir), pero R-CASI-1 solo se puede cumplir por sus otras dos ramas,
- * F3/F6.
+ * Todas piden lo mismo: que dos motores que no se hablan apunten a las mismas
+ * cuentas (el grafo de resenas y las compras/registros por IP, por ejemplo).
  *
- * R-CASI-4 ("todas sus notas altas") queda INCOMPLETA a proposito: falta
- * cruzar contra las calificaciones reales de las resenas del ciclo, dato
- * que el `Hallazgo` generico no carga. Se conecta en el paso 5
- * (persistencia), cuando se tenga acceso directo a los ids de resena de
- * cada hallazgo de grafo.
+ * Se quitaron (2026-10-17, `plan pendiente/limpieza-fraude.md`): la rama
+ * "comparten casa con calle" de R-CASI-1 (A.4 se descarto, nunca hubo
+ * detector) y R-CASI-4 ("ciclo con dos olas"): las olas de B.4 no se guardan
+ * en ninguna senal, asi que nunca se podia cumplir.
  */
 @Injectable()
 export class ReglasCasiConfirmadoService {
@@ -45,17 +38,13 @@ export class ReglasCasiConfirmadoService {
       (tipos.has('ciclo') ||
         tipos.has('reiterado') ||
         tipos.has('satelites')) &&
-      (tipos.has('misma_casa_calle') || // A.4, DESCARTADO -- ver comentario de la clase, nunca va a ser true
-        tipos.has('ip_multicuenta_compras') ||
-        tipos.has('granja_de_registros'))
+      (tipos.has('ip_multicuenta_compras') || tipos.has('granja_de_registros'))
     ) {
       reglas.push('R-CASI-1');
     }
 
     if (
-      (tipos.has('ciclo') ||
-        tipos.has('mutuo') ||
-        tipos.has('cadena_abierta')) &&
+      (tipos.has('ciclo') || tipos.has('mutuo')) &&
       this.contarReputacionExpresDelNucleo(grupo.hallazgos, nucleo) >= 2
     ) {
       reglas.push('R-CASI-2');
@@ -69,10 +58,6 @@ export class ReglasCasiConfirmadoService {
       (await this.tieneCompraYDevolucion(nucleo))
     ) {
       reglas.push('R-CASI-3');
-    }
-
-    if (this.tieneCicloConDosOlas(grupo.hallazgos)) {
-      reglas.push('R-CASI-4');
     }
 
     if (
@@ -108,15 +93,6 @@ export class ReglasCasiConfirmadoService {
       }
     }
     return contador;
-  }
-
-  /** Ver el comentario de la clase -- falta cruzar contra las
-   * calificaciones reales ("notas altas"), queda pendiente para el paso 5. */
-  private tieneCicloConDosOlas(hallazgos: Hallazgo[]): boolean {
-    return hallazgos.some(
-      (hallazgo) =>
-        hallazgo.tipo === 'ciclo' && Number(hallazgo.metricas.olas) >= 2,
-    );
   }
 
   /**

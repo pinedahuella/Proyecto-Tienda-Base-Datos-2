@@ -4,6 +4,7 @@ import { pool } from '../../database/postgres';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { GrupoFraude } from '../../models/fraude/grupo-fraude';
 import { Hallazgo } from '../../models/fraude/hallazgo';
+import { construirClave } from './hallazgo-fraude-adaptador.service';
 import { PuntajeFraudeService } from './puntaje-fraude.service';
 import { ReglasCasiConfirmadoService } from './reglas-casi-confirmado.service';
 
@@ -54,7 +55,7 @@ export class PersistenciaCasoFraudeService {
     const reglas = await this.reglasCasiConfirmadoService.evaluar(grupo);
     const nivel = this.calcularNivel(puntaje, reglas);
     const ultimaEvidencia = this.ultimaEvidenciaDe(grupo.hallazgos);
-    const firma = this.construirFirma(grupo.hallazgos);
+    const firma = this.construirFirma(grupo.hallazgos, grupo.cuentas);
 
     const cliente = await pool.connect();
     try {
@@ -137,9 +138,14 @@ export class PersistenciaCasoFraudeService {
   /**
    * Busca que casos existentes ya tocan alguno de estos hallazgos.
    * Ninguno -> crea uno nuevo. Uno -> lo actualiza. Dos o mas -> los
-   * FUSIONA (se queda el de menor id, mueve la evidencia de los demas y
-   * los borra) -- el ejemplo del Caso 2 del documento original: dos
+   * FUSIONA (se queda el de menor id y los demas se borran; su evidencia
+   * la vuelve a escribir `sincronizarEvidencia`) -- el ejemplo del Caso 2 del documento original: dos
    * anillos separados que una evidencia nueva conecta.
+   *
+   * Los hallazgos de login no cuentan para esta busqueda: la misma senal de
+   * login puede ser evidencia de varios casos a la vez, y si contara,
+   * fusionaria lo que el agrupador dejo separado (item C1 de
+   * `docs/BACKEND-PENDIENTE.md`).
    *
    * Si el caso resultante estaba `descartada` y la firma de evidencia
    * cambio, lo reabre como `pendiente` con una nota -- si la firma es
@@ -165,16 +171,20 @@ export class PersistenciaCasoFraudeService {
     ultimaEvidencia: Date,
     firma: string,
   ): Promise<number> {
-    const idsExistentes = new Set<number>();
-    for (const hallazgo of hallazgos) {
-      const resultado = await cliente.query<{ id_caso_fraude: string }>(
-        `SELECT id_caso_fraude FROM evidencia_caso_fraude WHERE id_senal_fraude = $1`,
-        [hallazgo.idOrigen],
-      );
-      if (resultado.rows[0] != null) {
-        idsExistentes.add(Number(resultado.rows[0].id_caso_fraude));
-      }
-    }
+    const { rows: existentes } = await cliente.query<{
+      id_caso_fraude: string;
+    }>(
+      `SELECT DISTINCT id_caso_fraude FROM evidencia_caso_fraude
+        WHERE id_senal_fraude = ANY($1::bigint[])`,
+      [
+        hallazgos
+          .filter((hallazgo) => hallazgo.fuente !== 'login')
+          .map((hallazgo) => hallazgo.idOrigen),
+      ],
+    );
+    const idsExistentes = new Set(
+      existentes.map((fila) => Number(fila.id_caso_fraude)),
+    );
 
     if (idsExistentes.size === 0) {
       const resultado = await cliente.query<{ id_caso_fraude: string }>(
@@ -211,10 +221,12 @@ export class PersistenciaCasoFraudeService {
       (fila) => Number(fila.id_caso_fraude) === idSuperviviente,
     )!;
 
+    // La evidencia de los sobrantes no se mueve: `sincronizarEvidencia`
+    // escribe la del grupo entera en el sobreviviente.
     for (const idSobrante of idsSobrantes) {
       await cliente.query(
-        `UPDATE evidencia_caso_fraude SET id_caso_fraude = $1 WHERE id_caso_fraude = $2`,
-        [idSuperviviente, idSobrante],
+        `DELETE FROM evidencia_caso_fraude WHERE id_caso_fraude = $1`,
+        [idSobrante],
       );
       await cliente.query(
         `DELETE FROM caso_fraude_regla WHERE id_caso_fraude = $1`,
@@ -297,10 +309,19 @@ export class PersistenciaCasoFraudeService {
     )[0];
   }
 
-  /** Upsert de un `evidencia_caso_fraude` por hallazgo (por senal) -- el
-   * `ON CONFLICT` usa el indice unico parcial de `id_senal_fraude`. Devuelve
-   * el id de evidencia de cada hallazgo, para que `sincronizarCuentas` sepa
-   * a cual enganchar cada cuenta. */
+  /**
+   * Deja la evidencia del caso IGUAL a los hallazgos del grupo: upsert de
+   * uno por hallazgo (unico por caso y senal) y borra la que ya no esta.
+   *
+   * Lo que se borra es evidencia que ya no es vigente (el admin la
+   * descarto) o que es de otro grupo: un caso que una version vieja junto
+   * de mas se parte asi. El primer grupo que lo toca se queda con el caso
+   * (y su estado); los demas ya no encuentran ahi su evidencia y abren uno
+   * nuevo, `pendiente`.
+   *
+   * Devuelve el id de evidencia de cada hallazgo, para que
+   * `sincronizarCuentas` sepa a cual enganchar cada cuenta.
+   */
   private async sincronizarEvidencia(
     cliente: PoolClient,
     idCasoFraude: number,
@@ -314,9 +335,8 @@ export class PersistenciaCasoFraudeService {
       }>(
         `INSERT INTO evidencia_caso_fraude (id_caso_fraude, id_senal_fraude, puntos, ultima_evidencia)
          VALUES ($1, $2, $3, $4)
-         ON CONFLICT (id_senal_fraude) WHERE id_senal_fraude IS NOT NULL
+         ON CONFLICT (id_caso_fraude, id_senal_fraude)
          DO UPDATE SET
-           id_caso_fraude = EXCLUDED.id_caso_fraude,
            puntos = EXCLUDED.puntos,
            ultima_evidencia = EXCLUDED.ultima_evidencia
          RETURNING id_evidencia_caso_fraude`,
@@ -327,6 +347,12 @@ export class PersistenciaCasoFraudeService {
         Number(resultado.rows[0].id_evidencia_caso_fraude),
       );
     }
+    await cliente.query(
+      `DELETE FROM evidencia_caso_fraude
+        WHERE id_caso_fraude = $1
+          AND id_senal_fraude <> ALL($2::bigint[])`,
+      [idCasoFraude, hallazgos.map((hallazgo) => hallazgo.idOrigen)],
+    );
     return idEvidenciaPorHallazgo;
   }
 
@@ -363,7 +389,9 @@ export class PersistenciaCasoFraudeService {
 
     for (const hallazgo of hallazgos) {
       const idEvidencia = idEvidenciaPorHallazgo.get(hallazgo)!;
-      for (const cuenta of hallazgo.cuentas) {
+      // `cuentas` son las del caso: de un hallazgo de login solo se
+      // enganchan las que ya estan por otra evidencia.
+      for (const cuenta of hallazgo.cuentas.filter((c) => cuentas.has(c))) {
         await cliente.query(
           `INSERT INTO evidencia_caso_fraude_cuenta (id_evidencia_caso_fraude, id_usuario, es_nucleo)
            VALUES ($1, $2, $3)`,
@@ -410,11 +438,18 @@ export class PersistenciaCasoFraudeService {
   }
 
   /** Tipo+clave de cada hallazgo, ordenado y unido -- si cambia entre dos
-   * corridas, la evidencia ya no es la misma que cuando se descarto. */
-  private construirFirma(hallazgos: Hallazgo[]): string {
+   * corridas, la evidencia ya no es la misma que cuando se descarto. La
+   * clave sale de las cuentas que se guardan con la evidencia (las del
+   * caso), igual que `CasosFraudeService.construirFirmaActual` al
+   * descartar: en login no son todas las de la senal. */
+  private construirFirma(
+    hallazgos: Hallazgo[],
+    cuentas: Map<number, boolean>,
+  ): string {
     return hallazgos
       .map(
-        (hallazgo) => `${hallazgo.fuente}:${hallazgo.tipo}:${hallazgo.clave}`,
+        (hallazgo) =>
+          `${hallazgo.fuente}:${hallazgo.tipo}:${construirClave(hallazgo.cuentas.filter((c) => cuentas.has(c)))}`,
       )
       .sort()
       .join('|');

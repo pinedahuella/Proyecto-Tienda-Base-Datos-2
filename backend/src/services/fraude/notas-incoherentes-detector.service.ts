@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { elasticClient } from '../../database/elastic';
+import { pool } from '../../database/postgres';
 import { registrarAnilloFraude } from '../../helpers/registrar-anillo-fraude';
 import {
   LARGO_MINIMO_VALORACION,
@@ -8,27 +8,20 @@ import {
 } from '../../helpers/valoracion-texto';
 import type { TipoAnilloFraude } from '../../models/anillo-fraude';
 
-const INDICE = process.env.ELASTIC_INDICE_COMENTARIOS ?? 'mesh_comentarios';
-
-/** Un documento de `mesh_comentarios`, con lo que necesita la evidencia. */
-interface DocumentoResena {
-  id_resena: number;
-}
-
 /** La reseña recien escrita, con lo que hace falta para saber si es contradictoria. */
-interface DocumentoNuevo {
-  es_respuesta: boolean;
-  valoracion_texto?: string | null;
-  calificacion?: number | null;
-  id_usuario: number;
-  id_producto: number;
-  id_vendedor?: number | null;
+interface FilaNueva {
+  valoracion_texto: string | null;
+  calificacion: number;
+  id_usuario: string;
+  id_producto_mongo: string;
+  id_usuario_vendedor: string;
 }
 
+/** Una cuenta, producto o vendedor que pasa la regla. */
 interface Candidato {
-  key: number;
-  doc_count: number;
-  contradictorias: { doc_count: number };
+  llave: number;
+  valoradas: number;
+  contradictorias: number;
 }
 
 /** Una de las tres cuentas de la regla: sobre quien se cuenta. */
@@ -39,8 +32,8 @@ interface Dimension {
     | 'notas_incoherentes_producto'
     | 'notas_incoherentes_vendedor'
   >;
-  /** El campo de `mesh_comentarios` por el que se agrupa. */
-  campo: 'id_usuario' | 'id_producto' | 'id_vendedor';
+  /** La columna de `resena` por la que se agrupa. */
+  columna: 'id_usuario' | 'id_producto_mongo' | 'id_usuario_vendedor';
   /** Que porcentaje de sus resenas valoradas deben ser contradictorias. */
   porcentajeMinimo: number;
 }
@@ -53,17 +46,17 @@ interface Dimension {
 const DIMENSIONES: Dimension[] = [
   {
     tipo: 'notas_incoherentes_cuenta',
-    campo: 'id_usuario',
+    columna: 'id_usuario',
     porcentajeMinimo: 20,
   },
   {
     tipo: 'notas_incoherentes_producto',
-    campo: 'id_producto',
+    columna: 'id_producto_mongo',
     porcentajeMinimo: 40,
   },
   {
     tipo: 'notas_incoherentes_vendedor',
-    campo: 'id_vendedor',
+    columna: 'id_usuario_vendedor',
     porcentajeMinimo: 20,
   },
 ];
@@ -72,35 +65,27 @@ const DIMENSIONES: Dimension[] = [
  * Una resena es CONTRADICTORIA si su texto dice una cosa y sus estrellas otra:
  * texto malo con 4 o 5 estrellas, o texto bueno con 1 o 2. Las 3 estrellas no
  * cuentan nunca, ni los textos `dudosos` (la franja del medio del modelo).
+ * Necesita los alias `r` (`resena`) y `v` (`vector_comentario`).
  */
-const CONTRADICTORIA = {
-  bool: {
-    should: [
-      {
-        bool: {
-          filter: [
-            { term: { valoracion_texto: 'mala' } },
-            { range: { calificacion: { gte: 4 } } },
-          ],
-        },
-      },
-      {
-        bool: {
-          filter: [
-            { term: { valoracion_texto: 'buena' } },
-            { range: { calificacion: { lte: 2 } } },
-          ],
-        },
-      },
-    ],
-    minimum_should_match: 1,
-  },
-};
+const SQL_CONTRADICTORIA = `((v.valoracion_texto = 'mala' AND r.calificacion >= 4)
+     OR (v.valoracion_texto = 'buena' AND r.calificacion <= 2))`;
+
+/**
+ * Las resenas que cuentan: raiz, en la ventana (`$1`, en dias) y ya valoradas.
+ * Las de menos de `LARGO_MINIMO_VALORACION` caracteres son `corta` y no se
+ * cuentan, ni como contradictorias ni en el total.
+ */
+const SQL_RESENAS_VALORADAS = `resena r
+       JOIN comentario c ON c.id_comentario = r.id_comentario
+       JOIN vector_comentario v ON v.id_comentario = r.id_comentario
+      WHERE c.fecha_publicacion >= now() - make_interval(days => $1)
+        AND v.valoracion_texto IN ('mala', 'buena', 'dudosa')`;
 
 /**
  * Detecta cuentas, productos y vendedores con muchas resenas "contradictorias"
  * (texto malo con 4-5 estrellas, o texto bueno con 1-2). Son tres senales de la
- * familia `patron_resenas`, con fuente `elastic`:
+ * familia `patron_resenas`, con fuente `elastic` (el nombre que el catalogo de
+ * senales le da al texto de las resenas):
  *
  * - `notas_incoherentes_cuenta`: una cuenta con 5 o mas resenas contradictorias
  *   que son el 20 % o mas de las que escribio. Entra a los casos de fraude
@@ -116,13 +101,14 @@ const CONTRADICTORIA = {
  * contradictoria tanto puede venir de quien compra resenas como de una campana
  * en contra del vendedor.
  *
- * Todo sale de agregaciones de Elasticsearch sobre `mesh_comentarios`, donde
- * cada resena ya trae su `valoracion_texto` (`ValoracionComentariosService`):
- * el modelo no corre aca. Solo cuentan las resenas raiz (las respuestas no
- * llevan estrellas), de los ultimos `VENTANA_DIAS` y con valoracion `mala`,
- * `buena` o `dudosa` (las de menos de `LARGO_MINIMO_VALORACION` caracteres son
- * `corta` y no se cuentan, ni como contradictorias ni en el total). El
- * porcentaje es contradictorias sobre ese total.
+ * Todo sale de una agregacion de PostgreSQL sobre `resena` y
+ * `vector_comentario`, donde cada resena ya trae su `valoracion_texto`
+ * (`ValoracionComentariosService`): el modelo no corre aca. Solo cuentan las
+ * resenas raiz (las respuestas no llevan estrellas), de los ultimos
+ * `VENTANA_DIAS` y con valoracion `mala`, `buena` o `dudosa` (las de menos de
+ * `LARGO_MINIMO_VALORACION` caracteres son `corta` y no se cuentan, ni como
+ * contradictorias ni en el total). El porcentaje es contradictorias sobre ese
+ * total.
  *
  * Mismo molde que `ResenasRepetidasDetectorService`: `@Interval`, bandera
  * `procesando` y un error de conexion se loguea y no tumba el proceso. La
@@ -171,11 +157,10 @@ export class NotasIncoherentesDetectorService {
     }
     this.procesando = true;
     try {
-      const candidatos = await this.buscarCandidatos();
       const resumen: string[] = [];
       for (const dimension of DIMENSIONES) {
         let senales = 0;
-        for (const candidato of candidatos.get(dimension.tipo) ?? []) {
+        for (const candidato of await this.buscarCandidatos(dimension)) {
           senales += await this.registrar(dimension, candidato, modelo.version);
         }
         resumen.push(`${senales} ${dimension.tipo}`);
@@ -192,11 +177,10 @@ export class NotasIncoherentesDetectorService {
 
   /**
    * El chequeo de UNA reseña recien escrita: la llama `ChequeoTextoInmediatoService`
-   * cuando ya esta indexada y valorada. Solo si esa reseña es contradictoria (una
-   * que no lo es solo puede bajar un porcentaje, no subirlo), vuelve a evaluar su
-   * cuenta, su producto y su vendedor. Las agregaciones las hace Elasticsearch,
-   * acotadas a esas tres llaves. Un error se loguea; lo recoge la proxima pasada
-   * de `detectar()`.
+   * cuando ya tiene su vector y su valoracion. Solo si esa reseña es contradictoria
+   * (una que no lo es solo puede bajar un porcentaje, no subirlo), vuelve a evaluar
+   * su cuenta, su producto y su vendedor, acotando la agregacion a esas tres llaves.
+   * Un error se loguea; lo recoge la proxima pasada de `detectar()`.
    */
   async detectarInmediato(idComentario: number): Promise<void> {
     try {
@@ -204,36 +188,23 @@ export class NotasIncoherentesDetectorService {
       if (modelo == null) {
         return;
       }
-      const respuesta = await elasticClient.get<DocumentoNuevo>(
-        {
-          index: INDICE,
-          id: String(idComentario),
-          _source: [
-            'es_respuesta',
-            'valoracion_texto',
-            'calificacion',
-            'id_usuario',
-            'id_producto',
-            'id_vendedor',
-          ],
-        },
-        { ignore: [404] },
+      // Solo una raiz tiene resena: una respuesta no devuelve fila.
+      const { rows } = await pool.query<FilaNueva>(
+        `SELECT v.valoracion_texto, r.calificacion, r.id_usuario,
+                r.id_producto_mongo, r.id_usuario_vendedor
+           FROM resena r
+           JOIN vector_comentario v ON v.id_comentario = r.id_comentario
+          WHERE r.id_comentario = $1`,
+        [idComentario],
       );
-      const nueva = respuesta.found ? respuesta._source : undefined;
+      const nueva = rows[0];
       if (nueva == null || !this.esContradictoria(nueva)) {
         return;
       }
 
       for (const dimension of DIMENSIONES) {
-        const llave = nueva[dimension.campo];
-        if (llave == null) {
-          continue;
-        }
-        const candidatos = await this.buscarCandidatos(
-          [dimension],
-          [{ term: { [dimension.campo]: llave } }],
-        );
-        for (const candidato of candidatos.get(dimension.tipo) ?? []) {
+        const llave = Number(nueva[dimension.columna]);
+        for (const candidato of await this.buscarCandidatos(dimension, llave)) {
           await this.registrar(dimension, candidato, modelo.version);
         }
       }
@@ -244,78 +215,53 @@ export class NotasIncoherentesDetectorService {
     }
   }
 
-  /** Lo mismo que `CONTRADICTORIA`, para una sola reseña ya en memoria. */
-  private esContradictoria(r: DocumentoNuevo): boolean {
-    if (r.es_respuesta || r.calificacion == null) {
-      return false;
-    }
+  /** Lo mismo que `SQL_CONTRADICTORIA`, para una sola reseña ya en memoria. */
+  private esContradictoria(r: FilaNueva): boolean {
     return (
       (r.valoracion_texto === 'mala' && r.calificacion >= 4) ||
       (r.valoracion_texto === 'buena' && r.calificacion <= 2)
     );
   }
 
-  /** Las resenas que cuentan: raiz, en la ventana y ya valoradas. */
-  private filtroBase(): object[] {
-    return [
-      { term: { es_respuesta: false } },
-      {
-        range: {
-          fecha_publicacion: {
-            gte: `now-${NotasIncoherentesDetectorService.VENTANA_DIAS}d`,
-          },
-        },
-      },
-      { terms: { valoracion_texto: ['mala', 'buena', 'dudosa'] } },
-    ];
-  }
-
   /**
-   * Una sola consulta con una agregacion por dimension. Cada una agrupa por
-   * cuenta, producto o vendedor, cuenta sus contradictorias en una sub-agregacion
-   * y se queda solo con las que pasan las dos reglas (`bucket_selector`).
-   * Ordenadas por contradictorias: si hubiera mas de `MAX_CANDIDATOS`, quedan
-   * las peores. Con `extra` (chequeo inmediato) la consulta se acota a una llave.
+   * Agrupa por cuenta, producto o vendedor, cuenta sus resenas valoradas y sus
+   * contradictorias, y se queda solo con los que pasan las dos reglas.
+   * Ordenados por contradictorias: si hubiera mas de `MAX_CANDIDATOS`, quedan
+   * los peores. Con `llave` (chequeo inmediato) se acota a esa sola.
    */
   private async buscarCandidatos(
-    dimensiones: Dimension[] = DIMENSIONES,
-    extra: object[] = [],
-  ): Promise<Map<string, Candidato[]>> {
-    const aggs: Record<string, object> = {};
-    for (const dimension of dimensiones) {
-      aggs[dimension.tipo] = {
-        terms: {
-          field: dimension.campo,
-          min_doc_count: NotasIncoherentesDetectorService.MIN_CONTRADICTORIAS,
-          size: NotasIncoherentesDetectorService.MAX_CANDIDATOS,
-          order: { contradictorias: 'desc' },
-        },
-        aggs: {
-          contradictorias: { filter: CONTRADICTORIA },
-          pasan: {
-            bucket_selector: {
-              buckets_path: { c: 'contradictorias._count', t: '_count' },
-              script: `params.c >= ${NotasIncoherentesDetectorService.MIN_CONTRADICTORIAS} && params.c * 100 >= params.t * ${dimension.porcentajeMinimo}`,
-            },
-          },
-        },
-      };
-    }
-
-    const respuesta = await elasticClient.search({
-      index: INDICE,
-      size: 0,
-      query: { bool: { filter: [...this.filtroBase(), ...extra] } },
-      aggs,
-    });
-
-    const resultado = new Map<string, Candidato[]>();
-    for (const dimension of dimensiones) {
-      const agregado = respuesta.aggregations?.[dimension.tipo] as
-        { buckets: Candidato[] } | undefined;
-      resultado.set(dimension.tipo, agregado?.buckets ?? []);
-    }
-    return resultado;
+    dimension: Dimension,
+    llave?: number,
+  ): Promise<Candidato[]> {
+    const { rows } = await pool.query<{
+      llave: string;
+      valoradas: number;
+      contradictorias: number;
+    }>(
+      `SELECT r.${dimension.columna} AS llave,
+              count(*)::int AS valoradas,
+              count(*) FILTER (WHERE ${SQL_CONTRADICTORIA})::int AS contradictorias
+         FROM ${SQL_RESENAS_VALORADAS}
+          AND ($2::bigint IS NULL OR r.${dimension.columna} = $2)
+        GROUP BY r.${dimension.columna}
+       HAVING count(*) FILTER (WHERE ${SQL_CONTRADICTORIA}) >= $3
+          AND count(*) FILTER (WHERE ${SQL_CONTRADICTORIA}) * 100
+              >= count(*) * $4
+        ORDER BY contradictorias DESC, r.${dimension.columna}
+        LIMIT $5`,
+      [
+        NotasIncoherentesDetectorService.VENTANA_DIAS,
+        llave ?? null,
+        NotasIncoherentesDetectorService.MIN_CONTRADICTORIAS,
+        dimension.porcentajeMinimo,
+        NotasIncoherentesDetectorService.MAX_CANDIDATOS,
+      ],
+    );
+    return rows.map((fila) => ({
+      llave: Number(fila.llave),
+      valoradas: fila.valoradas,
+      contradictorias: fila.contradictorias,
+    }));
   }
 
   /** Devuelve 1 si la senal quedo registrada, 0 si no. */
@@ -324,41 +270,37 @@ export class NotasIncoherentesDetectorService {
     candidato: Candidato,
     versionModelo: string,
   ): Promise<number> {
-    const respuesta = await elasticClient.search<DocumentoResena>({
-      index: INDICE,
-      size: NotasIncoherentesDetectorService.MAX_EVIDENCIA,
-      sort: [{ fecha_publicacion: 'desc' }],
-      _source: ['id_resena'],
-      query: {
-        bool: {
-          filter: [
-            ...this.filtroBase(),
-            CONTRADICTORIA,
-            { term: { [dimension.campo]: candidato.key } },
-          ],
-        },
-      },
-    });
-    const idsResenas = respuesta.hits.hits
-      .map((hit) => hit._source?.id_resena)
-      .filter((id): id is number => typeof id === 'number')
+    const { rows } = await pool.query<{ id_resena: string }>(
+      `SELECT r.id_resena
+         FROM ${SQL_RESENAS_VALORADAS}
+          AND ${SQL_CONTRADICTORIA}
+          AND r.${dimension.columna} = $2
+        ORDER BY c.fecha_publicacion DESC
+        LIMIT $3`,
+      [
+        NotasIncoherentesDetectorService.VENTANA_DIAS,
+        candidato.llave,
+        NotasIncoherentesDetectorService.MAX_EVIDENCIA,
+      ],
+    );
+    const idsResenas = rows
+      .map((fila) => Number(fila.id_resena))
       .sort((a, b) => a - b);
 
-    const contradictorias = candidato.contradictorias.doc_count;
-    const analizadas = candidato.doc_count;
-    const esProducto = dimension.campo === 'id_producto';
+    const { contradictorias, valoradas } = candidato;
+    const esProducto = dimension.columna === 'id_producto_mongo';
     try {
       await registrarAnilloFraude({
         tipo: dimension.tipo,
         // Un id de producto no es una cuenta: con la "p" `registrarAnilloFraude`
         // no lo toma por una y no inserta una cuenta que no existe.
-        clave: esProducto ? `p${candidato.key}` : String(candidato.key),
+        clave: esProducto ? `p${candidato.llave}` : String(candidato.llave),
         resenas: idsResenas,
-        productos: esProducto ? [candidato.key] : undefined,
+        productos: esProducto ? [candidato.llave] : undefined,
         detalle: {
           contradictorias,
-          resenas_valoradas: analizadas,
-          porcentaje: Math.round((contradictorias / analizadas) * 1000) / 10,
+          resenas_valoradas: valoradas,
+          porcentaje: Math.round((contradictorias / valoradas) * 1000) / 10,
           porcentaje_minimo: dimension.porcentajeMinimo,
           min_contradictorias:
             NotasIncoherentesDetectorService.MIN_CONTRADICTORIAS,
@@ -369,7 +311,7 @@ export class NotasIncoherentesDetectorService {
       });
     } catch (error) {
       this.logger.warn(
-        `no se pudo persistir la senal ${dimension.tipo} de ${dimension.campo}=${candidato.key}: ${mensajeCorto(error)}`,
+        `no se pudo persistir la senal ${dimension.tipo} de ${dimension.columna}=${candidato.llave}: ${mensajeCorto(error)}`,
       );
       return 0;
     }

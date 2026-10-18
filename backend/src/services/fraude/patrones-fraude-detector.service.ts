@@ -8,17 +8,19 @@ import { TipoAnilloFraude } from '../../models/anillo-fraude';
 
 /**
  * `elementos Generales/plan pendiente/anillos-fraude-familia-b.md`: extiende
- * lo que `AnillosDetectorService` hace para A.1/A.2 a las seis consultas de
- * `neo4j/consultas/B1..B7` que SI se persisten como su propio tipo de caso
- * (`cadena_abierta`, `satelites`, `persistente`, `favor_devuelto`,
- * `coordinados`, `reputacion_expres`). `B.4` (anillo_en_el_tiempo) queda
+ * lo que `AnillosDetectorService` hace para A.1/A.2 a las cuatro consultas
+ * de `neo4j/consultas/B2..B7` que SI se persisten como su propio tipo de caso
+ * (`satelites`, `persistente`, `coordinados`, `reputacion_expres`). B.1
+ * (cadena abierta) se quito: una cadena A->B->C no concentra reputacion en
+ * nadie, y en los datos solo repetia anillos que ya salian como `ciclo`. B.5
+ * (favor devuelto) se fusiono en `mutuo`: son las horas entre ida y vuelta
+ * de un par mutuo (`AnillosDetectorService`). `B.4` (anillo_en_el_tiempo) queda
  * fuera a proposito: su funcion es mostrar lo que la ventana de dias
  * esconde, asi que ponerle la misma ventana lo volveria inutil -- se usa
  * como enriquecimiento del detalle de un `ciclo`/`reiterado` ya existente,
  * no como hallazgo propio (ver `FraudeAnillosPersistidosService`).
  *
- * Los umbrales de cada consulta (nota alta, dias de cadena, horas de
- * sincronia, etc.) son los mismos que `neo4j/consultas/B0_parametros.cypher`
+ * Los umbrales de cada consulta (nota alta, horas de sincronia, etc.) son los mismos que `neo4j/consultas/B0_parametros.cypher`
  * -- medidos contra los datos reales, ver ese archivo para el porque de cada
  * numero. `VENTANA_DIAS` es la misma idea que
  * `AnillosDetectorService.VENTANA_DIAS`: sin ella, un hallazgo de hace anos
@@ -29,9 +31,9 @@ import { TipoAnilloFraude } from '../../models/anillo-fraude';
  * Mismo molde que `AnillosDetectorService`: `@Interval`, un flag
  * `procesando` evita que se solape con la corrida anterior, y un error de
  * conexion se loguea y no tumba el proceso. A diferencia de aquella, aca no
- * hace falta un `agrupar()` que fusione tipos -- cada uno de los seis
+ * hace falta un `agrupar()` que fusione tipos -- cada uno de los cuatro
  * patrones es independiente de los demas (no hay una escalada entre
- * `persistente` y `favor_devuelto`, por ejemplo), asi que cada hallazgo se
+ * `persistente` y `coordinados`, por ejemplo), asi que cada hallazgo se
  * persiste con su propio tipo tal cual sale de su consulta.
  */
 @Injectable()
@@ -43,18 +45,16 @@ export class PatronesFraudeDetectorService {
   /** Misma idea que `AnillosDetectorService.VENTANA_DIAS`. */
   private static readonly VENTANA_DIAS = 60;
 
-  /** Seis consultas de varios saltos en la misma corrida; que no se cuelgue. */
+  /** Cuatro consultas de varios saltos en la misma corrida; que no se cuelgue. */
   private static readonly LIMITE_MS = 20000;
 
   // Umbrales de B0_parametros.cypher (neo4j/consultas), medidos contra los
   // datos reales -- ver ese archivo para el razonamiento de cada uno.
   private static readonly NOTA_ALTA = 4;
-  private static readonly DIAS_CADENA = 30;
   private static readonly DIAS_CUENTA_DESECHABLE = 7;
   private static readonly MIN_SATELITES = 3;
   private static readonly MIN_MESES = 3;
   private static readonly MIN_EXCLUSIVIDAD = 0.6;
-  private static readonly HORAS_DEVOLUCION = 72;
   private static readonly HORAS_SINCRONIA = 24;
   private static readonly MIN_COINCIDENCIAS = 3;
   private static readonly HORAS_CUENTA_NUEVA = 24;
@@ -73,13 +73,11 @@ export class PatronesFraudeDetectorService {
     this.procesando = true;
     try {
       const parametros = this.parametrosBase();
-      const [cadenas, satelites, persistentes, favores, coordinados, expres] =
+      const [satelites, persistentes, coordinados, expres] =
         await conLimiteDeTiempo(
           Promise.all([
-            consultarGrafo<FilaHallazgo>(CYPHER_B1_VENTANA, parametros),
             consultarGrafo<FilaHallazgo>(CYPHER_B2_VENTANA, parametros),
             consultarGrafo<FilaHallazgo>(CYPHER_B3_VENTANA, parametros),
-            consultarGrafo<FilaHallazgo>(CYPHER_B5_VENTANA, parametros),
             consultarGrafo<FilaHallazgo>(CYPHER_B6_VENTANA, parametros),
             consultarGrafo<FilaHallazgo>(CYPHER_B7_VENTANA, parametros),
           ]),
@@ -88,10 +86,8 @@ export class PatronesFraudeDetectorService {
         );
 
       const hallazgos: HallazgoTipado[] = [
-        ...cadenas.map((f) => ({ tipo: 'cadena_abierta' as const, fila: f })),
         ...satelites.map((f) => ({ tipo: 'satelites' as const, fila: f })),
         ...persistentes.map((f) => ({ tipo: 'persistente' as const, fila: f })),
-        ...favores.map((f) => ({ tipo: 'favor_devuelto' as const, fila: f })),
         ...coordinados.map((f) => ({ tipo: 'coordinados' as const, fila: f })),
         ...expres.map((f) => ({ tipo: 'reputacion_expres' as const, fila: f })),
       ];
@@ -108,8 +104,8 @@ export class PatronesFraudeDetectorService {
   }
 
   /**
-   * Version acotada de `detectar()`, para los cuatro patrones cuya evidencia
-   * gira sobre DOS cuentas y una reseña puntual (B.1/B.3/B.5/B.6) -- mismo
+   * Version acotada de `detectar()`, para los dos patrones cuya evidencia
+   * gira sobre DOS cuentas y una reseña puntual (B.3/B.6) -- mismo
    * criterio que `AnillosDetectorService.detectarInmediato()`. B.2
    * (satelites) y B.7 (reputacion expres) quedan fuera: agrupan por
    * VENDEDOR ("¿ya tiene 3+ satelites?"), una pregunta sobre el vendedor
@@ -126,22 +122,17 @@ export class PatronesFraudeDetectorService {
         ...this.parametrosBase(),
         idResena: neo4j.int(idResena),
       };
-      const [cadenas, persistentes, favores, coordinados] =
-        await conLimiteDeTiempo(
-          Promise.all([
-            consultarGrafo<FilaHallazgo>(CYPHER_B1_VENTANA_ACOTADO, parametros),
-            consultarGrafo<FilaHallazgo>(CYPHER_B3_VENTANA_ACOTADO, parametros),
-            consultarGrafo<FilaHallazgo>(CYPHER_B5_VENTANA_ACOTADO, parametros),
-            consultarGrafo<FilaHallazgo>(CYPHER_B6_VENTANA_ACOTADO, parametros),
-          ]),
-          PatronesFraudeDetectorService.LIMITE_MS,
-          'Neo4j',
-        );
+      const [persistentes, coordinados] = await conLimiteDeTiempo(
+        Promise.all([
+          consultarGrafo<FilaHallazgo>(CYPHER_B3_VENTANA_ACOTADO, parametros),
+          consultarGrafo<FilaHallazgo>(CYPHER_B6_VENTANA_ACOTADO, parametros),
+        ]),
+        PatronesFraudeDetectorService.LIMITE_MS,
+        'Neo4j',
+      );
 
       const hallazgos: HallazgoTipado[] = [
-        ...cadenas.map((f) => ({ tipo: 'cadena_abierta' as const, fila: f })),
         ...persistentes.map((f) => ({ tipo: 'persistente' as const, fila: f })),
-        ...favores.map((f) => ({ tipo: 'favor_devuelto' as const, fila: f })),
         ...coordinados.map((f) => ({ tipo: 'coordinados' as const, fila: f })),
       ];
 
@@ -161,16 +152,12 @@ export class PatronesFraudeDetectorService {
     return {
       dias: neo4j.int(PatronesFraudeDetectorService.VENTANA_DIAS),
       nota_alta: neo4j.int(PatronesFraudeDetectorService.NOTA_ALTA),
-      dias_cadena: neo4j.int(PatronesFraudeDetectorService.DIAS_CADENA),
       dias_cuenta_desechable: neo4j.int(
         PatronesFraudeDetectorService.DIAS_CUENTA_DESECHABLE,
       ),
       min_satelites: neo4j.int(PatronesFraudeDetectorService.MIN_SATELITES),
       min_meses: neo4j.int(PatronesFraudeDetectorService.MIN_MESES),
       min_exclusividad: PatronesFraudeDetectorService.MIN_EXCLUSIVIDAD,
-      horas_devolucion: neo4j.int(
-        PatronesFraudeDetectorService.HORAS_DEVOLUCION,
-      ),
       horas_sincronia: neo4j.int(PatronesFraudeDetectorService.HORAS_SINCRONIA),
       min_coincidencias: neo4j.int(
         PatronesFraudeDetectorService.MIN_COINCIDENCIAS,
@@ -203,7 +190,7 @@ export class PatronesFraudeDetectorService {
   /**
    * A diferencia de `AnillosDetectorService.persistir()`, no hay `agrupar()`
    * previo: cada fila de cada consulta ya es un caso independiente (no hay
-   * tipo que "gane" sobre otro entre los seis patrones), asi que se registra
+   * tipo que "gane" sobre otro entre los cuatro patrones), asi que se registra
    * tal cual sale, una llamada por fila.
    */
   private async persistir(hallazgos: HallazgoTipado[]): Promise<void> {
@@ -226,16 +213,13 @@ export class PatronesFraudeDetectorService {
     }
   }
 
-  /** Solo estos tres tipos traen metricas hoy -- ver `PUNTOS_BASE` en
+  /** Solo estos dos tipos traen metricas hoy -- ver `PUNTOS_BASE` en
    * `puntaje-fraude.service.ts`. Los demas se quedan con el `{}` por
    * defecto de `registrarAnilloFraude`. */
   private detalleDe(
     tipo: HallazgoTipado['tipo'],
     fila: FilaHallazgo,
   ): Record<string, unknown> | undefined {
-    if (tipo === 'favor_devuelto') {
-      return { horas: fila.horas };
-    }
     if (tipo === 'reputacion_expres') {
       return { autor_minutos_vida: fila.autor_minutos_vida };
     }
@@ -267,11 +251,10 @@ type HallazgoTipado = {
 };
 
 /** Una fila cruda de cualquiera de las consultas: ids de Neo4j (Integer).
- * Los ultimos cuatro campos solo los traen B.3/B.5/B.7 -- ver `detalleDe`. */
+ * Los ultimos tres campos solo los traen B.3/B.7 -- ver `detalleDe`. */
 interface FilaHallazgo {
   cuentas: unknown[];
   resenas: unknown[];
-  horas?: number;
   autor_minutos_vida?: number;
   es_mutuo?: boolean;
   regularidad?: number;
@@ -293,54 +276,6 @@ function mensajeCorto(error: unknown): string {
   const texto = error instanceof Error ? error.message : String(error);
   return texto.length > 300 ? `${texto.slice(0, 297)}...` : texto;
 }
-
-// =====================================================================
-// B.1 -- cadena abierta
-// =====================================================================
-//
-// Igual que `neo4j/consultas/B1_cadena_abierta.cypher`, sin el bloque de
-// `Direccion` (fuera de alcance por ahora) y sin las columnas cosmeticas
-// (correos, agravantes) -- esta version es de deteccion, no de payload para
-// un endpoint. Agrega `ultima >= ... - $dias` (recencia: la reseña MAS
-// RECIENTE de la cadena, no solo que su duracion quepa en `$dias_cadena`) y,
-// en la version acotada, exige que `$idResena` sea parte del camino.
-const CYPHER_B1_BASE = `
-MATCH camino = (inicio:Usuario)-[:ESCRIBIO|CALIFICA_A*4..8]->(fin:Usuario)
-WHERE inicio <> fin
-WITH inicio, fin,
-     [n IN nodes(camino) WHERE n:Usuario] AS cuentas,
-     [n IN nodes(camino) WHERE n:Resena]  AS resenas
-WHERE size(cuentas) = size(reduce(vistas = [], c IN cuentas |
-        CASE WHEN c.id IN vistas THEN vistas ELSE vistas + c.id END))
-  AND ALL (r IN resenas WHERE r.calificacion >= $nota_alta)
-  AND NOT EXISTS { (fin)-[:ESCRIBIO|CALIFICA_A*2..6]->(inicio) }
-`;
-
-const CYPHER_B1_RESTO = `
-WITH cuentas, resenas,
-     reduce(m = resenas[0].fecha, r IN resenas | CASE WHEN r.fecha < m THEN r.fecha ELSE m END) AS primera,
-     reduce(m = resenas[0].fecha, r IN resenas | CASE WHEN r.fecha > m THEN r.fecha ELSE m END) AS ultima
-WHERE ultima.epochSeconds - primera.epochSeconds <= $dias_cadena * 86400
-  AND ultima >= datetime() - duration({days: $dias})
-
-WITH [c IN cuentas | c.id] AS ids, collect(resenas) AS grupos
-WITH ids, reduce(t = [], g IN grupos | t + [r IN g WHERE NOT r IN t]) AS resenas
-
-WITH collect({ids: ids, resenas: resenas}) AS todas
-UNWIND todas AS c
-WITH c, todas
-WHERE NONE (o IN todas WHERE size(o.ids) > size(c.ids)
-        AND ANY (i IN range(0, size(o.ids) - size(c.ids))
-                 WHERE o.ids[i..i + size(c.ids)] = c.ids))
-RETURN c.ids AS cuentas, [r IN c.resenas | r.id] AS resenas
-`;
-
-const CYPHER_B1_VENTANA = CYPHER_B1_BASE + CYPHER_B1_RESTO;
-
-const CYPHER_B1_VENTANA_ACOTADO =
-  CYPHER_B1_BASE +
-  `  AND $idResena IN [r IN resenas | r.id]\n` +
-  CYPHER_B1_RESTO;
 
 // =====================================================================
 // B.2 -- satelites (solo periodico, agrupa por vendedor)
@@ -399,35 +334,6 @@ const CYPHER_B3_VENTANA = CYPHER_B3_BASE + CYPHER_B3_RESTO;
 
 const CYPHER_B3_VENTANA_ACOTADO =
   CYPHER_B3_BASE + `  AND $idResena IN [x IN rs | x.id]\n` + CYPHER_B3_RESTO;
-
-// =====================================================================
-// B.5 -- favor devuelto
-// =====================================================================
-const CYPHER_B5_BASE = `
-MATCH (a:Usuario)-[:ESCRIBIO]->(ra:Resena)-[:CALIFICA_A]->(b:Usuario),
-      (b)-[:ESCRIBIO]->(rb:Resena)-[:CALIFICA_A]->(a)
-WHERE rb.fecha >= ra.fecha
-  AND rb.fecha.epochSeconds - ra.fecha.epochSeconds <= $horas_devolucion * 3600
-  AND ra.calificacion >= $nota_alta
-  AND rb.calificacion >= $nota_alta
-  AND rb.fecha >= datetime() - duration({days: $dias})
-`;
-
-const CYPHER_B5_RESTO = `
-WITH CASE WHEN a.id < b.id THEN a ELSE b END AS x,
-     CASE WHEN a.id < b.id THEN b ELSE a END AS y,
-     collect(ra.id) + collect(rb.id) AS resenas,
-     min(rb.fecha.epochSeconds - ra.fecha.epochSeconds) AS segundos_minimos
-RETURN [x.id, y.id] AS cuentas, resenas,
-       segundos_minimos / 3600.0 AS horas
-`;
-
-const CYPHER_B5_VENTANA = CYPHER_B5_BASE + CYPHER_B5_RESTO;
-
-const CYPHER_B5_VENTANA_ACOTADO =
-  CYPHER_B5_BASE +
-  `  AND ($idResena = ra.id OR $idResena = rb.id)\n` +
-  CYPHER_B5_RESTO;
 
 // =====================================================================
 // B.6 -- coordinados

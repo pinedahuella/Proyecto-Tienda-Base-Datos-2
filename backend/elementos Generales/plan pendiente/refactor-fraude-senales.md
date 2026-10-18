@@ -1,5 +1,7 @@
 # Refactor de fraude: un solo modelo de señales
 
+> **2026-10-17:** se quitaron los tipos `cadena_abierta`, `favor_devuelto` y `carrito_acaparador`, y la evidencia de un caso pasó a ser única por (caso, señal). Ver `limpieza-fraude.md`.
+
 Documento vivo de trabajo. Se va llenando etapa por etapa. Cada etapa se prueba antes de pasar a la siguiente.
 
 **Estado (2026-09-30): etapas 1 a 5 HECHAS, la 6 es OPCIONAL (sin construir), la 7 está EN CURSO (parte 1 hecha: el agrupador y los casos ya leen `senal_fraude`) y la 8 está PENDIENTE. Todo aplicado y probado en la base local; nada en `migrations/` todavía.**

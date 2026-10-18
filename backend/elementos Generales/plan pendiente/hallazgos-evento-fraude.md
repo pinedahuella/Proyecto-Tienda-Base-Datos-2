@@ -1,5 +1,7 @@
 # Persistencia de F1-F6 (hallazgos de fraude sobre eventos de ClickHouse)
 
+> **2026-10-17:** F4 (`carrito_acaparador`) se quitó y F6 (`granja_de_registros`) pasó a Elasticsearch (`FraudeLoginRetrospectivoService`). Ver `limpieza-fraude.md`.
+
 **Estado (2026-09-25, noche): tablas + worker + rutas de admin construidos,
 aplicados en local y probados en vivo contra ClickHouse/Postgres reales.
 Faltan los consumidores (F1 a tendencias, F4 a venta relámpago, el

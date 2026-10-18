@@ -1,20 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { elasticClient } from '../../database/elastic';
 import { mongoDb } from '../../database/mongo';
-import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
+import { pool } from '../../database/postgres';
+import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
+import { buscarCercanos } from '../../helpers/vectores-pgvector';
 import { Producto } from '../../models/producto';
 
-const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
 const LIMITE = 6;
 /** Cuantos vecinos se piden antes de quedarse con uno por grupo. Igual que el
- * `LIMIT 200` de `productos_similares()` (migracion 027). */
+ * `LIMIT 200` que tenia `productos_similares()` (migracion 027). */
 const CANDIDATOS = 200;
-
-interface DocumentoVector {
-  vector?: number[];
-  vector_grupo?: string;
-}
 
 interface Similar {
   id_producto: number;
@@ -29,16 +24,16 @@ export interface ProductoSimilar {
 
 /**
  * Recomendacion semantica de la Entrega final (`GET /productos/:id/similares`).
- * Solo une dos piezas: la busqueda kNN sobre el campo `vector` de
- * `mesh_productos` (Elasticsearch) dice CUALES ids son parecidos, y esta clase
- * le pide a MongoDB el detalle para pintar la tarjeta -- mismo patron de
- * enriquecido que `TambienVieronSyncService.consultarProductosPorId`. Sin
- * cache: el kNN sobre el indice es rapido.
+ * Solo une dos piezas: la busqueda de vecinos sobre `vector_producto`
+ * (PostgreSQL, pgvector) dice CUALES ids son parecidos, y esta clase le pide a
+ * MongoDB el detalle para pintar la tarjeta -- mismo patron de enriquecido que
+ * `TambienVieronSyncService.consultarProductosPorId`. Sin cache: la busqueda
+ * sobre el indice HNSW es rapida.
  *
- * Mismas reglas que tenia `productos_similares()` en PostgreSQL (migracion
- * 027): solo productos activos, nunca el mismo producto, nunca uno del mismo
- * `grupo` que el base (las copias del generador que solo cambian el nombre),
- * y uno solo por grupo, el mas cercano.
+ * Mismas reglas que tenia `productos_similares()` (migracion 027): solo
+ * productos activos, nunca el mismo producto, nunca uno del mismo `grupo` que
+ * el base (las copias del generador que solo cambian el nombre), y uno solo
+ * por grupo, el mas cercano.
  */
 @Injectable()
 export class SimilaresService {
@@ -70,59 +65,52 @@ export class SimilaresService {
     }));
   }
 
-  /** Vacio si el producto no existe en el indice o todavia no tiene vector. */
+  /** Vacio si el producto no existe o todavia no tiene vector. */
   private async buscarSimilares(idProducto: number): Promise<Similar[]> {
     try {
-      const base = await elasticClient.get<DocumentoVector>(
-        {
-          index: INDICE,
-          id: String(idProducto),
-          _source_includes: ['vector', 'vector_grupo'],
-        },
-        { ignore: [404] },
+      const { rows: base } = await pool.query<{
+        vector: string;
+        grupo: string;
+      }>(
+        `SELECT vector::text AS vector, grupo
+           FROM vector_producto
+          WHERE id_producto_mongo = $1`,
+        [idProducto],
       );
-      const vector = base.found ? base._source?.vector : undefined;
-      if (!vector) {
+      if (base.length === 0) {
         return [];
       }
-      const grupoBase = base._source?.vector_grupo;
 
-      const respuesta = await elasticClient.search<DocumentoVector>({
-        index: INDICE,
-        size: CANDIDATOS,
-        _source: ['vector_grupo'],
-        knn: {
-          field: 'vector',
-          query_vector: vector,
-          k: CANDIDATOS,
-          num_candidates: CANDIDATOS * 2,
-          filter: {
-            bool: {
-              filter: [{ term: { estado: 'activo' } }],
-              must_not: [
-                { ids: { values: [String(idProducto)] } },
-                ...(grupoBase ? [{ term: { vector_grupo: grupoBase } }] : []),
-              ],
-            },
-          },
-        },
-      });
+      // El vector va como parametro (no como subconsulta): asi el ORDER BY
+      // puede usar el indice HNSW.
+      const cercanos = await buscarCercanos<{
+        id_producto_mongo: string;
+        grupo: string;
+        similitud: number;
+      }>(
+        `SELECT id_producto_mongo, grupo, 1 - (vector <=> $1::vector) AS similitud
+           FROM vector_producto
+          WHERE activo
+            AND id_producto_mongo <> $2
+            AND grupo <> $3
+          ORDER BY vector <=> $1::vector
+          LIMIT $4`,
+        [base[0].vector, idProducto, base[0].grupo, CANDIDATOS],
+        CANDIDATOS * 2,
+      );
 
-      // Los resultados llegan del mas cercano al mas lejano: el primero de
-      // cada grupo es el que se queda.
+      // Llegan del mas cercano al mas lejano: el primero de cada grupo es el
+      // que se queda.
       const vistos = new Set<string>();
       const similares: Similar[] = [];
-      for (const hit of respuesta.hits.hits) {
-        const clave = hit._source?.vector_grupo ?? `id:${hit._id}`;
-        if (vistos.has(clave)) {
+      for (const fila of cercanos) {
+        if (vistos.has(fila.grupo)) {
           continue;
         }
-        vistos.add(clave);
+        vistos.add(fila.grupo);
         similares.push({
-          id_producto: Number(hit._id),
-          // En coseno, Elasticsearch puntua (1 + coseno) / 2: se devuelve al
-          // coseno (1 - distancia), la misma escala que daba pgvector.
-          similitud: 2 * (hit._score ?? 0) - 1,
+          id_producto: Number(fila.id_producto_mongo),
+          similitud: fila.similitud,
         });
         if (similares.length === LIMITE) {
           break;
@@ -130,7 +118,7 @@ export class SimilaresService {
       }
       return similares;
     } catch (error) {
-      manejarErrorConexionElastic(this.logger, error);
+      manejarErrorConexion(this.logger, error);
     }
   }
 }

@@ -1,5 +1,11 @@
 # Plan pendiente — Señales `resenas_parecidas_*`: un vendedor o un producto con reseñas copiadas
 
+> **Cambio 2026-10-16:** los vectores y la valoración de las reseñas ya no están
+> en Elasticsearch (`mesh_comentarios`) sino en PostgreSQL (`vector_comentario`,
+> pgvector). Donde este plan dice `mesh_comentarios`, hoy es `vector_comentario`,
+> y lo que pide del índice o del mapping de `mesh_comentarios` en `elastic/` ya
+> no hace falta. Ver `vectores-pgvector.md`.
+
 > **Estado (2026-10-04): HECHO y probado en local, con el backend corriendo.
 > Falta lo de otros (migración real, ETL, docs) — ver el final.** Sin el tipo en
 > `tipo_senal_fraude` los detectores no pueden guardar nada.

@@ -143,3 +143,99 @@ export function validarDuracionVencimiento(valor: unknown): number {
   }
   return valor;
 }
+
+/**
+ * Reglas de GET /vendedor/ofertas/buscar (el buscador de ofertas sobre
+ * Elasticsearch). El texto, el alcance, el orden, el filtro de stock y el de
+ * descuento. Los numeros (`id_vendedor`, `id_producto`, `precio_min`,
+ * `precio_max`, `pagina`, `limite`) usan las de validaciones-productos.ts.
+ */
+
+/** Mas largo que el nombre de un producto no tiene sentido buscar. */
+const LONGITUD_MAXIMA_BUSQUEDA_OFERTA = 100;
+
+export const ALCANCES_BUSQUEDA_OFERTA = ['propias', 'todas'];
+
+export const ORDENES_BUSQUEDA_OFERTA = [
+  'relevancia',
+  'precio_asc',
+  'precio_desc',
+  'descuento_desc',
+  'stock_asc',
+  'recientes',
+];
+
+export const FILTROS_STOCK_OFERTA = ['agotadas', 'con_stock'];
+
+/** El texto, recortado. Vacio o ausente devuelve `null`: se busca solo por filtros. */
+export function validarTextoBusquedaOferta(
+  valor: string | undefined,
+): string | null {
+  const texto = (valor ?? '').trim();
+  if (texto === '') {
+    return null;
+  }
+  if (texto.length > LONGITUD_MAXIMA_BUSQUEDA_OFERTA) {
+    throw new ErrorValidacion(
+      `La busqueda no puede pasar de ${LONGITUD_MAXIMA_BUSQUEDA_OFERTA} caracteres`,
+    );
+  }
+  return texto;
+}
+
+/** `propias` por defecto. */
+export function validarAlcanceBusquedaOferta(
+  valor: string | undefined,
+): string {
+  if (valor == null || valor === '') {
+    return 'propias';
+  }
+  if (!ALCANCES_BUSQUEDA_OFERTA.includes(valor)) {
+    throw new ErrorValidacion(
+      `El alcance debe ser uno de: ${ALCANCES_BUSQUEDA_OFERTA.join(', ')}`,
+    );
+  }
+  return valor;
+}
+
+/** Ausente devuelve `null`: el servicio decide (relevancia con texto, recientes sin el). */
+export function validarOrdenBusquedaOferta(
+  valor: string | undefined,
+): string | null {
+  if (valor == null || valor === '') {
+    return null;
+  }
+  if (!ORDENES_BUSQUEDA_OFERTA.includes(valor)) {
+    throw new ErrorValidacion(
+      `El orden debe ser uno de: ${ORDENES_BUSQUEDA_OFERTA.join(', ')}`,
+    );
+  }
+  return valor;
+}
+
+export function validarFiltroStockOferta(
+  valor: string | undefined,
+): string | null {
+  if (valor == null || valor === '') {
+    return null;
+  }
+  if (!FILTROS_STOCK_OFERTA.includes(valor)) {
+    throw new ErrorValidacion(
+      `El filtro de stock debe ser uno de: ${FILTROS_STOCK_OFERTA.join(', ')}`,
+    );
+  }
+  return valor;
+}
+
+/** `true` / `false`, o `null` si no viene (sin filtrar). */
+export function validarFiltroDescuentoOferta(
+  valor: string | undefined,
+): boolean | null {
+  if (valor == null || valor === '') {
+    return null;
+  }
+  if (valor !== 'true' && valor !== 'false') {
+    throw new ErrorValidacion('con_descuento debe ser "true" o "false"');
+  }
+  return valor === 'true';
+}

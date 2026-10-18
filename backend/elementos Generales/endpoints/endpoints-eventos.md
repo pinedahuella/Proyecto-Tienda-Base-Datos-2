@@ -762,6 +762,72 @@ Teardown completo: todas las filas sembradas (`vista_producto`,
 `busqueda_clic`) borradas con `ALTER TABLE ... DELETE`, confirmado con un
 barrido final por los cuatro ids/términos de prueba -- cero residuos.
 
+## GET /admin/eventos/busquedas-sin-resultados (agregado 2026-10-16)
+
+**Lo más buscado que no encontró nada**, con las formas de escribir lo mismo
+juntas: demanda que la tienda no cubre. Solo admin, en vivo contra ClickHouse
+como el resto de este panel (sin worker ni Redis: es una ruta de admin, con
+parámetros, y la agregación tarda milisegundos).
+`AdminBusquedasSinResultadosService`, en `AdminTendenciasController`.
+
+Es la versión completa del caso `no_tenemos` de `busquedas-sin-respuesta`
+(T3, arriba), que compara el término solo en minúsculas y sin espacios en las
+puntas. T3 sigue sirviendo para `no_convence` (hay resultados, nadie hace clic).
+
+| Query param | Qué hace |
+|---|---|
+| `dias` | Cuántos días hacia atrás. Defecto 7, tope 365 (mismo validador que el ranking) |
+| `limite` | Cuántos grupos. Defecto 20, tope 200 |
+
+Qué cuenta: `resultados = 0`, `lote = 'real'`, **sin filtros puestos**
+(categoría, precio, calificación, disponible: con un filtro el cero puede ser
+culpa del filtro). Las búsquedas del facetado sin filtros sí cuentan: son las que
+usa el frontend. Métrica: **sesiones distintas**, como las demás tendencias de
+búsqueda.
+
+Cómo se juntan:
+
+1. **`termino_normalizado`**, columna `MATERIALIZED` nueva de
+   `busqueda_realizada` (minúsculas, sin tildes, sin espacios de más; la calcula
+   ClickHouse en cada `INSERT`, el backend sigue mandando solo `termino`). Ver
+   `plan pendiente/busquedas-sin-resultados.sql`. El `termino` original no se
+   pierde: sale en `como_lo_escribieron`.
+2. **Errores de tecleo** con `editDistanceUTF8` entre los 300 términos más
+   buscados: 0 cambios si la palabra más corta tiene hasta 4 letras ("tv" y "tb"
+   son cosas distintas), 1 hasta 8, 2 desde 9. Cada término se une al **más
+   buscado** que tenga cerca, sin encadenar.
+3. Las sesiones de cada grupo se cuentan otra vez en ClickHouse: quien buscó dos
+   formas del mismo grupo cuenta una vez.
+
+```json
+GET /admin/eventos/busquedas-sin-resultados?dias=30
+{ "ok": true, "mensaje": "Busquedas sin resultados obtenidas", "payload": [
+  { "termino": "audifonos inalambricos", "sesiones": 6,
+    "terminos_agrupados": ["audifonos inalambricos", "audifnos inalambricos"],
+    "como_lo_escribieron": ["Audífonos inalámbricos", "audifonos  inalambricos", "AUDIFONOS INALAMBRICOS", "audifnos inalambricos"],
+    "ultima_busqueda": "2026-10-14T22:10:03Z" }
+] }
+```
+
+**400** `dias`/`limite` inválidos. **401/403** sin sesión o sin ser admin.
+**503** si ClickHouse no responde.
+
+### Probado el 2026-10-16
+
+Con búsquedas fantasma insertadas en ClickHouse (sesiones `zzfantasma-*`, borradas
+al terminar):
+
+| Caso | Resultado |
+|---|---|
+| "Audífonos inalámbricos" escrito de 5 formas (5 sesiones) + "audifnos inalambricos" (2 sesiones, una de ellas también buscó la otra) | un grupo, **6 sesiones**, con las formas originales en `como_lo_escribieron` |
+| "freidora de aire" repetida 3 veces por la misma sesión + 3 sesiones más + "freidora de aires" | un grupo, 5 sesiones |
+| "silla gamer" (3) + "sillas gamer" (1) | un grupo, 4 |
+| "tv" (3) y "tb" (1) | dos grupos: palabras cortas no se juntan |
+| Con resultados / con filtro de categoría / de hace 60 días / de otro `lote` | fuera (la de 60 días aparece con `dias=90`) |
+| Orden, `limite=2`, `dias=0` y `dias=abc` | bien / 2 / `400` / `400` |
+| Por HTTP: tres búsquedas reales por `GET /buscador/productos/facetado` ("Qzxwvy Pérez" ×2, "qzxwvy perez") y la ruta con sesión de admin | la columna se llena sola en el `INSERT` del backend; un grupo "qzxwvy perez", 3 sesiones, con las dos formas escritas; `200` |
+| Sin sesión | `401` |
+
 ## GET /admin/eventos/categorias-mas-buscadas | precios-mas-buscados | calificaciones-mas-buscadas (agregado 2026-09-26)
 
 Tres rutas más, mismo `AdminTendenciasController`/`Service` de arriba,

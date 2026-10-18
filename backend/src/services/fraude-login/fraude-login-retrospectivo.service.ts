@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { elasticClient } from '../../database/elastic';
 import { registrarAlertaFraude } from '../../helpers/registrar-alerta-fraude';
+import { registrarHallazgoEventoFraude } from '../../helpers/registrar-hallazgo-evento-fraude';
 import {} from '../../models/alerta-fraude';
 
 const INDICE =
@@ -19,7 +20,9 @@ interface BucketConMuestra {
  * Patrones lentos/repartidos -- punto 3 de
  * `elementos Generales/plan pendiente/fraude-login-eventos.md`. Lo que
  * ningun contador de Redis (ventanas de 1-5 min) puede ver: un ataque
- * repartido en horas para no cruzar un umbral corto.
+ * repartido en horas para no cruzar un umbral corto. Ademas, la granja de
+ * registros (`evaluarGranjaDeRegistros`), que mira 30 dias y no es una alerta
+ * de login.
  *
  * Worker `@Interval`, mismo molde que `EventosAutenticacionSyncService` /
  * `GrafoSyncService`: corre cada `INTERVALO_MS`, un flag `procesando` evita
@@ -65,6 +68,20 @@ export class FraudeLoginRetrospectivoService {
   private static readonly UMBRAL_MULTICUENTA_IP_LENTA = 8;
   private static readonly UMBRAL_IP_ROTACION_CUENTA = 5;
 
+  // Granja de registros: los mismos numeros que tenia la F6 de ClickHouse
+  // (clickhouse/consultas/parametros.txt).
+  private static readonly VENTANA_GRANJA = 'now-30d';
+  private static readonly MINUTOS_REGISTRO = 60;
+  private static readonly MIN_REGISTROS_POR_IP = 5;
+  /** Las IPs de la propia maquina, en las formas en que llegan al indice. */
+  private static readonly IPS_DE_CONFIANZA = [
+    '127.0.0.1',
+    '::1',
+    '::ffff:127.0.0.1',
+  ];
+  /** Registros que se traen por IP para buscar su peor ventana (tope de `top_hits`). */
+  private static readonly REGISTROS_POR_IP = 100;
+
   private static readonly TAMANO_BUCKETS = 1000;
   private static readonly TAMANO_MUESTRA = 20;
 
@@ -85,6 +102,7 @@ export class FraudeLoginRetrospectivoService {
         this.evaluarFuerzaBrutaCuentaLenta(),
         this.evaluarMultiCuentaIpLenta(),
         this.evaluarIpRotacionCuenta(),
+        this.evaluarGranjaDeRegistros(),
       ]);
     } catch (error) {
       this.logger.warn(
@@ -458,6 +476,141 @@ export class FraudeLoginRetrospectivoService {
       });
     }
   }
+
+  /**
+   * Granja de registros: muchas cuentas nacidas desde la MISMA IP en poco
+   * tiempo (`MIN_REGISTROS_POR_IP` dentro de `MINUTOS_REGISTRO`), en los
+   * ultimos 30 dias. Es la F6 que antes corria en ClickHouse: los registros
+   * ya no llegan alli (viven en Mongo, y de ahi a este indice).
+   *
+   * Elasticsearch agrupa los registros por IP (`terms`, solo las que llegan
+   * al minimo en total) y trae los de cada una (`top_hits`); la peor ventana
+   * se busca aqui (`peorVentana`), sobre pocos documentos.
+   *
+   * Se guarda como la F6: hallazgo de eventos, cuentas `autor` y sin aviso
+   * (son las sospechosas, no victimas), la IP en su pivote. A diferencia de
+   * una senal de login, SI une las cuentas en un caso de fraude: nacer juntas
+   * desde una IP no es compartir el wifi. `ultima_deteccion` es el ultimo
+   * registro de la ventana, para que el puntaje vea que tan reciente es.
+   */
+  private async evaluarGranjaDeRegistros(): Promise<void> {
+    const respuesta = await elasticClient.search<
+      unknown,
+      {
+        por_ip: {
+          buckets: {
+            key: string;
+            registros: { hits: { hits: { _source?: Registro }[] } };
+          }[];
+        };
+      }
+    >({
+      index: INDICE,
+      size: 0,
+      query: {
+        bool: {
+          filter: [
+            { term: { 'tipo.keyword': 'registro' } },
+            { term: { 'resultado.keyword': 'exito' } },
+            { exists: { field: 'id_usuario' } },
+            {
+              range: {
+                fecha: { gte: FraudeLoginRetrospectivoService.VENTANA_GRANJA },
+              },
+            },
+          ],
+          must_not: [
+            {
+              terms: {
+                'ip.keyword': FraudeLoginRetrospectivoService.IPS_DE_CONFIANZA,
+              },
+            },
+          ],
+        },
+      },
+      aggs: {
+        por_ip: {
+          terms: {
+            field: 'ip.keyword',
+            min_doc_count: FraudeLoginRetrospectivoService.MIN_REGISTROS_POR_IP,
+            size: FraudeLoginRetrospectivoService.TAMANO_BUCKETS,
+          },
+          aggs: {
+            registros: {
+              top_hits: {
+                size: FraudeLoginRetrospectivoService.REGISTROS_POR_IP,
+                sort: [{ fecha: { order: 'asc' } }],
+                _source: ['id_usuario', 'fecha'],
+              },
+            },
+          },
+        },
+      },
+    });
+
+    for (const bucket of respuesta.aggregations?.por_ip.buckets ?? []) {
+      const registros = bucket.registros.hits.hits
+        .map((hit) => hit._source)
+        .filter((r): r is Registro => r?.id_usuario != null && r.fecha != null);
+      const ventana = peorVentana(
+        registros,
+        FraudeLoginRetrospectivoService.MINUTOS_REGISTRO,
+      );
+      if (
+        ventana.cuentas.length <
+        FraudeLoginRetrospectivoService.MIN_REGISTROS_POR_IP
+      ) {
+        continue;
+      }
+      await registrarHallazgoEventoFraude({
+        tipo: 'granja_de_registros',
+        clave: bucket.key,
+        cuentas: ventana.cuentas,
+        idProductoMongo: null,
+        detalle: {
+          cuentas_en_la_peor_ventana: ventana.cuentas.length,
+          empezo: ventana.empezo,
+        },
+        ventanaInicio: new Date(ventana.termino),
+      });
+    }
+  }
+}
+
+/** Un registro de la granja: quien nacio y cuando. */
+interface Registro {
+  id_usuario: string;
+  fecha: string;
+}
+
+/**
+ * La ventana de `minutos` con mas registros (empieza en un registro y toma
+ * los que caen antes de `minutos` despues). `registros` ordenados por fecha.
+ */
+export function peorVentana(
+  registros: Registro[],
+  minutos: number,
+): { cuentas: string[]; empezo: string; termino: string } {
+  let mejor = { desde: 0, hasta: 0 };
+  let hasta = 0;
+  for (let desde = 0; desde < registros.length; desde++) {
+    const limite = Date.parse(registros[desde].fecha) + minutos * 60 * 1000;
+    while (
+      hasta < registros.length &&
+      Date.parse(registros[hasta].fecha) < limite
+    ) {
+      hasta++;
+    }
+    if (hasta - desde > mejor.hasta - mejor.desde) {
+      mejor = { desde, hasta };
+    }
+  }
+  const ventana = registros.slice(mejor.desde, mejor.hasta);
+  return {
+    cuentas: [...new Set(ventana.map((r) => r.id_usuario))],
+    empezo: ventana[0]?.fecha ?? '',
+    termino: ventana[ventana.length - 1]?.fecha ?? '',
+  };
 }
 
 /** Un bucket de agregacion `terms` usado solo para la muestra de evidencia. */

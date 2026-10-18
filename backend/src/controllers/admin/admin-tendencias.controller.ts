@@ -6,6 +6,7 @@ import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { ConsultarTendenciasQuery } from '../../dto/consultar-tendencias';
 import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { AdminTendenciasService } from '../../services/admin/admin-tendencias.service';
+import { AdminBusquedasSinResultadosService } from '../../services/admin/admin-busquedas-sin-resultados.service';
 
 /**
  * `GET /admin/eventos/*` -- el ranking de tendencias de las seis tablas de
@@ -40,6 +41,7 @@ import { AdminTendenciasService } from '../../services/admin/admin-tendencias.se
 export class AdminTendenciasController {
   constructor(
     private readonly adminTendenciasService: AdminTendenciasService,
+    private readonly adminBusquedasSinResultadosService: AdminBusquedasSinResultadosService,
   ) {}
 
   // GET /admin/eventos/vista
@@ -98,6 +100,23 @@ export class AdminTendenciasController {
       return exito(ranking, 'Tendencia de busquedas obtenida');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo obtener la tendencia de busquedas');
+    }
+  }
+
+  // GET /admin/eventos/busquedas-sin-resultados -- lo mas buscado que no
+  // encontro nada, con las formas de escribirlo agrupadas. Usa `dias` y
+  // `limite`; `direccion` no aplica.
+  @Get('busquedas-sin-resultados')
+  async busquedasSinResultados(@Query() query: ConsultarTendenciasQuery) {
+    try {
+      const busquedas =
+        await this.adminBusquedasSinResultadosService.obtener(query);
+      return exito(busquedas, 'Busquedas sin resultados obtenidas');
+    } catch (error) {
+      manejarErrorHttp(
+        error,
+        'No se pudieron obtener las busquedas sin resultados',
+      );
     }
   }
 

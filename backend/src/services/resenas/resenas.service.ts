@@ -328,8 +328,8 @@ export class ResenasService {
         void this.anillosDetectorService.detectarInmediato(idResena);
         void this.patronesFraudeDetectorService.detectarInmediato(idResena);
       });
-      // Fraude por texto: indexar la resena, valorarla y evaluar SOLO esta en
-      // las senales de texto (Elasticsearch). Sin await, igual que arriba: no
+      // Fraude por texto: calcular el vector de la resena, valorarla y evaluar
+      // SOLO esta en las senales de texto (pgvector). Sin await, igual que arriba: no
       // retrasa la respuesta, y si algo falla lo recogen los workers de 15 min.
       void this.chequeoTextoInmediatoService.ejecutar({
         idComentario: Number(fila.id_comentario),

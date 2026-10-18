@@ -59,6 +59,18 @@ export interface Carrito {
   total_lineas: number;
   /** Suma de todas las cantidades. */
   total_items: number;
+  /**
+   * `false` si lo que se ve en Redis no quedo guardado en PostgreSQL (la
+   * verdad): el intento de guardarlo fallo, o PostgreSQL tiene cambios que
+   * Redis no vio. El checkout no compra un carrito asi; se arregla con
+   * `POST /carrito/sincronizar`.
+   */
+  sincronizado: boolean;
+  /**
+   * De donde salio esta respuesta: `redis` (lo normal, rapido) o `postgres`
+   * (Redis no respondia y se leyo la verdad directo, mas lento).
+   */
+  fuente: 'redis' | 'postgres';
 }
 
 /**

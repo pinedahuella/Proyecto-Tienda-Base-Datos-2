@@ -30,16 +30,26 @@ import { ProductosVendedorController } from './controllers/vendedores/productos.
 import { ProductosVendedorService } from './services/vendedores/productos.service';
 import { OfertasVendedorController } from './controllers/vendedores/ofertas.controller';
 import { OfertasVendedorService } from './services/vendedores/ofertas.service';
+import { BuscarOfertasController } from './controllers/vendedores/buscar-ofertas.controller';
+import { BuscarOfertasService } from './services/vendedores/buscar-ofertas.service';
+import { EventoOfertaSyncService } from './services/vendedores/evento-oferta-sync.service';
 import { VentasLimitadasController } from './controllers/vendedores/ventas-limitadas.controller';
 import { VentasLimitadasService } from './services/vendedores/ventas-limitadas.service';
 import { RegistroOfertasRedisService } from './services/vendedores/registro-ofertas-redis.service';
 import { RegistroOfertasSyncService } from './services/vendedores/registro-ofertas-sync.service';
 import { PedidosCompradorController } from './controllers/compradores/pedidos.controller';
 import { PedidosCompradorService } from './services/compradores/pedidos.service';
+import { SeguimientosOfertaController } from './controllers/compradores/seguimientos-oferta.controller';
+import { SeguimientosOfertaService } from './services/compradores/seguimientos-oferta.service';
+import { PercolarSeguimientosService } from './services/compradores/percolar-seguimientos.service';
 import { ResenasController } from './controllers/resenas/resenas.controller';
 import { ResenasService } from './services/resenas/resenas.service';
 import { CarritoController } from './controllers/carrito/carrito.controller';
 import { CarritoService } from './services/carrito/carrito.service';
+import { CarritoPostgresService } from './services/carrito/carrito-postgres.service';
+import { CarritoRedisService } from './services/carrito/carrito-redis.service';
+import { CarritoBarridoService } from './services/carrito/carrito-barrido.service';
+import { ReservasVentaRelampagoSyncService } from './services/inventario-limitado/reservas-venta-relampago-sync.service';
 import { FraudeController } from './controllers/fraude/fraude.controller';
 import { AnillosDetectorService } from './services/fraude/anillos-detector.service';
 import { PatronesFraudeDetectorService } from './services/fraude/patrones-fraude-detector.service';
@@ -55,6 +65,7 @@ import { AdminReportesService } from './services/admin/admin-reportes.service';
 import { InventarioLimitadoService } from './services/inventario-limitado/inventario-limitado.service';
 import { GrafoController } from './controllers/grafo/grafo.controller';
 import { GrafoSyncService } from './services/grafo/grafo-sync.service';
+import { GrafoComprasSyncService } from './services/grafo/grafo-compras-sync.service';
 import { BaseDatosBuscadorController } from './controllers/base-datos-buscador.controller';
 import { BaseDatosBuscadorService } from './services/base-datos-buscador.service';
 import { BaseDatosVectoresController } from './controllers/base-datos-vectores.controller';
@@ -109,7 +120,6 @@ import { OfertasDestacadasService } from './services/productos/ofertas-destacada
 import { VistosRecientementeController } from './controllers/productos/vistos-recientemente.controller';
 import { VistosRecientementeService } from './services/productos/vistos-recientemente.service';
 import { TambienVieronSyncService } from './services/productos/tambien-vieron-sync.service';
-import { ParaTiSyncService } from './services/productos/para-ti-sync.service';
 import { TambienVieronController } from './controllers/productos/tambien-vieron.controller';
 import { TambienVieronService } from './services/productos/tambien-vieron.service';
 import { SimilaresController } from './controllers/productos/similares.controller';
@@ -118,6 +128,12 @@ import { VectoresSyncService } from './services/productos/vectores-sync.service'
 import { EventoComentarioSyncService } from './services/resenas/evento-comentario-sync.service';
 import { ValoracionComentariosService } from './services/resenas/valoracion-comentarios.service';
 import { ParaTiController } from './controllers/productos/para-ti.controller';
+import { TambienCompraronController } from './controllers/productos/tambien-compraron.controller';
+import { TambienCompraronService } from './services/productos/tambien-compraron.service';
+import { CombosController } from './controllers/productos/combos.controller';
+import { CombosService } from './services/productos/combos.service';
+import { CombosSyncService } from './services/productos/combos-sync.service';
+import { AdminBusquedasSinResultadosService } from './services/admin/admin-busquedas-sin-resultados.service';
 import { ParaTiService } from './services/productos/para-ti.service';
 import { ReglasDescuentoAutomaticoController } from './controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller';
 import { ReglasDescuentoAutomaticoService } from './services/reglas-descuento-automatico/reglas-descuento-automatico.service';
@@ -153,8 +169,10 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     CategoriasController,
     ProductosVendedorController,
     OfertasVendedorController,
+    BuscarOfertasController,
     VentasLimitadasController,
     PedidosCompradorController,
+    SeguimientosOfertaController,
     ResenasController,
     CarritoController,
     FraudeController,
@@ -182,6 +200,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     TambienVieronController,
     SimilaresController,
     ParaTiController,
+    TambienCompraronController,
+    CombosController,
     ReglasDescuentoAutomaticoController,
     ReglasDescuentoPeriodoController,
   ],
@@ -201,12 +221,20 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     CategoriasService,
     ProductosVendedorService,
     OfertasVendedorService,
+    BuscarOfertasService,
+    EventoOfertaSyncService,
     VentasLimitadasService,
     RegistroOfertasRedisService,
     RegistroOfertasSyncService,
     PedidosCompradorService,
+    SeguimientosOfertaService,
+    PercolarSeguimientosService,
     ResenasService,
     CarritoService,
+    CarritoPostgresService,
+    CarritoRedisService,
+    CarritoBarridoService,
+    ReservasVentaRelampagoSyncService,
     AnillosDetectorService,
     PatronesFraudeDetectorService,
     ResenasRepetidasDetectorService,
@@ -219,6 +247,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     AdminReportesService,
     InventarioLimitadoService,
     GrafoSyncService,
+    GrafoComprasSyncService,
     BaseDatosBuscadorService,
     BaseDatosVectoresService,
     BuscadorProductosService,
@@ -254,13 +283,16 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     OfertasDestacadasService,
     VistosRecientementeService,
     TambienVieronSyncService,
-    ParaTiSyncService,
     TambienVieronService,
     SimilaresService,
     VectoresSyncService,
     EventoComentarioSyncService,
     ValoracionComentariosService,
     ParaTiService,
+    TambienCompraronService,
+    CombosService,
+    CombosSyncService,
+    AdminBusquedasSinResultadosService,
     ReglasDescuentoAutomaticoService,
     ReglasDescuentoPeriodoService,
     DisparadorReglasPeriodoService,

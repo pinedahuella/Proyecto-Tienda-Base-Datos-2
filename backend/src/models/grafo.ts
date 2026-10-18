@@ -62,6 +62,9 @@ export interface ConciliacionGrafo {
   ultima_sincronizacion: string | null;
   /** El estado de la cola, o `null` si `evento_grafo` todavia no existe. */
   cola: EstadoColaGrafo | null;
+  /** El estado de la cola de las compras, o `null` si `evento_grafo_compra`
+   * todavia no existe. */
+  cola_compras: EstadoColaGrafo | null;
   /** Una fila por recurso comparado. */
   comparacion: FilaConciliacion[];
   /** Los eventos apartados, si los hay. */

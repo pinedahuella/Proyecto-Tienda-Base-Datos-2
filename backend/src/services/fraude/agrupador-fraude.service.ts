@@ -50,7 +50,9 @@ const TIPOS_FUERTES = new Set([
  *
  * Nucleo/periferia se decide DESPUES de agrupar, no durante la union: una
  * cuenta es nucleo si aparece en 2 o mas hallazgos del grupo, o en uno
- * solo pero "fuerte" (`TIPOS_FUERTES`). Una cuenta concentradora nunca es
+ * solo pero "fuerte" (`TIPOS_FUERTES`). Los de login no cuentan para eso
+ * ni agregan cuentas: de un hallazgo de login solo quedan en el caso las
+ * cuentas que ya estaban por otra evidencia. Una cuenta concentradora nunca es
  * nucleo -- por definicion toca demasiados hallazgos ajenos al grupo para
  * que eso signifique algo (extension propia, el documento original no lo
  * dice explicito, pero es consistente con por que se excluye como puente).
@@ -121,6 +123,11 @@ export class AgrupadorFraudeService {
   ): GrupoFraude {
     const porCuenta = new Map<number, { veces: number; fuerte: boolean }>();
     for (const hallazgo of hallazgos) {
+      // Login es evidencia extra: no mete cuentas al caso ni hace nucleo a
+      // nadie (una IP compartida no es una prueba).
+      if (hallazgo.fuente === 'login') {
+        continue;
+      }
       const esFuerte = TIPOS_FUERTES.has(hallazgo.tipo);
       for (const cuenta of hallazgo.cuentas) {
         const previo = porCuenta.get(cuenta) ?? { veces: 0, fuerte: false };

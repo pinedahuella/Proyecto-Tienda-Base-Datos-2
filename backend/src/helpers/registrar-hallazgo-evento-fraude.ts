@@ -55,7 +55,6 @@ const METRICA_PRINCIPAL: Record<TipoHallazgoEvento, string> = {
   vistas_infladas: 'vistas_por_sesion',
   compras_en_rafaga: 'pedidos_en_la_peor_rafaga',
   ip_multicuenta_compras: 'cuentas_distintas',
-  carrito_acaparador: 'agregadas',
   devoluciones_seriales: 'devueltas',
   granja_de_registros: 'cuentas_en_la_peor_ventana',
 };

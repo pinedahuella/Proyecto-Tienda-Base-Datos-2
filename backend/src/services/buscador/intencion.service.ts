@@ -1,8 +1,10 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { elasticClient } from '../../database/elastic';
+import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import { ErrorConexion, ErrorValidacion } from '../../helpers/errores';
 import { pedirVectores } from '../../helpers/vectores-ollama';
+import { aVectorPg, buscarCercanos } from '../../helpers/vectores-pgvector';
 import { redondear } from '../../helpers/similitud-vectores';
 import {
   MotivoIntencion,
@@ -10,8 +12,6 @@ import {
 } from '../../dto/buscar-intencion';
 
 const INDICE_PRODUCTOS = process.env.ELASTIC_INDICE ?? 'mesh_productos';
-const INDICE_COMENTARIOS =
-  process.env.ELASTIC_INDICE_COMENTARIOS ?? 'mesh_comentarios';
 
 const LIMITE_DEFECTO = 10;
 const LIMITE_MAXIMO = 30;
@@ -30,19 +30,21 @@ const CALIFICACION_MINIMA_DEFECTO = 4;
 const UMBRAL_COSENO_RESENAS = 0.45;
 const UMBRAL_COSENO_PRODUCTOS = 0.4;
 
-/** Cuantas resenas y cuantos productos se piden a Elasticsearch antes de
- * juntarlos por producto. */
+/** Cuantas resenas y cuantos productos se piden antes de juntarlos por
+ * producto. */
 const CANDIDATOS_RESENAS = 100;
 const CANDIDATOS_PRODUCTOS = 50;
 
 /** Ollama tiene que contestar rapido: es una peticion de una persona esperando. */
 const LIMITE_MS_OLLAMA = 8000;
 
-interface DocumentoResena {
-  id_producto: number;
-  id_resena: number;
+/** Una resena cercana a lo pedido. */
+interface FilaResena {
+  id_producto_mongo: string;
+  id_resena: string;
   comentario: string;
   calificacion: number;
+  similitud: number;
 }
 
 interface DocumentoProducto {
@@ -71,19 +73,21 @@ interface CoincidenciaResenas {
  * parecen en SIGNIFICADO, aunque no compartan ninguna palabra ("decora muy
  * bien la ventana" en la resena de una maceta).
  *
- * Funciona sobre los vectores que ya viven en Elasticsearch: el de cada resena
- * (`mesh_comentarios`, `EventoComentarioSyncService`) y el de cada producto
- * (`mesh_productos`, `VectoresSyncService`). La frase se convierte en vector
- * con el mismo modelo de Ollama, y se hacen dos busquedas kNN:
+ * Funciona sobre los vectores que ya viven en PostgreSQL (pgvector): el de cada
+ * resena (`vector_comentario`, `EventoComentarioSyncService`) y el de cada
+ * producto (`vector_producto`, `VectoresSyncService`). La frase se convierte en
+ * vector con el mismo modelo de Ollama, y se hacen dos busquedas de vecinos:
  *
  * 1. Sobre las resenas (solo las raiz, de buena calificacion): la gente cuenta
  *    para que le sirvio, y esa es la forma en que se busca. Es la fuente
  *    principal, y la que dice POR QUE sale un producto (`motivo`).
  * 2. Sobre los productos activos: su nombre, categoria y descripcion.
  *
- * Se juntan por producto (el puntaje es el mejor de los dos parecidos) y solo
- * salen productos activos, igual que `GET /buscador/productos`: el filtro de
- * estado va fijo en el codigo, no depende de ningun parametro de la peticion.
+ * Se juntan por producto (el puntaje es el mejor de los dos parecidos) y lo que
+ * se muestra de cada uno (nombre, precio, estrellas) sale de su documento en
+ * `mesh_productos`, como en `GET /buscador/productos`. Solo salen productos
+ * activos: el filtro de estado va fijo en el codigo, no depende de ningun
+ * parametro de la peticion.
  *
  * Limite conocido: el modelo (`paraphrase-multilingual`) compara frases
  * parecidas, no esta hecho para "pregunta contra documento", y los umbrales de
@@ -105,12 +109,9 @@ export class BuscadorIntencionService {
     const minimo = this.aCalificacionMinima(calificacionMinima);
 
     const vector = await this.vectorDe(texto);
+    const [resenas, productos] = await this.buscarCercanos(vector, minimo);
 
     try {
-      const [resenas, productos] = await Promise.all([
-        this.buscarResenas(vector, minimo),
-        this.buscarProductos(vector),
-      ]);
       return await this.juntar(resenas, productos, tope);
     } catch (error) {
       manejarErrorConexionElastic(this.logger, error);
@@ -167,85 +168,89 @@ export class BuscadorIntencionService {
     }
   }
 
-  /** Las resenas mas cercanas, agrupadas por producto: la mejor y cuantas. */
-  private async buscarResenas(
+  /** Las dos busquedas de vecinos, a la vez. Si PostgreSQL falla es un 503. */
+  private async buscarCercanos(
     vector: number[],
     calificacionMinima: number,
+  ): Promise<[Map<number, CoincidenciaResenas>, Map<number, number>]> {
+    try {
+      const parametro = aVectorPg(vector);
+      return await Promise.all([
+        this.buscarResenas(parametro, calificacionMinima),
+        this.buscarProductos(parametro),
+      ]);
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /** Las resenas mas cercanas, agrupadas por producto: la mejor y cuantas. */
+  private async buscarResenas(
+    vector: string,
+    calificacionMinima: number,
   ): Promise<Map<number, CoincidenciaResenas>> {
-    const respuesta = await elasticClient.search<DocumentoResena>({
-      index: INDICE_COMENTARIOS,
-      size: CANDIDATOS_RESENAS,
-      _source: ['id_producto', 'id_resena', 'comentario', 'calificacion'],
-      knn: {
-        field: 'vector',
-        query_vector: vector,
-        k: CANDIDATOS_RESENAS,
-        num_candidates: CANDIDATOS_RESENAS * 3,
-        filter: {
-          bool: {
-            filter: [
-              { term: { es_respuesta: false } },
-              { range: { calificacion: { gte: calificacionMinima } } },
-            ],
-          },
-        },
-      },
-    });
+    // Solo las raiz: la resena es la que lleva la calificacion.
+    const filas = await buscarCercanos<FilaResena>(
+      `SELECT r.id_producto_mongo, r.id_resena, c.comentario, r.calificacion,
+              1 - (v.vector <=> $1::vector) AS similitud
+         FROM vector_comentario v
+         JOIN resena r ON r.id_comentario = v.id_comentario
+         JOIN comentario c ON c.id_comentario = v.id_comentario
+        WHERE r.calificacion >= $2
+        ORDER BY v.vector <=> $1::vector
+        LIMIT $3`,
+      [vector, calificacionMinima, CANDIDATOS_RESENAS],
+      CANDIDATOS_RESENAS * 3,
+    );
 
     const porProducto = new Map<number, CoincidenciaResenas>();
     // Llegan del mas cercano al mas lejano: la primera de cada producto es la mejor.
-    for (const hit of respuesta.hits.hits) {
-      const fuente = hit._source;
-      const similitud = aCoseno(hit._score);
-      if (fuente == null || similitud < UMBRAL_COSENO_RESENAS) {
+    for (const fila of filas) {
+      if (fila.similitud < UMBRAL_COSENO_RESENAS) {
         continue;
       }
-      const previo = porProducto.get(fuente.id_producto);
+      const idProducto = Number(fila.id_producto_mongo);
+      const previo = porProducto.get(idProducto);
       if (previo) {
         previo.total++;
         continue;
       }
-      porProducto.set(fuente.id_producto, {
+      porProducto.set(idProducto, {
         total: 1,
         mejor: {
-          id_resena: fuente.id_resena,
-          calificacion: fuente.calificacion,
-          comentario: fuente.comentario,
-          similitud: redondear(similitud),
+          id_resena: Number(fila.id_resena),
+          calificacion: fila.calificacion,
+          comentario: fila.comentario,
+          similitud: redondear(fila.similitud),
         },
       });
     }
     return porProducto;
   }
 
-  /** Los productos activos mas cercanos: id, documento y parecido. */
-  private async buscarProductos(
-    vector: number[],
-  ): Promise<Map<number, { doc: DocumentoProducto; similitud: number }>> {
-    const respuesta = await elasticClient.search<DocumentoProducto>({
-      index: INDICE_PRODUCTOS,
-      size: CANDIDATOS_PRODUCTOS,
-      knn: {
-        field: 'vector',
-        query_vector: vector,
-        k: CANDIDATOS_PRODUCTOS,
-        num_candidates: CANDIDATOS_PRODUCTOS * 4,
-        // Fijo en el codigo, como en `BuscadorProductosService`: lo publico
-        // nunca ve un producto que no este activo.
-        filter: { term: { estado: 'activo' } },
-      },
-    });
+  /** Los productos activos mas cercanos: id y parecido, del mas cercano al
+   * mas lejano. */
+  private async buscarProductos(vector: string): Promise<Map<number, number>> {
+    // `activo` fijo en el codigo, como en `BuscadorProductosService`: lo
+    // publico nunca ve un producto que no este activo.
+    const filas = await buscarCercanos<{
+      id_producto_mongo: string;
+      similitud: number;
+    }>(
+      `SELECT id_producto_mongo, 1 - (vector <=> $1::vector) AS similitud
+         FROM vector_producto
+        WHERE activo
+        ORDER BY vector <=> $1::vector
+        LIMIT $2`,
+      [vector, CANDIDATOS_PRODUCTOS],
+      CANDIDATOS_PRODUCTOS * 4,
+    );
 
-    const productos = new Map<
-      number,
-      { doc: DocumentoProducto; similitud: number }
-    >();
-    for (const hit of respuesta.hits.hits) {
-      const similitud = aCoseno(hit._score);
-      if (hit._source == null || similitud < UMBRAL_COSENO_PRODUCTOS) {
-        continue;
+    const productos = new Map<number, number>();
+    for (const fila of filas) {
+      if (fila.similitud >= UMBRAL_COSENO_PRODUCTOS) {
+        productos.set(Number(fila.id_producto_mongo), fila.similitud);
       }
-      productos.set(Number(hit._id), { doc: hit._source, similitud });
     }
     return productos;
   }
@@ -253,26 +258,27 @@ export class BuscadorIntencionService {
   /** Une los dos origenes por producto, deja solo los activos y ordena. */
   private async juntar(
     resenas: Map<number, CoincidenciaResenas>,
-    productos: Map<number, { doc: DocumentoProducto; similitud: number }>,
+    productos: Map<number, number>,
     tope: number,
   ): Promise<ResultadoIntencion[]> {
-    const docs = new Map<number, DocumentoProducto>();
-    for (const [id, p] of productos) {
-      docs.set(id, p.doc);
+    // Primero los que salieron por su descripcion, luego los que solo
+    // salieron por una resena. Lo que se muestra sale de su documento, que de
+    // paso confirma que sigan activos.
+    const ids = [
+      ...productos.keys(),
+      ...[...resenas.keys()].filter((id) => !productos.has(id)),
+    ];
+    if (ids.length === 0) {
+      return [];
     }
-
-    // Los productos que solo salieron por una resena: su documento hay que
-    // traerlo, y de paso comprobar que sigan activos.
-    const faltantes = [...resenas.keys()].filter((id) => !docs.has(id));
-    if (faltantes.length > 0) {
-      const respuesta = await elasticClient.mget<DocumentoProducto>({
-        index: INDICE_PRODUCTOS,
-        ids: faltantes.map(String),
-      });
-      for (const doc of respuesta.docs) {
-        if ('found' in doc && doc.found && doc._source?.estado === 'activo') {
-          docs.set(Number(doc._id), doc._source);
-        }
+    const respuesta = await elasticClient.mget<DocumentoProducto>({
+      index: INDICE_PRODUCTOS,
+      ids: ids.map(String),
+    });
+    const docs = new Map<number, DocumentoProducto>();
+    for (const doc of respuesta.docs) {
+      if ('found' in doc && doc.found && doc._source?.estado === 'activo') {
+        docs.set(Number(doc._id), doc._source);
       }
     }
 
@@ -282,10 +288,10 @@ export class BuscadorIntencionService {
       const deProducto = productos.get(id);
       const similitudResenas = deResenas?.mejor.similitud ?? null;
       const similitudProducto =
-        deProducto == null ? null : redondear(deProducto.similitud);
+        deProducto == null ? null : redondear(deProducto);
       const origen: ResultadoIntencion['origen'] = [];
       if (deResenas) origen.push('resenas');
-      if (deProducto) origen.push('producto');
+      if (deProducto != null) origen.push('producto');
 
       resultados.push({
         id_producto: id,
@@ -309,9 +315,4 @@ export class BuscadorIntencionService {
 
     return resultados.sort((a, b) => b.puntaje - a.puntaje).slice(0, tope);
   }
-}
-
-/** En coseno, Elasticsearch puntua `(1 + coseno) / 2`: se devuelve al coseno. */
-function aCoseno(puntaje: number | null | undefined): number {
-  return 2 * (puntaje ?? 0) - 1;
 }

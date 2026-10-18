@@ -10,7 +10,7 @@ import { DIMENSIONES_VECTOR } from './vectores-ollama';
  * entrenada aparte (`clasificador-resenas/` en la raiz del repo) y exportada a
  * un JSON de pesos (`backend/modelos/regresion_logistica.json`): aca solo se
  * hace la cuenta `sigmoide(x . w + b)` sobre el vector que ya esta en
- * `mesh_comentarios`, sin llamar otra vez a Ollama.
+ * `vector_comentario`, sin llamar otra vez a Ollama.
  *
  * Con la valoracion y las estrellas se detecta una resena CONTRADICTORIA: texto
  * malo con 4 o 5 estrellas, o texto bueno con 1 o 2 (ver

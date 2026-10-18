@@ -119,6 +119,7 @@ GET /buscador/productos?nombre=labtop         -> quisiste_decir: "laptop"
 GET /buscador/productos?nombre=telefno movil  -> quisiste_decir: "telefono movil"
 GET /buscador/productos?nombre=laptop         -> quisiste_decir: null
 GET /buscador/productos?nombre=xyzqwk         -> quisiste_decir: null (no se parece a nada)
+GET /buscador/productos?nombre=zapatos comodos -> quisiste_decir: null (bien escritas, aunque no esten en el catalogo)
 ```
 
 Como funciona (`helpers/correccion-busqueda.ts`):
@@ -127,6 +128,14 @@ Como funciona (`helpers/correccion-busqueda.ts`):
   hay una segunda peticion. Usa el *term suggester* sobre `nombre`, con
   `suggest_mode: missing`: solo sugiere para palabras que no existen en
   ningun nombre, y solo para palabras de 3 letras o mas.
+- **Solo a una letra de distancia** (`max_edits: 1`, desde el 2026-10-17): una
+  de mas, una de menos, una cambiada o dos cambiadas de lugar. Con 2, una
+  palabra bien escrita que no esta en el catalogo se "corregia" a otra
+  ("comodos" salia "comedor"). Los errores de tipeo reales son de una
+  (labtop, camiza, audifnos, impermiable, laptpo); uno con dos ("labtpo") se
+  queda sin sugerencia, pero la busqueda difusa igual lo encuentra.
+- **El plural no es un error**: "zapatos" no se corrige a "zapato" (+s o +es,
+  sin mirar tildes).
 - **No toca el mapeo ni el ETL**: `espanol_llano` solo pasa a minusculas y
   quita tildes, asi que lo que sugiere son palabras reales del catalogo.
 - Solo corrige **hacia palabras que ya estan en el indice**. Una palabra que
@@ -382,19 +391,22 @@ palabras) no puede hacer.
 
 La frase se convierte en un vector con el mismo modelo de Ollama
 (`paraphrase-multilingual`, 768 dimensiones) que ya vectoriza el catálogo y las
-reseñas, y se hacen dos búsquedas kNN en Elasticsearch:
+reseñas, y se hacen dos búsquedas de vecinos en PostgreSQL (pgvector, desde el
+2026-10-16; antes eran kNN de Elasticsearch):
 
-1. **Sobre las reseñas** (`mesh_comentarios`; solo las raíz, no las respuestas, y
-   de calificación `calificacion_minima` o más). Es la fuente principal: la gente
-   cuenta para qué le sirvió algo, y así se busca. También es la que dice
-   **por qué** salió un producto (`motivo`).
-2. **Sobre los productos activos** (`mesh_productos`): nombre, categoría y
-   descripción.
+1. **Sobre las reseñas** (`vector_comentario` con `resena`; solo las raíz, no las
+   respuestas, y de calificación `calificacion_minima` o más; las 100 más
+   cercanas). Es la fuente principal: la gente cuenta para qué le sirvió algo, y
+   así se busca. También es la que dice **por qué** salió un producto (`motivo`).
+2. **Sobre los productos activos** (`vector_producto`): nombre, categoría y
+   descripción; los 50 más cercanos.
 
 Se juntan por producto: el `puntaje` es el mayor de los dos parecidos (0 a 1, coseno)
 y por él se ordena. Cada parecido tiene un **umbral** por debajo del cual no
 cuenta (0,45 para reseñas, 0,40 para productos; son constantes del servicio): sin
-él, la búsqueda devolvería siempre algo, aunque fuera ruido.
+él, la búsqueda devolvería siempre algo, aunque fuera ruido. Lo que se muestra de
+cada producto (nombre, precio, estrellas) sale de su documento en `mesh_productos`
+(Elasticsearch), que de paso confirma que siga activo.
 
 **Pública**, sin sesión. **Siempre** trae solo productos `activo`: el filtro va
 fijo en el código, igual que en `GET /buscador/productos`, y se comprueba también
@@ -469,12 +481,32 @@ un error.
 { "ok": false, "mensaje": "La calificacion minima debe ser un numero entero de 1 a 5", "payload": null }
 ```
 
-**503**, si Elasticsearch o Ollama no responden (`"No se pudo conectar con
-Elasticsearch"` / `"No se pudo conectar con Ollama"`). A diferencia de
-`GET /buscador/productos`, esta ruta **necesita Ollama en cada búsqueda**, para
-convertir la frase en vector (espera hasta 8 s).
+**503**, si PostgreSQL, Elasticsearch u Ollama no responden (`"No se pudo
+conectar con PostgreSQL"` / `"No se pudo conectar con Elasticsearch"` / `"No se
+pudo conectar con Ollama"`). A diferencia de `GET /buscador/productos`, esta ruta
+**necesita Ollama en cada búsqueda**, para convertir la frase en vector (espera
+hasta 8 s).
 
-### Probado en vivo -- 2026-10-02
+### De vuelta a pgvector -- probado 2026-10-16
+
+Mismas 15 frases (y cada una con `calificacion_minima=3`) contra el código
+anterior (Elasticsearch) y el nuevo, con los mismos vectores copiados. Los
+productos que salen son los mismos salvo en el borde del `limite` (por ejemplo,
+4 de 30 en `q=candado`), y los parecidos se mueven hasta 0,01: el índice de
+Elasticsearch (`int8_hnsw`) cuantizaba los vectores, y pgvector calcula el coseno
+exacto (ver la prueba de `GET /productos/:id/similares` en
+`endpoints-productos.md`). Forzando el índice HNSW (`enable_seqscan=off`) sale lo
+mismo que con el recorrido exacto, salvo el orden entre resultados con el mismo
+`puntaje`.
+
+| Caso | Resultado |
+|---|---|
+| `q=mi ventana esta muy solitaria&limite=3` por HTTP | `200` |
+| `q=` vacío | `400` |
+| PostgreSQL apagado | `503` "No se pudo conectar con PostgreSQL" |
+| Elasticsearch apagado | `503` "No se pudo conectar con Elasticsearch" |
+
+### Probado en vivo -- 2026-10-02 (con Elasticsearch)
 
 Contra el servidor, Elasticsearch y el Ollama reales. El catálogo **no tiene
 ninguna maceta**: el ejemplo se probó con una reseña de prueba, escrita a
@@ -518,8 +550,8 @@ terminar.
 ## GET /buscador/productos/hibrida (agregado 2026-10-04)
 
 La **búsqueda híbrida**: junta en una sola lista ordenada la búsqueda por
-**palabras** (la de `GET /buscador/productos`) y la búsqueda por **significado**
-(vectores, como `.../intencion`). Es la ruta para un buscador "normal" que además
+**palabras** (la de `GET /buscador/productos`, en Elasticsearch) y la búsqueda por
+**significado** (vectores en PostgreSQL, como `.../intencion`). Es la ruta para un buscador "normal" que además
 entiende frases: `labtop gamer` encuentra por las palabras, `algo para escuchar
 música mientras corro` encuentra por el significado, y las dos caben en el mismo
 cuadro de búsqueda.
@@ -584,9 +616,10 @@ que explica por qué salió:
 | `similitud` | El parecido de significado con lo escrito, de 0 a 1 (coseno), o `null` |
 
 `modo` dice cómo se hizo la búsqueda: **`hibrida`** (palabras + significado) o
-**`solo_texto`**, cuando Ollama no respondió y se contestó solo con las palabras
-(en ese caso todos los `origen` son `["texto"]` y `similitud` es `null`). Así la
-búsqueda principal no se cae porque un servicio de apoyo esté apagado.
+**`solo_texto`**, cuando Ollama no respondió o PostgreSQL falló en la búsqueda
+por significado, y se contestó solo con las palabras (en ese caso todos los
+`origen` son `["texto"]` y `similitud` es `null`). Así la búsqueda principal no
+se cae porque un servicio de apoyo esté apagado.
 
 **400**
 
@@ -595,7 +628,7 @@ búsqueda principal no se cae porque un servicio de apoyo esté apagado.
 { "ok": false, "mensaje": "La busqueda no puede tener mas de 250 caracteres", "payload": null }
 ```
 
-**503**, si Elasticsearch no responde: `"No se pudo completar la busqueda"`.
+**503**, si Elasticsearch no responde: `"No se pudo conectar con Elasticsearch"`.
 
 ### Cómo funciona
 
@@ -607,8 +640,9 @@ búsqueda principal no se cae porque un servicio de apoyo esté apagado.
    significado. Se piden 50 candidatos.
 2. **Por significado:** la frase se convierte en vector (el mismo modelo de
    Ollama que usan los productos) y se piden los 50 productos activos más
-   cercanos (kNN). Los de coseno menor a **0,40** se descartan: por debajo es
-   ruido.
+   cercanos a `vector_producto` (PostgreSQL, pgvector). Los de coseno menor a
+   **0,40** se descartan: por debajo es ruido. Lo que se muestra de cada uno sale
+   de su documento en `mesh_productos`, igual que en la búsqueda por palabras.
 3. **Se combinan por posición, no por puntaje** (RRF, *reciprocal rank
    fusion*, constante 60): cada búsqueda aporta `1 / (60 + posición)` y se suman.
    El puntaje de relevancia de las palabras y el coseno están en escalas
@@ -638,6 +672,21 @@ Contra el servidor y el catálogo local (102 productos):
 | `q=xyzqwk` | `200`, `resultados: []` |
 | `q=` (vacío), sin `q`, `q` de 300 caracteres | `400` |
 | Ollama apagado | no se probó apagándolo; el camino `solo_texto` está en el código (`vectorDe` devuelve `null`) |
+
+### De vuelta a pgvector -- probado 2026-10-16
+
+Las mismas 15 frases contra el código anterior (Elasticsearch) y el nuevo, con
+los mismos vectores copiados. Los resultados por significado coinciden con el
+coseno exacto calculado aparte (en `q=candado`, `q=tapete yoga` y `q=mantener el
+cafe caliente en la oficina`); con Elasticsearch no coincidían, por la
+cuantización de su índice. Por eso cambian algunas posiciones y, en el borde del
+`limite`, algún resultado.
+
+| Caso | Resultado |
+|---|---|
+| `q=candado para bicicleta&limite=3` por HTTP | `200`, `modo: hibrida` |
+| PostgreSQL apagado | `200`, `modo: solo_texto` (el log dice por qué) |
+| Elasticsearch apagado | `503` "No se pudo conectar con Elasticsearch" |
 
 ### Límites conocidos
 

@@ -1,40 +1,33 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { elasticClient } from '../../database/elastic';
+import { pool } from '../../database/postgres';
 import { registrarAnilloFraude } from '../../helpers/registrar-anillo-fraude';
 import {
-  cosenoEntre,
   marcarConGemela,
   media,
-  norma,
   redondear,
-  VectorConNorma,
 } from '../../helpers/similitud-vectores';
 import { LARGO_MINIMO_VALORACION } from '../../helpers/valoracion-texto';
+import { paresParecidos } from '../../helpers/vectores-pgvector';
 import type { TipoAnilloFraude } from '../../models/anillo-fraude';
-
-const INDICE = process.env.ELASTIC_INDICE_COMENTARIOS ?? 'mesh_comentarios';
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
-/** Un documento de `mesh_comentarios`, con lo que necesita este detector. */
-interface DocumentoComentario {
-  id_resena: number;
-  id_usuario: number;
+/** Una resena del vendedor o producto, con lo que necesita este detector. */
+interface FilaResena {
+  id_resena: string;
+  id_comentario: string;
+  id_usuario: string;
   comentario: string;
-  fecha_publicacion: string;
-  vector?: number[];
+  fecha_publicacion: Date;
 }
 
 /** Una resena lista para compararla con las demas del mismo vendedor/producto. */
-interface ResenaParaComparar extends VectorConNorma {
+interface ResenaParaComparar {
   idResena: number;
+  idComentario: number;
   idUsuario: number;
   fecha: number;
-}
-
-interface Candidato {
-  key: number;
 }
 
 /** Sobre quien se cuenta: un vendedor o un producto. */
@@ -43,8 +36,10 @@ interface Dimension {
     TipoAnilloFraude,
     'resenas_parecidas_vendedor' | 'resenas_parecidas_producto'
   >;
-  /** El campo de `mesh_comentarios` por el que se agrupa. */
+  /** Como se nombra en los logs. */
   campo: 'id_vendedor' | 'id_producto';
+  /** La columna de `resena` por la que se agrupa. */
+  columna: 'id_usuario_vendedor' | 'id_producto_mongo';
   /** Que parte de sus resenas analizadas deben tener una gemela de otra cuenta. */
   porcentajeMinimo: number;
 }
@@ -57,11 +52,13 @@ const DIMENSIONES: Dimension[] = [
   {
     tipo: 'resenas_parecidas_vendedor',
     campo: 'id_vendedor',
+    columna: 'id_usuario_vendedor',
     porcentajeMinimo: 20,
   },
   {
     tipo: 'resenas_parecidas_producto',
     campo: 'id_producto',
+    columna: 'id_producto_mongo',
     porcentajeMinimo: 40,
   },
 ];
@@ -69,7 +66,8 @@ const DIMENSIONES: Dimension[] = [
 /**
  * Detecta vendedores y productos cuyas resenas son, en buena parte, copias de
  * resenas de OTRAS cuentas: la firma de resenas automatizadas o hechas con una
- * plantilla. Son dos senales de la familia `patron_resenas`, fuente `elastic`:
+ * plantilla. Son dos senales de la familia `patron_resenas`, fuente `elastic`
+ * (el nombre que el catalogo de senales le da al texto de las resenas):
  *
  * - `resenas_parecidas_vendedor`: el 20 % o mas de las resenas de sus productos.
  * - `resenas_parecidas_producto`: el 40 % o mas de las resenas del producto.
@@ -81,18 +79,17 @@ const DIMENSIONES: Dimension[] = [
  * campana.
  *
  * Una resena tiene "gemela" si existe otra, de OTRA cuenta, con coseno de
- * `UMBRAL_COSENO` o mas entre sus vectores y no mas de `DIAS_ENTRE_RESENAS`
- * dias de diferencia. Las de la misma cuenta no cuentan: esa repeticion es la
- * senal `resenas_repetidas`, de la cuenta. Y no se encadena (cada resena cuenta
- * solo si tiene su propia gemela) para que un grupo grande no infle el
- * porcentaje.
+ * `UMBRAL_COSENO` o mas entre sus vectores (lo calcula PostgreSQL, pgvector) y
+ * no mas de `DIAS_ENTRE_RESENAS` dias de diferencia. Las de la misma cuenta no
+ * cuentan: esa repeticion es la senal `resenas_repetidas`, de la cuenta. Y no
+ * se encadena (cada resena cuenta solo si tiene su propia gemela) para que un
+ * grupo grande no infle el porcentaje.
  *
  * El porcentaje es resenas con gemela sobre las analizadas: raiz, de los
- * ultimos `VENTANA_DIAS`, con vector y de al menos `MIN_CARACTERES` caracteres
- * (el mismo largo que las demas senales de texto). Todo sale de
- * `mesh_comentarios`, que ya trae cuenta, vendedor, producto y fecha: no se
- * consulta PostgreSQL. La comparacion es de todas contra todas, con tope de
- * `MAX_RESENAS` por vendedor o producto (las mas recientes).
+ * ultimos `VENTANA_DIAS`, con vector (`vector_comentario`) y de al menos
+ * `MIN_CARACTERES` caracteres (el mismo largo que las demas senales de texto).
+ * La comparacion es de todas contra todas, con tope de `MAX_RESENAS` por
+ * vendedor o producto (las mas recientes).
  *
  * Mismo molde que `ResenasRepetidasDetectorService`: `@Interval`, bandera
  * `procesando` y un error de conexion se loguea y no tumba el proceso.
@@ -146,8 +143,8 @@ export class ResenasParecidasDetectorService {
       for (const dimension of DIMENSIONES) {
         const candidatos = await this.candidatos(dimension);
         let senales = 0;
-        for (const candidato of candidatos) {
-          senales += await this.revisar(dimension, candidato.key);
+        for (const clave of candidatos) {
+          senales += await this.revisar(dimension, clave);
         }
         resumen.push(
           `${candidatos.length} ${dimension.campo} revisados, ${senales} senal(es)`,
@@ -165,7 +162,7 @@ export class ResenasParecidasDetectorService {
 
   /**
    * El chequeo de UNA reseña recien escrita: la llama `ChequeoTextoInmediatoService`
-   * cuando ya esta indexada. Mira solo el vendedor y el producto de esa reseña, y
+   * cuando ya tiene su vector. Mira solo el vendedor y el producto de esa reseña, y
    * solo hace la cuenta completa si la reseña nueva tiene una gemela de otra
    * cuenta: sin ella el porcentaje no pudo subir. Un error se loguea; lo recoge
    * la proxima pasada de `detectar()`.
@@ -188,123 +185,96 @@ export class ResenasParecidasDetectorService {
     }
   }
 
-  private filtroBase(): object[] {
-    return [
-      { term: { es_respuesta: false } },
-      { exists: { field: 'vector' } },
-      {
-        range: {
-          fecha_publicacion: {
-            gte: `now-${ResenasParecidasDetectorService.VENTANA_DIAS}d`,
-          },
-        },
-      },
-    ];
-  }
-
-  /** Los vendedores o productos con al menos `MIN_RESENAS` resenas en la
-   * ventana: con menos no pueden llegar a la regla. */
-  private async candidatos(dimension: Dimension): Promise<Candidato[]> {
-    const respuesta = await elasticClient.search({
-      index: INDICE,
-      size: 0,
-      query: { bool: { filter: this.filtroBase() } },
-      aggs: {
-        candidatos: {
-          terms: {
-            field: dimension.campo,
-            min_doc_count: ResenasParecidasDetectorService.MIN_RESENAS,
-            size: ResenasParecidasDetectorService.MAX_CANDIDATOS,
-          },
-        },
-      },
-    });
-    const agregado = respuesta.aggregations?.candidatos as
-      { buckets: Candidato[] } | undefined;
-    return agregado?.buckets ?? [];
+  /** Los vendedores o productos con al menos `MIN_RESENAS` resenas con vector
+   * en la ventana: con menos no pueden llegar a la regla. Los de mas resenas
+   * primero. */
+  private async candidatos(dimension: Dimension): Promise<number[]> {
+    const { rows } = await pool.query<{ llave: string }>(
+      `SELECT r.${dimension.columna} AS llave
+         FROM resena r
+         JOIN comentario c ON c.id_comentario = r.id_comentario
+         JOIN vector_comentario v ON v.id_comentario = r.id_comentario
+        WHERE c.fecha_publicacion >= now() - make_interval(days => $1)
+        GROUP BY r.${dimension.columna}
+       HAVING count(*) >= $2
+        ORDER BY count(*) DESC, r.${dimension.columna}
+        LIMIT $3`,
+      [
+        ResenasParecidasDetectorService.VENTANA_DIAS,
+        ResenasParecidasDetectorService.MIN_RESENAS,
+        ResenasParecidasDetectorService.MAX_CANDIDATOS,
+      ],
+    );
+    return rows.map((fila) => Number(fila.llave));
   }
 
   /**
    * Devuelve 1 si el vendedor o producto quedo como senal, 0 si no. Con
-   * `idResenaNueva` (chequeo inmediato) corta antes de la cuenta de todas contra
-   * todas si esa reseña no se analiza o no tiene gemela.
+   * `idResenaNueva` (chequeo inmediato) corta antes de la cuenta completa si esa
+   * reseña no se analiza o no tiene gemela.
    */
   private async revisar(
     dimension: Dimension,
     clave: number,
     idResenaNueva?: number,
   ): Promise<number> {
-    const respuesta = await elasticClient.search<DocumentoComentario>({
-      index: INDICE,
-      size: ResenasParecidasDetectorService.MAX_RESENAS,
-      sort: [{ fecha_publicacion: 'desc' }],
-      _source: [
-        'id_resena',
-        'id_usuario',
-        'comentario',
-        'fecha_publicacion',
-        'vector',
+    const { rows } = await pool.query<FilaResena>(
+      `SELECT r.id_resena, r.id_comentario, r.id_usuario, c.comentario,
+              c.fecha_publicacion
+         FROM resena r
+         JOIN comentario c ON c.id_comentario = r.id_comentario
+         JOIN vector_comentario v ON v.id_comentario = r.id_comentario
+        WHERE r.${dimension.columna} = $1
+          AND c.fecha_publicacion >= now() - make_interval(days => $2)
+        ORDER BY c.fecha_publicacion DESC
+        LIMIT $3`,
+      [
+        clave,
+        ResenasParecidasDetectorService.VENTANA_DIAS,
+        ResenasParecidasDetectorService.MAX_RESENAS,
       ],
-      query: {
-        bool: {
-          filter: [
-            ...this.filtroBase(),
-            { term: { [dimension.campo]: clave } },
-          ],
-        },
-      },
-    });
+    );
 
-    const resenas: ResenaParaComparar[] = [];
-    for (const hit of respuesta.hits.hits) {
-      const fuente = hit._source;
-      if (
-        fuente?.vector == null ||
-        fuente.comentario.trim().length <
-          ResenasParecidasDetectorService.MIN_CARACTERES
-      ) {
-        continue;
-      }
-      resenas.push({
-        idResena: fuente.id_resena,
-        idUsuario: fuente.id_usuario,
-        fecha: new Date(fuente.fecha_publicacion).getTime(),
-        vector: fuente.vector,
-        norma: norma(fuente.vector),
-      });
-    }
+    const resenas: ResenaParaComparar[] = rows
+      .filter(
+        (fila) =>
+          fila.comentario.trim().length >=
+          ResenasParecidasDetectorService.MIN_CARACTERES,
+      )
+      .map((fila) => ({
+        idResena: Number(fila.id_resena),
+        idComentario: Number(fila.id_comentario),
+        idUsuario: Number(fila.id_usuario),
+        fecha: fila.fecha_publicacion.getTime(),
+      }));
     if (resenas.length < ResenasParecidasDetectorService.MIN_RESENAS) {
       return 0;
     }
 
+    // Gemelas: se parecen (lo dice PostgreSQL), son de cuentas distintas (una
+    // cuenta repetida es la senal de la cuenta) y se escribieron con pocos dias
+    // de diferencia.
     const msEntre =
       ResenasParecidasDetectorService.DIAS_ENTRE_RESENAS * MS_POR_DIA;
-    const sonGemelas = (
-      ra: ResenaParaComparar,
-      rb: ResenaParaComparar,
-    ): number | null => {
-      if (ra.idUsuario === rb.idUsuario) {
-        return null; // una cuenta repetida es la senal de la cuenta
-      }
-      if (Math.abs(ra.fecha - rb.fecha) > msEntre) {
-        return null;
-      }
-      const coseno = cosenoEntre(ra, rb);
-      return coseno >= ResenasParecidasDetectorService.UMBRAL_COSENO
-        ? coseno
-        : null;
-    };
+    const pares = (
+      await paresParecidos(
+        resenas.map((r) => r.idComentario),
+        ResenasParecidasDetectorService.UMBRAL_COSENO,
+      )
+    ).filter(
+      ({ a, b }) =>
+        resenas[a].idUsuario !== resenas[b].idUsuario &&
+        Math.abs(resenas[a].fecha - resenas[b].fecha) <= msEntre,
+    );
 
     if (idResenaNueva != null) {
-      const nueva = resenas.find((r) => r.idResena === idResenaNueva);
-      if (nueva == null || !resenas.some((r) => sonGemelas(nueva, r) != null)) {
+      const nueva = resenas.findIndex((r) => r.idResena === idResenaNueva);
+      if (nueva < 0 || !pares.some((p) => p.a === nueva || p.b === nueva)) {
         return 0;
       }
     }
 
-    const { conGemela, similitudes } = marcarConGemela(resenas.length, (a, b) =>
-      sonGemelas(resenas[a], resenas[b]),
-    );
+    const { conGemela, similitudes } = marcarConGemela(resenas.length, pares);
     // `resenas` viene de la mas reciente a la mas vieja: la evidencia se queda
     // con las mas recientes.
     const marcadas = resenas.filter((_, i) => conGemela[i]);

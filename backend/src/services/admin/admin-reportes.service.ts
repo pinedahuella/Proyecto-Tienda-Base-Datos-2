@@ -56,7 +56,8 @@ export class AdminReportesService {
            FROM pedido p
            JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
            JOIN usuarios u ON u.id_usuario = p.id_usuario
-           JOIN direccion_historial dh
+           -- LEFT: un carrito (pendiente) todavia no tiene direccion.
+           LEFT JOIN direccion_historial dh
              ON dh.id_direccion_historial = p.id_direccion_historial
            LEFT JOIN pedido_producto pp ON pp.id_pedido = p.id_pedido
            LEFT JOIN precio_historial ph
@@ -161,8 +162,8 @@ interface FilaReservacion {
   usuario: string;
   correo_electronico: string;
   cliente_nombre: string;
-  ciudad: string;
-  departamento: string;
+  ciudad: string | null;
+  departamento: string | null;
   cantidad_lineas: number;
   unidades: number;
   total: string;

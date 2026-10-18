@@ -51,9 +51,14 @@ una reservación **es** un pedido pendiente.
 > quedó fijo es el **precio** de cada línea, congelado al agregarla, así que
 > `total` es firme.
 
-Desde que el carrito vive en Redis, los pedidos `pendiente` solo nacen del
-flujo viejo (`POST /comprador/pedidos` → `crear_pedido`, sin llegar a
-`comprar_pedido`). Contra los datos sembrados esta lista está **vacía**.
+**Desde el 2026-10-17 cada pedido `pendiente` es el carrito abierto de una
+cuenta** (ver `plan pendiente/carrito-postgres-verdad.md`): nace con el primer
+producto que se agrega y deja de estar aquí al comprarlo, al vaciarlo o a las
+24 h sin tocarlo. Así que este reporte es, en la práctica, "los carritos
+abiertos". Un carrito todavía no tiene dirección (se elige al pagar): sale con
+`ciudad` y `departamento` en `null`. El `total` es al precio que vio cada
+persona; la venta relámpago sí aparta unidades, pero eso vive en
+`reserva_venta_relampago`, no en este reporte.
 
 ```
 GET /admin/reportes/reservaciones

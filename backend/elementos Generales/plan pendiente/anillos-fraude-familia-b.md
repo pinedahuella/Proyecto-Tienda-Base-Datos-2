@@ -1,5 +1,7 @@
 # Persistir la familia B (B.1-B.7) en `anillo_fraude`
 
+> **2026-10-17:** `cadena_abierta` (B.1) se quitó y `favor_devuelto` (B.5) se fusionó en `mutuo` (horas de ida y vuelta en su `detalle`). Ver `limpieza-fraude.md`.
+
 > **Estado (2026-09-24): HECHO, aplicado en local y probado en vivo.**
 > Sigue a `anillos-fraude-persistencia.md` (mismo folder), que ya dejó
 > `anillo_fraude`/`anillo_fraude_resena` funcionando para A.1/A.2

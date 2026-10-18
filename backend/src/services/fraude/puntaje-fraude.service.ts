@@ -4,15 +4,13 @@ import { Hallazgo } from '../../models/fraude/hallazgo';
 
 /**
  * Puntos base por tipo (seccion 3 de `docs/fraude-entrega3/02-reglas-backend.md`).
- * `favor_devuelto`/`reputacion_expres` aca guardan el PISO de su rango --
- * el valor real depende de metricas (horas, minutos de vida del autor) que
- * `PatronesFraudeDetectorService` ya calcula y guarda en
- * `anillo_fraude.detalle` para B.3/B.5/B.7 (persistente, favor_devuelto,
- * reputacion_expres); el piso de aca solo se usa si por algun motivo la
- * metrica no vino (`Number.isFinite` falla). Los bonos de B.4 (ciclo/mutuo/
- * reiterado, `bonoB4` mas abajo) y de `cadena_abierta` siguen sin
- * conectar a proposito -- alcance dejado para despues (B.4) o descartado
- * por completo (`cadena_abierta`, ver `ReglasCasiConfirmadoService`).
+ * `reputacion_expres` aca guarda el PISO de su rango -- el valor real
+ * depende de los minutos de vida del autor, que `PatronesFraudeDetectorService`
+ * guarda en `senal_fraude.detalle`; el piso solo se usa si la metrica no vino
+ * (`Number.isFinite` falla). `mutuo`/`reiterado` suman ademas el bono de ida y
+ * vuelta (lo que antes era `favor_devuelto`). Los bonos de B.4 (ciclo/mutuo/
+ * reiterado, `bonoB4` mas abajo) siguen sin conectar a proposito -- alcance
+ * dejado para despues.
  */
 const PUNTOS_BASE: Record<string, number> = {
   ciclo: 30,
@@ -20,14 +18,12 @@ const PUNTOS_BASE: Record<string, number> = {
   mutuo: 15,
   satelites: 25, // "granja", B.2
   coordinados: 20,
-  favor_devuelto: 8, // piso del rango 20/12/8
   reputacion_expres: 10, // piso del rango 20/10
-  cadena_abierta: 15,
   persistente: 15,
-  resenas_repetidas: 15, // cuenta con 5+ resenas casi iguales (texto, Elasticsearch)
-  anillo_de_texto: 25, // 3+ cuentas con resenas casi iguales sobre un vendedor (texto, Elasticsearch)
+  resenas_repetidas: 15, // cuenta con 5+ resenas casi iguales (texto, pgvector)
+  anillo_de_texto: 25, // 3+ cuentas con resenas casi iguales sobre un vendedor (texto, pgvector)
   resena_positiva_cancelada: 20, // resena de 4-5 estrellas y la compra cancelada (reembolsada) poco despues (pedidos, PostgreSQL)
-  notas_incoherentes_cuenta: 10, // 5+ y 20 %+ de sus resenas con el texto contrario a las estrellas (texto, Elasticsearch)
+  notas_incoherentes_cuenta: 10, // 5+ y 20 %+ de sus resenas con el texto contrario a las estrellas (texto, pgvector)
   ip_multicuenta_compras: 20, // F3
   granja_de_registros: 20, // F6
   compras_en_rafaga: 15, // F2
@@ -56,7 +52,8 @@ const TOPE_REPETICION = 2;
  * Verificado a mano contra el ejemplo del "Caso 1" del documento
  * original (el unico con el paso a paso completo): ciclo 30 + bono B.4
  * (invisible hoy +10, orden secuencial +5) = 45; reiterado 30 + los
- * mismos bonos = 45; favor devuelto en 1.48h (tier 12) = 12; suma 87 (sin
+ * mismos bonos = 45; favor devuelto en 1.48h (tier 12) = 12 (hoy es el bono
+ * de ida y vuelta del par, no un hallazgo aparte); suma 87 (sin
  * contar "misma casa con calle", que no tiene detector todavia, ver
  * `TIPOS_FUERTES` en el agrupador); un solo motor, factor 1; ultima
  * evidencia a 199 dias, recencia al piso 0.5. El documento suma 112
@@ -109,9 +106,6 @@ export class PuntajeFraudeService {
    * `evidencia_caso_fraude.puntos` (el aporte de un hallazgo individual,
    * no el total del caso). */
   puntosDeHallazgo(hallazgo: Hallazgo): number {
-    if (hallazgo.tipo === 'favor_devuelto') {
-      return this.puntosFavorDevuelto(hallazgo.metricas);
-    }
     if (hallazgo.tipo === 'reputacion_expres') {
       return this.puntosReputacionExpres(hallazgo.metricas);
     }
@@ -125,8 +119,8 @@ export class PuntajeFraudeService {
     ) {
       puntos += this.bonoB4(hallazgo.metricas);
     }
-    if (hallazgo.tipo === 'cadena_abierta') {
-      puntos += this.bonoCadenaAbierta(hallazgo.metricas);
+    if (hallazgo.tipo === 'mutuo' || hallazgo.tipo === 'reiterado') {
+      puntos += this.bonoIdaYVuelta(hallazgo.metricas);
     }
     if (hallazgo.tipo === 'persistente') {
       puntos += this.bonoPersistente(hallazgo.metricas);
@@ -134,16 +128,15 @@ export class PuntajeFraudeService {
     return puntos;
   }
 
-  /** 20 si tardo menos de 1 hora, 12 si menos de 24, 8 si menos de 72 --
-   * lee `metricas.horas`. */
-  private puntosFavorDevuelto(metricas: Record<string, unknown>): number {
-    const horas = Number(metricas.horas);
-    if (!Number.isFinite(horas)) {
-      return PUNTOS_BASE.favor_devuelto;
-    }
+  /** El par se devolvio la nota: +20 si tardo menos de 1 hora, +12 si
+   * menos de 24, +8 si menos de 72, nada si mas -- lee `metricas.horas`. */
+  private bonoIdaYVuelta(metricas: Record<string, unknown>): number {
+    const horas = metricas.horas;
+    if (typeof horas !== 'number' || !Number.isFinite(horas)) return 0;
     if (horas < 1) return 20;
     if (horas < 24) return 12;
-    return 8;
+    if (horas < 72) return 8;
+    return 0;
   }
 
   /** 20 si el autor de la resena tenia menos de 60 minutos de vida, 10 si
@@ -161,15 +154,6 @@ export class PuntajeFraudeService {
     if (Number(metricas.olas) >= 2) bono += 10;
     if (metricas.invisible_hoy === true) bono += 10;
     if (metricas.orden_secuencial === true) bono += 5;
-    return bono;
-  }
-
-  /** +10 si nacieron juntas, +10 si los extremos comparten casa -- lee
-   * `metricas.nacieron_juntas`, `metricas.extremos_comparten_casa`. */
-  private bonoCadenaAbierta(metricas: Record<string, unknown>): number {
-    let bono = 0;
-    if (metricas.nacieron_juntas === true) bono += 10;
-    if (metricas.extremos_comparten_casa === true) bono += 10;
     return bono;
   }
 

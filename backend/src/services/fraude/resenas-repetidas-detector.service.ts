@@ -1,34 +1,27 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { elasticClient } from '../../database/elastic';
+import { pool } from '../../database/postgres';
 import { registrarAnilloFraude } from '../../helpers/registrar-anillo-fraude';
 import {
-  cosenoEntre,
   marcarConGemela,
   media,
-  norma,
   redondear,
-  VectorConNorma,
 } from '../../helpers/similitud-vectores';
 import { LARGO_MINIMO_VALORACION } from '../../helpers/valoracion-texto';
+import { paresParecidos } from '../../helpers/vectores-pgvector';
 
-const INDICE = process.env.ELASTIC_INDICE_COMENTARIOS ?? 'mesh_comentarios';
-
-/** Un documento de `mesh_comentarios`, con lo que necesita este detector. */
-interface DocumentoComentario {
-  id_usuario: number;
-  id_resena: number;
+/** Una resena de la cuenta, con lo que necesita este detector. */
+interface FilaResena {
+  id_resena: string;
+  id_comentario: string;
   comentario: string;
-  vector?: number[];
+  tiene_vector: boolean;
 }
 
-/** Una resena de la cuenta, lista para compararla con las demas. */
-interface ResenaConVector extends VectorConNorma {
+/** Una resena de la cuenta que entra a la comparacion. */
+interface ResenaAnalizada {
   idResena: number;
-}
-
-interface CuentaCandidata {
-  key: number;
+  idComentario: number;
 }
 
 /**
@@ -37,16 +30,18 @@ interface CuentaCandidata {
  * `resenas_repetidas` de la familia `patron_resenas`. Ver
  * `elementos Generales/plan pendiente/resenas-repetidas.md`.
  *
- * El texto de cada resena ya vive, con su vector, en `mesh_comentarios`
- * (Elasticsearch, `EventoComentarioSyncService`). Aca solo se LEE:
+ * El vector de cada resena ya esta en `vector_comentario` (pgvector,
+ * `EventoComentarioSyncService`). Aca solo se LEE:
  *
- * 1. Una agregacion saca las cuentas con `MIN_RESENAS` o mas resenas en la
- *    ventana (sin contar las respuestas a otras resenas).
- * 2. De cada una se traen sus resenas con su vector, y se descartan las de
- *    menos de `MIN_CARACTERES`: un "Excelente producto" lo escribe cualquiera.
- * 3. Se comparan todas contra todas (coseno) y cada resena que tiene una
- *    "gemela" suya (otra de la misma cuenta con coseno de `UMBRAL_COSENO` o mas)
- *    se marca. No se encadena: cada una cuenta solo si tiene su propia gemela.
+ * 1. Se sacan las cuentas con `MIN_RESENAS` o mas resenas en la ventana (sin
+ *    contar las respuestas a otras resenas).
+ * 2. De cada una se traen sus resenas, y se descartan las que no tienen vector
+ *    y las de menos de `MIN_CARACTERES`: un "Excelente producto" lo escribe
+ *    cualquiera.
+ * 3. PostgreSQL las compara todas contra todas (coseno) y cada resena que tiene
+ *    una "gemela" suya (otra de la misma cuenta con coseno de `UMBRAL_COSENO` o
+ *    mas) se marca. No se encadena: cada una cuenta solo si tiene su propia
+ *    gemela.
  * 4. Si las marcadas son `MIN_RESENAS` o mas Y son el `PORCENTAJE_MINIMO` o mas
  *    de las resenas analizadas de la cuenta, es una senal. Porcentaje y no solo
  *    cantidad (desde 2026-10-04): quien escribe mucho repite alguna frase por
@@ -108,8 +103,8 @@ export class ResenasRepetidasDetectorService {
     try {
       const cuentas = await this.cuentasCandidatas();
       let senales = 0;
-      for (const cuenta of cuentas) {
-        senales += await this.revisarCuenta(cuenta.key);
+      for (const idUsuario of cuentas) {
+        senales += await this.revisarCuenta(idUsuario);
       }
       this.logger.log(
         `worker de resenas repetidas: ${cuentas.length} cuenta(s) revisadas, ${senales} senal(es)`,
@@ -125,7 +120,7 @@ export class ResenasRepetidasDetectorService {
 
   /**
    * El chequeo de UNA reseña recien escrita: la llama `ChequeoTextoInmediatoService`
-   * cuando ya esta indexada. Solo mira a su autor, y solo hace la cuenta completa
+   * cuando ya tiene su vector. Solo mira a su autor, y solo hace la cuenta completa
    * si la reseña nueva tiene una gemela: sin ella, el porcentaje de la cuenta no
    * pudo subir y no hay nada nuevo que evaluar. Un error se loguea; lo recoge la
    * proxima pasada de `detectar()`.
@@ -140,106 +135,82 @@ export class ResenasRepetidasDetectorService {
     }
   }
 
-  private filtroBase(): object[] {
-    return [
-      { term: { es_respuesta: false } },
-      {
-        range: {
-          fecha_publicacion: {
-            gte: `now-${ResenasRepetidasDetectorService.VENTANA_DIAS}d`,
-          },
-        },
-      },
-    ];
-  }
-
-  /** Las cuentas con al menos `MIN_RESENAS` resenas en la ventana. */
-  private async cuentasCandidatas(): Promise<CuentaCandidata[]> {
-    const respuesta = await elasticClient.search({
-      index: INDICE,
-      size: 0,
-      query: { bool: { filter: this.filtroBase() } },
-      aggs: {
-        cuentas: {
-          terms: {
-            field: 'id_usuario',
-            min_doc_count: ResenasRepetidasDetectorService.MIN_RESENAS,
-            size: ResenasRepetidasDetectorService.MAX_CUENTAS,
-          },
-        },
-      },
-    });
-    const agregado = respuesta.aggregations?.cuentas as
-      { buckets: CuentaCandidata[] } | undefined;
-    return agregado?.buckets ?? [];
+  /** Las cuentas con al menos `MIN_RESENAS` resenas en la ventana, las de mas
+   * resenas primero. */
+  private async cuentasCandidatas(): Promise<number[]> {
+    const { rows } = await pool.query<{ id_usuario: string }>(
+      `SELECT r.id_usuario
+         FROM resena r
+         JOIN comentario c ON c.id_comentario = r.id_comentario
+        WHERE c.fecha_publicacion >= now() - make_interval(days => $1)
+        GROUP BY r.id_usuario
+       HAVING count(*) >= $2
+        ORDER BY count(*) DESC, r.id_usuario
+        LIMIT $3`,
+      [
+        ResenasRepetidasDetectorService.VENTANA_DIAS,
+        ResenasRepetidasDetectorService.MIN_RESENAS,
+        ResenasRepetidasDetectorService.MAX_CUENTAS,
+      ],
+    );
+    return rows.map((fila) => Number(fila.id_usuario));
   }
 
   /**
    * Devuelve 1 si la cuenta quedo como senal, 0 si no. Con `idResenaNueva`
-   * (chequeo inmediato) corta antes de la cuenta de todas contra todas si esa
-   * reseña no se analiza (corta, sin vector) o no tiene gemela.
+   * (chequeo inmediato) corta antes de la cuenta completa si esa reseña no se
+   * analiza (corta, sin vector) o no tiene gemela.
    */
   private async revisarCuenta(
     idUsuario: number,
     idResenaNueva?: number,
   ): Promise<number> {
-    const respuesta = await elasticClient.search<DocumentoComentario>({
-      index: INDICE,
-      size: ResenasRepetidasDetectorService.MAX_RESENAS_POR_CUENTA,
-      sort: [{ fecha_publicacion: 'desc' }],
-      _source: ['id_usuario', 'id_resena', 'comentario', 'vector'],
-      query: {
-        bool: {
-          filter: [...this.filtroBase(), { term: { id_usuario: idUsuario } }],
-        },
-      },
-    });
+    const { rows } = await pool.query<FilaResena>(
+      `SELECT r.id_resena, r.id_comentario, c.comentario,
+              EXISTS (SELECT 1 FROM vector_comentario v
+                       WHERE v.id_comentario = r.id_comentario) AS tiene_vector
+         FROM resena r
+         JOIN comentario c ON c.id_comentario = r.id_comentario
+        WHERE r.id_usuario = $1
+          AND c.fecha_publicacion >= now() - make_interval(days => $2)
+        ORDER BY c.fecha_publicacion DESC
+        LIMIT $3`,
+      [
+        idUsuario,
+        ResenasRepetidasDetectorService.VENTANA_DIAS,
+        ResenasRepetidasDetectorService.MAX_RESENAS_POR_CUENTA,
+      ],
+    );
 
-    const resenas: ResenaConVector[] = [];
-    for (const hit of respuesta.hits.hits) {
-      const fuente = hit._source;
-      if (
-        fuente?.vector == null ||
-        fuente.comentario.trim().length <
-          ResenasRepetidasDetectorService.MIN_CARACTERES
-      ) {
-        continue;
-      }
-      resenas.push({
-        idResena: fuente.id_resena,
-        vector: fuente.vector,
-        norma: norma(fuente.vector),
-      });
-    }
+    const resenas: ResenaAnalizada[] = rows
+      .filter(
+        (fila) =>
+          fila.tiene_vector &&
+          fila.comentario.trim().length >=
+            ResenasRepetidasDetectorService.MIN_CARACTERES,
+      )
+      .map((fila) => ({
+        idResena: Number(fila.id_resena),
+        idComentario: Number(fila.id_comentario),
+      }));
     if (resenas.length < ResenasRepetidasDetectorService.MIN_RESENAS) {
       return 0;
     }
 
+    // Una resena se marca si tiene una gemela: otra con coseno sobre el umbral.
+    const pares = await paresParecidos(
+      resenas.map((r) => r.idComentario),
+      ResenasRepetidasDetectorService.UMBRAL_COSENO,
+    );
+
     if (idResenaNueva != null) {
-      const nueva = resenas.find((r) => r.idResena === idResenaNueva);
-      if (
-        nueva == null ||
-        !resenas.some(
-          (r) =>
-            r !== nueva &&
-            cosenoEntre(nueva, r) >=
-              ResenasRepetidasDetectorService.UMBRAL_COSENO,
-        )
-      ) {
+      const nueva = resenas.findIndex((r) => r.idResena === idResenaNueva);
+      if (nueva < 0 || !pares.some((p) => p.a === nueva || p.b === nueva)) {
         return 0;
       }
     }
 
-    // Una resena se marca si tiene una gemela: otra con coseno sobre el umbral.
-    const { conGemela, similitudes } = marcarConGemela(
-      resenas.length,
-      (a, b) => {
-        const coseno = cosenoEntre(resenas[a], resenas[b]);
-        return coseno >= ResenasRepetidasDetectorService.UMBRAL_COSENO
-          ? coseno
-          : null;
-      },
-    );
+    const { conGemela, similitudes } = marcarConGemela(resenas.length, pares);
     const marcadas = resenas.filter((_, i) => conGemela[i]);
     if (
       marcadas.length < ResenasRepetidasDetectorService.MIN_RESENAS ||

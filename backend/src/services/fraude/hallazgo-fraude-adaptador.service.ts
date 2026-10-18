@@ -4,10 +4,10 @@ import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { FuenteHallazgo, Hallazgo } from '../../models/fraude/hallazgo';
 
 /**
- * F1 (vistas infladas) y F4 (carrito acaparador) no entran en los casos de
- * fraude de resenas (seccion 6 de `docs/fraude-entrega3/02-reglas-backend.md`):
- * F1 va al panel de tendencias como aviso, F4 a una cola de operaciones de
- * venta relampago. Los otros cuatro (F2, F3, F5, F6) si.
+ * F1 (vistas infladas) no entra en los casos de fraude de resenas (seccion 6
+ * de `docs/fraude-entrega3/02-reglas-backend.md`): va al panel de tendencias
+ * como aviso. F2, F3, F5 y la granja de registros (la antigua F6, hoy en
+ * Elasticsearch) si.
  */
 const TIPOS_EVENTO_INCLUIDOS = [
   'compras_en_rafaga',
@@ -55,6 +55,10 @@ const TIPOS_SOLO_ALERTA = [
  * anillos (A) y los patrones de resenas (B) entran TODOS los tipos. La fuente
  * `elastic` (el texto de las resenas, `resenas_repetidas`) cuenta como un
  * motor aparte en el puntaje, igual que el grafo, ClickHouse o el login.
+ *
+ * Excepcion: la familia `compras_navegacion` es siempre `eventos`
+ * (comportamiento de compra y registro), venga de la base que venga. La
+ * granja de registros sale de Elasticsearch, pero no es texto de resenas.
  */
 const FUENTE_POR_CATALOGO: Record<string, FuenteHallazgo> = {
   neo4j: 'grafo',
@@ -133,7 +137,10 @@ export class HallazgoFraudeAdaptadorService {
       return resultado.rows.map((fila) => {
         const cuentas = [...new Set(fila.cuentas.map(Number))];
         return {
-          fuente: FUENTE_POR_CATALOGO[fila.fuente],
+          fuente:
+            fila.familia === 'compras_navegacion'
+              ? 'eventos'
+              : FUENTE_POR_CATALOGO[fila.fuente],
           idOrigen: Number(fila.id),
           tipo: fila.tipo,
           cuentas,

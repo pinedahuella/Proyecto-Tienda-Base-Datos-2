@@ -46,7 +46,8 @@ PostgreSQL**, sobre lo que las demás rutas ya detectaron y persistieron:
 - **`GET`/`PATCH /admin/fraude/casos` y `GET .../casos/:id`** — el
   **agrupador de casos de fraude**: junta en un solo caso, con puntaje y
   nivel combinados, los hallazgos de las tres fuentes de abajo (más una
-  cuarta desde 2026-10-02, `elastic`: el texto de las reseñas) cuando
+  cuarta desde 2026-10-02, `elastic`: el texto de las reseñas, que desde el
+  2026-10-16 se compara en PostgreSQL aunque la fuente conserva el nombre) cuando
   comparten cuentas. No reemplaza los tres paneles individuales, los
   junta. Ver la sección "El agrupador de casos de fraude", al final.
 - **`GET`/`PATCH /admin/fraude/alertas-resenas` y
@@ -948,8 +949,8 @@ de operación de todo el sistema, mismo criterio que `/admin/fraude/alertas-rese
 
 ## Qué compara
 
-Seis filas. Lo que de verdad importa es que **cada reseña de PostgreSQL
-tenga su nodo completo en el grafo**:
+Siete filas (la de compras desde el 2026-10-16). Lo que de verdad importa es
+que **cada reseña y cada compra de PostgreSQL estén en el grafo**:
 
 | Recurso | PostgreSQL | Neo4j | ¿cuenta para el veredicto? |
 |---|---|---|---|
@@ -957,6 +958,7 @@ tenga su nodo completo en el grafo**:
 | `relacion ESCRIBIO` | `count(*) FROM resena` | relaciones `ESCRIBIO` | **sí** |
 | `relacion CALIFICA_A` | `count(*) FROM resena` | relaciones `CALIFICA_A` | **sí** |
 | `relacion SOBRE` | `count(*) FROM resena` | relaciones `SOBRE` | **sí** |
+| `compras` | líneas de pedidos `comprado`/`enviado`/`entregado` | nodos `:Compra` | **sí** |
 | `productos resenados` | `count(DISTINCT id_producto_mongo)` | nodos `:Producto` | no |
 | `usuarios con resena` | autores ∪ vendedores distintos | nodos `:Usuario` | no |
 
@@ -967,8 +969,13 @@ carga **todos** los usuarios, no solo los que aparecen en una reseña. Un
 exceso ahí (`diferencia > 0`) es normal. Se informan igual, para tener el
 panorama.
 
-`cuadra` es `true` solo si las cuatro filas de arriba tienen
-`diferencia = 0` (`diferencia = neo4j - postgres`).
+`cuadra` es `true` solo si las cinco filas de arriba tienen
+`diferencia = 0` (`diferencia = neo4j - postgres`). La respuesta trae además
+`cola_compras` (pendientes y apartados de `evento_grafo_compra`, o `null` si la
+tabla no existe), y si `compras` no cuadra la `sugerencia` dice cómo
+volver a encolar las compras: `etl/cargar_grafo.sh` no las carga (ver
+`plan pendiente/grafo-compras.md`). El ejemplo de abajo es de antes de las
+compras.
 
 ## 200
 
@@ -1057,17 +1064,21 @@ contrastar.
 Estas rutas leen la tabla `anillo_fraude`/`anillo_fraude_resena`, que llenan
 DOS workers: `AnillosDetectorService` (A.1 ciclos, A.2 mismo producto,
 tipos `mutuo`/`ciclo`/`reiterado`, ver `plan pendiente/anillos-fraude-persistencia.sql`)
-y, desde 2026-09-24, `PatronesFraudeDetectorService` -- seis consultas más
-(`cadena_abierta`, `satelites`, `persistente`, `favor_devuelto`,
-`coordinados`, `reputacion_expres`; B.1-B.3 y B.5-B.7 de
-`neo4j/consultas/`), ver `plan pendiente/anillos-fraude-familia-b.md`. Los
+y, desde 2026-09-24, `PatronesFraudeDetectorService` -- cuatro consultas más
+(`satelites`, `persistente`, `coordinados`, `reputacion_expres`; B.2, B.3,
+B.6 y B.7 de `neo4j/consultas/`), ver `plan pendiente/anillos-fraude-familia-b.md`.
+Desde 2026-10-17 ya no existen `cadena_abierta` (B.1, quitada) ni
+`favor_devuelto` (B.5): las horas de ida y vuelta de un par van en el `detalle`
+de `mutuo` (`{"horas": ...}`), ver `plan pendiente/limpieza-fraude.md`. Los
 dos workers corren cada 15 min sobre una ventana de **60 días** y tienen su
 propio chequeo acotado por reseña (excepto `satelites`/`reputacion_expres`,
 que agrupan por vendedor y solo corren en el periódico).
 
 **Desde 2026-10-02 hay un tercero:** `ResenasRepetidasDetectorService`
 (tipo `resenas_repetidas`, familia `patron_resenas`), que no usa el grafo sino
-el texto de las reseñas en Elasticsearch (`mesh_comentarios`): una cuenta con
+el texto de las reseñas: el vector de cada una en `vector_comentario`
+(PostgreSQL, pgvector, desde el 2026-10-16; antes en `mesh_comentarios` de
+Elasticsearch), y PostgreSQL compara todas contra todas. Una cuenta con
 5 o más reseñas que tienen una "gemela" suya (otra casi igual, coseno 0,92) **y**
 que son el **30 %** o más de sus reseñas de 100 caracteres o más, en los
 últimos 180 días (desde 2026-10-04 por porcentaje; antes un grupo de 5 de al
@@ -1087,16 +1098,32 @@ en el grafo igual).
 señales de texto (`resenas_repetidas`, `resenas_parecidas_*`, `anillo_de_texto` y
 `notas_incoherentes_*`) ya no esperan al worker de 15 minutos: al escribir una
 reseña, `ResenasService.crear` lanza **sin esperar** (`void`, igual que los
-anillos del grafo) `ChequeoTextoInmediatoService`, que (1) **indexa ya** la reseña
-en `mesh_comentarios` (`EventoComentarioSyncService.procesarAhora`, con su vector
-de Ollama), (2) **la valora ya** (`ValoracionComentariosService.valorarAhora`) y
+anillos del grafo) `ChequeoTextoInmediatoService`, que (1) **calcula ya su
+vector** y lo guarda en `vector_comentario` (`EventoComentarioSyncService.procesarAhora`,
+con Ollama), (2) **la valora ya** (`ValoracionComentariosService.valorarAhora`) y
 (3) **evalúa solo esa reseña** en las cuatro señales, en paralelo. La respuesta de
-`POST /resenas` no espera nada de esto. Si algo falla (Ollama o Elasticsearch
+`POST /resenas` no espera nada de esto. Si algo falla (Ollama o PostgreSQL
 caídos, un detector), no se reintenta ahí: el evento queda en la cola y los workers
 periódicos lo recogen en su próxima pasada. Cada detector corta pronto si la reseña
 nueva no puede cambiar su resultado (para `resenas_*` y `anillo_de_texto`, si no
 tiene una gemela; para `notas_incoherentes_*`, si no es contradictoria), así que no
-gasta CPU del backend en cada reseña. Ver `plan pendiente/chequeo-texto-inmediato.md`.
+hace la cuenta completa en cada reseña. Ver `plan pendiente/chequeo-texto-inmediato.md`.
+
+**Las señales de texto en pgvector (desde 2026-10-16).** Los vectores y la
+valoración pasaron de `mesh_comentarios` (Elasticsearch) a `vector_comentario`
+(PostgreSQL); ver `plan pendiente/vectores-pgvector.md`. Las reglas no cambiaron.
+La comparación de todas contra todas la hace ahora PostgreSQL (`paresParecidos()`
+en `helpers/vectores-pgvector.ts`) y las agregaciones de las notas incoherentes son
+un `GROUP BY` con `count(*) FILTER`. La fuente de estas señales en el catálogo
+sigue llamándose `elastic`: es la que usan el puntaje, la regla `R-CASI-3` y la
+API, y cambiarle el nombre no es parte de este cambio. Probado con 50 reseñas de
+prueba que disparan cada señal y sus bordes (una cuenta al 29,4 % que no llega al
+30 %, gemelas a 45 días entre sí pero a más de 30 de las demás, reseñas fuera de
+los 180 días, textos casi iguales de menos de 100 caracteres, una mala con 3
+estrellas): los cuatro detectores, en su pasada periódica y en el chequeo
+inmediato, registran **exactamente** las mismas señales, con las mismas reseñas
+de evidencia y el mismo `detalle`, que con Elasticsearch. Las 50 valoraciones
+también son idénticas. Las reseñas de prueba se borraron al terminar.
 
 **Desde 2026-10-04 hay dos más, de reseñar y cancelar la compra**
 (`ResenasCanceladasDetectorService`, familia `patron_resenas`, **fuente nueva
@@ -1130,7 +1157,7 @@ suman puntos. Ver `plan pendiente/resenas-parecidas.md`.
 `patron_resenas`): una reseña es contradictoria si su **texto** es malo y tiene
 4 o 5 estrellas, o su texto es bueno y tiene 1 o 2 (el 3 nunca cuenta). El
 texto lo valora una regresión logística (`valoracion_texto` en
-`mesh_comentarios`, la pone `ValoracionComentariosService`). Solo cuentan
+`vector_comentario`, la pone `ValoracionComentariosService`). Solo cuentan
 reseñas raíz de 100 a 350 caracteres, de los últimos 180 días. Cada señal pide
 **5 o más** contradictorias **y** un porcentaje de las reseñas valoradas:
 
@@ -1168,7 +1195,7 @@ reglas que el resto del proyecto). Dos filtros opcionales e independientes:
 - `estado=pendiente|revisada|descartada` -- reusa el mismo catálogo y las
   mismas funciones de validación que `alertas-login`
   (`validarFiltroEstadoAlerta`), sin duplicar nada.
-- `tipo=mutuo|ciclo|reiterado|cadena_abierta|satelites|persistente|favor_devuelto|coordinados|reputacion_expres|resenas_repetidas|anillo_de_texto|notas_incoherentes_cuenta|notas_incoherentes_producto|notas_incoherentes_vendedor|resenas_parecidas_producto|resenas_parecidas_vendedor|resena_positiva_cancelada|resenas_negativas_canceladas_vendedor`
+- `tipo=mutuo|ciclo|reiterado|satelites|persistente|coordinados|reputacion_expres|resenas_repetidas|anillo_de_texto|notas_incoherentes_cuenta|notas_incoherentes_producto|notas_incoherentes_vendedor|resenas_parecidas_producto|resenas_parecidas_vendedor|resena_positiva_cancelada|resenas_negativas_canceladas_vendedor`
   (`anillo_en_el_tiempo`, B.4, no está porque no se persiste como caso propio).
 - sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
   ordenados por `ultima_vez_confirmado_activo DESC` (los que siguen activos
@@ -1228,7 +1255,7 @@ de un admin. Detalle completo del razonamiento en
 
 ```json
 { "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
-{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, cadena_abierta, satelites, persistente, favor_devuelto, coordinados, reputacion_expres, resenas_repetidas, anillo_de_texto, notas_incoherentes_cuenta, notas_incoherentes_producto, notas_incoherentes_vendedor, resenas_parecidas_producto, resenas_parecidas_vendedor, resena_positiva_cancelada, resenas_negativas_canceladas_vendedor", "payload": null }
+{ "ok": false, "mensaje": "El tipo debe ser uno de: mutuo, ciclo, reiterado, satelites, persistente, coordinados, reputacion_expres, resenas_repetidas, anillo_de_texto, notas_incoherentes_cuenta, notas_incoherentes_producto, notas_incoherentes_vendedor, resenas_parecidas_producto, resenas_parecidas_vendedor, resena_positiva_cancelada, resenas_negativas_canceladas_vendedor", "payload": null }
 ```
 
 ### 401 / 403
@@ -1400,7 +1427,9 @@ Dos filtros opcionales e independientes:
 - `estado=pendiente|revisada|descartada` -- reusa el mismo catálogo y las
   mismas funciones de validación que `alertas-login`/`alertas-resenas`
   (`validarFiltroEstadoAlerta`), sin duplicar nada.
-- `tipo=vistas_infladas|compras_en_rafaga|ip_multicuenta_compras|carrito_acaparador|devoluciones_seriales|granja_de_registros`
+- `tipo=vistas_infladas|compras_en_rafaga|ip_multicuenta_compras|devoluciones_seriales|granja_de_registros`
+  (`carrito_acaparador`, F4, se quitó el 2026-10-17; `granja_de_registros`
+  sale desde esa fecha de Elasticsearch, no de ClickHouse)
 - sin alguno de los dos -- no se filtra por ese campo; sin ninguno, todos,
   ordenados por `fecha_actualizacion DESC`.
 
@@ -1439,7 +1468,7 @@ Dos filtros opcionales e independientes:
 
 `cuentas` sale de la tabla de pivote real (`hallazgo_evento_fraude_cuenta`
 unida contra `usuarios`), no de un `UNION` derivado. `id_producto_mongo`
-solo viene lleno en `vistas_infladas`/`carrito_acaparador` -- `null` en el
+solo viene lleno en `vistas_infladas` -- `null` en el
 resto. `detalle` es evidencia libre por tipo (conteos, ventana, tasas) --
 las cuentas NUNCA van ahí, ya están normalizadas en `cuentas`.
 
@@ -1451,7 +1480,7 @@ oportunidad de evadir la detección.
 
 ```json
 { "ok": false, "mensaje": "El estado debe ser uno de: pendiente, revisada, descartada", "payload": null }
-{ "ok": false, "mensaje": "El tipo debe ser uno de: vistas_infladas, compras_en_rafaga, ip_multicuenta_compras, carrito_acaparador, devoluciones_seriales, granja_de_registros", "payload": null }
+{ "ok": false, "mensaje": "El tipo debe ser uno de: vistas_infladas, compras_en_rafaga, ip_multicuenta_compras, devoluciones_seriales, granja_de_registros", "payload": null }
 ```
 
 ### 401 / 403
@@ -1536,11 +1565,18 @@ original del compañero en
 `elementos Generales/plan pendiente/agrupador-fraude.md`.
 
 La agrupación (unión-búsqueda sobre cuentas compartidas), el puntaje y las
-cinco reglas "casi confirmado" las arma
+cuatro reglas "casi confirmado" (R-CASI-1, 2, 3 y 5; la 4 se quitó el
+2026-10-17 porque nunca se podía cumplir) las arma
 `AgrupadorFraudeWorkerService` (`@Interval` cada 15 minutos, recalcula
 todo desde cero) -- estas tres rutas **solo leen y actualizan** lo que ese
 worker ya dejó en `caso_fraude`/`evidencia_caso_fraude`/
 `evidencia_caso_fraude_cuenta`, nunca agrupan ni califican por su cuenta.
+
+**Desde 2026-10-17 las señales de login no unen casos** (tampoco al guardar):
+una misma señal de login, p. ej. `multi_cuenta_ip` de una IP compartida, puede
+ser evidencia de varios casos a la vez, y en cada uno solo aparecen las cuentas
+de ESE caso. No cuentan para el núcleo. La granja de registros (cuentas nacidas
+juntas desde una IP) sí une. Ver `plan pendiente/limpieza-fraude.md`.
 
 ## GET /admin/fraude/casos
 

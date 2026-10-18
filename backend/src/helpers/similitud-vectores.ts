@@ -1,34 +1,12 @@
-/** Un vector con su norma ya calculada, para comparar muchos pares sin
- * recalcularla. */
-export interface VectorConNorma {
-  vector: number[];
-  norma: number;
-}
-
-/** La norma (longitud) de un vector. */
-export function norma(vector: number[]): number {
-  let suma = 0;
-  for (const x of vector) suma += x * x;
-  return Math.sqrt(suma);
-}
-
-/** El coseno entre dos vectores: 1 si apuntan igual, 0 si no se parecen. */
-export function cosenoEntre(a: VectorConNorma, b: VectorConNorma): number {
-  let producto = 0;
-  for (let i = 0; i < a.vector.length; i++) {
-    producto += a.vector[i] * b.vector[i];
-  }
-  return producto / (a.norma * b.norma);
+/** Dos elementos (por su posicion en la lista) que se parecen, y cuanto. */
+export interface ParParecido {
+  a: number;
+  b: number;
+  valor: number;
 }
 
 export function media(valores: number[]): number {
   return valores.reduce((s, v) => s + v, 0) / valores.length;
-}
-
-/** Elasticsearch puntua una busqueda kNN con coseno como `(1 + coseno) / 2`:
- * esto lo devuelve al coseno, de -1 a 1. */
-export function cosenoDePuntaje(puntaje: number | null | undefined): number {
-  return 2 * (puntaje ?? 0) - 1;
 }
 
 /** A 3 decimales, para guardarlo en el `detalle` de una senal. */
@@ -38,40 +16,33 @@ export function redondear(valor: number): number {
 
 /**
  * Marca cada elemento que tiene al menos una "gemela": otro elemento con el que
- * `sonGemelas` da un valor (no `null`). A diferencia de `agruparPorParecido` no
- * encadena: A y C no quedan juntos porque ambos se parezcan a B, cada uno solo
- * cuenta si tiene su propia gemela. Sirve para medir "que porcentaje de estas
- * resenas tiene una copia" sin que un grupo grande infle el numero. Devuelve
- * tambien el `valor` de cada par que paso la prueba.
+ * forma uno de los `pares`. A diferencia de `agruparPorParecido` no encadena: A
+ * y C no quedan juntos porque ambos se parezcan a B, cada uno solo cuenta si
+ * tiene su propia gemela. Sirve para medir "que porcentaje de estas resenas
+ * tiene una copia" sin que un grupo grande infle el numero. Devuelve tambien el
+ * `valor` de cada par.
  */
 export function marcarConGemela(
   cantidad: number,
-  sonGemelas: (a: number, b: number) => number | null,
+  pares: ParParecido[],
 ): { conGemela: boolean[]; similitudes: number[] } {
   const conGemela = new Array<boolean>(cantidad).fill(false);
-  const similitudes: number[] = [];
-  for (let a = 0; a < cantidad; a++) {
-    for (let b = a + 1; b < cantidad; b++) {
-      const valor = sonGemelas(a, b);
-      if (valor != null) {
-        conGemela[a] = true;
-        conGemela[b] = true;
-        similitudes.push(valor);
-      }
-    }
+  for (const par of pares) {
+    conGemela[par.a] = true;
+    conGemela[par.b] = true;
   }
-  return { conGemela, similitudes };
+  return { conGemela, similitudes: pares.map((par) => par.valor) };
 }
 
 /**
- * Une en grupos los elementos que `sonParecidos` relaciona, directa o
+ * Une en grupos los elementos que los `pares` relacionan, directa o
  * encadenadamente (union-busqueda). Devuelve, de cada grupo, los indices de
- * sus elementos y los `valor` de los pares que pasaron la prueba dentro de el.
- * Los elementos que no se parecen a ninguno quedan en un grupo de uno.
+ * sus elementos y los `valor` de los pares dentro de el. Los elementos que no
+ * forman ningun par quedan en un grupo de uno.
  */
 export function agruparPorParecido(
   cantidad: number,
-  sonParecidos: (a: number, b: number) => number | null,
+  pares: ParParecido[],
 ): { indices: number[]; valores: number[] }[] {
   const padre = Array.from({ length: cantidad }, (_, i) => i);
   const raiz = (i: number): number => {
@@ -82,15 +53,8 @@ export function agruparPorParecido(
     return i;
   };
 
-  const pares: { a: number; valor: number }[] = [];
-  for (let a = 0; a < cantidad; a++) {
-    for (let b = a + 1; b < cantidad; b++) {
-      const valor = sonParecidos(a, b);
-      if (valor != null) {
-        pares.push({ a, valor });
-        padre[raiz(a)] = raiz(b);
-      }
-    }
+  for (const par of pares) {
+    padre[raiz(par.a)] = raiz(par.b);
   }
 
   const porRaiz = new Map<number, { indices: number[]; valores: number[] }>();

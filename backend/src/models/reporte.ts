@@ -40,8 +40,13 @@ export interface Reservacion {
   unidades: number;
   /** Suma de `precio_congelado * cantidad` de sus lineas. */
   total: string;
-  ciudad: string;
-  departamento: string;
+  /**
+   * `null` mientras es carrito: desde el 2026-10-17 el pedido pendiente ES el
+   * carrito de la cuenta (`plan pendiente/carrito-postgres-verdad.md`) y la
+   * direccion se elige recien al pagar.
+   */
+  ciudad: string | null;
+  departamento: string | null;
 }
 
 export interface ReporteReservaciones {

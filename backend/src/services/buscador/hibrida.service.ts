@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { elasticClient } from '../../database/elastic';
+import { describirError } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import { ErrorValidacion } from '../../helpers/errores';
 import { pedirVectores } from '../../helpers/vectores-ollama';
-import { cosenoDePuntaje, redondear } from '../../helpers/similitud-vectores';
+import { aVectorPg, buscarCercanos } from '../../helpers/vectores-pgvector';
+import { redondear } from '../../helpers/similitud-vectores';
 import { RespuestaHibrida, ResultadoHibrido } from '../../dto/buscar-hibrida';
 
 const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
@@ -58,29 +60,38 @@ const CAMPOS_DEVUELTOS = [
   'resenas_total',
 ];
 
+/** Un producto cercano a la frase, de `vector_producto`. */
+interface FilaCercana {
+  id_producto_mongo: string;
+  similitud: number;
+}
+
 /** Un candidato de una de las dos busquedas, en su posicion. */
 interface Candidato {
   id: number;
   doc: DocumentoIndice;
   posicion: number;
-  /** El puntaje de Elasticsearch: relevancia (texto) o coseno (significado). */
+  /** Relevancia de Elasticsearch (texto) o coseno de pgvector (significado). */
   valor: number;
 }
 
 /**
  * La busqueda HIBRIDA (`GET /buscador/productos/hibrida`): junta las dos formas
- * de buscar que ya tiene el proyecto sobre el indice `mesh_productos`.
+ * de buscar productos que tiene el proyecto.
  *
- * 1. Por PALABRAS: el `multi_match` difuso de `GET /buscador/productos`
- *    (tolera errores de tecleo, sin tildes, `nombre` pesa mas que `descripcion`
- *    y `variantes`), pero mas estricto: con una o dos palabras deben estar todas
- *    y con mas, el 70 % (`minimum_should_match`), para que una frase no se llene
- *    de coincidencias con "para" o "algo". Acierta cuando la persona escribe el
- *    nombre o algo muy cercano a el.
- * 2. Por SIGNIFICADO: la frase se convierte en vector (el mismo modelo de
- *    Ollama que usan los productos) y se buscan los productos cuyo vector esta
- *    mas cerca (kNN). Acierta cuando se describe lo que se quiere sin usar las
- *    palabras del catalogo.
+ * 1. Por PALABRAS, en Elasticsearch (`mesh_productos`): el `multi_match` difuso
+ *    de `GET /buscador/productos` (tolera errores de tecleo, sin tildes,
+ *    `nombre` pesa mas que `descripcion` y `variantes`), pero mas estricto: con
+ *    una o dos palabras deben estar todas y con mas, el 70 %
+ *    (`minimum_should_match`), para que una frase no se llene de coincidencias
+ *    con "para" o "algo". Acierta cuando la persona escribe el nombre o algo
+ *    muy cercano a el.
+ * 2. Por SIGNIFICADO, en PostgreSQL (`vector_producto`, pgvector): la frase se
+ *    convierte en vector (el mismo modelo de Ollama que usan los productos) y se
+ *    buscan los productos cuyo vector esta mas cerca. Acierta cuando se
+ *    describe lo que se quiere sin usar las palabras del catalogo. Lo que se
+ *    muestra de cada uno sale de su documento en `mesh_productos`, igual que en
+ *    la busqueda por palabras.
  *
  * Se combinan por POSICION, no por puntaje (RRF): el puntaje de relevancia por
  * palabras y el coseno estan en escalas distintas y no se pueden sumar. Un
@@ -91,10 +102,11 @@ interface Candidato {
  * Solo productos activos, igual que `GET /buscador/productos`: el filtro de
  * estado va fijo en el codigo, no depende de ningun parametro de la peticion.
  *
- * Si Ollama no responde, no falla: contesta solo con la busqueda por palabras y
- * lo dice en `modo`. La busqueda principal no debe caerse porque un servicio de
- * apoyo este apagado (a diferencia de la busqueda por intencion, que sin vector
- * no tiene nada que hacer).
+ * Si Ollama no responde, o falla la busqueda por significado en PostgreSQL, no
+ * falla: contesta solo con la busqueda por palabras y lo dice en `modo`. La
+ * busqueda principal no debe caerse porque un servicio de apoyo este apagado
+ * (a diferencia de la busqueda por intencion, que sin vector no tiene nada que
+ * hacer).
  *
  * Limite conocido: igual que la busqueda por intencion, el umbral de parecido
  * se calibro con pocas frases; con una sola palabra suelta el vector dice poco y
@@ -112,22 +124,14 @@ export class BuscadorHibridoService {
     const tope = this.aLimite(limite);
 
     // Las dos empiezan a la vez; el vector solo hace falta para la segunda.
-    const vectorPromesa = this.vectorDe(texto);
-
-    try {
-      const [vector, porTexto] = await Promise.all([
-        vectorPromesa,
-        this.buscarPorTexto(texto),
-      ]);
-      const porSignificado =
-        vector == null ? [] : await this.buscarPorSignificado(vector);
-      return {
-        modo: vector == null ? 'solo_texto' : 'hibrida',
-        resultados: this.combinar(porTexto, porSignificado, tope),
-      };
-    } catch (error) {
-      manejarErrorConexionElastic(this.logger, error);
-    }
+    const [porTexto, porSignificado] = await Promise.all([
+      this.buscarPorTexto(texto),
+      this.buscarPorSignificado(texto),
+    ]);
+    return {
+      modo: porSignificado == null ? 'solo_texto' : 'hibrida',
+      resultados: this.combinar(porTexto, porSignificado ?? [], tope),
+    };
   }
 
   private validarTexto(q: string | undefined): string {
@@ -168,71 +172,135 @@ export class BuscadorHibridoService {
     }
   }
 
+  /** Por palabras, en Elasticsearch. Si falla es un 503: es la busqueda
+   * principal. */
   private async buscarPorTexto(texto: string): Promise<Candidato[]> {
-    const respuesta = await elasticClient.search<DocumentoIndice>({
-      index: INDICE,
-      size: CANDIDATOS,
-      _source: CAMPOS_DEVUELTOS,
-      query: {
-        bool: {
-          must: [
-            {
-              multi_match: {
-                query: texto,
-                fields: ['nombre^3', 'descripcion', 'variantes'],
-                fuzziness: 'AUTO',
-                // Con una o dos palabras deben estar todas; con mas, el 70 %.
-                // Sin esto, una frase ("algo para escuchar musica") trae
-                // cualquier producto que tenga "para" o "algo": ruido que le
-                // gana a la busqueda por significado.
-                minimum_should_match: '2<70%',
+    try {
+      const respuesta = await elasticClient.search<DocumentoIndice>({
+        index: INDICE,
+        size: CANDIDATOS,
+        _source: CAMPOS_DEVUELTOS,
+        query: {
+          bool: {
+            must: [
+              {
+                multi_match: {
+                  query: texto,
+                  fields: ['nombre^3', 'descripcion', 'variantes'],
+                  fuzziness: 'AUTO',
+                  // Con una o dos palabras deben estar todas; con mas, el 70 %.
+                  // Sin esto, una frase ("algo para escuchar musica") trae
+                  // cualquier producto que tenga "para" o "algo": ruido que le
+                  // gana a la busqueda por significado.
+                  minimum_should_match: '2<70%',
+                },
               },
-            },
-          ],
-          // Fijo en el codigo: lo publico nunca ve un producto que no este activo.
-          filter: [{ term: { estado: 'activo' } }],
+            ],
+            // Fijo en el codigo: lo publico nunca ve un producto que no este activo.
+            filter: [{ term: { estado: 'activo' } }],
+          },
         },
-      },
-    });
-    return this.aCandidatos(respuesta.hits.hits, (hit) => hit._score ?? 0);
+      });
+      return this.aCandidatos(
+        respuesta.hits.hits.map((hit) => ({
+          id: Number(hit._id),
+          doc: hit._source,
+          valor: hit._score ?? 0,
+        })),
+      );
+    } catch (error) {
+      manejarErrorConexionElastic(this.logger, error);
+    }
   }
 
-  private async buscarPorSignificado(vector: number[]): Promise<Candidato[]> {
-    const respuesta = await elasticClient.search<DocumentoIndice>({
-      index: INDICE,
-      size: CANDIDATOS,
-      _source: CAMPOS_DEVUELTOS,
-      knn: {
-        field: 'vector',
-        query_vector: vector,
-        k: CANDIDATOS,
-        num_candidates: CANDIDATOS * 4,
-        filter: { term: { estado: 'activo' } },
-      },
-    });
-    const candidatos = this.aCandidatos(respuesta.hits.hits, (hit) =>
-      cosenoDePuntaje(hit._score),
-    );
+  /**
+   * Por significado: el vector de la frase contra `vector_producto`. `null` si
+   * Ollama no da el vector o PostgreSQL falla: la busqueda sigue solo con las
+   * palabras.
+   */
+  private async buscarPorSignificado(
+    texto: string,
+  ): Promise<Candidato[] | null> {
+    const vector = await this.vectorDe(texto);
+    if (vector == null) {
+      return null;
+    }
+
+    let cercanos: FilaCercana[];
+    try {
+      // `activo` fijo en el codigo: lo publico nunca ve un producto que no
+      // este activo.
+      cercanos = await buscarCercanos<FilaCercana>(
+        `SELECT id_producto_mongo, 1 - (vector <=> $1::vector) AS similitud
+           FROM vector_producto
+          WHERE activo
+          ORDER BY vector <=> $1::vector
+          LIMIT $2`,
+        [aVectorPg(vector), CANDIDATOS],
+        CANDIDATOS * 4,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `busqueda hibrida: sin busqueda por significado, solo texto (${describirError(error)})`,
+      );
+      return null;
+    }
+
     // Llegan del mas cercano al mas lejano: se cortan los que no pasan el umbral.
-    return candidatos.filter((c) => c.valor >= UMBRAL_COSENO);
+    const pasan = cercanos.filter((fila) => fila.similitud >= UMBRAL_COSENO);
+    const docs = await this.documentos(
+      pasan.map((fila) => Number(fila.id_producto_mongo)),
+    );
+    return this.aCandidatos(
+      pasan.map((fila) => {
+        const id = Number(fila.id_producto_mongo);
+        return { id, doc: docs.get(id), valor: fila.similitud };
+      }),
+    );
   }
 
+  /** Los documentos de `mesh_productos` de esos productos, solo si siguen
+   * activos. Si Elasticsearch falla es un 503, como la busqueda por palabras. */
+  private async documentos(
+    ids: number[],
+  ): Promise<Map<number, DocumentoIndice>> {
+    const docs = new Map<number, DocumentoIndice>();
+    if (ids.length === 0) {
+      return docs;
+    }
+    try {
+      const respuesta = await elasticClient.mget<DocumentoIndice>({
+        index: INDICE,
+        ids: ids.map(String),
+        _source: CAMPOS_DEVUELTOS,
+      });
+      for (const doc of respuesta.docs) {
+        if ('found' in doc && doc.found && doc._source?.estado === 'activo') {
+          docs.set(Number(doc._id), doc._source);
+        }
+      }
+      return docs;
+    } catch (error) {
+      manejarErrorConexionElastic(this.logger, error);
+    }
+  }
+
+  /** Numera los candidatos en el orden en que llegan, saltando los que no
+   * tienen documento. */
   private aCandidatos(
-    hits: { _id?: string; _score?: number | null; _source?: DocumentoIndice }[],
-    valorDe: (hit: { _score?: number | null }) => number,
+    encontrados: {
+      id: number;
+      doc: DocumentoIndice | undefined;
+      valor: number;
+    }[],
   ): Candidato[] {
     const candidatos: Candidato[] = [];
-    hits.forEach((hit) => {
-      if (hit._source == null || hit._id == null) {
-        return;
+    for (const { id, doc, valor } of encontrados) {
+      if (doc == null || Number.isNaN(id)) {
+        continue;
       }
-      candidatos.push({
-        id: Number(hit._id),
-        doc: hit._source,
-        posicion: candidatos.length + 1,
-        valor: valorDe(hit),
-      });
-    });
+      candidatos.push({ id, doc, posicion: candidatos.length + 1, valor });
+    }
     return candidatos;
   }
 

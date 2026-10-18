@@ -92,10 +92,26 @@ export class CarritoController {
   @Delete()
   async vaciar(@UsuarioActual() usuarioActual: TokenUsuario) {
     try {
-      await this.carritoService.vaciar(usuarioActual.id_usuario, true);
+      await this.carritoService.vaciar(usuarioActual.id_usuario);
       return exito(null, 'Carrito vaciado');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo vaciar el carrito');
+    }
+  }
+
+  // POST /carrito/sincronizar -- arregla un carrito desincronizado
+  // (`sincronizado: false` en GET /carrito): decide si a PostgreSQL le falta
+  // la ultima escritura de Redis o si Redis se quedo atras, y deja los dos
+  // iguales. Devuelve el carrito como queda.
+  @Post('sincronizar')
+  async sincronizar(@UsuarioActual() usuarioActual: TokenUsuario) {
+    try {
+      const carrito = await this.carritoService.sincronizar(
+        usuarioActual.id_usuario,
+      );
+      return exito(carrito, 'Carrito sincronizado');
+    } catch (error) {
+      manejarErrorHttp(error, 'No se pudo sincronizar el carrito');
     }
   }
 

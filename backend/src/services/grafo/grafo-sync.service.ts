@@ -6,7 +6,11 @@ import { pool } from '../../database/postgres';
 import { consultarGrafo, ejecutarGrafo } from '../../database/neo4j';
 import { conLimiteDeTiempo } from '../../helpers/limite-tiempo';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
-import { manejarErrorGrafo } from '../../helpers/manejar-error-grafo';
+import {
+  esFalloDeConexionGrafo,
+  manejarErrorGrafo,
+} from '../../helpers/manejar-error-grafo';
+import { ESTADOS_DE_COMPRA } from './grafo-compras-sync.service';
 import {
   ConciliacionGrafo,
   EstadoColaGrafo,
@@ -347,7 +351,8 @@ export class GrafoSyncService {
       'la conciliacion del grafo',
     );
 
-    const cola = await this.estadoCola();
+    const cola = await this.estadoCola('evento_grafo');
+    const colaCompras = await this.estadoCola('evento_grafo_compra');
     const eventosApartados = await this.eventosApartados();
 
     const comparacion: FilaConciliacion[] = [
@@ -355,6 +360,7 @@ export class GrafoSyncService {
       fila('relacion ESCRIBIO', pg.resenas, grafo.escribio, true),
       fila('relacion CALIFICA_A', pg.resenas, grafo.califica_a, true),
       fila('relacion SOBRE', pg.resenas, grafo.sobre, true),
+      fila('compras', pg.compras, grafo.compras, true),
       fila('productos resenados', pg.productos, grafo.productos, false),
       fila('usuarios con resena', pg.participantes, grafo.usuarios, false),
     ];
@@ -373,6 +379,7 @@ export class GrafoSyncService {
       verificado_en: new Date().toISOString(),
       ultima_sincronizacion: cola?.ultimaSincronizacion ?? null,
       cola: cola?.estado ?? null,
+      cola_compras: colaCompras?.estado ?? null,
       comparacion,
       eventos_apartados: eventosApartados,
       sugerencia: hayQueDecirAlgo
@@ -396,6 +403,7 @@ export class GrafoSyncService {
         resenas: string;
         productos: string;
         participantes: string;
+        compras: string;
       }>(
         `SELECT
            (SELECT count(*) FROM resena)                          AS resenas,
@@ -404,12 +412,19 @@ export class GrafoSyncService {
               SELECT id_usuario          FROM resena
               UNION
               SELECT id_usuario_vendedor FROM resena
-            ) p)                                                  AS participantes`,
+            ) p)                                                  AS participantes,
+           (SELECT count(*)
+                FROM pedido pe
+                JOIN estado_pedido e ON e.id_estado_pedido = pe.id_estado_pedido
+                JOIN pedido_producto pp ON pp.id_pedido = pe.id_pedido
+               WHERE e.estado_pedido_nombre = ANY($1::text[]))     AS compras`,
+        [ESTADOS_DE_COMPRA],
       );
       return {
         resenas: Number(rows[0].resenas),
         productos: Number(rows[0].productos),
         participantes: Number(rows[0].participantes),
+        compras: Number(rows[0].compras),
       };
     } catch (error) {
       manejarErrorConexion(this.logger, error);
@@ -432,7 +447,8 @@ export class GrafoSyncService {
         CALL { MATCH ()-[e:ESCRIBIO]->()   RETURN count(e) AS escribio }
         CALL { MATCH ()-[c:CALIFICA_A]->() RETURN count(c) AS califica_a }
         CALL { MATCH ()-[s:SOBRE]->()      RETURN count(s) AS sobre }
-        RETURN resenas, productos, usuarios, escribio, califica_a, sobre
+        CALL { MATCH (k:Compra)            RETURN count(k) AS compras }
+        RETURN resenas, productos, usuarios, escribio, califica_a, sobre, compras
       `);
       const f = filas[0] ?? {};
       return {
@@ -442,6 +458,7 @@ export class GrafoSyncService {
         escribio: aEntero(f.escribio),
         califica_a: aEntero(f.califica_a),
         sobre: aEntero(f.sobre),
+        compras: aEntero(f.compras),
       };
     } catch (error) {
       manejarErrorGrafo(this.logger, error);
@@ -453,12 +470,13 @@ export class GrafoSyncService {
   // -------------------------------------------------------------------
 
   /**
-   * `null` si la tabla `evento_grafo` aun no existe (la migracion `015` la
-   * hace el companero; en local ya esta aplicada por el `.sql` de
-   * referencia). Que falte NO es un error: la conciliacion sigue siendo
-   * util sin la cola.
+   * `null` si la tabla de la cola aun no existe (las migraciones las hace el
+   * companero; en local estan aplicadas por los `.sql` de referencia). Que
+   * falte NO es un error: la conciliacion sigue siendo util sin la cola.
    */
-  private async estadoCola(): Promise<{
+  private async estadoCola(
+    tabla: 'evento_grafo' | 'evento_grafo_compra',
+  ): Promise<{
     estado: EstadoColaGrafo;
     ultimaSincronizacion: string | null;
   } | null> {
@@ -472,7 +490,7 @@ export class GrafoSyncService {
            count(*) FILTER (WHERE procesado_en IS NULL AND intentos < 5)  AS pendientes,
            count(*) FILTER (WHERE procesado_en IS NULL AND intentos >= 5) AS apartados,
            max(procesado_en)                                              AS ultima_sincronizacion
-         FROM evento_grafo`,
+         FROM ${tabla}`,
       );
       return {
         estado: {
@@ -485,7 +503,7 @@ export class GrafoSyncService {
     } catch (error) {
       if ((error as { code?: string })?.code === '42P01') {
         this.logger.warn(
-          'La tabla evento_grafo todavia no existe (falta la migracion 015): la conciliacion va sin la cola',
+          `La tabla ${tabla} todavia no existe (falta su migracion): la conciliacion va sin esa cola`,
         );
         return null;
       }
@@ -560,6 +578,12 @@ export class GrafoSyncService {
         );
       }
 
+      if ([...faltan, ...sobran].some((f) => f.recurso === 'compras')) {
+        partes.push(
+          'Las compras no las carga `etl/cargar_grafo.sh`: para rehacerlas, encola todas las cuentas con la siembra del final de `plan pendiente/grafo-compras.sql`.',
+        );
+      }
+
       if (cola != null && cola.pendientes > 0) {
         partes.push(
           `Hay ${cola.pendientes} evento(s) pendiente(s) en la cola: si el numero no baja solo en unos minutos, corre \`etl/cargar_grafo.sh --limpiar\`.`,
@@ -591,6 +615,8 @@ interface ContadoresPostgres {
   resenas: number;
   productos: number;
   participantes: number;
+  /** Lineas de pedido compradas (una `:Compra` cada una). */
+  compras: number;
 }
 
 interface ContadoresGrafo {
@@ -600,6 +626,7 @@ interface ContadoresGrafo {
   escribio: number;
   califica_a: number;
   sobre: number;
+  compras: number;
 }
 
 function fila(
@@ -633,43 +660,6 @@ function aEntero(valor: unknown): number {
 function mensajeCorto(error: unknown): string {
   const texto = error instanceof Error ? error.message : String(error);
   return texto.length > 500 ? `${texto.slice(0, 497)}...` : texto;
-}
-
-/**
- * `true` si el error es un problema de CONEXION (Neo4j o PostgreSQL caídos,
- * la tabla desapareció) y no culpa del evento. En ese caso el worker corta
- * la corrida sin gastar un intento y reintenta entera después.
- *
- * Un `Neo.ClientError.Statement.*` SÍ es culpa del evento (Cypher o
- * parámetro inválido → dato torcido en la base): eso sí gasta intento.
- */
-function esFalloDeConexionGrafo(error: unknown): boolean {
-  if (error instanceof AggregateError) {
-    return true; // el driver de pg probó varias IPs y todas fallaron
-  }
-  const codigo = (error as { code?: string } | undefined)?.code;
-  if (typeof codigo !== 'string') {
-    return false;
-  }
-  if (codigo.startsWith('Neo.ClientError.Statement')) {
-    return false;
-  }
-  if (codigo.startsWith('Neo.') || codigo === 'ServiceUnavailable') {
-    return true; // ServiceUnavailable, SessionExpired, Neo.TransientError.*
-  }
-  return (
-    codigo.startsWith('08') || // clase de error de conexion de Postgres
-    codigo.startsWith('53') || // recursos insuficientes
-    codigo === '57P01' || // admin shutdown
-    codigo === '57P02' || // crash shutdown
-    codigo === '57P03' || // cannot connect now
-    codigo === '42P01' || // la tabla evento_grafo ya no existe
-    codigo === 'ECONNREFUSED' ||
-    codigo === 'ECONNRESET' ||
-    codigo === 'ETIMEDOUT' ||
-    codigo === 'ENOTFOUND' ||
-    codigo === 'EPIPE'
-  );
 }
 
 // =====================================================================

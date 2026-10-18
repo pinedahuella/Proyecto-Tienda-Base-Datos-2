@@ -680,7 +680,7 @@ preseleccionar la primera.
 | `mejor_similitud` | El parecido (coseno, de 0 a 1) del producto más cercano de esa categoría |
 
 **`productos_similares`** -- hasta 5 productos **activos**, del más al menos
-parecido, uno por grupo de copias (`vector_grupo`, igual que
+parecido, uno por grupo de copias (`grupo` de `vector_producto`, igual que
 `GET /productos/:id/similares`).
 
 | Campo | Qué es |
@@ -699,17 +699,22 @@ Si nada del catálogo se parece (coseno menor a 0,5), las dos listas vienen
 { "ok": false, "mensaje": "La descripcion debe ser un texto", "payload": null }
 { "ok": false, "mensaje": "No hay sesion activa", "payload": null }
 { "ok": false, "mensaje": "No se pudo conectar con Ollama", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+{ "ok": false, "mensaje": "No se pudo conectar con Elasticsearch", "payload": null }
 ```
 
-`403` para un comprador. El `503` es porque, sin vector, no hay nada que sugerir
-(a diferencia de la búsqueda híbrida, aquí no hay un sustituto razonable). Un
-fallo de Elasticsearch da `503` con su mensaje de siempre.
+`403` para un comprador. El `503` de Ollama es porque, sin vector, no hay nada que
+sugerir (a diferencia de la búsqueda híbrida, aquí no hay un sustituto
+razonable). Los vecinos salen de PostgreSQL y lo que se muestra de cada uno, de
+Elasticsearch: si cualquiera de los dos falla, `503` con su mensaje.
 
 ### Cómo funciona
 
 El texto (`"nombre. descripción"`) se convierte en vector con el mismo modelo de
 Ollama que usan los productos, y se piden los 30 productos **activos** más
-cercanos (kNN en `mesh_productos`). Esos vecinos se usan dos veces:
+cercanos a `vector_producto` (PostgreSQL, pgvector, desde el 2026-10-16; antes,
+kNN en `mesh_productos`). El nombre, la categoría y el precio de cada uno salen
+de su documento en `mesh_productos`. Esos vecinos se usan dos veces:
 
 - **Categorías:** cada vecino con coseno de 0,5 o más "vota" por su categoría,
   ponderado por su parecido; la que junta más, va primero.
@@ -736,6 +741,22 @@ Con sesión de admin, contra el catálogo local:
 | `xyzqwk` | `200`, las dos listas vacías |
 | Sin `nombre` / nombre de 201 caracteres / `descripcion` numérica | `400` los tres |
 | Sin sesión | `401` |
+
+### De vuelta a pgvector -- probado 2026-10-16
+
+Ocho propuestas contra el código anterior (Elasticsearch) y el nuevo, con los
+mismos vectores copiados: las mismas categorías y los mismos productos
+parecidos en el mismo orden en siete; en `Laptop Quetzal 13` cambia uno de los
+tres parecidos, en el borde. Los parecidos se mueven hasta 0,013 y algún
+`productos_parecidos` en uno o cuatro (el umbral de 0,5 se cruza distinto),
+porque el índice de Elasticsearch cuantizaba los vectores y pgvector calcula el
+coseno exacto.
+
+| Caso | Resultado |
+|---|---|
+| `Tapete de yoga antideslizante` por HTTP, sesión de admin | `200`, `Fitness`; el tapete existente como `posible_duplicado` |
+| Sin sesión | `401` |
+| PostgreSQL apagado / Elasticsearch apagado | `503` con el mensaje de cada uno |
 
 ### Límites conocidos
 
@@ -1813,6 +1834,132 @@ ofertas `activa`, 8 `pausada`, ninguna en las otras tres):
 | `estado=retirada` / `pendiente` / `rechazada` | `total_ofertas: 0` -- correcto, no hay ninguna oferta en esos tres estados en TODA la base (confirmado con una consulta aparte a Postgres) |
 | sin `estado` | `total_ofertas: 88` (80 + 8, la suma de las dos que sí existen) |
 | `estado=lateral` | `400` "El estado debe ser uno de: pendiente, activa, pausada, retirada, rechazada" |
+
+---
+
+## GET /vendedor/ofertas/buscar (agregado 2026-10-17)
+
+El **buscador de ofertas**, sobre Elasticsearch (índice `mesh_ofertas`). Búsqueda
+por texto difuso (tolera errores de tecleo, `fuzziness: AUTO`, y no distingue
+tildes) sobre el nombre del producto (más peso), el de la variante y el del
+vendedor, más filtros, orden, paginación y un `resumen` hecho con
+**agregaciones** de Elasticsearch sobre todo lo que cumple la búsqueda, no solo
+sobre la página.
+
+El índice lo mantiene `EventoOfertaSyncService` (cada 5 s) desde la cola
+`evento_oferta` de PostgreSQL: ver `plan pendiente/evento-oferta.md`. Un cambio
+de precio, descuento, stock o estado tarda hasta unos 5 s en verse aquí. Para
+editar una oferta siguen las rutas de arriba, contra PostgreSQL.
+
+**Quién ve qué** (el filtro va fijo en el código, no sale de la petición):
+
+| Sesión | Sin `alcance` (o `alcance=propias`) | `alcance=todas` |
+|---|---|---|
+| Vendedor | solo sus ofertas | 400 |
+| Tienda (`tienda@mesh.com`) | las de la tienda | las de todos los vendedores |
+| Admin | las de la tienda (sustitución de identidad, igual que el resto del archivo) | las de todos los vendedores |
+
+Mismos roles que las demás rutas de ofertas (vendedor o admin). Controller y
+servicio propios (`BuscarOfertasController`, `BuscarOfertasService`).
+
+### Query params
+
+Todos opcionales.
+
+| Param | Default | Regla |
+|---|---|---|
+| `q` | — | Texto, recortado, hasta 100 caracteres (más → 400 `La busqueda no puede pasar de 100 caracteres`). Sin `q` se lista solo por filtros. |
+| `alcance` | `propias` | `propias` o `todas`. Otro valor → 400. `todas` con sesión de vendedor → 400 `alcance=todas es solo de la tienda y de los admin`. |
+| `id_vendedor` | — | Entero. Solo con `alcance=todas`; sin él → 400 `id_vendedor solo se usa con alcance=todas`. |
+| `id_producto` | — | Entero: las ofertas de un producto (para comparar precios entre vendedores). |
+| `estado` | — | Uno de los cinco `ESTADOS_OFERTA` (mismo validador que `/paginado`). |
+| `con_descuento` | — | `true` (con descuento vigente) o `false` (sin descuento). Otro valor → 400. |
+| `stock` | — | `agotadas` (stock 0) o `con_stock`. Otro valor → 400. |
+| `precio_min`, `precio_max` | — | Sobre el **precio final** (con descuento), hasta 2 decimales (mismo validador que `GET /productos`). `precio_min` > `precio_max` → 400. |
+| `orden` | `relevancia` con `q`, `recientes` sin `q` | `relevancia`, `precio_asc`, `precio_desc`, `descuento_desc`, `stock_asc` o `recientes` (id de oferta descendente). Todos desempatan por `id_oferta`. Otro valor → 400. |
+| `pagina`, `limite` | `1`, `20` | Los mismos validadores que `/paginado` (tope 100). Más allá del resultado 10 000 → 400 `afina los filtros` (límite de Elasticsearch). |
+
+```
+GET /vendedor/ofertas/buscar?q=laptp&orden=precio_asc&limite=2
+GET /vendedor/ofertas/buscar?alcance=todas&stock=agotadas
+GET /vendedor/ofertas/buscar?alcance=todas&id_producto=7&orden=precio_asc
+```
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Busqueda completada",
+  "payload": {
+    "ofertas": [
+      {
+        "id_oferta": "426",
+        "id_producto": "77",
+        "id_producto_variante": "155",
+        "nombre_producto": "Pesa rusa Yunque",
+        "nombre_variante": "12 kg",
+        "estado_variante": "activa",
+        "vendedor": {
+          "id_usuario": "2",
+          "usuario": "mesh_tienda",
+          "nombre": "Mesh Tienda",
+          "estado": "activo"
+        },
+        "precio": "437.00",
+        "porcentaje_descuento": "30.00",
+        "precio_final": "305.90",
+        "stock": 18,
+        "estado": "activa"
+      }
+    ],
+    "pagina": 1,
+    "limite": 20,
+    "total_ofertas": 13,
+    "total_paginas": 1,
+    "resumen": {
+      "por_estado": { "activa": 13 },
+      "con_descuento": 13,
+      "agotadas": 0,
+      "precio_final": { "minimo": "121.50", "maximo": "4720.00", "promedio": "921.02" },
+      "por_vendedor": [
+        { "id_vendedor": "2", "usuario": "mesh_tienda", "ofertas": 13 }
+      ]
+    }
+  }
+}
+```
+
+`resumen.por_vendedor` (los 10 vendedores con más ofertas) solo viene con
+`alcance=todas`. Ids y montos van como texto, igual que en las demás rutas de
+ofertas.
+
+### 400 / 401 / 403 / 503 / 500
+
+- **400**: cualquiera de las reglas de la tabla.
+- **401 / 403**: sin sesión, o con rol comprador (`SesionGuard` + `@Roles`).
+- **503**: Elasticsearch o PostgreSQL no responden.
+- **500**: un error inesperado (por ejemplo, que no exista el índice `mesh_ofertas`).
+
+### Probado en vivo (ligero) -- 2026-10-17
+
+Base local con 5531 ofertas; el worker las indexó todas en unos 55 s, sin errores.
+
+| Caso | Resultado |
+|---|---|
+| vendedor `ventas.norte`, `q=laptop` | 62, todas suyas; `resumen` con 55 activas y 7 pausadas |
+| vendedor, `q=laptp` (mal escrito) | 60, encuentra laptops |
+| vendedor, `alcance=todas` / `id_vendedor=2` | 400 / 400 |
+| tienda, `q=laptop` | 148, todas de la tienda |
+| tienda, `q=laptop&alcance=todas` | 394, de varios vendedores, con `por_vendedor` |
+| admin, `alcance=todas&con_descuento=true&orden=descuento_desc` | 13, del 30 % hacia abajo |
+| admin, `alcance=todas&id_vendedor=4&estado=pausada` | 70, todas pausadas de `ventas_norte` |
+| admin, `alcance=todas&stock=agotadas` | 490, todas con stock 0 |
+| `precio_min=100&precio_max=50` / `orden=raro` | 400 / 400 |
+| `UPDATE oferta SET stock = stock + 1` (y de vuelta) | el documento cambia en menos de 7 s |
+
+Falta la prueba a fondo (renombrar producto, variante y vendedor; borrar una
+oferta; Elasticsearch caído).
 
 ---
 

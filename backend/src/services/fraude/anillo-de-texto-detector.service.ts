@@ -1,41 +1,32 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { pool } from '../../database/postgres';
-import { elasticClient } from '../../database/elastic';
 import { registrarAnilloFraude } from '../../helpers/registrar-anillo-fraude';
 import {
   agruparPorParecido,
-  cosenoEntre,
   media,
-  norma,
   redondear,
-  VectorConNorma,
 } from '../../helpers/similitud-vectores';
-
 import { LARGO_MINIMO_VALORACION } from '../../helpers/valoracion-texto';
-
-const INDICE = process.env.ELASTIC_INDICE_COMENTARIOS ?? 'mesh_comentarios';
+import { paresParecidos } from '../../helpers/vectores-pgvector';
 
 const MS_POR_DIA = 24 * 60 * 60 * 1000;
 
-/** Una resena de la base (autor, vendedor y fecha), sin su texto. */
+/** Una resena de la base: autor, vendedor, fecha y texto. */
 interface FilaResena {
   id_resena: string;
+  id_comentario: string;
   id_usuario: string;
   id_usuario_vendedor: string;
   fecha_publicacion: Date;
-}
-
-/** Un documento de `mesh_comentarios`, con lo que necesita este detector. */
-interface DocumentoComentario {
-  id_resena: number;
   comentario: string;
-  vector?: number[];
+  tiene_vector: boolean;
 }
 
 /** Una resena lista para compararla con las demas del mismo vendedor. */
-interface ResenaDelAnillo extends VectorConNorma {
+interface ResenaDelAnillo {
   idResena: number;
+  idComentario: number;
   idUsuario: number;
   fecha: number;
 }
@@ -44,20 +35,19 @@ interface ResenaDelAnillo extends VectorConNorma {
  * Detecta VARIAS cuentas que escribieron resenas casi iguales sobre el mismo
  * vendedor, en fechas cercanas: un anillo de texto, la firma de una red de
  * bots o de cuentas coordinadas que usan la misma plantilla. Es la senal
- * `anillo_de_texto` de la familia `patron_resenas`, con fuente `elastic`. La
+ * `anillo_de_texto` de la familia `patron_resenas`, con fuente `elastic` (el
+ * nombre que el catalogo de senales le da al texto de las resenas). La
  * hermana de `ResenasRepetidasDetectorService`, que mira UNA cuenta que se
  * repite. Ver `elementos Generales/plan pendiente/anillo-de-texto.md`.
  *
- * El texto de cada resena vive, con su vector, en `mesh_comentarios`
- * (`EventoComentarioSyncService`); el autor, el vendedor y la fecha, en
- * PostgreSQL. Aca se cruzan los dos:
+ * Todo sale de PostgreSQL: el autor, el vendedor, la fecha y el texto de cada
+ * resena, y su vector en `vector_comentario` (`EventoComentarioSyncService`):
  *
- * 1. PostgreSQL saca los vendedores con resenas de `MIN_CUENTAS` o mas autores
+ * 1. Se sacan los vendedores con resenas de `MIN_CUENTAS` o mas autores
  *    distintos en la ventana, y las resenas de cada uno.
- * 2. De esas resenas se traen sus vectores de Elasticsearch, y se descartan
- *    las de menos de `MIN_CARACTERES`.
+ * 2. Se descartan las que no tienen vector y las de menos de `MIN_CARACTERES`.
  * 3. Dos resenas se unen si son de AUTORES DISTINTOS, se escribieron con no
- *    mas de `DIAS_ENTRE_RESENAS` de diferencia y su coseno pasa de
+ *    mas de `DIAS_ENTRE_RESENAS` de diferencia y su coseno (pgvector) pasa de
  *    `UMBRAL_COSENO`. Un grupo son las que se unen, directa o encadenadamente.
  * 4. Si un grupo tiene `MIN_CUENTAS` o mas autores distintos, es un anillo.
  *    Una senal por grupo (`clave` = los ids de sus cuentas, ordenados y unidos
@@ -132,7 +122,7 @@ export class AnilloDeTextoDetectorService {
 
   /**
    * El chequeo de UNA reseña recien escrita: la llama `ChequeoTextoInmediatoService`
-   * cuando ya esta indexada. Solo mira a su vendedor, y solo hace la comparacion
+   * cuando ya tiene su vector. Solo mira a su vendedor, y solo hace la comparacion
    * completa si la reseña nueva tiene una gemela de otra cuenta: sin ella no pudo
    * formarse un anillo nuevo. Un error se loguea; lo recoge la proxima pasada de
    * `detectar()`.
@@ -158,13 +148,17 @@ export class AnilloDeTextoDetectorService {
   ): Promise<Map<string, FilaResena[]>> {
     const { rows } = await pool.query<FilaResena>(
       `WITH recientes AS (
-         SELECT r.id_resena, r.id_usuario, r.id_usuario_vendedor,
-                c.fecha_publicacion
+         SELECT r.id_resena, r.id_comentario, r.id_usuario,
+                r.id_usuario_vendedor, c.fecha_publicacion, c.comentario
            FROM resena r
            JOIN comentario c ON c.id_comentario = r.id_comentario
           WHERE c.fecha_publicacion >= now() - make_interval(days => $1)
        )
-       SELECT id_resena, id_usuario, id_usuario_vendedor, fecha_publicacion
+       SELECT id_resena, id_comentario, id_usuario, id_usuario_vendedor,
+              fecha_publicacion, comentario,
+              EXISTS (SELECT 1 FROM vector_comentario v
+                       WHERE v.id_comentario = recientes.id_comentario)
+                AS tiene_vector
          FROM recientes
         WHERE id_usuario_vendedor IN (
                 SELECT id_usuario_vendedor FROM recientes
@@ -201,40 +195,36 @@ export class AnilloDeTextoDetectorService {
       0,
       AnilloDeTextoDetectorService.MAX_RESENAS_POR_VENDEDOR,
     );
-    const resenas = await this.cargarVectores(recientes);
+    const resenas = this.analizables(recientes);
     const cuentasDistintas = new Set(resenas.map((r) => r.idUsuario));
     if (cuentasDistintas.size < AnilloDeTextoDetectorService.MIN_CUENTAS) {
       return 0;
     }
 
+    // Se unen si se parecen (lo dice PostgreSQL), son de autores distintos (una
+    // cuenta repetida es la otra senal) y se escribieron con pocos dias de
+    // diferencia.
     const msEntre =
       AnilloDeTextoDetectorService.DIAS_ENTRE_RESENAS * MS_POR_DIA;
-    const sonGemelas = (
-      ra: ResenaDelAnillo,
-      rb: ResenaDelAnillo,
-    ): number | null => {
-      if (ra.idUsuario === rb.idUsuario) {
-        return null; // una cuenta repetida es la otra senal
-      }
-      if (Math.abs(ra.fecha - rb.fecha) > msEntre) {
-        return null;
-      }
-      const coseno = cosenoEntre(ra, rb);
-      return coseno >= AnilloDeTextoDetectorService.UMBRAL_COSENO
-        ? coseno
-        : null;
-    };
+    const pares = (
+      await paresParecidos(
+        resenas.map((r) => r.idComentario),
+        AnilloDeTextoDetectorService.UMBRAL_COSENO,
+      )
+    ).filter(
+      ({ a, b }) =>
+        resenas[a].idUsuario !== resenas[b].idUsuario &&
+        Math.abs(resenas[a].fecha - resenas[b].fecha) <= msEntre,
+    );
 
     if (idResenaNueva != null) {
-      const nueva = resenas.find((r) => r.idResena === idResenaNueva);
-      if (nueva == null || !resenas.some((r) => sonGemelas(nueva, r) != null)) {
+      const nueva = resenas.findIndex((r) => r.idResena === idResenaNueva);
+      if (nueva < 0 || !pares.some((p) => p.a === nueva || p.b === nueva)) {
         return 0;
       }
     }
 
-    const grupos = agruparPorParecido(resenas.length, (a, b) =>
-      sonGemelas(resenas[a], resenas[b]),
-    );
+    const grupos = agruparPorParecido(resenas.length, pares);
 
     let anillos = 0;
     for (const grupo of grupos) {
@@ -276,47 +266,22 @@ export class AnilloDeTextoDetectorService {
     return anillos;
   }
 
-  /** Los vectores de esas resenas, de Elasticsearch. Una sin vector, o de menos
-   * de `MIN_CARACTERES`, no entra. Solo resenas raiz: las respuestas no. */
-  private async cargarVectores(
-    filas: FilaResena[],
-  ): Promise<ResenaDelAnillo[]> {
-    const porId = new Map(filas.map((f) => [Number(f.id_resena), f]));
-    const respuesta = await elasticClient.search<DocumentoComentario>({
-      index: INDICE,
-      size: filas.length,
-      _source: ['id_resena', 'comentario', 'vector'],
-      query: {
-        bool: {
-          filter: [
-            { term: { es_respuesta: false } },
-            { terms: { id_resena: [...porId.keys()] } },
-          ],
-        },
-      },
-    });
-
-    const resenas: ResenaDelAnillo[] = [];
-    for (const hit of respuesta.hits.hits) {
-      const fuente = hit._source;
-      const fila = fuente ? porId.get(fuente.id_resena) : undefined;
-      if (
-        fuente?.vector == null ||
-        fila == null ||
-        fuente.comentario.trim().length <
-          AnilloDeTextoDetectorService.MIN_CARACTERES
-      ) {
-        continue;
-      }
-      resenas.push({
-        idResena: fuente.id_resena,
+  /** Las resenas que entran a la comparacion: con vector y de al menos
+   * `MIN_CARACTERES`. */
+  private analizables(filas: FilaResena[]): ResenaDelAnillo[] {
+    return filas
+      .filter(
+        (fila) =>
+          fila.tiene_vector &&
+          fila.comentario.trim().length >=
+            AnilloDeTextoDetectorService.MIN_CARACTERES,
+      )
+      .map((fila) => ({
+        idResena: Number(fila.id_resena),
+        idComentario: Number(fila.id_comentario),
         idUsuario: Number(fila.id_usuario),
-        fecha: new Date(fila.fecha_publicacion).getTime(),
-        vector: fuente.vector,
-        norma: norma(fuente.vector),
-      });
-    }
-    return resenas;
+        fecha: fila.fecha_publicacion.getTime(),
+      }));
   }
 }
 

@@ -18,8 +18,10 @@ El flujo de pedido vive en PostgreSQL, en ocho funciones
 (`migrations/007_flujo_pedido.sql`, explicadas en `docs/base-de-datos.md`):
 `crear_pedido`, `agregar_linea`, `restar_linea`, `quitar_linea`,
 `cambiar_direccion_pedido`, `comprar_pedido`, `cancelar_pedido` y
-`reponer_stock` (esta última es del panel del vendedor, no de aquí). Las
-siete primeras ya tienen ruta.
+`reponer_stock` (esta última es del panel del vendedor, no de aquí). Desde el
+2026-10-17 las usa el carrito: el pedido `pendiente` de cada cuenta es su
+carrito, y `POST /carrito/comprar` lo compra con `cambiar_direccion_pedido` y
+`comprar_pedido`. Aquí solo quedan las rutas de leer y de cancelar.
 
 **Ninguna de las funciones comprueba de quién es el pedido** — eso lo hace
 el backend antes de llamar a cada una, en una consulta aparte: un pedido
@@ -34,94 +36,36 @@ carrito (`agregar_linea` guarda el id de la fila vigente de
 `precio_historial`, que nunca se actualiza), así que subir el precio
 después no cambia lo que va a pagar quien ya la tenía en su carrito.
 
-> **`POST /comprador/pedidos` (abrir un pedido directo, sin carrito) y
-> `POST /comprador/pedidos/:id/comprar` (pagarlo) son código VIEJO,
-> anterior a la migración al carrito de Redis (`POST /carrito/comprar`,
-> ver `endpoints-carrito.md`) -- confirmado revisando el frontend
-> (2026-09-19): `Checkout.svelte` todavía tiene un `modo='pedido'` que
-> llama a esta ruta, pero en toda la app solo se instancia una vez
-> (`+layout.svelte`) y siempre con `modo="carrito"`. `Pedido.svelte` (la
-> pantalla que sí sigue abriendo un pedido directo y agregándole líneas)
-> nunca renderiza `Checkout`, así que hoy no hay ningún botón que llegue a
-> pagar por este camino -- solo es alcanzable llamando la ruta a mano.
-> Sigue viva y funcional (no se borró), pero no hace falta invertir en
-> ella: por eso, por ejemplo, `comprarPedido()` nunca se enganchó al
-> registro de `compra_producto` en ClickHouse (`EventosService.registrarCompra`,
-> ver `endpoints-eventos.md`) como sí se hizo con `CarritoService` -- un
-> hueco real, pero sobre un camino que la interfaz actual no usa.
-
+> **2026-10-17:** las rutas que armaban un pedido a mano se quitaron (ver
+> "Rutas quitadas el 2026-10-17", abajo). Quedan las de leer y cancelar.
 ---
 
-## POST /comprador/pedidos
+## Rutas quitadas el 2026-10-17
 
-Abre un pedido vacío, en estado `pendiente`. No agrega ninguna línea
-todavía y no toca stock — `crear_pedido` en PostgreSQL nunca lo toca.
+Desde el cambio "Redis nunca es la verdad" (ver
+`plan pendiente/carrito-postgres-verdad.md` y `endpoints-carrito.md`), el pedido
+`pendiente` de cada cuenta **es su carrito**: se arma con `/carrito` y se compra
+con `POST /carrito/comprar`. Estas seis rutas armaban un pedido a mano por
+fuera del carrito, ninguna pantalla las usaba (revisado en el frontend: el
+`modo="pedido"` de `Checkout.svelte` nunca se usa) y lo dejaban desincronizado,
+asi que se quitaron. Ahora dan **404**:
 
-```json
-{ "id_direccion": 1 }
-```
+| Ruta quitada | Lo que se usa en su lugar |
+|---|---|
+| `POST /comprador/pedidos` | el carrito nace con el primer `PUT /carrito/lineas/:idOferta` |
+| `POST /comprador/pedidos/:id/detalles` | `PUT /carrito/lineas/:idOferta` |
+| `PATCH /comprador/pedidos/:id/detalles` | `PUT /carrito/lineas/:idOferta` (cantidad absoluta) |
+| `DELETE /comprador/pedidos/:id/detalles/:idDetalle` | `DELETE /carrito/lineas/:idOferta` |
+| `PATCH /comprador/pedidos/:id` (direccion) | `id_direccion` en `POST /carrito/comprar` |
+| `POST /comprador/pedidos/:id/comprar` | `POST /carrito/comprar` |
 
-| Campo | Obligatorio | Qué es |
-| --- | --- | --- |
-| `id_direccion` | Sí | El id normal de una dirección propia (el que devuelve `GET /direccion-usuario`) — no el `id_direccion_historial` |
+Las funciones de PostgreSQL de `migrations/007` siguen ahi; el checkout usa
+`comprar_pedido()` y `cambiar_direccion_pedido()`.
 
-**`id_usuario` nunca viene en el cuerpo.** Sale del token de sesión, igual
-que en el resto del proyecto: nadie puede crear un pedido a nombre de otro
-usuario pasando su id.
-
-### De `id_direccion` a `id_direccion_historial`
-
-La función de PostgreSQL `crear_pedido(id_usuario, id_direccion_historial)`
-no recibe el `id_direccion` normal — recibe la **versión congelada** de esa
-dirección en `direccion_historial`, para que el pedido siempre diga a dónde
-se mandó de verdad, así la persona edite su dirección después. Esta ruta
-resuelve internamente cuál es la versión más reciente antes de llamar a la
-función, y esa misma consulta ya exige que la dirección sea del usuario
-logueado — **una dirección ajena da el mismo 404 que una que no existe**.
-
-### 201
-
-```json
-{
-  "ok": true,
-  "mensaje": "Pedido creado correctamente",
-  "payload": { "id_pedido": "8" }
-}
-```
-
-`id_pedido` sale como texto: es un `bigserial` de PostgreSQL, y el driver
-`pg` entrega los `bigint` como `string` para no perder precisión.
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id_direccion es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
-```
-
-### 401
-
-```json
-{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
-{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe una direccion con ese id", "payload": null }
-```
-
-### 503
-
-```json
-{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
-```
-
-### 500
-
-```json
-{ "ok": false, "mensaje": "No se pudo crear el pedido", "payload": null }
-```
+**El pendiente no es un pedido todavia:** `GET /comprador/pedidos` no lo lista,
+`GET /comprador/pedidos/:id` del pendiente da 404, y
+`POST /comprador/pedidos/:id/cancelar` del pendiente da **409** ("Ese pedido es
+tu carrito: para vaciarlo usa DELETE /carrito").
 
 ---
 
@@ -395,547 +339,6 @@ consumiera; ver `cambio_propuestas/2026-09-04_0810-...md`.
 
 ---
 
-## PATCH /comprador/pedidos/:id
-
-Cambia a qué dirección apunta un pedido, llamando a
-`cambiar_direccion_pedido(id_pedido, id_direccion_historial)`. **Solo
-mientras el pedido sigue `pendiente`** — mismo criterio que agregar/quitar
-una línea: una vez `comprado`, `id_direccion_historial` ya es la versión
-que regía cuando se pagó, y cambiarla después reescribiría a dónde se dijo
-que se mandó de verdad.
-
-Mismo `id_direccion` que `POST /comprador/pedidos` (no
-`id_direccion_historial`): el backend resuelve internamente cuál es la
-versión más reciente en `direccion_historial`, exigiendo de paso que esa
-dirección sea de quien está logueado — una dirección ajena o inexistente
-da el mismo 404. Un pedido ajeno también da el mismo 404 que uno que no
-existe.
-
-```
-PATCH /comprador/pedidos/14
-{ "id_direccion": 4 }
-```
-
-### 200
-
-```json
-{
-  "ok": true,
-  "mensaje": "Direccion actualizada correctamente",
-  "payload": { "id_pedido": 14, "id_direccion": 4 }
-}
-```
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id no es valido", "payload": null }
-{ "ok": false, "mensaje": "El id_direccion es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe un pedido con ese id", "payload": null }
-{ "ok": false, "mensaje": "No existe una direccion con ese id", "payload": null }
-```
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "El pedido 14 esta comprado y ya no se puede cambiar", "payload": null }
-```
-
-### 401 / 503 / 500
-
-Mismos casos que las demás rutas.
-
----
-
-## POST /comprador/pedidos/:id/detalles
-
-Agrega una **oferta** al pedido — o, si esa oferta ya estaba en el pedido,
-**le suma la cantidad** a la línea existente (nunca crea una segunda línea
-para la misma oferta). Una oferta por llamada, no admite lote.
-
-```json
-{ "id_oferta": 12, "cantidad": 2 }
-```
-
-| Campo | Obligatorio | Qué es |
-| --- | --- | --- |
-| `id_oferta` | Sí | Entero mayor a 0 — el `id_oferta` de PostgreSQL, tal como lo devuelve la lista `ofertas` de `GET /productos/:id` |
-| `cantidad` | Sí | Entero mayor a 0 — la que se agrega **esta vez**, no la total |
-
-Solo sobre un pedido propio: `id_pedido` (`:id` en la URL) tiene que ser de
-quien está logueado, y da el mismo 404 que uno inexistente si no lo es.
-
-### `id_producto`, `id_producto_variante`, los nombres y el precio: los resuelve el backend
-
-El cliente **solo manda `id_oferta` y `cantidad`**. El backend hace el
-resto por su cuenta, sin confiar en nada más que mande el cliente:
-
-1. busca la oferta en PostgreSQL para sacar el par de ids del catálogo en
-   Mongo (`id_producto_mongo`, `id_producto_variante_mongo`) — una oferta
-   inexistente da 404;
-2. con esos ids, pide el producto público a Mongo (mismo mecanismo que
-   `GET /productos/:id`, incluyendo que un producto `borrador`/`inactivo`
-   da el mismo 404 que uno inexistente) para sacar `nombre_producto` y
-   `nombre_variante`. **Una variante `inactiva` da el mismo 404** que una
-   que no existe — no se puede agregar al carrito en ninguno de los dos
-   casos, aunque el producto en sí esté `activo`;
-3. llama a `agregar_linea(id_pedido, linea_jsonb)`, que congela el precio
-   ahí mismo (guarda el id de la fila vigente de `precio_historial`) y
-   pone el nombre del vendedor leyéndolo de `usuarios` — nunca del
-   parámetro.
-
-Así, si el vendedor sube el precio después, esta línea conserva el que se
-le mostró a quien compró, y nadie puede mandar un nombre o un precio
-falso.
-
-### El stock se comprueba, no se descuenta ni se reserva
-
-`agregar_linea` mira el stock real de la oferta y avisa si no alcanza,
-pero no descuenta ni aparta nada — es un aviso temprano, no una garantía.
-Si dos personas meten la última unidad de la misma oferta en su pedido, se
-la lleva la primera que compre (`POST /comprador/pedidos/:id/comprar`): la
-segunda recibirá "no hay suficiente stock" al intentar comprar, aunque al
-agregar la línea sí le haya alcanzado. Que **otro** vendedor tenga stock de
-la misma variante no estorba: son ofertas distintas.
-
-```
-POST /comprador/pedidos/3/detalles
-{ "id_oferta": 2, "cantidad": 2 }
--> primera vez: cantidad: 2
-
-POST /comprador/pedidos/3/detalles
-{ "id_oferta": 2, "cantidad": 1 }
--> misma oferta otra vez: cantidad: 3 (sumada, sigue siendo una sola linea)
-```
-
-### 201
-
-```json
-{
-  "ok": true,
-  "mensaje": "Producto agregado al pedido",
-  "payload": {
-    "id_pedido": 3,
-    "id_pedido_producto": 4,
-    "id_oferta": 2,
-    "id_usuario_vendedor": 6,
-    "cantidad": 2,
-    "stock_disponible": 14
-  }
-}
-```
-
-`cantidad` es la **acumulada** (lo que ya tenía esa línea, más lo que se
-acaba de agregar), no la de esta llamada sola. Los ids de este payload en
-particular salen como `Number`, no como `string` — a diferencia del resto
-de la API: es lo único que devuelve un `jsonb` de PostgreSQL en vez de una
-fila normal, y JSON no distingue un `bigint` de un `number`.
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id no es valido", "payload": null }
-{ "ok": false, "mensaje": "El id_oferta es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
-{ "ok": false, "mensaje": "La cantidad es obligatoria y debe ser un numero entero mayor a 0", "payload": null }
-```
-
-### 401
-
-```json
-{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
-{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe un pedido con ese id", "payload": null }
-{ "ok": false, "mensaje": "No existe una oferta con ese id", "payload": null }
-{ "ok": false, "mensaje": "No existe un producto con ese id", "payload": null }
-{ "ok": false, "mensaje": "No existe una variante con ese id en este producto", "payload": null }
-```
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "El pedido <id> esta <estado> y ya no se puede cambiar", "payload": null }
-{ "ok": false, "mensaje": "La oferta <id> esta <estado> y no se puede comprar", "payload": null }
-{ "ok": false, "mensaje": "No hay suficiente stock de \"<nombre_variante>\": quedan <n> y el pedido pide <n>", "payload": null }
-```
-
-Estos mensajes salen tal cual los levanta `agregar_linea` en PostgreSQL —
-ya son claros y seguros de mostrar, así que el backend no los reescribe.
-"El pedido pide" es la cantidad **acumulada** que quedaría, no solo la de
-esta llamada.
-
-### 503
-
-```json
-{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
-{ "ok": false, "mensaje": "No se pudo conectar con MongoDB", "payload": null }
-```
-
-### 500
-
-```json
-{ "ok": false, "mensaje": "No se pudo agregar el producto al pedido", "payload": null }
-```
-
----
-
-## PATCH /comprador/pedidos/:id/detalles
-
-El "-1" de la ruta anterior: **resta** cantidad de una oferta que ya está
-en el pedido, llamando a `restar_linea(id_pedido, id_oferta, cantidad)`.
-Mismo cuerpo que `POST /comprador/pedidos/:id/detalles` (`id_oferta` +
-`cantidad`), pero resta en vez de sumar.
-
-**Si la resta deja la cantidad en 0 o menos, la línea se borra entera**
-— incluso si `cantidad` pide restar más de lo que había: no es un error,
-simplemente la quita del pedido (`eliminada: true` en la respuesta, sin
-`id_pedido_producto`). No hace falta pedir
-`DELETE .../detalles/:idDetalle` aparte para ese caso.
-
-Solo mientras el pedido sigue `pendiente` — mismo criterio que las demás
-rutas que modifican un pedido. Una oferta que no está en el pedido, o un
-pedido que ya no admite cambios, dan 409. Un pedido ajeno da el mismo 404
-de siempre.
-
-```
-PATCH /comprador/pedidos/15/detalles
-{ "id_oferta": 3, "cantidad": 1 }
-```
-
-### 200 (queda con cantidad > 0)
-
-```json
-{
-  "ok": true,
-  "mensaje": "Cantidad actualizada",
-  "payload": {
-    "id_pedido": 15,
-    "id_pedido_producto": 16,
-    "id_oferta": 3,
-    "cantidad": 2,
-    "eliminada": false
-  }
-}
-```
-
-### 200 (la resta la borro)
-
-```json
-{
-  "ok": true,
-  "mensaje": "Producto quitado del pedido",
-  "payload": { "id_pedido": 15, "id_oferta": 3, "cantidad": 0, "eliminada": true }
-}
-```
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id no es valido", "payload": null }
-{ "ok": false, "mensaje": "El id_oferta es obligatorio y debe ser un numero entero mayor a 0", "payload": null }
-{ "ok": false, "mensaje": "La cantidad es obligatoria y debe ser un numero entero mayor a 0", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe un pedido con ese id", "payload": null }
-```
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "El pedido 15 esta comprado y ya no se puede cambiar", "payload": null }
-{ "ok": false, "mensaje": "La oferta 6 no esta en el pedido 15", "payload": null }
-```
-
-### 401 / 503 / 500
-
-Mismos casos que las demás rutas (el 500 es
-`"No se pudo actualizar la cantidad"`).
-
----
-
-## DELETE /comprador/pedidos/:id/detalles/:idDetalle
-
-Saca una línea del pedido por completo — nunca la deja con cantidad `0`:
-la función de PostgreSQL `quitar_linea` simplemente borra la fila.
-
-`idDetalle` es el id propio de la línea
-(`pedido_producto.id_pedido_producto`), no el `id_oferta` — se resuelve a
-la oferta internamente (vía `precio_historial`), en la misma consulta que
-comprueba que la línea sea de un pedido propio: un detalle ajeno, o de un
-pedido ajeno, da el mismo 404 que uno que no existe.
-
-```
-DELETE /comprador/pedidos/3/detalles/4
-```
-
-### 200
-
-```json
-{ "ok": true, "mensaje": "Producto quitado del pedido", "payload": null }
-```
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id no es valido", "payload": null }
-```
-
-### 401
-
-```json
-{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
-{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe un detalle con ese id", "payload": null }
-```
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "El pedido <id> esta <estado> y ya no se puede cambiar", "payload": null }
-```
-
-### 503
-
-```json
-{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
-```
-
-### 500
-
-```json
-{ "ok": false, "mensaje": "No se pudo quitar el producto del pedido", "payload": null }
-```
-
----
-
-## POST /comprador/pedidos/:id/comprar
-
-**Ruta vieja, ver la nota al inicio de este documento** -- superada por
-`POST /carrito/comprar` desde la migración al carrito de Redis; el
-frontend actual no tiene ningún botón que llegue aquí.
-
-Confirma la compra: llama a `comprar_pedido(id_pedido, metodo_pago)`, que
-descuenta el stock de cada oferta, registra el pago (nace `pagado` de una
-vez, sin importar el método — simplificación de la primera entrega, ver
-`docs/base-de-datos.md`) y pasa el pedido a `comprado`. Todo o nada — si
-algo falla, no se descuenta ni se cobra nada.
-
-**No registra `compra_producto` en ClickHouse** (a diferencia de
-`CarritoService.ejecutarCompraCarrito()`, ver `endpoints-eventos.md`) --
-detectado leyendo el código el 2026-09-18, sin probarlo contra el
-servidor, y documentado en `docs/BACKEND-PENDIENTE.md`. Como esta ruta ya
-no es alcanzable desde la interfaz real (ver la nota del inicio), no se
-prioriza enganchar el registro aquí: el ranking de "más vendidos" y las
-tendencias de compra de ClickHouse solo ven ventas hechas por el carrito,
-que es como se compra hoy en la práctica.
-
-```json
-{ "metodo_pago": "tarjeta", "tarjeta": { "numero": "4242424242424242", "vencimiento": "12/28", "cvv": "123", "titular": "Ana Lopez" } }
-```
-
-| Campo | Obligatorio | Qué es |
-| --- | --- | --- |
-| `metodo_pago` | Sí | Uno de `GET /comprador/pedidos/metodos-pago` (`tarjeta`, `transferencia`, `efectivo contra entrega`) |
-| `tarjeta` | Solo si `metodo_pago` es `"tarjeta"` | Ver la sección de abajo |
-| `confirmar_cambios` | No | Ver "Antes de cobrar" |
-
-Solo sobre un pedido propio, mismo criterio de siempre.
-
-### El mock de tarjeta
-
-**No es una pasarela de pago de verdad.** No se cobra nada, y **no se
-guarda ningún dato de la tarjeta en ninguna tabla** — no existe ni una
-columna para eso en `pago` (`migrations/006_pedidos.sql`). Solo sirve para
-que, si `metodo_pago` es `"tarjeta"`, el flujo "haga algo" antes de llamar
-a `comprar_pedido()`: valida la forma de la tarjeta y decide si el cobro
-simulado pasa.
-
-```json
-{
-  "numero": "4242424242424242",
-  "vencimiento": "12/28",
-  "cvv": "123",
-  "titular": "Ana Lopez"
-}
-```
-
-| Campo | Regla |
-| --- | --- |
-| `numero` | 13 a 19 dígitos (espacios y guiones se ignoran) y tiene que pasar el algoritmo de Luhn |
-| `vencimiento` | Formato `MM/AA`, y no puede ya haber pasado |
-| `cvv` | 3 o 4 dígitos |
-| `titular` | Texto no vacío |
-
-Si el formato es válido, el "cobro" pasa **salvo** que el número sea uno
-de estos cinco (los mismos números de prueba que publica Stripe para su
-sandbox — https://docs.stripe.com/testing — de mentira, no son tarjetas de
-nadie):
-
-| Número | Qué simula |
-| --- | --- |
-| `4242424242424242` | Aprobada (cualquier otro número con formato válido también) |
-| `4000000000000002` | Rechazada, sin motivo especifico |
-| `4000000000009995` | Fondos insuficientes |
-| `4000000000000069` | Tarjeta vencida (además del chequeo de `vencimiento`) |
-| `4000000000000127` | CVV incorrecto |
-| `4100000000000019` | Tarjeta reportada como robada |
-
-Un problema de **formato** (número mal armado, Luhn inválido, CVV con
-letras) da **400**. Un formato válido pero rechazado da **402** — el
-mismo código que usan las pasarelas de verdad para "el cobro no pasó".
-
-### Antes de cobrar: se revisa que la oferta siga como estaba
-
-Justo antes de llamar a `comprar_pedido()`, cada línea del pedido se
-compara contra su oferta **tal como está hoy**:
-
-- **La oferta ya no está activa** (la pausaron o la retiraron), **la
-  variante del catálogo se desactivó** desde que se agregó al carrito
-  (se trata igual que si el producto entero estuviera oculto — mismo
-  criterio que al agregar la línea), o **ya no hay stock suficiente** →
-  rechaza con **409**, siempre, pase lo que pase. Ninguna bandera lo
-  salta.
-- **El precio de hoy ya no es el que quedó congelado** en la línea → esto
-  **no bloquea** (lo que se va a cobrar sigue siendo el precio congelado,
-  nunca el de hoy), pero la persona merece saberlo antes de pagar: la
-  respuesta sale con `comprado: false` y la lista de lo que cambió, **sin
-  tocar nada** — ni el stock, ni el pago, ni el estado del pedido.
-  Reenviando la misma petición con `"confirmar_cambios": true` la compra
-  sigue adelante, cobrando el precio congelado de todos modos.
-
-### 201 — compra realizada
-
-```json
-{
-  "ok": true,
-  "mensaje": "Compra realizada correctamente",
-  "payload": {
-    "comprado": true,
-    "id_pedido": 3,
-    "total": "8058.00",
-    "stock": [
-      { "id_oferta": 2, "id_usuario": 6, "id_producto": 1, "id_producto_variante": 1, "stock": 12 }
-    ]
-  }
-}
-```
-
-`stock` trae el saldo resultante de cada oferta tocada. Desde el 2026-10-01
-la compra **ya no recalcula** en esa misma petición `precio_tienda`/
-`stock_tienda`/`stock_total`/`total_ofertas` del producto en Mongo (son
-copias, no la verdad; ver `endpoints-productos.md`): el trigger de `oferta`
-anota el producto en `evento_producto` dentro de la transacción y un worker
-(`EventoProductoSyncService`, cada 5 s) lo recalcula. El estado de la
-variante que se revisa antes de pagar sale de `variante_catalogo`
-(PostgreSQL), así que esta ruta tampoco depende de Mongo; una variante que no
-esté en la copia cuenta como no disponible.
-
-### 201 — hay que confirmar un cambio de precio primero
-
-```json
-{
-  "ok": true,
-  "mensaje": "Hay cambios que revisar antes de comprar",
-  "payload": {
-    "comprado": false,
-    "avisos": [
-      {
-        "id_pedido_producto": 5,
-        "nombre_producto": "Laptop Aurora 14",
-        "nombre_variante": "32 GB / 1 TB",
-        "precio_congelado": "8984.00",
-        "precio_actual": "9500.00"
-      }
-    ]
-  }
-}
-```
-
-`ok` sigue en `true`: la petición en sí no falló, es información para
-decidir. El frontend debería mostrarle esto a la persona y, si quiere
-seguir de todas formas, repetir la petición con `confirmar_cambios: true`.
-
-### 400
-
-```json
-{ "ok": false, "mensaje": "El id no es valido", "payload": null }
-{ "ok": false, "mensaje": "El metodo_pago es obligatorio", "payload": null }
-{ "ok": false, "mensaje": "El metodo de pago es tarjeta: hace falta el objeto \"tarjeta\" con numero, vencimiento, cvv y titular", "payload": null }
-{ "ok": false, "mensaje": "El numero de tarjeta debe tener entre 13 y 19 digitos", "payload": null }
-{ "ok": false, "mensaje": "El numero de tarjeta no es valido", "payload": null }
-{ "ok": false, "mensaje": "El vencimiento debe tener el formato MM/AA", "payload": null }
-{ "ok": false, "mensaje": "El CVV debe tener 3 o 4 digitos", "payload": null }
-{ "ok": false, "mensaje": "El titular de la tarjeta es obligatorio", "payload": null }
-```
-
-### 401
-
-```json
-{ "ok": false, "mensaje": "No hay sesion activa", "payload": null }
-{ "ok": false, "mensaje": "Token invalido o expirado", "payload": null }
-```
-
-### 402
-
-```json
-{ "ok": false, "mensaje": "La tarjeta esta vencida", "payload": null }
-{ "ok": false, "mensaje": "Fondos insuficientes", "payload": null }
-{ "ok": false, "mensaje": "El codigo de seguridad (CVV) es incorrecto", "payload": null }
-{ "ok": false, "mensaje": "La tarjeta fue reportada como robada", "payload": null }
-{ "ok": false, "mensaje": "La tarjeta fue rechazada", "payload": null }
-```
-
-### 404
-
-```json
-{ "ok": false, "mensaje": "No existe un pedido con ese id", "payload": null }
-```
-
-### 409
-
-```json
-{ "ok": false, "mensaje": "El pedido <id> ya esta <estado>", "payload": null }
-{ "ok": false, "mensaje": "El pedido <id> no tiene ninguna linea", "payload": null }
-{ "ok": false, "mensaje": "El metodo de pago \"<metodo_pago>\" no existe", "payload": null }
-{ "ok": false, "mensaje": "La oferta de \"<nombre_variante>\" ya no esta disponible (<estado>)", "payload": null }
-{ "ok": false, "mensaje": "La variante \"<nombre_variante>\" ya no esta disponible", "payload": null }
-{ "ok": false, "mensaje": "No hay suficiente stock de \"<nombre_variante>\": quedan <n> y el pedido pide <n>", "payload": null }
-```
-
-### 503
-
-```json
-{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
-```
-
-Desde el 2026-10-01 esta ruta ya no devuelve el 503 de MongoDB: el estado de
-la variante se lee de `variante_catalogo` en PostgreSQL.
-
-### 500
-
-```json
-{ "ok": false, "mensaje": "No se pudo completar la compra", "payload": null }
-```
-
----
-
 ## POST /comprador/pedidos/:id/cancelar
 
 Cancela un pedido propio, llamando a `cancelar_pedido(id_pedido)`.
@@ -1011,3 +414,172 @@ que devolver. Igual que en `comprar`, cada oferta tocada deja el producto en
 ```json
 { "ok": false, "mensaje": "No se pudo cancelar el pedido", "payload": null }
 ```
+
+---
+
+## Seguimientos de ofertas: "avísame" (agregado 2026-10-17)
+
+Cinco rutas en `/comprador/seguimientos`. El comprador pide que le avisen:
+
+- **`busqueda`**: buscó algo, no lo encontró, y quiere saber cuándo llegue, con
+  o sin un precio máximo.
+- **`baja_precio`**: está viendo una variante y quiere saber cuándo baje de
+  precio, solo en la oferta de la tienda (`solo_tienda: true`) o en la de
+  cualquier vendedor.
+
+Cada seguimiento se guarda en PostgreSQL (`seguimiento_oferta`) y, mientras no
+se cumple, como una consulta en el **percolator** de Elasticsearch
+(`mesh_seguimientos`). Cada oferta que indexa el worker de ofertas se pasa por
+ahí. La primera que coincide genera **un solo aviso**
+(`aviso_seguimiento_oferta`), el seguimiento queda cumplido y sale del
+percolator, así que no se dispara dos veces. Si dos ofertas coinciden en el
+mismo lote, el aviso lleva la más barata. Ver
+`plan pendiente/seguimiento-ofertas.md`.
+
+Una oferta solo cumple un seguimiento si se puede comprar: activa, con stock,
+con la variante y el vendedor activos. Solo avisa cuando una oferta **cambia**
+(llega, cambia de precio, de stock o de estado): una que ya cumplía y no se
+mueve no dispara nada.
+
+Solo `SesionGuard`, sin `@Roles` (igual que `/comprador/pedidos`). Cada quien ve
+y toca solo lo suyo: lo ajeno responde el mismo 404 que lo que no existe.
+
+## POST /comprador/seguimientos
+
+```json
+{ "tipo": "busqueda", "texto": "audifonos brisa verde", "precio_maximo": "500.00" }
+```
+
+```json
+{ "tipo": "baja_precio", "id_producto": 7, "id_producto_variante": 1, "solo_tienda": true, "precio_referencia": "6000.00" }
+```
+
+| Campo | Tipo | Regla |
+|---|---|---|
+| `tipo` | `busqueda` / `baja_precio` | obligatorio |
+| `texto` | texto | `busqueda`: obligatorio, hasta 100 caracteres. Deben aparecer **todas** sus palabras (difuso, sin tildes) entre el nombre del producto y el de la variante |
+| `precio_maximo` | texto, hasta 2 decimales, > 0 | `busqueda`: opcional. El precio final no debe pasarlo |
+| `id_producto`, `id_producto_variante` | enteros > 0 | `baja_precio`: obligatorios (mismos validadores que `POST /vendedor/ofertas`). La variante debe existir (si no, 404) |
+| `solo_tienda` | booleano | `baja_precio`: opcional, `false` por defecto |
+| `precio_referencia` | texto, hasta 2 decimales, > 0 | `baja_precio`: opcional. Avisa cuando una oferta quede **por debajo**. Sin él, se toma el precio final más bajo de ese momento entre las ofertas activas con stock (solo de la tienda si `solo_tienda`). Si no hay ninguna, 400 |
+
+Un campo del otro tipo (por ejemplo `texto` con `baja_precio`) da 400, en vez de
+ignorarse en silencio.
+
+### 200
+
+```json
+{
+  "ok": true,
+  "mensaje": "Te avisaremos cuando se cumpla",
+  "payload": {
+    "id_seguimiento": "5",
+    "tipo": "baja_precio",
+    "texto": null,
+    "precio_maximo": null,
+    "id_producto": "7",
+    "id_producto_variante": "1",
+    "nombre_producto": "Laptop Aurora 14",
+    "nombre_variante": "16 GB / 512 GB",
+    "precio_referencia": "5947.00",
+    "solo_tienda": false,
+    "fecha_creacion": "2026-10-17T14:37:05.120Z",
+    "fecha_cumplido": null,
+    "id_aviso": null
+  }
+}
+```
+
+### 400 / 404 / 409 / 503 / 500
+
+- **400**: las reglas de la tabla; `No hay ofertas activas de esa variante: indica precio_referencia`.
+- **404**: `No existe esa variante del producto`.
+- **409**: `Ya sigues esa busqueda` / `Ya sigues el precio de esa variante` (ya hay uno vivo igual; uno cumplido no cuenta), o `Ya tienes 20 seguimientos activos`.
+- **503**: PostgreSQL o Elasticsearch no responden (no queda nada a medias: si Elasticsearch falla, se hace ROLLBACK).
+
+## GET /comprador/seguimientos
+
+`?estado=activos` (los que esperan) o `?estado=cumplidos`. Sin él, todos, del más
+nuevo al más viejo. Cada uno con la forma del 200 de arriba; un cumplido trae
+`fecha_cumplido` e `id_aviso`. Otro `estado` → 400.
+
+## DELETE /comprador/seguimientos/:id
+
+Borra un seguimiento propio, vivo o cumplido (su aviso se va con él). Uno vivo
+sale también del percolator. `200 Seguimiento borrado`; ajeno o inexistente →
+404; id no numérico → 400.
+
+## GET /comprador/seguimientos/avisos
+
+`?no_leidos=true` para ver solo los no leídos. Los 50 más nuevos, más el total
+de no leídos. La oferta viene **como está ahora**; `precio_final_aviso` es el
+precio que tenía cuando avisó.
+
+```json
+{
+  "ok": true,
+  "mensaje": "Avisos obtenidos",
+  "payload": {
+    "avisos": [
+      {
+        "id_aviso": "2",
+        "leido": false,
+        "fecha_aviso": "2026-10-17T14:36:44.861Z",
+        "fecha_leida": null,
+        "precio_final_aviso": "6627.00",
+        "seguimiento": {
+          "id_seguimiento": "3",
+          "tipo": "baja_precio",
+          "texto": null,
+          "precio_maximo": null,
+          "precio_referencia": "99999.00",
+          "solo_tienda": true
+        },
+        "oferta": {
+          "id_oferta": "36",
+          "id_producto": "7",
+          "id_producto_variante": "1",
+          "nombre_producto": "Laptop Aurora 14",
+          "nombre_variante": "16 GB / 512 GB",
+          "vendedor_usuario": "mesh_tienda",
+          "precio_final": "6627.00",
+          "stock": 34,
+          "estado": "activa"
+        }
+      }
+    ],
+    "total_no_leidos": 2
+  }
+}
+```
+
+## PATCH /comprador/seguimientos/avisos/:id
+
+```json
+{ "leido": true }
+```
+
+`true` lo marca como leído (guarda la fecha; volver a marcarlo no la cambia);
+`false` lo deja como no leído otra vez. `leido` que no sea booleano → 400; ajeno o
+inexistente → 404.
+
+### Probado en vivo (ligero) -- 2026-10-17
+
+Con `comprador.sur@mesh.com`, tocando ofertas a mano en PostgreSQL. Al final se
+dejaron como estaban y se borraron los seguimientos de prueba.
+
+| Caso | Resultado |
+|---|---|
+| `busqueda` "audifonos brisa verde" hasta Q5000; se activa la oferta 93 (Audífonos Brisa Sport, Verde lima, Q680) | aviso con la oferta 93 en menos de 7 s |
+| `busqueda` "telefono nautilo" hasta Q1; se activa la oferta 50 | no avisa (precio) |
+| `baja_precio` 7/1, `solo_tienda`, referencia Q99999; se toca la oferta 35 (`ventas_norte`) | no avisa (no es de la tienda) |
+| lo mismo; se toca la 36 (tienda) **dos veces** | **un solo** aviso, con la 36; el seguimiento sale del percolator |
+| `baja_precio` 7/1 sin referencia | toma Q5947.00, el precio final más bajo de ese momento |
+| la misma búsqueda dos veces / sin `tipo` / `texto` con `baja_precio` / variante 999 | 409 / 400 / 400 / 404 |
+| marcar leído, no leído, `leido: "si"` | 200 / 200 / 400 |
+| otro comprador marca o borra lo ajeno | 404 / 404 |
+| borrar los 4 seguimientos | el percolator queda en 0 y sus avisos se van con ellos |
+
+Falta la prueba a fondo: seguimientos de un producto que se crea nuevo,
+Elasticsearch caído al crear o al percolar, y una baja de precio real (aquí se
+usó una referencia alta para no dejar historial de precios).

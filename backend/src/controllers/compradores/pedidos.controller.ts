@@ -1,24 +1,9 @@
-import {
-  Body,
-  Controller,
-  Delete,
-  Get,
-  Param,
-  Patch,
-  Post,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
-import type { AgregarLineaPeticion } from '../../dto/agregar-linea-pedido';
-import type { RestarLineaPeticion } from '../../dto/restar-linea-pedido';
-import type { CrearPedidoPeticion } from '../../dto/crear-pedido';
-import type { CambiarDireccionPedidoPeticion } from '../../dto/cambiar-direccion-pedido';
-import type { ComprarPedidoPeticion } from '../../dto/comprar-pedido';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import { PedidosCompradorService } from '../../services/compradores/pedidos.service';
 
@@ -29,6 +14,13 @@ import { PedidosCompradorService } from '../../services/compradores/pedidos.serv
  * es un privilegio de un rol en particular -- cualquiera con sesion puede
  * hacerlo, sea comprador, vendedor o admin. Solo @UseGuards(SesionGuard),
  * sin restriccion de rol.
+ *
+ * Solo leer y cancelar. Se arma y se compra por /carrito: el pedido
+ * `pendiente` de cada cuenta es su carrito (ver PedidosCompradorService). Las
+ * rutas viejas que armaban un pedido a mano (`POST /comprador/pedidos`,
+ * `POST|PATCH|DELETE /:id/detalles`, `PATCH /:id`, `POST /:id/comprar`) se
+ * quitaron el 2026-10-17: ninguna pantalla las usaba y pasaban por encima del
+ * carrito.
  */
 @Controller('comprador/pedidos')
 @UseGuards(SesionGuard)
@@ -36,23 +28,6 @@ export class PedidosCompradorController {
   constructor(
     private readonly pedidosCompradorService: PedidosCompradorService,
   ) {}
-
-  // POST /comprador/pedidos
-  @Post()
-  async crear(
-    @Body() cuerpo: CrearPedidoPeticion,
-    @UsuarioActual() usuarioActual: TokenUsuario,
-  ) {
-    try {
-      const idPedido = await this.pedidosCompradorService.crear(
-        usuarioActual.id_usuario,
-        cuerpo,
-      );
-      return exito({ id_pedido: idPedido }, 'Pedido creado correctamente');
-    } catch (error) {
-      manejarErrorHttp(error, 'No se pudo crear el pedido');
-    }
-  }
 
   // GET /comprador/pedidos
   @Get()
@@ -93,109 +68,6 @@ export class PedidosCompradorController {
       return exito(pedido, 'Pedido obtenido correctamente');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo obtener el pedido');
-    }
-  }
-
-  // PATCH /comprador/pedidos/:id
-  @Patch(':id')
-  async cambiarDireccion(
-    @Param('id') id: string,
-    @Body() cuerpo: CambiarDireccionPedidoPeticion,
-    @UsuarioActual() usuarioActual: TokenUsuario,
-  ) {
-    try {
-      const pedido = await this.pedidosCompradorService.cambiarDireccion(
-        id,
-        usuarioActual.id_usuario,
-        cuerpo,
-      );
-      return exito(pedido, 'Direccion actualizada correctamente');
-    } catch (error) {
-      manejarErrorHttp(error, 'No se pudo actualizar la direccion del pedido');
-    }
-  }
-
-  // POST /comprador/pedidos/:id/detalles
-  @Post(':id/detalles')
-  async agregarLinea(
-    @Param('id') id: string,
-    @Body() cuerpo: AgregarLineaPeticion,
-    @UsuarioActual() usuarioActual: TokenUsuario,
-  ) {
-    try {
-      const linea = await this.pedidosCompradorService.agregarLinea(
-        id,
-        usuarioActual.id_usuario,
-        cuerpo,
-      );
-      return exito(linea, 'Producto agregado al pedido');
-    } catch (error) {
-      manejarErrorHttp(error, 'No se pudo agregar el producto al pedido');
-    }
-  }
-
-  // PATCH /comprador/pedidos/:id/detalles
-  @Patch(':id/detalles')
-  async restarLinea(
-    @Param('id') id: string,
-    @Body() cuerpo: RestarLineaPeticion,
-    @UsuarioActual() usuarioActual: TokenUsuario,
-  ) {
-    try {
-      const linea = await this.pedidosCompradorService.restarLinea(
-        id,
-        usuarioActual.id_usuario,
-        cuerpo,
-      );
-      return exito(
-        linea,
-        linea.eliminada
-          ? 'Producto quitado del pedido'
-          : 'Cantidad actualizada',
-      );
-    } catch (error) {
-      manejarErrorHttp(error, 'No se pudo actualizar la cantidad');
-    }
-  }
-
-  // DELETE /comprador/pedidos/:id/detalles/:idDetalle
-  @Delete(':id/detalles/:idDetalle')
-  async quitarLinea(
-    @Param('id') id: string,
-    @Param('idDetalle') idDetalle: string,
-    @UsuarioActual() usuarioActual: TokenUsuario,
-  ) {
-    try {
-      await this.pedidosCompradorService.quitarLinea(
-        id,
-        idDetalle,
-        usuarioActual.id_usuario,
-      );
-      return exito(null, 'Producto quitado del pedido');
-    } catch (error) {
-      manejarErrorHttp(error, 'No se pudo quitar el producto del pedido');
-    }
-  }
-
-  // POST /comprador/pedidos/:id/comprar
-  @Post(':id/comprar')
-  async comprar(
-    @Param('id') id: string,
-    @Body() cuerpo: ComprarPedidoPeticion,
-    @UsuarioActual() usuarioActual: TokenUsuario,
-  ) {
-    try {
-      const resultado = await this.pedidosCompradorService.comprarPedido(
-        id,
-        usuarioActual.id_usuario,
-        cuerpo,
-      );
-      const mensaje = resultado.comprado
-        ? 'Compra realizada correctamente'
-        : 'Hay cambios que revisar antes de comprar';
-      return exito(resultado, mensaje);
-    } catch (error) {
-      manejarErrorHttp(error, 'No se pudo completar la compra');
     }
   }
 

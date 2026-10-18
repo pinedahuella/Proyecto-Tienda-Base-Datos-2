@@ -1,5 +1,7 @@
 # El agrupador de casos de fraude
 
+> **2026-10-17:** las señales de login ya no unen casos tampoco al guardar, la evidencia es única por (caso, señal) y se quitó R-CASI-4. Ver `limpieza-fraude.md`.
+
 **Estado (2026-09-26, cierre de la sesion): CERRADO de punta a punta,
 probado en vivo.** Los 7 pasos (modelo + 3 adaptadores, agrupador union-
 busqueda, puntaje, reglas R-CASI, persistencia, worker, las 3 rutas) estan

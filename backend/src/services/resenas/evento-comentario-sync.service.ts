@@ -1,16 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { pool } from '../../database/postgres';
-import { elasticClient } from '../../database/elastic';
 import { OLLAMA_MODELO } from '../../database/ollama';
+import { esFalloDeConexion } from '../../helpers/manejar-error-db';
 import {
   DIMENSIONES_VECTOR,
   LOTE_VECTORES,
   md5,
   pedirVectores,
 } from '../../helpers/vectores-ollama';
-
-const INDICE = process.env.ELASTIC_INDICE_COMENTARIOS ?? 'mesh_comentarios';
+import { aVectorPg } from '../../helpers/vectores-pgvector';
 
 /** Una fila pendiente de `evento_comentario`. `fecha` va como texto para no perder microsegundos. */
 interface EventoPendiente {
@@ -19,30 +18,16 @@ interface EventoPendiente {
   fecha: string;
 }
 
-/** Un comentario con lo que hace falta para su documento: de que resena (y
- * de que producto) cuelga, subiendo por `id_comentario_padre` hasta la raiz. */
+/** Un comentario que cuelga de una resena, con lo que hace falta para su vector. */
 interface FilaComentario {
   id_comentario: string;
   id_comentario_padre: string | null;
-  id_raiz: string;
-  id_usuario: string;
   comentario: string;
-  fecha_publicacion: Date;
-  id_resena: string;
-  id_producto_mongo: string;
-  id_usuario_vendedor: string;
-  calificacion: number;
 }
 
-/** Lo que el documento ya tiene del vector. */
-interface VectorIndexado {
-  vector_hash?: string;
-}
-
-/** Un documento por indexar, y el evento que lo pidio. */
-interface PorIndexar {
+/** Un comentario que sigue colgando de una resena, y el evento que lo pidio. */
+interface PorRevisar {
   evento: EventoPendiente;
-  fila: FilaComentario;
   texto: string;
   hash: string;
   /** `true` si el texto es lo bastante largo para tener significado. */
@@ -52,37 +37,31 @@ interface PorIndexar {
 }
 
 /**
- * El worker que mantiene al dia el indice de comentarios (Elasticsearch,
- * `mesh_comentarios`): un documento por comentario, que es el texto de cada
- * resena (la raiz) o de una respuesta, con su vector. Vacia la cola
- * `evento_comentario`, que llenan los triggers de `comentario` y `resena` en
- * la misma transaccion del cambio. Ver
- * `elementos Generales/plan pendiente/evento-comentario.md`.
+ * El worker que mantiene al dia `vector_comentario` (PostgreSQL, pgvector): el
+ * vector de cada comentario, que es el texto de cada resena (la raiz) o de una
+ * respuesta. Vacia la cola `evento_comentario`, que llenan los triggers de
+ * `comentario` y `resena` en la misma transaccion del cambio. Ver
+ * `elementos Generales/plan pendiente/vectores-pgvector.md`.
  *
  * Como `GrafoSyncService`, no guarda "alta" ni "baja" en el evento: mira si
- * el comentario todavia existe. Existe (y cuelga de una resena) -> lo indexa;
- * no existe -> borra el documento.
+ * el comentario todavia existe y cuelga de una resena. Si no (se borro, o se
+ * borro su resena), le quita el vector. Borrar el comentario ya se lleva su
+ * fila por la FK; esto cubre el comentario que se queda sin resena.
  *
  * Como `VectoresSyncService`, solo llama a Ollama si el texto cambio: compara
- * el md5 contra el `vector_hash` que ya tiene el documento. Y escribe con
- * `update` parcial, para no borrar lo que no toca.
+ * el md5 contra el `texto_hash` que ya tiene la fila.
  *
- * Una respuesta muy corta ("gracias") casi no tiene significado: se indexa
- * para la busqueda de texto pero sin vector (`MIN_CARACTERES_RESPUESTA`). La
- * raiz de una resena siempre lleva vector.
+ * Una respuesta muy corta ("gracias") casi no tiene significado: no lleva
+ * vector (`MIN_CARACTERES_RESPUESTA`). La raiz de una resena siempre lo lleva.
  *
- * Cada documento lleva tambien el `id_vendedor` de su resena (para contar por
- * vendedor con agregaciones). Y cuando el texto cambia y se recalcula el vector,
- * se borran `valoracion_texto`, `prob_mala` y `valoracion_modelo`: los vuelve a
- * poner `ValoracionComentariosService` desde el vector nuevo.
- *
- * La calificacion solo va en el documento de la raiz. Las respuestas guardan
- * el `id_resena` y el `id_producto` y no la copian: si la calificacion cambia,
- * no hay que refrescar todo el hilo.
+ * Cuando el texto cambia y se recalcula el vector, se borra la valoracion
+ * (`valoracion_texto`, `prob_mala`, `valoracion_modelo`): la vuelve a poner
+ * `ValoracionComentariosService` desde el vector nuevo.
  *
  * Mismo patron que `EventoProductoSyncService`: `@Interval` con una bandera
  * para que una corrida lenta no se pise con la siguiente, y la fila se marca
- * procesada solo si `fecha` sigue siendo la que se leyo.
+ * procesada solo si `fecha` sigue siendo la que se leyo. Cada comentario se
+ * escribe por separado: uno que falla suma `intentos` y no frena a los demas.
  */
 @Injectable()
 export class EventoComentarioSyncService {
@@ -115,13 +94,13 @@ export class EventoComentarioSyncService {
   }
 
   /**
-   * Indexa YA lo pendiente, sin esperar el reloj de 10 s, y termina cuando el
-   * documento ya se puede buscar. La llama `ResenasService` justo despues de
-   * crear una resena, igual que `GrafoSyncService.procesarAhora()`. Si ya hay
-   * una pasada en curso, espera a que termine y hace OTRA: la resena nueva pudo
+   * Calcula YA lo pendiente, sin esperar el reloj de 10 s, y termina cuando el
+   * vector ya esta guardado. La llama `ResenasService` justo despues de crear
+   * una resena, igual que `GrafoSyncService.procesarAhora()`. Si ya hay una
+   * pasada en curso, espera a que termine y hace OTRA: la resena nueva pudo
    * quedar fuera de la que ya habia empezado.
    *
-   * Si Ollama o Elasticsearch fallan no lanza nada: el evento queda pendiente y
+   * Si Ollama o PostgreSQL fallan no lanza nada: el evento queda pendiente y
    * lo toma la proxima pasada del reloj.
    */
   async procesarAhora(): Promise<void> {
@@ -157,70 +136,70 @@ export class EventoComentarioSyncService {
         return;
       }
 
-      const filas = await this.leerComentarios(
-        eventos.map((e) => e.id_comentario),
-      );
-      const hashesPrevios = await this.leerHashesIndexados(
-        eventos.map((e) => e.id_comentario),
-      );
+      const ids = eventos.map((e) => e.id_comentario);
+      const filas = await this.leerComentarios(ids);
+      const hashesPrevios = await this.leerHashes(ids);
 
-      const borrar: EventoPendiente[] = [];
-      const porIndexar: PorIndexar[] = [];
+      const sinResena: EventoPendiente[] = [];
+      const porRevisar: PorRevisar[] = [];
       for (const evento of eventos) {
         const fila = filas.get(evento.id_comentario);
         if (fila == null) {
-          // Ya no existe, o su raiz no es una resena: no hay nada que indexar.
-          borrar.push(evento);
+          sinResena.push(evento);
           continue;
         }
         const texto = fila.comentario;
         const hash = md5(texto);
         const vectorizable = this.esVectorizable(fila, texto);
-        porIndexar.push({
+        porRevisar.push({
           evento,
-          fila,
           texto,
           hash,
           vectorizable,
           recalcular:
-            vectorizable &&
-            hashesPrevios.get(evento.id_comentario)?.vector_hash !== hash,
+            vectorizable && hashesPrevios.get(evento.id_comentario) !== hash,
         });
       }
 
-      const vectores = await this.calcularVectores(porIndexar);
+      const vectores = await this.calcularVectores(porRevisar);
       const hechos: EventoPendiente[] = [];
       const fallidos: { evento: EventoPendiente; motivo: string }[] = [];
+      let quitados = 0;
 
-      const operaciones = this.armarOperaciones(borrar, porIndexar, vectores);
-      if (operaciones.length > 0) {
-        const respuesta = await elasticClient.bulk({
-          operations: operaciones.flatMap((o) => o.lineas),
-          // Que lo indexado se pueda buscar al terminar: lo que viene despues
-          // (la valoracion y los detectores) lo busca de inmediato.
-          refresh: 'wait_for',
+      for (const evento of sinResena) {
+        await this.guardar(evento, hechos, fallidos, async () => {
+          quitados += await this.quitarVector(evento.id_comentario);
         });
-        respuesta.items.forEach((item, k) => {
-          const evento = operaciones[k].evento;
-          const resultado = item.update ?? item.delete;
-          // Un borrado de algo que nunca estuvo indexado (404) esta bien: ya
-          // no hay documento, que es lo que se queria.
-          if (resultado?.error && resultado.status !== 404) {
-            fallidos.push({
-              evento,
-              motivo: resultado.error.reason ?? resultado.error.type,
-            });
-            return;
+      }
+      for (const p of porRevisar) {
+        if (!p.vectorizable) {
+          // Antes pudo tener vector (el texto era mas largo): se quita.
+          await this.guardar(p.evento, hechos, fallidos, async () => {
+            quitados += await this.quitarVector(p.evento.id_comentario);
+          });
+        } else if (!p.recalcular) {
+          // El texto no cambio: el vector que tiene sigue valiendo.
+          hechos.push(p.evento);
+        } else {
+          const vector = vectores.get(p.evento.id_comentario);
+          if (vector == null) {
+            // Ollama no dio el vector: sin el no se guarda nada, se reintenta.
+            this.logger.warn(
+              `worker de comentarios: sin vector para el comentario ${p.evento.id_comentario}, se reintenta en la proxima corrida`,
+            );
+            continue;
           }
-          hechos.push(evento);
-        });
+          await this.guardar(p.evento, hechos, fallidos, () =>
+            this.guardarVector(p.evento.id_comentario, vector, p.hash),
+          );
+        }
       }
 
       await this.marcarProcesados(hechos);
       await this.marcarFallidos(fallidos);
 
       this.logger.log(
-        `worker de comentarios: ${eventos.length} evento(s), ${hechos.length} al dia, ${vectores.size} vector(es) calculados, ${borrar.length} borrados del indice, ${fallidos.length} con error`,
+        `worker de comentarios: ${eventos.length} evento(s), ${hechos.length} al dia, ${vectores.size} vector(es) calculados, ${quitados} sin vector, ${fallidos.length} con error`,
       );
     } catch (error) {
       this.logger.warn(
@@ -238,7 +217,7 @@ export class EventoComentarioSyncService {
   }
 
   /**
-   * Los comentarios que existen, con su raiz y su resena. Sube por
+   * Los comentarios que existen y cuelgan de una resena. Sube por
    * `id_comentario_padre` hasta la raiz (una CTE recursiva). Un comentario
    * cuya raiz no tiene resena no sale: no pertenece a ninguna.
    */
@@ -255,10 +234,7 @@ export class EventoComentarioSyncService {
            FROM subida s
            JOIN comentario p ON p.id_comentario = s.padre
        )
-       SELECT c.id_comentario, c.id_comentario_padre, s.actual AS id_raiz,
-              c.id_usuario, c.comentario, c.fecha_publicacion,
-              r.id_resena, r.id_producto_mongo, r.id_usuario_vendedor,
-              r.calificacion
+       SELECT c.id_comentario, c.id_comentario_padre, c.comentario
          FROM subida s
          JOIN comentario c ON c.id_comentario = s.id
          JOIN resena r ON r.id_comentario = s.actual
@@ -273,31 +249,27 @@ export class EventoComentarioSyncService {
     );
   }
 
-  /** El `vector_hash` que ya tienen los documentos. Uno que no existe no sale. */
-  private async leerHashesIndexados(
-    ids: string[],
-  ): Promise<Map<string, VectorIndexado>> {
-    const resultado = new Map<string, VectorIndexado>();
-    const respuesta = await elasticClient.mget<VectorIndexado>({
-      index: INDICE,
-      ids,
-      _source: ['vector_hash'],
-    });
-    for (const doc of respuesta.docs) {
-      if ('found' in doc && doc.found) {
-        resultado.set(String(doc._id), doc._source ?? {});
-      }
-    }
-    return resultado;
+  /** El `texto_hash` del vector que ya tienen. Uno sin vector no sale. */
+  private async leerHashes(ids: string[]): Promise<Map<string, string>> {
+    const { rows } = await pool.query<{
+      id_comentario: string;
+      texto_hash: string;
+    }>(
+      `SELECT id_comentario, texto_hash
+         FROM vector_comentario
+        WHERE id_comentario = ANY($1::bigint[])`,
+      [ids],
+    );
+    return new Map(rows.map((fila) => [fila.id_comentario, fila.texto_hash]));
   }
 
   /** Pide a Ollama los vectores de los textos que cambiaron, por lotes. Los
    * lotes que fallan quedan fuera del mapa y esos eventos se reintentan. */
   private async calcularVectores(
-    porIndexar: PorIndexar[],
+    porRevisar: PorRevisar[],
   ): Promise<Map<string, number[]>> {
     const vectores = new Map<string, number[]>();
-    const pendientes = porIndexar.filter((p) => p.recalcular);
+    const pendientes = porRevisar.filter((p) => p.recalcular);
     for (let i = 0; i < pendientes.length; i += LOTE_VECTORES) {
       const lote = pendientes.slice(i, i + LOTE_VECTORES);
       let respuesta: number[][];
@@ -324,84 +296,59 @@ export class EventoComentarioSyncService {
     return vectores;
   }
 
-  /** Las lineas del `_bulk`, de a una operacion por evento. Un comentario que
-   * necesitaba vector y no lo consiguio (Ollama) se salta: se reintenta. */
-  private armarOperaciones(
-    borrar: EventoPendiente[],
-    porIndexar: PorIndexar[],
-    vectores: Map<string, number[]>,
-  ): { evento: EventoPendiente; lineas: object[] }[] {
-    const operaciones: { evento: EventoPendiente; lineas: object[] }[] = [];
-
-    for (const evento of borrar) {
-      operaciones.push({
-        evento,
-        lineas: [{ delete: { _index: INDICE, _id: evento.id_comentario } }],
-      });
-    }
-
-    for (const p of porIndexar) {
-      const doc: Record<string, unknown> = {
-        id_comentario: Number(p.fila.id_comentario),
-        id_comentario_padre:
-          p.fila.id_comentario_padre == null
-            ? null
-            : Number(p.fila.id_comentario_padre),
-        id_raiz: Number(p.fila.id_raiz),
-        id_resena: Number(p.fila.id_resena),
-        id_producto: Number(p.fila.id_producto_mongo),
-        id_vendedor: Number(p.fila.id_usuario_vendedor),
-        id_usuario: Number(p.fila.id_usuario),
-        es_respuesta: p.fila.id_comentario_padre != null,
-        calificacion:
-          p.fila.id_comentario_padre == null ? p.fila.calificacion : null,
-        comentario: p.texto,
-        fecha_publicacion: p.fila.fecha_publicacion,
-      };
-
-      if (!p.vectorizable) {
-        // Antes pudo tener vector (el texto era mas largo): se quita.
-        doc.vector = null;
-        doc.vector_hash = null;
-        doc.vector_modelo = null;
-        this.borrarValoracion(doc);
-      } else if (p.recalcular) {
-        const vector = vectores.get(p.evento.id_comentario);
-        if (vector == null) {
-          // Ollama no dio el vector: sin el no se indexa a medias, se reintenta.
-          this.logger.warn(
-            `worker de comentarios: sin vector para el comentario ${p.evento.id_comentario}, se reintenta en la proxima corrida`,
-          );
-          continue;
-        }
-        doc.vector = vector;
-        doc.vector_hash = p.hash;
-        doc.vector_modelo = OLLAMA_MODELO;
-        // El texto cambio: la valoracion que tenia ya no vale.
-        // `ValoracionComentariosService` la vuelve a calcular con el vector nuevo.
-        this.borrarValoracion(doc);
+  /** Corre la escritura de un evento y lo anota como hecho o como fallido. Un
+   * fallo de conexion no es culpa del comentario: corta la corrida sin sumarle
+   * intentos. */
+  private async guardar(
+    evento: EventoPendiente,
+    hechos: EventoPendiente[],
+    fallidos: { evento: EventoPendiente; motivo: string }[],
+    escribir: () => Promise<void>,
+  ): Promise<void> {
+    try {
+      await escribir();
+      hechos.push(evento);
+    } catch (error) {
+      if (esFalloDeConexion(error)) {
+        throw error;
       }
-      // Si el hash no cambio no se tocan los campos del vector.
-
-      operaciones.push({
-        evento: p.evento,
-        lineas: [
-          { update: { _index: INDICE, _id: p.evento.id_comentario } },
-          { doc, doc_as_upsert: true },
-        ],
-      });
+      fallidos.push({ evento, motivo: mensajeCorto(error) });
     }
-    return operaciones;
   }
 
-  private borrarValoracion(doc: Record<string, unknown>): void {
-    doc.valoracion_texto = null;
-    doc.prob_mala = null;
-    doc.valoracion_modelo = null;
+  /** El vector nuevo, sin valoracion: el texto cambio y la que tenia ya no vale.
+   * `ValoracionComentariosService` la vuelve a calcular. */
+  private async guardarVector(
+    idComentario: string,
+    vector: number[],
+    hash: string,
+  ): Promise<void> {
+    await pool.query(
+      `INSERT INTO vector_comentario (id_comentario, vector, texto_hash, modelo)
+       VALUES ($1, $2::vector, $3, $4)
+       ON CONFLICT (id_comentario) DO UPDATE SET
+         vector = EXCLUDED.vector,
+         texto_hash = EXCLUDED.texto_hash,
+         modelo = EXCLUDED.modelo,
+         fecha_calculo = now(),
+         valoracion_texto = NULL,
+         prob_mala = NULL,
+         valoracion_modelo = NULL`,
+      [idComentario, aVectorPg(vector), hash, OLLAMA_MODELO],
+    );
+  }
+
+  /** Devuelve 1 si el comentario tenia vector y se le quito, 0 si no tenia. */
+  private async quitarVector(idComentario: string): Promise<number> {
+    const { rowCount } = await pool.query(
+      'DELETE FROM vector_comentario WHERE id_comentario = $1',
+      [idComentario],
+    );
+    return rowCount ?? 0;
   }
 
   /** Solo si `fecha` sigue siendo la que se leyo: si el comentario cambio
-   * mientras se indexaba, la fila queda pendiente y se vuelve a hacer. */
+   * mientras se calculaba, la fila queda pendiente y se vuelve a hacer. */
   private async marcarProcesados(eventos: EventoPendiente[]): Promise<void> {
     if (eventos.length === 0) {
       return;

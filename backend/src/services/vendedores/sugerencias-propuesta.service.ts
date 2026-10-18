@@ -1,9 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { elasticClient } from '../../database/elastic';
+import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import { ErrorConexion, ErrorValidacion } from '../../helpers/errores';
 import { pedirVectores } from '../../helpers/vectores-ollama';
-import { cosenoDePuntaje, redondear } from '../../helpers/similitud-vectores';
+import { aVectorPg, buscarCercanos } from '../../helpers/vectores-pgvector';
+import { redondear } from '../../helpers/similitud-vectores';
 import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
 import { validarNombreProducto } from '../../helpers/validaciones-crear-producto';
 import {
@@ -51,12 +53,28 @@ function normalizarNombre(nombre: string): string {
     .trim();
 }
 
+/** Lo que se muestra de un producto, de su documento en `mesh_productos`. */
 interface DocumentoIndice {
   nombre: string;
+  estado: string;
   categoria_nombre: string | null;
   id_categoria: number | null;
   precio_tienda: number | null;
-  vector_grupo?: string;
+}
+
+/** Un producto activo cercano al texto, de `vector_producto`. */
+interface FilaCercana {
+  id_producto_mongo: string;
+  grupo: string;
+  similitud: number;
+}
+
+/** Un producto del catalogo que paso el umbral de parecido. */
+interface Vecino {
+  id: number;
+  doc: DocumentoIndice;
+  grupo: string;
+  similitud: number;
 }
 
 /**
@@ -68,13 +86,14 @@ interface DocumentoIndice {
  * - que productos PARECIDOS ya hay en el catalogo (para que vea si el suyo ya
  *   existe, y no proponga un duplicado).
  *
- * Usa los vectores de `mesh_productos`: el texto escrito se convierte en vector
- * con el mismo modelo de Ollama, y los productos activos mas cercanos (kNN) se
- * reparten dos veces. Las categorias de esos vecinos "votan", ponderadas por su
- * parecido: la categoria que junta mas parecido es la primera. Y los vecinos
- * mismos son los productos similares, uno por grupo de copias
- * (`vector_grupo`, igual que `SimilaresService`), con la bandera
- * `posible_duplicado` cuando el parecido es muy alto.
+ * Usa los vectores de `vector_producto` (PostgreSQL, pgvector): el texto
+ * escrito se convierte en vector con el mismo modelo de Ollama, y los productos
+ * activos mas cercanos se reparten dos veces. Las categorias de esos vecinos
+ * "votan", ponderadas por su parecido: la categoria que junta mas parecido es
+ * la primera. Y los vecinos mismos son los productos similares, uno por grupo
+ * de copias (`grupo`, igual que `SimilaresService`), con la bandera
+ * `posible_duplicado` cuando el parecido es muy alto. El nombre, la categoria y
+ * el precio de cada uno salen de su documento en `mesh_productos`.
  *
  * El vector del catalogo se hizo con `"nombre. Categoria X. descripcion"`; aca
  * la categoria no se conoce (es justo lo que se sugiere), asi que el texto es
@@ -101,43 +120,73 @@ export class SugerenciasPropuestaService {
     const texto = descripcion ? `${nombre}. ${descripcion}` : nombre;
     const vector = await this.vectorDe(texto);
 
+    // Llegan del mas cercano al mas lejano: se cortan los que no pasan el umbral.
+    const cercanos = (await this.buscarCercanos(vector)).filter(
+      (fila) => fila.similitud >= UMBRAL_COSENO,
+    );
+    const docs = await this.documentos(
+      cercanos.map((fila) => Number(fila.id_producto_mongo)),
+    );
+    const vecinos: Vecino[] = [];
+    for (const fila of cercanos) {
+      const id = Number(fila.id_producto_mongo);
+      const doc = docs.get(id);
+      if (doc != null) {
+        vecinos.push({ id, doc, grupo: fila.grupo, similitud: fila.similitud });
+      }
+    }
+
+    return {
+      categorias: this.categoriasDe(vecinos),
+      productos_similares: this.productosDe(vecinos, nombreNormalizado),
+    };
+  }
+
+  /** Los productos activos mas cercanos al texto. Si PostgreSQL falla es un 503. */
+  private async buscarCercanos(vector: number[]): Promise<FilaCercana[]> {
     try {
-      const respuesta = await elasticClient.search<DocumentoIndice>({
+      // `activo` fijo en el codigo: solo lo que circula.
+      return await buscarCercanos<FilaCercana>(
+        `SELECT id_producto_mongo, grupo, 1 - (vector <=> $1::vector) AS similitud
+           FROM vector_producto
+          WHERE activo
+          ORDER BY vector <=> $1::vector
+          LIMIT $2`,
+        [aVectorPg(vector), CANDIDATOS],
+        CANDIDATOS * 4,
+      );
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /** Los documentos de `mesh_productos` de esos productos, solo si siguen
+   * activos. Si Elasticsearch falla es un 503. */
+  private async documentos(
+    ids: number[],
+  ): Promise<Map<number, DocumentoIndice>> {
+    const docs = new Map<number, DocumentoIndice>();
+    if (ids.length === 0) {
+      return docs;
+    }
+    try {
+      const respuesta = await elasticClient.mget<DocumentoIndice>({
         index: INDICE,
-        size: CANDIDATOS,
+        ids: ids.map(String),
         _source: [
           'nombre',
+          'estado',
           'categoria_nombre',
           'id_categoria',
           'precio_tienda',
-          'vector_grupo',
         ],
-        knn: {
-          field: 'vector',
-          query_vector: vector,
-          k: CANDIDATOS,
-          num_candidates: CANDIDATOS * 4,
-          // Fijo en el codigo: solo lo que circula.
-          filter: { term: { estado: 'activo' } },
-        },
       });
-
-      // Llegan del mas cercano al mas lejano.
-      const vecinos = respuesta.hits.hits
-        .map((hit) => ({
-          id: Number(hit._id),
-          doc: hit._source,
-          similitud: cosenoDePuntaje(hit._score),
-        }))
-        .filter(
-          (v): v is { id: number; doc: DocumentoIndice; similitud: number } =>
-            v.doc != null && v.similitud >= UMBRAL_COSENO,
-        );
-
-      return {
-        categorias: this.categoriasDe(vecinos),
-        productos_similares: this.productosDe(vecinos, nombreNormalizado),
-      };
+      for (const doc of respuesta.docs) {
+        if ('found' in doc && doc.found && doc._source?.estado === 'activo') {
+          docs.set(Number(doc._id), doc._source);
+        }
+      }
+      return docs;
     } catch (error) {
       manejarErrorConexionElastic(this.logger, error);
     }
@@ -169,9 +218,7 @@ export class SugerenciasPropuestaService {
   }
 
   /** Cada vecino vota por su categoria con su parecido; gana la que mas junta. */
-  private categoriasDe(
-    vecinos: { doc: DocumentoIndice; similitud: number }[],
-  ): CategoriaSugerida[] {
+  private categoriasDe(vecinos: Vecino[]): CategoriaSugerida[] {
     const porCategoria = new Map<
       number,
       { nombre: string; suma: number; cuenta: number; mejor: number }
@@ -209,17 +256,16 @@ export class SugerenciasPropuestaService {
 
   /** Los vecinos mas cercanos, uno por grupo de copias. */
   private productosDe(
-    vecinos: { id: number; doc: DocumentoIndice; similitud: number }[],
+    vecinos: Vecino[],
     nombreNormalizado: string,
   ): ProductoParecido[] {
     const vistos = new Set<string>();
     const productos: ProductoParecido[] = [];
-    for (const { id, doc, similitud } of vecinos) {
-      const clave = doc.vector_grupo ?? `id:${id}`;
-      if (vistos.has(clave)) {
+    for (const { id, doc, grupo, similitud } of vecinos) {
+      if (vistos.has(grupo)) {
         continue;
       }
-      vistos.add(clave);
+      vistos.add(grupo);
       productos.push({
         id_producto: id,
         nombre: doc.nombre,

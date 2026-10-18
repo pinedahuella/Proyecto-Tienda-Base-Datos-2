@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
 import { mongoDb } from '../../database/mongo';
-import { elasticClient } from '../../database/elastic';
+import { pool } from '../../database/postgres';
 import { OLLAMA_MODELO } from '../../database/ollama';
 import {
   DIMENSIONES_VECTOR as DIMENSIONES,
@@ -9,9 +9,8 @@ import {
   md5,
   pedirVectores,
 } from '../../helpers/vectores-ollama';
+import { aVectorPg } from '../../helpers/vectores-pgvector';
 import { Producto } from '../../models/producto';
-
-const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
 
 interface ProductoPendiente {
   _id: number;
@@ -21,16 +20,20 @@ interface ProductoPendiente {
   estado: string;
 }
 
-/** Lo que ya hay en el documento de Elasticsearch de un producto. */
-interface VectorIndexado {
-  vector_hash?: string;
-  vector_grupo?: string;
+/** Lo que ya hay en `vector_producto` de un producto. */
+interface VectorGuardado {
+  texto_hash: string;
+  grupo: string;
+  activo: boolean;
 }
 
-/** Un cambio parcial al documento: solo los campos del vector. */
-interface CambioVector {
+/** Un vector nuevo, listo para guardarse. */
+interface VectorNuevo {
   id: number;
-  doc: Record<string, unknown>;
+  vector: number[];
+  hash: string;
+  grupo: string;
+  activo: boolean;
 }
 
 /** El texto que se convierte en vector -- MISMO formato que
@@ -42,36 +45,32 @@ function construirTexto(producto: ProductoPendiente): string {
 
 /**
  * Recomendacion semantica de la Entrega final: el vector de cada producto
- * vive en el documento de `mesh_productos` (Elasticsearch, campo `dense_vector`
- * `vector`), junto con `vector_hash`, `vector_grupo` y `vector_modelo`. Antes
- * vivia en `producto_vector` (PostgreSQL, pgvector).
+ * vive en `vector_producto` (PostgreSQL, pgvector), junto con su `texto_hash`,
+ * su `grupo` y si esta `activo`. Ver
+ * `elementos Generales/plan pendiente/vectores-pgvector.md`.
  *
  * Consume la bandera `pendiente_vector` de `Producto` -- mismo patron "cola
  * sin cola" que `BuscadorSyncService`, pero con un paso extra antes de
  * llamar a Ollama: compara el hash del texto (nombre+categoria+descripcion)
- * contra el `vector_hash` que ya tiene el documento. Si el hash no cambio (la
+ * contra el `texto_hash` que ya tiene la fila. Si el hash no cambio (la
  * bandera se puso por un cambio de estado, o de caracteristicas/variantes
  * que no afectan el texto), NO gasta una llamada a Ollama -- solo actualiza
- * `vector_grupo` si hace falta. Es la misma logica de
+ * `grupo` y `activo` si hace falta. Es la misma logica de
  * `etl/cargar_vectores.ps1`, aplicada solo al subconjunto marcado en vez de
  * a todo el catalogo.
  *
- * Solo ESCRIBE los campos del vector, con una actualizacion parcial. Y como
- * `BuscadorSyncService` tambien actualiza el documento (con `update`, no con
- * `index`), ninguno de los dos workers borra lo del otro. Si el documento
- * todavia no existe en el indice, ese producto se deja pendiente y se
- * reintenta en la proxima corrida.
- *
- * El "activo" ya no se guarda aparte: es el `estado` del documento, que lo
- * mantiene `BuscadorSyncService`.
+ * Si el producto todavia no esta en `producto_catalogo` (la FK de
+ * `vector_producto`), se deja pendiente y se reintenta en la proxima corrida.
  */
 @Injectable()
 export class VectoresSyncService {
   private readonly logger = new Logger(VectoresSyncService.name);
 
-  /** Cada 3 horas: un cambio de nombre/descripcion no es urgente, a
-   * diferencia de una busqueda o una vista reciente. */
-  private static readonly INTERVALO_MS = 3 * 60 * 60 * 1000;
+  /** Cada 10 segundos, como `BuscadorSyncService`: `activo` decide que
+   * productos salen en las busquedas por significado, y un producto que se
+   * desactiva no puede seguir saliendo horas despues. Ollama solo se llama
+   * cuando cambia el texto, no en cada corrida. */
+  private static readonly INTERVALO_MS = 10000;
 
   private procesando = false;
 
@@ -116,12 +115,12 @@ export class VectoresSyncService {
       return;
     }
 
-    let existentes: Map<number, VectorIndexado>;
+    let guardados: Map<number, VectorGuardado | null>;
     try {
-      existentes = await this.leerIndexados(pendientes.map((p) => p._id));
+      guardados = await this.leerGuardados(pendientes.map((p) => p._id));
     } catch (error) {
       this.logger.warn(
-        `worker de vectores: no se pudo leer Elasticsearch (${(error as Error)?.message ?? error})`,
+        `worker de vectores: no se pudo leer PostgreSQL (${(error as Error)?.message ?? error})`,
       );
       return;
     }
@@ -131,52 +130,54 @@ export class VectoresSyncService {
       texto: string;
       hash: string;
       grupo: string;
+      activo: boolean;
     }[] = [];
-    const soloGrupo: CambioVector[] = [];
     const listos: number[] = [];
+    let soloGrupoOActivo = 0;
 
     for (const producto of pendientes) {
+      if (!guardados.has(producto._id)) {
+        // Todavia no esta en producto_catalogo: se reintenta luego.
+        continue;
+      }
       const texto = construirTexto(producto);
       const hash = md5(texto);
       const grupo = md5(
         `${producto.categoria?.nombre ?? ''}|${producto.descripcion ?? ''}`.trim(),
       );
-      const previo = existentes.get(producto._id);
+      const activo = producto.estado === 'activo';
+      const previo = guardados.get(producto._id);
 
-      if (previo == null) {
-        // El documento no esta en el indice (todavia): se reintenta luego.
+      if (previo == null || previo.texto_hash !== hash) {
+        porRecalcular.push({ producto, texto, hash, grupo, activo });
         continue;
       }
-      if (previo.vector_hash !== hash) {
-        porRecalcular.push({ producto, texto, hash, grupo });
-        continue;
+      if (previo.grupo !== grupo || previo.activo !== activo) {
+        try {
+          await pool.query(
+            `UPDATE vector_producto SET grupo = $2, activo = $3
+              WHERE id_producto_mongo = $1`,
+            [producto._id, grupo, activo],
+          );
+          soloGrupoOActivo++;
+        } catch (error) {
+          this.logger.warn(
+            `worker de vectores: no se pudo actualizar el producto ${producto._id} (${(error as Error)?.message ?? error})`,
+          );
+          continue;
+        }
       }
-      if (previo.vector_grupo !== grupo) {
-        soloGrupo.push({ id: producto._id, doc: { vector_grupo: grupo } });
-        continue;
-      }
-      // Ni el texto ni el grupo cambiaron: la bandera se puso por un campo
-      // que no afecta al vector (estado, caracteristicas, variantes). Nada
-      // que hacer salvo bajarla.
+      // Si nada cambio, la bandera se puso por un campo que no afecta al
+      // vector (caracteristicas, variantes): solo hay que bajarla.
       listos.push(producto._id);
-    }
-
-    try {
-      for (const id of await this.actualizar(soloGrupo)) {
-        listos.push(id);
-      }
-    } catch (error) {
-      this.logger.warn(
-        `worker de vectores: no se pudo actualizar el grupo en Elasticsearch (${(error as Error)?.message ?? error})`,
-      );
     }
 
     let recalculados = 0;
     for (let i = 0; i < porRecalcular.length; i += LOTE) {
-      const grupo = porRecalcular.slice(i, i + LOTE);
+      const lote = porRecalcular.slice(i, i + LOTE);
       let vectores: number[][];
       try {
-        vectores = await pedirVectores(grupo.map((item) => item.texto));
+        vectores = await pedirVectores(lote.map((item) => item.texto));
       } catch (error) {
         this.logger.warn(
           `worker de vectores: Ollama fallo en el lote que empieza en ${i} (${(error as Error)?.message ?? error})`,
@@ -184,9 +185,9 @@ export class VectoresSyncService {
         continue;
       }
 
-      const cambios: CambioVector[] = [];
-      for (let k = 0; k < grupo.length; k++) {
-        const item = grupo[k];
+      const nuevos: VectorNuevo[] = [];
+      for (let k = 0; k < lote.length; k++) {
+        const item = lote[k];
         const vector = vectores[k];
         if (!Array.isArray(vector) || vector.length !== DIMENSIONES) {
           this.logger.warn(
@@ -194,26 +195,24 @@ export class VectoresSyncService {
           );
           continue;
         }
-        cambios.push({
+        nuevos.push({
           id: item.producto._id,
-          doc: {
-            vector,
-            vector_hash: item.hash,
-            vector_grupo: item.grupo,
-            vector_modelo: OLLAMA_MODELO,
-          },
+          vector,
+          hash: item.hash,
+          grupo: item.grupo,
+          activo: item.activo,
         });
       }
 
       try {
-        const guardados = await this.actualizar(cambios);
-        for (const id of guardados) {
-          listos.push(id);
+        await this.guardar(nuevos);
+        for (const nuevo of nuevos) {
+          listos.push(nuevo.id);
         }
-        recalculados += guardados.length;
+        recalculados += nuevos.length;
       } catch (error) {
         this.logger.warn(
-          `worker de vectores: no se pudieron guardar los vectores del lote que empieza en ${i} en Elasticsearch (${(error as Error)?.message ?? error})`,
+          `worker de vectores: no se pudieron guardar los vectores del lote que empieza en ${i} en PostgreSQL (${(error as Error)?.message ?? error})`,
         );
       }
     }
@@ -234,55 +233,68 @@ export class VectoresSyncService {
     }
 
     this.logger.log(
-      `worker de vectores: ${pendientes.length} pendiente(s), ${recalculados} recalculado(s), ${soloGrupo.length} solo grupo, ${listos.length} al dia`,
+      `worker de vectores: ${pendientes.length} pendiente(s), ${recalculados} recalculado(s), ${soloGrupoOActivo} solo grupo o activo, ${listos.length} al dia`,
     );
   }
 
-  /** Lo que el indice ya sabe del vector de esos productos. Un producto sin
-   * documento en el indice no aparece en el mapa. */
-  private async leerIndexados(
+  /** Lo que `vector_producto` ya sabe de esos productos: `null` si estan en
+   * `producto_catalogo` pero sin vector todavia. Uno que ni siquiera esta en
+   * `producto_catalogo` no aparece en el mapa. */
+  private async leerGuardados(
     ids: number[],
-  ): Promise<Map<number, VectorIndexado>> {
-    const resultado = new Map<number, VectorIndexado>();
-    for (let i = 0; i < ids.length; i += 500) {
-      const respuesta = await elasticClient.mget<VectorIndexado>({
-        index: INDICE,
-        ids: ids.slice(i, i + 500).map(String),
-        _source: ['vector_hash', 'vector_grupo'],
-      });
-      for (const doc of respuesta.docs) {
-        if ('found' in doc && doc.found) {
-          resultado.set(Number(doc._id), doc._source ?? {});
-        }
-      }
-    }
-    return resultado;
+  ): Promise<Map<number, VectorGuardado | null>> {
+    const { rows } = await pool.query<{
+      id_producto_mongo: string;
+      texto_hash: string | null;
+      grupo: string | null;
+      activo: boolean | null;
+    }>(
+      `SELECT pc.id_producto_mongo, v.texto_hash, v.grupo, v.activo
+         FROM producto_catalogo pc
+         LEFT JOIN vector_producto v USING (id_producto_mongo)
+        WHERE pc.id_producto_mongo = ANY($1::bigint[])`,
+      [ids],
+    );
+    return new Map(
+      rows.map((fila) => [
+        Number(fila.id_producto_mongo),
+        fila.texto_hash == null
+          ? null
+          : {
+              texto_hash: fila.texto_hash,
+              grupo: fila.grupo!,
+              activo: fila.activo!,
+            },
+      ]),
+    );
   }
 
-  /** Aplica los cambios parciales en un solo `_bulk`. Devuelve los ids que de
-   * verdad se guardaron; los que fallaron (por ejemplo, documento que no
-   * existe) quedan pendientes. */
-  private async actualizar(cambios: CambioVector[]): Promise<number[]> {
-    if (cambios.length === 0) {
-      return [];
+  /** Guarda los vectores de un lote en una sola sentencia (UPSERT). */
+  private async guardar(nuevos: VectorNuevo[]): Promise<void> {
+    if (nuevos.length === 0) {
+      return;
     }
-    const respuesta = await elasticClient.bulk({
-      operations: cambios.flatMap((cambio) => [
-        { update: { _index: INDICE, _id: String(cambio.id) } },
-        { doc: cambio.doc },
-      ]),
-    });
-    const guardados: number[] = [];
-    respuesta.items.forEach((item, k) => {
-      const resultado = item.update;
-      if (resultado?.error) {
-        this.logger.warn(
-          `worker de vectores: Elasticsearch rechazo el producto ${cambios[k].id} (${resultado.error.reason ?? resultado.error.type})`,
-        );
-        return;
-      }
-      guardados.push(cambios[k].id);
-    });
-    return guardados;
+    await pool.query(
+      `INSERT INTO vector_producto
+              (id_producto_mongo, vector, texto_hash, grupo, activo, modelo)
+       SELECT t.id, t.vector::vector, t.hash, t.grupo, t.activo, $6
+         FROM unnest($1::bigint[], $2::text[], $3::text[], $4::text[], $5::boolean[])
+                AS t (id, vector, hash, grupo, activo)
+       ON CONFLICT (id_producto_mongo) DO UPDATE SET
+         vector = EXCLUDED.vector,
+         texto_hash = EXCLUDED.texto_hash,
+         grupo = EXCLUDED.grupo,
+         activo = EXCLUDED.activo,
+         modelo = EXCLUDED.modelo,
+         fecha_calculo = now()`,
+      [
+        nuevos.map((n) => n.id),
+        nuevos.map((n) => aVectorPg(n.vector)),
+        nuevos.map((n) => n.hash),
+        nuevos.map((n) => n.grupo),
+        nuevos.map((n) => n.activo),
+        OLLAMA_MODELO,
+      ],
+    );
   }
 }

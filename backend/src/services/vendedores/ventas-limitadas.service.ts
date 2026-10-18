@@ -11,7 +11,10 @@ import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { CORREO_TIENDA } from '../../helpers/constantes';
 import { validarDuracionVencimiento } from '../../helpers/validaciones-oferta';
 import { ID_ROL_ADMIN } from '../../models/rol-usuario';
-import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
+import {
+  devolverReservasDeOferta,
+  InventarioLimitadoService,
+} from '../inventario-limitado/inventario-limitado.service';
 import { ProductosService } from '../productos/productos.service';
 import { RegistroOfertasRedisService } from './registro-ofertas-redis.service';
 import {
@@ -312,7 +315,15 @@ export class VentasLimitadasService {
           WHERE id_oferta = $1 AND es_inventario_limitado = true`,
         [idOferta],
       );
+      // La venta cerro sola: sus reservas activas se devuelven en la misma
+      // transaccion (ver devolverReservasDeOferta). Las claves de Redis
+      // vencen solas con el mismo plazo.
+      const usuarios = await devolverReservasDeOferta(cliente, idOferta);
       await cliente.query('COMMIT');
+      await this.inventarioLimitadoService.soltarTicketsDeCarritos(
+        idOferta,
+        usuarios,
+      );
     } catch (error) {
       await this.intentarRollback(cliente);
       throw error;

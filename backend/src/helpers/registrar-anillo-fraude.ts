@@ -22,7 +22,7 @@ const TIPOS_CICLO_RESENAS: ReadonlySet<TipoAnilloFraude> = new Set([
  * hoy forma parte de la evidencia. Desde la etapa 8 del refactor ya no escribe
  * en `anillo_fraude` ni en `anillo_fraude_resena`. La llama `AnillosDetectorService`
  * (`detectar()`/`detectarInmediato()`) por cada grupo que encuentran A.1/A.2,
- * y `PatronesFraudeDetectorService` por cada hallazgo de B.1/B.2/B.3/B.5/B.6/B.7
+ * y `PatronesFraudeDetectorService` por cada hallazgo de B.2/B.3/B.6/B.7
  * (ver `elementos Generales/plan pendiente/anillos-fraude-familia-b.md`).
  *
  * `datos.clave` es SOLO los ids de cuenta ordenados (ver el comentario de la
@@ -62,9 +62,10 @@ export async function registrarAnilloFraude(datos: {
    */
   cuentas?: { idUsuario: number; rol: 'autor' | 'victima' }[];
   /** Las metricas del hallazgo (horas, minutos de vida, regularidad, etc.)
-   * -- solo `favor_devuelto`/`reputacion_expres`/`persistente` la traen hoy
-   * (ver `PatronesFraudeDetectorService`); el resto se queda con el `{}` por
-   * defecto de la columna. */
+   * -- solo `mutuo` (las horas de ida y vuelta, `AnillosDetectorService`),
+   * `reputacion_expres` y `persistente` (`PatronesFraudeDetectorService`) la
+   * traen hoy; el resto se queda con el `{}` por defecto de la columna. En
+   * `mutuo`/`ciclo`/`reiterado`, sin `detalle` se deja el que ya tenia. */
   detalle?: Record<string, unknown>;
 }): Promise<void> {
   const cliente = await pool.connect();
@@ -128,17 +129,27 @@ async function registrarSenalDelAnillo(
                                           FROM tipo_senal_fraude
                                          WHERE tipo_senal_fraude_nombre = $2),
                 ultima_deteccion = now(),
-                total_detecciones = total_detecciones + 1
+                total_detecciones = total_detecciones + 1,
+                detalle = COALESCE($3::jsonb, detalle)
           WHERE id_senal_fraude = $1`,
-        [idSenal, datos.tipo],
+        [
+          idSenal,
+          datos.tipo,
+          datos.detalle == null ? null : JSON.stringify(datos.detalle),
+        ],
       );
     } else {
       const insertada = await cliente.query<{ id_senal_fraude: string }>(
-        `INSERT INTO senal_fraude (id_tipo_senal_fraude, clave, id_estado_alerta_fraude)
-         SELECT id_tipo_senal_fraude, $2, $3
+        `INSERT INTO senal_fraude (id_tipo_senal_fraude, clave, id_estado_alerta_fraude, detalle)
+         SELECT id_tipo_senal_fraude, $2, $3, $4::jsonb
            FROM tipo_senal_fraude WHERE tipo_senal_fraude_nombre = $1
          RETURNING id_senal_fraude`,
-        [datos.tipo, datos.clave, ID_ESTADO_ALERTA_FRAUDE_PENDIENTE],
+        [
+          datos.tipo,
+          datos.clave,
+          ID_ESTADO_ALERTA_FRAUDE_PENDIENTE,
+          JSON.stringify(datos.detalle ?? {}),
+        ],
       );
       idSenal = insertada.rows[0].id_senal_fraude;
     }

@@ -114,6 +114,11 @@ export class AnillosDetectorService {
    * llegar por las dos consultas (o por varias rotaciones del mismo ciclo) y
    * se junta, no se duplica; "reiterado" pisa el tipo de un par que tambien
    * salio como "mutuo" (misma pareja, senal mas fuerte).
+   *
+   * De un par se guardan ademas las `horas` entre la ida y la vuelta (la mas
+   * corta, si se calificaron varias veces): es lo que antes era su propia
+   * senal, `favor_devuelto` (B.5). Devolver la nota en minutos no es una
+   * compra, es una respuesta; el puntaje lo usa como bono.
    */
   private agrupar(
     ciclicos: FilaGrupo[],
@@ -125,33 +130,50 @@ export class AnillosDetectorService {
       cuentas: number[],
       resenas: number[],
       ganaElTipo: boolean,
+      horas: number | null,
     ): void => {
       const clave = [...cuentas].sort((a, b) => a - b).join('-');
       const existente = grupos.get(clave);
       if (existente == null) {
-        grupos.set(clave, { tipo, clave, cuentas, resenas: dedup(resenas) });
+        grupos.set(clave, {
+          tipo,
+          clave,
+          cuentas,
+          resenas: dedup(resenas),
+          horas,
+        });
         return;
       }
       existente.resenas = dedup([...existente.resenas, ...resenas]);
       if (ganaElTipo) {
         existente.tipo = tipo;
       }
+      if (
+        horas != null &&
+        (existente.horas == null || horas < existente.horas)
+      ) {
+        existente.horas = horas;
+      }
     };
 
     for (const fila of ciclicos) {
       const cuentas = fila.cuentas.map(aNumero);
       const resenas = fila.resenas.map(aNumero);
+      const segundos = (fila.segundos ?? []).map(aNumero);
       registrar(
         cuentas.length >= 3 ? 'ciclo' : 'mutuo',
         cuentas,
         resenas,
         false,
+        cuentas.length === 2 && segundos.length === 2
+          ? Math.abs(segundos[1] - segundos[0]) / 3600
+          : null,
       );
     }
     for (const fila of reiterados) {
       const cuentas = fila.cuentas.map(aNumero);
       const resenas = fila.resenas.map(aNumero);
-      registrar('reiterado', cuentas, resenas, true);
+      registrar('reiterado', cuentas, resenas, true, null);
     }
 
     return [...grupos.values()];
@@ -185,6 +207,7 @@ export class AnillosDetectorService {
           tipo: grupo.tipo,
           clave: grupo.clave,
           resenas: grupo.resenas,
+          detalle: grupo.horas == null ? undefined : { horas: grupo.horas },
         });
       } catch (error) {
         this.logger.warn(
@@ -200,12 +223,16 @@ interface GrupoDetectado {
   clave: string;
   cuentas: number[];
   resenas: number[];
+  /** Solo de un par: horas entre la ida y la vuelta (la mas corta). */
+  horas: number | null;
 }
 
-/** Una fila cruda de cualquiera de las dos consultas: ids de Neo4j (Integer). */
+/** Una fila cruda de cualquiera de las dos consultas: ids de Neo4j (Integer).
+ * `segundos` (la fecha de cada resena) solo la traen las de ciclos. */
 interface FilaGrupo {
   cuentas: unknown[];
   resenas: unknown[];
+  segundos?: unknown[];
 }
 
 /**
@@ -249,7 +276,8 @@ WHERE ALL (c IN ciclo WHERE ciclo[0].id <= c.id)
   AND ALL (r IN resenasCamino WHERE r.fecha >= datetime() - duration({days: $dias}))
 RETURN
   [c IN ciclo | c.id] AS cuentas,
-  [r IN resenasCamino | r.id] AS resenas
+  [r IN resenasCamino | r.id] AS resenas,
+  [r IN resenasCamino | r.fecha.epochSeconds] AS segundos
 `;
 
 /**
@@ -288,7 +316,8 @@ WHERE ALL (c IN ciclo WHERE ciclo[0].id <= c.id)
   AND $idResena IN [r IN resenasCamino | r.id]
 RETURN
   [c IN ciclo | c.id] AS cuentas,
-  [r IN resenasCamino | r.id] AS resenas
+  [r IN resenasCamino | r.id] AS resenas,
+  [r IN resenasCamino | r.fecha.epochSeconds] AS segundos
 `;
 
 /**

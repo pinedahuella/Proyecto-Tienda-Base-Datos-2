@@ -7,8 +7,8 @@ import { conLimiteDeTiempo } from './limite-tiempo';
  * barato que uno por texto. */
 export const LOTE_VECTORES = 32;
 
-/** Dimensiones que devuelve `paraphrase-multilingual` y que espera el campo
- * `dense_vector` de Elasticsearch. */
+/** Dimensiones que devuelve `paraphrase-multilingual` y que esperan las
+ * columnas `vector(768)` de `vector_producto` y `vector_comentario`. */
 export const DIMENSIONES_VECTOR = 768;
 
 const LIMITE_MS_OLLAMA_DEFECTO = 30000;
@@ -19,7 +19,7 @@ interface RespuestaEmbed {
 
 /**
  * Pide a Ollama el vector de cada texto (`/api/embed`). Lo comparten los
- * workers que mantienen vectores en Elasticsearch: `VectoresSyncService`
+ * workers que mantienen vectores en PostgreSQL: `VectoresSyncService`
  * (productos) y `EventoComentarioSyncService` (reseñas y sus respuestas).
  * Lanza si Ollama no responde o contesta con error. `limiteMs` es cuanto se
  * espera: los workers dejan los 30 s de siempre, una peticion de una persona

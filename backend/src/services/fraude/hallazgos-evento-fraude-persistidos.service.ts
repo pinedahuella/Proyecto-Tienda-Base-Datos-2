@@ -47,7 +47,7 @@ const SQL_CUENTAS_DE_HALLAZGO = `(
    WHERE sc.id_senal_fraude = s.id_senal_fraude
 )`;
 
-/** El producto (Mongo) del hallazgo -- F1 y F4 son los unicos con uno, y de
+/** El producto (Mongo) del hallazgo -- F1 es el unico con uno, y de
  * uno solo; el resto da NULL. */
 const SQL_PRODUCTO_DE_HALLAZGO = `(
   SELECT min(sp.id_producto_mongo)
@@ -55,12 +55,13 @@ const SQL_PRODUCTO_DE_HALLAZGO = `(
    WHERE sp.id_senal_fraude = s.id_senal_fraude
 )`;
 
-/** Solo las senales de ClickHouse: compras y navegacion (F1-F6). */
+/** Solo las senales de compras y navegacion (F1, F2, F3, F5 y la granja de
+ * registros, que hoy sale de Elasticsearch). */
 const SQL_SOLO_EVENTOS = `f.familia_senal_fraude_nombre = 'compras_navegacion'`;
 
 /**
  * `GET`/`PATCH /admin/fraude/alertas-eventos` -- el panel de admin sobre
- * `senal_fraude` (la familia `compras_navegacion`, F1-F6,
+ * `senal_fraude` (la familia `compras_navegacion`: F1, F2, F3, F5 y la granja,
  * `elementos Generales/plan pendiente/refactor-fraude-senales.md`), los
  * hallazgos que ya detecto y guardo `HallazgosEventoFraudeDetectorService`.
  * Nombrado en paralelo con `alertas-login`/`alertas-resenas`: mismo

@@ -1,5 +1,11 @@
 # Plan pendiente — Chequeo inmediato de las señales de texto
 
+> **Cambio 2026-10-16:** los vectores y la valoración de las reseñas ya no están
+> en Elasticsearch (`mesh_comentarios`) sino en PostgreSQL (`vector_comentario`,
+> pgvector). Donde este plan dice `mesh_comentarios`, hoy es `vector_comentario`,
+> y lo que pide del índice o del mapping de `mesh_comentarios` en `elastic/` ya
+> no hace falta. Ver `vectores-pgvector.md`.
+
 > **Estado (2026-10-04): HECHO y probado en local, con el backend corriendo.** No
 > necesita migración ni cambios en `elastic/`: usa lo que ya existía.
 

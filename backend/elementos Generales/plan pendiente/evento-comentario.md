@@ -1,5 +1,11 @@
 # Plan pendiente — Cola de comentarios por indexar (`evento_comentario`)
 
+> **Cambio 2026-10-16:** los vectores y la valoración de las reseñas ya no están
+> en Elasticsearch (`mesh_comentarios`) sino en PostgreSQL (`vector_comentario`,
+> pgvector). Donde este plan dice `mesh_comentarios`, hoy es `vector_comentario`,
+> y lo que pide del índice o del mapping de `mesh_comentarios` en `elastic/` ya
+> no hace falta. Ver `vectores-pgvector.md`.
+
 > **Estado (2026-10-02): etapas 1 (tabla y triggers) y 2 (worker) HECHAS y
 > probadas en local, con el backend corriendo. Falta la ruta de búsqueda, y la
 > migración real y el ETL del índice (le tocan a quien lleva `migrations/` y

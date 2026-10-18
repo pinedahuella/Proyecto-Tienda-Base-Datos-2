@@ -57,9 +57,8 @@ export class BuscadorSyncService {
       let sincronizados = 0;
       for (const producto of pendientes) {
         try {
-          // `update` con `doc_as_upsert` y no `index`: `index` reemplaza el
-          // documento entero y borraria el vector que escribe
-          // `VectoresSyncService`. Asi cada worker toca solo sus campos.
+          // `update` con `doc_as_upsert`: crea el documento si no existe y, si
+          // existe, reemplaza solo los campos de `aDocumentoIndice`.
           await elasticClient.update({
             index: INDICE,
             id: String(producto._id),

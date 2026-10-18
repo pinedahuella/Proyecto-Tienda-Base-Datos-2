@@ -882,12 +882,12 @@ borraron con `ALTER TABLE ... DELETE`; el pedido real preexistente de
 
 ## GET /productos/:id/tambien-vieron y GET /productos/para-ti (agregado 2026-09-25)
 
-R2 y R3 de la propuesta del compañero. A diferencia de R1
-(`vistos-recientemente`, calculado al pedir), estas dos **nunca calculan
-nada en vivo** -- leen directo de Redis, lo que dejó el worker
-correspondiente en su último ciclo (`TambienVieronSyncService`/
-`ParaTiSyncService`, cada 15 min). Ver esos dos archivos para el diseño
-completo del worker.
+R2 y R3 de la propuesta del compañero. **Desde el 2026-10-16 "para ti" ya no
+sale de ClickHouse sino del grafo de Neo4j** (ver la sección siguiente); lo de
+aquí sobre `para-ti` queda como historia. `tambien-vieron` sigue igual: a
+diferencia de R1 (`vistos-recientemente`, calculado al pedir), **nunca calcula
+nada en vivo** -- lee directo de Redis lo que dejó `TambienVieronSyncService`
+en su último ciclo (cada 15 min).
 
 **`GET /productos/:id/tambien-vieron`** -- pública, sin sesión. Lee
 `mesh:producto:<id>:tambien-vieron`. Sin caché para ese producto (nunca
@@ -921,7 +921,181 @@ de quedar huerfana mostrando una recomendacion vieja para siempre.
 { "ok": false, "mensaje": "No se pudo conectar con Redis", "payload": null }
 ```
 
-### Probado en vivo -- 2026-09-25
+### GET /productos/para-ti desde Neo4j (cambio 2026-10-16)
+
+"Para ti" ahora es **lo que compraron las cuentas que compraron lo mismo que
+tú, y tú todavía no**. Sale del grafo, de los nodos `:Compra` que mantiene
+`GrafoComprasSyncService` (ver `plan pendiente/grafo-compras.md`), con un
+recorrido corto **en vivo**, sin worker ni caché:
+
+```
+tú -[:HIZO]-> :Compra -[:DE]-> producto <-[:DE]- :Compra <-[:HIZO]- otra cuenta
+otra cuenta -[:HIZO]-> :Compra -[:DE]-> recomendado
+```
+
+Se parte de tus **`max_productos` productos comprados más recientes** (por la
+fecha de tu última compra de cada uno), pero nunca se recomienda algo que ya
+compraste, de ninguna fecha. Se ordena por cuántas cuentas distintas llevan a
+cada producto (empate: el id más bajo), se pide el detalle a Mongo **solo de los `activo`** y se devuelven
+10. Sigue pidiendo sesión. Una cuenta sin compras, o cuyas compras no comparte
+nadie, recibe `[]`; caer a `mas-vistos` lo decide el frontend, como antes. Ya
+no existe `ParaTiSyncService` ni la clave `mesh:cuenta:<id>:para-ti` (las que
+quedaron vencen solas en 24 h).
+
+| Query param | Obligatorio | Qué hace |
+|---|---|---|
+| `max_productos` | no | De cuántos de tus productos comprados más recientes se parte. Entero de 1 a 50, por defecto 10 |
+
+```
+GET /productos/para-ti
+GET /productos/para-ti?max_productos=3
+```
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Para ti obtenido",
+  "payload": [
+    {
+      "id_producto": 12,
+      "compradores": 18,
+      "porque_compraste": [76, 77, 41, 28, 25],
+      "producto": { "...documento completo de Mongo...": "" }
+    }
+  ]
+}
+```
+
+| Campo | Qué es |
+|---|---|
+| `compradores` | Cuántas cuentas que compraron algo que tú compraste también compraron este. Por aquí se ordena |
+| `porque_compraste` | Hasta 5 productos tuyos que esas cuentas también compraron (el "porque compraste X") |
+| `producto` | El documento de Mongo, siempre `activo` |
+
+Antes cada elemento traía `puntaje` y `porque_viste` (vistas de ClickHouse); el
+frontend solo usa `producto`, que no cambió.
+
+**400** `"max_productos debe ser un numero entero de 1 a 50"`. **401** sin sesión.
+**503** `"No se pudo conectar con Neo4j"` (o con MongoDB).
+
+| Caso (2026-10-16, base local: 61 cuentas compradoras, 610 compras) | Resultado |
+|---|---|
+| Las 61 cuentas, contra el mismo cálculo hecho en SQL sobre PostgreSQL | **iguales en las 61** (mismos productos, mismo orden, mismos `compradores`) |
+| Que no recomiende algo ya comprado, y que cada `porque_compraste` sí lo esté | se cumple |
+| Cuenta sin compras (admin) / cuenta inexistente | `[]` / `[]` |
+| `GET /productos/para-ti` por HTTP con la sesión de `comprador.sur@mesh.com` | `200`, 10 resultados, 0.38 s |
+| Sin sesión | `401` |
+| Neo4j apagado / de vuelta | `503` "No se pudo conectar con Neo4j" / `200` sin reiniciar el backend |
+| Con `max_productos` 1, 3, 10 y 50, las 61 cuentas contra el SQL equivalente (semillas = las N más recientes) | iguales en las 61, en los cuatro valores |
+| `max_productos` 0, 51, `abc`, `2.5` | `400` |
+| `?max_productos=3` por HTTP | `200` |
+
+### GET /productos/:id/tambien-compraron (agregado 2026-10-16)
+
+**"Quienes compraron esto también compraron"**, pensada para cuando se agrega
+un producto al carrito: sugerir qué más llevar. **Pública**, sin sesión (parte
+de un producto, no de una cuenta). Sale del mismo grafo de compras, en vivo
+(`TambienCompraronService`):
+
+```
+producto <-[:DE]- :Compra <-[:HIZO]- cuenta -[:HIZO]-> :Compra -[:DE]-> recomendado
+```
+
+Ordenado por cuántas cuentas distintas compraron los dos (empate: el id más
+bajo). Nunca el mismo producto, solo `activo`, hasta 6. Un producto que nadie
+compró, o que nadie compró junto con otro, recibe `[]`. Es la versión por
+compras de `tambien-vieron` (que sale de las vistas en ClickHouse).
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Tambien compraron obtenido",
+  "payload": [
+    {
+      "id_producto": 70,
+      "compradores": 7,
+      "producto": { "...documento completo de Mongo...": "" }
+    }
+  ]
+}
+```
+
+**400** `"El id no es valido"`. **503** `"No se pudo conectar con Neo4j"` (o con
+MongoDB).
+
+| Caso (2026-10-16) | Resultado |
+|---|---|
+| Los 94 productos que aparecen en algún pedido, contra el mismo cálculo en SQL sobre PostgreSQL | iguales en los 94 |
+| Producto inexistente | `[]` |
+| `GET /productos/83/tambien-compraron` por HTTP / `abc` | `200` / `400` |
+
+### GET /productos/combos (agregado 2026-10-16)
+
+**Los combos de la tienda:** los grupos de 2 y 3 productos que más se compran en
+el **mismo pedido**. **Pública**, sin sesión. Es un conteo sobre todas las
+compras, sin un producto de partida, así que sale de **ClickHouse**
+(`compra_producto`), no del grafo: "con este producto suelen llevar" es
+`tambien-compraron` (Neo4j).
+
+Mismo patrón que `mas-vendidos`: `CombosSyncService` corre al arrancar y cada
+30 min, cuenta en ClickHouse, pide la tarjeta de cada producto a Mongo (la misma
+versión acotada de `mas-vendidos`) y deja el JSON listo en Redis
+(`mesh:productos:combos`). La ruta solo lee Redis: no toca ClickHouse ni Mongo.
+Un combo puede estar hasta 30 min desactualizado.
+
+Reglas (constantes del worker):
+
+- Pedidos de los últimos **180 días**, sin los cancelados (`devolucion_producto`)
+  y solo `lote = 'real'`, como los demás rankings.
+- Un grupo es combo si aparece en **2 pedidos o más**.
+- Hasta **tríos**: con 4 o más las combinaciones se disparan y casi nunca se
+  repiten. Un pedido de más de 30 productos distintos no entra (compra al por
+  mayor).
+- Un par que está dentro de un trío con los mismos pedidos no se muestra (el
+  trío ya lo dice); si el par aparece en más pedidos que el trío, se queda.
+- Solo combos cuyos productos sigan **todos** `activo`.
+- Ordenados por pedidos; a igual cantidad, primero los tríos. Hasta 10.
+
+**200**
+
+```json
+{
+  "ok": true,
+  "mensaje": "Combos obtenidos",
+  "payload": [
+    {
+      "pedidos": 2,
+      "productos": [
+        { "_id": 68, "nombre": "Balon de futbol numero 5", "imagen": "...", "precio_tienda": "...", "precio_desde": "...", "hay_descuento": false, "resenas_promedio": 0, "resenas_total": 0, "stock_total": 40 },
+        { "_id": 84, "nombre": "La casa de los relojes detenidos", "...": "" },
+        { "_id": 100, "nombre": "Agua de colonia Amanecer Citrico", "...": "" }
+      ]
+    }
+  ]
+}
+```
+
+Sin combos (o el worker todavía no corrió): `200` con `[]`. **503** si Redis no
+responde.
+
+| Caso (2026-10-16, base local) | Resultado |
+|---|---|
+| Combos del worker contra el mismo cálculo hecho aparte desde PostgreSQL (pares y tríos por pedido, mismas reglas) | iguales: 4 tríos en 2 pedidos (los dos únicos pedidos de 2+ productos de los últimos 180 días tienen los mismos 4 productos) |
+| Quitar el par que está dentro de un trío igual de frecuente | se quita; el par más frecuente que su trío y el ajeno se quedan |
+| Sin clave en Redis | `[]` |
+| `GET /productos/combos` por HTTP, con Redis vacío antes de arrancar | el worker corre al arrancar y la ruta responde `200` con los 4 combos, 0.22 s |
+
+Hoy casi no hay combos porque las semillas hacen pedidos de un solo producto
+(1.17 productos por pedido en promedio): hace falta agregar pedidos de varios
+productos que tengan sentido juntos. Una prueba que costó un error: `arrayFlatten`
+de ClickHouse aplana **todos** los niveles, así que los grupos se arman como
+tuplas y se pasan a arreglo al final.
+
+### Probado en vivo -- 2026-09-25 (con ClickHouse, historico para `para-ti`)
 
 Contra el servidor, ClickHouse, MongoDB y Redis reales.
 
@@ -978,32 +1152,39 @@ que algo las toque de nuevo o pase el resto de su vida útil sin que ocurra.
 Recomendacion semantica de la Entrega final (5 puntos): productos parecidos
 por el **significado** de nombre + categoria + descripcion, no por
 categoria/precio como R2/R3. El vector (pedido a **Ollama**, modelo
-`paraphrase-multilingual`, 768 dimensiones) vive desde el 2026-10-02 en el
-documento de `mesh_productos` (**Elasticsearch**, campo `dense_vector`
-`vector`, con `vector_hash`, `vector_grupo` y `vector_modelo`). Antes vivia
-en `producto_vector` (PostgreSQL, pgvector, migraciones 024 y 027, funcion
-`productos_similares(id, limite)`); esa tabla y esa funcion ya no las usa el
-backend. De este lado estan la ruta, la bandera y el worker que lo mantiene
-al dia.
+`paraphrase-multilingual`, 768 dimensiones) vive desde el 2026-10-16 en
+`vector_producto` (**PostgreSQL, pgvector**, con `texto_hash`, `grupo` y
+`activo`; ver `plan pendiente/vectores-pgvector.md`). Historia: hasta el
+2026-10-02 estaba en `producto_vector` (pgvector, migraciones 024 y 027,
+funcion `productos_similares()`, retiradas en la 036); del 2026-10-02 al
+2026-10-16, en el documento de `mesh_productos` (Elasticsearch,
+`dense_vector`), y volvio a PostgreSQL a pedido del profesor. De este lado
+estan la ruta, la bandera y el worker que lo mantiene al dia.
 
 **Pública, sin sesión**, igual que `tambien-vieron`. Valida el `:id` con el
 mismo `REGEX_ID` que el resto de rutas de producto. Por dentro son dos
-consultas a Elasticsearch:
+consultas a PostgreSQL:
 
-1. `GET mesh_productos/_doc/:id` con `vector` y `vector_grupo`.
-2. Una busqueda `knn` con ese vector (`k` 200, `num_candidates` 400) y de
-   filtro `estado: activo`, sin el propio producto y sin ninguno de su mismo
-   `vector_grupo`. Del resultado se queda con uno por grupo (el mas
-   cercano) y corta en 6 -- las mismas reglas de `productos_similares()`.
-   `similitud` es el coseno: Elasticsearch puntua `(1 + coseno) / 2`, y se
-   devuelve a `2 * puntaje - 1`, la misma escala que daba pgvector.
+1. El `vector` y el `grupo` del producto en `vector_producto`.
+2. Sus 200 vecinos mas cercanos por coseno (`ORDER BY vector <=> $1
+   LIMIT 200`, sobre el indice HNSW), solo `activo`, sin el propio producto
+   y sin ninguno de su mismo `grupo`. Del resultado se queda con uno por
+   grupo (el mas cercano) y corta en 6 -- las mismas reglas que tenia
+   `productos_similares()`. `similitud` es el coseno, `1 - distancia`.
 
-y el mismo enriquecido con Mongo (`$in` de ids) que ya usa
-`TambienVieronSyncService` -- si un id del indice no tiene documento en
-Mongo, sale con `producto: null` en vez de romper la respuesta. Si el
-producto pedido no existe en el indice o no tiene vector todavia (no lo
-alcanzo la carga, o el worker de abajo), la ruta contesta `[]`, nunca un
-error. Si Elasticsearch no responde, `503`.
+La busqueda la corre `buscarCercanos()` (`helpers/vectores-pgvector.ts`), que
+dentro de su transaccion sube `hnsw.ef_search` y activa
+`hnsw.iterative_scan`: con los valores por defecto de pgvector, una consulta
+que usa el indice HNSW revisa solo 40 candidatos y un `LIMIT 200` puede volver
+con 39 filas (comprobado en local).
+
+Despues, el mismo enriquecido con Mongo (`$in` de ids) que ya usa
+`TambienVieronSyncService` -- si un id no tiene documento en Mongo, sale con
+`producto: null` en vez de romper la respuesta. Si el producto pedido no
+existe o no tiene vector todavia (no lo alcanzo la carga, o el worker de
+abajo), la ruta contesta `[]`, nunca un error. Si PostgreSQL no responde,
+`503`. Elasticsearch ya no interviene: esta ruta sigue funcionando con
+Elasticsearch apagado.
 
 **200**
 
@@ -1027,6 +1208,12 @@ error. Si Elasticsearch no responde, `503`.
 { "ok": false, "mensaje": "El id no es valido", "payload": null }
 ```
 
+**503**
+
+```json
+{ "ok": false, "mensaje": "No se pudo conectar con PostgreSQL", "payload": null }
+```
+
 ### La bandera `pendiente_vector` y el worker `VectoresSyncService`
 
 Mismo patron "cola sin cola" que `pendiente_busqueda` (Elasticsearch), pero
@@ -1039,32 +1226,51 @@ en `vendedores/productos.service.ts` (`models/producto.ts`, campo
 estado, no tiene sentido gastar una llamada a Ollama por ellas.
 
 `VectoresSyncService` (`services/productos/vectores-sync.service.ts`),
-`@Interval` cada 3 horas (un cambio de descripcion no es urgente, a
-diferencia de una vista o una busqueda reciente):
+`@Interval` cada 10 segundos, como `BuscadorSyncService` (hasta el
+2026-10-16 era cada 3 horas). El cambio es porque `activo` vive ahora en
+`vector_producto` y decide que productos salen en las busquedas por
+significado: un producto desactivado no puede seguir saliendo horas despues.
+Ollama solo se llama cuando cambia el texto, no en cada corrida.
 
 1. Lee los productos con `pendiente_vector: true` (proyeccion minima:
    nombre, descripcion, categoria.nombre, estado).
 2. Arma el mismo texto que `cargar_vectores.ps1`
    (`"nombre. Categoria X. descripcion"`) y calcula su hash MD5.
-3. Compara contra el `vector_hash` que ya tiene el documento en
-   Elasticsearch (un `mget`):
+3. Compara contra el `texto_hash` que ya tiene `vector_producto`:
    - **Hash igual** (la bandera se puso por un cambio de estado, o de
      caracteristicas/variantes que no afectan el texto): **no llama a
-     Ollama**, solo actualiza `vector_grupo` si de verdad cambio. El
-     "activo" ya no se guarda aparte: es el `estado` del documento.
-   - **Hash distinto**: pide los vectores a Ollama en lotes de 32
-     (`/api/embed`) y los escribe con un `_bulk` de actualizaciones
-     parciales (`vector`, `vector_hash`, `vector_grupo`, `vector_modelo`).
-   - **El documento no existe todavia en el indice**: se deja pendiente.
+     Ollama**, solo actualiza `grupo` y `activo` si de verdad cambiaron.
+   - **Hash distinto, o sin vector todavia**: pide los vectores a Ollama en
+     lotes de 32 (`/api/embed`) y los guarda con un solo `INSERT ... ON
+     CONFLICT` por lote.
+   - **El producto no esta en `producto_catalogo`** (la FK de
+     `vector_producto`): se deja pendiente.
 4. Baja la bandera en Mongo solo de los productos que sí quedaron al día;
-   los que fallan (Ollama caido, Elasticsearch caido) se reintentan solos en
+   los que fallan (Ollama caido, PostgreSQL caido) se reintentan solos en
    el siguiente ciclo, sin tumbar el resto del lote.
 
-`BuscadorSyncService` actualiza ahora el documento con `update`
-(`doc_as_upsert`) y no con `index`, para no borrar el vector que escribe
-este worker: cada uno toca solo sus campos.
+### De vuelta a pgvector -- probado 2026-10-16
 
-### Cambio a Elasticsearch -- probado 2026-10-02
+Contra PostgreSQL 18 con pgvector 0.8.6, Elasticsearch 8.15.3, MongoDB y el
+Ollama reales, con los 1001 productos locales. Los vectores se copiaron de
+Elasticsearch con `plan pendiente/vectores-pgvector-copiar.cjs` y se comparo
+contra lo que devolvia el codigo anterior.
+
+| Caso | Resultado |
+|---|---|
+| Similares de los 1103 ids de `producto_catalogo`, comparados con el coseno exacto calculado en JavaScript con los vectores originales | pgvector coincide con el exacto en 1000 de 1001 (el que difiere es un empate a 4e-8); error maximo de `similitud` 2e-7. Elasticsearch coincidia en 317: su indice (`int8_hnsw`) cuantiza los vectores y la `similitud` se desviaba hasta 0.016 |
+| Lo mismo, forzando el indice HNSW (`enable_seqscan=off`) | identico al recorrido exacto en los 1103 |
+| `LIMIT 200` sobre el indice HNSW sin los ajustes de `buscarCercanos()` / con ellos | 39 filas / 200 filas |
+| Marca sin cambios en 3 productos | `3 pendiente(s), 0 recalculado(s), 0 solo grupo o activo, 3 al dia`; la fila no se toca |
+| Producto 83 a `inactivo` y de vuelta | `activo` pasa a `false` y vuelve a `true` sin llamar a Ollama |
+| Descripcion del 76 cambiada y restaurada | hash, grupo y vector nuevos; al restaurarla, el mismo hash y grupo y coseno 1 con el original |
+| Producto 5 sin vector | se calcula; coseno 1 con el que estaba en Elasticsearch |
+| Producto que no esta en `producto_catalogo` | sigue con `pendiente_vector`, sin fila |
+| `GET /productos/83/similares` por HTTP | `200` en 0.23 s |
+| `GET /productos/999999/similares` | `200` con `[]` |
+| PostgreSQL apagado / Elasticsearch apagado | `503` "No se pudo conectar con PostgreSQL" / `200` (ya no depende de Elasticsearch) |
+
+### Cambio a Elasticsearch -- probado 2026-10-02 (historico, ya no aplica)
 
 Contra Elasticsearch 8.15.3, MongoDB y el Ollama reales, con los 102
 productos locales.
@@ -1078,12 +1284,7 @@ productos locales.
 | `SimilaresService` para el producto 50 | los mismos 6 en el mismo orden |
 | `SimilaresService` para un id inexistente (99999) | `[]` |
 
-Hay que agregar los 4 campos al mapping de `elastic/001_indice.json` (lo
-lleva otra persona), y `etl/cargar_busqueda.sh` reconstruye el indice entero
-y borra los vectores: despues hay que marcar `pendiente_vector` en todo el
-catalogo y dejar correr el worker.
-
-### Probado en vivo -- 2026-09-26
+### Probado en vivo -- 2026-09-26 (historico, con `producto_vector`)
 
 Contra el servidor, PostgreSQL, MongoDB y el Ollama real de la maquina de
 desarrollo (modelo `paraphrase-multilingual` ya descargado). El intervalo

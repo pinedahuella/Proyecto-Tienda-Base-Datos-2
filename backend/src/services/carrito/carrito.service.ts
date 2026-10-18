@@ -1,12 +1,15 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { redis } from '../../database/redis';
+import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import {
+  ErrorConexion,
+  ErrorConexionRedis,
   ErrorConflicto,
   ErrorNoEncontrado,
+  ErrorPago,
   ErrorValidacion,
 } from '../../helpers/errores';
-import { manejarErrorRedis } from '../../helpers/manejar-error-redis';
+import { esRedisInalcanzable } from '../../helpers/manejar-error-redis';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
 import { validarYCobrarTarjeta } from '../../helpers/validaciones-tarjeta';
@@ -21,6 +24,7 @@ import {
   ComprarCarritoPeticion,
   ComprarCarritoRespuesta,
 } from '../../dto/comprar-carrito';
+import type { StockResultanteOferta } from '../../dto/comprar-pedido';
 import {
   Carrito,
   CarritoLinea,
@@ -33,23 +37,30 @@ import { ProductosService } from '../productos/productos.service';
 import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
 import { EventosService } from '../eventos/eventos.service';
 import { expresionPrecioFinal } from '../../helpers/precio-descuento';
+import {
+  CarritoPostgres,
+  CarritoPostgresService,
+  ConflictoCapacidad,
+  ConflictoVersion,
+  LineaCarritoPostgres,
+  LineaDeseada,
+  VIDA_CARRITO_SEGUNDOS,
+} from './carrito-postgres.service';
+import {
+  CarritoRedisService,
+  HashCarrito,
+  LineaCarritoRedis,
+} from './carrito-redis.service';
 
 const REGEX_ID = /^\d+$/;
 
-/** Lo que devuelve comprar_carrito() de PostgreSQL, tal cual. */
-interface CompraCarritoPostgres {
-  id_pedido: number;
-  total: string;
-  stock: {
-    id_oferta: number;
-    id_usuario: number;
-    id_producto: number;
-    id_producto_variante: number;
-    stock: number;
-  }[];
-}
+/** Cada cuanto, como mucho, ver el carrito renueva el reloj de PostgreSQL. */
+const TOCAR_POSTGRES_CADA_MS = 5 * 60 * 1000;
 
-/** Fila cruda de `oferta` + estado + vendedor, para enriquecer el carrito. */
+const MENSAJE_DESINCRONIZADO =
+  'Tu carrito no quedo guardado del todo: sincronizalo (POST /carrito/sincronizar) y revisalo antes de comprar';
+
+/** Fila de `oferta` + estado + vendedor + catalogo, para pintar y cobrar una linea. */
 interface FilaOferta {
   id_oferta: string;
   id_producto_mongo: string;
@@ -72,339 +83,155 @@ interface FilaOferta {
   nombre_variante: string | null;
   estado_variante: string | null;
   imagen: string | null;
+  /** La fila de `precio_historial` vigente: la que se guarda con la linea. */
+  id_precio_historial: string | null;
+  /** Hay una venta relampago abierta y sin vencer (PostgreSQL decide, no Redis). */
+  venta_vigente: boolean;
+}
+
+/** La replica pendiente de una cuenta: una sola a la vez, y otra si algo cambio mientras corria. */
+interface ReplicaEnCurso {
+  promesa: Promise<void>;
+  otraVez: boolean;
 }
 
 /**
- * Lo que se guarda por linea DENTRO del HASH de Redis, como JSON (campo =
- * `id_oferta`, valor = esto serializado). Es una FOTO tomada la ultima vez
- * que se hizo `PUT /carrito/lineas/:idOferta` -- no se refresca sola, ni
- * siquiera al ver el carrito. `disponible`/`motivo` tambien quedan
- * congelados con esa foto (salvo la excepcion de inventario limitado, que
- * SI se revisa en vivo contra Redis -- ver `verCarrito`).
- */
-interface LineaCarritoRedis {
-  cantidad: number;
-  id_producto: number;
-  id_producto_variante: number;
-  nombre_producto: string;
-  nombre_variante: string;
-  imagen: string | null;
-  /** El precio que de verdad se cobra/muestra -- YA con el descuento aplicado, si tenia uno al tomar la foto. */
-  precio: string;
-  /** El % de descuento que tenia la oferta al tomar la foto, o `null` -- solo informativo (badge), `precio` ya lo tiene aplicado. */
-  porcentaje_descuento: string | null;
-  vendedor_usuario: string;
-  vendedor_nombre: string;
-  stock_disponible: number;
-  disponible: boolean;
-  motivo: MotivoNoDisponible | null;
-}
-
-/**
- * El carrito de compra, que vive SOLO en Redis (Entrega 2). Reemplaza al
- * carrito viejo, que era una fila de `pedido` en estado `pendiente` en
- * PostgreSQL.
+ * El carrito de compra. Directiva del profesor: **Redis nunca es la fuente de
+ * verdad**. Ver `elementos Generales/plan pendiente/carrito-postgres-verdad.md`.
  *
  *
- * La forma
+ * Las dos copias
  * ============================================================
- * Una sola clave por cuenta, un HASH:
+ *   Redis       `mesh:carrito:<id_usuario>`, un HASH: una FOTO por linea
+ *               (`<id_oferta>` -> JSON), el ticket de cada reserva de venta
+ *               relampago (`t:<id_oferta>`), la version de PostgreSQL que
+ *               conoce (`_v`) y la marca de desincronizado (`_d`)
+ *               (`CarritoRedisService`). Es la copia rapida: se escribe y se
+ *               lee aqui primero.
+ *   PostgreSQL  el pedido `pendiente` de la cuenta y sus lineas
+ *               (`CarritoPostgresService`), mas `reserva_venta_relampago`.
+ *               Es la VERDAD: el checkout compra esto.
  *
- *     mesh:carrito:<id_usuario>   HASH   { <id_oferta>: <linea JSON>, ... }
+ * Agregar, quitar o vaciar: se escribe en Redis, se le contesta a la persona,
+ * y DEBAJO, sin hacerla esperar, un intento (`programarReplica`) copia el
+ * carrito entero de Redis a PostgreSQL. Si ese intento falla (PostgreSQL
+ * caido, o PostgreSQL tenia cambios que Redis no vio), el carrito queda
+ * marcado como desincronizado (`_d`): `GET /carrito` lo dice
+ * (`sincronizado: false`), el checkout no compra, y
+ * `POST /carrito/sincronizar` lo arregla. La siguiente escritura que si se
+ * replica tambien lo arregla sola.
  *
- * Cada campo guarda la cantidad JUNTO con una foto de nombre, precio,
- * imagen, vendedor y stock (`LineaCarritoRedis`), tomada de PostgreSQL (la
- * oferta y la copia del catalogo, `producto_catalogo`/`variante_catalogo`)
- * la ultima vez que se agrego o se cambio la cantidad de esa linea. Es a
- * proposito: el profesor pidio que el carrito "resista por si solo", es
- * decir que verlo (`GET /carrito`) nunca dependa de que Postgres
- * este arriba -- a cambio, lo que se ve ahi puede estar desactualizado
- * hasta por las 24 h de vida del carrito (el nombre pudo cambiar, el precio
- * tambien). El checkout es la excepcion: paga con datos en vivo, nunca con
- * esta foto (ver `verCarritoEnVivo`).
+ * Si Redis no responde, todo va directo a PostgreSQL (mas lento, pero sigue
+ * funcionando): agregar, quitar, ver y comprar. La cuenta queda anotada
+ * (`afectados`) para reconstruir su Redis desde PostgreSQL cuando vuelva.
+ *
+ * Si Redis no tiene el carrito (vencio, se reinicio) se reconstruye desde
+ * PostgreSQL. Las 24 h de inactividad las decide PostgreSQL
+ * (`fecha_ultima_actividad`): un carrito con mas de 24 h sin tocar se borra
+ * al leerlo, y el barrido (`CarritoBarridoService`) borra los que nadie lee.
  *
  *
- * Que toca PostgreSQL y que no (Mongo ya no interviene)
+ * Venta relampago
  * ============================================================
- *   PUT /carrito/lineas/:idOferta            -> SI toca Postgres,
- *       una vez, para tomar la foto de esa UNA linea (`construirSnapshot`).
- *       Es la unica escritura que consulta afuera.
- *   DELETE /carrito/lineas/:idOferta, DELETE /carrito -> Redis puro
- *       (HDEL/DEL + EXPIRE). Devuelven un resumen calculado solo con Redis.
- *   GET /carrito                             -> Redis puro (HGETALL). Nunca
- *       consulta Postgres -- lee las fotos ya guardadas.
- *   POST /carrito/comprar                    -> consulta en vivo (igual que
- *       antes de este cambio) para el error itemizado por linea y el aviso
- *       de cambio de precio, ANTES de cobrar (`verCarritoEnVivo`). El cobro
- *       en si mismo siempre fue autoridad de `comprar_carrito()`.
+ * Redis sigue siendo la puerta rapida: su script atomico
+ * (`redimensionar`) decide primero, sin candados, y rechaza en el acto a
+ * quien llega tarde. La reserva de verdad es una fila de
+ * `reserva_venta_relampago`, que se escribe con la replica. Si Redis no
+ * responde, PostgreSQL reserva solo (`FOR UPDATE` corto sobre la oferta). Si
+ * Redis perdio la venta, se reconstruye desde PostgreSQL
+ * (`InventarioLimitadoService.restaurar`).
  *
- *
- * Como nace y como muere -- sin un paso de "crear"
- * ============================================================
- * No hay ruta para crear un carrito. El primer `HSET` sobre una clave que
- * no existe la crea sola: el carrito nace con el primer producto. Muere
- * solo: TTL de 24 h sin tocarlo, `DEL` tras el checkout, o
- * `DELETE /carrito`. Un carrito sin lineas no existe como clave.
- *
- *
- * De quien es el carrito
- * ============================================================
- * El `id_usuario` sale del token de sesion; la clave es
- * `mesh:carrito:<id_usuario>`. No hay id de carrito que pasar ni guardar en
- * `localStorage`. Dos dispositivos de la misma cuenta comparten el carrito
- * sin hacer nada.
+ * El checkout compra el pedido pendiente: bloquea el pedido y las ofertas,
+ * comprueba disponibilidad y reservas (una linea relampago sin reserva viva
+ * intenta reservar ahi mismo), avisa si el precio cambio, y llama a
+ * `comprar_pedido()` (`migrations/007`) en la misma transaccion en que las
+ * reservas pasan a `confirmada`.
  */
 @Injectable()
 export class CarritoService {
   private readonly logger = new Logger(CarritoService.name);
 
+  /** Las replicas en curso, por cuenta. */
+  private readonly replicas = new Map<string, ReplicaEnCurso>();
+
+  /** Cuentas que escribieron con Redis caido: su Redis se reconstruye al volver. */
+  private readonly afectados = new Set<string>();
+
+  /**
+   * Cuentas que vaciaron el carrito y todavia no se replico, con la version
+   * que Redis conocia (la clave ya no esta para guardarla).
+   */
+  private readonly vaciados = new Map<string, number | null>();
+
+  /** Ultima vez que ver el carrito renovo el reloj de PostgreSQL, por cuenta. */
+  private readonly tocados = new Map<string, number>();
+
   constructor(
     private readonly productosService: ProductosService,
     private readonly inventarioLimitadoService: InventarioLimitadoService,
     private readonly eventosService: EventosService,
+    private readonly carritoPostgres: CarritoPostgresService,
+    private readonly carritoRedis: CarritoRedisService,
   ) {}
 
   /** TTL del carrito, en segundos: 24 h de INACTIVIDAD (se re-pone en cada toque). */
-  static readonly TTL_SEGUNDOS = 60 * 60 * 24;
+  static readonly TTL_SEGUNDOS = VIDA_CARRITO_SEGUNDOS;
 
-  /** La clave del carrito de una cuenta en Redis. */
-  private clave(idUsuario: string): string {
-    return `mesh:carrito:${idUsuario}`;
-  }
+  // ---------------------------------------------------------------------
+  // GET /carrito
+  // ---------------------------------------------------------------------
 
   /**
-   * El carrito completo, tal como esta GUARDADO en Redis -- nunca toca
-   * Postgres (pedido del profesor: `GET /carrito` tiene que resistir aunque
-   * las otras bases esten caidas). Nombre, precio, imagen,
-   * vendedor y stock son la foto que tomo el `PUT` que agrego o cambio cada
-   * linea (`LineaCarritoRedis`), no el dato de ahora mismo. Renueva el TTL
-   * (mirar el carrito cuenta como actividad).
+   * El carrito como lo ve la persona. Lo normal es Redis puro: la foto que
+   * tomo el `PUT` de cada linea. Renueva el TTL (mirar cuenta como
+   * actividad), y cada tanto tambien el reloj de PostgreSQL.
    *
-   * La UNICA excepcion es la disponibilidad de una linea de inventario
-   * limitado: `ticketVigente` es tambien Redis puro (consulta la clave de
-   * la reserva, no Postgres), asi que se revisa en vivo igual que antes.
+   * Si Redis no tiene el carrito, se reconstruye desde PostgreSQL. Si Redis no
+   * responde, se lee PostgreSQL directo (`fuente: 'postgres'`).
+   *
+   * La disponibilidad de una linea de venta relampago se revisa en vivo
+   * contra Redis (`ticketVigente`): la reserva puede vencer sola dentro de
+   * las 24 h del carrito.
    */
   async verCarrito(idUsuario: string): Promise<Carrito> {
-    const { lineas: crudo, tickets } = await this.leerHashCompleto(idUsuario);
-    const idsOferta = Object.keys(crudo).map(Number);
-
-    if (idsOferta.length === 0) {
-      return { lineas: [], total: '0.00', total_lineas: 0, total_items: 0 };
+    if (esRedisInalcanzable()) {
+      return this.verDesdePostgres(idUsuario);
     }
-
-    await this.renovarTtl(idUsuario);
-
-    // Async por linea (no un .map sincrono): las lineas de inventario
-    // limitado necesitan una consulta a Redis (ticketVigente) para saber si
-    // la reserva que las respalda sigue viva.
-    const lineas: CarritoLinea[] = await Promise.all(
-      idsOferta.map(async (idOferta) => {
-        const snapshot = crudo[idOferta];
-        const ticket = tickets[idOferta] ?? null;
-        const esInventarioLimitado = ticket != null;
-
-        let { disponible, motivo } = snapshot;
-        // Ver el comentario de `verCarrito` en la clase: la reserva de una
-        // venta relampago puede vencer sola dentro de las 24 h que dura el
-        // carrito, sin que nadie vuelva a tocar esta linea -- por eso esto
-        // SI se revisa en vivo (contra Redis, no contra Postgres) en vez de
-        // confiar en la foto.
-        if (esInventarioLimitado && disponible) {
-          const vigente = await this.inventarioLimitadoService.ticketVigente(
-            idOferta,
-            ticket,
-          );
-          if (!vigente) {
-            disponible = false;
-            motivo = 'reserva_vencida';
-          }
-        }
-
-        const subtotal = (Number(snapshot.precio) * snapshot.cantidad).toFixed(
-          2,
-        );
-
-        return {
-          id_oferta: idOferta,
-          cantidad: snapshot.cantidad,
-          id_producto: snapshot.id_producto,
-          id_producto_variante: snapshot.id_producto_variante,
-          nombre_producto: snapshot.nombre_producto,
-          nombre_variante: snapshot.nombre_variante,
-          imagen: snapshot.imagen,
-          precio: snapshot.precio,
-          porcentaje_descuento: snapshot.porcentaje_descuento,
-          subtotal,
-          vendedor: {
-            usuario: snapshot.vendedor_usuario,
-            nombre: snapshot.vendedor_nombre,
-          },
-          stock_disponible: snapshot.stock_disponible,
-          disponible,
-          motivo,
-          es_inventario_limitado: esInventarioLimitado,
-        };
-      }),
-    );
-
-    const total = lineas
-      .reduce((suma, linea) => suma + Number(linea.subtotal), 0)
-      .toFixed(2);
-    const totalItems = idsOferta.reduce(
-      (suma, id) => suma + crudo[id].cantidad,
-      0,
-    );
-
-    return {
-      lineas,
-      total,
-      total_lineas: lineas.length,
-      total_items: totalItems,
-    };
+    try {
+      await this.prepararRedis(idUsuario);
+      const hash = await this.carritoRedis.leerHashCompleto(idUsuario);
+      if (!hash.existe) {
+        return await this.calentar(idUsuario);
+      }
+      const carrito = await this.pintarDesdeRedis(hash);
+      await this.carritoRedis.renovarTtl(idUsuario);
+      this.tocarPostgres(idUsuario);
+      return carrito;
+    } catch (error) {
+      if (esRedisInalcanzable(error)) {
+        return this.verDesdePostgres(idUsuario);
+      }
+      throw error;
+    }
   }
 
-  /**
-   * La misma forma que `verCarrito`, pero EN VIVO contra Postgres --
-   * usada solo por el checkout (`ejecutarCompraCarrito`), nunca por
-   * `GET /carrito`. Es deliberadamente la logica que `verCarrito` tenia
-   * antes de guardar la foto en Redis: el checkout ya tiene que tocar
-   * Postgres para cobrar, asi que aprovecha para dar el error itemizado por
-   * linea y detectar si el precio cambio desde la ultima foto que vio el
-   * cliente -- eso no se puede saber sin consultar el dato real.
-   *
-   * Una sola consulta en lote, sin importar cuantas lineas: `oferta` con
-   * la copia del catalogo (`variante_catalogo`/`producto_catalogo`) unida,
-   * sin Mongo. Renueva el TTL, igual que `verCarrito`
-   * (intentar pagar tambien cuenta como actividad).
-   */
-  private async verCarritoEnVivo(idUsuario: string): Promise<Carrito> {
-    const { lineas: crudo, tickets } = await this.leerHashCompleto(idUsuario);
-    const idsOferta = Object.keys(crudo).map(Number);
-
-    if (idsOferta.length === 0) {
-      return { lineas: [], total: '0.00', total_lineas: 0, total_items: 0 };
-    }
-
-    await this.renovarTtl(idUsuario);
-
-    const ofertas = await this.consultarOfertas(idsOferta);
-
-    const lineas: CarritoLinea[] = await Promise.all(
-      idsOferta.map(async (idOferta) => {
-        const cantidad = crudo[idOferta].cantidad;
-        const oferta = ofertas.get(idOferta);
-        const ticket = tickets[idOferta] ?? null;
-        const esInventarioLimitado = ticket != null;
-
-        if (oferta == null) {
-          // El id de oferta esta en el carrito pero no existe en `oferta`
-          // (un PUT con un id inventado). Se muestra como no disponible en
-          // vez de desaparecer sin avisar.
-          return {
-            id_oferta: idOferta,
-            cantidad,
-            id_producto: 0,
-            id_producto_variante: 0,
-            nombre_producto: '(oferta no encontrada)',
-            nombre_variante: '(oferta no encontrada)',
-            imagen: null,
-            precio: '0.00',
-            porcentaje_descuento: null,
-            subtotal: '0.00',
-            vendedor: { usuario: '', nombre: '' },
-            stock_disponible: 0,
-            disponible: false,
-            motivo: 'oferta_no_existe' as const,
-            es_inventario_limitado: esInventarioLimitado,
-          };
-        }
-
-        const idProducto = Number(oferta.id_producto_mongo);
-        const idVariante = Number(oferta.id_producto_variante_mongo);
-
-        const subtotal = (Number(oferta.precio_final) * cantidad).toFixed(2);
-        let { disponible, motivo } = this.evaluarDisponibilidad(
-          oferta,
-          cantidad,
-          oferta.estado_variante ?? undefined,
-        );
-
-        // Para una linea de inventario limitado, el stock de PostgreSQL
-        // esta CONGELADO desde que se abrio la venta (sembrar copio el
-        // numero una sola vez) -- no refleja lo que de verdad queda en
-        // Redis. La disponibilidad real de esta linea es "la reserva
-        // sigue viva", no "hay stock en Postgres": si la reserva vencio
-        // sola (nadie confirmo ni redimensiono a tiempo), se marca no
-        // disponible aunque Postgres todavia diga que hay stock.
-        if (esInventarioLimitado && disponible) {
-          const vigente = await this.inventarioLimitadoService.ticketVigente(
-            idOferta,
-            ticket,
-          );
-          if (!vigente) {
-            disponible = false;
-            motivo = 'reserva_vencida';
-          }
-        }
-
-        return {
-          id_oferta: idOferta,
-          cantidad,
-          id_producto: idProducto,
-          id_producto_variante: idVariante,
-          nombre_producto: oferta.nombre_producto ?? '(producto no encontrado)',
-          nombre_variante: oferta.nombre_variante ?? '(variante no encontrada)',
-          imagen: oferta.imagen,
-          precio: oferta.precio_final,
-          porcentaje_descuento: oferta.porcentaje_descuento,
-          subtotal,
-          vendedor: {
-            usuario: oferta.vendedor_usuario,
-            nombre: oferta.vendedor_nombre,
-          },
-          stock_disponible: oferta.stock,
-          disponible,
-          motivo,
-          es_inventario_limitado: esInventarioLimitado,
-        };
-      }),
-    );
-
-    const total = lineas
-      .reduce((suma, linea) => suma + Number(linea.subtotal), 0)
-      .toFixed(2);
-    const totalItems = idsOferta.reduce(
-      (suma, id) => suma + crudo[id].cantidad,
-      0,
-    );
-
-    return {
-      lineas,
-      total,
-      total_lineas: lineas.length,
-      total_items: totalItems,
-    };
-  }
+  // ---------------------------------------------------------------------
+  // PUT /carrito/lineas/:idOferta
+  // ---------------------------------------------------------------------
 
   /**
-   * Fija la cantidad ABSOLUTA de una oferta en el carrito (no un +1/-1). Si
-   * la clave del carrito no existe, `HSET` la crea. Renueva el TTL.
+   * Fija la cantidad ABSOLUTA de una oferta en el carrito (no un +1/-1).
+   * Consulta PostgreSQL una vez para tomar la foto de esa linea (nombre,
+   * precio, imagen, vendedor, stock, disponibilidad), la guarda en Redis y
+   * contesta; la copia a PostgreSQL va debajo.
    *
-   * A diferencia de antes, esto SI consulta Postgres -- una vez, y
-   * solo para ESTA linea (`construirSnapshot`) -- para tomar la foto
-   * (nombre, precio, imagen, vendedor, stock, disponibilidad) que
-   * `GET /carrito` va a servir despues sin volver a preguntar. Es la unica
-   * escritura del carrito que toca algo fuera de Redis; se acepta ese costo
-   * en el agregar para que el ver sea 100% Redis.
+   * Una oferta que no existe da 404: ya no se puede guardar en la verdad, y
+   * un carrito con una linea que no existe no tiene sentido.
    *
-   * Para una oferta de INVENTARIO LIMITADO (se detecta con
-   * `existeVentaLimitada`, una sola consulta a Redis, `EXISTS`) sigue siendo
-   * la UNICA excepcion a "agregar nunca reserva nada": llama a
-   * `redimensionar` (acredita el ticket viejo si esta linea ya tenia uno, y
-   * pide la cantidad nueva, las dos cosas en un solo paso atomico -- ver
-   * `plan pendiente/redimensionar-reserva.lua`). Si no alcanza, 409 de una
-   * vez, ANTES de tocar el carrito -- a diferencia de una oferta normal, que
-   * se deja agregar siempre y se avisa recien en `GET /carrito`.
+   * Si la oferta tiene una venta relampago vigente (lo dice PostgreSQL), el
+   * script atomico de Redis (`redimensionar`) reserva las unidades: si no
+   * alcanzan, 409 en el acto, ANTES de tocar el carrito. Una oferta normal se
+   * deja agregar siempre y avisa en `GET /carrito`.
    */
   async definirCantidad(
     idUsuario: string,
@@ -414,19 +241,71 @@ export class CarritoService {
     const idOferta = this.validarIdOferta(idOfertaParametro);
     const cantidad = validarCantidadCarrito(datos.cantidad);
 
-    const esInventarioLimitado =
-      await this.inventarioLimitadoService.existeVentaLimitada(idOferta);
-    const snapshot = await this.construirSnapshot(idOferta, cantidad);
+    const oferta = (await this.consultarOfertas([idOferta])).get(idOferta);
+    if (oferta == null) {
+      throw new ErrorNoEncontrado('No existe una oferta con ese id');
+    }
+    const foto = this.fotoDeOferta(oferta, cantidad);
 
-    if (esInventarioLimitado) {
-      const ticketViejo = await this.leerTicket(idUsuario, idOferta);
-      const resultado = await this.inventarioLimitadoService.redimensionar(
+    if (!esRedisInalcanzable()) {
+      try {
+        return await this.definirEnRedis(
+          idUsuario,
+          idOferta,
+          cantidad,
+          oferta,
+          foto,
+        );
+      } catch (error) {
+        if (!esRedisInalcanzable(error)) {
+          throw error;
+        }
+      }
+    }
+    return this.definirEnPostgres(idUsuario, idOferta, cantidad, oferta);
+  }
+
+  private async definirEnRedis(
+    idUsuario: string,
+    idOferta: number,
+    cantidad: number,
+    oferta: FilaOferta,
+    foto: LineaCarritoRedis,
+  ): Promise<LineaCarritoDefinida> {
+    await this.prepararRedis(idUsuario);
+    if (!(await this.carritoRedis.existeCarrito(idUsuario))) {
+      // Redis no tiene el carrito: puede que PostgreSQL si. Se trae antes de
+      // escribir, para no empezar uno nuevo encima del de verdad.
+      await this.calentar(idUsuario);
+    }
+
+    let ticket: number | null = null;
+    if (oferta.venta_vigente) {
+      const ticketViejo = await this.carritoRedis.leerTicket(
+        idUsuario,
+        idOferta,
+      );
+      let resultado = await this.inventarioLimitadoService.redimensionar(
         idOferta,
         idUsuario,
         ticketViejo,
         cantidad,
         TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS,
       );
+      if (resultado.resultado === 'SIN_OFERTA') {
+        // PostgreSQL dice que la venta sigue abierta y Redis no la tiene (se
+        // reinicio, un FLUSHALL): se reconstruye desde PostgreSQL y se
+        // vuelve a intentar una vez.
+        if (await this.inventarioLimitadoService.restaurar(idOferta)) {
+          resultado = await this.inventarioLimitadoService.redimensionar(
+            idOferta,
+            idUsuario,
+            ticketViejo,
+            cantidad,
+            TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS,
+          );
+        }
+      }
 
       if (resultado.resultado === 'AGOTADO') {
         throw new ErrorConflicto(
@@ -434,74 +313,111 @@ export class CarritoService {
         );
       }
       if (resultado.resultado === 'TICKET_AJENO') {
-        // No deberia pasar en circunstancias normales -- el ticket viejo
-        // sale del propio carrito de ESTE usuario. Defensivo: si pasa, es
-        // que algo mas toco esa reserva por fuera.
+        // No deberia pasar: el ticket viejo sale del propio carrito de ESTE
+        // usuario. Defensivo: algo mas toco esa reserva por fuera.
         throw new ErrorConflicto(
           'No se pudo actualizar la reserva de esta oferta',
         );
       }
-
-      try {
-        const clave = this.clave(idUsuario);
-        await redis.hset(
-          clave,
-          String(idOferta),
-          JSON.stringify(snapshot),
-          this.campoTicket(idOferta),
-          String(resultado.ticket),
-        );
-        await redis.expire(clave, CarritoService.TTL_SEGUNDOS);
-      } catch (error) {
-        manejarErrorRedis(this.logger, error);
+      if (resultado.resultado === 'REDIMENSIONADO') {
+        ticket = resultado.ticket;
+        foto.reserva_vence = new Date(
+          Date.now() + TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS * 1000,
+        ).toISOString();
       }
-
-      const resumen = await this.resumen(idUsuario);
-      return {
-        id_oferta: idOferta,
-        cantidad,
-        es_inventario_limitado: true,
-        ...resumen,
-      };
+      // SIN_OFERTA despues de restaurar: la venta ya no esta vigente (cerro
+      // en el medio). La linea se guarda como normal.
     }
 
-    try {
-      const clave = this.clave(idUsuario);
-      await redis.hset(clave, String(idOferta), JSON.stringify(snapshot));
-      // Si esta linea arrastraba un ticket de una venta relampago que ya
-      // cerro (`existeVentaLimitada` dio false porque la clave Redis de la
-      // oferta ya no existe -> no hay ninguna reserva viva que soltar), se
-      // limpia el campo companero. Sin esto la linea seguiria saliendo como
-      // `es_inventario_limitado` en `GET /carrito` y el checkout intentaria
-      // `confirmar` un ticket muerto. `HDEL` de un campo que no esta es un
-      // no-op, asi que va siempre sin comprobar antes.
-      await redis.hdel(clave, this.campoTicket(idOferta));
-      await redis.expire(clave, CarritoService.TTL_SEGUNDOS);
-    } catch (error) {
-      manejarErrorRedis(this.logger, error);
-    }
+    // Sin ticket, se limpia el que la linea arrastrara de una venta que ya
+    // cerro.
+    await this.carritoRedis.guardarLinea(idUsuario, idOferta, foto, ticket);
 
-    const resumen = await this.resumen(idUsuario);
+    this.programarReplica(idUsuario);
+    const resumen = await this.carritoRedis.resumen(idUsuario);
     return {
       id_oferta: idOferta,
       cantidad,
-      es_inventario_limitado: false,
+      es_inventario_limitado: ticket != null,
       ...resumen,
     };
   }
 
   /**
+   * Redis no responde: la linea se escribe directo en PostgreSQL, mas lento
+   * pero sin perder la venta. Una venta relampago reserva aqui mismo (sin
+   * ticket: Redis no esta para darlo); si no alcanza, el mismo 409 que daria
+   * Redis.
+   */
+  private async definirEnPostgres(
+    idUsuario: string,
+    idOferta: number,
+    cantidad: number,
+    oferta: FilaOferta,
+  ): Promise<LineaCarritoDefinida> {
+    let quedan: LineaDeseada[] = [];
+    await this.carritoPostgres.escribir(
+      idUsuario,
+      (actuales) => {
+        const otras = actuales
+          .filter((l) => l.id_oferta !== idOferta)
+          .map((l) => this.deseadaDesdePostgres(l));
+        const actual = actuales.find((l) => l.id_oferta === idOferta);
+        let reserva: LineaDeseada['reserva'] = null;
+        if (oferta.venta_vigente) {
+          const vieja = actual?.reserva;
+          reserva =
+            vieja != null &&
+            vieja.cantidad === cantidad &&
+            vieja.fecha_vence.getTime() > Date.now()
+              ? { ticket: vieja.ticket, fecha_vence: vieja.fecha_vence }
+              : {
+                  ticket: null,
+                  fecha_vence: new Date(
+                    Date.now() +
+                      TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS * 1000,
+                  ),
+                };
+        }
+        quedan = [
+          ...otras,
+          {
+            id_oferta: idOferta,
+            cantidad,
+            id_precio_historial: oferta.id_precio_historial,
+            nombre_producto:
+              oferta.nombre_producto ?? '(producto no encontrado)',
+            nombre_variante:
+              oferta.nombre_variante ?? '(variante no encontrada)',
+            id_producto: Number(oferta.id_producto_mongo),
+            id_producto_variante: Number(oferta.id_producto_variante_mongo),
+            reserva,
+          },
+        ];
+        return quedan;
+      },
+      { versionEsperada: undefined, capacidad: 'rechazar' },
+    );
+    this.afectados.add(idUsuario);
+    if (oferta.venta_vigente) {
+      this.inventarioLimitadoService.marcarParaRestaurar(idOferta);
+    }
+    return {
+      id_oferta: idOferta,
+      cantidad,
+      es_inventario_limitado: oferta.venta_vigente,
+      ...this.resumenDe(quedan),
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // DELETE /carrito/lineas/:idOferta y DELETE /carrito
+  // ---------------------------------------------------------------------
+
+  /**
    * Quita una oferta del carrito. Idempotente: si la linea no estaba,
-   * responde igual. Si era la ultima linea, Redis borra la clave sola (un
-   * HASH sin campos deja de existir).
-   *
-   * Si la linea era de inventario limitado (tenia ticket guardado), suelta
-   * la reserva con `devolver` ANTES de quitarla del carrito -- si no, la
-   * unidad quedaria "reservada" en Redis hasta que venza sola, en vez de
-   * liberarse al toque para el siguiente comprador. `devolver` sobre un
-   * ticket que ya vencio o ya se confirmo no es un error (contesta
-   * `SIN_TICKET`/`TICKET_AJENO`, no lanza nada) -- solo un fallo real de
-   * conexion a Redis detiene esto.
+   * responde igual. Si era de venta relampago, suelta la reserva en Redis en
+   * el acto (`devolver`); en PostgreSQL pasa a `devuelta` con la replica.
    */
   async quitarLinea(
     idUsuario: string,
@@ -509,106 +425,215 @@ export class CarritoService {
   ): Promise<ResumenCarrito> {
     const idOferta = this.validarIdOferta(idOfertaParametro);
 
-    const ticket = await this.leerTicket(idUsuario, idOferta);
-    if (ticket != null) {
-      await this.inventarioLimitadoService.devolver(
-        idOferta,
-        idUsuario,
-        ticket,
-      );
+    if (!esRedisInalcanzable()) {
+      try {
+        await this.prepararRedis(idUsuario);
+        if (!(await this.carritoRedis.existeCarrito(idUsuario))) {
+          await this.calentar(idUsuario);
+        }
+        const ticket = await this.carritoRedis.leerTicket(idUsuario, idOferta);
+        if (ticket != null) {
+          await this.inventarioLimitadoService.devolver(
+            idOferta,
+            idUsuario,
+            ticket,
+          );
+        }
+        await this.carritoRedis.borrarLinea(idUsuario, idOferta);
+        this.programarReplica(idUsuario);
+        return await this.carritoRedis.resumen(idUsuario);
+      } catch (error) {
+        if (!esRedisInalcanzable(error)) {
+          throw error;
+        }
+      }
     }
 
-    try {
-      const clave = this.clave(idUsuario);
-      await redis.hdel(clave, String(idOferta), this.campoTicket(idOferta));
-      // Si quedan lineas, se renueva el TTL. Si el hash quedo vacio, la
-      // clave ya no existe y EXPIRE no hace nada (devuelve 0).
-      await redis.expire(clave, CarritoService.TTL_SEGUNDOS);
-    } catch (error) {
-      manejarErrorRedis(this.logger, error);
+    let quedan: LineaDeseada[] = [];
+    let teniaReserva = false;
+    await this.carritoPostgres.escribir(
+      idUsuario,
+      (actuales) => {
+        teniaReserva =
+          actuales.find((l) => l.id_oferta === idOferta)?.reserva != null;
+        quedan = actuales
+          .filter((l) => l.id_oferta !== idOferta)
+          .map((l) => this.deseadaDesdePostgres(l));
+        return quedan;
+      },
+      { versionEsperada: undefined, capacidad: 'rechazar' },
+    );
+    this.afectados.add(idUsuario);
+    if (teniaReserva) {
+      this.inventarioLimitadoService.marcarParaRestaurar(idOferta);
     }
-
-    return this.resumen(idUsuario);
+    return this.resumenDe(quedan);
   }
 
   /**
-   * Vacia el carrito de una cuenta: un `DEL` de la clave. Idempotente.
-   *
-   * `soltarReservas` decide que pasa con las reservas de inventario
-   * limitado que hubiera en el carrito (campos `t:<id_oferta>`):
-   *
-   *   - `true` (vaciado MANUAL, `DELETE /carrito`): antes del `DEL` se
-   *     recorren esos tickets y se devuelven (op `devolver`), para que sus
-   *     unidades vuelvan al contador de Redis en el acto en vez de esperar
-   *     a que venza cada reserva (`TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS`).
-   *   - `false` (vaciado tras un checkout correcto, desde `comprarCarrito`):
-   *     esas reservas YA se confirmaron (op `confirmar`) una por una antes
-   *     de llegar aca -- devolverlas soltaria unidades recien vendidas.
+   * Vacia el carrito (`DELETE /carrito`). Suelta en el acto las reservas de
+   * venta relampago que hubiera y borra la clave de Redis (un carrito vacio no
+   * existe como clave). La replica vacia PostgreSQL debajo.
    */
-  async vaciar(idUsuario: string, soltarReservas = false): Promise<void> {
-    if (soltarReservas) {
-      const { tickets } = await this.leerHashCompleto(idUsuario);
-      await this.devolverReservas(
-        idUsuario,
-        Object.entries(tickets).map(([idOferta, ticket]) => ({
-          idOferta: Number(idOferta),
-          ticket,
-        })),
-      );
+  async vaciar(idUsuario: string): Promise<void> {
+    if (!esRedisInalcanzable()) {
+      try {
+        await this.prepararRedis(idUsuario);
+        if (!(await this.carritoRedis.existeCarrito(idUsuario))) {
+          await this.calentar(idUsuario);
+        }
+        const hash = await this.carritoRedis.leerHashCompleto(idUsuario);
+        for (const [idOferta, ticket] of Object.entries(hash.tickets)) {
+          await this.inventarioLimitadoService.devolver(
+            Number(idOferta),
+            idUsuario,
+            ticket,
+          );
+        }
+        await this.carritoRedis.borrar(idUsuario);
+        // La clave ya no esta, y con ella la version: se le pasa a la replica
+        // aparte, para que vacie PostgreSQL comparando contra la version que
+        // Redis conocia.
+        this.vaciados.set(idUsuario, hash.version);
+        this.programarReplica(idUsuario);
+        return;
+      } catch (error) {
+        if (!esRedisInalcanzable(error)) {
+          throw error;
+        }
+      }
     }
 
-    try {
-      await redis.del(this.clave(idUsuario));
-    } catch (error) {
-      manejarErrorRedis(this.logger, error);
+    let teniaReservas: number[] = [];
+    await this.carritoPostgres.escribir(
+      idUsuario,
+      (actuales) => {
+        teniaReservas = actuales
+          .filter((l) => l.reserva != null)
+          .map((l) => l.id_oferta);
+        return [];
+      },
+      { versionEsperada: undefined, capacidad: 'rechazar' },
+    );
+    this.afectados.add(idUsuario);
+    for (const idOferta of teniaReservas) {
+      this.inventarioLimitadoService.marcarParaRestaurar(idOferta);
     }
   }
 
+  // ---------------------------------------------------------------------
+  // POST /carrito/sincronizar
+  // ---------------------------------------------------------------------
+
   /**
-   * El checkout. Lee el carrito, comprueba que todo se pueda comprar, y lo
-   * compra llamando a `comprar_carrito()` de PostgreSQL
-   * (`migrations/012_comprar_carrito.sql`), que crea el pedido, le mete
-   * todas las lineas y lo compra en **una sola transaccion** -- un fallo no
-   * deja ni pedido ni lineas a medias.
+   * Arregla un carrito desincronizado. Primero espera la replica en curso.
+   * Despues decide quien tiene razon:
    *
-   * Orden:
-   *   1. `verCarritoEnVivo()` -> lineas enriquecidas EN VIVO (nombre,
-   *      precio, stock, disponibilidad, distinto de la foto que sirve
-   *      `GET /carrito`). Carrito vacio -> 409.
-   *   2. Si alguna linea no se puede comprar (oferta pausada, variante
-   *      desactivada, sin stock, o un id inventado) -> 409 con la lista,
-   *      SIEMPRE (no hay forma de saltarse esto). Segun el interruptor
-   *      `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR`
-   *      (`helpers/constantes.ts`), esas lineas ademas se quitan del
-   *      carrito en Redis antes de responder, o se dejan intactas. Es un
-   *      chequeo previo para dar un buen mensaje; la verdad la vuelve a
-   *      comprobar `comprar_carrito()` dentro de su transaccion, con
-   *      `FOR UPDATE`.
-   *   3. Si no hay bloqueantes, se compara el precio GUARDADO en la foto de
-   *      Redis de cada linea (lo que `GET /carrito` le mostro al cliente,
-   *      no algo que el cliente tenga que mandar de vuelta) contra el
-   *      precio actual. Si alguno discrepa y `confirmar_cambios` no vino en
-   *      `true` -> se devuelve `{comprado: false, avisos}` (sin tocar
-   *      nada); reenviar con `confirmar_cambios: true` deja pasar la
-   *      compra al precio de hoy. Mismo criterio que
-   *      `PedidosCompradorService.revisarCambiosAntesDeComprar`.
-   *   4. Se resuelve `id_direccion_historial` (exige que la direccion sea de
-   *      la cuenta) y, si el metodo es tarjeta, se valida/cobra el mock.
-   *   5. `SELECT comprar_carrito(...)` con las lineas ya con nombre.
-   *   6. `DEL` del carrito y recalculo de los campos calculados de Mongo de
-   *      cada producto tocado. Si el recalculo falla, la compra NO se
-   *      deshace: solo queda una tarjeta del catalogo desfasada un rato
-   *      (mismo criterio que `comprarPedido`).
+   *   - Redis y PostgreSQL estan en la misma version (o PostgreSQL no tiene
+   *     carrito): lo que falta en PostgreSQL es la ultima escritura de Redis,
+   *     que no se pudo copiar. Se vuelve a copiar.
+   *   - PostgreSQL tiene una version mas nueva (hubo escrituras con Redis
+   *     caido), o la copia choca: PostgreSQL es la verdad y Redis se
+   *     reconstruye desde ahi.
+   *
+   * Devuelve el carrito como queda.
+   */
+  async sincronizar(idUsuario: string): Promise<Carrito> {
+    await this.esperarReplica(idUsuario);
+    if (esRedisInalcanzable()) {
+      return this.verDesdePostgres(idUsuario);
+    }
+    let hash: HashCarrito;
+    try {
+      hash = await this.carritoRedis.leerHashCompleto(idUsuario);
+    } catch (error) {
+      if (esRedisInalcanzable(error)) {
+        return this.verDesdePostgres(idUsuario);
+      }
+      throw error;
+    }
+
+    const postgres = await this.carritoPostgres.leer(idUsuario);
+    const mismaVersion =
+      postgres == null
+        ? hash.version == null || hash.version === 0
+        : hash.version === postgres.version ||
+          (hash.version == null && postgres.lineas.length === 0);
+
+    if (hash.existe && mismaVersion) {
+      try {
+        const resultado = await this.carritoPostgres.escribir(
+          idUsuario,
+          () => this.deseadasDesdeRedis(hash),
+          { versionEsperada: hash.version, capacidad: 'conflicto' },
+        );
+        await this.carritoRedis.marcarSincronizado(
+          idUsuario,
+          resultado.version,
+        );
+        this.afectados.delete(idUsuario);
+        return this.verCarrito(idUsuario);
+      } catch (error) {
+        if (error instanceof ConflictoCapacidad) {
+          // PostgreSQL no tiene esas unidades: la reserva de Redis se suelta y
+          // la linea se queda como PostgreSQL diga.
+          const ticket = hash.tickets[error.idOferta];
+          if (ticket != null) {
+            await this.inventarioLimitadoService
+              .devolver(error.idOferta, idUsuario, ticket)
+              .catch(() => undefined);
+          }
+          this.inventarioLimitadoService.marcarParaRestaurar(error.idOferta);
+        } else if (!(error instanceof ConflictoVersion)) {
+          throw error;
+        }
+      }
+    }
+
+    await this.reconstruirDesdePostgres(idUsuario);
+    this.afectados.delete(idUsuario);
+    return this.verCarrito(idUsuario);
+  }
+
+  // ---------------------------------------------------------------------
+  // POST /carrito/comprar
+  // ---------------------------------------------------------------------
+
+  /**
+   * El checkout. Compra el carrito de VERDAD (el pedido pendiente de
+   * PostgreSQL) en una sola transaccion:
+   *
+   *   1. Espera la replica en curso. Si Redis esta, el carrito no puede estar
+   *      desincronizado, y lo que ve Redis tiene que coincidir con PostgreSQL
+   *      (version y lineas): si no, 409 y se marca desincronizado. PostgreSQL
+   *      manda; si Redis no responde, se compra lo que dice PostgreSQL.
+   *   2. Bloquea el pedido y las ofertas (`FOR UPDATE`, en orden de id).
+   *      Carrito vencido (24 h) o vacio -> 409.
+   *   3. Disponibilidad en vivo (oferta activa, variante activa, stock). Si
+   *      algo no se puede comprar -> 409 con la lista, siempre.
+   *   4. Venta relampago: cada linea necesita una reserva activa, sin vencer y
+   *      de la misma cantidad. Si no la tiene (vencio, o la venta se abrio
+   *      despues de agregarla) intenta reservar ahi mismo; si no hay unidades,
+   *      409.
+   *   5. Precio: si alguna linea cambio de precio desde que se agrego y no
+   *      vino `confirmar_cambios: true` -> `{comprado: false, avisos}` sin
+   *      tocar nada (ROLLBACK). Con la confirmacion, se cobra el de hoy.
+   *   6. Direccion (tiene que ser de la cuenta), tarjeta si aplica,
+   *      `comprar_pedido()` (stock, kardex, pago, estado `comprado`), y las
+   *      reservas del pedido pasan a `confirmada`. COMMIT.
+   *   7. Despues: se confirman los tickets en Redis, se borra el carrito de
+   *      Redis y se registra la compra en ClickHouse. Nada de esto deshace la
+   *      compra si falla.
    */
   async comprarCarrito(
     idUsuario: string,
     datos: ComprarCarritoPeticion,
     ip: string,
   ): Promise<ComprarCarritoRespuesta> {
-    // Un candado corto por cuenta cierra el hueco del doble submit (dos
-    // POST /carrito/comprar identicos y concurrentes creaban dos pedidos,
-    // cobrando dos veces). Ver conCandadoCheckout.
-    return this.conCandadoCheckout(idUsuario, () =>
+    // Un candado corto por cuenta cierra el hueco del doble submit. Si Redis
+    // no esta, el `FOR UPDATE` del pedido hace el mismo trabajo (la segunda
+    // compra espera y encuentra el carrito ya comprado).
+    return this.carritoRedis.conCandadoCheckout(idUsuario, () =>
       this.ejecutarCompraCarrito(idUsuario, datos, ip),
     );
   }
@@ -623,299 +648,681 @@ export class CarritoService {
     }
     const idDireccion = this.resolverIdDireccion(datos.id_direccion);
 
-    const carrito = await this.verCarritoEnVivo(idUsuario);
-    if (carrito.lineas.length === 0) {
-      throw new ErrorConflicto('El carrito esta vacio');
+    await this.esperarReplica(idUsuario);
+    let hash: HashCarrito | null = null;
+    if (!esRedisInalcanzable()) {
+      try {
+        hash = await this.carritoRedis.leerHashCompleto(idUsuario);
+      } catch (error) {
+        if (!esRedisInalcanzable(error)) {
+          throw error;
+        }
+      }
+    }
+    if (hash?.desincronizado) {
+      throw new ErrorConflicto(MENSAJE_DESINCRONIZADO);
     }
 
-    // Las lineas de inventario limitado que traen una reserva viva en Redis
-    // (campo `t:<id_oferta>` del hash), con su numero de ticket. Se leen
-    // ANTES de comprar porque el `vaciar()` del final borra el hash del
-    // carrito -- y con el, los tickets: despues de pagar hay que CONFIRMAR
-    // cada uno (op `confirmar` de `redis/inventario_limitado.lua`), y si el
-    // pago no se concreta, DEVOLVERLO. Es el paso 4 de
-    // `plan pendiente/inventario-limitado.md`.
-    const lineasConReserva = await this.leerLineasConReserva(
-      idUsuario,
-      carrito.lineas,
-    );
+    const cliente = await this.carritoPostgres.conectar();
+    let compra: {
+      id_pedido: number;
+      total: string;
+      stock: StockResultanteOferta[];
+    };
+    let lineasCompradas: LineaCarritoPostgres[];
+    let confirmadas: { id_oferta: number; ticket: number | null }[];
+    const reservadasAqui: number[] = [];
+    let quitarDespues: number[] = [];
+    try {
+      await cliente.query('BEGIN');
+      const { carrito, vencido } = await this.leerParaComprar(
+        cliente,
+        idUsuario,
+      );
 
-    const lineasBloqueantes = carrito.lineas.filter(
-      (linea) => !linea.disponible,
-    );
-    if (lineasBloqueantes.length > 0) {
-      if (QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR) {
-        await this.quitarLineasDelCarrito(
-          idUsuario,
-          lineasBloqueantes.map((linea) => linea.id_oferta),
+      if (carrito == null || carrito.lineas.length === 0) {
+        // El vencimiento (si lo hubo) ya borro el carrito: eso se guarda.
+        await cliente.query('COMMIT');
+        if (vencido) {
+          // La copia de Redis tampoco vale ya: si no se borra, seguiria
+          // mostrando un carrito que en la verdad ya no existe.
+          if (hash != null) {
+            await this.carritoRedis.borrar(idUsuario).catch(() => undefined);
+          }
+          throw new ErrorConflicto(
+            'El carrito vencio por inactividad (24 h sin tocarlo): vuelve a agregar los productos',
+          );
+        }
+        if (hash != null && Object.keys(hash.lineas).length > 0) {
+          await this.carritoRedis.marcarDesincronizado(idUsuario);
+          throw new ErrorConflicto(MENSAJE_DESINCRONIZADO);
+        }
+        throw new ErrorConflicto('El carrito esta vacio');
+      }
+
+      if (hash != null && hash.existe && !this.coincide(hash, carrito)) {
+        await cliente.query('ROLLBACK');
+        await this.carritoRedis.marcarDesincronizado(idUsuario);
+        throw new ErrorConflicto(MENSAJE_DESINCRONIZADO);
+      }
+
+      const ids = carrito.lineas.map((l) => l.id_oferta);
+      const ofertas = await this.consultarOfertas(ids, cliente);
+
+      const bloqueantes: { linea: LineaCarritoPostgres; motivo: string }[] = [];
+      for (const linea of carrito.lineas) {
+        const oferta = ofertas.get(linea.id_oferta);
+        if (oferta == null) {
+          bloqueantes.push({
+            linea,
+            motivo: this.motivoATexto('oferta_no_existe'),
+          });
+          continue;
+        }
+        const { disponible, motivo } = this.evaluarDisponibilidad(
+          oferta,
+          linea.cantidad,
+          oferta.estado_variante ?? undefined,
+        );
+        if (!disponible) {
+          bloqueantes.push({ linea, motivo: this.motivoATexto(motivo) });
+        }
+      }
+
+      if (bloqueantes.length === 0) {
+        for (const linea of carrito.lineas) {
+          const oferta = ofertas.get(linea.id_oferta)!;
+          if (!oferta.venta_vigente) {
+            continue;
+          }
+          const reserva = linea.reserva;
+          const vale =
+            reserva != null &&
+            reserva.cantidad === linea.cantidad &&
+            reserva.fecha_vence.getTime() > Date.now();
+          if (vale) {
+            continue;
+          }
+          // Sin ticket: Redis no la dio. La reconciliacion la vuelve a sembrar.
+          const { reservada, libres } =
+            await this.carritoPostgres.reservarSiHayUnidades(cliente, {
+              idPedido: carrito.id_pedido,
+              idUsuario,
+              idOferta: linea.id_oferta,
+              cantidad: linea.cantidad,
+              stock: oferta.stock,
+              ticket: null,
+              fechaVence: new Date(
+                Date.now() + TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS * 1000,
+              ),
+              idReservaActual: reserva?.id_reserva ?? null,
+            });
+          if (!reservada) {
+            bloqueantes.push({
+              linea,
+              motivo: `es de una venta relampago y ${reserva == null ? 'no tenia reserva' : 'su reserva vencio'}: pediste ${linea.cantidad} y hay ${libres} disponibles`,
+            });
+            continue;
+          }
+          reservadasAqui.push(linea.id_oferta);
+        }
+      }
+
+      if (bloqueantes.length > 0) {
+        await cliente.query('ROLLBACK');
+        if (QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR) {
+          quitarDespues = bloqueantes.map((b) => b.linea.id_oferta);
+        }
+        const mensaje = bloqueantes
+          .map((b) => `"${b.linea.nombre_variante}" ${b.motivo}`)
+          .join('; ');
+        throw new ErrorConflicto(mensaje);
+      }
+
+      const avisos: AvisoPrecioCarrito[] = [];
+      for (const linea of carrito.lineas) {
+        const oferta = ofertas.get(linea.id_oferta)!;
+        if (linea.precio_visto !== oferta.precio_final) {
+          avisos.push({
+            id_oferta: linea.id_oferta,
+            nombre_producto: oferta.nombre_producto ?? linea.nombre_producto,
+            nombre_variante: oferta.nombre_variante ?? linea.nombre_variante,
+            precio_visto: linea.precio_visto,
+            precio_actual: oferta.precio_final,
+          });
+        }
+      }
+      if (avisos.length > 0 && datos.confirmar_cambios !== true) {
+        await cliente.query('ROLLBACK');
+        return { comprado: false, avisos };
+      }
+
+      const idDireccionHistorial = await this.resolverDireccionHistorial(
+        idUsuario,
+        idDireccion,
+      );
+      if (datos.metodo_pago === METODO_PAGO_TARJETA) {
+        validarYCobrarTarjeta(datos.tarjeta);
+      }
+
+      await cliente.query('SELECT cambiar_direccion_pedido($1, $2)', [
+        carrito.id_pedido,
+        idDireccionHistorial,
+      ]);
+
+      // Lo que queda en la factura: los nombres de hoy, y el precio de hoy si
+      // la persona acepto los cambios.
+      const aceptoCambios = new Set(avisos.map((a) => a.id_oferta));
+      for (const linea of carrito.lineas) {
+        const oferta = ofertas.get(linea.id_oferta)!;
+        await cliente.query(
+          `UPDATE pedido_producto pp
+              SET nombre_producto = $3, nombre_variante = $4,
+                  nombre_vendedor = $5,
+                  id_precio_historial = CASE WHEN $6 THEN $7::bigint
+                                             ELSE pp.id_precio_historial END
+             FROM precio_historial ph
+            WHERE ph.id_precio_historial = pp.id_precio_historial
+              AND pp.id_pedido = $1 AND ph.id_oferta = $2`,
+          [
+            carrito.id_pedido,
+            linea.id_oferta,
+            (oferta.nombre_producto ?? linea.nombre_producto).slice(0, 200),
+            (oferta.nombre_variante ?? linea.nombre_variante).slice(0, 100),
+            oferta.vendedor_nombre.slice(0, 200),
+            aceptoCambios.has(linea.id_oferta),
+            oferta.id_precio_historial,
+          ],
         );
       }
-      const mensaje = lineasBloqueantes
-        .map(
-          (linea) =>
-            `"${linea.nombre_variante}" ${this.motivoATexto(linea.motivo)}`,
-        )
-        .join('; ');
-      throw new ErrorConflicto(mensaje);
-    }
 
-    const { lineas: guardado } = await this.leerHashCompleto(idUsuario);
-    const avisos = this.compararPrecios(carrito.lineas, guardado);
-    if (avisos.length > 0 && datos.confirmar_cambios !== true) {
-      return { comprado: false, avisos };
-    }
-
-    const idDireccionHistorial = await this.resolverDireccionHistorial(
-      idUsuario,
-      idDireccion,
-    );
-
-    if (datos.metodo_pago === METODO_PAGO_TARJETA) {
-      validarYCobrarTarjeta(datos.tarjeta);
-    }
-
-    // Las lineas en el formato que espera agregar_linea (dentro de
-    // comprar_carrito). El nombre del producto/variante ya lo resolvio
-    // verCarrito desde la copia del catalogo en PostgreSQL; el del vendedor lo pone la propia funcion.
-    const lineas = carrito.lineas.map((linea) => ({
-      id_oferta: linea.id_oferta,
-      cantidad: linea.cantidad,
-      id_producto: linea.id_producto,
-      id_producto_variante: linea.id_producto_variante,
-      nombre_producto: linea.nombre_producto,
-      nombre_variante: linea.nombre_variante,
-    }));
-
-    let compra: CompraCarritoPostgres;
-    try {
-      const resultado = await pool.query<{
-        comprar_carrito: CompraCarritoPostgres;
-      }>('SELECT comprar_carrito($1, $2, $3::jsonb, $4)', [
-        idUsuario,
-        idDireccionHistorial,
-        JSON.stringify(lineas),
+      const { rows } = await cliente.query<{
+        comprar_pedido: {
+          id_pedido: number;
+          total: string;
+          stock: StockResultanteOferta[];
+        };
+      }>('SELECT comprar_pedido($1, $2)', [
+        carrito.id_pedido,
         datos.metodo_pago,
       ]);
-      compra = resultado.rows[0].comprar_carrito;
+      compra = rows[0].comprar_pedido;
+
+      const { rows: reservas } = await cliente.query<{
+        id_oferta: string;
+        ticket: string | null;
+      }>(
+        `UPDATE reserva_venta_relampago
+            SET id_estado_reserva = (SELECT id_estado_reserva FROM estado_reserva_venta_relampago
+                                      WHERE estado_reserva_nombre = 'confirmada'),
+                fecha_cierre = now()
+          WHERE id_pedido = $1
+            AND id_estado_reserva = (SELECT id_estado_reserva FROM estado_reserva_venta_relampago
+                                      WHERE estado_reserva_nombre = 'activa')
+      RETURNING id_oferta, ticket`,
+        [carrito.id_pedido],
+      );
+      confirmadas = reservas.map((r) => ({
+        id_oferta: Number(r.id_oferta),
+        ticket: r.ticket == null ? null : Number(r.ticket),
+      }));
+
+      await cliente.query('COMMIT');
+      lineasCompradas = carrito.lineas;
     } catch (error) {
-      // La oferta se pauso / se agoto entre verCarrito y esta llamada:
-      // comprar_carrito lo rechaza y no queda nada escrito. Como el pago no
-      // se concreto, se sueltan las reservas de inventario limitado que se
-      // habian tomado -- sus unidades vuelven al contador de Redis en el
-      // acto, en vez de esperar los 15 min del TTL de cada reserva.
-      await this.devolverReservas(idUsuario, lineasConReserva);
+      await cliente.query('ROLLBACK').catch(() => undefined);
+      if (
+        error instanceof ErrorConflicto ||
+        error instanceof ErrorValidacion ||
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorPago
+      ) {
+        throw error;
+      }
       if (this.esErrorDeNegocio(error)) {
         throw new ErrorConflicto((error as Error).message);
       }
       manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
+      for (const idOferta of quitarDespues) {
+        await this.quitarLinea(idUsuario, String(idOferta)).catch(
+          () => undefined,
+        );
+      }
     }
 
-    // El pago paso: cada reserva de inventario limitado pasa de "reservada"
-    // a "vendida" (op `confirmar`). Best-effort -- la venta ya esta cerrada
-    // en PostgreSQL y un fallo de Redis aca no la deshace (ver
-    // confirmarReservas).
-    await this.confirmarReservas(idUsuario, lineasConReserva);
-
-    await this.vaciar(idUsuario);
+    await this.despuesDeComprar(idUsuario, confirmadas, reservadasAqui);
 
     // Evento de analitica en ClickHouse (plan pendiente/eventos-clickhouse.md).
-    // Fire-and-forget, SIN `await`: si ClickHouse esta caido o tarda, la
-    // compra ya quedo cerrada en PostgreSQL y no debe verse afectada -- ver
-    // `EventosService.registrarCompra`, que nunca lanza. Una fila por linea
-    // del pedido, todas en un solo INSERT.
+    // Fire-and-forget, SIN `await`: la compra ya quedo cerrada en PostgreSQL.
     void this.eventosService.registrarCompra({
       idUsuario,
       idPedido: compra.id_pedido,
       ip,
-      lineas: lineas.map((linea) => ({
+      lineas: lineasCompradas.map((linea) => ({
         idProducto: linea.id_producto,
         idOferta: linea.id_oferta,
         cantidad: linea.cantidad,
       })),
     });
 
-    // Los campos calculados del catalogo en Mongo (precio, stock...) ya NO se
-    // recalculan aqui: los triggers de `oferta` dejaron los productos en
-    // `evento_producto` dentro de la transaccion de la compra, y
-    // `EventoProductoSyncService` los recalcula aparte. Mongo no interviene
-    // en la respuesta del checkout.
-
     return {
       comprado: true,
-      id_pedido: compra.id_pedido,
+      id_pedido: Number(compra.id_pedido),
       total: compra.total,
       stock: compra.stock,
     };
   }
 
-  // ---------------------------------------------------------------------
-  // Privados
-  // ---------------------------------------------------------------------
-
   /**
-   * Corre `fn` bajo un candado corto en Redis exclusivo del checkout de
-   * esta cuenta (`mesh:checkout:<id_usuario>`). Si ya hay una compra en
-   * curso para la misma cuenta, corta con 409 sin tocar nada.
-   *
-   * Cierra el hueco del doble submit: dos `POST /carrito/comprar`
-   * identicos y concurrentes leian los dos el carrito lleno ANTES de que
-   * ninguno lo vaciara, y cada uno creaba su propio pedido -- cobrando dos
-   * veces. `SET ... NX` es atomico (Redis atiende un comando a la vez),
-   * asi que de dos peticiones que llegan juntas solo una consigue el
-   * candado; la otra ni siquiera llega a leer el carrito.
-   *
-   * El candado vence solo a los 30 s (`EX`) por si el proceso muere a
-   * mitad del checkout -- un `comprar_carrito()` normal tarda muucho menos.
-   * El `finally` lo suelta en el camino feliz y en el de error; si ese
-   * `DEL` fallara, el `EX` lo limpia igual.
+   * La compra ya esta cerrada en PostgreSQL. Lo de Redis va despues y nunca la
+   * deshace: se confirman los tickets (pasan de reservados a vendidos), se
+   * borra el carrito, y lo que no se pudo dejar en orden se marca para que la
+   * reconciliacion lo reconstruya desde PostgreSQL.
    */
-  private async conCandadoCheckout<T>(
+  private async despuesDeComprar(
     idUsuario: string,
-    fn: () => Promise<T>,
-  ): Promise<T> {
-    const clave = `mesh:checkout:${idUsuario}`;
-
-    let obtenido: string | null = null;
-    try {
-      obtenido = await redis.set(clave, '1', 'EX', 30, 'NX');
-    } catch (error) {
-      manejarErrorRedis(this.logger, error);
-    }
-
-    if (obtenido == null) {
-      throw new ErrorConflicto(
-        'Ya tienes una compra en curso, espera un momento antes de reintentar',
-      );
-    }
-
-    try {
-      return await fn();
-    } finally {
+    confirmadas: { id_oferta: number; ticket: number | null }[],
+    reservadasAqui: number[],
+  ): Promise<void> {
+    const redisVivo = !esRedisInalcanzable();
+    for (const { id_oferta, ticket } of confirmadas) {
+      if (!redisVivo || ticket == null || reservadasAqui.includes(id_oferta)) {
+        this.inventarioLimitadoService.marcarParaRestaurar(id_oferta);
+        continue;
+      }
       try {
-        await redis.del(clave);
+        const { resultado } = await this.inventarioLimitadoService.confirmar(
+          id_oferta,
+          idUsuario,
+          ticket,
+        );
+        if (resultado !== 'CONFIRMADO') {
+          this.logger.warn(
+            `Reserva de la oferta ${id_oferta} (ticket ${ticket}) no confirmada en Redis: ${resultado}. La compra ya se concreto en PostgreSQL; se reconstruye desde ahi.`,
+          );
+          this.inventarioLimitadoService.marcarParaRestaurar(id_oferta);
+        }
       } catch (error) {
         this.logger.warn(
-          `No se pudo soltar el candado de checkout de ${idUsuario} (vence solo en 30 s): ` +
-            (error instanceof Error ? error.message : String(error)),
+          `No se pudo confirmar la reserva de la oferta ${id_oferta} en Redis; la compra ya se concreto: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        this.inventarioLimitadoService.marcarParaRestaurar(id_oferta);
+      }
+    }
+
+    if (!redisVivo) {
+      this.afectados.add(idUsuario);
+      return;
+    }
+    try {
+      await this.carritoRedis.borrar(idUsuario);
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo borrar de Redis el carrito ya comprado de ${idUsuario}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.afectados.add(idUsuario);
+    }
+  }
+
+  // ---------------------------------------------------------------------
+  // La replica: Redis -> PostgreSQL, debajo
+  // ---------------------------------------------------------------------
+
+  /**
+   * Programa la copia del carrito de Redis a PostgreSQL, sin esperarla. Una
+   * sola a la vez por cuenta: si ya hay una corriendo, se pide otra al
+   * terminar (que copiara el estado de ese momento, que ya incluye este
+   * cambio). Asi el orden de las escrituras se respeta y varias seguidas se
+   * resuelven con pocas copias.
+   */
+  private programarReplica(idUsuario: string): void {
+    const enCurso = this.replicas.get(idUsuario);
+    if (enCurso != null) {
+      enCurso.otraVez = true;
+      return;
+    }
+    const replica: ReplicaEnCurso = {
+      promesa: Promise.resolve(),
+      otraVez: false,
+    };
+    replica.promesa = (async () => {
+      try {
+        do {
+          replica.otraVez = false;
+          await this.replicarUnaVez(idUsuario);
+        } while (replica.otraVez);
+      } finally {
+        this.replicas.delete(idUsuario);
+      }
+    })();
+    this.replicas.set(idUsuario, replica);
+  }
+
+  /** Espera a que termine la replica en curso de la cuenta, si hay una. */
+  private async esperarReplica(idUsuario: string): Promise<void> {
+    while (this.replicas.has(idUsuario)) {
+      await this.replicas.get(idUsuario)!.promesa;
+    }
+  }
+
+  /**
+   * UN intento de copiar el carrito entero de Redis a PostgreSQL. Nunca
+   * lanza. Si sale bien, Redis guarda la version nueva y deja de estar
+   * desincronizado. Si choca o PostgreSQL falla, se marca desincronizado.
+   */
+  private async replicarUnaVez(idUsuario: string): Promise<void> {
+    if (esRedisInalcanzable()) {
+      return;
+    }
+    let hash: HashCarrito;
+    try {
+      hash = await this.carritoRedis.leerHashCompleto(idUsuario);
+    } catch {
+      return;
+    }
+    if (!hash.existe) {
+      if (this.vaciados.has(idUsuario)) {
+        await this.replicarVaciado(idUsuario);
+      }
+      return;
+    }
+    this.vaciados.delete(idUsuario);
+
+    try {
+      const resultado = await this.carritoPostgres.escribir(
+        idUsuario,
+        () => this.deseadasDesdeRedis(hash),
+        { versionEsperada: hash.version, capacidad: 'conflicto' },
+      );
+      await this.carritoRedis.marcarSincronizado(idUsuario, resultado.version);
+      if (Object.keys(hash.lineas).length === 0) {
+        // Quedo vacio y PostgreSQL ya lo sabe: la clave sobra. Solo si sigue
+        // sin lineas.
+        await this.carritoRedis.borrarSiVacio(idUsuario);
+      }
+      if (resultado.omitidas.length > 0) {
+        this.logger.warn(
+          `carrito de ${idUsuario}: ${resultado.omitidas.length} linea(s) de ofertas que ya no existen no se guardaron en PostgreSQL`,
         );
       }
-    }
-  }
-
-  private validarIdOferta(valor: string): number {
-    if (!REGEX_ID.test(valor)) {
-      throw new ErrorValidacion('El id no es valido');
-    }
-    return Number(valor);
-  }
-
-  /** El HASH del carrito como `{ id_oferta: cantidad }`, filtrando basura. */
-  private async leerHash(idUsuario: string): Promise<Record<number, number>> {
-    const { lineas } = await this.leerHashCompleto(idUsuario);
-    const cantidades: Record<number, number> = {};
-    for (const [id, linea] of Object.entries(lineas)) {
-      cantidades[Number(id)] = linea.cantidad;
-    }
-    return cantidades;
-  }
-
-  /**
-   * El HASH del carrito completo, separado en dos mapas: las lineas
-   * normales (`<id_oferta>: <foto JSON>`, parseada a `LineaCarritoRedis`) y
-   * los tickets de inventario limitado (`t:<id_oferta>: ticket`). Son
-   * campos DEL MISMO hash de Redis -- mismo truco que usa
-   * `inventario_limitado.lua` para no necesitar una clave nueva por cada
-   * reserva (ver ese archivo). Un campo que no parsea como JSON valido se
-   * descarta en silencio (mismo criterio que antes con numeros invalidos):
-   * es basura de una version vieja del carrito, no algo que deba tumbar el
-   * `GET`.
-   */
-  private async leerHashCompleto(idUsuario: string): Promise<{
-    lineas: Record<number, LineaCarritoRedis>;
-    tickets: Record<number, number>;
-  }> {
-    try {
-      const crudo = await redis.hgetall(this.clave(idUsuario));
-      const lineas: Record<number, LineaCarritoRedis> = {};
-      const tickets: Record<number, number> = {};
-
-      for (const [campo, valor] of Object.entries(crudo)) {
-        if (campo.startsWith('t:')) {
-          const idOferta = Number(campo.slice(2));
-          const ticket = Number(valor);
-          if (Number.isInteger(idOferta) && Number.isInteger(ticket)) {
-            tickets[idOferta] = ticket;
-          }
-          continue;
-        }
-        const id = Number(campo);
-        if (!Number.isInteger(id)) {
-          continue;
-        }
-        try {
-          const linea = JSON.parse(valor) as LineaCarritoRedis;
-          if (Number.isInteger(linea.cantidad) && linea.cantidad > 0) {
-            lineas[id] = linea;
-          }
-        } catch {
-          // Campo corrupto o de un formato viejo del carrito -- se ignora,
-          // no tumba el resto del carrito.
-        }
-      }
-      return { lineas, tickets };
     } catch (error) {
-      manejarErrorRedis(this.logger, error);
+      await this.carritoRedis.marcarDesincronizado(idUsuario);
+      if (error instanceof ConflictoCapacidad) {
+        this.inventarioLimitadoService.marcarParaRestaurar(error.idOferta);
+      }
+      this.logger.warn(
+        `carrito de ${idUsuario} desincronizado: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
   }
 
   /**
-   * Arma la foto de una linea (`LineaCarritoRedis`) consultando Postgres
-   * UNA vez, para guardarla en el carrito de Redis. Es el unico lugar
-   * donde `definirCantidad` toca algo fuera de Redis.
-   *
-   * Si la oferta no existe (id inventado en el `PUT`), igual arma una foto
-   * -- con nombres de relleno y `disponible: false` -- en vez de rechazar
-   * el `PUT`: mismo criterio de siempre, un id invalido se guarda igual y
-   * se avisa al verlo, no al agregarlo.
+   * La replica de un `DELETE /carrito`: vacia PostgreSQL contra la version que
+   * Redis conocia. Si choca (PostgreSQL tenia cambios que Redis no vio) o
+   * PostgreSQL falla, PostgreSQL se queda como estaba y es lo que se vera: la
+   * clave de Redis ya no esta, asi que el proximo `GET` lo trae de ahi.
    */
-  private async construirSnapshot(
-    idOferta: number,
-    cantidad: number,
-  ): Promise<LineaCarritoRedis> {
-    const ofertas = await this.consultarOfertas([idOferta]);
-    const oferta = ofertas.get(idOferta);
-
-    if (oferta == null) {
-      return {
-        cantidad,
-        id_producto: 0,
-        id_producto_variante: 0,
-        nombre_producto: '(oferta no encontrada)',
-        nombre_variante: '(oferta no encontrada)',
-        imagen: null,
-        precio: '0.00',
-        porcentaje_descuento: null,
-        vendedor_usuario: '',
-        vendedor_nombre: '',
-        stock_disponible: 0,
-        disponible: false,
-        motivo: 'oferta_no_existe',
-      };
+  private async replicarVaciado(idUsuario: string): Promise<void> {
+    const version = this.vaciados.get(idUsuario) ?? null;
+    this.vaciados.delete(idUsuario);
+    try {
+      await this.carritoPostgres.escribir(idUsuario, () => [], {
+        versionEsperada: version,
+        capacidad: 'conflicto',
+      });
+    } catch (error) {
+      this.logger.warn(
+        `No se pudo vaciar en PostgreSQL el carrito de ${idUsuario} (se vera lo que quedo ahi): ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
+  }
 
-    const idProducto = Number(oferta.id_producto_mongo);
-    const idVariante = Number(oferta.id_producto_variante_mongo);
+  // ---------------------------------------------------------------------
+  // Redis desde PostgreSQL
+  // ---------------------------------------------------------------------
 
+  /**
+   * Si la cuenta escribio con Redis caido, su Redis no vio esos cambios: antes
+   * de usarlo se reconstruye desde PostgreSQL. Si PostgreSQL tampoco esta, se
+   * sigue con lo que hay y se reintenta la proxima vez.
+   */
+  private async prepararRedis(idUsuario: string): Promise<void> {
+    if (!this.afectados.has(idUsuario)) {
+      return;
+    }
+    try {
+      await this.reconstruirDesdePostgres(idUsuario);
+      this.afectados.delete(idUsuario);
+    } catch (error) {
+      if (error instanceof ErrorConexionRedis) {
+        throw error;
+      }
+      this.logger.warn(
+        `No se pudo reconstruir el carrito de ${idUsuario} desde PostgreSQL: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  /**
+   * Redis no tiene el carrito: se trae de PostgreSQL (si tiene) y se devuelve
+   * pintado. Si PostgreSQL no responde, el carrito se ve vacio: Redis es todo
+   * lo que se puede consultar, y el checkout volvera a preguntarle a la
+   * verdad.
+   */
+  private async calentar(idUsuario: string): Promise<Carrito> {
+    await this.esperarReplica(idUsuario);
+    let postgres: CarritoPostgres | null;
+    try {
+      postgres = await this.carritoPostgres.leer(idUsuario);
+    } catch (error) {
+      if (
+        error instanceof ErrorConexion &&
+        !(error instanceof ErrorConexionRedis)
+      ) {
+        return this.carritoVacio('redis');
+      }
+      throw error;
+    }
+    if (postgres == null || postgres.lineas.length === 0) {
+      return this.carritoVacio('redis');
+    }
+    await this.escribirRedisDesdePostgres(idUsuario, postgres);
+    return this.pintarDesdeRedis(
+      await this.carritoRedis.leerHashCompleto(idUsuario),
+    );
+  }
+
+  /** Tira el carrito de Redis y lo vuelve a escribir desde PostgreSQL (vacio si no hay). */
+  private async reconstruirDesdePostgres(idUsuario: string): Promise<void> {
+    await this.esperarReplica(idUsuario);
+    const postgres = await this.carritoPostgres.leer(idUsuario);
+    if (postgres == null || postgres.lineas.length === 0) {
+      // Un carrito vacio pero existente: Redis guarda su version para que la
+      // proxima escritura se compare contra ella.
+      await this.carritoRedis.dejarVacio(
+        idUsuario,
+        postgres?.version ?? null,
+        postgres == null ? 0 : this.ttlRestante(postgres),
+      );
+      return;
+    }
+    await this.escribirRedisDesdePostgres(idUsuario, postgres);
+  }
+
+  /**
+   * Escribe en Redis el carrito de PostgreSQL, entero y de una vez: la foto de
+   * cada linea con el precio que la persona vio (el de la linea en
+   * PostgreSQL) y la disponibilidad de ahora, los tickets que tengan sus
+   * reservas, la version, y el TTL que le queda segun PostgreSQL.
+   */
+  private async escribirRedisDesdePostgres(
+    idUsuario: string,
+    postgres: CarritoPostgres,
+  ): Promise<void> {
+    const ofertas = await this.consultarOfertas(
+      postgres.lineas.map((l) => l.id_oferta),
+    );
+    await this.carritoRedis.reemplazar(
+      idUsuario,
+      postgres.version,
+      postgres.lineas.map((linea) => ({
+        idOferta: linea.id_oferta,
+        foto: this.fotoDesdePostgres(linea, ofertas.get(linea.id_oferta)),
+        ticket: linea.reserva?.ticket ?? null,
+      })),
+      this.ttlRestante(postgres),
+    );
+  }
+
+  /** Lo que le queda al carrito de sus 24 h, segun PostgreSQL. Al menos 1 s. */
+  private ttlRestante(postgres: CarritoPostgres): number {
+    const pasados = Math.floor(
+      (Date.now() - postgres.fecha_ultima_actividad.getTime()) / 1000,
+    );
+    return Math.max(1, CarritoService.TTL_SEGUNDOS - pasados);
+  }
+
+  // ---------------------------------------------------------------------
+  // Pintar el carrito
+  // ---------------------------------------------------------------------
+
+  private async pintarDesdeRedis(hash: HashCarrito): Promise<Carrito> {
+    const idsOferta = Object.keys(hash.lineas).map(Number);
+    const lineas: CarritoLinea[] = await Promise.all(
+      idsOferta.map(async (idOferta) => {
+        const foto = hash.lineas[idOferta];
+        const ticket = hash.tickets[idOferta] ?? null;
+        const esInventarioLimitado = ticket != null;
+
+        let { disponible, motivo } = foto;
+        // La reserva de una venta relampago puede vencer sola dentro de las
+        // 24 h del carrito, sin que nadie vuelva a tocar esta linea: se
+        // revisa en vivo contra Redis en vez de confiar en la foto.
+        if (esInventarioLimitado && disponible) {
+          const vigente = await this.inventarioLimitadoService.ticketVigente(
+            idOferta,
+            ticket,
+          );
+          if (!vigente) {
+            disponible = false;
+            motivo = 'reserva_vencida';
+          }
+        }
+        return this.lineaDeFoto(
+          idOferta,
+          foto,
+          disponible,
+          motivo,
+          esInventarioLimitado,
+        );
+      }),
+    );
+    return this.armarCarrito(lineas, !hash.desincronizado, 'redis');
+  }
+
+  /**
+   * El carrito leido directo de PostgreSQL (Redis no responde). Precio y
+   * nombres son los de cada linea (lo que la persona vio); disponibilidad y
+   * stock, los de ahora.
+   */
+  private async verDesdePostgres(idUsuario: string): Promise<Carrito> {
+    const postgres = await this.carritoPostgres.leer(idUsuario);
+    if (postgres == null || postgres.lineas.length === 0) {
+      return this.carritoVacio('postgres');
+    }
+    const ofertas = await this.consultarOfertas(
+      postgres.lineas.map((l) => l.id_oferta),
+    );
+    const lineas = postgres.lineas.map((linea) => {
+      const foto = this.fotoDesdePostgres(linea, ofertas.get(linea.id_oferta));
+      return this.lineaDeFoto(
+        linea.id_oferta,
+        foto,
+        foto.disponible,
+        foto.motivo,
+        linea.reserva != null,
+      );
+    });
+    return this.armarCarrito(lineas, true, 'postgres');
+  }
+
+  private lineaDeFoto(
+    idOferta: number,
+    foto: LineaCarritoRedis,
+    disponible: boolean,
+    motivo: MotivoNoDisponible | null,
+    esInventarioLimitado: boolean,
+  ): CarritoLinea {
+    return {
+      id_oferta: idOferta,
+      cantidad: foto.cantidad,
+      id_producto: foto.id_producto,
+      id_producto_variante: foto.id_producto_variante,
+      nombre_producto: foto.nombre_producto,
+      nombre_variante: foto.nombre_variante,
+      imagen: foto.imagen,
+      precio: foto.precio,
+      porcentaje_descuento: foto.porcentaje_descuento,
+      subtotal: (Number(foto.precio) * foto.cantidad).toFixed(2),
+      vendedor: {
+        usuario: foto.vendedor_usuario,
+        nombre: foto.vendedor_nombre,
+      },
+      stock_disponible: foto.stock_disponible,
+      disponible,
+      motivo,
+      es_inventario_limitado: esInventarioLimitado,
+    };
+  }
+
+  private armarCarrito(
+    lineas: CarritoLinea[],
+    sincronizado: boolean,
+    fuente: 'redis' | 'postgres',
+  ): Carrito {
+    return {
+      lineas,
+      total: lineas
+        .reduce((suma, l) => suma + Number(l.subtotal), 0)
+        .toFixed(2),
+      total_lineas: lineas.length,
+      total_items: lineas.reduce((suma, l) => suma + l.cantidad, 0),
+      sincronizado,
+      fuente,
+    };
+  }
+
+  private carritoVacio(fuente: 'redis' | 'postgres'): Carrito {
+    return {
+      lineas: [],
+      total: '0.00',
+      total_lineas: 0,
+      total_items: 0,
+      sincronizado: true,
+      fuente,
+    };
+  }
+
+  // ---------------------------------------------------------------------
+  // Fotos y lineas deseadas
+  // ---------------------------------------------------------------------
+
+  /** La foto de una linea recien agregada, con los datos de ahora. */
+  private fotoDeOferta(
+    oferta: FilaOferta,
+    cantidad: number,
+  ): LineaCarritoRedis {
     const { disponible, motivo } = this.evaluarDisponibilidad(
       oferta,
       cantidad,
       oferta.estado_variante ?? undefined,
     );
-
     return {
       cantidad,
-      id_producto: idProducto,
-      id_producto_variante: idVariante,
+      id_producto: Number(oferta.id_producto_mongo),
+      id_producto_variante: Number(oferta.id_producto_variante_mongo),
       nombre_producto: oferta.nombre_producto ?? '(producto no encontrado)',
       nombre_variante: oferta.nombre_variante ?? '(variante no encontrada)',
       imagen: oferta.imagen,
@@ -926,204 +1333,178 @@ export class CarritoService {
       stock_disponible: oferta.stock,
       disponible,
       motivo,
+      id_precio_historial: oferta.id_precio_historial,
+      reserva_vence: null,
     };
   }
 
-  /** El nombre del campo companero (dentro del mismo HASH del carrito) que guarda el ticket de una linea de inventario limitado. */
-  private campoTicket(idOferta: number): string {
-    return `t:${idOferta}`;
-  }
-
-  /** El ticket guardado para esta linea, o `null` si no tiene (oferta normal, o nunca tuvo). */
-  private async leerTicket(
-    idUsuario: string,
-    idOferta: number,
-  ): Promise<number | null> {
-    try {
-      const valor = await redis.hget(
-        this.clave(idUsuario),
-        this.campoTicket(idOferta),
-      );
-      return valor == null ? null : Number(valor);
-    } catch (error) {
-      manejarErrorRedis(this.logger, error);
+  /**
+   * La foto de una linea que viene de PostgreSQL: precio y nombres de la linea
+   * (lo que la persona vio), disponibilidad de ahora. Una reserva vencida se
+   * marca como tal.
+   */
+  private fotoDesdePostgres(
+    linea: LineaCarritoPostgres,
+    oferta: FilaOferta | undefined,
+  ): LineaCarritoRedis {
+    let disponible = false;
+    let motivo: MotivoNoDisponible | null = 'oferta_no_existe';
+    if (oferta != null) {
+      ({ disponible, motivo } = this.evaluarDisponibilidad(
+        oferta,
+        linea.cantidad,
+        oferta.estado_variante ?? undefined,
+      ));
+      if (
+        disponible &&
+        linea.reserva != null &&
+        linea.reserva.fecha_vence.getTime() <= Date.now()
+      ) {
+        disponible = false;
+        motivo = 'reserva_vencida';
+      }
     }
-  }
-
-  /** Resumen ligero (solo Redis) para las respuestas de PUT/DELETE. */
-  private async resumen(idUsuario: string): Promise<ResumenCarrito> {
-    const mapa = await this.leerHash(idUsuario);
-    const ids = Object.keys(mapa).map(Number);
     return {
-      total_lineas: ids.length,
-      total_items: ids.reduce((suma, id) => suma + mapa[id], 0),
+      cantidad: linea.cantidad,
+      id_producto: linea.id_producto,
+      id_producto_variante: linea.id_producto_variante,
+      nombre_producto: linea.nombre_producto,
+      nombre_variante: linea.nombre_variante,
+      imagen: oferta?.imagen ?? null,
+      precio: linea.precio_visto,
+      porcentaje_descuento: linea.porcentaje_descuento_visto,
+      vendedor_usuario: oferta?.vendedor_usuario ?? '',
+      vendedor_nombre: oferta?.vendedor_nombre ?? '',
+      stock_disponible: oferta?.stock ?? 0,
+      disponible,
+      motivo,
+      id_precio_historial: linea.id_precio_historial,
+      reserva_vence: linea.reserva?.fecha_vence.toISOString() ?? null,
     };
   }
 
-  /**
-   * `HDEL` de una o mas lineas del carrito -- usado solo cuando
-   * `QUITAR_LINEAS_NO_DISPONIBLES_AL_PAGAR` esta en `true` y el checkout
-   * encontro lineas que ya no se pueden comprar. La compra de todos modos
-   * se rechaza (409); esto solo deja el carrito limpio para el proximo
-   * intento.
-   *
-   * Tambien borra el campo ticket companero (`t:<id_oferta>`) de cada
-   * linea, si tenia -- sin esto, quedaria un ticket huerfano en el
-   * carrito, apuntando a una linea que ya no esta. Y si esa linea todavia
-   * tenia una reserva de inventario limitado viva (por ejemplo, la oferta
-   * se pauso pero su venta relampago sigue abierta en Redis), se suelta
-   * con `devolver` antes de quitarla -- si no, la reserva quedaria colgada
-   * hasta que venza su TTL. Una reserva ya vencida (`reserva_vencida`)
-   * contesta `SIN_TICKET` sin efecto, no es un error.
-   */
-  private async quitarLineasDelCarrito(
+  /** Como quiere Redis que quede PostgreSQL: sus lineas, con sus tickets. */
+  private deseadasDesdeRedis(hash: HashCarrito): LineaDeseada[] {
+    return Object.entries(hash.lineas).map(([id, foto]) => {
+      const idOferta = Number(id);
+      const ticket = hash.tickets[idOferta] ?? null;
+      return {
+        id_oferta: idOferta,
+        cantidad: foto.cantidad,
+        id_precio_historial: foto.id_precio_historial ?? null,
+        nombre_producto: foto.nombre_producto,
+        nombre_variante: foto.nombre_variante,
+        id_producto: foto.id_producto,
+        id_producto_variante: foto.id_producto_variante,
+        reserva:
+          ticket == null
+            ? null
+            : {
+                ticket,
+                fecha_vence: foto.reserva_vence
+                  ? new Date(foto.reserva_vence)
+                  : new Date(
+                      Date.now() +
+                        TTL_RESERVA_INVENTARIO_LIMITADO_SEGUNDOS * 1000,
+                    ),
+              },
+      };
+    });
+  }
+
+  /** Una linea de PostgreSQL tal cual, para reescribirla sin cambios. */
+  private deseadaDesdePostgres(linea: LineaCarritoPostgres): LineaDeseada {
+    return {
+      id_oferta: linea.id_oferta,
+      cantidad: linea.cantidad,
+      id_precio_historial: linea.id_precio_historial,
+      nombre_producto: linea.nombre_producto,
+      nombre_variante: linea.nombre_variante,
+      id_producto: linea.id_producto,
+      id_producto_variante: linea.id_producto_variante,
+      reserva:
+        linea.reserva == null
+          ? null
+          : {
+              ticket: linea.reserva.ticket,
+              fecha_vence: linea.reserva.fecha_vence,
+            },
+    };
+  }
+
+  private resumenDe(lineas: LineaDeseada[]): ResumenCarrito {
+    return {
+      total_lineas: lineas.length,
+      total_items: lineas.reduce((suma, l) => suma + l.cantidad, 0),
+    };
+  }
+
+  /** Redis y PostgreSQL cuentan lo mismo: misma version y mismas lineas con mismas cantidades. */
+  private coincide(hash: HashCarrito, postgres: CarritoPostgres): boolean {
+    if (hash.version !== postgres.version) {
+      return false;
+    }
+    const enRedis = Object.entries(hash.lineas);
+    if (enRedis.length !== postgres.lineas.length) {
+      return false;
+    }
+    const cantidades = new Map(
+      postgres.lineas.map((l) => [l.id_oferta, l.cantidad]),
+    );
+    return enRedis.every(
+      ([id, foto]) => cantidades.get(Number(id)) === foto.cantidad,
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Checkout: privados
+  // ---------------------------------------------------------------------
+
+  /** El carrito para comprar, bloqueado, y si se acaba de vencer. */
+  private async leerParaComprar(
+    cliente: PoolClient,
     idUsuario: string,
-    idsOferta: number[],
-  ): Promise<void> {
-    const { tickets } = await this.leerHashCompleto(idUsuario);
-    const conReserva = idsOferta
-      .filter((id) => tickets[id] != null)
-      .map((id) => ({ idOferta: id, ticket: tickets[id] }));
-    if (conReserva.length > 0) {
-      await this.devolverReservas(idUsuario, conReserva);
-    }
-
-    try {
-      const campos = idsOferta.flatMap((id) => [
-        String(id),
-        this.campoTicket(id),
-      ]);
-      await redis.hdel(this.clave(idUsuario), ...campos);
-    } catch (error) {
-      manejarErrorRedis(this.logger, error);
-    }
+  ): Promise<{ carrito: CarritoPostgres | null; vencido: boolean }> {
+    const { rows } = await cliente.query<{ vencido: boolean }>(
+      `SELECT p.fecha_ultima_actividad <= now() - make_interval(secs => $2) AS vencido
+         FROM pedido p
+         JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
+        WHERE p.id_usuario = $1 AND ep.estado_pedido_nombre = 'pendiente'`,
+      [idUsuario, VIDA_CARRITO_SEGUNDOS],
+    );
+    const vencido = rows[0]?.vencido === true;
+    const carrito = await this.carritoPostgres.leerEnTransaccion(
+      cliente,
+      idUsuario,
+      true,
+    );
+    return { carrito, vencido };
   }
 
-  /**
-   * De las lineas del carrito, las de inventario limitado que tienen una
-   * reserva viva (campo `t:<id_oferta>` en el hash) junto con su numero de
-   * ticket. Una sola lectura del hash (`HGETALL`), barata porque el
-   * carrito es chico.
-   */
-  private async leerLineasConReserva(
-    idUsuario: string,
-    lineas: CarritoLinea[],
-  ): Promise<{ idOferta: number; ticket: number }[]> {
-    const { tickets } = await this.leerHashCompleto(idUsuario);
-    return lineas
-      .filter((linea) => tickets[linea.id_oferta] != null)
-      .map((linea) => ({
-        idOferta: linea.id_oferta,
-        ticket: tickets[linea.id_oferta],
-      }));
+  // ---------------------------------------------------------------------
+  // Privados
+  // ---------------------------------------------------------------------
+
+  private validarIdOferta(valor: string): number {
+    if (!REGEX_ID.test(valor)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    return Number(valor);
   }
 
-  /**
-   * Tras un pago exitoso, marca como vendidas (op `confirmar` de
-   * `redis/inventario_limitado.lua`) las reservas de inventario limitado
-   * del carrito.
-   *
-   * Best-effort a proposito: cuando esto corre, `comprar_carrito()` ya
-   * cerro la venta en PostgreSQL, que es el libro contable real (con su
-   * `FOR UPDATE`). Si `confirmar` falla aca -- Redis caido, o el ticket ya
-   * vencio -- NO se deshace la compra: se registra y se sigue. Una reserva
-   * que quedo sin confirmar vence sola a los 15 min y `cosechar` devuelve
-   * su unidad al contador de Redis; es un desajuste chico y acotado entre
-   * los dos contadores, no una sobreventa, y `revertir` borra las claves
-   * de Redis cuando la venta cierra. Mismo criterio que el recalculo de
-   * Mongo de mas abajo.
-   */
-  private async confirmarReservas(
-    idUsuario: string,
-    lineas: { idOferta: number; ticket: number }[],
-  ): Promise<void> {
-    for (const { idOferta, ticket } of lineas) {
-      try {
-        const { resultado } = await this.inventarioLimitadoService.confirmar(
-          idOferta,
-          idUsuario,
-          ticket,
-        );
-        if (resultado !== 'CONFIRMADO') {
-          this.logger.warn(
-            `Reserva de inventario limitado no confirmada (oferta ${idOferta}, ticket ${ticket}): ${resultado}. La compra ya se concreto en PostgreSQL.`,
-          );
-        }
-      } catch (error) {
-        this.logger.error(
-          `No se pudo confirmar la reserva de inventario limitado (oferta ${idOferta}, ticket ${ticket}); la compra ya se concreto: ` +
-            (error instanceof Error ? error.message : String(error)),
-        );
-      }
+  /** Ver el carrito tambien renueva el reloj de PostgreSQL, como mucho cada 5 min. */
+  private tocarPostgres(idUsuario: string): void {
+    const ahora = Date.now();
+    if (ahora - (this.tocados.get(idUsuario) ?? 0) < TOCAR_POSTGRES_CADA_MS) {
+      return;
     }
+    this.tocados.set(idUsuario, ahora);
+    void this.carritoPostgres.tocar(idUsuario);
   }
 
-  /**
-   * El pago no se concreto: suelta (op `devolver`) las reservas de
-   * inventario limitado que se habian tomado, para que sus unidades
-   * vuelvan al contador en el acto. Best-effort y nunca lanza: ya estamos
-   * en el camino de error (o de vaciado manual), y el 409/503 original es
-   * el que tiene que llegar al cliente. Si `devolver` falla, la reserva
-   * vence sola igual a los 15 min.
-   */
-  private async devolverReservas(
-    idUsuario: string,
-    lineas: { idOferta: number; ticket: number }[],
-  ): Promise<void> {
-    for (const { idOferta, ticket } of lineas) {
-      try {
-        await this.inventarioLimitadoService.devolver(
-          idOferta,
-          idUsuario,
-          ticket,
-        );
-      } catch (error) {
-        this.logger.error(
-          `No se pudo devolver la reserva de inventario limitado (oferta ${idOferta}, ticket ${ticket}): ` +
-            (error instanceof Error ? error.message : String(error)),
-        );
-      }
-    }
-  }
-
-  /**
-   * Compara el precio GUARDADO en la foto de Redis de cada linea (lo que
-   * `GET /carrito` le mostro al cliente la ultima vez) contra el precio
-   * actual EN VIVO de esa misma linea. El cliente no manda nada de precios
-   * -- no hay como, y no haria falta: el carrito ya sabe lo que le mostro.
-   * Texto contra texto (los dos `numeric(12,2)` formateados igual por
-   * PostgreSQL) -- exacto, sin el redondeo binario de comparar como numero
-   * de JavaScript. Una linea que no esta en la foto guardada (no deberia
-   * pasar: `guardado` sale del mismo HASH que produjo `lineas`) no genera
-   * aviso, no hay nada que comparar.
-   */
-  private compararPrecios(
-    lineas: CarritoLinea[],
-    guardado: Record<number, LineaCarritoRedis>,
-  ): AvisoPrecioCarrito[] {
-    const avisos: AvisoPrecioCarrito[] = [];
-    for (const linea of lineas) {
-      const precioVisto = guardado[linea.id_oferta]?.precio;
-      if (precioVisto != null && precioVisto !== linea.precio) {
-        avisos.push({
-          id_oferta: linea.id_oferta,
-          nombre_producto: linea.nombre_producto,
-          nombre_variante: linea.nombre_variante,
-          precio_visto: precioVisto,
-          precio_actual: linea.precio,
-        });
-      }
-    }
-    return avisos;
-  }
-
-  private async renovarTtl(idUsuario: string): Promise<void> {
-    try {
-      await redis.expire(this.clave(idUsuario), CarritoService.TTL_SEGUNDOS);
-    } catch (error) {
-      manejarErrorRedis(this.logger, error);
-    }
-  }
+  // ---------------------------------------------------------------------
+  // PostgreSQL: privados
+  // ---------------------------------------------------------------------
 
   private evaluarDisponibilidad(
     oferta: FilaOferta,
@@ -1134,8 +1515,8 @@ export class CarritoService {
       return { disponible: false, motivo: 'oferta_no_disponible' };
     }
     // La variante puede haberse desactivado en el catalogo despues de
-    // agregarla. Si la variante no esta en `variante_catalogo`, `estadoVariante` es
-    // undefined y se deja pasar (el nombre ya sale como "(no encontrada)").
+    // agregarla. Si la variante no esta en `variante_catalogo`,
+    // `estadoVariante` es undefined y se deja pasar.
     if (estadoVariante != null && estadoVariante !== 'activa') {
       return { disponible: false, motivo: 'variante_no_disponible' };
     }
@@ -1148,12 +1529,19 @@ export class CarritoService {
     return { disponible: true, motivo: null };
   }
 
+  /**
+   * Las ofertas en vivo, con todo lo que hace falta para pintar y cobrar una
+   * linea. Con `cliente` corre dentro de esa transaccion y BLOQUEA las
+   * ofertas (`FOR UPDATE OF o`, en orden de id): es la del checkout.
+   */
   private async consultarOfertas(
     idsOferta: number[],
+    cliente?: PoolClient,
   ): Promise<Map<number, FilaOferta>> {
-    try {
-      const resultado = await pool.query<FilaOferta>(
-        `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
+    if (idsOferta.length === 0) {
+      return new Map();
+    }
+    const sql = `SELECT o.id_oferta, o.id_producto_mongo, o.id_producto_variante_mongo,
                 o.precio, o.porcentaje_descuento,
                 ${expresionPrecioFinal('o')}::text AS precio_final,
                 o.stock, eo.estado_oferta_nombre,
@@ -1162,7 +1550,14 @@ export class CarritoService {
                 pc.nombre AS nombre_producto,
                 vc.nombre_variante,
                 vc.estado AS estado_variante,
-                vc.imagen
+                vc.imagen,
+                (SELECT ph.id_precio_historial FROM precio_historial ph
+                  WHERE ph.id_oferta = o.id_oferta
+                  ORDER BY ph.fecha_creacion DESC, ph.id_precio_historial DESC
+                  LIMIT 1) AS id_precio_historial,
+                (o.es_inventario_limitado
+                 AND (o.fecha_vencimiento_venta_limitada IS NULL
+                      OR o.fecha_vencimiento_venta_limitada > now())) AS venta_vigente
            FROM oferta o
            JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
            JOIN usuarios u ON u.id_usuario = o.id_usuario
@@ -1171,13 +1566,19 @@ export class CarritoService {
                  AND vc.id_producto_variante_mongo = o.id_producto_variante_mongo
            LEFT JOIN producto_catalogo pc
                   ON pc.id_producto_mongo = o.id_producto_mongo
-          WHERE o.id_oferta = ANY($1::bigint[])`,
-        [idsOferta],
-      );
+          WHERE o.id_oferta = ANY($1::bigint[])
+          ${cliente != null ? 'ORDER BY o.id_oferta FOR UPDATE OF o' : ''}`;
+    try {
+      const resultado = await (cliente ?? pool).query<FilaOferta>(sql, [
+        idsOferta,
+      ]);
       return new Map(
         resultado.rows.map((fila) => [Number(fila.id_oferta), fila]),
       );
     } catch (error) {
+      if (cliente != null) {
+        throw error;
+      }
       manejarErrorConexion(this.logger, error);
     }
   }
@@ -1205,7 +1606,6 @@ export class CarritoService {
   /**
    * Acepta el `id_direccion` como number o como el string que devuelve
    * GET /direccion-usuario (es un bigint y el driver pg lo da como texto).
-   * Mismo criterio que PedidosCompradorService.
    */
   private resolverIdDireccion(valor: number | string): number {
     const id =
@@ -1221,8 +1621,7 @@ export class CarritoService {
   /**
    * La version mas reciente de esa direccion en `direccion_historial`.
    * Exige que sea de la cuenta logueada -- una direccion ajena da el mismo
-   * 404 que una que no existe. Mismo criterio y misma consulta que
-   * PedidosCompradorService.
+   * 404 que una que no existe.
    */
   private async resolverDireccionHistorial(
     idUsuario: string,
@@ -1253,10 +1652,8 @@ export class CarritoService {
 
   /**
    * 23503 (foreign_key_violation) y 23514 (check_violation): los dos codigos
-   * con los que `crear_pedido` / `agregar_linea` / `comprar_pedido` levantan
-   * sus errores de negocio (oferta inexistente, no activa, sin stock,
-   * direccion ajena, metodo de pago invalido). Mismo criterio que
-   * PedidosCompradorService.
+   * con los que `comprar_pedido` / `cambiar_direccion_pedido` levantan sus
+   * errores de negocio (sin stock, metodo de pago invalido, direccion).
    */
   private esErrorDeNegocio(error: unknown): boolean {
     const codigo = (error as { code?: string } | undefined)?.code;

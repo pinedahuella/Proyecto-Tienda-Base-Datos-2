@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { redis } from '../../database/redis';
+import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import {
   ErrorConflicto,
@@ -44,23 +45,28 @@ redis.defineCommand('inventarioLimitado', {
   lua: readFileSync(RUTA_SCRIPT, 'utf8'),
 });
 
-/**
- * `redimensionar-reserva.lua` vive en `elementos Generales/plan pendiente/`
- * (DENTRO de `backend/`, a diferencia del script de arriba): es la
- * operacion provisional que escribio Claude, no el companero -- ver
- * `plan pendiente/inventario-limitado.md` y
- * `cambio_propuestas/2026-09-03_1700-redimensionar-reserva-lua.md`. El
- * dia que el companero la revise y la sume a `inventario_limitado.lua`,
- * esta constante y su `defineCommand` se borran.
+/*
+ * `redimensionar` ya es una rama de `redis/inventario_limitado.lua` (el
+ * companero la sumo alla). Hasta el 2026-10-17 el backend cargaba todavia la
+ * copia provisional de `plan pendiente/redimensionar-reserva.lua`, que no
+ * comprobaba que la venta existiera (`campo('stock') or 0`): si Redis perdia
+ * la venta contestaba AGOTADO en vez de SIN_OFERTA y dejaba un hash con solo
+ * `rechazos`. Ahora se usa la rama del original, que si lo comprueba.
  */
-const RUTA_SCRIPT_REDIMENSIONAR = join(
+
+/**
+ * `restaurar-venta-relampago.lua`, mismo caso que el de arriba: provisional,
+ * en `plan pendiente/`, sobre las mismas dos claves. Reconstruye el estado de
+ * Redis desde PostgreSQL (ver `restaurar()` de abajo).
+ */
+const RUTA_SCRIPT_RESTAURAR = join(
   __dirname,
-  '../../../elementos Generales/plan pendiente/redimensionar-reserva.lua',
+  '../../../elementos Generales/plan pendiente/restaurar-venta-relampago.lua',
 );
 
-redis.defineCommand('redimensionarReserva', {
+redis.defineCommand('restaurarVentaRelampago', {
   numberOfKeys: 2,
-  lua: readFileSync(RUTA_SCRIPT_REDIMENSIONAR, 'utf8'),
+  lua: readFileSync(RUTA_SCRIPT_RESTAURAR, 'utf8'),
 });
 
 type ComandoInventarioLimitado = (
@@ -79,7 +85,7 @@ interface FilaOfertaLimitada {
 /** La primera palabra que devuelven `reservar` / `redimensionar` de Redis. */
 export type ResultadoReservar = 'VENDIDO' | 'AGOTADO' | 'SIN_OFERTA';
 export type ResultadoRedimensionar =
-  'REDIMENSIONADO' | 'AGOTADO' | 'TICKET_AJENO';
+  'REDIMENSIONADO' | 'AGOTADO' | 'TICKET_AJENO' | 'SIN_OFERTA';
 export type ResultadoConfirmar = 'CONFIRMADO' | 'SIN_TICKET' | 'TICKET_AJENO';
 export type ResultadoDevolver = 'DEVUELTO' | 'SIN_TICKET' | 'TICKET_AJENO';
 
@@ -163,6 +169,17 @@ export interface EstadoVentaLimitada {
 export class InventarioLimitadoService {
   private readonly logger = new Logger(InventarioLimitadoService.name);
 
+  /**
+   * Ofertas cuyo estado de Redis hay que reconstruir desde PostgreSQL en la
+   * proxima pasada de `ReservasVentaRelampagoSyncService`: una reserva que
+   * PostgreSQL rechazo, una compra hecha con Redis caido, un cierre que no
+   * pudo borrar sus claves.
+   */
+  private readonly porRestaurar = new Set<number>();
+
+  /** Las que estan restaurandose ahora: dos restauraciones de la misma oferta no se pisan. */
+  private readonly restaurando = new Map<number, Promise<unknown>>();
+
   constructor(
     private readonly registroOfertasRedis: RegistroOfertasRedisService,
   ) {}
@@ -229,27 +246,17 @@ export class InventarioLimitadoService {
     }
 
     try {
-      // Llamado como metodo (redisExtendido.inventarioLimitado(...)) y no
-      // extraido a una variable aparte: ioredis necesita su propio `this`
-      // (el cliente) para resolver el comando definido -- una funcion
-      // suelta lo pierde y revienta con un error críptico ("Cannot read
-      // properties of undefined (reading 'options')").
-      const redisExtendido = redis as unknown as {
-        inventarioLimitado: ComandoInventarioLimitado;
-      };
-      const resultado = await redisExtendido.inventarioLimitado(
-        this.clave(idOferta),
-        this.claveReservas(idOferta),
-        'sembrar',
-        fila.stock,
-        ttlSegundos,
-      );
-      return { stock_sembrado: Number(resultado[1]) };
+      // Antes era `sembrar` (del script original), que reinicia el contador
+      // de tickets en 0: un carrito con el ticket 3 de una venta anterior
+      // chocaba con el ticket 3 de otra persona en la nueva. `restaurar`
+      // siembra desde PostgreSQL (la verdad) y sigue numerando desde el
+      // ticket mas alto que esta oferta haya repartido.
+      const { stock_libre } = await this.restaurarAhora(idOferta);
+      return { stock_sembrado: stock_libre };
     } catch (error) {
       // El UPDATE de arriba ya se comprometio. Si Redis falla aca, hay
       // que deshacerlo -- si no, la oferta queda marcada como limitada en
-      // Postgres sin nada sembrado en Redis, y nadie podria comprarla por
-      // ningun camino hasta que alguien note el error a mano.
+      // Postgres sin nada sembrado en Redis.
       try {
         await pool.query(
           `UPDATE oferta
@@ -275,8 +282,20 @@ export class InventarioLimitadoService {
       throw new ErrorValidacion('El id de la oferta no es valido');
     }
 
+    // En UNA transaccion: apagar la oferta y devolver sus reservas activas.
+    // El UPDATE de `oferta` toma la fila primero (mismo orden que el checkout:
+    // oferta -> reserva), asi que un checkout que estaba confirmando una de
+    // estas reservas termina antes, y una reserva ya confirmada no se toca.
+    let cliente: PoolClient;
+    let usuarios: string[] = [];
     try {
-      const resultado = await pool.query(
+      cliente = await pool.connect();
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+    try {
+      await cliente.query('BEGIN');
+      const resultado = await cliente.query(
         `UPDATE oferta
             SET es_inventario_limitado = false, fecha_vencimiento_venta_limitada = NULL
           WHERE id_oferta = $1
@@ -286,18 +305,212 @@ export class InventarioLimitadoService {
       if (resultado.rowCount === 0) {
         throw new ErrorNoEncontrado('No existe una oferta con ese id');
       }
+      usuarios = await devolverReservasDeOferta(cliente, idOferta);
+      await cliente.query('COMMIT');
     } catch (error) {
+      await cliente.query('ROLLBACK').catch(() => undefined);
       if (error instanceof ErrorNoEncontrado) {
         throw error;
       }
       manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
     }
 
+    // PostgreSQL ya cerro la venta, que es lo que vale. Si Redis no responde,
+    // sus claves se borran en la proxima reconciliacion (restaurar una oferta
+    // sin venta vigente las borra) en vez de devolver un 503 que diria que no
+    // se cerro.
+    await this.soltarTicketsDeCarritos(idOferta, usuarios);
     try {
       await redis.del(this.clave(idOferta), this.claveReservas(idOferta));
     } catch (error) {
-      manejarErrorRedis(this.logger, error);
+      this.logger.warn(
+        `La venta relampago de la oferta ${idOferta} se cerro en PostgreSQL pero no se pudieron borrar sus claves de Redis (se reintenta sola): ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.marcarParaRestaurar(idOferta);
     }
+  }
+
+  /**
+   * La venta cerro: el ticket de esta oferta se quita del carrito de Redis de
+   * quienes tenian reserva, para que su linea se vea como una normal y no como
+   * una reserva vencida. La linea se queda. No lanza: si Redis no esta, el
+   * ticket queda huerfano y es inofensivo (la reserva ya se devolvio en
+   * PostgreSQL y el checkout la trata como linea normal).
+   */
+  async soltarTicketsDeCarritos(
+    idOferta: number,
+    usuarios: string[],
+  ): Promise<void> {
+    for (const idUsuario of usuarios) {
+      await redis
+        .hdel(`mesh:carrito:${idUsuario}`, `t:${idOferta}`)
+        .catch(() => undefined);
+    }
+  }
+
+  /** Pide que la proxima reconciliacion reconstruya Redis para esta oferta. */
+  marcarParaRestaurar(idOferta: number): void {
+    this.porRestaurar.add(idOferta);
+  }
+
+  /** Las marcadas hasta ahora, y las olvida: quien las pide las va a restaurar. */
+  tomarPorRestaurar(): number[] {
+    const ids = [...this.porRestaurar];
+    this.porRestaurar.clear();
+    return ids;
+  }
+
+  /**
+   * Reconstruye el estado de Redis de una oferta desde PostgreSQL, que es la
+   * verdad: el stock libre (`oferta.stock` menos las reservas activas sin
+   * vencer), cada reserva viva con SU ticket y SU vencimiento, y el contador
+   * de tickets desde el mas alto que la oferta repartio en toda su historia.
+   * Las reservas hechas solo en PostgreSQL (Redis caido, `ticket` NULL)
+   * reciben un ticket aqui y se guarda.
+   *
+   * Si la oferta ya no tiene una venta vigente, borra sus claves de Redis y
+   * devuelve `false`. No lanza: es reconciliacion. Si falla, la deja marcada
+   * para la proxima pasada.
+   */
+  async restaurar(idOferta: number): Promise<boolean> {
+    try {
+      await this.restaurarAhora(idOferta);
+      return true;
+    } catch (error) {
+      if (error instanceof SinVentaVigente) {
+        return false;
+      }
+      this.logger.warn(
+        `No se pudo restaurar la venta relampago de la oferta ${idOferta}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.marcarParaRestaurar(idOferta);
+      return false;
+    }
+  }
+
+  /** Igual que `restaurar`, pero lanza. Una sola a la vez por oferta. */
+  private async restaurarAhora(
+    idOferta: number,
+  ): Promise<{ stock_libre: number }> {
+    const enCurso = this.restaurando.get(idOferta);
+    if (enCurso != null) {
+      await enCurso.catch(() => undefined);
+    }
+    const promesa = this.restaurarSinCandado(idOferta);
+    this.restaurando.set(idOferta, promesa);
+    try {
+      return await promesa;
+    } finally {
+      if (this.restaurando.get(idOferta) === promesa) {
+        this.restaurando.delete(idOferta);
+      }
+    }
+  }
+
+  private async restaurarSinCandado(
+    idOferta: number,
+  ): Promise<{ stock_libre: number }> {
+    const { rows: ofertas } = await pool.query<{
+      stock: number;
+      vigente: boolean;
+      ttl: number;
+      ticket_base: string;
+    }>(
+      `SELECT o.stock,
+              (o.es_inventario_limitado
+               AND (o.fecha_vencimiento_venta_limitada IS NULL
+                    OR o.fecha_vencimiento_venta_limitada > now())) AS vigente,
+              COALESCE(CEIL(EXTRACT(EPOCH FROM
+                  o.fecha_vencimiento_venta_limitada - now())), 0)::int AS ttl,
+              COALESCE((SELECT MAX(r.ticket) FROM reserva_venta_relampago r
+                         WHERE r.id_oferta = o.id_oferta), 0) AS ticket_base
+         FROM oferta o
+        WHERE o.id_oferta = $1`,
+      [idOferta],
+    );
+    const oferta = ofertas[0];
+    if (oferta == null || !oferta.vigente) {
+      await redis
+        .del(this.clave(idOferta), this.claveReservas(idOferta))
+        .catch(() => undefined);
+      throw new SinVentaVigente();
+    }
+
+    const { rows: reservas } = await pool.query<{
+      id_reserva: string;
+      ticket: string | null;
+      id_usuario: string;
+      cantidad: number;
+      vence_ms: string;
+    }>(
+      `SELECT r.id_reserva, r.ticket, r.id_usuario, r.cantidad,
+              (EXTRACT(EPOCH FROM r.fecha_vence) * 1000)::bigint AS vence_ms
+         FROM reserva_venta_relampago r
+        WHERE r.id_oferta = $1
+          AND r.id_estado_reserva = (SELECT id_estado_reserva FROM estado_reserva_venta_relampago
+                                      WHERE estado_reserva_nombre = 'activa')
+          AND r.fecha_vence > now()
+        ORDER BY r.id_reserva`,
+      [idOferta],
+    );
+
+    // El contador de Redis puede ir mas adelante que PostgreSQL (un ticket que
+    // Redis dio y todavia no se guardo): nunca se retrocede.
+    const [ticketRedis, vendidasRedis] = await redis.hmget(
+      this.clave(idOferta),
+      'ticket',
+      'vendidas',
+    );
+    const base = Math.max(Number(oferta.ticket_base), Number(ticketRedis ?? 0));
+    const reservado = reservas.reduce((suma, r) => suma + r.cantidad, 0);
+    const stockLibre = Math.max(0, oferta.stock - reservado);
+
+    const argv: (string | number)[] = [
+      'restaurar',
+      stockLibre,
+      // 0 = sin vencimiento. Una que vence se redondea hacia arriba (CEIL)
+      // para que Redis no cierre antes que PostgreSQL.
+      oferta.ttl > 0 ? oferta.ttl : 0,
+      base,
+      Number(vendidasRedis ?? 0),
+      reservas.length,
+    ];
+    for (const r of reservas) {
+      argv.push(
+        r.ticket == null ? 0 : Number(r.ticket),
+        r.id_usuario,
+        r.cantidad,
+        Number(r.vence_ms),
+      );
+    }
+
+    const redisExtendido = redis as unknown as {
+      restaurarVentaRelampago: ComandoInventarioLimitado;
+    };
+    const respuesta = await redisExtendido.restaurarVentaRelampago(
+      this.clave(idOferta),
+      this.claveReservas(idOferta),
+      ...argv,
+    );
+
+    // Las que no tenian ticket (reservadas con Redis caido) ya tienen uno.
+    const asignados = respuesta.slice(3).map(Number);
+    for (let i = 0; i < reservas.length; i++) {
+      if (reservas[i].ticket == null) {
+        await pool.query(
+          `UPDATE reserva_venta_relampago SET ticket = $2
+            WHERE id_reserva = $1 AND ticket IS NULL`,
+          [reservas[i].id_reserva, asignados[i]],
+        );
+      }
+    }
+
+    this.logger.log(
+      `venta relampago de la oferta ${idOferta} restaurada desde PostgreSQL: ${stockLibre} libre(s), ${reservas.length} reserva(s)`,
+    );
+    return { stock_libre: stockLibre };
   }
 
   /**
@@ -370,10 +583,10 @@ export class InventarioLimitadoService {
   ): Promise<RespuestaRedimensionar> {
     try {
       const redisExtendido = redis as unknown as {
-        redimensionarReserva: ComandoInventarioLimitado;
+        inventarioLimitado: ComandoInventarioLimitado;
       };
       const [resultado, ticket, numero] =
-        await redisExtendido.redimensionarReserva(
+        await redisExtendido.inventarioLimitado(
           this.clave(idOferta),
           this.claveReservas(idOferta),
           'redimensionar',
@@ -538,4 +751,32 @@ export class InventarioLimitadoService {
       manejarErrorConexion(this.logger, error);
     }
   }
+}
+
+/** `restaurar` sobre una oferta que ya no tiene venta relampago vigente. */
+class SinVentaVigente extends Error {}
+
+/**
+ * Las reservas activas de una oferta pasan a `devuelta`: la venta relampago
+ * cerro (a mano, por una regla o porque vencio). Corre dentro de la
+ * transaccion que la cierra, despues del UPDATE de `oferta`. La comparten
+ * `InventarioLimitadoService.revertir` y el worker que apaga las vencidas
+ * (`VentasLimitadasService`).
+ */
+export async function devolverReservasDeOferta(
+  cliente: PoolClient,
+  idOferta: number,
+): Promise<string[]> {
+  const { rows } = await cliente.query<{ id_usuario: string }>(
+    `UPDATE reserva_venta_relampago
+        SET id_estado_reserva = (SELECT id_estado_reserva FROM estado_reserva_venta_relampago
+                                  WHERE estado_reserva_nombre = 'devuelta'),
+            fecha_cierre = now()
+      WHERE id_oferta = $1
+        AND id_estado_reserva = (SELECT id_estado_reserva FROM estado_reserva_venta_relampago
+                                  WHERE estado_reserva_nombre = 'activa')
+  RETURNING id_usuario`,
+    [idOferta],
+  );
+  return [...new Set(rows.map((r) => r.id_usuario))];
 }
