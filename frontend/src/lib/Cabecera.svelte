@@ -16,6 +16,7 @@
 		verificarSesion
 	} from './sesion';
 	import { carrito } from './estadoCarrito.svelte';
+	import { avisos } from './seguimientos.svelte';
 
 	/**
 	 * Cabecera del sitio. Se queda pegada arriba al bajar.
@@ -100,8 +101,12 @@
 	let soyDesarrollador = $derived(esCuentaDesarrollador(correo));
 
 	onMount(async () => {
-		// Si me la pasan, no pregunto: el panel ya hizo esa consulta.
-		if (sesion !== undefined) return;
+		// Si me la pasan, no pregunto: el panel ya hizo esa consulta. Los avisos
+		// del "avisame" si se cuentan, que el panel no los trae.
+		if (sesion !== undefined) {
+			if (sesion) void avisos.recontar();
+			return;
+		}
 
 		// Primero lo guardado, para no parpadear mientras se pregunta. Es
 		// justo para esto que existe leerSesion(); quien manda es el backend.
@@ -114,7 +119,10 @@
 			propioVendedor = usuario?.id_rol_usuario === ID_ROL_VENDEDOR;
 			// La burbuja del carrito solo se cuenta si hay alguien dentro: sin
 			// sesion, /comprador/pedidos contesta 401 y no hay nada que contar.
-			if (usuario) await carrito.recontar();
+			if (usuario) {
+				void avisos.recontar();
+				await carrito.recontar();
+			}
 		} catch {
 			// SesionIndeterminada: se cayo el servidor, NO la sesion. Sacar a
 			// alguien aqui seria mentirle: se deja lo que ya se sabia.
@@ -282,6 +290,14 @@
 				     carrito, que es LA accion de una tienda. -->
 				<nav class="fila">
 					<a class="navegar" href="/pedidos">Mis pedidos</a>
+					<!-- Los avisos del "avisame": solo salen cuando hay alguno sin leer,
+					     para no sumar otro enlace fijo a la fila. La lista completa esta
+					     en Mi perfil. -->
+					{#if avisos.noLeidos > 0}
+						<a class="navegar" href="/panel?s=avisos">
+							Avisos <span class="burbuja">{avisos.noLeidos}</span>
+						</a>
+					{/if}
 					<!-- "Admin" y "Mi perfil" son DOS cosas y antes eran una sola pantalla
 					     mezclada. Admin lleva a lo de administrar el sistema (reportes,
 					     cuentas, fraude, tendencias) y solo sale en cuentas de admin. Mi
@@ -329,6 +345,9 @@
 
 					<div id="menu-cuenta" class="menu" class:abierto={menuAbierto}>
 						<a class="opcion" href="/pedidos" onclick={() => cerrarMenu()}>Mis pedidos</a>
+						<a class="opcion" href="/panel?s=avisos" onclick={() => cerrarMenu()}>
+							Avisos{#if avisos.noLeidos > 0}<span class="burbuja">{avisos.noLeidos}</span>{/if}
+						</a>
 						{#if soyAdmin}
 							<a class="opcion" href="/panel?s=reportes" onclick={() => cerrarMenu()}>Admin</a>
 						{/if}

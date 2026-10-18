@@ -6,6 +6,7 @@
 	import { pedir } from '$lib/api';
 	import { textoPorcentaje } from '$lib/descuento';
 	import { sesionAnalitica } from '$lib/sesionAnalitica';
+	import EstanteCombos from '$lib/EstanteCombos.svelte';
 	import EstanteRecomendados, {
 		type ProductoRecomendado,
 		type Recomendado
@@ -1478,6 +1479,7 @@
 				items={paraTi}
 			/>
 			<EstanteRecomendados id="t-vistos" titulo="Viste hace poco" items={vistosHacePoco} />
+			<EstanteCombos />
 		{/if}
 
 		<!-- Los filtros. Cada cambio vuelve a preguntarle al backend.

@@ -13,8 +13,6 @@
 		type Pais
 	} from './lugares';
 	import {
-		cambiarDireccionPedido,
-		comprarPedido,
 		crearDireccion,
 		direccionEnUnaLinea,
 		quetzales,
@@ -22,10 +20,8 @@
 		totalPedido,
 		traerDirecciones,
 		traerMetodosPago,
-		traerPedido,
 		type AvisoDePrecio,
 		type DatosTarjeta,
-		type DireccionDelPedido,
 		type DireccionUsuario,
 		type LineaPedido,
 		type MetodoPago,
@@ -33,23 +29,24 @@
 	} from './pedido';
 
 	/**
-	 * El paso final: elegir forma de pago, meter la tarjeta si toca, y cerrar
-	 * la compra con POST /comprador/pedidos/:id/comprar.
+	 * El paso final: elegir a donde se entrega y como se paga, y cerrar la
+	 * compra con POST /carrito/comprar.
 	 *
-	 * Se pinta como una ventana modal encima del carrito, no como otra pagina:
-	 * lo que se esta comprando es justo lo que hay detras, y mandar a la
-	 * persona a otra ruta la obligaria a acordarse de lo que habia.
+	 * Se pinta como una ventana modal encima de todo, no como otra pagina: lo
+	 * que se esta comprando es el carrito, y mandar a la persona a otra ruta la
+	 * obligaria a acordarse de lo que habia.
 	 *
-	 * Aqui tambien se ensena y se cambia A DONDE SE ENTREGA. El pedido nace en
-	 * la ficha del producto con la PRIMERA direccion que tenga la persona, sin
-	 * preguntarle: si tiene tres, la que se usa es al azar desde su punto de
-	 * vista. Este es el ultimo sitio donde se puede corregir, porque despues de
-	 * comprar el pedido ya no admite el PATCH.
+	 * Desde el 2026-10-17 (carrito-postgres-verdad.md de Jose David) el carrito
+	 * es el pedido `pendiente` de la cuenta en PostgreSQL, con una copia rapida
+	 * en Redis. La compra lo compra entero en una transaccion: la direccion
+	 * viaja EN el cuerpo, porque el carrito no la tiene hasta pagar. Hasta esa
+	 * fecha esta pantalla tenia ademas un modo "pedido" que compraba con
+	 * POST /comprador/pedidos/:id/comprar; esas rutas ya no existen y el modo
+	 * se quito.
 	 *
-	 * Esta pantalla NO decide el precio. El precio se congelo al agregar cada
-	 * linea (`agregar_linea` guarda el id de la fila de `precio_historial` que
-	 * regia ese dia) y es el que se cobra, aunque el vendedor lo haya subido
-	 * despues. Aqui solo se ensena y, si cambio, se avisa.
+	 * Esta pantalla NO decide el precio. Cada linea del carrito guarda el que
+	 * la persona vio al agregarla, y el backend lo compara con el de hoy al
+	 * cobrar. Aqui solo se ensena y, si cambio, se avisa.
 	 *
 	 * Lo unico que hace falta entender de la respuesta de comprar es que tiene
 	 * CUATRO finales distintos, y solo uno es "salio mal":
@@ -59,43 +56,30 @@
 	 *                         que verlos antes. Se repite la MISMA peticion con
 	 *                         confirmar_cambios para seguir.
 	 *   402                   el cobro simulado se rechazo. Se puede reintentar
-	 *                         con otra tarjeta, el pedido sigue intacto.
-	 *   409                   la oferta se pauso o ya no hay unidades. Esto no
-	 *                         se salta con ninguna bandera: hay que arreglar el
+	 *                         con otra tarjeta, el carrito sigue intacto.
+	 *   409                   la oferta se pauso, no hay unidades, el carrito
+	 *                         vencio o no quedo guardado en PostgreSQL. Esto no
+	 *                         se salta con ninguna bandera: hay que volver al
 	 *                         carrito, asi que aqui no se ofrece "seguir igual".
 	 */
-
 	let {
 		abierto = false,
-		idPedido,
 		lineas = [],
 		alCerrar,
 		alComprado,
-		modo = 'pedido',
+		alVolverAlCarrito,
 		alExpirarSesion
 	}: {
 		abierto?: boolean;
-		idPedido: string | null;
+		/** Solo para pintar el resumen: el backend compra el carrito entero. */
 		lineas?: LineaPedido[];
 		alCerrar?: () => void;
 		alComprado?: (resultado: ResultadoCompra) => void;
 		/**
-		 * De donde sale lo que se compra.
-		 *
-		 *   'pedido'  el de siempre: hay una fila de `pedido` en `pendiente`,
-		 *             la direccion se le puso antes con un PATCH, y se compra
-		 *             con POST /comprador/pedidos/:id/comprar
-		 *   'carrito' el de la Entrega 2: el carrito vive en Redis y no hay
-		 *             pedido todavia. La direccion viaja EN el cuerpo de la
-		 *             compra, y POST /carrito/comprar crea el pedido, le mete
-		 *             las lineas y lo compra de una sola vez.
-		 *
-		 * Todo lo demas -- elegir direccion, crear una nueva, la forma de pago,
-		 * la tarjeta -- es identico, y por eso esto es un modo y no un segundo
-		 * componente: duplicar 1800 lineas para cambiar la ultima llamada seria
-		 * garantizar que las dos se separen.
+		 * Cierra esta ventana y vuelve a abrir el carrito. Es la salida de un
+		 * 409: la linea que hay que quitar o ajustar esta alla, no aqui.
 		 */
-		modo?: 'pedido' | 'carrito';
+		alVolverAlCarrito?: () => void;
 		alExpirarSesion?: () => void;
 	} = $props();
 
@@ -107,22 +91,17 @@
 	let metodoElegido = $state('');
 
 	/**
-	 * Las direcciones VIVAS del usuario (las que se pueden elegir) y la version
-	 * CONGELADA que hoy tiene el pedido. No son la misma cosa: el pedido guarda
-	 * una fila de direccion_historial, asi que si la persona corrigio la
-	 * direccion despues de abrir el pedido, lo que se entrega sigue siendo la
-	 * version vieja hasta que se vuelva a poner con el PATCH.
+	 * Las direcciones VIVAS del usuario, las que se pueden elegir. La que se
+	 * marca viaja en el cuerpo de POST /carrito/comprar, y el backend guarda
+	 * esa version en direccion_historial al comprar.
 	 */
 	let direcciones = $state<DireccionUsuario[]>([]);
-	let direccionPedido = $state<DireccionDelPedido | null>(null);
-	/** El radio marcado. Se guarda aparte para poder devolverlo si el PATCH falla. */
+	/** El radio marcado: la direccion a la que se entrega. */
 	let idElegida = $state('');
 	let cargandoEntrega = $state(false);
 	/** true solo cuando la lista de direcciones llego de verdad. Ver `sinDirecciones`. */
 	let listaLeida = $state(false);
 	let errorEntrega = $state('');
-	let cambiandoDireccion = $state(false);
-	let errorCambio = $state('');
 
 	let formNueva = $state(false);
 	let dirPais = $state('');
@@ -217,6 +196,15 @@
 	let rechazo = $state('');
 	/** El mensaje del 409: la oferta cambio. Este no se reintenta desde aqui. */
 	let bloqueo = $state('');
+	/**
+	 * El 409 de "tu carrito no quedo guardado del todo": la copia de Redis a
+	 * PostgreSQL fallo o choco, y el backend no compra lo que no es verdad. Se
+	 * arregla con POST /carrito/sincronizar, y despues hay que REVISAR el
+	 * carrito (si mando PostgreSQL, puede no ser lo que se veia). No hay codigo
+	 * aparte en la respuesta, asi que se reconoce por su mensaje.
+	 */
+	let desincronizado = $derived(/sincroniza/i.test(bloqueo));
+	let sincronizando = $state(false);
 	/** Las lineas cuyo precio de hoy ya no es el congelado. Ver el bloque de avisos. */
 	let avisos = $state<AvisoDePrecio[]>([]);
 
@@ -230,22 +218,13 @@
 	/**
 	 * La clave de cada linea en el resumen.
 	 *
-	 * NO puede ser `id_pedido_producto` a secas, y esto tumbaba la pantalla:
-	 * en modo carrito ese campo llega VACIO en todas las lineas -- lo crea la
-	 * compra, y aqui todavia no hay pedido (ver `aLineasDePedido` en
-	 * CarritoRedis.svelte). Con una sola linea no se notaba; con dos, las dos
-	 * claves eran `''`, Svelte reventaba con `each_key_duplicate` y el
-	 * checkout entero dejaba de pintarse: el boton de pagar no aparecia y no
-	 * habia forma de comprar.
-	 *
-	 * `id_oferta` sirve para los dos modos: el carrito de Redis guarda UNA
-	 * linea por oferta (PUT /carrito/lineas/:idOferta fija la cantidad
-	 * absoluta), y en un pedido dos lineas del mismo producto son de ofertas
-	 * distintas -- otra variante, u otro vendedor.
-	 *
+	 * NO puede ser `id_pedido_producto`: ese campo llega VACIO en todas las
+	 * lineas (ver `aLineasDePedido` en CarritoRedis.svelte), y con dos lineas
+	 * las dos claves eran `''`, Svelte reventaba con `each_key_duplicate` y el
+	 * checkout entero dejaba de pintarse. `id_oferta` sirve: el carrito guarda
+	 * UNA linea por oferta (PUT /carrito/lineas/:idOferta fija la cantidad).
 	 * Se prefiere `id_pedido_producto` cuando existe porque es la identidad de
-	 * verdad de la fila: si algun dia un pedido llegara a tener dos lineas de
-	 * la misma oferta, ese id las sigue distinguiendo.
+	 * verdad de la fila.
 	 */
 	function claveLinea(l: LineaPedido): string {
 		return l.id_pedido_producto !== '' && l.id_pedido_producto != null
@@ -261,78 +240,22 @@
 	let sinDirecciones = $derived(listaLeida && direcciones.length === 0);
 
 	/**
-	 * La fila VIVA de la que salio la version congelada del pedido, y si las dos
-	 * ya no dicen lo mismo.
-	 *
-	 * Pasa de verdad: se abre el pedido, se corrige la direccion en el panel, y
-	 * el pedido sigue apuntando a la version de antes -- que es lo correcto (un
-	 * pedido recuerda a donde se dijo que se mandaba), pero nadie lo adivina
-	 * viendo una sola linea. Se comparan por su texto, que es justo lo que la
-	 * persona lee.
-	 */
-	let vivaDelPedido = $derived(
-		direcciones.find((d) => d.id_direccion === direccionPedido?.id_direccion) ?? null
-	);
-	let textoViva = $derived(vivaDelPedido ? direccionEnUnaLinea(vivaDelPedido) : '');
-	let entregaDesactualizada = $derived(
-		direccionPedido != null && textoViva !== '' && textoViva !== direccionEnUnaLinea(direccionPedido)
-	);
-
-	/**
 	 * Con un 409 en pantalla el boton de confirmar desaparece a proposito: la
 	 * unica salida es volver al carrito y quitar o cambiar esa linea.
 	 *
-	 * Sin direccion en pantalla tampoco se paga: no por capricho del backend
-	 * (comprar no la pide), sino porque nadie deberia pagar un envio sin haber
-	 * leido a donde va. Mientras el PATCH esta en vuelo se espera: la direccion
-	 * de la pantalla todavia no es la que quedo.
-	 *
-	 * Guardar una direccion nueva cuenta igual, y no es lo mismo que el PATCH:
-	 * entre el POST que la crea y el PATCH que se la pone al pedido, lo que hay
-	 * en pantalla sigue siendo la direccion VIEJA. Sin esperar aqui, quien
-	 * acaba de escribir a donde quiere que le llegue podria pulsar Pagar en ese
-	 * hueco y comprar a la de antes -- justo lo que esta pantalla existe para
-	 * que no pase.
+	 * Sin direccion elegida tampoco se paga: nadie deberia pagar un envio sin
+	 * haber leido a donde va. Mientras se guarda una direccion nueva se
+	 * espera: hasta que vuelve, la marcada sigue siendo la de antes.
 	 */
-	/**
-	 * Las dos condiciones que cambian entre los modos, y por que.
-	 *
-	 * En modo carrito NO hay `idPedido` (lo crea la compra) ni
-	 * `direccionPedido` (no hay pedido al que ponersela). Lo que sustituye a
-	 * las dos es `idElegida`: la direccion que la persona marco aqui y que
-	 * viaja en el cuerpo de POST /carrito/comprar.
-	 *
-	 * Exigir las de arriba en modo carrito dejaba el boton apagado para
-	 * siempre, sin decir por que -- se veia igual que si estuviera roto.
-	 */
-	let listoElPedido = $derived(
-		modo === 'carrito' ? idElegida !== '' : idPedido != null && direccionPedido != null
-	);
-
-	/**
-	 * A donde se entrega, en los dos modos.
-	 *
-	 * En modo pedido la verdad es la del pedido, que ya la guardo el servidor.
-	 * En modo carrito el pedido no existe todavia, asi que es la que este
-	 * marcada en la lista -- la misma que viaja en POST /carrito/comprar.
-	 *
-	 * Existe para que el pie de la pantalla no tenga que preguntar por
-	 * `direccionPedido`, que en carrito es null siempre.
-	 */
-	let entregaFinal = $derived(
-		modo === 'carrito'
-			? (direcciones.find((d) => d.id_direccion === idElegida) ?? null)
-			: direccionPedido
-	);
+	let entregaFinal = $derived(direcciones.find((d) => d.id_direccion === idElegida) ?? null);
 
 	let sePuedeConfirmar = $derived(
 		!cobrando &&
 			!vacio &&
 			bloqueo === '' &&
 			metodoElegido !== '' &&
-			listoElPedido &&
+			entregaFinal != null &&
 			!sinDirecciones &&
-			!cambiandoDireccion &&
 			!guardandoDireccion
 	);
 
@@ -400,97 +323,35 @@
 
 	// ------------------------------------------------------------- entrega
 	/**
-	 * La lista de direcciones y el pedido, a la vez: ninguna depende de la
-	 * otra. Hacen falta las dos porque el pedido solo dice CUAL tiene puesta
-	 * (con su id_direccion dentro de la version congelada), no cuales hay.
+	 * Las direcciones de la CUENTA. El carrito no tiene direccion hasta pagar
+	 * (045: id_direccion_historial va NULL mientras el pedido es pendiente), asi
+	 * que no hay una "del pedido" que preseleccionar: se marca la primera. Con
+	 * una sola direccion, el caso normal, eso evita un paso que no decide nada;
+	 * con varias, se puede cambiar.
 	 */
 	async function cargarEntrega() {
-		const id = idPedido;
 		const mia = ++cargaEntrega;
 
 		errorEntrega = '';
-		errorCambio = '';
-
-		// En modo carrito NO hay pedido, y eso es lo normal: el pedido lo crea
-		// la compra. Las direcciones se leen igual -- son de la CUENTA, no del
-		// pedido -- y la elegida viaja despues en el cuerpo de
-		// POST /carrito/comprar.
-		//
-		// Sin esta rama la pantalla salia sin una sola direccion y con el boton
-		// de pagar apagado para siempre, porque el unico camino que las cargaba
-		// pedia un idPedido que en este modo nunca existe.
-		if (modo === 'carrito') {
-			cargandoEntrega = true;
-			const rDir = await traerDirecciones();
-			if (mia !== cargaEntrega) return;
-			cargandoEntrega = false;
-
-			if (expiro(rDir)) return;
-
-			if (rDir.ok && Array.isArray(rDir.payload)) {
-				direcciones = rDir.payload;
-				listaLeida = true;
-				// No hay direccion "del pedido" que preseleccionar, asi que se
-				// elige la primera. Con una sola direccion -- el caso normal --
-				// eso evita un paso que no decide nada; con varias, se puede
-				// cambiar.
-				direccionPedido = null;
-				idElegida = direcciones[0]?.id_direccion ?? '';
-			} else {
-				direcciones = [];
-				listaLeida = false;
-				idElegida = '';
-				errorEntrega = motivo(rDir, 'No se pudieron leer tus direcciones');
-			}
-			return;
-		}
-
-		if (id == null) {
-			// Sin pedido no hay direccion de entrega que ensenar. No es un error
-			// que haya que gritar: el boton de pagar ya esta apagado por eso.
-			//
-			// El "Cargando..." se apaga aqui aunque esta carga no lo encendiera:
-			// pudo dejarlo puesto una anterior que ya no manda, y esa no lo va a
-			// apagar. Sin esto la seccion se quedaba cargando para siempre.
-			direcciones = [];
-			direccionPedido = null;
-			idElegida = '';
-			listaLeida = false;
-			cargandoEntrega = false;
-			return;
-		}
-
 		cargandoEntrega = true;
-		const [rDirecciones, rPedido] = await Promise.all([traerDirecciones(), traerPedido(id)]);
-
+		const rDir = await traerDirecciones();
 		// Una carga vieja no escribe nada, ni siquiera apaga el "Cargando...":
 		// el de la nueva sigue puesto a proposito.
 		if (mia !== cargaEntrega) return;
 		cargandoEntrega = false;
 
-		// El `||` corta si la primera ya era un 401, para no sacar a la persona
-		// dos veces por la misma sesion caducada.
-		if (expiro(rDirecciones) || expiro(rPedido)) return;
+		if (expiro(rDir)) return;
 
-		if (rDirecciones.ok && Array.isArray(rDirecciones.payload)) {
-			direcciones = rDirecciones.payload;
+		if (rDir.ok && Array.isArray(rDir.payload)) {
+			direcciones = rDir.payload;
 			listaLeida = true;
+			idElegida = direcciones[0]?.id_direccion ?? '';
 		} else {
 			direcciones = [];
 			listaLeida = false;
-			errorEntrega = motivo(rDirecciones, 'No se pudieron leer tus direcciones');
+			idElegida = '';
+			errorEntrega = motivo(rDir, 'No se pudieron leer tus direcciones');
 		}
-
-		if (rPedido.ok && rPedido.payload != null) {
-			direccionPedido = rPedido.payload.direccion ?? null;
-		} else {
-			direccionPedido = null;
-			if (errorEntrega === '') {
-				errorEntrega = motivo(rPedido, 'No se pudo leer la direccion de este pedido');
-			}
-		}
-
-		idElegida = direccionPedido?.id_direccion ?? '';
 	}
 
 	/**
@@ -507,105 +368,8 @@
 		return r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
 	}
 
-	/**
-	 * Vuelve a leer el pedido para saber que direccion quedo de VERDAD.
-	 *
-	 * La respuesta del PATCH devuelve el id que se le mando, no lo que guardo,
-	 * asi que pintarla seria pintar lo que uno creyo. Si la relectura falla se
-	 * deja en null a proposito: ensenar la de antes junto a un error dejaria a
-	 * la vista una direccion que ya puede no ser la del pedido.
-	 */
-	async function releerPedido(id: string): Promise<boolean> {
-		const r = await traerPedido(id);
-
-		if (expiro(r)) return false;
-
-		if (!r.ok || r.payload == null) {
-			direccionPedido = null;
-			errorEntrega = motivo(r, 'No se pudo leer la direccion de este pedido');
-			return false;
-		}
-
-		errorEntrega = '';
-		direccionPedido = r.payload.direccion ?? null;
-		return direccionPedido != null;
-	}
-
-	/**
-	 * Pone esa direccion en el pedido. Solo funciona mientras sigue pendiente,
-	 * que es justo el caso de esta pantalla; un pedido ya comprado contesta 409
-	 * y se ensena tal cual, sin traducirlo.
-	 */
-	async function ponerDireccion(idDireccion: string): Promise<boolean> {
-		// En modo carrito no hay pedido al que ponerle la direccion: todavia no
-		// existe. Se elige aqui y viaja en el cuerpo de POST /carrito/comprar.
-		// Devolver true no es mentir: la direccion QUEDO elegida, que es lo que
-		// esta funcion promete a quien la llama.
-		if (modo === 'carrito') return true;
-
-		const id = idPedido;
-		if (id == null || idDireccion === '') return false;
-
-		cambiandoDireccion = true;
-		errorCambio = '';
-
-		const r = await cambiarDireccionPedido(id, idDireccion);
-
-		if (expiro(r)) {
-			cambiandoDireccion = false;
-			return false;
-		}
-
-		if (!r.ok) {
-			cambiandoDireccion = false;
-			errorCambio = motivo(r, 'No se pudo cambiar la direccion del pedido');
-			return false;
-		}
-
-		const leido = await releerPedido(id);
-		cambiandoDireccion = false;
-		return leido;
-	}
-
-	/**
-	 * El boton de "usar la version de hoy": es la MISMA direccion, asi que solo
-	 * hay que volver a ponerla para que el pedido apunte a su version nueva.
-	 *
-	 * El radio se resincroniza igual que al elegir otra, y por lo mismo: si la
-	 * relectura falla, el pedido se queda sin direccion conocida, y dejar un
-	 * punto marcado ahi diria que se entrega en un sitio que ya nadie sabe si
-	 * es el del pedido.
-	 */
-	async function reponerLaDeHoy() {
-		const idDireccion = direccionPedido?.id_direccion ?? '';
-		if (idDireccion === '') return;
-
-		await ponerDireccion(idDireccion);
-		idElegida = direccionPedido?.id_direccion ?? '';
-	}
-
-	async function elegirDireccion(idDireccion: string) {
-		if (idDireccion === idElegida || cambiandoDireccion) return;
-
-		// Se marca antes de que conteste el servidor para que el radio no se
-		// quede saltando, y despues se deja el que diga el pedido: si el PATCH
-		// fallo, el punto vuelve solo a donde estaba.
+	function elegirDireccion(idDireccion: string) {
 		idElegida = idDireccion;
-		await ponerDireccion(idDireccion);
-
-		// Esa relectura es SOLO del modo pedido, y olvidarlo rompia el otro.
-		//
-		// En modo carrito no hay pedido, asi que `direccionPedido` es null
-		// SIEMPRE y esta linea dejaba `idElegida` en '': marcabas una direccion
-		// y se desmarcaba sola, sin ningun error. Y como `listoElPedido` en
-		// este modo es justo `idElegida !== ''`, quedaba sin poder pagar.
-		//
-		// `ponerDireccion` ya trae su rama para el carrito -- se acordaron de
-		// esta funcion y no de la de al lado. Por eso el candado va aqui y no
-		// dentro: la que sabe si hay pedido del que releer es esta.
-		if (modo !== 'carrito') {
-			idElegida = direccionPedido?.id_direccion ?? '';
-		}
 	}
 
 	/**
@@ -684,30 +448,12 @@
 	}
 
 	/**
-	 * Crea la direccion y ademas la deja usada para ESTE envio: crearla sola no
+	 * Crea la direccion y ademas la deja marcada para ESTE envio: crearla sola no
 	 * cambia a donde se entrega, y quien la escribe aqui la escribe para esta
-	 * compra.
-	 *
-	 * Como se "usa" depende del modo, igual que en `cargarEntrega` y en
-	 * `listoElPedido`:
-	 *
-	 *   modo pedido   -> se le pone al pedido con un PATCH (hay fila que tocar)
-	 *   modo carrito  -> se marca en `idElegida`, que es lo que viaja despues en
-	 *                    el cuerpo de POST /carrito/comprar
-	 *
-	 * Esta rama FALTABA y era un callejon sin salida: en modo carrito no hay
-	 * `idPedido` -- lo crea la compra -- asi que el formulario contestaba "No
-	 * hay un pedido abierto al que ponersela" y no guardaba nada. A quien no
-	 * tuviera ya una direccion guardada le dejaba el checkout muerto: no podia
-	 * crearla aqui, y sin direccion el boton de pagar nunca se enciende.
+	 * compra. Es la que viaja despues en el cuerpo de POST /carrito/comprar.
 	 */
 	async function crearYUsar(evento: SubmitEvent) {
 		evento.preventDefault();
-
-		if (modo === 'pedido' && idPedido == null) {
-			errorNueva = 'No hay un pedido abierto al que ponersela';
-			return;
-		}
 
 		const problema = revisarDireccion();
 		if (problema !== '') {
@@ -744,7 +490,7 @@
 		if (!r.ok || r.payload == null) {
 			guardandoDireccion = false;
 			// El `ok` sin payload es el caso feo: la direccion SI se creo, pero sin
-			// su id no hay con que ponersela al pedido. Se dice eso, no el mensaje
+			// su id no hay con que marcarla. Se dice eso, no el mensaje
 			// de exito del backend, y no se cierra el formulario: volver a mandarla
 			// crearia una copia.
 			errorNueva = motivo(
@@ -754,27 +500,12 @@
 			return;
 		}
 
-		// Ya existe aunque el PATCH de despues falle, asi que entra en la lista
-		// igual: perderla de vista obligaria a escribirla otra vez.
 		const nueva = r.payload;
 		direcciones = [nueva, ...direcciones];
 		listaLeida = true;
-
-		// En modo carrito no hay pedido al que ponersela: basta con marcarla.
-		// Es la misma direccion que viaja en el cuerpo de la compra, asi que
-		// con esto el boton de pagar ya se enciende.
-		if (modo === 'carrito') {
-			guardandoDireccion = false;
-			idElegida = nueva.id_direccion;
-			cerrarNueva();
-			return;
-		}
-
-		const puesta = await ponerDireccion(nueva.id_direccion);
 		guardandoDireccion = false;
-
-		idElegida = direccionPedido?.id_direccion ?? '';
-		if (puesta) cerrarNueva();
+		idElegida = nueva.id_direccion;
+		cerrarNueva();
 	}
 
 	/**
@@ -969,13 +700,7 @@
 	 * vuelve a avisar y no compra.
 	 */
 	async function confirmar(confirmarCambios = false) {
-		// En modo carrito NO hay idPedido, y no es un error: lo crea la propia
-		// compra. Solo el modo viejo lo exige.
-		if (modo === 'pedido' && idPedido == null) {
-			error = 'No hay un pedido abierto que comprar';
-			return;
-		}
-		if (modo === 'carrito' && idElegida === '') {
+		if (idElegida === '') {
 			error = 'Elige una direccion de entrega';
 			return;
 		}
@@ -1028,18 +753,15 @@
 		// Si algo no cuadra, el backend no cobra nada y contesta
 		// `comprado: false` con los `avisos`. La segunda pulsacion manda
 		// `confirmar_cambios: true` y acepta el precio de hoy.
-		const r =
-			modo === 'carrito'
-				? await pedir<ResultadoCompra>(
-						'/carrito/comprar',
-						conJson('POST', {
-							id_direccion: idElegida,
-							metodo_pago: cuerpo.metodo_pago,
-							...(cuerpo.tarjeta ? { tarjeta: cuerpo.tarjeta } : {}),
-							...(confirmarCambios ? { confirmar_cambios: true } : {})
-						})
-					)
-				: await comprarPedido(idPedido as string, cuerpo);
+		const r = await pedir<ResultadoCompra>(
+			'/carrito/comprar',
+			conJson('POST', {
+				id_direccion: idElegida,
+				metodo_pago: cuerpo.metodo_pago,
+				...(cuerpo.tarjeta ? { tarjeta: cuerpo.tarjeta } : {}),
+				...(confirmarCambios ? { confirmar_cambios: true } : {})
+			})
+		);
 		cobrando = false;
 
 		if (expiro(r)) return;
@@ -1068,21 +790,10 @@
 			// ok con comprado:false NO es un fallo: no se toco el stock, ni el
 			// pago, ni el estado del pedido. Es la unica parada antes de cobrar.
 			//
-			// LAS DOS RUTAS NO MANDAN EL MISMO AVISO, y hay que normalizarlo.
-			//
-			//   pedido    { id_pedido_producto, precio_congelado, precio_actual }
-			//   carrito   { id_oferta,          precio_visto,     precio_actual }
-			//
-			// Los nombres distintos no son un descuido de nadie: describen cosas
-			// distintas. En el pedido el precio esta CONGELADO y el aviso dice
-			// "esto vale otra cosa hoy, pero te cobro el tuyo". En el carrito la
-			// foto de Redis no congela nada: el aviso dice "esto ya no vale lo
-			// que viste, y si sigues te cobro el de hoy". Son avisos opuestos.
-			//
-			// Se traducen al tipo del pedido porque es el que pinta la tabla, y
-			// la tabla ya distingue los dos casos por el modo. Meter aqui un
-			// `as` para taparlo compilaria y ensenaria celdas vacias: los campos
-			// no existen con ese nombre.
+			// El aviso del carrito es { id_oferta, precio_visto, precio_actual }
+			// y la tabla pinta AvisoDePrecio, que viene de la compra de un pedido
+			// (id_pedido_producto, precio_congelado). Se traduce campo por campo:
+			// un `as` compilaria y ensenaria celdas vacias.
 			avisos = (r.payload.avisos ?? []).map((a) => {
 				const c = a as unknown as Partial<AvisoDePrecio> & {
 					id_oferta?: number;
@@ -1119,6 +830,39 @@
 		}
 
 		error = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+	}
+
+	// ------------------------------------------------------- volver al carrito
+	/**
+	 * La salida de un 409. Antes solo cerraba esta ventana, y el carrito ya se
+	 * habia cerrado al pasar al pago: la persona se quedaba en la ficha sin ver
+	 * la linea que tenia que arreglar.
+	 */
+	function volverAlCarrito() {
+		if (cobrando || sincronizando) return;
+		if (alVolverAlCarrito) alVolverAlCarrito();
+		else alCerrar?.();
+	}
+
+	/**
+	 * POST /carrito/sincronizar decide quien tiene razon (si a PostgreSQL le
+	 * falta la ultima escritura de Redis, la vuelve a copiar; si PostgreSQL es
+	 * mas nuevo, Redis se rehace desde ahi) y devuelve el carrito como queda.
+	 * Despues se vuelve al carrito a REVISARLO: si mando PostgreSQL, puede no
+	 * ser lo que se veia, y cobrarlo de una vez seria cobrar algo no leido.
+	 */
+	async function guardarYRevisar() {
+		sincronizando = true;
+		const r = await pedir('/carrito/sincronizar', { method: 'POST' });
+		sincronizando = false;
+
+		if (expiro(r)) return;
+		if (!r.ok) {
+			error = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
+			return;
+		}
+		bloqueo = '';
+		volverAlCarrito();
 	}
 
 	// -------------------------------------------------------------- rotulos
@@ -1179,26 +923,8 @@
 				{#if cargandoEntrega}
 					<p class="quieto">Cargando la direccion de entrega...</p>
 				{:else}
-					{#if direccionPedido}
-						<p class="actual">{direccionEnUnaLinea(direccionPedido)}</p>
-
-						{#if entregaDesactualizada}
-							<!-- El pedido guarda una VERSION, no la direccion viva: si se
-							     corrigio despues de abrirlo, sigue apuntando a la de antes
-							     hasta que se vuelva a poner. -->
-							<p class="menor eleccion">
-								Esa es la version que se guardo al abrir el pedido. Esa misma
-								direccion hoy dice <strong>{textoViva}</strong>.
-							</p>
-							<button
-								type="button"
-								class="enlace"
-								disabled={cobrando || cambiandoDireccion || guardandoDireccion}
-								onclick={reponerLaDeHoy}
-							>
-								Entregar en la version de hoy
-							</button>
-						{/if}
+					{#if entregaFinal}
+						<p class="actual">{direccionEnUnaLinea(entregaFinal)}</p>
 					{/if}
 
 					{#if sinDirecciones}
@@ -1224,7 +950,7 @@
 							type="button"
 							class="reintentar"
 							onclick={cargarEntrega}
-							disabled={cambiandoDireccion || guardandoDireccion}
+							disabled={guardandoDireccion}
 						>
 							Reintentar
 						</button>
@@ -1241,7 +967,7 @@
 										type="radio"
 										name="direccion-entrega"
 										checked={idElegida === d.id_direccion}
-										disabled={cobrando || cambiandoDireccion || guardandoDireccion}
+										disabled={cobrando || guardandoDireccion}
 										onchange={() => elegirDireccion(d.id_direccion)}
 									/>
 									<span class="datos">
@@ -1250,14 +976,6 @@
 								</label>
 							{/each}
 						</div>
-					{/if}
-
-					{#if cambiandoDireccion}
-						<p class="quieto" role="status">Cambiando la direccion del pedido...</p>
-					{/if}
-
-					{#if errorCambio}
-						<p class="malo" role="alert">{errorCambio}</p>
 					{/if}
 
 					{#if formNueva}
@@ -1356,7 +1074,7 @@
 							type="button"
 							class="enlace"
 							onclick={abrirNueva}
-							disabled={cobrando || cambiandoDireccion}
+							disabled={cobrando}
 						>
 							{sinDirecciones ? 'Agregar una direccion' : 'Usar otra direccion'}
 						</button>
@@ -1399,28 +1117,15 @@
 					</p>
 					<!-- Se dice aqui y no solo cuando cambia: es la regla del modelo,
 					     y saberla antes evita la sorpresa de ver otro precio en la
-					     ficha del producto.
-
-					     Y el texto DEPENDE DEL MODO, porque la regla no es la misma
-					     en los dos. En modo pedido el precio se congelo de verdad al
-					     agregar la linea. En modo carrito, Redis guarda una foto de
-					     cada linea (`id_oferta -> JSON` con precio y descuento), y el
-					     total de arriba sale de esa foto. Al pagar, el backend la
-					     compara con el precio de hoy: si cambio, responde
-					     `comprado:false` con avisos y solo cobra el nuevo cuando la
-					     persona confirma. Por eso aqui no se promete el precio de
-					     ahora sino el aviso. Es la misma frase que en CarritoRedis. -->
-					{#if modo === 'carrito'}
-						<p class="menor nota">
-							Ves el precio de cuando agregaste cada producto. Si cambia antes de
-							pagar, te avisamos antes de cobrar.
-						</p>
-					{:else}
-						<p class="menor nota">
-							Se cobra el precio que quedo congelado al agregar cada linea, aunque el
-							vendedor lo haya cambiado despues.
-						</p>
-					{/if}
+					     ficha del producto. Cada linea guarda el precio que se vio al
+					     agregarla; al pagar, el backend lo compara con el de hoy y,
+					     si cambio, responde `comprado:false` con avisos y solo cobra
+					     el nuevo cuando la persona confirma. Es la misma frase que en
+					     CarritoRedis. -->
+					<p class="menor nota">
+						Ves el precio de cuando agregaste cada producto. Si cambia antes de
+						pagar, te avisamos antes de cobrar.
+					</p>
 				{/if}
 			</section>
 
@@ -1538,45 +1243,21 @@
 			{#if avisos.length > 0}
 				<section class="bloque aviso" role="status">
 					<h3>Hay precios que cambiaron</h3>
-					<!--
-						El texto cambia con el modo porque LO QUE PASA es distinto, y
-						decirlo igual en los dos seria mentir en uno.
-
-						En modo pedido el precio SI esta congelado: se cobra el que se
-						guardo al agregar la linea, y el de hoy es solo informacion.
-
-						En modo carrito lo guardado es solo una FOTO del precio que se
-						vio al agregar: no obliga a nadie, y si sigues se cobra el de
-						HOY. Aqui la pantalla enseno un numero y el cobro va a ser
-						otro, asi que el aviso tiene que decir cual de los dos manda.
-					-->
-					{#if modo === 'carrito'}
-						<p class="menor">
-							Todavia no se compro nada. El precio cambio desde que lo agregaste: si
-							sigues, se te cobra el precio de hoy.
-						</p>
-					{:else}
-						<p class="menor">
-							Todavia no se compro nada. Estas lineas valen hoy otra cosa, pero se te
-							cobra el precio congelado:
-						</p>
-					{/if}
+					<!-- Lo que se vio al agregar no obliga a nadie: si sigues, se cobra el
+					     precio de HOY. La pantalla enseno un numero y el cobro va a ser
+					     otro, asi que el aviso tiene que decir cual de los dos manda. -->
+					<p class="menor">
+						Todavia no se compro nada. El precio cambio desde que lo agregaste: si
+						sigues, se te cobra el precio de hoy.
+					</p>
 
 					<div class="rodillo">
 						<table>
 							<thead>
 								<tr>
 									<th scope="col">Linea</th>
-									<!--
-										En modo carrito las dos columnas significan lo contrario
-										que en modo pedido, y por eso cambian de nombre. Alla la
-										primera es la que se cobra; aqui la que se cobra es la
-										segunda, la de hoy. Dejarlas con el mismo encabezado
-										haria que la tabla dijera exactamente al reves de lo que
-										va a pasar.
-									-->
-									<th scope="col">{modo === 'carrito' ? 'Lo que viste' : 'Se te cobra'}</th>
-									<th scope="col">{modo === 'carrito' ? 'Se te cobra hoy' : 'Precio de hoy'}</th>
+									<th scope="col">Lo que viste</th>
+									<th scope="col">Se te cobra hoy</th>
 								</tr>
 							</thead>
 							<tbody>
@@ -1616,11 +1297,26 @@
 				     pedido ya estaba comprado seria mandar a arreglar algo que no
 				     esta roto. El motivo exacto ya lo dice el backend arriba. -->
 				<div class="malo" role="alert">
-					<p>{bloqueo}</p>
-					<p class="menor">
-						Esto no se salta confirmando: vuelve al carrito, revisa lo que llevas y
-						vuelve a intentarlo.
-					</p>
+					{#if desincronizado}
+						<!-- El mensaje del backend nombra la ruta; a la persona le basta
+						     saber que paso y que hacer. -->
+						<p>Tu carrito no quedo guardado del todo y no se cobro nada.</p>
+						<p class="menor">Guardalo y revisalo antes de pagar.</p>
+						<button
+							type="button"
+							class="reintentar"
+							disabled={sincronizando}
+							onclick={guardarYRevisar}
+						>
+							{sincronizando ? 'Guardando...' : 'Guardar y revisar el carrito'}
+						</button>
+					{:else}
+						<p>{bloqueo}</p>
+						<p class="menor">
+							Esto no se salta confirmando: vuelve al carrito, revisa lo que llevas y
+							vuelve a intentarlo.
+						</p>
+					{/if}
 				</div>
 			{/if}
 
@@ -1632,13 +1328,6 @@
 			<!-- La direccion otra vez, pegada al boton que cobra: arriba se pudo
 			     leer hace tres pantallas de scroll, y lo que importa es que se lea
 			     en el momento de pagar. -->
-			<!--
-				`direccionPedido` es la del PEDIDO, y en modo carrito no hay pedido:
-				es null siempre. Preguntando solo por ella, este pie enseñaba el
-				aviso rojo "no se sabe a donde se entrega" con la direccion marcada
-				ahi arriba, en la misma pantalla. Decia que faltaba algo que no
-				faltaba, justo al lado del boton de pagar.
-			-->
 			{#if entregaFinal}
 				<p class="entrega-pie">
 					Se entrega en <strong>{direccionEnUnaLinea(entregaFinal)}</strong>
@@ -1651,7 +1340,11 @@
 			{/if}
 
 			<footer class="pie">
-				<button type="button" onclick={intentarCerrar} disabled={cobrando}>
+				<button
+					type="button"
+					onclick={bloqueo ? volverAlCarrito : intentarCerrar}
+					disabled={cobrando || sincronizando}
+				>
 					{bloqueo ? 'Volver al carrito' : 'Cancelar'}
 				</button>
 

@@ -4,9 +4,12 @@ import { pedir, conJson } from './api';
 /**
  * Todo lo que hace falta para hablar con /comprador/pedidos.
  *
- * La compra sale del carrito de Redis (/carrito y el checkout). Las rutas
- * viejas para abrir un pedido vacio y llenarlo linea por linea siguen en el
- * backend, pero ninguna pantalla las usa, asi que aqui ya no estan.
+ * La compra sale del carrito (/carrito y el checkout, POST /carrito/comprar).
+ * Desde el 2026-10-17 el carrito ES el pedido `pendiente` de la cuenta en
+ * PostgreSQL, con una copia rapida en Redis, y el backend quito las seis
+ * rutas que armaban un pedido a mano (crear, agregar, cambiar y quitar
+ * lineas, cambiar la direccion y comprar): ahora dan 404. El pendiente
+ * tampoco se lista ni se ve por id aqui.
  *
  * Las rutas que se usan (ninguna pide un rol, solo sesion: comprar no es privilegio
  * de nadie, cualquiera con cuenta compra -- tambien un vendedor o un admin):
@@ -14,8 +17,6 @@ import { pedir, conJson } from './api';
  *   GET    /comprador/pedidos                         los mios, resumidos
  *   GET    /comprador/pedidos/metodos-pago            el catalogo de formas de pago
  *   GET    /comprador/pedidos/:id                     el pedido, su direccion y sus lineas
- *   PATCH  /comprador/pedidos/:id                     cambia la direccion de entrega
- *   POST   /comprador/pedidos/:id/comprar             cierra la compra
  *   POST   /comprador/pedidos/:id/cancelar            cancela (y devuelve stock si ya se compro)
  *
  * Se compra una OFERTA, nunca un producto ni una variante: la misma
@@ -395,40 +396,6 @@ export function traerPedido(idPedido: string) {
 /** El catalogo cerrado de formas de pago. Se pide, no se escribe a mano. */
 export function traerMetodosPago() {
 	return pedir<MetodoPago[]>('/comprador/pedidos/metodos-pago');
-}
-
-/**
- * Cambia a donde se entrega un pedido que sigue pendiente.
- *
- * Recibe el `id_direccion` normal, no el del historial: el backend resuelve
- * cual es la version vigente antes de aplicarlo.
- */
-export function cambiarDireccionPedido(idPedido: string, idDireccion: string | number) {
-	return pedir<{ id_pedido: number; id_direccion: number }>(
-		`/comprador/pedidos/${idPedido}`,
-		conJson('PATCH', { id_direccion: idDireccion })
-	);
-}
-
-/**
- * Cierra la compra.
- *
- * `tarjeta` solo va cuando el metodo es "tarjeta". `confirmar_cambios` se
- * manda en el SEGUNDO intento, cuando el primero contesto con avisos de
- * precio: sin el, el backend vuelve a avisar y no compra.
- *
- * Codigos que hay que distinguir arriba:
- *   402  el cobro simulado no paso (tarjeta rechazada, sin fondos...)
- *   409  la oferta se pauso o ya no hay stock. Esto NO se salta con nada.
- */
-export function comprarPedido(
-	idPedido: string,
-	cuerpo: { metodo_pago: string; tarjeta?: DatosTarjeta; confirmar_cambios?: boolean }
-) {
-	return pedir<ResultadoCompra>(
-		`/comprador/pedidos/${idPedido}/comprar`,
-		conJson('POST', cuerpo)
-	);
 }
 
 /**

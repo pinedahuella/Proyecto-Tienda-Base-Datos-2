@@ -23,6 +23,7 @@
 		type Elegidos
 	} from '$lib/buscador';
 	import { registrarClicBusqueda, type FacetasDelClic } from '$lib/eventos';
+	import { seguirBusqueda } from '$lib/seguimientos.svelte';
 
 	/**
 	 * La pagina de resultados del buscador, /buscar?q=...
@@ -253,6 +254,33 @@
 			? `${texto}, se ven los ${resultados.length} mas parecidos`
 			: texto;
 	});
+
+	/**
+	 * El aviso de una busqueda sin resultados. Hasta 100 letras (la regla del
+	 * backend) y, si se escribe, un precio maximo sobre el precio final.
+	 */
+	let precioTope = $state('');
+	let guardandoAviso = $state(false);
+	let avisoBusqueda = $state<{ de: string; texto: string; bien: boolean; entrar?: boolean } | null>(null);
+
+	async function pedirAviso() {
+		const de = consulta;
+		const tope = precioTope.trim().replace(',', '.');
+		if (tope !== '' && !/^\d+(\.\d{1,2})?$/.test(tope)) {
+			avisoBusqueda = { de, texto: 'El precio va en numeros, con hasta 2 decimales.', bien: false };
+			return;
+		}
+		guardandoAviso = true;
+		const r = await seguirBusqueda(de.trim().slice(0, 100), tope || undefined);
+		guardandoAviso = false;
+		if (r.estado === 401) {
+			avisoBusqueda = { de, texto: 'Para pedir un aviso hace falta entrar.', bien: false, entrar: true };
+			return;
+		}
+		avisoBusqueda = r.ok
+			? { de, texto: 'Listo. Te avisamos cuando llegue.', bien: true }
+			: { de, texto: r.mensaje, bien: false };
+	}
 </script>
 
 <svelte:head>
@@ -344,6 +372,25 @@
 				El buscador tolera errores de tecleo y no distingue tildes, asi que si
 				esto sale es que ese producto no esta en el catalogo.
 			</p>
+			<!-- "Avisame cuando llegue" (seguimientos de ofertas, 2026-10-17): se
+			     guarda la busqueda y avisa UNA vez cuando llegue una oferta que
+			     tenga todas sus palabras. -->
+			<div class="seguir">
+				{#if avisoBusqueda && avisoBusqueda.de === consulta}
+					<p class:bien={avisoBusqueda.bien} role="status">
+						{avisoBusqueda.texto}
+						{#if avisoBusqueda.entrar}<a href="/entrar">Iniciar sesion</a>{/if}
+					</p>
+				{:else}
+					<label class="tope">
+						Hasta Q
+						<input type="text" inputmode="decimal" placeholder="sin tope" bind:value={precioTope} />
+					</label>
+					<button type="button" class="boton" disabled={guardandoAviso} onclick={pedirAviso}>
+						{guardandoAviso ? 'Guardando...' : 'Avisame cuando llegue'}
+					</button>
+				{/if}
+			</div>
 			<a class="boton" href="/">Ver todo el catalogo</a>
 		</div>
 	{:else}
@@ -881,5 +928,28 @@
 			border: 1px solid var(--linea);
 			border-radius: 999px;
 		}
+	}
+
+	.seguir {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		margin: 1rem 0;
+	}
+
+	.seguir .tope {
+		display: flex;
+		align-items: center;
+		gap: 0.4rem;
+		font-size: var(--f-sm);
+	}
+
+	.seguir .tope input {
+		width: 7rem;
+	}
+
+	.seguir .bien {
+		color: var(--indigo);
 	}
 </style>

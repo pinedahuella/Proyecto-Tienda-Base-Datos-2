@@ -8,11 +8,13 @@
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
+	import BuscarOfertas from '$lib/BuscarOfertas.svelte';
 	import ReglasDescuento from '$lib/ReglasDescuento.svelte';
 	import ReglasPeriodo from '$lib/ReglasPeriodo.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
 	import PanelFraude from '$lib/PanelFraude.svelte';
 	import AlertasFraudeUsuario from '$lib/AlertasFraudeUsuario.svelte';
+	import AvisosSeguimiento from '$lib/AvisosSeguimiento.svelte';
 	import PanelTendencias from '$lib/PanelTendencias.svelte';
 	import DemoFraude from '$lib/DemoFraude.svelte';
 	import PanelComandos from '$lib/PanelComandos.svelte';
@@ -146,6 +148,7 @@
 				// Distinta de "Fraude": esa es EN VIVO contra el grafo y solo la ve
 				// un admin; esta es "a mi cuenta le paso algo" y la ve cualquiera --
 				// GET /perfil/alertas-fraude, filtrado a la sesion de quien pregunta.
+				{ id: 'avisos', nombre: 'Avisos', pie: 'Lo que pediste que te avisemos cuando llegue o baje de precio' },
 				{ id: 'alertas', nombre: 'Alertas', pie: 'Avisos de seguridad sobre tu propia cuenta' },
 				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 			];
@@ -160,6 +163,7 @@
 					: { id: 'catalogo', nombre: 'Proponer', pie: 'Mandale al catalogo un producto que falte' },
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Como van las que mandaste' },
 				...(veComandos ? [COMANDOS] : []),
+				{ id: 'avisos', nombre: 'Avisos', pie: 'Lo que pediste que te avisemos cuando llegue o baje de precio' },
 				{ id: 'alertas', nombre: 'Alertas', pie: 'Avisos de seguridad sobre tu propia cuenta' },
 				{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 			];
@@ -168,6 +172,7 @@
 		// Un comprador tiene poco que gestionar: su cuenta, sus alertas y por donde seguir.
 		return [
 			...(veComandos ? [COMANDOS] : []),
+			{ id: 'avisos', nombre: 'Avisos', pie: 'Lo que pediste que te avisemos cuando llegue o baje de precio' },
 			{ id: 'alertas', nombre: 'Alertas', pie: 'Avisos de seguridad sobre tu propia cuenta' },
 			{ id: 'cuenta', nombre: 'Mi cuenta', pie: 'Tus datos, tu contrasena y tus direcciones' }
 		];
@@ -190,7 +195,7 @@
 	 * siempre. Lo del vendedor (ofertas, propuestas) es SU trabajo, no un ambito
 	 * aparte.
 	 */
-	const PERSONALES = new Set(['alertas', 'cuenta']);
+	const PERSONALES = new Set(['avisos', 'alertas', 'cuenta']);
 
 	/**
 	 * Tres ambitos, cada uno con su boton en la cabecera (pedido de Meme, 2026-09-25):
@@ -782,6 +787,14 @@
 			     diferencia de "Fraude" (PanelFraude, EN VIVO contra el grafo,
 			     solo admin), esto es "a MI cuenta le paso algo" y lo ve
 			     cualquiera: GET /perfil/alertas-fraude ya filtra por la sesion. -->
+			<!-- Los avisos del "avisame" (seguimientos de ofertas, 2026-10-17). Comun a
+			     todas las cuentas: comprar no es privilegio de ningun rol. -->
+			<div class="hoja" class:oculta={seccionViva !== 'avisos'}>
+				{#if visitadas.has('avisos')}
+					<AvisosSeguimiento alExpirarSesion={expiro} />
+				{/if}
+			</div>
+
 			<div class="hoja" class:oculta={seccionViva !== 'alertas'}>
 				{#if visitadas.has('alertas')}
 					<AlertasFraudeUsuario alExpirarSesion={expiro} alCambiarContrasena={cambiarContrasenaRapido} />
@@ -819,6 +832,7 @@
 
 				<div class="hoja" class:oculta={seccionViva !== 'ofertas'}>
 					{#if visitadas.has('ofertas')}
+						<BuscarOfertas alExpirarSesion={expiro} {administraLaTienda} />
 						<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
 					{/if}
 				</div>
@@ -892,6 +906,7 @@
 					     nadie, mientras que la oferta -- precio, existencias y estado --
 					     si es del vendedor. Es lo suyo, asi que va arriba. -->
 					{#if visitadas.has('ofertas')}
+						<BuscarOfertas alExpirarSesion={expiro} {administraLaTienda} />
 						<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
 					{/if}
 				</div>

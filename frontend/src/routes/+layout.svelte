@@ -30,14 +30,19 @@
 	 * para pintar el resumen del checkout, no para elegir que se cobra.
 	 */
 	function alPedirComprar(idPedido: string, lineas: LineaPedido[]) {
-		// idPedido llega vacio y esta bien: con el carrito en Redis el pedido
-		// NO existe todavia -- lo crea POST /carrito/comprar, en la misma
-		// transaccion en que lo compra. El checkout va en modo "carrito" y no
-		// lo necesita; las lineas siguen sirviendo para pintar el resumen.
+		// idPedido llega vacio y esta bien: el carrito es el pedido pendiente
+		// de la cuenta y POST /carrito/comprar lo compra sin que nadie mande su
+		// id. Las lineas sirven para pintar el resumen.
 		idPedidoAComprar = idPedido || null;
 		lineasAComprar = lineas;
 		carrito.cerrar();
 		checkoutAbierto = true;
+	}
+
+	/** Un 409 del checkout: se arregla en el carrito, asi que se vuelve a el. */
+	function alVolverAlCarrito() {
+		checkoutAbierto = false;
+		carrito.abrir();
 	}
 
 	function alComprado(resultado: ResultadoCompra) {
@@ -108,9 +113,9 @@
 	{@render children()}
 </div>
 
-<!-- El carrito de la Entrega 2: vive en Redis. Reemplazo a Carrito.svelte,
-     que leia una fila de `pedido` en `pendiente` de PostgreSQL con su id en
-     localStorage. Ya no hay id que guardar: el carrito es de la CUENTA. -->
+<!-- El carrito. Desde el 2026-10-17 se escribe en Redis (rapido) y debajo en
+     el pedido `pendiente` de PostgreSQL, que es la verdad. No hay id que
+     guardar en el navegador: el carrito es de la CUENTA y sale del token. -->
 <CarritoRedis
 	abierto={carrito.abierto}
 	alCerrar={() => carrito.cerrar()}
@@ -120,11 +125,10 @@
 
 <Checkout
 	abierto={checkoutAbierto}
-	idPedido={idPedidoAComprar}
 	lineas={lineasAComprar}
-	modo="carrito"
 	alCerrar={() => (checkoutAbierto = false)}
 	{alComprado}
+	{alVolverAlCarrito}
 	alExpirarSesion={sesionExpirada}
 />
 

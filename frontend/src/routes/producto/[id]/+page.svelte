@@ -8,6 +8,7 @@
 	import { carrito } from '$lib/estadoCarrito.svelte';
 	import { registrarVista, registrarCarrito, type OrigenVista } from '$lib/eventos';
 	import { textoPorcentaje, tieneDescuento } from '$lib/descuento';
+	import { seguirBajaDePrecio } from '$lib/seguimientos.svelte';
 	import EstanteRecomendados, {
 		type ProductoRecomendado,
 		type Recomendado
@@ -176,6 +177,58 @@
 				: [];
 	}
 
+	/**
+	 * "Quienes compraron esto tambien compraron": GET /productos/:id/tambien-compraron
+	 * (2026-10-16). Sale del grafo de compras de Neo4j, en vivo: las cuentas que
+	 * compraron este producto y que mas compraron. Es la version por COMPRAS de
+	 * tambien-vieron, que sale de las vistas. Publica, y un producto que nadie
+	 * compro junto con otro contesta [] y el estante no sale.
+	 */
+	let tambienCompraron = $state<Recomendado[]>([]);
+
+	async function traerTambienCompraron(cual: number) {
+		const r = await pedir<{ producto: ProductoRecomendado | null }[]>(`/productos/${cual}/tambien-compraron`);
+		if (cual !== id) return;
+		tambienCompraron =
+			r.ok && Array.isArray(r.payload)
+				? r.payload
+						.filter((f) => f && f.producto && f.producto._id !== cual)
+						.map((f) => ({ producto: f.producto as ProductoRecomendado }))
+				: [];
+	}
+
+	/**
+	 * "Avisame si baja", por presentacion (seguimientos de ofertas, 2026-10-17).
+	 * El backend toma como referencia el precio mas bajo de hoy y avisa una vez
+	 * cuando alguna oferta quede por debajo. La respuesta se pinta en la misma
+	 * presentacion que la pidio.
+	 */
+	let siguiendo = $state<number | null>(null);
+	let respuestaSeguir = $state<{ variante: number; texto: string; bien: boolean } | null>(null);
+
+	async function seguirPrecio(v: Variante) {
+		siguiendo = v.id_producto_variante;
+		respuestaSeguir = null;
+		const r = await seguirBajaDePrecio(id, v.id_producto_variante);
+		siguiendo = null;
+
+		if (r.estado === 401) {
+			haySesion = false;
+			respuestaSeguir = { variante: v.id_producto_variante, texto: 'Inicia sesion para pedir avisos.', bien: false };
+			return;
+		}
+		if (r.ok && r.payload) {
+			const ref = Number(r.payload.precio_referencia ?? 0);
+			respuestaSeguir = {
+				variante: v.id_producto_variante,
+				texto: `Listo. Te avisamos cuando baje de ${quetzales(ref)}.`,
+				bien: true
+			};
+			return;
+		}
+		respuestaSeguir = { variante: v.id_producto_variante, texto: mensajeUtil(r), bien: false };
+	}
+
 	async function traer(cual: number) {
 		cargando = true;
 		error = '';
@@ -183,6 +236,8 @@
 		elegida = 0;
 		tambienVieron = [];
 		similares = [];
+		tambienCompraron = [];
+		respuestaSeguir = null;
 
 		if (!Number.isInteger(cual) || cual < 1) {
 			error = 'Ese no es un numero de producto valido';
@@ -210,6 +265,7 @@
 			registrarVista(cual, origen);
 			void traerTambienVieron(cual);
 			void traerSimilares(cual);
+			void traerTambienCompraron(cual);
 		} else if (r.estado === 404) {
 			error = 'Ese producto no esta en el catalogo publico';
 		} else {
@@ -1031,6 +1087,23 @@
 								<p class="entrar-aviso">
 									<a href="/entrar">Inicia sesion</a> para agregar al pedido.
 								</p>
+							{:else}
+								<!-- El "avisame si baja" va debajo de las ofertas y no junto a
+								     cada una: sigue la PRESENTACION, de cualquier vendedor. -->
+								<div class="seguir">
+									<button
+										type="button"
+										disabled={siguiendo !== null}
+										onclick={() => seguirPrecio(v)}
+									>
+										{siguiendo === v.id_producto_variante ? 'Guardando...' : 'Avisame si baja de precio'}
+									</button>
+									{#if respuestaSeguir && respuestaSeguir.variante === v.id_producto_variante}
+										<span class:bien={respuestaSeguir.bien} class:malo={!respuestaSeguir.bien} role="status">
+											{respuestaSeguir.texto}
+										</span>
+									{/if}
+								</div>
 							{/if}
 
 						{/if}
@@ -1111,6 +1184,11 @@
 		{#if producto}
 			<EstanteRecomendados id="t-similares" titulo="Parecidos a este" items={similares} />
 			<EstanteRecomendados id="t-tambien-vieron" titulo="Quienes vieron esto tambien vieron" items={tambienVieron} />
+			<EstanteRecomendados
+				id="t-tambien-compraron"
+				titulo="Quienes lo compraron tambien llevaron"
+				items={tambienCompraron}
+			/>
 		{/if}
 	</div>
 </main>
@@ -1654,6 +1732,40 @@
 
 	/* El aviso de iniciar sesion, con la caja del acento: es una invitacion a
 	   hacer algo, no una aclaracion. */
+	.seguir {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 0.6rem;
+		margin-top: 0.85rem;
+	}
+
+	.seguir button {
+		padding: 0.4rem 0.9rem;
+		font-family: inherit;
+		font-size: var(--f-sm);
+		color: var(--indigo);
+		background: none;
+		border: 1px solid var(--indigo);
+		border-radius: var(--r);
+		cursor: pointer;
+	}
+
+	.seguir button:disabled {
+		opacity: 0.55;
+		cursor: default;
+	}
+
+	.seguir .bien {
+		font-size: var(--f-sm);
+		color: var(--indigo);
+	}
+
+	.seguir .malo {
+		font-size: var(--f-sm);
+		color: var(--rojo);
+	}
+
 	.entrar-aviso {
 		margin-top: 0.85rem;
 		padding: 0.7rem 0.9rem;

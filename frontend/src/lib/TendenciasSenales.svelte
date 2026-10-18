@@ -15,6 +15,17 @@
 	 *   T3  GET /admin/eventos/busquedas-sin-respuesta  terminos buscados que no dan
 	 *                                                   nada o que nadie cliquea
 	 *
+	 * Y una cuarta, de Jose David (2026-10-16, AdminBusquedasSinResultadosService):
+	 *
+	 *       GET /admin/eventos/busquedas-sin-resultados lo mas buscado que no dio
+	 *                                                   nada, con las formas de
+	 *                                                   escribir lo mismo juntas
+	 *
+	 * Es la version completa del "no lo tenemos" de T3: junta mayusculas, tildes
+	 * y espacios de mas (la columna termino_normalizado de ClickHouse) y los
+	 * errores de tecleo (editDistanceUTF8), y cuenta sesiones distintas. Recibe
+	 * `dias` y no `dias_ventana`.
+	 *
 	 * Los umbrales (20 vistas, 1.5 veces, 20 sesiones, 2 %, 30 %, 3 sesiones)
 	 * estan fijos en el backend; aqui solo se eligen las ventanas y cuantos. Por
 	 * eso una lista vacia no es un fallo: quiere decir que nada paso el umbral,
@@ -59,7 +70,15 @@
 		diagnostico: 'no_tenemos' | 'no_convence';
 	}
 
-	type Clave = 'ascenso' | 'embudo' | 'busquedas';
+	interface FilaSinResultados {
+		termino: string;
+		sesiones: number;
+		terminos_agrupados: string[];
+		como_lo_escribieron: string[];
+		ultima_busqueda: string;
+	}
+
+	type Clave = 'ascenso' | 'embudo' | 'busquedas' | 'sin_resultados';
 
 	const PESTANAS: { clave: Clave; nombre: string; explica: string }[] = [
 		{
@@ -79,6 +98,12 @@
 			nombre: 'Busquedas sin respuesta',
 			explica:
 				'Lo que al menos 3 sesiones buscaron y no encontraron, o encontraron y no les convencio. Es demanda que hoy se va a otra tienda.'
+		},
+		{
+			clave: 'sin_resultados',
+			nombre: 'Lo que no tenemos',
+			explica:
+				'Lo mas buscado que no dio ningun resultado, sin filtros puestos. Junta las formas de escribir lo mismo (mayusculas, tildes, errores de tecleo) y cuenta sesiones distintas.'
 		}
 	];
 
@@ -96,6 +121,7 @@
 	let ascenso = $state<FilaAscenso[]>([]);
 	let embudo = $state<FilaEmbudo[]>([]);
 	let busquedas = $state<FilaBusqueda[]>([]);
+	let sinResultados = $state<FilaSinResultados[]>([]);
 	let cargando = $state(true);
 	let error = $state('');
 
@@ -109,6 +135,9 @@
 	function ruta(): string {
 		if (clave === 'ascenso') {
 			return `/admin/eventos/tendencias?dias_recientes=${diasRecientes}&dias_base=${diasBase}&limite=${limite}`;
+		}
+		if (clave === 'sin_resultados') {
+			return `/admin/eventos/busquedas-sin-resultados?dias=${diasVentana}&limite=${limite}`;
 		}
 		const nombre = clave === 'embudo' ? 'embudo' : 'busquedas-sin-respuesta';
 		return `/admin/eventos/${nombre}?dias_ventana=${diasVentana}&limite=${limite}`;
@@ -137,7 +166,8 @@
 
 		if (cual === 'ascenso') ascenso = r.payload as FilaAscenso[];
 		else if (cual === 'embudo') embudo = r.payload as FilaEmbudo[];
-		else busquedas = r.payload as FilaBusqueda[];
+		else if (cual === 'busquedas') busquedas = r.payload as FilaBusqueda[];
+		else sinResultados = r.payload as FilaSinResultados[];
 	}
 
 	function cambiar(nueva: Clave) {
@@ -171,10 +201,27 @@
 		if (clave === 'embudo') {
 			return `Ningun producto tiene un problema de venta en los ultimos ${diasVentana} dias. La consulta corrio bien, nada paso el umbral.`;
 		}
+		if (clave === 'sin_resultados') {
+			return `Nadie busco algo que no tengamos en los ultimos ${diasVentana} dias. La consulta corrio bien y no devolvio filas.`;
+		}
 		return `Ninguna busqueda se quedo sin respuesta en los ultimos ${diasVentana} dias. La consulta corrio bien, nada paso el umbral.`;
 	}
 
-	let filas = $derived(clave === 'ascenso' ? ascenso.length : clave === 'embudo' ? embudo.length : busquedas.length);
+	function cuando(valor: string): string {
+		const d = new Date(valor);
+		if (Number.isNaN(d.getTime())) return '';
+		return d.toLocaleString('es-GT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+	}
+
+	let filas = $derived(
+		clave === 'ascenso'
+			? ascenso.length
+			: clave === 'embudo'
+				? embudo.length
+				: clave === 'busquedas'
+					? busquedas.length
+					: sinResultados.length
+	);
 </script>
 
 <div class="senales">
@@ -278,6 +325,23 @@
 						{#if num(f.unidades) > 0}
 							Volvieron {num(f.devueltas)} de {num(f.unidades)} ({pct(f.tasa_devolucion)}).
 						{/if}
+					</p>
+				</li>
+			{/each}
+		</ul>
+	{:else if clave === 'sin_resultados'}
+		<ul class="lista">
+			{#each sinResultados as f, i (`${f.termino}#${i}`)}
+				<li class="fila">
+					<div class="cabeza">
+						<span class="nombre sin-enlace">{f.termino}</span>
+						<span class="cifra">{num(f.sesiones)} {num(f.sesiones) === 1 ? 'sesion' : 'sesiones'}</span>
+					</div>
+					<p class="datos">
+						{#if (f.como_lo_escribieron ?? []).length > 1}
+							Lo escribieron asi: {f.como_lo_escribieron.join(', ')}.
+						{/if}
+						Ultima vez {cuando(f.ultima_busqueda)}.
 					</p>
 				</li>
 			{/each}

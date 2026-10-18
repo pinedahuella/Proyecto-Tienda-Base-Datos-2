@@ -6,19 +6,23 @@
 	import { textoPorcentaje, tieneDescuento } from './descuento';
 
 	/**
-	 * El carrito de la Entrega 2, sobre Redis.
+	 * El carrito, con Redis delante y PostgreSQL de verdad.
 	 *
-	 * REEMPLAZA a Carrito.svelte, que leia una fila de `pedido` en `pendiente`
-	 * de PostgreSQL con su id en localStorage.
-	 *
-	 * Lo que se gano con la mudanza, y conviene tenerlo escrito porque es lo
-	 * que hay que defender en la presentacion:
+	 * Desde el 2026-10-17 (carrito-postgres-verdad.md de Jose David, a pedido
+	 * del profesor: "Redis nunca es la fuente de verdad") cada cambio se
+	 * escribe en Redis y se contesta, y debajo, sin hacer esperar a nadie, se
+	 * copia al pedido `pendiente` de la cuenta en PostgreSQL. Lo que hay que
+	 * defender en la presentacion:
 	 *
 	 *   - caduca solo a las 24 h sin tocarlo, y el reloj vuelve a empezar en
-	 *     cada toque. Antes un pedido `pendiente` se quedaba ahi para siempre
+	 *     cada toque. Las 24 h las decide PostgreSQL (fecha_ultima_actividad)
 	 *   - no hay id que guardar: la clave sale del token, asi que el carrito
 	 *     aparece igual desde otro dispositivo sin buscar nada
-	 *   - agregar y quitar no tocan PostgreSQL
+	 *   - si Redis se cae se sigue comprando contra PostgreSQL, mas lento
+	 *     (`fuente: "postgres"`)
+	 *   - si la copia a PostgreSQL falla, el carrito queda desincronizado
+	 *     (`sincronizado: false`), no se puede pagar y se arregla con
+	 *     POST /carrito/sincronizar
 	 *
 	 *
 	 * LO QUE HAY QUE ENTENDER DEL MODELO, QUE NO ES OBVIO
@@ -43,6 +47,7 @@
 	 *   PUT    /carrito/lineas/:idOferta     fija la cantidad ABSOLUTA
 	 *   DELETE /carrito/lineas/:idOferta     quita una linea
 	 *   DELETE /carrito                      lo vacia entero
+	 *   POST   /carrito/sincronizar          lo guarda en PostgreSQL si quedo a medias
 	 *
 	 * `PUT` fija, no suma: para "uno mas" se manda `cantidad + 1`, no un +1. Y
 	 * para quitar va el DELETE, no `cantidad: 0` -- el backend lo rechaza.
@@ -111,6 +116,14 @@
 		total: string;
 		total_lineas: number;
 		total_items: number;
+		/**
+		 * false si lo que se ve no quedo guardado en PostgreSQL. Opcional
+		 * porque un backend de antes del 2026-10-17 no lo manda, y entonces no
+		 * hay nada que avisar.
+		 */
+		sincronizado?: boolean;
+		/** `redis` lo normal, `postgres` si Redis no respondia. */
+		fuente?: 'redis' | 'postgres';
 	}
 
 	/**
@@ -147,6 +160,8 @@
 
 	let hayLineas = $derived((carrito?.lineas.length ?? 0) > 0);
 	let noComprables = $derived(carrito?.lineas.filter((l) => !l.disponible) ?? []);
+	let desincronizado = $derived(carrito?.sincronizado === false);
+	let sincronizando = $state(false);
 
 	// onMount para la primera vez. Con $effect se repetiria solo.
 	onMount(cargar);
@@ -255,6 +270,24 @@
 		await cargar();
 	}
 
+	/**
+	 * El carrito quedo a medias: lo ultimo que se cambio esta en Redis y no
+	 * llego a PostgreSQL, o PostgreSQL tuvo cambios que Redis no vio. El
+	 * backend decide quien tiene razon y devuelve el carrito como queda, que
+	 * puede no ser el de antes: por eso se pinta lo que devuelve.
+	 */
+	async function sincronizar() {
+		sincronizando = true;
+		error = '';
+		const r = await pedir<CarritoApi>('/carrito/sincronizar', { method: 'POST' });
+		sincronizando = false;
+		if (!r.ok || !r.payload) {
+			error = mensajeUtil(r);
+			return;
+		}
+		carrito = r.payload;
+	}
+
 	async function vaciar() {
 		const r = await pedir('/carrito', { method: 'DELETE' });
 		if (!r.ok) {
@@ -340,8 +373,9 @@
 	</div>
 
 	<p class="intro">
-		Vive en <strong>Redis</strong>, no en la base relacional. Caduca a las 24 horas sin tocarlo,
-		y el reloj vuelve a empezar cada vez que lo abres o lo cambias.
+		Se guarda en <strong>Redis</strong> para que sea rapido y en <strong>PostgreSQL</strong>, que
+		es la copia que vale. Caduca a las 24 horas sin tocarlo, y el reloj vuelve a empezar cada vez
+		que lo abres o lo cambias.
 	</p>
 
 	<!-- El precio es el de cuando agregaste. Decirlo aqui y no en el checkout:
@@ -378,11 +412,26 @@
 		<div class="caja">
 			<h3>Tu carrito esta vacio</h3>
 			<p class="gris">
-				Un carrito vacio no ocupa nada: en Redis simplemente no existe la clave hasta que
+				Un carrito vacio no ocupa nada: no existe ni en Redis ni en PostgreSQL hasta que
 				agregas el primer producto.
 			</p>
 		</div>
 	{:else if carrito}
+		{#if desincronizado}
+			<!-- No se puede pagar asi: el backend contesta 409. Se dice aqui,
+			     antes de llegar al pago, con el boton que lo arregla. -->
+			<div class="aviso" role="alert">
+				<p>Tu carrito no quedo guardado del todo. Guardalo antes de pagar.</p>
+				<button type="button" class="ajustar" disabled={sincronizando} onclick={sincronizar}>
+					{sincronizando ? 'Guardando...' : 'Guardar mi carrito'}
+				</button>
+			</div>
+		{/if}
+		{#if carrito.fuente === 'postgres'}
+			<p class="gris" role="status">
+				Redis no responde: el carrito va directo a PostgreSQL y puede ir mas lento.
+			</p>
+		{/if}
 		{#if noComprables.length > 0}
 			<!-- Se avisa ARRIBA y ademas se marca cada linea. La linea no se
 			     quita sola: si desapareciera, el total cambiaria sin que nadie
@@ -495,8 +544,12 @@
 			<div class="pagar">
 				<button
 					type="button"
-					disabled={noComprables.length > 0}
-					title={noComprables.length > 0 ? 'Quita o ajusta las lineas marcadas' : ''}
+					disabled={noComprables.length > 0 || desincronizado}
+					title={desincronizado
+						? 'Guarda tu carrito antes de pagar'
+						: noComprables.length > 0
+							? 'Quita o ajusta las lineas marcadas'
+							: ''}
 						onclick={() => alPedirComprar?.('', aLineasDePedido(carrito?.lineas ?? []))}
 				>
 					Continuar al pago
