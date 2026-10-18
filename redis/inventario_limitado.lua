@@ -75,9 +75,10 @@ Dicho de frente, porque es la parte incomoda: son DOS contadores del mismo
 stock, uno en Redis y uno en PostgreSQL, y dos contadores se pueden separar.
 Se separan si una reserva gana en Redis y despues el pago falla. Para eso esta
 `devolver`, y para eso las reservas VENCEN solas: una reserva que nadie confirma
-regresa su unidad al contador. La reconciliacion real (contar tickets
-confirmados contra `stock_movimiento`) queda pendiente y esta escrita como tal
-en README.md; no se invento aqui un proceso que nadie va a correr.
+regresa su unidad al contador. Desde el 2026-10-17 la verdad de las reservas
+vive en PostgreSQL (reserva_venta_relampago, migracion 045), y la
+reconciliacion existe: ReservasVentaRelampagoSyncService del backend reconstruye
+este estado con `restaurar` cuando Redis lo pierde o no lo conoce entero.
 
 
 LA FORMA DE LOS DATOS
@@ -117,6 +118,8 @@ OPERACIONES
   reservar   ARGV: op, id_usuario, cantidad, ttl_reserva_segundos
   confirmar  ARGV: op, id_usuario, ticket
   devolver   ARGV: op, id_usuario, ticket
+  restaurar  ARGV: op, stock_libre, ttl_segundos, ticket_base, vendidas, n,
+                   y n reservas de a cuatro (ticket, id_usuario, cantidad, vence_ms)
   estado     ARGV: op
 
 El id_usuario va SEGUNDO en las cuatro operaciones que actuan, y en `confirmar`
@@ -579,6 +582,104 @@ elseif op == 'redimensionar' then
 -- COMPROBACION INDEPENDIENTE del contador `reservado`: los dos se escriben en
 -- lugares distintos del script y tienen que contar la misma historia. Si
 -- alguna vez no coinciden, el bug esta aqui adentro.
+-- ============================================================
+-- restaurar
+-- ============================================================
+-- ARGV: op, stock_libre, ttl_segundos, ticket_base, vendidas, n, y detras
+--       n reservas de a cuatro: ticket, id_usuario, cantidad, vence_ms
+--
+-- Reconstruye la venta desde PostgreSQL, que desde el 2026-10-17 es la verdad
+-- de las reservas (tabla reserva_venta_relampago, migracion 045). Es el
+-- restaurar-venta-relampago.lua que Jose David dejo provisional en
+-- backend/elementos Generales/plan pendiente/, hecho una rama mas de este
+-- script, con las mismas dos claves y los mismos argumentos. Hace falta en
+-- tres momentos:
+--
+--   1. Al ABRIR la venta. `sembrar` reinicia el contador de tickets en 0, y
+--      un carrito que guardaba el ticket 3 de una venta anterior chocaba con
+--      el ticket 3 de otra persona en la venta nueva. Aqui el contador
+--      arranca en ticket_base, el ticket mas alto que esa oferta repartio en
+--      toda su historia.
+--   2. Cuando Redis PERDIO la venta (se reinicio, un FLUSHALL) y PostgreSQL
+--      dice que sigue abierta.
+--   3. Cuando hubo reservas hechas solo en PostgreSQL (Redis estaba caido) y
+--      Redis no las conoce. Llegan con ticket 0 y se numeran despues del mas
+--      alto, para no chocar con ninguno de los que si traian.
+--
+-- Borra lo que habia y escribe de nuevo en un solo paso atomico: stock libre,
+-- cada reserva viva con SU ticket y SU vencimiento, y el contador. Todas las
+-- comprobaciones van ANTES de la primera escritura, como en las demas ramas.
+--
+-- Devuelve {'RESTAURADA', stock_libre, ultimo_ticket, t1, t2, ...}: despues
+-- del ultimo ticket, el que recibio CADA reserva, en el orden en que llegaron.
+elseif op == 'restaurar' then
+    local stock_libre = tonumber(ARGV[2])
+    local ttl         = tonumber(ARGV[3])
+    local base        = tonumber(ARGV[4])
+    local vendidas    = tonumber(ARGV[5])
+    local n           = tonumber(ARGV[6])
+
+    if not stock_libre or stock_libre < 0 then
+        return redis.error_reply('restaurar: el stock libre tiene que ser >= 0')
+    end
+    if not ttl or ttl < 0 or not base or base < 0 or not vendidas or vendidas < 0 then
+        return redis.error_reply('restaurar: ttl, ticket_base y vendidas tienen que ser >= 0')
+    end
+    if not n or n < 0 or #ARGV ~= 6 + n * 4 then
+        return redis.error_reply('restaurar: la lista de reservas no cuadra con n')
+    end
+
+    local reservado = 0
+    local maximo = base
+    for i = 0, n - 1 do
+        local ticket   = tonumber(ARGV[7 + i * 4])
+        local cantidad = tonumber(ARGV[9 + i * 4])
+        local vence    = tonumber(ARGV[10 + i * 4])
+        if not ticket or ticket < 0 or not cantidad or cantidad <= 0 or not vence then
+            return redis.error_reply('restaurar: reserva ' .. (i + 1) .. ' invalida')
+        end
+        if ticket > maximo then
+            maximo = ticket
+        end
+        reservado = reservado + cantidad
+    end
+
+    redis.call('DEL', CLAVE, RESERVAS)
+    redis.call('HSET', CLAVE,
+               'stock', stock_libre, 'reservado', reservado,
+               'vendidas', vendidas, 'rechazos', 0, 'ticket', maximo)
+
+    local siguiente = maximo
+    local asignados = {}
+    for i = 0, n - 1 do
+        local ticket     = tonumber(ARGV[7 + i * 4])
+        local id_usuario = ARGV[8 + i * 4]
+        local cantidad   = tonumber(ARGV[9 + i * 4])
+        local vence      = tonumber(ARGV[10 + i * 4])
+        if ticket == 0 then
+            siguiente = siguiente + 1
+            ticket = siguiente
+        end
+        redis.call('HSET', CLAVE, 'r:' .. ticket, cantidad, 'u:' .. ticket, id_usuario)
+        redis.call('ZADD', RESERVAS, vence, ticket)
+        asignados[#asignados + 1] = ticket
+    end
+    redis.call('HSET', CLAVE, 'ticket', siguiente)
+
+    -- Las dos claves vencen juntas, igual que en `reservar`.
+    if ttl > 0 then
+        redis.call('EXPIRE', CLAVE, ttl)
+        if n > 0 then
+            redis.call('EXPIRE', RESERVAS, ttl)
+        end
+    end
+
+    local respuesta = {'RESTAURADA', stock_libre, siguiente}
+    for i = 1, #asignados do
+        respuesta[#respuesta + 1] = asignados[i]
+    end
+    return respuesta
+
 elseif op == 'estado' then
     return {
         'ESTADO',

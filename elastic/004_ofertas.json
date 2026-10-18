@@ -1,0 +1,57 @@
+{
+  "settings": {
+    "number_of_shards": 1,
+    "number_of_replicas": 0,
+
+    "analysis": {
+      "analyzer": {
+        "espanol_llano": {
+          "tokenizer": "standard",
+          "filter": ["lowercase", "asciifolding"]
+        }
+      }
+    }
+  },
+
+  "mappings": {
+    "dynamic": "strict",
+    "properties": {
+      "id_oferta": { "type": "long" },
+      "id_producto": { "type": "long" },
+      "id_producto_variante": { "type": "long" },
+
+      "nombre_producto": {
+        "type": "text",
+        "analyzer": "espanol_llano",
+        "fields": {
+          "exacto": { "type": "keyword", "ignore_above": 256 }
+        }
+      },
+      "nombre_variante": {
+        "type": "text",
+        "analyzer": "espanol_llano"
+      },
+      "estado_variante": { "type": "keyword" },
+
+      "id_vendedor": { "type": "long" },
+      "vendedor_usuario": {
+        "type": "text",
+        "analyzer": "espanol_llano",
+        "fields": {
+          "exacto": { "type": "keyword" }
+        }
+      },
+      "vendedor_nombre": {
+        "type": "text",
+        "analyzer": "espanol_llano"
+      },
+      "estado_vendedor": { "type": "keyword" },
+
+      "precio": { "type": "double" },
+      "porcentaje_descuento": { "type": "double" },
+      "precio_final": { "type": "double" },
+      "stock": { "type": "integer" },
+      "estado": { "type": "keyword" }
+    }
+  }
+}

@@ -55,6 +55,16 @@ FOR (r:Resena) REQUIRE r.id IS UNIQUE;
 CREATE CONSTRAINT producto_id IF NOT EXISTS
 FOR (p:Producto) REQUIRE p.id IS UNIQUE;
 
+// La compra (2026-10-16, migracion 041): un nodo :Compra por linea de pedido,
+// con el id de pedido_producto, como :Resena lleva el de resena.
+//     (:Usuario)-[:HIZO]->(:Compra)-[:DE]->(:Producto)
+//     (:Compra)-[:A_VENDEDOR]->(:Usuario)
+// No la carga el ETL: la proyecta el worker GrafoComprasSyncService del
+// backend desde la cola evento_grafo_compra. El worker tambien usa MERGE, asi
+// que necesita la restriccion por la misma razon que las otras tres.
+CREATE CONSTRAINT compra_id IF NOT EXISTS
+FOR (k:Compra) REQUIRE k.id IS UNIQUE;
+
 
 // ============================================================
 // La direccion se identifica por su TEXTO normalizado, no por su id

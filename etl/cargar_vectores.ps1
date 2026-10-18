@@ -1,48 +1,52 @@
 # etl/cargar_vectores.ps1
-# Calcula el vector de contenido de cada producto y lo guarda en su documento
-# del indice mesh_productos de Elasticsearch (campos vector, vector_hash,
-# vector_grupo y vector_modelo, ver elastic/001_indice.json). Es lo que usa la
-# recomendacion semantica: SimilaresService le pide a Elasticsearch los
-# parecidos con kNN. Hasta el 2026-10-02 vivia en PostgreSQL, tabla
-# producto_vector, que la migracion 036 retira.
+# Calcula el vector de contenido de cada producto y lo guarda en la tabla
+# vector_producto de PostgreSQL (pgvector, migracion 040). Es lo que usan la
+# recomendacion semantica (GET /productos/:id/similares), la busqueda por
+# intencion, la hibrida y las sugerencias al proponer: todas le piden los
+# vecinos a PostgreSQL con ORDER BY vector <=> $1.
+#
+# De donde vivio el vector, para quien lea el historial
+#   hasta el 2026-10-02  tabla producto_vector (la retira la 036)
+#   2026-10-02 al 10-16  campos vector* del indice mesh_productos
+#   desde el 2026-10-16  tabla vector_producto (040, a pedido del profesor)
 #
 #   .\etl\cargar_vectores.ps1            solo lo que falta o cambio
-#   .\etl\cargar_vectores.ps1 -Todo      recalcula todo el catalogo
+#   .\etl\cargar_vectores.ps1 -Todo      recalcula todo el catalogo con Ollama
 #
 # De donde sale cada cosa
 #   el texto     MongoDB, coleccion productos, nombre + categoria + descripcion
 #   el vector    Ollama, modelo paraphrase-multilingual, 768 dimensiones. El de
 #                la PC si lo tiene (localhost:11434) y si no el contenedor
 #                mesh-ollama (localhost:11435). Ver el paso 1
-#   el destino   Elasticsearch, el documento del producto en mesh_productos
+#   el destino   PostgreSQL, vector_producto (una fila por producto)
 #
-# Solo recalcula un producto si su documento no tiene vector o si su texto
-# cambio. Para saberlo el documento guarda el md5 del texto (vector_hash). El
-# texto, el hash y el grupo se calculan IGUAL que en VectoresSyncService del
-# backend, que mantiene al dia los productos que se editan; si cambian aqui,
-# cambian alli.
+# Solo recalcula un producto si no tiene fila, si su texto cambio (texto_hash)
+# o si el modelo es otro. El texto, el hash, el grupo y `activo` se calculan
+# IGUAL que en VectoresSyncService del backend, que mantiene al dia los
+# productos que se editan; si cambian aqui, cambian alli.
 #
-# EL INDICE SE REHACE Y LOS VECTORES NO SE PIERDEN
-# El ETL del buscador (Correr-EtlBusqueda en arrancar.ps1, o
-# etl/cargar_busqueda.sh) tira mesh_productos entero y lo vuelve a crear, y con
-# el se irian los 3105 vectores, unos 7 minutos de Ollama. Antes de tirarlo, el
-# ETL copia los campos del vector al indice mesh_productos_vectores_previos.
-# Este script mira ahi primero: si un producto tiene alli un vector con el
-# mismo hash y el mismo modelo, se lo devuelve sin llamar a Ollama.
+# Solo entran los productos que ya estan en producto_catalogo: la FK de
+# vector_producto lo exige. Los copia a PostgreSQL el paso 7e de arrancar,
+# que corre antes que este. Un producto que se borra de producto_catalogo se
+# lleva su vector por la cascada.
 #
-# Un producto que ya no esta en Mongo no hace falta borrarlo: su documento se
-# fue con el indice. El "activo" tampoco se guarda aparte, es el estado del
-# documento.
+# UNA BASE QUE TENIA LOS VECTORES EN ELASTICSEARCH
+# Si vector_producto todavia no tiene un producto y Elasticsearch si (el campo
+# vector de mesh_productos, o la copia mesh_productos_vectores_previos que
+# dejaba el ETL del buscador), se copia de ahi con el mismo hash y el mismo
+# modelo, sin llamar a Ollama. Son los mismos numeros. Es lo que hace el
+# vectores-pgvector-copiar.cjs de Jose David para los productos, pero dentro
+# del arranque. Si Elasticsearch no responde, se calcula con Ollama y listo.
 #
 # Codigos de salida
-#   0  todos los documentos del indice tienen vector
+#   0  todos los productos de producto_catalogo tienen vector al dia
 #   2  no se consiguio un Ollama con el modelo, ni el de la PC ni el de Docker.
-#      Lo que se pudo devolver de mesh_productos_vectores_previos si se devolvio
-#   1  cualquier otro fallo, tambien Elasticsearch caido o el indice sin crear
+#      Lo que se pudo copiar de Elasticsearch si se copio
+#   1  cualquier otro fallo, tambien PostgreSQL caido o la 040 sin correr
 #
 # Nada de tuberias hacia docker exec. PowerShell 5.1 les mete un BOM (ver
-# arrancar.ps1, el ETL de Mongo). Lo que va a Mongo viaja con docker cp y lo
-# que va a Elasticsearch como archivo con -InFile.
+# arrancar.ps1, el ETL de Mongo). Lo que va a Mongo y a PostgreSQL viaja como
+# archivo con docker cp.
 
 param([switch]$Todo)
 
@@ -60,8 +64,8 @@ Get-Content (Join-Path $raiz '.env') | ForEach-Object {
 
 $ollama = if ($env_['OLLAMA_URL']) { $env_['OLLAMA_URL'] } else { 'http://localhost:11434' }
 $modelo = if ($env_['OLLAMA_MODELO_VECTORES']) { $env_['OLLAMA_MODELO_VECTORES'] } else { 'paraphrase-multilingual' }
-# Los mismos valores que arrancar.ps1 ($ES_URL, $ES_INDICE) y que ELASTIC_INDICE
-# del backend.
+# Los mismos valores que arrancar.ps1 ($ES_URL, $ES_INDICE). Solo se leen, para
+# la copia de una base que tenia los vectores alli.
 $es = 'http://localhost:9200'
 $indice = 'mesh_productos'
 $previos = 'mesh_productos_vectores_previos'
@@ -71,20 +75,28 @@ $inv = [Globalization.CultureInfo]::InvariantCulture
 $tmp = Join-Path ([IO.Path]::GetTempPath()) 'mesh-vectores'
 New-Item -ItemType Directory -Force $tmp | Out-Null
 
-# Primero Elasticsearch, que es barato de mirar: sin el no hay donde guardar
-# nada y no tiene sentido encender Ollama.
+# Corre un archivo de SQL dentro de mesh-postgres y devuelve su salida. Va con
+# docker cp y -f, nunca por tuberia (el BOM de PowerShell 5.1).
+function Psql-Archivo($sql) {
+    $archivo = Join-Path $tmp 'vectores.sql'
+    [IO.File]::WriteAllText($archivo, $sql, $sinBom)
+    docker cp $archivo mesh-postgres:/tmp/mesh_vectores.sql | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "No se pudo copiar el SQL a mesh-postgres" }
+    $salida = docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -qtAX -v ON_ERROR_STOP=1 -f /tmp/mesh_vectores.sql 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) { throw "PostgreSQL rechazo el SQL de los vectores: $($salida.Trim())" }
+    return $salida
+}
+
+# Primero PostgreSQL, que es barato de mirar: sin la tabla no hay donde
+# guardar nada y no tiene sentido encender Ollama.
 try {
-    $total = [int](Invoke-RestMethod -Uri "$es/$indice/_count" -TimeoutSec 20).count
+    $hayTabla = (Psql-Archivo "SELECT to_regclass('public.vector_producto') IS NOT NULL;").Trim()
 } catch {
-    Write-Host "   Elasticsearch no responde o el indice $indice no existe. Corre antes el ETL del buscador" -ForegroundColor Red
+    Write-Host "   PostgreSQL no responde. $($_.Exception.Message)" -ForegroundColor Red
     exit 1
 }
-$m = Invoke-RestMethod -Uri "$es/$indice/_mapping/field/vector" -TimeoutSec 20
-$campo = @($m.PSObject.Properties)[0]
-if ($null -eq $campo -or -not $campo.Value.mappings.vector -or $campo.Value.mappings.vector.mapping.vector.type -ne 'dense_vector') {
-    # Un indice creado con el mapeo de antes del 2026-10-02. Sin el campo, el
-    # primer update le pondria al vector un mapeo dinamico de floats sueltos.
-    Write-Host "   El indice $indice no tiene el campo vector (dense_vector). Rehazlo con  .\arrancar.ps1 -Etl" -ForegroundColor Red
+if ($hayTabla -ne 't') {
+    Write-Host "   Falta la tabla vector_producto. Corre antes las migraciones (la 040)" -ForegroundColor Red
     exit 1
 }
 
@@ -231,9 +243,9 @@ if ($hayOllama -and (Test-Path $envBackend)) {
 
 # 2. El catalogo, desde Mongo
 $js = @'
-db.productos.find({}, { nombre: 1, descripcion: 1, 'categoria.nombre': 1 }).forEach(function (d) {
+db.productos.find({}, { nombre: 1, descripcion: 1, estado: 1, 'categoria.nombre': 1 }).forEach(function (d) {
   print(JSON.stringify({ id: d._id, nombre: d.nombre || '', cat: (d.categoria && d.categoria.nombre) || '',
-                         desc: d.descripcion || '' }));
+                         desc: d.descripcion || '', estado: d.estado || '' }));
 });
 '@
 [IO.File]::WriteAllText((Join-Path $tmp 'extraer.js'), $js, $sinBom)
@@ -252,110 +264,127 @@ foreach ($linea in [IO.File]::ReadAllLines((Join-Path $tmp 'productos.jsonl'), [
     $texto = "$($d.nombre). Categoria $($d.cat). $($d.desc)".Trim()
     # El grupo deja fuera el nombre: las copias del generador cambian el sufijo
     # del nombre y repiten la descripcion, y no tienen que recomendarse entre si.
-    $productos[[long]$d.id] = [pscustomobject]@{ id = [long]$d.id; texto = $texto; hash = (Md5 $texto); grupo = (Md5 "$($d.cat)|$($d.desc)".Trim()) }
+    $productos[[long]$d.id] = [pscustomobject]@{
+        id = [long]$d.id; texto = $texto; hash = (Md5 $texto)
+        grupo = (Md5 "$($d.cat)|$($d.desc)".Trim()); activo = ($d.estado -eq 'activo')
+    }
 }
 if ($productos.Count -eq 0) { Write-Host "   El catalogo de MongoDB esta vacio" -ForegroundColor Red; exit 1 }
 
 
-# 3. Lo que ya hay en Elasticsearch, sin traer los vectores
+# 3. Lo que ya hay en PostgreSQL, sin traer los vectores
+$enCatalogo = @{}
+foreach ($l in ((Psql-Archivo 'SELECT id_producto_mongo FROM producto_catalogo;') -split "`n")) {
+    if ($l.Trim()) { $enCatalogo[[long]$l.Trim()] = $true }
+}
+$guardados = @{}
+$filas = Psql-Archivo "SELECT id_producto_mongo || '|' || texto_hash || '|' || grupo || '|' || activo || '|' || modelo FROM vector_producto;"
+foreach ($l in ($filas -split "`n")) {
+    $c = $l.Trim().Split('|')
+    if ($c.Count -eq 5) { $guardados[[long]$c[0]] = [pscustomobject]@{ hash = $c[1]; grupo = $c[2]; activo = ($c[3] -eq 't'); modelo = $c[4] } }
+}
+
+$sinCatalogo = @($productos.Keys | Where-Object { -not $enCatalogo.ContainsKey($_) })
+$validos = @($productos.Values | Where-Object { $enCatalogo.ContainsKey($_.id) })
+$pendientes = @($validos | Where-Object {
+    $Todo -or -not $guardados.ContainsKey($_.id) -or $guardados[$_.id].hash -ne $_.hash -or $guardados[$_.id].modelo -ne $modelo
+} | Sort-Object id)
+$soloGrupo = @($validos | Where-Object {
+    -not $Todo -and $guardados.ContainsKey($_.id) -and $guardados[$_.id].hash -eq $_.hash -and $guardados[$_.id].modelo -eq $modelo -and
+    ($guardados[$_.id].grupo -ne $_.grupo -or $guardados[$_.id].activo -ne $_.activo)
+})
+
+
+# 4. Lo que se puede copiar de Elasticsearch (una base de antes del 2026-10-16)
 #
-# Con scroll y no con un solo _search: un _search se corta en 10000 documentos
-# (index.max_result_window), y el generador de arrancar puede pasar de ahi.
-function Leer-Campos($nombreIndice, [string[]]$campos) {
+# El vector viaja como TEXTO, sin pasar por ConvertFrom-Json: son 768 numeros
+# por producto, y convertirlos a objetos de PowerShell y de vuelta costaria mas
+# que pedirlos. Se recortan con expresiones regulares, que aqui son seguras
+# porque el _source solo trae vector, vector_hash y vector_modelo: un arreglo de
+# numeros y dos cadenas sin llaves dentro. Con scroll y no con un solo _search,
+# que se corta en 10000 documentos.
+function Leer-VectoresDe($nombreIndice) {
     $r = @{}
-    $cuerpo = @{ size = 1000; _source = $campos; sort = @('_doc') } | ConvertTo-Json -Compress
-    $p = Invoke-RestMethod -Method Post -Uri "$es/$nombreIndice/_search?scroll=1m" -ContentType 'application/json' -Body $cuerpo -TimeoutSec 60
-    while ($p.hits.hits.Count -gt 0) {
-        foreach ($h in $p.hits.hits) { $r[[long]$h._id] = $h._source }
-        $siguiente = @{ scroll = '1m'; scroll_id = $p._scroll_id } | ConvertTo-Json -Compress
-        $p = Invoke-RestMethod -Method Post -Uri "$es/_search/scroll" -ContentType 'application/json' -Body $siguiente -TimeoutSec 60
+    $cuerpo = '{"size":500,"_source":["vector","vector_hash","vector_modelo"],"query":{"exists":{"field":"vector"}},"sort":["_doc"]}'
+    try {
+        $crudo = (Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$es/$nombreIndice/_search?scroll=1m" `
+            -ContentType 'application/json' -Body $cuerpo -TimeoutSec 60).Content
+    } catch { return $r }
+    while ($true) {
+        $n = 0
+        foreach ($mt in [regex]::Matches($crudo, '"_id":"(\d+)"[^{}]*?"_source":(\{[^{}]*\})')) {
+            $n++
+            $f = $mt.Groups[2].Value
+            $v = [regex]::Match($f, '"vector":(\[[^\]]*\])')
+            $h = [regex]::Match($f, '"vector_hash":"([0-9a-f]{32})"')
+            $m = [regex]::Match($f, '"vector_modelo":"([^"]*)"')
+            if ($v.Success -and $h.Success -and $m.Success) {
+                $r[[long]$mt.Groups[1].Value] = [pscustomobject]@{ vector = $v.Groups[1].Value; hash = $h.Groups[1].Value; modelo = $m.Groups[1].Value }
+            }
+        }
+        $id = [regex]::Match($crudo, '"_scroll_id":"([^"]+)"').Groups[1].Value
+        if ($n -eq 0 -or -not $id) { break }
+        $crudo = (Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$es/_search/scroll" -ContentType 'application/json' `
+            -Body ('{"scroll":"1m","scroll_id":"' + $id + '"}') -TimeoutSec 60).Content
     }
-    try { Invoke-RestMethod -Method Delete -Uri "$es/_search/scroll/$($p._scroll_id)" -TimeoutSec 10 | Out-Null } catch { }
+    if ($id) { try { Invoke-RestMethod -Method Delete -Uri "$es/_search/scroll/$id" -TimeoutSec 10 | Out-Null } catch { } }
     return $r
 }
 
-$enIndice = Leer-Campos $indice @('vector_hash', 'vector_grupo')
-$guardados = @{}
-try { $guardados = Leer-Campos $previos @('vector_hash', 'vector_modelo') } catch { }
-
-# Solo los productos que tienen documento. Uno que esta en Mongo y no en el
-# indice no tiene donde guardar su vector; lo agrega BuscadorSyncService y lo
-# vectoriza VectoresSyncService del backend.
-$sinDocumento = @($productos.Keys | Where-Object { -not $enIndice.ContainsKey($_) })
-$enAmbos = @($productos.Values | Where-Object { $enIndice.ContainsKey($_.id) })
-$pendientes = @($enAmbos | Where-Object { $Todo -or $enIndice[$_.id].vector_hash -ne $_.hash } | Sort-Object id)
-$soloGrupo = @($enAmbos | Where-Object { -not $Todo -and $enIndice[$_.id].vector_hash -eq $_.hash -and $enIndice[$_.id].vector_grupo -ne $_.grupo })
-# De los pendientes, los que el ETL del buscador guardo antes de tirar el
-# indice con el MISMO texto y el MISMO modelo vuelven tal cual. -Todo no
-# devuelve nada: pide recalcular.
-$devolver = @($pendientes | Where-Object { -not $Todo -and $guardados.ContainsKey($_.id) -and $guardados[$_.id].vector_hash -eq $_.hash -and $guardados[$_.id].vector_modelo -eq $modelo })
-$idsDevolver = @{}
-foreach ($pr in $devolver) { $idsDevolver[$pr.id] = $true }
-$aOllama = @($pendientes | Where-Object { -not $idsDevolver.ContainsKey($_.id) })
-
-$conVectorAntes = $enAmbos.Count - $pendientes.Count
-Write-Host "   $($productos.Count) productos en MongoDB, $total documentos en $indice, $conVectorAntes con vector al dia"
-Write-Host "   $($devolver.Count) se devuelven de $previos, $($aOllama.Count) por calcular con Ollama, $($soloGrupo.Count) cambian solo de grupo"
-if ($sinDocumento.Count) {
-    Write-Host "   $($sinDocumento.Count) productos de MongoDB no estan en el indice; los agrega el worker del buscador" -ForegroundColor Yellow
-}
-
-
-# 4. Escribir, por tandas de _bulk con actualizaciones parciales
-#
-# _bulk contesta 200 aunque documentos sueltos fallen. El unico sitio donde
-# eso se ve es `errors`, y se mira en cada tanda.
-function Mandar-Bulk($texto) {
-    if (-not $texto) { return }
-    $archivo = Join-Path $tmp 'vectores.ndjson'
-    [IO.File]::WriteAllText($archivo, $texto, $sinBom)
-    $r = Invoke-RestMethod -Method Post -Uri "$es/_bulk" -ContentType 'application/x-ndjson' -InFile $archivo -TimeoutSec 300
-    if ($r.errors) {
-        $malo = @($r.items | ForEach-Object { $_.update } | Where-Object { $_.error } | Select-Object -First 1)
-        Write-Host "   Elasticsearch rechazo un documento: $($malo[0]._id) $($malo[0].error.type) $($malo[0].error.reason)" -ForegroundColor Red
-        exit 1
+$deElastic = @{}
+if ($pendientes.Count -and -not $Todo) {
+    foreach ($nombre in @($previos, $indice)) {
+        $leidos = Leer-VectoresDe $nombre
+        foreach ($k in $leidos.Keys) { $deElastic[$k] = $leidos[$k] }
     }
 }
-function Linea-Accion($id) { '{"update":{"_index":"' + $indice + '","_id":"' + $id + '"}}' }
+# Solo con el MISMO texto y el MISMO modelo. -Todo no copia nada: pide recalcular.
+$copiar = @($pendientes | Where-Object { $deElastic.ContainsKey($_.id) -and $deElastic[$_.id].hash -eq $_.hash -and $deElastic[$_.id].modelo -eq $modelo })
+$idsCopiar = @{}
+foreach ($pr in $copiar) { $idsCopiar[$pr.id] = $true }
+$aOllama = @($pendientes | Where-Object { -not $idsCopiar.ContainsKey($_.id) })
 
-# 4a. Los que cambiaron solo de grupo
-$sb = New-Object Text.StringBuilder
-foreach ($pr in $soloGrupo) {
-    [void]$sb.Append((Linea-Accion $pr.id)).Append("`n")
-    [void]$sb.Append('{"doc":{"vector_grupo":"' + $pr.grupo + '"}}').Append("`n")
+$alDia = $validos.Count - $pendientes.Count
+Write-Host "   $($productos.Count) productos en MongoDB, $($validos.Count) en producto_catalogo, $alDia con vector al dia en vector_producto"
+Write-Host "   $($copiar.Count) se copian de Elasticsearch, $($aOllama.Count) por calcular con Ollama, $($soloGrupo.Count) cambian solo de grupo o de activo"
+if ($sinCatalogo.Count) {
+    Write-Host "   $($sinCatalogo.Count) productos de MongoDB no estan en producto_catalogo; los vectoriza el worker del backend cuando entren" -ForegroundColor Yellow
 }
-Mandar-Bulk $sb.ToString()
 
-# 4b. Los devueltos de mesh_productos_vectores_previos
+
+# 5. Escribir
 #
-# El vector viaja como TEXTO, sin pasar por ConvertFrom-Json: son 768 numeros
-# por producto, y convertirlos a objetos de PowerShell y de vuelta a JSON
-# costaria mas que pedirlos. El _source de _mget se recorta con una expresion
-# regular, que aqui es segura porque solo pide vector, vector_hash y
-# vector_modelo: un arreglo de numeros y dos cadenas de hex y de letras, sin
-# llaves dentro. El grupo se le suma al final, el de ahora.
-for ($i = 0; $i -lt $devolver.Count; $i += 200) {
-    $tanda = $devolver[$i..([Math]::Min($i + 200, $devolver.Count) - 1)]
-    $cuerpo = '{"ids":[' + (($tanda | ForEach-Object { '"' + $_.id + '"' }) -join ',') + ']}'
-    $crudo = (Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$es/$previos/_mget?_source=vector,vector_hash,vector_modelo" `
-        -ContentType 'application/json' -Body $cuerpo -TimeoutSec 120).Content
-    $porId = @{}
-    foreach ($mt in [regex]::Matches($crudo, '"_id":"(\d+)"[^{}]*?"found":true,"_source":(\{[^{}]*\})')) {
-        $porId[[long]$mt.Groups[1].Value] = $mt.Groups[2].Value
-    }
+# UPSERT por tandas, una sentencia por tanda. El vector va como literal de
+# pgvector ('[0.1,0.2,...]'), igual que aVectorPg() del backend.
+function Fila-Vector($pr, $vector) {
+    "($($pr.id),'$vector'::vector,'$($pr.hash)','$($pr.grupo)',$(if ($pr.activo) { 'true' } else { 'false' }),'$modelo')"
+}
+function Guardar-Filas([string[]]$filas) {
+    if (-not $filas.Count) { return }
+    $sql = "INSERT INTO vector_producto (id_producto_mongo, vector, texto_hash, grupo, activo, modelo) VALUES`n" +
+           ($filas -join ",`n") + "`n" +
+           "ON CONFLICT (id_producto_mongo) DO UPDATE SET vector = EXCLUDED.vector, texto_hash = EXCLUDED.texto_hash, " +
+           "grupo = EXCLUDED.grupo, activo = EXCLUDED.activo, modelo = EXCLUDED.modelo, fecha_calculo = now();"
+    Psql-Archivo $sql | Out-Null
+}
+
+# 5a. Los que cambiaron solo de grupo o de activo
+if ($soloGrupo.Count) {
     $sb = New-Object Text.StringBuilder
-    foreach ($pr in $tanda) {
-        $fuente = $porId[$pr.id]
-        if (-not $fuente) { $aOllama += $pr; continue }
-        [void]$sb.Append((Linea-Accion $pr.id)).Append("`n")
-        [void]$sb.Append('{"doc":' + $fuente.Substring(0, $fuente.Length - 1) + ',"vector_grupo":"' + $pr.grupo + '"}}').Append("`n")
+    foreach ($pr in $soloGrupo) {
+        [void]$sb.Append("UPDATE vector_producto SET grupo = '$($pr.grupo)', activo = $(if ($pr.activo) { 'true' } else { 'false' }) WHERE id_producto_mongo = $($pr.id);`n")
     }
-    Mandar-Bulk $sb.ToString()
+    Psql-Archivo $sb.ToString() | Out-Null
 }
 
-# 4c. Los que calcula Ollama
+# 5b. Los copiados de Elasticsearch
+for ($i = 0; $i -lt $copiar.Count; $i += 200) {
+    $tanda = $copiar[$i..([Math]::Min($i + 200, $copiar.Count) - 1)]
+    Guardar-Filas @($tanda | ForEach-Object { Fila-Vector $_ $deElastic[$_.id].vector })
+}
+
+# 5c. Los que calcula Ollama
 if ($aOllama.Count -and -not $hayOllama) {
-    Invoke-RestMethod -Method Post -Uri "$es/$indice/_refresh" -TimeoutSec 60 | Out-Null
     Write-Host "   Sin Ollama quedan $($aOllama.Count) productos sin vector" -ForegroundColor Yellow
     exit 2
 }
@@ -369,30 +398,29 @@ for ($i = 0; $i -lt $aOllama.Count; $i += $lote) {
         Write-Host "   Ollama fallo en el lote que empieza en $i. $($_.Exception.Message)" -ForegroundColor Red
         exit 1
     }
-    $sb = New-Object Text.StringBuilder
+    $filas = @()
     for ($k = 0; $k -lt $grupo.Count; $k++) {
         $v = $r.embeddings[$k]
-        if ($v.Count -ne 768) { Write-Host "   El modelo devolvio $($v.Count) dimensiones y el indice espera 768" -ForegroundColor Red; exit 1 }
+        if ($v.Count -ne 768) { Write-Host "   El modelo devolvio $($v.Count) dimensiones y la tabla espera 768" -ForegroundColor Red; exit 1 }
         # Con cultura invariante: con la de la PC un decimal puede salir con coma
-        # y el JSON queda roto.
+        # y el literal queda roto.
         $lit = '[' + (($v | ForEach-Object { ([double]$_).ToString('R', $inv) }) -join ',') + ']'
-        $pr = $grupo[$k]
-        [void]$sb.Append((Linea-Accion $pr.id)).Append("`n")
-        [void]$sb.Append('{"doc":{"vector":' + $lit + ',"vector_hash":"' + $pr.hash + '","vector_grupo":"' + $pr.grupo + '","vector_modelo":"' + $modelo + '"}}').Append("`n")
+        $filas += (Fila-Vector $grupo[$k] $lit)
     }
-    Mandar-Bulk $sb.ToString()
+    Guardar-Filas $filas
     Write-Host ("   {0} de {1}" -f ([Math]::Min($i + $lote, $aOllama.Count)), $aOllama.Count)
 }
 
 
-# 5. El resultado, contado y no supuesto
-Invoke-RestMethod -Method Post -Uri "$es/$indice/_refresh" -TimeoutSec 60 | Out-Null
-$total = [int](Invoke-RestMethod -Uri "$es/$indice/_count" -TimeoutSec 20).count
-$cuerpo = '{"query":{"exists":{"field":"vector"}}}'
-$conVector = [int](Invoke-RestMethod -Method Post -Uri "$es/$indice/_count" -ContentType 'application/json' -Body $cuerpo -TimeoutSec 20).count
-if ($conVector -ne $total) {
-    Write-Host "   Vectores en $conVector de $total documentos" -ForegroundColor Red
+# 6. El resultado, contado y no supuesto
+$conVector = [int](Psql-Archivo @"
+SELECT count(*) FROM vector_producto v
+  JOIN producto_catalogo pc ON pc.id_producto_mongo = v.id_producto_mongo
+ WHERE v.modelo = '$modelo';
+"@).Trim()
+if ($conVector -lt $validos.Count) {
+    Write-Host "   Vectores en $conVector de $($validos.Count) productos de producto_catalogo" -ForegroundColor Red
     exit 1
 }
-Write-Host "   Vectores en $conVector de $total documentos, $($devolver.Count) devueltos, $($aOllama.Count) calculados, $($soloGrupo.Count) cambiaron de grupo" -ForegroundColor Green
+Write-Host "   Vectores en $conVector de $($validos.Count) productos, $($copiar.Count) copiados de Elasticsearch, $($aOllama.Count) calculados, $($soloGrupo.Count) cambiaron de grupo o de activo" -ForegroundColor Green
 exit 0

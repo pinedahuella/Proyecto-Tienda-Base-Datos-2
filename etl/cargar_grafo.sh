@@ -185,6 +185,29 @@ SELECT (to_regclass('public.evento_grafo') IS NOT NULL) AS hay_cola \gset
 \endif
 FIN
 
+# Las compras (041) no las carga este ETL: las proyecta el worker
+# GrafoComprasSyncService del backend desde evento_grafo_compra, que va por
+# cuenta. --limpiar se las acaba de llevar y la cola dice que todo esta hecho,
+# asi que se encolan todas las cuentas con pedidos y el worker las vuelve a
+# dejar iguales a PostgreSQL. Sin --limpiar no hace falta: el MERGE de resenas
+# no toca las :Compra.
+if [ "$LIMPIAR" = "si" ]; then
+    echo "==> encolando las compras para el worker del grafo"
+    docker exec -i mesh-postgres \
+        psql -U "$DB_USER" -d "$BASE" -qtAX -v ON_ERROR_STOP=1 <<'FIN'
+SELECT (to_regclass('public.evento_grafo_compra') IS NOT NULL) AS hay_compras \gset
+\if :hay_compras
+    INSERT INTO evento_grafo_compra (id_usuario)
+    SELECT DISTINCT id_usuario FROM pedido
+    ON CONFLICT (id_usuario) WHERE procesado_en IS NULL
+    DO UPDATE SET fecha = clock_timestamp(), intentos = 0;
+    SELECT count(*) || ' cuenta(s) en la cola; las proyecta el backend' FROM evento_grafo_compra WHERE procesado_en IS NULL;
+\else
+    SELECT 'la tabla evento_grafo_compra no existe todavia (falta la migracion 041)';
+\endif
+FIN
+fi
+
 
 # ============================================================
 # 4. Contar lo que quedo

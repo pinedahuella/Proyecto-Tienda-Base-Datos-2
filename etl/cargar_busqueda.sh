@@ -88,14 +88,17 @@ if [ ! -s "$TMP/busqueda.ndjson" ]; then
 fi
 
 # ------------------------------------------------------------------
-# 2. Guardar los vectores, borrar el indice y crearlo con su mapeo
+# 2. Borrar el indice y crearlo con su mapeo
 # ------------------------------------------------------------------
-# Desde el 2026-10-02 el documento de cada producto lleva su vector (vector,
-# vector_hash, vector_grupo, vector_modelo), y calcularlos todos son unos 7
-# minutos de Ollama. Antes de borrar se copian aparte con _reindex, por dentro
-# de Elasticsearch, y etl/cargar_vectores.ps1 los devuelve sin Ollama si el
-# texto del producto no cambio. Lo mismo hace Guardar-VectoresPrevios en
-# arrancar.ps1. Si falla no corta: lo unico que se pierde es tiempo de Ollama.
+# Desde la migracion 040 (2026-10-16) los vectores viven en vector_producto de
+# PostgreSQL y el mapeo de hoy ya no los tiene: el indice se tira sin perder
+# nada. Del 2026-10-02 al 10-16 el documento llevaba el vector, y una maquina
+# que todavia tenga un indice de esos y no haya pasado por arrancar.ps1 los
+# perderia aqui. Por eso, SOLO si el indice viejo trae vectores, se copian
+# aparte con _reindex, por dentro de Elasticsearch, y etl/cargar_vectores.ps1
+# los pasa a PostgreSQL sin Ollama. arrancar.ps1 no lo necesita: copia los
+# vectores antes de rehacer el indice. Si falla no corta: lo unico que se
+# pierde es tiempo de Ollama.
 PREVIOS="${PREVIOS:-mesh_productos_vectores_previos}"
 CON_VECTOR=$(curl -s -X POST "$ES/$INDICE/_count" -H 'Content-Type: application/json' \
     -d '{"query":{"exists":{"field":"vector"}}}' | sed -n 's/.*"count":\([0-9]*\).*/\1/p')
@@ -162,4 +165,4 @@ if [ "$EN_INDICE" != "$ESPERADOS" ]; then
 fi
 
 echo "==> listo, $EN_INDICE productos buscables"
-echo "    Los vectores: powershell -File etl/cargar_vectores.ps1 (devuelve los guardados y calcula el resto)"
+echo "    Los vectores viven en PostgreSQL (vector_producto); este indice ya no los lleva"

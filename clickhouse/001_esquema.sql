@@ -231,6 +231,23 @@ ALTER TABLE busqueda_realizada
     ADD COLUMN IF NOT EXISTS calificaciones Array(String) DEFAULT [],
     ADD COLUMN IF NOT EXISTS disponible     UInt8         DEFAULT 0;
 
+-- El termino normalizado, para GET /admin/eventos/busquedas-sin-resultados
+-- (Jose David, 25f0fe0, 2026-10-16): minusculas, sin tildes ni dieresis (la n
+-- con virgulilla queda n, como el analizador del buscador) y sin espacios de
+-- mas. `termino` se queda como lo escribio la persona. Es MATERIALIZED:
+-- ClickHouse la calcula sola en cada INSERT y el backend sigue mandando solo
+-- `termino`, asi que la regla vive en un solo lugar. No sale en un SELECT *.
+-- Referencia en backend/elementos Generales/plan pendiente/busquedas-sin-resultados.sql.
+--
+-- Su MATERIALIZE COLUMN no va aqui: este archivo corre en cada arranque y
+-- reescribiria la columna entera cada vez. No hace falta, porque en las
+-- partes viejas que no la tienen ClickHouse la calcula al leer.
+ALTER TABLE busqueda_realizada
+    ADD COLUMN IF NOT EXISTS termino_normalizado String
+    MATERIALIZED replaceRegexpAll(
+        trimBoth(replaceRegexpAll(lowerUTF8(normalizeUTF8NFD(termino)), '\\p{Mn}', '')),
+        '\\s+', ' ');
+
 
 -- ============================================================
 -- busqueda_clic -- clic sobre un resultado de busqueda

@@ -1160,15 +1160,20 @@ function Correr-Etl {
 $ES_URL    = 'http://localhost:9200'
 $ES_INDICE = 'mesh_productos'
 
-# Donde Correr-EtlBusqueda deja los vectores de los productos antes de tirar
-# mesh_productos, para que etl/cargar_vectores.ps1 los devuelva sin Ollama. El
-# mismo nombre esta en cargar_vectores.ps1 y en etl/cargar_busqueda.sh.
+# Los indices que dejaron de usarse el 2026-10-16, cuando los vectores volvieron
+# a PostgreSQL (migracion 040). mesh_comentarios era el texto y el vector de cada
+# comentario; mesh_productos_vectores_previos, la copia de los vectores que el
+# ETL del buscador guardaba antes de tirar mesh_productos. Se borran solos en
+# una maquina que todavia los tiene, despues de copiar lo que hiciera falta
+# (ver Retirar-IndicesDeVectores).
 $ES_INDICE_VECTORES_PREVIOS = 'mesh_productos_vectores_previos'
-
-# El texto de las resenas y sus respuestas, con su vector (desde el 2026-10-02).
-# Mismo valor por defecto que ELASTIC_INDICE_COMENTARIOS del backend
-# (services/resenas/evento-comentario-sync.service.ts).
 $ES_INDICE_COMENTARIOS = 'mesh_comentarios'
+
+# El buscador de ofertas y el percolator de los seguimientos (2026-10-17, 043 y
+# 044). Mismos valores por defecto que ELASTIC_INDICE_OFERTAS y
+# ELASTIC_INDICE_SEGUIMIENTOS del backend.
+$ES_INDICE_OFERTAS = 'mesh_ofertas'
+$ES_INDICE_SEGUIMIENTOS = 'mesh_seguimientos'
 
 # El indice del log de autenticacion. Mismo valor por defecto que
 # ELASTIC_INDICE_EVENTOS en backend/src/services/eventos-autenticacion/: si
@@ -1176,147 +1181,291 @@ $ES_INDICE_COMENTARIOS = 'mesh_comentarios'
 # elastic/002_eventos_autenticacion.json.
 $ES_INDICE_EVENTOS = 'mesh_eventos_autenticacion'
 
-# Copia los campos del vector de cada producto (vector, vector_hash,
-# vector_grupo, vector_modelo) de mesh_productos a mesh_productos_vectores_previos,
-# justo antes de que Correr-EtlBusqueda tire el indice. Lo copia Elasticsearch
-# por dentro con _reindex: nada de los 768 numeros por producto pasa por
-# PowerShell. El indice de copia lleva el vector con index:false, sin el grafo
-# HNSW, porque solo se lee por id.
-#
-# Se rehace cada vez: lo que guarda es el estado justo antes de esta
-# reconstruccion. Si el indice no existe o no tiene ni un vector (la primera
-# vez, o un indice de antes del 2026-10-02) no hace nada y se queda la copia
-# anterior, que no estorba: cargar_vectores.ps1 solo devuelve un vector si su
-# hash coincide con el texto de hoy.
-#
-# Nunca corta: si falla, lo unico que se pierde es tiempo de Ollama despues.
-function Guardar-VectoresPrevios {
-    $conVector = 0
-    try {
-        $conVector = [int](Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_count" -ContentType 'application/json' `
-            -Body '{"query":{"exists":{"field":"vector"}}}' -TimeoutSec 20).count
-    } catch { return }
-    if ($conVector -eq 0) { return }
+# Corre un SQL corto en mesh-postgres y devuelve la salida recortada, o $null si
+# fallo. Va por -c y no por tuberia (el BOM de PowerShell 5.1).
+function Psql-Corto($sql) {
+    $salida = "$(docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX -v ON_ERROR_STOP=1 -c $sql 2>&1)".Trim()
+    if ($LASTEXITCODE -ne 0) {
+        Aviso "PostgreSQL rechazo: $salida"
+        return $null
+    }
+    return $salida
+}
 
-    $mapeo = '{"settings":{"number_of_shards":1,"number_of_replicas":0},' +
-             '"mappings":{"dynamic":false,"properties":{' +
-             '"vector":{"type":"dense_vector","dims":768,"index":false},' +
-             '"vector_hash":{"type":"keyword"},"vector_grupo":{"type":"keyword"},"vector_modelo":{"type":"keyword"}}}}'
-    $copia = '{"source":{"index":"' + $ES_INDICE + '","_source":["vector","vector_hash","vector_grupo","vector_modelo"],' +
-             '"query":{"exists":{"field":"vector"}}},"dest":{"index":"' + $ES_INDICE_VECTORES_PREVIOS + '"}}'
+function Existe-Indice($nombre) {
     try {
-        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_VECTORES_PREVIOS" -TimeoutSec 30 | Out-Null } catch { }
-        Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_VECTORES_PREVIOS" -ContentType 'application/json' -Body $mapeo -TimeoutSec 30 | Out-Null
-        $r = Invoke-RestMethod -Method Post -Uri "$ES_URL/_reindex?wait_for_completion=true&refresh=true" `
-            -ContentType 'application/json' -Body $copia -TimeoutSec 600
-        if ($r.failures.Count -gt 0 -or $r.created -ne $conVector) {
-            Aviso "Se guardaron $($r.created) de $conVector vectores antes de rehacer el indice; los que falten los recalcula Ollama"
-        } else {
-            Ok "$conVector vectores guardados en $ES_INDICE_VECTORES_PREVIOS antes de rehacer el indice"
-        }
+        Invoke-RestMethod -Method Head -Uri "$ES_URL/$nombre" -TimeoutSec 20 | Out-Null
+        return $true
     } catch {
-        Aviso "No se pudieron guardar los vectores antes de rehacer el indice: $($_.Exception.Message)"
-        Aviso "   No corta nada; cargar_vectores.ps1 los vuelve a calcular con Ollama"
+        return $false
     }
 }
 
 
-# El indice de los comentarios: el texto de cada resena y de sus respuestas,
-# con su vector. De el leen las senales de fraude por texto
-# (ResenasRepetidasDetectorService, AnilloDeTextoDetectorService) y
-# GET /buscador/productos/intencion.
+# Los vectores de los comentarios, la primera vez que una base llega a la 040.
 #
-# Al reves que mesh_productos, este NO se tira ni lo llena un ETL. Lo llena el
-# worker EventoComentarioSyncService desde la cola evento_comentario
-# (migracion 034), comentario por comentario. Y el worker no lo crea: con
-# update y doc_as_upsert, un indice que no existe nacia con mapeo dinamico y el
-# vector como floats sueltos. Por eso aqui se crea, con elastic/003_comentarios.json,
-# antes de que arranque el backend.
+# Hasta el 2026-10-16 vivian en mesh_comentarios. Ahora los escribe en
+# vector_comentario el worker EventoComentarioSyncService del backend, desde la
+# cola evento_comentario, y ValoracionComentariosService los valora. En una base
+# nueva no hay nada que hacer: la 034 corre antes que la semilla y sus triggers
+# encolan cada comentario. En una que ya tenia los comentarios procesados
+# (todas las de antes del 10-16), la cola esta vacia y vector_comentario
+# tambien, y nadie los volveria a mirar.
 #
-# Cuando lo crea, encola TODOS los comentarios que ya hay. En una base nueva
-# ya estaban encolados (la 034 corre antes que la semilla y sus triggers los
-# anotan), y el UPSERT de la cola los junta sin duplicar. En una base que ya
-# tenia comentarios antes de la 034, o despues de un -Reiniciar de solo
-# Elasticsearch, es lo unico que los lleva al indice.
+# Por eso, si vector_comentario esta VACIA y hay comentarios, se encolan todos
+# una vez. El worker los vuelve a calcular con Ollama: Jose David midio que da
+# el mismo vector (coseno 1) y el mismo hash que habia en Elasticsearch, y la
+# valoracion sale del vector. Es la otra forma de su vectores-pgvector-copiar.cjs,
+# que copiaba los numeros sin Ollama: aqui no hace falta Node ni el indice viejo.
+# Con la tabla ya con filas no se toca nada, asi que corre en cada arranque sin
+# costar mas que un count.
 #
-# Si ya existe pero su vector no es dense_vector (un indice que el worker creo
-# solo, con mapeo dinamico), se tira, se rehace y se encola todo, igual que el
-# de eventos de autenticacion. Es una proyeccion: el original esta en
-# PostgreSQL.
+# Nunca corta.
+function Preparar-VectoresComentarios {
+    $cuantos = Psql-Corto "SELECT (SELECT count(*) FROM vector_comentario) || '|' || (SELECT count(*) FROM comentario);"
+    if ($cuantos -notmatch '^(\d+)\|(\d+)$') {
+        Aviso "No se pudo contar vector_comentario (falta la migracion 040?)"
+        return
+    }
+    $conVector = [int]$Matches[1]; $comentarios = [int]$Matches[2]
+    if ($conVector -gt 0 -or $comentarios -eq 0) {
+        $pend = Psql-Corto "SELECT count(*) FROM evento_comentario WHERE procesado_en IS NULL;"
+        Ok "$conVector comentarios con vector en vector_comentario, $pend en la cola del worker"
+        return
+    }
+    $pend = Psql-Corto ("INSERT INTO evento_comentario (id_comentario) SELECT id_comentario FROM comentario " +
+                        "ON CONFLICT (id_comentario) WHERE procesado_en IS NULL DO NOTHING; " +
+                        "SELECT count(*) FROM evento_comentario WHERE procesado_en IS NULL;")
+    if ($null -eq $pend) { return }
+    Ok "vector_comentario estaba vacia: $pend comentarios en la cola, los vectoriza el worker del backend (necesita Ollama)"
+}
+
+
+# Borra mesh_comentarios y mesh_productos_vectores_previos si siguen ahi. Va
+# DESPUES de cargar_vectores.ps1, que copia de ellos los vectores de los
+# productos, y de Preparar-VectoresComentarios. Nadie mas los lee desde el
+# 2026-10-16. Nunca corta.
+function Retirar-IndicesDeVectores {
+    foreach ($nombre in @($ES_INDICE_COMENTARIOS, $ES_INDICE_VECTORES_PREVIOS)) {
+        if (Existe-Indice $nombre) {
+            try {
+                Invoke-RestMethod -Method Delete -Uri "$ES_URL/$nombre" -TimeoutSec 30 | Out-Null
+                Ok "$nombre borrado: los vectores viven en PostgreSQL desde la 040"
+            } catch {
+                Aviso "No se pudo borrar $nombre ($($_.Exception.Message)). No estorba"
+            }
+        }
+    }
+}
+
+
+# El buscador de ofertas (043). El documento de cada oferta lo escribe el worker
+# EventoOfertaSyncService desde la cola evento_oferta, y el worker NO crea el
+# indice: si no existe, avisa una vez y deja todo pendiente, y
+# GET /vendedor/ofertas/buscar responde 500. Por eso aqui se crea, con
+# elastic/004_ofertas.json, antes de que arranque el backend.
 #
-# Y tambien si el vector esta con el indice HNSW y no con `flat`. Medido el
-# 2026-10-04 con 666 comentarios: hay textos repetidos (44 copias de uno, 24
-# de otro, de la semilla vieja y de las demos de fraude), y con vectores
-# identicos el grafo HNSW se atasca. Para "zapatos comodos para caminar todo
-# el dia", un kNN con 100 candidatos daba como mejor una resena con coseno
-# 0,30, y la busqueda exacta encontraba una de 0,81. `flat` compara contra
-# todos: exacto siempre, y con unos miles de resenas sigue tardando
-# milisegundos. El worker vuelve a calcular los vectores con Ollama.
+# Cuando lo crea, encola TODAS las ofertas. En una base nueva ya estaban
+# encoladas (los triggers de la 043 las anotan al cargar migrations/datos/), y el
+# UPSERT de la cola las junta sin duplicar. Pero si el indice se perdio con la
+# base llena (un volumen de Elasticsearch nuevo), la cola dice que todo esta
+# procesado y el indice quedaria vacio para siempre.
+#
+# Si ya existe pero no es dynamic strict (lo creo otra cosa, con mapeo
+# dinamico), se rehace: es una proyeccion, el original esta en PostgreSQL.
 #
 # Devuelve $true si el indice queda con el mapeo bueno. Nunca lanza.
-function Preparar-IndiceComentarios {
-    $existe = $true
-    try {
-        Invoke-RestMethod -Method Head -Uri "$ES_URL/$ES_INDICE_COMENTARIOS" -TimeoutSec 20 | Out-Null
-    } catch {
-        $existe = $false
-    }
-
-    if ($existe) {
-        $tipo = $null
-        $opciones = $null
+function Preparar-IndiceOfertas {
+    if (Existe-Indice $ES_INDICE_OFERTAS) {
+        $dinamico = $null
         try {
-            $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_mapping/field/vector" -TimeoutSec 20
-            $primero = @($m.PSObject.Properties)[0]
-            if ($primero -and $primero.Value.mappings.vector) {
-                $tipo = $primero.Value.mappings.vector.mapping.vector.type
-                $opciones = $primero.Value.mappings.vector.mapping.vector.index_options.type
-            }
+            $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_OFERTAS/_mapping" -TimeoutSec 20
+            $dinamico = [string]@($m.PSObject.Properties)[0].Value.mappings.dynamic
         } catch { }
-        if ($tipo -eq 'dense_vector' -and $opciones -eq 'flat') {
-            # Los campos que se le suman al mapeo despues de creado (id_vendedor y la
-            # valoracion del clasificador, 3305cf3) no piden rehacerlo: un PUT
-            # _mapping agrega lo que falta y deja igual lo que ya estaba. Sin esto,
-            # el primer documento con valoracion_texto le pondria un mapeo dinamico
-            # (text en vez de keyword) y las agregaciones de las notas
-            # incoherentes dejarian de contar.
-            try {
-                $mapeo = (Get-Content "$PSScriptRoot\elastic\003_comentarios.json" -Raw | ConvertFrom-Json).mappings |
-                    ConvertTo-Json -Depth 20 -Compress
-                Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_mapping" -ContentType 'application/json' `
-                    -Body $mapeo -TimeoutSec 30 | Out-Null
-            } catch {
-                Aviso "No se pudo poner al dia el mapeo de comentarios: $($_.Exception.Message)"
-                Aviso "   Si un campo ya existe con otro tipo, hay que rehacer el indice: borrarlo y volver a arrancar"
-                return $false
-            }
-            $n = (Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_count" -TimeoutSec 20).count
-            Ok "Ya existe con el mapeo bueno ($n comentarios). Lo mantiene el worker del backend"
+        if ($dinamico -eq 'strict') {
+            $n = (Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_OFERTAS/_count" -TimeoutSec 20).count
+            $pend = Psql-Corto "SELECT count(*) FROM evento_oferta WHERE procesado_en IS NULL;"
+            Ok "Ya existe ($n ofertas, $pend en la cola). Lo mantiene el worker del backend"
             return $true
         }
-        Aviso "El indice existia con el vector como $tipo / $opciones y no dense_vector / flat. Se rehace"
-        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_COMENTARIOS" -TimeoutSec 30 | Out-Null } catch { }
+        Aviso "El indice de ofertas existia con dynamic '$dinamico' y no 'strict'. Se rehace"
+        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_OFERTAS" -TimeoutSec 30 | Out-Null } catch { }
     }
 
     try {
-        Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_COMENTARIOS" -ContentType 'application/json' `
-            -InFile "$PSScriptRoot\elastic\003_comentarios.json" -TimeoutSec 60 | Out-Null
+        Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_OFERTAS" -ContentType 'application/json' `
+            -InFile "$PSScriptRoot\elastic\004_ofertas.json" -TimeoutSec 60 | Out-Null
     } catch {
-        Aviso "No se pudo crear el indice de comentarios: $($_.Exception.Message)"
+        Aviso "No se pudo crear el indice de ofertas: $($_.Exception.Message)"
         return $false
     }
-    Ok "indice creado con el mapeo de elastic/003_comentarios.json"
+    Ok "indice creado con el mapeo de elastic/004_ofertas.json"
 
-    $encolar = 'INSERT INTO evento_comentario (id_comentario) SELECT id_comentario FROM comentario ' +
-               'ON CONFLICT (id_comentario) WHERE procesado_en IS NULL DO NOTHING; ' +
-               'SELECT count(*) FROM evento_comentario WHERE procesado_en IS NULL;'
-    $pendientes = "$(docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX -v ON_ERROR_STOP=1 -c $encolar 2>&1)".Trim()
-    if ($LASTEXITCODE -ne 0) {
-        Aviso "No se pudieron encolar los comentarios: $pendientes"
+    $pend = Psql-Corto ("INSERT INTO evento_oferta (id_oferta) SELECT id_oferta FROM oferta " +
+                        "ON CONFLICT (id_oferta) WHERE procesado_en IS NULL DO NOTHING; " +
+                        "SELECT count(*) FROM evento_oferta WHERE procesado_en IS NULL;")
+    if ($null -eq $pend) { return $false }
+    Ok "$pend ofertas en la cola; las indexa el worker del backend cuando arranque (unas 100 por segundo)"
+    return $true
+}
+
+
+# El percolator de los seguimientos (044). Al reves que el de ofertas, este NO
+# se puede llenar desde una cola: cada documento es una CONSULTA que el backend
+# arma al crear el seguimiento (consultaDelSeguimiento() de
+# services/compradores/seguimientos-oferta.service.ts) y guarda con el id del
+# seguimiento. Si el indice se pierde, los seguimientos vivos de PostgreSQL ya
+# no avisarian nunca.
+#
+# Por eso, cuando se crea el indice, se vuelven a cargar las consultas de los
+# seguimientos que siguen esperando (fecha_cumplido NULL). Las arma PostgreSQL
+# con jsonb, la MISMA forma que consultaDelSeguimiento(): los cuatro filtros de
+# "se puede comprar" y luego, segun el tipo, el match difuso con todas las
+# palabras y el precio maximo, o la variante con precio estrictamente menor y,
+# con solo_tienda, la cuenta tienda@mesh.com. Si alli cambia, cambia aqui.
+#
+# Si ya existe como percolator y tiene una consulta por cada seguimiento vivo,
+# no se toca. Si no cuadra, se rehace entero.
+#
+# Devuelve $true si el indice queda bien. Nunca lanza.
+function Preparar-IndiceSeguimientos {
+    if (Existe-Indice $ES_INDICE_SEGUIMIENTOS) {
+        $tipo = $null
+        try {
+            $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_mapping/field/consulta" -TimeoutSec 20
+            $tipo = @($m.PSObject.Properties)[0].Value.mappings.consulta.mapping.consulta.type
+        } catch { }
+        $n = -1
+        try { $n = [int](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_count" -TimeoutSec 20).count } catch { }
+        $vivos = Psql-Corto "SELECT count(*) FROM seguimiento_oferta WHERE fecha_cumplido IS NULL;"
+        if ($tipo -eq 'percolator' -and $vivos -match '^\d+$' -and [int]$vivos -eq $n) {
+            Ok "Ya existe ($n consultas guardadas, una por seguimiento esperando)"
+            return $true
+        }
+        # Distinto numero de un lado y del otro: una consulta que sobra avisaria
+        # de un seguimiento borrado y una que falta no avisaria nunca. Se rehace
+        # entero desde PostgreSQL, que es la verdad.
+        if ($tipo -ne 'percolator') {
+            Aviso "El indice de seguimientos existia con consulta como '$tipo' y no percolator. Se rehace"
+        } else {
+            Aviso "El percolator tiene $n consultas y PostgreSQL $vivos seguimientos esperando. Se rehace"
+        }
+        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS" -TimeoutSec 30 | Out-Null } catch { }
+    }
+
+    try {
+        Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS" -ContentType 'application/json' `
+            -InFile "$PSScriptRoot\elastic\005_seguimientos.json" -TimeoutSec 60 | Out-Null
+    } catch {
+        Aviso "No se pudo crear el indice de seguimientos: $($_.Exception.Message)"
         return $false
     }
-    Ok "$pendientes comentarios en la cola; los indexa el worker del backend cuando arranque (necesita Ollama)"
-    return $true
+    Ok "indice creado con el mapeo de elastic/005_seguimientos.json"
+
+    # Una linea de accion y una de documento por seguimiento vivo, ya como
+    # ndjson. El documento lleva los mismos cuatro campos que escribe el backend.
+    $sqlConsultas = @'
+WITH tienda AS (SELECT id_usuario FROM usuarios WHERE correo_electronico = 'tienda@mesh.com'),
+vivos AS (
+    SELECT s.*, t.tipo_seguimiento_oferta_nombre AS tipo
+      FROM seguimiento_oferta s
+      JOIN tipo_seguimiento_oferta t USING (id_tipo_seguimiento_oferta)
+     WHERE s.fecha_cumplido IS NULL
+),
+armadas AS (
+    SELECT v.id_seguimiento, v.id_usuario, v.tipo,
+           jsonb_build_array(
+               jsonb_build_object('term',  jsonb_build_object('estado', 'activa')),
+               jsonb_build_object('range', jsonb_build_object('stock', jsonb_build_object('gt', 0))),
+               jsonb_build_object('term',  jsonb_build_object('estado_variante', 'activa')),
+               jsonb_build_object('term',  jsonb_build_object('estado_vendedor', 'activo'))
+           ) AS comunes,
+           v.texto, v.precio_maximo, v.id_producto_mongo, v.id_producto_variante_mongo,
+           v.precio_referencia, v.solo_tienda
+      FROM vivos v
+)
+SELECT jsonb_build_object('index', jsonb_build_object('_id', a.id_seguimiento::text))::text || E'\n' ||
+       jsonb_build_object(
+           'id_seguimiento',   a.id_seguimiento,
+           'id_usuario',       a.id_usuario,
+           'tipo_seguimiento', a.tipo,
+           'consulta', CASE WHEN a.tipo = 'busqueda' THEN
+               jsonb_build_object('bool', jsonb_build_object(
+                   'must', jsonb_build_array(jsonb_build_object('match', jsonb_build_object(
+                       'nombre_completo', jsonb_build_object('query', a.texto, 'operator', 'and', 'fuzziness', 'AUTO')))),
+                   'filter', a.comunes || CASE WHEN a.precio_maximo IS NULL THEN '[]'::jsonb ELSE
+                       jsonb_build_array(jsonb_build_object('range', jsonb_build_object(
+                           'precio_final', jsonb_build_object('lte', a.precio_maximo)))) END))
+           ELSE
+               jsonb_build_object('bool', jsonb_build_object(
+                   'filter', a.comunes || jsonb_build_array(
+                       jsonb_build_object('term',  jsonb_build_object('id_producto', a.id_producto_mongo)),
+                       jsonb_build_object('term',  jsonb_build_object('id_producto_variante', a.id_producto_variante_mongo)),
+                       jsonb_build_object('range', jsonb_build_object('precio_final', jsonb_build_object('lt', a.precio_referencia))))
+                   || CASE WHEN a.solo_tienda THEN
+                       jsonb_build_array(jsonb_build_object('term', jsonb_build_object('id_vendedor', (SELECT id_usuario FROM tienda))))
+                      ELSE '[]'::jsonb END))
+           END)::text
+  FROM armadas a
+ ORDER BY a.id_seguimiento;
+'@
+    $tmp = Join-Path $env:TEMP "mesh-seguimientos"
+    New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+    try {
+        $archivoSql = Join-Path $tmp "seguimientos.sql"
+        [IO.File]::WriteAllText($archivoSql, $sqlConsultas, (New-Object System.Text.UTF8Encoding($false)))
+        docker cp "$archivoSql" "mesh-postgres:/tmp/mesh_seguimientos.sql" 2>&1 | Out-Null
+        $errSql = docker exec mesh-postgres sh -c "psql -U $($env_['DB_USER']) -d $($env_['DB_NAME']) -qtAX -v ON_ERROR_STOP=1 -f /tmp/mesh_seguimientos.sql > /tmp/mesh_seguimientos.ndjson" 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) {
+            Aviso "No se pudieron armar las consultas de los seguimientos: $($errSql.Trim())"
+            return $false
+        }
+        $ndjson = Join-Path $tmp "seguimientos.ndjson"
+        docker cp "mesh-postgres:/tmp/mesh_seguimientos.ndjson" "$ndjson" 2>&1 | Out-Null
+        if (-not (Test-Path $ndjson) -or (Get-Item $ndjson).Length -eq 0) {
+            Ok "sin seguimientos esperando: nada que cargar en el percolator"
+            return $true
+        }
+        try {
+            $r = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_bulk?refresh=true" `
+                -ContentType 'application/x-ndjson' -InFile $ndjson -TimeoutSec 120
+        } catch {
+            Aviso "El bulk del percolator fallo: $($_.Exception.Message)"
+            return $false
+        }
+        if ($r.errors) {
+            $malo = @($r.items | ForEach-Object { $_.index } | Where-Object { $_.error } | Select-Object -First 1)
+            Aviso "Elasticsearch rechazo una consulta guardada: $($malo[0]._id) $($malo[0].error.type) $($malo[0].error.reason)"
+            return $false
+        }
+        Ok "$(@($r.items).Count) consultas de seguimientos vivos cargadas en el percolator"
+        return $true
+    }
+    finally {
+        Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
+    }
+}
+
+
+# Los vectores de los productos, en vector_producto (040). El como y el por
+# que estan en la cabecera de etl/cargar_vectores.ps1. Se llama con
+# Elasticsearch arriba o sin el: si esta, la primera vez copia de ahi los
+# vectores viejos sin Ollama; si no, los calcula.
+#
+# NO corta el arranque. Sin Ollama la tienda funciona entera y solo faltan los
+# productos parecidos, la busqueda por intencion y las senales de fraude por
+# texto. Pero no se queda callado.
+function Correr-VectoresProductos {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\etl\cargar_vectores.ps1"
+    switch ($LASTEXITCODE) {
+        0 { }
+        2 {
+            Aviso "Sin Ollama no hay productos parecidos en la ficha. El resto funciona."
+            Aviso "   No hubo Ollama ni en esta PC ni en Docker. El motivo esta justo arriba."
+            Aviso "   Se reintenta solo con  .\etl\cargar_vectores.ps1"
+        }
+        default { Error1 "Los vectores no quedaron completos. Se puede reintentar con  .\etl\cargar_vectores.ps1" }
+    }
 }
 
 
@@ -1362,13 +1511,10 @@ function Correr-EtlBusqueda {
 
         # El indice se tira entero y se rehace. Es una proyeccion: no guarda
         # nada que no este en Mongo, y reconstruir es la unica forma de que
-        # DESAPAREZCA lo que dejo de ser publico.
-        #
-        # Con UNA excepcion desde el 2026-10-02: el vector de cada producto.
-        # Sale de Mongo tambien, pero calcularlo son unos 7 minutos de Ollama
-        # para el catalogo entero. Por eso antes de tirar el indice se guardan
-        # sus campos del vector aparte, y cargar_vectores.ps1 los devuelve.
-        Guardar-VectoresPrevios
+        # DESAPAREZCA lo que dejo de ser publico. Del 2026-10-02 al 10-16 el
+        # documento llevaba tambien el vector del producto y habia que
+        # guardarlo aparte antes de tirarlo; desde la 040 vive en PostgreSQL y
+        # el indice se tira sin perder nada.
 
         # El 404 del DELETE se traga a proposito: la primera vez no existe.
         try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE" -TimeoutSec 30 | Out-Null } catch { }
@@ -1821,6 +1967,34 @@ SELECT (to_regclass('public.evento_grafo') IS NOT NULL) AS hay_cola \gset
         # lo unico que queda mal es que la cola diga que falta algo que no
         # falta, y eso se arregla con la proxima corrida del ETL.
         Aviso "   No se pudo vaciar la cola del outbox. El grafo esta cargado igual."
+    }
+
+    # --- 6. Las compras, si se vacio el grafo ---
+    # Las :Compra (041, 2026-10-16) no las carga este ETL: las proyecta el
+    # worker GrafoComprasSyncService del backend desde la cola
+    # evento_grafo_compra, que va por CUENTA. El DETACH DELETE de arriba se las
+    # llevo, y la cola dice que todo esta proyectado. Se encolan todas las
+    # cuentas con pedidos y el worker las vuelve a dejar iguales a PostgreSQL
+    # segundos despues de arrancar. Sin vaciar el grafo no hace falta: el MERGE
+    # de resenas no toca las :Compra.
+    if ($limpiar) {
+        $encolar = "SELECT to_regclass('public.evento_grafo_compra') IS NOT NULL AS hay \gset`n" +
+                   "\if :hay`n" +
+                   "INSERT INTO evento_grafo_compra (id_usuario) SELECT DISTINCT id_usuario FROM pedido " +
+                   "ON CONFLICT (id_usuario) WHERE procesado_en IS NULL DO UPDATE SET fecha = clock_timestamp(), intentos = 0;`n" +
+                   "SELECT count(*) FROM evento_grafo_compra WHERE procesado_en IS NULL;`n" +
+                   "\else`nSELECT -1;`n\endif`n"
+        $archivoCompras = Join-Path $tmp "encolar_compras.sql"
+        Set-Content -Path $archivoCompras -Value $encolar -Encoding ascii
+        docker cp "$archivoCompras" "mesh-postgres:/tmp/encolar_compras.sql" 2>&1 | Out-Null
+        $cuentas = (docker exec mesh-postgres psql -U $usuario -d $base -qtAX -f /tmp/encolar_compras.sql 2>&1 | Out-String).Trim()
+        if ($cuentas -eq '-1') {
+            Aviso "   Falta evento_grafo_compra (migracion 041): las compras no van al grafo"
+        } elseif ($LASTEXITCODE -eq 0 -and $cuentas -match '^\d+$') {
+            Ok "$cuentas cuenta(s) con compras en la cola; las proyecta el worker del backend al arrancar"
+        } else {
+            Aviso "   No se pudieron encolar las compras para el grafo: $cuentas"
+        }
     }
 
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue
@@ -3052,10 +3226,10 @@ if ($copiaOk) {
 }
 
 
-# (El paso 7d, los vectores de la recomendacion semantica, se mudo el
-# 2026-10-04 adentro del paso de Elasticsearch, despues del indice del
-# buscador: el vector ya no va a PostgreSQL sino al documento del producto, y
-# ese documento tiene que existir antes.)
+# (El paso 7d, los vectores de la recomendacion semantica, esta dentro del paso
+# de Elasticsearch, ANTES del indice del buscador. Los vectores viven en
+# PostgreSQL desde la 040, pero una maquina que los tenia en mesh_productos los
+# copia de ahi antes de que el indice se rehaga sin ellos.)
 
 
 # ------------------------------------------------------------
@@ -3448,8 +3622,33 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
     Aviso "   Es la JVM mas pesada de las dos que hay; si la maquina anda"
     Aviso "   corta de memoria es lo primero que se cae."
     Aviso "   Mira el log:  docker logs mesh-elastic --tail 30"
+
+    # Los vectores no necesitan a Elasticsearch desde la 040: viven en
+    # PostgreSQL. Sin el solo no se puede copiar lo viejo, y se calcula.
+    Paso "Vectores de la recomendacion semantica"
+    Correr-VectoresProductos
 } else {
     Ok "Elasticsearch respondiendo"
+
+    # ------------------------------------------------------------
+    # 7d. Los vectores de la recomendacion semantica
+    # ------------------------------------------------------------
+    # En la tabla vector_producto de PostgreSQL desde el 2026-10-16 (040; del
+    # 10-02 al 10-16 iban en el documento de mesh_productos). Los calcula Ollama
+    # con el modelo paraphrase-multilingual. Solo se calcula lo que falta o
+    # cambio, asi que en un arranque normal tarda unos segundos.
+    #
+    # Va ANTES del indice del buscador, y es a proposito: en una maquina que
+    # todavia tiene los vectores en mesh_productos, cargar_vectores.ps1 los copia
+    # de ahi sin Ollama, y el paso siguiente rehace el indice sin ellos.
+    #
+    # Nadie instala Ollama a mano. cargar_vectores.ps1 usa el de esta PC si lo
+    # tiene (y lo enciende si esta apagado), y si no levanta el contenedor
+    # mesh-ollama del compose. El modelo lo baja solo la primera vez. En una PC
+    # sin nada, la primera corrida baja la imagen y el modelo y calcula los
+    # vectores en la CPU: son varios minutos, una sola vez.
+    Paso "Vectores de la recomendacion semantica"
+    Correr-VectoresProductos
 
     # ------------------------------------------------------------
     # El indice del buscador
@@ -3462,8 +3661,7 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
     # etl/extraer_busqueda.js: el admin busca tambien los rechazados). Hasta el
     # 2026-10-04 se comparaba contra los ACTIVOS, lo que el extractor metia
     # antes. Con un solo producto que no estuviera activo no cuadraba nunca y
-    # el indice se rehacia en CADA arranque. Mientras era solo texto costaba
-    # unos segundos; con los vectores dentro del documento se los llevaba.
+    # el indice se rehacia en CADA arranque.
     Paso "Indice del buscador"
 
     $enMongo = (docker exec mesh-mongo sh -c (Comando-Mongo "--eval 'db.productos.countDocuments({})'") 2>&1 | Out-String).Trim()
@@ -3476,21 +3674,22 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
         $enIndice = '0'
     }
 
-    # Y tambien si el indice existe pero nacio con el mapeo de antes del
-    # 2026-10-02, sin el campo vector: el ETL lo crea con el mapeo de hoy. Es
-    # lo que pone al dia una maquina del equipo que ya tenia el indice, sin
-    # -Etl (que rehace tambien el catalogo de Mongo).
-    $tipoVector = $null
+    # Y tambien si el indice todavia tiene el campo vector, del mapeo del
+    # 2026-10-02 al 10-16: el paso de arriba ya copio los vectores a
+    # PostgreSQL, y el ETL lo crea con el mapeo de hoy, sin ellos. Es lo que
+    # pone al dia una maquina del equipo que ya tenia el indice, sin -Etl (que
+    # rehace tambien el catalogo de Mongo).
+    $conVectorViejo = $false
     try {
         $mv = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_mapping/field/vector" -TimeoutSec 20
         $pv = @($mv.PSObject.Properties)[0]
-        if ($pv -and $pv.Value.mappings.vector) { $tipoVector = $pv.Value.mappings.vector.mapping.vector.type }
+        if ($pv -and $pv.Value.mappings.vector) { $conVectorViejo = $true }
     } catch { }
-    if ($enIndice -ne '0' -and $tipoVector -ne 'dense_vector') {
-        Aviso "El indice no tiene el campo vector (mapeo de antes del 2026-10-02). Se rehace"
+    if ($conVectorViejo) {
+        Aviso "El indice todavia tiene el campo vector (mapeo del 2026-10-02 al 10-16). Se rehace sin el"
     }
 
-    if ($Etl -or ($enMongo -notmatch '^\d+$') -or ($enIndice -ne $enMongo) -or ($tipoVector -ne 'dense_vector')) {
+    if ($Etl -or ($enMongo -notmatch '^\d+$') -or ($enIndice -ne $enMongo) -or $conVectorViejo) {
         if (-not (Correr-EtlBusqueda)) {
             Aviso "El indice del buscador no se pudo rehacer. El resto sigue."
             Aviso "   A mano:  bash etl/cargar_busqueda.sh"
@@ -3500,46 +3699,30 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
     }
 
     # ------------------------------------------------------------
-    # 7d. Los vectores de la recomendacion semantica
+    # Los vectores de los comentarios
     # ------------------------------------------------------------
-    # Van en el documento de cada producto de mesh_productos (desde el
-    # 2026-10-02; antes en la tabla producto_vector, que retira la 036), asi
-    # que este paso va despues del indice del buscador. Los calcula Ollama con
-    # el modelo paraphrase-multilingual. Solo se calcula lo que falta o
-    # cambio, asi que en un arranque normal tarda unos segundos, y si el
-    # indice se acaba de rehacer devuelve los que Guardar-VectoresPrevios dejo
-    # aparte.
-    #
-    # Nadie instala Ollama a mano. cargar_vectores.ps1 usa el de esta PC si lo
-    # tiene (y lo enciende si esta apagado), y si no levanta el contenedor
-    # mesh-ollama del compose. El modelo lo baja solo la primera vez. En una PC
-    # sin nada, la primera corrida baja la imagen y el modelo y calcula los
-    # 3105 vectores en la CPU: son varios minutos, una sola vez.
-    #
-    # NO corta el arranque. Sin Ollama la tienda funciona entera y solo faltan
-    # los productos parecidos, la busqueda por intencion y las senales de
-    # fraude por texto. Pero no se queda callado.
-    Paso "Vectores de la recomendacion semantica"
-    & powershell -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\etl\cargar_vectores.ps1"
-    switch ($LASTEXITCODE) {
-        0 { }
-        2 {
-            Aviso "Sin Ollama no hay productos parecidos en la ficha. El resto funciona."
-            Aviso "   No hubo Ollama ni en esta PC ni en Docker. El motivo esta justo arriba."
-            Aviso "   Se reintenta solo con  .\etl\cargar_vectores.ps1"
-        }
-        default { Error1 "Los vectores no quedaron completos. Se puede reintentar con  .\etl\cargar_vectores.ps1" }
-    }
+    # Desde la 040 los escribe el worker del backend en vector_comentario, y el
+    # indice mesh_comentarios ya no existe. Despues de las migraciones (necesita
+    # la 034 y la 040) y antes del backend. El como y el por que estan junto a
+    # Preparar-VectoresComentarios.
+    Paso "Vectores de los comentarios"
+    Preparar-VectoresComentarios
+    Retirar-IndicesDeVectores
 
     # ------------------------------------------------------------
-    # El indice de comentarios
+    # 9e. El buscador de ofertas y el percolator de los seguimientos
     # ------------------------------------------------------------
-    # Despues de las migraciones (necesita evento_comentario de la 034) y
-    # antes del backend. El como y el por que estan junto a
-    # Preparar-IndiceComentarios.
-    Paso "Indice de comentarios"
-    if (-not (Preparar-IndiceComentarios)) {
-        Aviso "Sin el indice de comentarios no hay senales de fraude por texto ni busqueda por intencion. El resto sigue."
+    # Despues de las migraciones (la 043 y la 044) y antes del backend, que no
+    # crea ninguno de los dos. El de seguimientos va despues del de ofertas
+    # porque el worker de ofertas es el que lo usa. El como y el por que estan
+    # junto a Preparar-IndiceOfertas y Preparar-IndiceSeguimientos.
+    Paso "Indice del buscador de ofertas"
+    if (-not (Preparar-IndiceOfertas)) {
+        Aviso "Sin el indice de ofertas no hay buscador de ofertas ni avisos de seguimientos. El resto sigue."
+    }
+    Paso "Percolator de los seguimientos"
+    if (-not (Preparar-IndiceSeguimientos)) {
+        Aviso "Sin el percolator los avisos de 'avisame' no se disparan. El resto sigue."
     }
 
     # ------------------------------------------------------------

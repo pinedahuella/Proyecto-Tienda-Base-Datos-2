@@ -32,25 +32,15 @@ Corrimos todas las pruebas del repo con las bases en tu PC (el detalle esta en
 cdcded8. El 4 esta HECHO: en tu base ya hay anillos `ciclo` y `mutuo`, y
 `multi_cuenta_ip`, y `casos_fraude_fusion.cjs` da 0 FALLA (C1 sigue como
 decision). El 3 sigue igual: el clasificador marca 8 y el detector da 0 en las
-<<<<<<< HEAD
-tres variantes. El 1 no se puede ver desde aqui hasta que lo subas. El 2 no se
-=======
 tres variantes. El 1 llego en f03636b a las 14:32 y esta HECHO: con una
 conexion sacada del pool y cortada con `pg_terminate_backend`, el proceso deja
 dos WARN "Se perdio una conexion en uso", la siguiente consulta responde y no
 muere. Y a las 15:37 paso solo: un microcorte de Tailscale, timeouts en
 Postgres y Mongo, y el backend siguio vivo con el mismo proceso. Todo el
-<<<<<<< HEAD
-resto de pruebas del repo, en verde contra tu base (ver TRASPASO.md). El 2 no se
->>>>>>> bbbcf3ee8afd003892c0496b12bbd71b92af37a3
-ve corrido: tus contenedores arrancaron a las 14:18 y el ultimo pedido es de
-las 12:14.
-=======
 resto de pruebas del repo, en verde contra tu base (ver TRASPASO.md). El 2 esta HECHO:
 `falla_checkout.sh` en tu PC a las 16:40 dio 32 OK, 0 FALLA. En tu base quedaron
 los 3 pedidos que tienen que salir (16:38 a 16:39) y Postgres reiniciado a las
 16:39:14. Queda solo el 3, que no lo pide ninguna entrega.
->>>>>>> 5263611b3f083936a44dbac084c25bb796a7e03d
 
 ---
 

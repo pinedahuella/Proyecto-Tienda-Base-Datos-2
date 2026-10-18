@@ -59,17 +59,7 @@
       "variantes": {
         "type": "text",
         "analyzer": "espanol_llano"
-      },
-
-      "vector": {
-        "type": "dense_vector",
-        "dims": 768,
-        "index": true,
-        "similarity": "cosine"
-      },
-      "vector_hash": { "type": "keyword" },
-      "vector_grupo": { "type": "keyword" },
-      "vector_modelo": { "type": "keyword" }
+      }
     }
   }
 }
