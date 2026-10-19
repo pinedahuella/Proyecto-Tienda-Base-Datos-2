@@ -48,6 +48,9 @@ Edge            1536x730 sin ventana: portada con "Se compran juntos" y ficha de
   productos sueltos) llenan los demas lugares con trios sin sentido y salen solos de la ventana de 180 dias ese
   dia. Sugerencia para David en `docs/BACKEND-PENDIENTE.md` (MAX_PRODUCTOS_POR_PEDIDO mas bajo).
 - backend/.env vuelto a 100.64.42.11 al terminar.
+- Para estudiar todo lo del backend del 1 al 18-10 (carrito con verdad en PostgreSQL, pgvector, percolator,
+  compras en el grafo, combos, fraude por texto y la limpieza del 17-10): `docs/guia-estudio-cambios-backend-octubre.md`,
+  con el mismo formato que las guias de David en `backend/elementos Generales/guias-estudio/`.
 
 **EMPIEZA AQUI (18-10). Lo de David del 16 y 17 (25f0fe0) llevado a todas las capas y probado en la base local.**
 Meme pidio revisar lo nuevo de GitHub, aplicarlo en todos lados y probarlo a fondo. David subio 126 archivos de
