@@ -18,6 +18,8 @@ ClickHouse guarda lo que pasa en la tienda (vistas, carritos, compras, devolucio
 | F5 | `F5_devoluciones_seriales.sql` | Quien devuelve casi todo |
 | F6 | `F6_granja_de_registros.sql` | Desde que IP nacieron muchas cuentas en poco tiempo |
 
+**Desde el 2026-10-17** la F4 no se usa (con el carrito en PostgreSQL apartar sin comprar ya no retiene unidades) y la F6 la calcula el backend sobre Elasticsearch, donde estan los registros (`evento_registro` de ClickHouse esta vacia desde el 2026-09-10). La R3 ("para ti") sale del grafo de compras de Neo4j desde el 2026-10-16. Los tres archivos siguen aqui como historia.
+
 ## Decisiones comunes
 
 Las trece usan parametros de ClickHouse, `{nombre:Tipo}`. Es el mismo formato que recibe el driver de Node del backend en `query_params`, asi que el backend puede copiar cada archivo sin tocarlo. Los umbrales viven en `clickhouse/consultas/parametros.txt`. Lo que depende de quien pregunta (la cuenta, la sesion, el producto, la lista de candidatos) lo pone el backend en cada llamada.

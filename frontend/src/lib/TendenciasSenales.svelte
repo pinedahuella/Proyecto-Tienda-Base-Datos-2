@@ -341,7 +341,7 @@
 						{#if (f.como_lo_escribieron ?? []).length > 1}
 							Lo escribieron asi: {f.como_lo_escribieron.join(', ')}.
 						{/if}
-						Ultima vez {cuando(f.ultima_busqueda)}.
+						Ultima vez el {cuando(f.ultima_busqueda)}
 					</p>
 				</li>
 			{/each}

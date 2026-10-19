@@ -120,6 +120,12 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `037_senales_notas_incoherentes.sql` | Los tipos `notas_incoherentes_cuenta`, `_producto` y `_vendedor` (3305cf3): resenas cuyas estrellas contradicen su texto segun el clasificador de resenas |
 | `038_senales_resenas_parecidas.sql` | Los tipos `resenas_parecidas_vendedor` y `_producto` (3305cf3): muchas resenas con una gemela de otra cuenta |
 | `039_senales_resenas_canceladas.sql` | La fuente `postgres` y los tipos `resena_positiva_cancelada` y `resenas_negativas_canceladas_vendedor` (1f1f480): resenar y despues cancelar la compra |
+| `040_vectores_en_postgres.sql` | Todos los vectores vuelven a PostgreSQL con pgvector, a pedido del profesor (25f0fe0): `vector_producto` y `vector_comentario`, 1 a 1 con FK y cascada, indice HNSW de coseno. No se llama `producto_vector` porque la 036 la borra en cada arranque. arrancar copia los vectores viejos de Elasticsearch la primera vez |
+| `041_grafo_compras.sql` | Las compras al grafo de Neo4j (25f0fe0): la cola `evento_grafo_compra` por cuenta, con triggers en `pedido` y `pedido_producto`. La siembra del final corre una sola vez (con la cola vacia), no en cada arranque como en el SQL de referencia |
+| `042_limpieza_fraude.sql` | La limpieza de fraude (25f0fe0): evidencia unica por (caso, senal), fuera `cadena_abierta`, `favor_devuelto`, `carrito_acaparador` y R-CASI-4, la granja de registros a la fuente `elastic`. La 031 y la 026 los vuelven a poner en cada arranque y esta los quita despues; cuesta tres numeros de la secuencia por arranque |
+| `043_evento_oferta.sql` | La cola `evento_oferta` del buscador de ofertas (25f0fe0), con triggers en `oferta`, `producto_catalogo`, `variante_catalogo` y `usuarios`. Siembra una sola vez |
+| `044_seguimiento_ofertas.sql` | Los "avisame" del comprador (25f0fe0): `seguimiento_oferta`, `aviso_seguimiento_oferta` (un aviso por seguimiento, UNIQUE) y su catalogo de tipos |
+| `045_carrito_en_postgres.sql` | Redis nunca es la verdad (25f0fe0): el pedido `pendiente` de cada cuenta es su carrito (`version`, `fecha_ultima_actividad`, sin direccion hasta pagar, uno por cuenta) y `reserva_venta_relampago` con su catalogo de estados |
 
 **De la 034 a la 039, las senales que no salen del grafo.** Son del 2 al 4 de
 octubre y siguen un mismo molde: el backend las detecta y la migracion solo
@@ -282,8 +288,11 @@ de los vectores de la recomendacion semantica y la 025 la de los hallazgos F1 a 
 dentro a las mismas `crear_pedido`, `agregar_linea` y `comprar_pedido`, en vez
 de copiar su contenido, justamente para que no existan dos versiones de las
 reglas de negocio que se puedan desincronizar. Existe porque el carrito de la
-Entrega 2 vive en Redis: ya no hay una fila de `pedido` mientras la persona
-compra, asi que el pedido tiene que nacer entero al pagar. Lo que se paga esta
+Entrega 2 vivia en Redis: no habia una fila de `pedido` mientras la persona
+compraba, asi que el pedido tenia que nacer entero al pagar. Desde la 045
+(2026-10-17) el carrito vuelve a ser el pedido `pendiente` de PostgreSQL, el
+backend compra con `comprar_pedido()` y `comprar_carrito()` queda en la base sin
+uso. Lo que se paga esta
 escrito de frente en su cabecera: con ella el precio se congela en el momento de
 PAGAR y no en el de agregar al carrito.
 

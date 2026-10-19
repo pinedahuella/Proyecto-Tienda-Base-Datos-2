@@ -91,7 +91,7 @@
 					</div>
 					<p class="nombres">
 						{#each c.productos as p, i (p._id)}
-							{#if i > 0}<span class="mas"> + </span>{/if}
+							{#if i > 0}<span class="mas" aria-hidden="true">+</span>{/if}
 							<a href="/producto/{p._id}?origen=catalogo">{p.nombre}</a>
 						{/each}
 					</p>
@@ -180,6 +180,7 @@
 	}
 
 	.mas {
+		margin: 0 0.3em;
 		color: var(--gris);
 	}
 

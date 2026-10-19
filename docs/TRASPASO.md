@@ -3,7 +3,66 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-08, 16:00**.
+Ultima actualizacion: **2026-10-18, noche**.
+
+**EMPIEZA AQUI (18-10). Lo de David del 16 y 17 (25f0fe0) llevado a todas las capas y probado en la base local.**
+Meme pidio revisar lo nuevo de GitHub, aplicarlo en todos lados y probarlo a fondo. David subio 126 archivos de
+`backend/` (carrito con la verdad en PostgreSQL, vectores de vuelta a pgvector, compras en el grafo, buscador de
+ofertas, avisame con percolator, limpieza de fraude, combos y busquedas sin resultados) y dejo marcadores de conflicto
+en `docs/BACKEND-PENDIENTE.md` (arreglado). Lo que le toca a el esta al principio de ese archivo. No se toco `backend/`.
+
+```
+migraciones     040 vectores en PostgreSQL, 041 compras al grafo, 042 limpieza de fraude, 043 cola de ofertas,
+                044 avisame, 045 carrito en PostgreSQL. Las siembras corren una sola vez (no en cada arranque)
+arrancar.ps1    vectores ANTES del indice del buscador (copia los de Elasticsearch sin Ollama la primera vez),
+                indice sin vector, encola los comentarios y borra mesh_comentarios, crea mesh_ofertas y
+                mesh_seguimientos (paso 9e; recarga el percolator desde PostgreSQL si no cuadra), y el ETL del
+                grafo vuelve a encolar las compras tras --limpiar
+otras capas     elastic 004 y 005, clickhouse termino_normalizado, neo4j compra_id, redis rama restaurar,
+                etl/cargar_vectores.ps1 a vector_producto
+frontend        carrito desincronizado y su boton, 409 del checkout, sin el modo pedido, avisame (ficha, /buscar,
+                pestana Avisos y numero en la cabecera), tambien compraron, combos, buscar ofertas, lo que no
+                tenemos, fuera los tipos de fraude quitados. svelte-check 0 en 222 archivos. Visto en Edge
+```
+
+Probado el 18-10 con la base LOCAL (backend/.env apuntado a localhost con `usar-bases-remotas.ps1 -Local`):
+
+```
+arrancar.ps1    sobre la base vieja (039): exit 0 en 307 s, migraciones sin error, 3105 vectores copiados de
+                Elasticsearch, 16936 ofertas encoladas e indexadas por el worker en ~2 min, 700 comentarios
+                recalculados. Segunda vez, borrando mesh_ofertas y mesh_seguimientos con 3 avisos vivos: exit 0
+                en 181 s, los dos se rehicieron y las 3 consultas volvieron identicas
+desde cero      base aparte mesh_limpia en el mismo contenedor: migraciones y semilla sin un error, las colas
+                se llenan solas por los triggers; segunda pasada solo con los already exists de 001-006 y sin
+                duplicar nada. Borrada al terminar
+pruebas nuevas  ofertas_y_seguimientos 56 (con Elasticsearch caido), grafo_compras 30 (con Neo4j caido),
+                busquedas_sin_resultados 13, redis/prueba_restaurar 20
+actualizadas    carrito 42, carrito_vencimiento 25, falla_checkout 32 (con Redis parado AHORA COMPRA),
+                anillos_familia_b 40, recomendaciones 29, vectores_worker 5, clasificador_en_postgres 5,
+                recomendacion_semantica 15
+sin cambios     oferta_limitada 33 (y PostgreSQL registro las 40 reservas y las devolvio), descuentos 98,
+                reglas_descuento 44, reglas_periodo 61, ofertas_paginadas 40 (3 SIN MEDIR de siempre),
+                alertas_login 52, anillos 27, eventos 31, tendencias 53 y 28, etl_mongo 21, resenas 15,
+                busqueda 13, notas 10, facetas.py 19, casos_fraude_fusion 0 FALLA, granja 6, prueba_acceso 31,
+                prueba_concurrencia sin sobreventa, detectores de resenas corren
+demos           demo-entrega-final (las 9 partes), demo-patrones-resenas 2 de 2, demo-resenas-texto 6 de 6
+```
+
+Lo que salio en el camino:
+
+- **etl_compras.sh 5 FALLA, de antes.** ClickHouse tiene 480 lineas de compra de pedidos (771 a 1250) que ya no
+  estan en PostgreSQL: son los de la semilla del clasificador que `clasificador-resenas/semilla/quitar.sql` borro el
+  04-10 y que ClickHouse conservo (fechas de enero a septiembre). arrancar tambien lo avisa ("las ventas no
+  cuadran"). No es de lo de hoy; para limpiarlo, `quitar.sql` tendria que borrar tambien en ClickHouse.
+- **Un fallo mio, arreglado:** `cargar_vectores.ps1` leia `activo` como 't' y PostgreSQL lo da como 'true' al
+  concatenarlo; cada arranque reescribia 3103 filas. Medido en el segundo arranque, corregido y vuelto a correr: 0.
+- **Notas incoherentes ya detecta** (3 por cuenta, 3 por vendedor) con la version en SQL de David; el 08-10 daba 0.
+- **POST /comprador/seguimientos da 201**, no 200 como dice su doc (anotado para David).
+- **Sin hacer, a proposito:** las semillas con pedidos de varios productos para los combos (David las pidio). Cambian
+  conteos que esperan varias pruebas; queda para decidirlo con Meme.
+
+Como quedo la maquina: ver el final de esta entrada en el resumen del 18-10 (se apago todo y `backend/.env` volvio a
+apuntar a la PC de David, 100.64.42.11). En la PC de David hay que hacer `git pull` y `.\arrancar.ps1`.
 
 **EMPIEZA AQUI (08-10, 16:00). Con el arreglo de Postgres de David (f03636b), todo el repo en verde contra su PC.**
 Backend, frontend y Ollama en la PC de Meme; las seis bases en la de David por Tailscale. Su base ya tiene 1000

@@ -281,7 +281,10 @@ $guardados = @{}
 $filas = Psql-Archivo "SELECT id_producto_mongo || '|' || texto_hash || '|' || grupo || '|' || activo || '|' || modelo FROM vector_producto;"
 foreach ($l in ($filas -split "`n")) {
     $c = $l.Trim().Split('|')
-    if ($c.Count -eq 5) { $guardados[[long]$c[0]] = [pscustomobject]@{ hash = $c[1]; grupo = $c[2]; activo = ($c[3] -eq 't'); modelo = $c[4] } }
+    # Un boolean concatenado a texto sale 'true'/'false', no 't'/'f' como cuando
+    # psql lo imprime solo. Comparando con 't' todos parecian inactivos y cada
+    # arranque reescribia 3103 filas sin cambiar nada (medido el 2026-10-18).
+    if ($c.Count -eq 5) { $guardados[[long]$c[0]] = [pscustomobject]@{ hash = $c[1]; grupo = $c[2]; activo = ($c[3] -eq 'true'); modelo = $c[4] } }
 }
 
 $sinCatalogo = @($productos.Keys | Where-Object { -not $enCatalogo.ContainsKey($_) })

@@ -1127,4 +1127,31 @@ de las fuentes `elastic` (Texto de las resenas) y `postgres` (Compras canceladas
 se nombra igual que las de la pestana Resenas; antes salia el nombre crudo.
 
 **La ficha** sigue pidiendo `GET /productos/:id/similares` para Parecidos a este; lo
-que cambio es de donde salen: un kNN en Elasticsearch y no pgvector.
+que cambio es de donde salen: del 2026-10-02 al 10-16, un kNN en Elasticsearch, y
+desde entonces otra vez pgvector (`vector_producto`, migracion 040).
+
+### Lo que se sumo el 2026-10-18, con lo de David del 16 y 17
+
+- **Carrito** (`CarritoRedis.svelte`): si `GET /carrito` dice `sincronizado: false`,
+  un aviso con el boton Guardar mi carrito (`POST /carrito/sincronizar`) y el pago
+  apagado; si dice `fuente: "postgres"`, una nota de que Redis no responde. Los
+  textos ya no dicen que vive solo en Redis.
+- **Checkout** (`Checkout.svelte`): se quito el modo `pedido`, que llamaba a rutas que
+  ya no existen. El 409 "tu carrito no quedo guardado" trae el boton Guardar y
+  revisar el carrito, que sincroniza, cierra el pago y reabre el carrito; Volver al
+  carrito ahora si lo reabre (`alVolverAlCarrito` del layout).
+- **Avisame** (`seguimientos.svelte.ts`, `AvisosSeguimiento.svelte`): Avisame si baja
+  de precio en cada presentacion de la ficha, Avisame cuando llegue en una busqueda
+  sin resultados (con precio maximo opcional), la pestana Avisos del perfil y el
+  enlace Avisos con su numero en la cabecera.
+- **Ficha**: el estante Quienes lo compraron tambien llevaron
+  (`GET /productos/:id/tambien-compraron`, Neo4j).
+- **Portada**: Se compran juntos (`EstanteCombos.svelte`, `GET /productos/combos`).
+- **Panel del vendedor**: Buscar ofertas (`BuscarOfertas.svelte`,
+  `GET /vendedor/ofertas/buscar`), con De todos los vendedores para la tienda y el admin.
+- **Tendencias del admin**: Lo que no tenemos, en Senales
+  (`GET /admin/eventos/busquedas-sin-resultados`).
+- **Fraude**: fuera los tipos `cadena_abierta`, `favor_devuelto` y `carrito_acaparador`
+  y la regla R-CASI-4.
+
+Vistas en Edge a 1536x730 el 2026-10-18, con las cuentas de la semilla.

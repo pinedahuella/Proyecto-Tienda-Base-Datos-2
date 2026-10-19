@@ -6,12 +6,19 @@
 //
 // Prueba que el clasificador de resenas (clasificador-resenas/) se puede usar
 // en el backend con el vector que YA esta guardado, sin volver a pedirle nada a
-// Ollama. Para cada resena sembrada compara la probabilidad que da el modelo con
-// el vector guardado contra la que da con el vector con que se entreno: si el
-// modelo de vectores o el texto fueran otros, no cuadraria. Ademas compara la
-// probabilidad con la que ValoracionComentariosService dejo en prob_mala. Despues
-// cuenta aciertos y lista las resenas cuya nota no cuadra con el texto, que es la
-// senal que el backend levanta.
+// Ollama. Para cada resena sembrada compara el vector guardado con el que se uso
+// para entrenar, y la probabilidad que da el modelo con uno y con otro: si el
+// modelo de vectores o el texto fueran otros, no cuadraria. Ademas comprueba que
+// prob_mala es la que da el modelo del BACKEND (backend/modelos/regresion_logistica.json,
+// que no es el mismo archivo que el de clasificador-resenas/modelo/) sobre ese
+// vector. Despues cuenta aciertos y lista las resenas cuya nota no cuadra con el
+// texto, que es la senal que el backend levanta.
+//
+// Un vector recalculado no siempre es identico al del entrenamiento: Ollama los
+// pide por lotes y el punto flotante cambia en la ultima cifra. Medido el
+// 2026-10-18, despues de que arrancar los encolara para pasarlos de
+// Elasticsearch a PostgreSQL: 391 de 480 identicos y el resto con coseno
+// 0,999998 o mas. Por eso el limite es un coseno de 0,99999 y no la igualdad.
 //
 // Hasta el 2026-10-16 se llamaba clasificador_en_elastic.mjs y leia el indice
 // mesh_comentarios. Desde la migracion 040 el vector y la valoracion de cada
@@ -46,6 +53,19 @@ const pg = new Client({
 await pg.connect();
 
 const modelo = cargarModelo(cargarModelo('regresion_logistica').recomendado);
+// El del backend: una regresion logistica con sus propios pesos.
+const delBackend = JSON.parse(readFileSync(join(AQUI, '..', 'backend', 'modelos', 'regresion_logistica.json'), 'utf8'));
+function probBackend(vector) {
+  const x = normalizar(vector);
+  let z = delBackend.sesgo;
+  for (let i = 0; i < x.length; i++) z += x[i] * delBackend.pesos[i];
+  return z >= 0 ? 1 / (1 + Math.exp(-z)) : Math.exp(z) / (1 + Math.exp(z));
+}
+function coseno(a, b) {
+  let p = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { p += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
+  return p / Math.sqrt(na * nb);
+}
 const entrenadas = new Map(
   JSON.parse(readFileSync(join(RAIZ, 'vectores', 'vectores.json'), 'utf8')).items.map((x) => [x.id, x.vector]),
 );
@@ -65,6 +85,9 @@ const { rows } = await pg.query(
 let leidas = 0;
 let peor = 0;
 let peorGuardada = 0;
+let cosenoMinimo = 1;
+let identicos = 0;
+let comparados = 0;
 let aciertos = 0;
 const marcadas = [];
 const vistas = new Set();
@@ -73,12 +96,18 @@ for (const fila of rows) {
   if (!r) continue;
   leidas++;
   vistas.add(r.id);
-  const p = probabilidadMala(modelo, normalizar(JSON.parse(fila.vector)));
+  const guardado = JSON.parse(fila.vector);
+  const p = probabilidadMala(modelo, normalizar(guardado));
   if (entrenadas.has(r.id)) {
-    peor = Math.max(peor, Math.abs(p - probabilidadMala(modelo, normalizar(entrenadas.get(r.id)))));
+    const e = entrenadas.get(r.id);
+    comparados++;
+    const c = coseno(guardado, e);
+    cosenoMinimo = Math.min(cosenoMinimo, c);
+    if (guardado.every((x, i) => Math.abs(x - e[i]) < 1e-6)) identicos++;
+    peor = Math.max(peor, Math.abs(p - probabilidadMala(modelo, normalizar(e))));
   }
   // prob_mala se guarda con 3 decimales: la diferencia esperable es de 5e-4.
-  if (fila.prob_mala != null) peorGuardada = Math.max(peorGuardada, Math.abs(p - Number(fila.prob_mala)));
+  if (fila.prob_mala != null) peorGuardada = Math.max(peorGuardada, Math.abs(probBackend(guardado) - Number(fila.prob_mala)));
   if ((p >= modelo.umbral) === (r.etiqueta === 'mala')) aciertos++;
   if (notaNoCuadra(modelo, p, fila.calificacion)) {
     marcadas.push({ id: r.id, caso: r.caso ?? '-', estrellas: fila.calificacion, p, resena: fila.id_resena });
@@ -89,8 +118,9 @@ await pg.end();
 const ok = [];
 const mal = [];
 (vistas.size === porTexto.size ? ok : mal).push(`${vistas.size} de ${porTexto.size} resenas del clasificador estan en vector_comentario con vector`);
-(peor < 1e-5 ? ok : mal).push(`con el vector guardado la ${modelo.tipo} da lo mismo que con el del entrenamiento, diferencia maxima ${peor.toExponential(2)}`);
-(peorGuardada <= 5.01e-4 ? ok : mal).push(`y lo mismo que dejo el backend en prob_mala, diferencia maxima ${peorGuardada.toExponential(2)} (3 decimales)`);
+(cosenoMinimo >= 0.99999 ? ok : mal).push(`el vector guardado es el del entrenamiento: ${identicos} de ${comparados} identicos, coseno minimo ${cosenoMinimo.toFixed(7)}`);
+(peor < 1e-3 ? ok : mal).push(`con el vector guardado la ${modelo.tipo} da lo mismo que con el del entrenamiento, diferencia maxima ${peor.toExponential(2)}`);
+(peorGuardada <= 5.01e-4 ? ok : mal).push(`prob_mala es la del modelo del backend sobre ese vector, diferencia maxima ${peorGuardada.toExponential(2)} (3 decimales)`);
 ok.push(`aciertos ${aciertos} de ${leidas} (incluye las que se usaron para entrenar, no mide el modelo)`);
 
 console.log(`Modelo ${modelo.tipo}, umbral de fraude ${modelo.umbral_fraude}`);

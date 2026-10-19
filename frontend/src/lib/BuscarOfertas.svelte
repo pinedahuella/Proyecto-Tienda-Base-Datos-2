@@ -109,9 +109,10 @@
 		return 'Q' + n.toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 	}
 
+	/** Los estados de oferta son palabras que terminan en vocal: el plural es sumar una s. */
 	function resumenEstados(r: Resultado): string {
 		return Object.entries(r.resumen.por_estado ?? {})
-			.map(([estado, n]) => `${n} ${estado}`)
+			.map(([estado, n]) => `${n} ${n === 1 ? estado : estado + 's'}`)
 			.join(', ');
 	}
 </script>

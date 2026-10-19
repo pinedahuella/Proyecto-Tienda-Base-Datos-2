@@ -598,9 +598,13 @@ Lo que conviene saber:
 - **Ollama es el de la PC del backend.** El backend calcula ahi el vector de lo
   que se busca y de cada resena nueva. El de la PC de las bases solo lo usa
   `arrancar.ps1` para los vectores de los productos.
-- **`mesh_comentarios` lo llena el backend**, no `arrancar.ps1`. En una PC
-  recien preparada esta en 0 hasta que un backend apunte a ella y su worker
-  procese la cola `evento_comentario` (598 resenas en unos 30 segundos).
+- **Los vectores de las resenas los calcula el backend**, no `arrancar.ps1`.
+  Desde la 040 viven en `vector_comentario` de PostgreSQL (antes en el indice
+  `mesh_comentarios`, que arrancar borra). En una PC recien preparada la tabla
+  esta vacia hasta que un backend apunte a ella y su worker procese la cola
+  `evento_comentario` (700 comentarios en unos 30 segundos, medido el
+  2026-10-18). Lo mismo el indice `mesh_ofertas`: lo crea arrancar, y lo llena el
+  worker de ofertas del backend (16 958 ofertas en unos 2 minutos).
 - **Para medir tiempos no sirve.** Cada consulta cruza la red; lo que se mide es
   la red. Las cifras del informe salen de una sola maquina.
 - **Si la PC de las bases se apaga, el backend se cae entero** por la conexion

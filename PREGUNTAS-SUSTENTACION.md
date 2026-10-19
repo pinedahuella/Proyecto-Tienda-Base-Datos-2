@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 131 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 138 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las líneas son las del código en main al 20 de septiembre de 2026, salvo las preguntas 32 a 34 y la 119, que están al 23 de septiembre. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
 
@@ -23,7 +23,8 @@ Las líneas son las del código en main al 20 de septiembre de 2026, salvo las p
 - [Parte 5. Buscador en Elasticsearch y consistencia del checkout](#parte-5-buscador-en-elasticsearch-y-consistencia-del-checkout), preguntas 66 a 82
 - [Parte 6. Fraude de login y de IP](#parte-6-fraude-de-login-y-de-ip), preguntas 83 a 101
 - [Parte 7. Arquitectura, seguridad y entrega final](#parte-7-arquitectura-seguridad-y-entrega-final), preguntas 102 a 115
-- [Parte 8. Entrega final, lo que hoy hay en el repositorio](#parte-8-entrega-final-lo-que-hoy-hay-en-el-repositorio), preguntas 116 a 118
+- [Parte 8. Entrega final, lo que hoy hay en el repositorio](#parte-8-entrega-final-lo-que-hoy-hay-en-el-repositorio), preguntas 116 a 131
+- [Parte 9. Lo que cambió el 16 y 17 de octubre](#parte-9-lo-que-cambió-el-16-y-17-de-octubre), preguntas 132 a 138
 
 ---
 
@@ -290,22 +291,23 @@ Archivos que más se usan en esta parte.
 - `redis/carrito.lua`
 - `pruebas/carrito.sh`
 
-### 32. ¿Por qué el carrito vive en Redis y no en PostgreSQL?
-El carrito es un dato transitorio que se lee y se escribe todo el tiempo. Antes era una fila de pedido pendiente que nunca vencía y obligaba a tener cuenta. En Redis nace con el primer producto y muere solo por inactividad. Agregar al carrito tampoco reserva stock, así que al vencer no hay nada que limpiar.
+### 32. ¿Por qué el carrito está en Redis y en PostgreSQL?
+Desde el 17 de octubre, porque el profesor pidió que Redis nunca sea la fuente de verdad. Cada cambio se escribe en Redis y se contesta al momento, y debajo, sin hacer esperar a nadie, se copia al pedido `pendiente` de la cuenta en PostgreSQL, que es la verdad. Hay uno solo por cuenta, nace con el primer producto y muere a las 24 horas sin tocarlo. Si Redis se cae, el carrito se lee y se compra directo contra PostgreSQL, más lento. Agregar al carrito sigue sin reservar stock, salvo en una venta relámpago.
 
-- Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 108 a 129, la explicación de que el carrito vive solo en Redis y reemplaza a la fila de pedido pendiente. `redis/carrito.lua` lineas 4 a 8, los dos problemas del carrito viejo.
-- Lo que pide el profesor. Entrega 2, implementar el carrito sobre un almacén clave-valor con expiración por inactividad, 1.5 pts.
-- Por qué así. Son datos temporales con un patrón de acceso distinto a los datos de negocio permanentes, y Redis trae el vencimiento incorporado.
+- Dónde se ve. `migrations/045_carrito_en_postgres.sql`, las columnas `version` y `fecha_ultima_actividad` del pedido, el índice de un pendiente por cuenta y la tabla `reserva_venta_relampago`. `backend/src/services/carrito/carrito.service.ts` (la orquestación) y `carrito-postgres.service.ts` (la verdad). `pruebas/carrito.sh`, 42 OK, mide que lo escrito llega a PostgreSQL y que si Redis pierde el carrito vuelve desde ahí.
+- Lo que pide el profesor. Entrega 2, carrito sobre un almacén clave-valor con expiración por inactividad (1.5 pts), y su directiva posterior de que Redis no sea la verdad.
+- Por qué así. Redis contesta en microsegundos y se queda como la puerta rápida; PostgreSQL guarda lo que no se puede perder. Hasta el 17 de octubre el carrito vivía solo en Redis y un Redis vaciado se lo llevaba.
+- Ojo si preguntan qué pasa si las dos copias no coinciden. Redis guarda la versión de PostgreSQL que conoce. Si la copia falla o choca, el carrito queda marcado como desincronizado, la pantalla lo dice con un botón para guardarlo (`POST /carrito/sincronizar`) y el checkout no cobra hasta que se arregle.
 
 ### 33. ¿Qué tipo de dato y qué estructura de claves usa el carrito?
-Un hash por cuenta. El campo es el id de la oferta y el valor es la línea en JSON, una foto con la cantidad, el precio (ya con descuento), el porcentaje de descuento, el nombre, la imagen y el vendedor. Si la línea es de venta relámpago, hay un segundo campo con el ticket de la reserva. Ver el carrito solo lee Redis. Al pagar, el backend compara la foto con el precio de hoy y avisa si cambió.
+Un hash por cuenta. El campo es el id de la oferta y el valor es la línea en JSON, una foto con la cantidad, el precio (ya con descuento), el porcentaje de descuento, el nombre, la imagen y el vendedor. Si la línea es de venta relámpago, hay un segundo campo con el ticket de la reserva. Desde el 17 de octubre lleva dos campos más: `_v`, la versión de PostgreSQL que conoce, y `_d`, la marca de desincronizado. Ver el carrito lee Redis; solo si Redis no lo tiene se reconstruye desde PostgreSQL. Al pagar, el backend compara la foto con el precio de hoy y avisa si cambió.
 
 - Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 83 a 107, la línea que se guarda (`LineaCarritoRedis`). Lineas 115 a 129, la forma del hash y por qué guarda una foto. Lineas 175 a 178, la clave `mesh:carrito:<id_usuario>`. Lineas 947 a 950, el campo `t:<id_oferta>` del ticket.
 - Lo que pide el profesor. Entrega 2, carrito sobre almacén clave-valor, 1.5 pts.
 - Por qué así. Con un hash cada línea se cambia sola sin leer y reescribir el carrito entero. La foto hace que ver el carrito no dependa de PostgreSQL ni de Mongo; el precio que puede quedar viejo se revisa al pagar.
 
 ### 34. ¿Cuál es el TTL del carrito y dónde está configurado?
-El TTL es de 24 horas, o sea 86400 segundos, de inactividad. Está escrito de forma explícita como una constante estática y se aplica con EXPIRE después de cada escritura. Hay que decir con honestidad que es una constante del código y no una variable de entorno.
+El TTL es de 24 horas, o sea 86400 segundos, de inactividad. Está escrito de forma explícita como una constante estática y se aplica con EXPIRE después de cada escritura. Hay que decir con honestidad que es una constante del código y no una variable de entorno. Desde el 17 de octubre las 24 horas las decide PostgreSQL (`pedido.fecha_ultima_actividad`): si no fuera así, un carrito que Redis soltó volvería a nacer desde la copia. Un carrito vencido se borra al leerlo o en un barrido cada 10 minutos (`pruebas/carrito_vencimiento.sh`, 25 OK).
 
 - Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 172 a 173, la constante `TTL_SEGUNDOS`. Lineas 481 a 492, el HSET seguido del EXPIRE. `redis/README.md` lineas 82 a 95, la justificación de las 24 horas.
 - Lo que pide el profesor. Entrega 2, tiempo de expiración configurado explícitamente y expiración justificada, 1.5 pts.
@@ -959,13 +961,12 @@ Sí, en Redis. Hay tres usuarios de ACL, cada uno con lo justo. `default` es el 
 - Por qué así. Redis es el que guarda lo más delicado en caliente, el carrito, los contadores de fraude y las ventas relámpago, y un FLUSHALL por error se lleva todo eso. Además sigue la autorización por rol en la API, con 401 y 403, en `backend/src/guards/sesion.guard.ts` lineas 41 a 98.
 
 ### 117. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
-Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en el documento del producto en Elasticsearch, campo `vector` de tipo `dense_vector` con similitud coseno. `SimilaresService` pide los vecinos con una búsqueda kNN que en la misma consulta filtra los inactivos, el propio producto y las copias del generador, y se queda con uno por grupo. Después pide a MongoDB cómo se ven. Los 3105 productos tienen vector. Hasta el 4 de octubre vivía en PostgreSQL con pgvector.
+Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector, tabla `vector_producto`, con un índice HNSW de coseno. `SimilaresService` pide los 200 vecinos más cercanos que estén activos y no sean el propio producto ni sus copias, y se queda con uno por grupo. Después pide a MongoDB cómo se ven. Los 3105 productos tienen vector. Las reseñas tienen el suyo en `vector_comentario`.
 
-- Dónde se ve. `elastic/001_indice.json`, los cuatro campos del vector. `etl/cargar_vectores.ps1`, paso 7d de arrancar, que escribe con `_bulk`. `backend/src/services/productos/similares.service.ts`, la ruta `GET /productos/:id/similares` con el kNN, y `vectores-sync.service.ts`, que recalcula cada 3 horas los productos editados. `migrations/036_sin_producto_vector.sql`, que retira la tabla y la función de pgvector. `pruebas/recomendacion_semantica.py`, 15 OK. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`, que compara el kNN con la búsqueda exacta contra todos.
-- Lo que pide el profesor. Entrega final, recomendación por similitud semántica de la descripción con representaciones vectoriales (5 pts). La sección 5.2 da como referencia una extensión vectorial sobre PostgreSQL.
-- Por qué así. En Elasticsearch el vector vive en el mismo documento que el nombre, el estado y las facetas, así que una sola consulta los combina y no hay una tabla aparte con otra copia de los ids que se pueda quedar atrás. Con pgvector el buscador de texto y el de vectores eran dos motores. Medido en la demo, el kNN con el índice HNSW tarda unos 17 ms y la búsqueda exacta contra los 3105 unos 27 ms, y dan los mismos seis.
-- Ojo si preguntan qué pasa al reconstruir el índice. El ETL del buscador lo tira y lo rehace, y con él se irían los vectores, unos 7 minutos de Ollama. Antes de tirarlo se copian con `_reindex` a `mesh_productos_vectores_previos` y `cargar_vectores.ps1` los devuelve sin Ollama si el texto no cambió. Medido, 48 segundos.
-- Ojo si preguntan por pgvector. Se usó del 25 de septiembre al 4 de octubre. Su índice HNSW nunca se usaba en la primera versión de la función porque comparaba con un JOIN; la 027 lo arregló (3,8 ms contra 32 ms). Esa historia sigue en las migraciones 024 y 027.
+- Dónde se ve. `migrations/040_vectores_en_postgres.sql`, las dos tablas. `etl/cargar_vectores.ps1`, paso 7d de arrancar. `backend/src/services/productos/similares.service.ts` y `helpers/vectores-pgvector.ts` (`buscarCercanos()`, que sube `hnsw.ef_search` y activa `iterative_scan` para que el filtro no deje la lista corta). `vectores-sync.service.ts` recalcula cada 10 segundos los productos editados. `pruebas/recomendacion_semantica.py`, 15 OK. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`, que compara el índice HNSW con la búsqueda exacta: 1,6 ms contra 7,4 ms, los mismos seis.
+- Lo que pide el profesor. Entrega final, recomendación por similitud semántica de la descripción con representaciones vectoriales (5 pts). La sección 5.2 da como referencia una extensión vectorial sobre PostgreSQL, y el 16 de octubre pidió explícitamente pgvector.
+- Por qué así. Es más exacto. Medido por Jose David con el mismo catálogo, pgvector da el coseno exacto en 1000 de 1001 productos y el índice `int8_hnsw` de Elasticsearch en 317, porque cuantiza los vectores. Y las comparaciones de todas las reseñas contra todas las hace PostgreSQL sin sacar los vectores de la base.
+- Ojo si preguntan por la historia. Estuvo en pgvector del 25 de septiembre al 2 de octubre, en Elasticsearch del 2 al 16 de octubre, y volvió. Al volver, arrancar copió los 3105 vectores de Elasticsearch a PostgreSQL sin llamar a Ollama (mismo hash, mismo modelo). El ADR-10 de `docs/ARQUITECTURA.md` lo cuenta con números.
 
 ### 118. ¿Qué decisiones de arquitectura se sostendrían y cuáles se replantearían? (retrospectiva)
 Está en el capítulo 5 del informe de la Entrega final. Son siete decisiones que sostendríamos, entre ellas el dinero y el stock en PostgreSQL sin migrar a NewSQL, el catálogo en MongoDB y Elasticsearch como copia reconstruible. Y seis que replantearíamos, cada una con lo que pasó y lo que haríamos distinto. Un ejemplo que sirve para contarlo es la base columnar, que se rechazó el 3 de septiembre con dos números medidos y entró el 6 como ClickHouse porque el dato cambió.
@@ -973,7 +974,7 @@ Está en el capítulo 5 del informe de la Entrega final. Son siete decisiones qu
 - Dónde se ve. `Reporte Entrega Final - DABD2 - Mesh.docx`, capítulo 5, que sale de `contenido-entrega-final.json`. `docs/ARQUITECTURA.md` lineas 143 a 156 (la columnar y el cambio) y 219 a 234 (lo que el diagrama no esconde). `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 256, consecuencias.
 - Lo que pide el profesor. Entrega final, documento de retrospectiva con las decisiones que se sostendrían y las que se replantearían, justificadas en ambos casos (4 pts).
 - Por qué así. El cambio de la columnar muestra el criterio, la decisión se sostuvo con números y se revisó cuando el volumen de eventos cambió.
-- Ojo, una que el informe da por sostenida se replanteó después. El informe sostiene pgvector sobre el mismo PostgreSQL, y el 4 de octubre los vectores se mudaron a Elasticsearch, cuando aparecieron las reseñas con vector y la búsqueda por intención. Es el mismo criterio: la decisión cambió cuando cambió lo que había que buscar.
+- Ojo, una que el informe da por sostenida se replanteó dos veces. El informe sostiene pgvector sobre el mismo PostgreSQL; el 4 de octubre los vectores se mudaron a Elasticsearch, cuando aparecieron las reseñas con vector y la búsqueda por intención, y el 16 volvieron a pgvector a pedido del profesor y porque se midió que era más exacto. Es el mismo criterio: la decisión cambió cuando cambió lo que había que buscar o lo que se midió.
 
 ### 119. ¿Cómo funciona el descuento de una oferta y por qué una venta relámpago lo exige?
 La oferta guarda su precio de lista y aparte un porcentaje de descuento que puede ser nulo. El precio final no se guarda en ninguna columna, se calcula en cada consulta con `ROUND(precio * (1 - COALESCE(porcentaje_descuento, 0) / 100), 2)`. El trigger del historial escucha el precio y el porcentaje, así que cambiar solo el descuento deja una fila nueva en `precio_historial`, y la compra cobra el precio final. Una venta relámpago no se puede abrir sin descuento (409), y el descuento no se puede quitar con la venta abierta (409).
@@ -988,7 +989,7 @@ Las cuatro familias de detección (anillos y patrones de reseñas en Neo4j, comp
 - Dónde se ve. `backend/src/services/fraude/agrupador-fraude.service.ts` linea 60 (agrupar) y 156 (las cuentas concentradoras). `puntaje-fraude.service.ts` linea 65. `agrupador-fraude-worker.service.ts` linea 68, la corrida al arrancar. `migrations/026_casos_fraude.sql` lineas 48, 102 y 152, el caso, su evidencia y sus cuentas. En la app, el panel de Fraude, pestaña Casos. Pruebas `node pruebas/casos_fraude_fusion.cjs` y `node pruebas/casos_fraude_granja.cjs`.
 - Ojo si preguntan por el vendedor de una granja. Una cuenta con más de 10 contrapartes en reseñas es concentradora y nunca es núcleo. Antes contaban también las reseñas del propio fraude, así que el vendedor que armaba una granja de 11 cuentas quedaba fuera del núcleo de su caso. Ahora esas reseñas no cuentan para el umbral, y la prueba de la granja lo demuestra (saboteada falla).
 - Desde el refactor de fraude. El agrupador ya no tiene tres adaptadores, lee una sola tabla, `senal_fraude` (`hallazgo-fraude-adaptador.service.ts` línea 79). La evidencia del caso apunta a la señal, y la recencia sale de `ultima_deteccion`, que solo mueve el detector, así que revisar algo viejo ya no lo rejuvenece (era el C4).
-- Lo que queda abierto. Si una IP compartida debe unir casos (C1). Está en `docs/BACKEND-PENDIENTE.md`.
+- Cerrado el 17 de octubre. Una IP compartida ya no une casos, tampoco al guardar (era el C1): la evidencia es única por caso y señal, y una señal de login puede estar en varios casos con las cuentas de cada uno (`migrations/042_limpieza_fraude.sql`).
 
 ### 121. ¿Dónde vive el vencimiento de un descuento y qué pasa si se vacía Redis?
 En PostgreSQL. La oferta guarda `fecha_vencimiento_descuento` y `fecha_vencimiento_venta_limitada`, y nulo quiere decir que no vence. Un worker del backend revisa cada minuto las que ya pasaron su fecha y las apaga. Hasta el 26 de septiembre el vencimiento era una clave de Redis con TTL, y un Redis vaciado se llevaba los descuentos. Ahora Redis solo lleva el contador de la venta relámpago. El panel del vendedor muestra hasta cuándo dura cada uno, y si la venta relámpago vence sola se lleva también el descuento, así que la etiqueta muestra la fecha que llega primero.
@@ -1004,15 +1005,14 @@ Porque cada detector guardaba a su manera. Los anillos en `anillo_fraude`, las c
 - Ojo si preguntan por las tablas viejas. Siguen en la base, sin escrituras. No se borraron porque las migraciones viejas se vuelven a correr en cada arranque y las volverían a crear vacías; borrarlas es una decisión aparte.
 - Por qué así. La detección del detector y la revisión del admin quedan en fechas distintas, `ultima_deteccion` y `fecha_actualizacion`. Un mismo patrón visto diez veces es una fila con diez detecciones, no diez filas que el agrupador contaba como evidencia distinta.
 
-### 123. ¿Cómo llegan las reseñas a Elasticsearch con su vector?
-Por una cola en PostgreSQL, igual que el grafo. La tabla `evento_comentario` la llenan dos triggers en la misma transacción que el comentario o la reseña, con una sola fila pendiente por comentario. Un worker del backend cada 10 segundos toma las pendientes, mira si el comentario todavía existe, le pide el vector a Ollama solo si el texto cambió y lo escribe en el índice `mesh_comentarios`, o lo borra si ya no existe.
+### 123. ¿Cómo consigue cada reseña su vector?
+Por una cola en PostgreSQL, igual que el grafo. La tabla `evento_comentario` la llenan dos triggers en la misma transacción que el comentario o la reseña, con una sola fila pendiente por comentario. Un worker del backend cada 10 segundos toma las pendientes, mira si el comentario todavía existe, le pide el vector a Ollama solo si el texto cambió y lo guarda en `vector_comentario` de PostgreSQL, o lo quita si ya no existe. Hasta el 16 de octubre lo escribía en el índice `mesh_comentarios` de Elasticsearch.
 
-- Dónde se ve. `migrations/034_evento_comentario.sql`, la cola y los triggers. `elastic/003_comentarios.json`, el mapeo. `backend/src/services/resenas/evento-comentario-sync.service.ts`, el worker. En `arrancar.ps1`, el paso Índice de comentarios crea el índice antes del backend y encola los comentarios que ya había.
-- Por qué así. Un like no encola nada, porque el trigger solo mira la columna del texto. Las respuestas cortas, de menos de 15 letras, se indexan sin vector.
-- Ojo si preguntan por el tipo de índice. El vector de `mesh_comentarios` va en `flat`, que compara contra todos, y no en HNSW. Medido el 4 de octubre, con 44 copias de un mismo texto el grafo HNSW se atascaba: para "zapatos cómodos para caminar todo el día" daba como mejor una reseña con coseno 0,30, y la búsqueda exacta encontraba una de 0,81. Con unos miles de reseñas `flat` sigue tardando milisegundos.
+- Dónde se ve. `migrations/034_evento_comentario.sql`, la cola y los triggers. `migrations/040_vectores_en_postgres.sql`, la tabla. `backend/src/services/resenas/evento-comentario-sync.service.ts`, el worker. En `arrancar.ps1`, el paso Vectores de los comentarios encola todo una vez si la tabla está vacía (así se pasaron los 700 comentarios de Elasticsearch a PostgreSQL) y borra el índice viejo.
+- Por qué así. Un like no encola nada, porque el trigger solo mira la columna del texto. Las respuestas cortas, de menos de 15 letras, se quedan sin vector. Tabla aparte y no una columna en `comentario`: si el worker escribiera en la misma fila, el trigger lo volvería a encolar.
 
 ### 124. ¿Qué señales de fraude salen del texto de las reseñas?
-Cuatro familias, todas con los vectores de `mesh_comentarios` y en la tabla de señales. `resenas_repetidas`, una cuenta con 5 o más reseñas que tienen una gemela suya y el 30 % o más de las que escribe. `anillo_de_texto`, tres o más cuentas con reseñas casi iguales sobre el mismo vendedor. `resenas_parecidas_vendedor` y `_producto`, muchas reseñas con una gemela de otra cuenta. Y las `notas_incoherentes`, que usan el clasificador de la pregunta 125. Una gemela es otra reseña con coseno de 0,92 o más; solo cuentan las de más de 100 caracteres.
+Cuatro familias, todas con los vectores de `vector_comentario` y en la tabla de señales. `resenas_repetidas`, una cuenta con 5 o más reseñas que tienen una gemela suya y el 30 % o más de las que escribe. `anillo_de_texto`, tres o más cuentas con reseñas casi iguales sobre el mismo vendedor. `resenas_parecidas_vendedor` y `_producto`, muchas reseñas con una gemela de otra cuenta. Y las `notas_incoherentes`, que usan el clasificador de la pregunta 125. Una gemela es otra reseña con coseno de 0,92 o más; solo cuentan las de más de 100 caracteres.
 
 - Dónde se ve. `migrations/035_senales_fraude_por_texto.sql` y `migrations/038_senales_resenas_parecidas.sql`, los tipos. Los detectores en `backend/src/services/fraude/`, uno por familia, cada 15 minutos. El panel de Fraude del admin las enseña con su nombre.
 - Por qué así. El grafo de Neo4j ve quién reseña a quién; esto ve lo que dicen. Las de cuenta son por porcentaje y no por cantidad, porque quien escribe mucho repite alguna frase por casualidad.
@@ -1021,7 +1021,7 @@ Cuatro familias, todas con los vectores de `mesh_comentarios` y en la tabla de s
 ### 125. ¿Qué hace el clasificador de reseñas y cómo se entrenó?
 Lee el texto de una reseña y da la probabilidad de que sea mala. Son dos modelos hechos a mano con numpy sobre el vector de Ollama, una regresión logística y una red de 768 entradas, 32 neuronas y una salida. Se entrenaron con 400 reseñas escritas a mano, y se probaron con otras 80 difíciles que nunca se usaron para aprender: la red acierta el 91,2 % y la regresión el 90 %. Con eso el backend marca la nota incoherente, un texto malo con 4 o 5 estrellas o uno bueno con 1 o 2, y la cuenta por cuenta, producto y vendedor.
 
-- Dónde se ve. `clasificador-resenas/`, los datos, el entrenamiento y `modelo/reporte.txt`. `predecir.mjs`, la misma cuenta en JavaScript, que da lo mismo que Python. El backend usa la regresión en `backend/src/helpers/valoracion-texto.ts` y guarda la valoración en `mesh_comentarios`. `migrations/037_senales_notas_incoherentes.sql`, los tres tipos. `pruebas/clasificador_en_elastic.mjs` comprueba que con el vector de Elasticsearch da lo mismo que con el del entrenamiento.
+- Dónde se ve. `clasificador-resenas/`, los datos, el entrenamiento y `modelo/reporte.txt`. `predecir.mjs`, la misma cuenta en JavaScript, que da lo mismo que Python. El backend usa la regresión en `backend/src/helpers/valoracion-texto.ts` y guarda la valoración en `vector_comentario` (hasta el 16 de octubre, en `mesh_comentarios`). `migrations/037_senales_notas_incoherentes.sql`, los tres tipos. `pruebas/clasificador_en_postgres.mjs` comprueba que el vector guardado es el del entrenamiento (391 de 480 idénticos, el resto con coseno 0,999998) y que `prob_mala` es la que da el modelo del backend.
 - Ojo si preguntan por sus límites. No entiende el sarcasmo (0 de 3), porque lee palabras. Por eso la señal va al admin y nunca bloquea sola.
 - Ojo si preguntan de dónde salen las reseñas de la tienda. Las mismas 480 están sembradas como reseñas de verdad, de 40 cuentas con su compra pagada, cada una en el producto del que habla su texto (`clasificador-resenas/semilla/`).
 
@@ -1061,3 +1061,50 @@ Antes la reseña se quedaba y nadie lo veía. Ahora es una señal. Una reseña d
 No. Al escribir una reseña el backend la indexa, la valora y la evalúa en las señales de texto en ese momento, sin hacer esperar a quien la escribe, y el worker de cada 15 minutos recoge lo que haya fallado. Medido en la demo, las señales salen a los 3 o 4 segundos.
 
 - Dónde se ve. `backend/src/services/fraude/chequeo-texto-inmediato.service.ts`. En vivo, `.\demo-resenas-texto.ps1`, que dice cuántos segundos tardó cada señal.
+
+---
+
+## Parte 9. Lo que cambió el 16 y 17 de octubre
+
+Lo de 25f0fe0 de Jose David, a pedido del profesor, con las migraciones 040 a 045. Todo probado el 18 de octubre en la base local, con el backend real.
+
+### 132. ¿Qué pasa si Redis se cae en plena compra?
+Se compra igual. Desde el 17 de octubre el carrito de verdad es el pedido `pendiente` de PostgreSQL, así que con Redis caído el backend lee el carrito y lo compra directo ahí, sin el candado de Redis: el `SELECT ... FOR UPDATE` del pedido evita el doble cobro. La venta relámpago también sigue vendiendo: PostgreSQL reserva solo, con el mismo control de unidades, y la reserva queda sin ticket hasta que Redis vuelve.
+
+- Dónde se ve. `pruebas/falla_checkout.sh`, 32 OK: con Redis parado compra, con MongoDB parado compra, con PostgreSQL parado no, y en los tres nada queda a medias. `docs/CONSISTENCIA-CHECKOUT.md`, sección 0 bis.
+- Lo que pide el profesor. Entrega 3, estrategia de consistencia y prueba de falla simulada, y su directiva de que Redis nunca sea la verdad.
+- Ojo si preguntan por lo que no se cubre. `SesionGuard` mira PostgreSQL en cada petición con sesión, así que con PostgreSQL caído nada con sesión responde. Es un control de seguridad de todo el backend y se dejó así.
+
+### 133. ¿Dónde viven las reservas de una venta relámpago?
+En dos lugares con roles distintos. Redis decide primero con su script Lua, atómico, y rechaza al que llega tarde sin bloquear a nadie. La reserva de verdad queda en `reserva_venta_relampago` de PostgreSQL, con su ticket, su vencimiento de 15 minutos y su estado (`activa`, `confirmada`, `devuelta`, `vencida`). Si Redis pierde la venta, `ReservasVentaRelampagoSyncService` la reconstruye desde PostgreSQL con la operación `restaurar`.
+
+- Dónde se ve. `migrations/045_carrito_en_postgres.sql`. `redis/inventario_limitado.lua`, la rama `restaurar`, y `redis/prueba_restaurar.sh`, 20 OK contra el script provisional de David. `pruebas/oferta_limitada.sh`, 33 OK: 60 cuentas sobre 20 unidades, y PostgreSQL registró las 40 reservas de las dos olas, todas con su ticket, y las devolvió al cerrar la venta.
+- Por qué así. Abrir la venta con `restaurar` y no con `sembrar` sigue numerando los tickets desde el más alto de la historia, así que un ticket viejo de un carrito nunca choca con el de otra persona.
+
+### 134. ¿Para qué se metieron las compras al grafo?
+Para que cada base resuelva lo suyo. "Para ti" (lo que compraron quienes compraron lo mismo que tú) es un recorrido de dos saltos desde una cuenta, la pregunta típica de un grafo. Cada línea comprada es un nodo `:Compra`, `(:Usuario)-[:HIZO]->(:Compra)-[:DE]->(:Producto)`, y "para ti" y "también compraron" se leen de Neo4j en vivo. Antes "para ti" salía de las vistas en ClickHouse cada 15 minutos.
+
+- Dónde se ve. `migrations/041_grafo_compras.sql`, la cola `evento_grafo_compra` por cuenta y sus triggers. `neo4j/001_esquema.cypher`, la restricción `compra_id`. `pruebas/grafo_compras.sh`, 30 OK: las compras llegan al grafo en segundos, para ti y también compraron dan lo que deben, con Neo4j parado el pedido se cobra igual y se proyecta al volver, y cancelar se lleva las compras.
+- Por qué así. Mismo patrón que las reseñas: el pedido commitea sin esperar a Neo4j y un worker proyecta. La cola va por cuenta y no por pedido, así un pedido nuevo, uno cancelado o uno borrado se resuelven igual.
+
+### 135. ¿Qué es el buscador de ofertas?
+Que un vendedor encuentre "la laptop de 16 GB" entre sus 2000 ofertas escribiéndolo, aunque lo escriba mal. Es un índice propio en Elasticsearch, `mesh_ofertas`, con un documento por oferta. Lo mantiene una cola, `evento_oferta`, con triggers en la oferta y en lo que la rodea: el nombre del producto, la variante y el nombre y estado del vendedor. La ruta trae además un resumen con agregaciones sobre todo lo que cumple la búsqueda.
+
+- Dónde se ve. `migrations/043_evento_oferta.sql`, `elastic/004_ofertas.json`, `GET /vendedor/ofertas/buscar`, y en el panel del vendedor el bloque Buscar ofertas. `pruebas/ofertas_y_seguimientos.sh`, 56 OK, incluye renombrar y suspender al vendedor y apagar Elasticsearch.
+- Lo que pide el profesor. Darle más uso a Elasticsearch (16 de octubre).
+
+### 136. ¿Qué es el "avísame" y por qué usa un percolator?
+El comprador pide que le avisen cuando llegue algo que buscó y no estaba, o cuando una variante baje de precio. Un percolator guarda CONSULTAS en vez de documentos: cada "avísame" es una consulta en `mesh_seguimientos`, y cada oferta que cambia se lanza contra todas. La primera que cumple genera un solo aviso y la consulta se borra. La verdad es `seguimiento_oferta` de PostgreSQL.
+
+- Dónde se ve. `migrations/044_seguimiento_ofertas.sql` (`aviso_seguimiento_oferta.id_seguimiento` es UNIQUE: imposible avisar dos veces), `elastic/005_seguimientos.json`. En la app, el botón Avísame si baja de precio en la ficha, Avísame cuando llegue en una búsqueda sin resultados, y la pestaña Avisos del perfil con el número en la cabecera. `pruebas/ofertas_y_seguimientos.sh` prueba una búsqueda que se cumple con una oferta nueva, el precio máximo que la frena y una baja de precio de verdad.
+- Ojo si preguntan qué pasa si se pierde el índice. arrancar lo rehace y vuelve a cargar las consultas de los seguimientos vivos, armadas por PostgreSQL con la misma forma que el backend. Probado borrando el índice: las tres consultas volvieron idénticas.
+
+### 137. ¿Qué son los combos y las búsquedas sin resultados?
+Dos usos más de ClickHouse. Los combos son los grupos de 2 y 3 productos que más se compran en el mismo pedido, un conteo sobre todas las compras que un worker deja en Redis cada 30 minutos y la portada enseña como Se compran juntos. Las búsquedas sin resultados son lo más buscado que no dio nada, juntando las formas de escribir lo mismo: la columna `termino_normalizado` (minúsculas, sin tildes, sin espacios de más) la calcula ClickHouse sola en cada inserción, y los errores de tecleo se unen con distancia de edición.
+
+- Dónde se ve. `GET /productos/combos` y `frontend/src/lib/EstanteCombos.svelte`. `clickhouse/001_esquema.sql`, la columna. `GET /admin/eventos/busquedas-sin-resultados`, en el panel de Tendencias, Señales, Lo que no tenemos. `pruebas/busquedas_sin_resultados.sh`, 13 OK: cuatro formas de escribir lo mismo y un error de tecleo salen como un grupo de 5 sesiones.
+
+### 138. ¿Qué se quitó del fraude el 17 de octubre y por qué?
+Tres señales que no aportaban. La cadena abierta, porque una cadena A, B, C no concentra reputación en nadie y en los datos solo repetía anillos que ya salían. El favor devuelto, porque siempre salía sobre el mismo par que el mutuo: ahora las horas entre la ida y la vuelta van en el detalle del mutuo y suman como bono (+20 en menos de una hora). El carrito acaparador, porque con el carrito en PostgreSQL apartar sin comprar ya no retiene unidades. Además la granja de registros pasó a Elasticsearch, donde sí están los registros, y una IP compartida dejó de unir casos.
+
+- Dónde se ve. `migrations/042_limpieza_fraude.sql` y `backend/elementos Generales/plan pendiente/limpieza-fraude.md`. `pruebas/anillos_familia_b.sh`, 40 OK: el favor devuelto sale como mutuo con 1 segundo entre ida y vuelta, y los tipos quitados dan 400. Las consultas viejas (`B1`, `B5`, `F4`, `F6`) quedan en el repositorio marcadas como fuera de uso.

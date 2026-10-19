@@ -325,17 +325,20 @@ levantar() {
         fi
     done
 
-    # El carrito de la cuenta compartida vuelve a como estaba. Se devuelve
-    # DESPUES de esperar a Redis, porque escribirlo mientras arranca se pierde
-    # sin dar error.
-    if [ -n "${LLAVE_CARRITO:-}" ]; then
-        R DEL "$LLAVE_CARRITO" >/dev/null
+    # El carrito de la cuenta compartida vuelve a como estaba, POR LA API y
+    # despues de esperar a las tres bases. Hasta el 2026-10-17 se devolvia con
+    # HSET directo a Redis; desde la 045 el carrito de verdad es el pedido
+    # pendiente de PostgreSQL, y escribir solo en Redis dejaba un carrito que la
+    # verdad no conocia.
+    if [ -n "${SESION:-}" ]; then
+        curl -s -m 20 -X DELETE "$API/carrito" -H "Cookie: $SESION" >/dev/null 2>&1
         if [ -n "${CARRITO_PREVIO:-}" ]; then
-            while IFS=$'\t' read -r _of _cant; do
-                [ -n "$_of" ] && R HSET "$LLAVE_CARRITO" "$_of" "$_cant" >/dev/null
+            while read -r _of _cant; do
+                [ -n "$_of" ] && curl -s -m 20 -X PUT "$API/carrito/lineas/$_of" \
+                    -H 'Content-Type: application/json' -H "Cookie: $SESION" \
+                    -d "{\"cantidad\":$_cant}" >/dev/null 2>&1
             done <<< "$CARRITO_PREVIO"
-            R EXPIRE "$LLAVE_CARRITO" 86400 >/dev/null
-            echo "  se devolvio el carrito que $CUENTA tenia antes"
+            echo "  se devolvio por la API el carrito que $CUENTA tenia antes"
         else
             echo "  $CUENTA no tenia carrito antes, y sigue sin tenerlo"
         fi
@@ -525,8 +528,13 @@ else
 fi
 
 # La cuenta es compartida y puede tener algo a medias. Se guarda para
-# devolverlo, igual que hace pruebas/carrito.sh.
-CARRITO_PREVIO=$(R HGETALL "$LLAVE_CARRITO" | paste - - 2>/dev/null)
+# devolverlo, igual que hace pruebas/carrito.sh: lo que dice el backend, una
+# linea "id_oferta cantidad" por renglon.
+CARRITO_PREVIO=$(curl -s -m 20 "$API/carrito" -H "Cookie: $SESION" | python -c "
+import sys,json
+try:
+    for l in json.load(sys.stdin)['payload']['lineas']: print('%s %s' % (l['id_oferta'], l['cantidad']))
+except Exception: pass")
 if [ -n "$CARRITO_PREVIO" ]; then
     OK "se respaldo el carrito que ya tenia $CUENTA"
 else

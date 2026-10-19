@@ -19,7 +19,7 @@ Todo detector, sea Cypher, ClickHouse o el login, entrega lo mismo.
 | Campo | Que es |
 |---|---|
 | `fuente` | grafo, eventos o login |
-| `tipo` | el nombre de la consulta, por ejemplo `ciclo`, `cadena_abierta`, `compras_en_rafaga` |
+| `tipo` | el nombre de la consulta, por ejemplo `ciclo`, `satelites`, `compras_en_rafaga` |
 | `cuentas` | los ids de usuario involucrados |
 | `clave` | esos ids ordenados y unidos con guion, igual que `anillo_fraude.clave` |
 | `evidencia` | los ids concretos (resenas, pedidos, registros) |

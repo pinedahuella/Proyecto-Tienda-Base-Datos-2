@@ -1,5 +1,12 @@
 -- F6_granja_de_registros.sql -- MUCHAS CUENTAS NACIDAS DESDE LA MISMA IP EN POCO TIEMPO
 --
+-- FUERA DE USO EN EL BACKEND desde el 2026-10-17: la granja de registros sale de
+-- Elasticsearch (mesh_eventos_autenticacion), en
+-- FraudeLoginRetrospectivoService.evaluarGranjaDeRegistros(), con los mismos numeros
+-- (5 cuentas en 60 min, 30 dias). En ClickHouse nunca podia dispararse: evento_registro
+-- esta vacia desde que el backend dejo de escribir log_registro el 2026-09-10. Se deja
+-- como historia.
+--
 -- QUE DEVUELVE: IPs desde las que se registraron al menos
 -- `min_registros_por_ip` cuentas dentro de una ventana de `minutos_registro`
 -- minutos, con las cuentas de la peor ventana.

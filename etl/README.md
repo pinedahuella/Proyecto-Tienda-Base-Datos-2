@@ -38,6 +38,14 @@ reconstruir.js
 correr.sh
 ```
 
+```
+A PostgreSQL -- los vectores (pgvector, desde el 2026-10-16)
+---------------------------------------
+cargar_vectores.ps1   lee el texto de MongoDB, pide el vector a Ollama y escribe
+                      vector_producto. La primera vez en una base que los tenia
+                      en Elasticsearch, los copia de ahi sin Ollama
+```
+
 **No hay nada que instalar, en ninguno de los dos.** Es la regla de esta
 carpeta y se cumple igual en los dos casos: PostgreSQL arma el texto y lo carga
 el cliente que ya viene DENTRO del contenedor. Para Mongo el texto es JSON
@@ -796,6 +804,17 @@ rafagas ("tres o mas calificaciones a la misma cuenta en 72 horas"), que es una
 de las cuatro senales de `neo4j/consultas/A3_rafaga.cypher`. Esta anotado como trampa dentro de
 `extraer_grafo.sql` porque es facil escribir el ETL sin fecha y no notarlo: el
 grafo carga igual y solo esa consulta se queda muda.
+
+### Las compras no las carga este ETL
+
+Desde el 2026-10-16 el grafo tiene tambien las compras, como nodos `:Compra`
+(migracion 041, ver `neo4j/README.md`). No salen de `extraer_grafo.sql`: las
+proyecta el worker `GrafoComprasSyncService` del backend desde la cola
+`evento_grafo_compra`. Lo unico que este ETL hace con ellas es no perderlas:
+`--limpiar` borra el grafo entero, asi que al terminar encola todas las cuentas
+con pedidos (el `.sh` y `Correr-EtlGrafo` de arrancar), y el worker las vuelve a
+dejar iguales a PostgreSQL. Sin `--limpiar` no hace falta: el MERGE de resenas no
+toca las `:Compra`.
 
 ### Lo que NO va al grafo, dicho para que nadie lo suponga
 

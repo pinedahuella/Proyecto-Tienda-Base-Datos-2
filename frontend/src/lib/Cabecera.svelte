@@ -295,7 +295,7 @@
 					     en Mi perfil. -->
 					{#if avisos.noLeidos > 0}
 						<a class="navegar" href="/panel?s=avisos">
-							Avisos <span class="burbuja">{avisos.noLeidos}</span>
+							Avisos <span class="contador">{avisos.noLeidos}</span>
 						</a>
 					{/if}
 					<!-- "Admin" y "Mi perfil" son DOS cosas y antes eran una sola pantalla
@@ -346,7 +346,7 @@
 					<div id="menu-cuenta" class="menu" class:abierto={menuAbierto}>
 						<a class="opcion" href="/pedidos" onclick={() => cerrarMenu()}>Mis pedidos</a>
 						<a class="opcion" href="/panel?s=avisos" onclick={() => cerrarMenu()}>
-							Avisos{#if avisos.noLeidos > 0}<span class="burbuja">{avisos.noLeidos}</span>{/if}
+							Avisos{#if avisos.noLeidos > 0}<span class="contador">{avisos.noLeidos}</span>{/if}
 						</a>
 						{#if soyAdmin}
 							<a class="opcion" href="/panel?s=reportes" onclick={() => cerrarMenu()}>Admin</a>
@@ -486,6 +486,24 @@
 	   que necesita ser el contexto de posicion de esa burbuja. */
 	.carro {
 		position: relative;
+	}
+
+	/* El numero de avisos sin leer, junto al texto del enlace. No es .burbuja:
+	   esa va absoluta sobre el boton del carrito, y en un enlace se iba a la
+	   esquina de la pagina. */
+	.contador {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		min-width: 19px;
+		height: 19px;
+		margin-left: 4px;
+		padding: 0 5px;
+		font-size: var(--f-xs);
+		line-height: 1;
+		color: var(--blanco);
+		background: var(--indigo);
+		border-radius: 999px;
 	}
 
 	.burbuja {

@@ -15,6 +15,7 @@ enchufarlo sea llamar a `EVALSHA` desde donde corresponda.
 | `inventario_limitado.lua` | Comprobar y descontar EN UN SOLO PASO. Lo que la rubrica pide. |
 | `prueba_carrito.sh` | Evidencia del TTL por inactividad, y de que al vencer no hay nada que liberar. |
 | `prueba_concurrencia.sh` | Evidencia de que 1000 solicitudes sobre 100 unidades venden 100. |
+| `prueba_restaurar.sh` | Que la rama `restaurar` de `inventario_limitado.lua` hace lo mismo que el script provisional del backend (2026-10-18). |
 | `mas_vendidos.sh` | Muestra el ranking de mas vendidos y, con `--reconstruir`, lo recalcula desde ClickHouse. |
 
 ```
@@ -43,6 +44,35 @@ bash pruebas/descuentos.sh            # el precio con descuento en la foto y en 
 bash pruebas/oferta_limitada.sh       # la venta relampago con cuentas reales
 ```
 
+
+## Desde el 2026-10-17, Redis nunca es la fuente de verdad
+
+Lo pidio el profesor y lo hizo Jose David (25f0fe0, migracion 045,
+`backend/elementos Generales/plan pendiente/carrito-postgres-verdad.md`). Lo que
+cambia aqui:
+
+- **El carrito** se sigue escribiendo y leyendo en Redis (`mesh:carrito:<id>`),
+  pero debajo se copia al pedido `pendiente` de la cuenta en PostgreSQL, que es
+  la verdad. El hash lleva dos campos mas: `_v`, la version de PostgreSQL que
+  conoce, y `_d`, la marca de desincronizado. Si Redis pierde el carrito, se
+  reconstruye desde PostgreSQL; si Redis se cae, todo va directo a PostgreSQL.
+  Las 24 h las decide `pedido.fecha_ultima_actividad`, y el TTL de Redis se pone
+  igual.
+- **La venta relampago**: Redis sigue decidiendo primero con
+  `inventario_limitado.lua`, y la reserva de verdad queda en
+  `reserva_venta_relampago`. La reconciliacion que la seccion 2 daba por
+  pendiente **ya existe**: `ReservasVentaRelampagoSyncService` (cada 10 s)
+  reconstruye el estado de Redis desde PostgreSQL con la operacion `restaurar`
+  cuando Redis lo pierde, cuando hay reservas sin ticket o cuando se abre la
+  venta.
+- **`restaurar`** es una rama mas de `inventario_limitado.lua` desde el
+  2026-10-18, con los mismos argumentos que el `restaurar-venta-relampago.lua`
+  provisional que David dejo en `plan pendiente/` y que el backend todavia
+  carga aparte. `bash redis/prueba_restaurar.sh` corre los dos con las mismas
+  entradas y exige el mismo estado (20 OK). Pasar el backend a la rama esta en
+  `docs/BACKEND-PENDIENTE.md`.
+
+Lo de abajo cuenta como se llego a cada pieza, con la fecha de cada cosa.
 
 ---
 
@@ -459,9 +489,10 @@ ser, la ultima comprobacion de que el libro cuadra.
 dos contadores se pueden separar. Se separan si una reserva gana en Redis y
 despues el pago falla; para eso estan `devolver` y el vencimiento. Se separan
 tambien si el vendedor cambia el stock directamente en PostgreSQL, o si Redis se
-reinicia sin haber alcanzado a persistir. La reconciliacion real -- contar
-tickets confirmados contra `stock_movimiento` y resembrar -- **no esta hecha**;
-esta en la lista de la seccion 5, no inventada como si existiera.
+reinicia sin haber alcanzado a persistir. La reconciliacion real **existe desde
+el 2026-10-17**: las reservas viven en `reserva_venta_relampago` de PostgreSQL y
+`ReservasVentaRelampagoSyncService` rehace Redis desde ahi con `restaurar` (ver
+el principio de este archivo). Hasta esa fecha no estaba hecha.
 
 
 ---

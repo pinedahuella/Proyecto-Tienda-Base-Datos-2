@@ -84,3 +84,4 @@ desktop.ini
 # la raiz del repositorio, y de ahi estas lineas.
 .mesh-*
 
+__pycache__/

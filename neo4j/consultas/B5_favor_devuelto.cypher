@@ -1,5 +1,11 @@
 // B5_favor_devuelto.cypher -- "YO TE CALIFICO, TU ME CALIFICAS", CON RELOJ
 //
+// FUERA DE USO desde el 2026-10-17 (limpieza de fraude de Jose David, migracion 042):
+// el tipo favor_devuelto no existe. Siempre salia sobre el mismo par que mutuo, asi que
+// se fusiono ahi: el par guarda en su detalle las HORAS entre la ida y la vuelta, y el
+// puntaje suma un bono (+20 en menos de 1 h, +12 en menos de 24, +8 en menos de 72). A
+// diferencia de esta consulta no exige notas altas. Se deja como historia.
+//
 // QUE BUSCA: A le pone nota alta a B y B le devuelve nota alta a A en menos
 // de $horas_devolucion horas.
 //

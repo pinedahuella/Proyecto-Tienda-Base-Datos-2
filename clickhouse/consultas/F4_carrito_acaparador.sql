@@ -1,5 +1,11 @@
 -- F4_carrito_acaparador.sql -- LA CUENTA QUE LLENA EL CARRITO Y NO COMPRA
 --
+-- FUERA DE USO desde el 2026-10-17 (limpieza de fraude de Jose David, migracion 042):
+-- el tipo carrito_acaparador no existe. Su premisa (apartar unidades hasta que el
+-- carrito vence) quedo vieja con el carrito en PostgreSQL: una oferta normal no
+-- reserva nada, y una venta relampago reserva 15 min con PostgreSQL impidiendo vender
+-- de mas. Se deja como historia; clickhouse/pruebas/comprobar.py la sigue midiendo.
+--
 -- QUE DEVUELVE: pares (cuenta, producto) donde la cuenta agrego al carrito al
 -- menos `min_unidades_acaparadas` unidades y compro a lo sumo
 -- `max_tasa_compra_acaparador` de ellas.

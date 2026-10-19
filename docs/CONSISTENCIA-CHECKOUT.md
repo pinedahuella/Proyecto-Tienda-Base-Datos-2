@@ -2,8 +2,10 @@
 
 **Mesh -- Bases de Datos 2, Universidad del Istmo. Entrega 3.**
 
-Fecha: 2026-09-04. Ultima actualizacion: 2026-10-01, la fila 11 (MongoDB
-caido durante el checkout) queda resuelta. Todo lo que dice este documento sale de codigo que
+Fecha: 2026-09-04. Ultima actualizacion: 2026-10-18, el carrito pasa a tener
+su verdad en PostgreSQL y Redis caido ya no impide comprar (ver 0 bis y las
+filas 12 a 14). Antes, el 2026-10-01, la fila 11 (MongoDB caido durante el
+checkout) quedo resuelta. Todo lo que dice este documento sale de codigo que
 corre hoy y de mediciones contra la base viva. Donde algo no esta resuelto, se
 dice que no lo esta.
 
@@ -29,6 +31,47 @@ escribir en PostgreSQL. Todo lo que sigue existe por esa frase.
 La postura del proyecto, dicha de una vez: **el dinero y el stock son
 transaccionales y no se negocian; todo lo demas se acepta como eventual y se
 declara cuanto tarda.**
+
+---
+
+## 0 bis. Desde el 2026-10-17, Redis nunca es la fuente de verdad
+
+El profesor lo pidio asi, y Jose David lo hizo en 25f0fe0 (migracion 045,
+`backend/elementos Generales/plan pendiente/carrito-postgres-verdad.md`). Lo
+que cambia en la tabla de arriba:
+
+```
+PostgreSQL   el pedido, el stock, el kardex, el pago,   transaccional
+             EL CARRITO (el pedido pendiente) y las
+             reservas de venta relampago
+Redis        la copia rapida del carrito, el script     fuera de la transaccion,
+             que decide primero en la venta relampago   nunca la verdad
+             y el candado
+```
+
+Como se escribe: el carrito va a Redis y se contesta, y debajo un intento
+asincrono lo copia al pedido `pendiente` de la cuenta, por diferencias. Si la
+copia falla o choca con una version que Redis no vio, el carrito queda
+**desincronizado**: la pantalla lo dice con un boton, `POST /carrito/sincronizar`
+decide quien tiene razon, y mientras tanto el checkout contesta 409 y no cobra.
+
+Como se compra: `POST /carrito/comprar` bloquea el pedido pendiente y las
+ofertas (`FOR UPDATE`, en orden de id), compara Redis con PostgreSQL si Redis
+esta, comprueba disponibilidad, reservas y precio, y llama a
+`cambiar_direccion_pedido()` y `comprar_pedido()` en la misma transaccion. Ya no
+usa `comprar_carrito()`.
+
+Lo que ganan los puntos de falla:
+
+| # | Que puede pasar | Que se hace | Categoria |
+|---|---|---|---|
+| 12 | Redis cae durante el checkout | se compra contra PostgreSQL; el `FOR UPDATE` del pedido hace de candado | **resuelto**, medido en 4 bis |
+| 13 | Redis pierde el carrito o la venta relampago (reinicio, FLUSHALL) | el carrito se reconstruye desde PostgreSQL al leerlo; la venta, con `restaurar` desde `reserva_venta_relampago` | **reintento idempotente** |
+| 14 | La copia de Redis a PostgreSQL falla | carrito desincronizado, el checkout no cobra hasta sincronizar | **rechazo explicito** |
+
+La fila 6 (el proceso muere entre el COMMIT y vaciar el carrito) deja de ser
+una ventana: el carrito que se compra ES el pedido, y el COMMIT lo pasa a
+`comprado`. Lo que quede en Redis no coincide con PostgreSQL y se descarta.
 
 ---
 
@@ -415,7 +458,23 @@ linea base con todo vivo no es adorno: sin ella, un escenario que no compra no
 prueba nada, porque podria ser que la falla lo impidiera o que el arnes nunca
 supiera comprar.
 
-**Resultado: 31 OK, 0 FALLA, y un hallazgo para declarar.**
+**Vuelta a correr el 2026-10-18, con el carrito en PostgreSQL: 32 OK, 0 FALLA.**
+
+| Escenario | HTTP | Que quedo en PostgreSQL | El carrito |
+|---|---|---|---|
+| todo vivo | 201, `comprado: true` | pedido, pago, kardex, stock de 15 a 14 | se vacia |
+| Redis parado | **201, `comprado: true`** | pedido, pago, kardex, stock de 14 a 13 | se vacia |
+| MongoDB parado | 201, `comprado: true` | pedido, pago, kardex, stock de 13 a 12 | se vacia |
+| PostgreSQL parado | **503** "No se pudo conectar con PostgreSQL" | intacto | entero |
+| todo vivo otra vez | 201, `comprado: true` | stock de 12 a 11 | se vacia |
+
+El escenario A cambio de regla: hasta el 2026-10-17 se EXIGIA que con Redis
+parado no comprara (el carrito vivia solo ahi); ahora se exige que compre.
+Ninguna caida cobro a medias, y el candado quedo suelto en todas.
+
+Lo de abajo es la historia de la primera corrida.
+
+**Resultado del 2026-09-06: 31 OK, 0 FALLA, y un hallazgo para declarar.**
 
 | Escenario | HTTP | Que quedo en PostgreSQL | El carrito |
 |---|---|---|---|

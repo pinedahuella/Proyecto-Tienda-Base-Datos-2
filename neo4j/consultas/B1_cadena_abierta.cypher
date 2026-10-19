@@ -1,5 +1,11 @@
 // B1_cadena_abierta.cypher -- EL ANILLO QUE NO SE CIERRA
 //
+// FUERA DE USO desde el 2026-10-17 (limpieza de fraude de Jose David, migracion 042):
+// el backend ya no la busca y el tipo cadena_abierta no existe. Una cadena A->B->C no
+// concentra reputacion en nadie, y en los datos solo repetia anillos que ya salian como
+// ciclo, mutuo o satelites. Se deja como historia de la Entrega 3 y la siguen corriendo
+// neo4j/correr_patrones.sh y neo4j/pruebas/comparar.py sobre su siembra.
+//
 // QUE BUSCA: una cadena de 3 a 5 cuentas donde cada una le pone nota alta a
 // la siguiente -- A a B, B a C, C a D -- y la reputacion NUNCA vuelve al
 // origen: no hay ningun camino de resenas de D de vuelta a A.

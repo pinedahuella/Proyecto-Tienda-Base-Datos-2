@@ -44,6 +44,36 @@ tres relaciones de arriba:
 El grafo es una PROYECCION, no una fuente de verdad: se puede borrar entero y
 reconstruir desde PostgreSQL. Nada se escribe aqui que no exista alla.
 
+## Las compras, desde el 2026-10-16
+
+Jose David sumo las compras al grafo (25f0fe0, migracion 041,
+`backend/elementos Generales/plan pendiente/grafo-compras.md`), con la misma
+forma que la resena: un NODO `:Compra` por linea de pedido, con el id de
+`pedido_producto`.
+
+```
+(:Usuario)-[:HIZO]->(:Compra)-[:DE]->(:Producto)
+                    (:Compra)-[:A_VENDEDOR]->(:Usuario)
+```
+
+La variante, la cantidad, el precio y la fecha van como propiedades. Cuenta como
+compra un pedido `comprado`, `enviado` o `entregado`; `pendiente` (el carrito) y
+`cancelado` no. De aqui salen "para ti" (lo que compraron quienes compraron lo
+mismo que tu, `GET /productos/para-ti`) y "tambien compraron"
+(`GET /productos/:id/tambien-compraron`), en vivo.
+
+**No las carga el ETL.** Las proyecta el worker `GrafoComprasSyncService` del
+backend, cada 10 s, desde la cola `evento_grafo_compra` (una fila por CUENTA: el
+worker relee todas sus compras y deja sus `:Compra` iguales a eso). La
+restriccion `compra_id` esta en `001_esquema.cypher`, porque el worker tambien
+usa MERGE. Como `--limpiar` borra el grafo entero, al terminar el ETL (el de
+arrancar y `etl/cargar_grafo.sh`) encola todas las cuentas con pedidos y el
+worker las vuelve a proyectar. La conciliacion (`GET /admin/grafo/conciliacion`)
+compara las `:Compra` con las lineas compradas de PostgreSQL.
+
+Prueba: `bash pruebas/grafo_compras.sh` (30 OK el 2026-10-18), que compra de
+verdad, para Neo4j a mitad y cancela.
+
 ## Como entrar
 
 La ventana del navegador esta en <http://localhost:7474> (usuario `neo4j`, la

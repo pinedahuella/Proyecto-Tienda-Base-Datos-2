@@ -4,6 +4,81 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO DE 25f0fe0 (16 y 17 de octubre), llevado a todas las capas el 2026-10-18
+
+Todo lo que tus planes dejaban como "le toca a otros" esta hecho y probado en la
+base local de Meme con tu backend tal cual (no se toco `backend/`). Commits de
+este lado: e32c246 (capas), ea718b9 (frontend), ef7be24 (pruebas y demos) y los
+de despues; el detalle de lo medido esta en `docs/TRASPASO.md`, EMPIEZA AQUI
+(18-10).
+
+**Lo que hay de este lado:**
+
+- Migraciones 040 a 045, una por cada SQL de referencia, en el orden que pedias:
+  `040_vectores_en_postgres`, `041_grafo_compras`, `042_limpieza_fraude`,
+  `043_evento_oferta`, `044_seguimiento_ofertas`, `045_carrito_en_postgres`. El
+  unico cambio respecto a tus SQL: las siembras del final (todas las ofertas a
+  `evento_oferta`, todas las cuentas a `evento_grafo_compra`) corren una sola
+  vez, con la cola vacia, porque arrancar corre el esquema en cada arranque y se
+  re-encolaba todo cada vez. En la 042 el indice viejo solo se tira si todavia
+  es UNIQUE, por lo mismo.
+- `elastic/004_ofertas.json` y `005_seguimientos.json`, creados por arrancar
+  (paso 9e). Si `mesh_ofertas` se crea de nuevo, arrancar encola todas las
+  ofertas; si `mesh_seguimientos` no cuadra con los seguimientos vivos, lo rehace
+  y vuelve a cargar sus consultas, armadas en SQL con la misma forma que tu
+  `consultaDelSeguimiento()`. Probado borrando los dos indices: las tres
+  consultas volvieron identicas a las que habia guardado el backend.
+- `003_comentarios.json` borrado y los campos de vector fuera de `001_indice.json`.
+  arrancar copia los vectores de los productos de Elasticsearch a `vector_producto`
+  sin Ollama (3105 de 3105), encola los comentarios si `vector_comentario` esta
+  vacia (tu worker los recalculo: 700 en ~30 s), y despues borra `mesh_comentarios`
+  y `mesh_productos_vectores_previos`.
+- `etl/cargar_vectores.ps1` escribe `vector_producto` (mismo texto, hash, grupo y
+  activo que `VectoresSyncService`).
+- Neo4j: la restriccion `compra_id` en `001_esquema.cypher`, y el ETL del grafo
+  (arrancar y `cargar_grafo.sh --limpiar`) vuelve a encolar las compras al terminar.
+- ClickHouse: `termino_normalizado` en `001_esquema.sql`, sin el MATERIALIZE COLUMN
+  (correria en cada arranque; en las partes viejas se calcula al leer).
+- Redis: `restaurar` es una rama mas de `redis/inventario_limitado.lua`, con tus
+  mismos argumentos. `bash redis/prueba_restaurar.sh` corre la rama y tu script
+  provisional con las mismas entradas: 20 OK, mismo estado y misma respuesta.
+- Frontend: carrito desincronizado y `fuente`, el 409 del checkout con su boton,
+  sin el `modo="pedido"` ni `comprarPedido`/`cambiarDireccionPedido`, avisame en
+  la ficha y en `/buscar`, la pestana Avisos con su contador, tambien compraron,
+  combos en la portada, el buscador de ofertas del vendedor, "Lo que no tenemos"
+  en Tendencias, y los tipos quitados fuera del panel de Fraude.
+- Pruebas actualizadas (`carrito.sh`, `carrito_vencimiento.sh`, `falla_checkout.sh`,
+  `anillos_familia_b.sh`, `recomendaciones.sh`, `vectores_worker.cjs`,
+  `recomendacion_semantica.py`, `clasificador_en_postgres.mjs`) y nuevas:
+  `ofertas_y_seguimientos.sh` (56 OK, con Elasticsearch caido),
+  `grafo_compras.sh` (30 OK, con Neo4j caido), `busquedas_sin_resultados.sh` (13 OK).
+  `falla_checkout.sh` da 32 OK y ahora EXIGE que con Redis parado compre.
+
+**Lo que te toca a ti, en orden:**
+
+1. **Pasar el backend a la rama `restaurar` del Lua original** y borrar los dos
+   provisionales de `plan pendiente/` (`restaurar-venta-relampago.lua` y
+   `redimensionar-reserva.lua`). En `inventario-limitado.service.ts` es cambiar
+   `restaurarVentaRelampago` por `inventarioLimitado` con los mismos argumentos y
+   quitar su `defineCommand`. La prueba de arriba demuestra que da lo mismo.
+2. **En tu PC:** `git pull` y `.\arrancar.ps1`. Tus tablas aplicadas a mano son las
+   mismas que crean las migraciones (todas con IF NOT EXISTS) y tus colas ya
+   tienen filas, asi que no se re-siembran; tus indices `mesh_ofertas` y
+   `mesh_seguimientos` se quedan si su mapeo es el bueno. Quita
+   `ELASTIC_INDICE_COMENTARIOS` de tu `backend/.env`.
+3. **Detalle de la doc:** `POST /comprador/seguimientos` contesta **201** (el
+   default de Nest para un POST), y `endpoints-compradores.md` dice 200.
+4. **De paso, lo bueno:** tu punto 3 del 08-10 (notas incoherentes en 0 contra 8
+   del clasificador) ya no pasa con la version en SQL: en la base local da 3 por
+   cuenta y 3 por vendedor, y el clasificador sigue marcando 8 resenas.
+
+**Sin hacer, a proposito:** las semillas con pedidos de varios productos para que
+haya combos. La semilla (`migrations/datos/001_catalogo.sql`) la escribe
+`generador.js` y sumarle pedidos cambia los conteos que esperan varias pruebas;
+queda para decidirlo con Meme. Hoy hay 4 combos en la base local.
+
+---
+
 ## LO QUE TE TOCA, 2026-10-08 en la tarde
 
 Corrimos todas las pruebas del repo con las bases en tu PC (el detalle esta en

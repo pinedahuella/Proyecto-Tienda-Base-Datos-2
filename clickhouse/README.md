@@ -414,3 +414,28 @@ Para saber si el archivo esta puesto, no basta con que el contenedor este sano: 
 `SELECT name FROM system.tables WHERE database = 'system' AND name = 'trace_log'`, que tiene que dar vacio.
 Si diera una fila, el contenedor sigue con la configuracion vieja y hay que reiniciarlo. Detalle y medicion en
 `docs/TRASPASO.md`.
+
+# Lo que cambio el 2026-10-16 y 17 (25f0fe0 de Jose David)
+
+- **Combos.** `GET /productos/combos`: los grupos de 2 y 3 productos que mas se
+  compran en el MISMO pedido, contados en `compra_producto` (sin los devueltos,
+  ultimos 180 dias, solo `lote = 'real'`). `CombosSyncService` lo cuenta al
+  arrancar y cada 30 min y deja el JSON en Redis (`mesh:productos:combos`); la
+  ruta solo lee Redis. La portada lo ensena como "Se compran juntos". No
+  necesito esquema nuevo. Con la semilla casi no hay combos: hacen falta pedidos
+  de varios productos.
+- **Busquedas sin resultados.** `busqueda_realizada` gana `termino_normalizado`,
+  una columna MATERIALIZED (minusculas, sin tildes, sin espacios de mas) que
+  ClickHouse calcula sola en cada INSERT. Esta en `001_esquema.sql` sin el
+  `MATERIALIZE COLUMN`: el esquema se corre en cada arranque y reescribiria la
+  columna entera cada vez, y en las partes viejas ClickHouse la calcula al leer.
+  La lee `GET /admin/eventos/busquedas-sin-resultados`, que junta ademas los
+  errores de tecleo con `editDistanceUTF8`. Prueba:
+  `bash pruebas/busquedas_sin_resultados.sh` (13 OK el 2026-10-18).
+- **R3 ("para ti") ya no sale de aqui.** Se calcula en vivo en el grafo de
+  compras de Neo4j; `consultas/R3_para_ti.sql` y `ParaTiSyncService` quedaron
+  sin uso (el servicio se borro).
+- **F4 y F6.** El carrito acaparador (F4) se quito, y la granja de registros (F6)
+  sale de Elasticsearch: `evento_registro` esta vacia desde el 2026-09-10. Las
+  dos consultas siguen en `consultas/` marcadas como fuera de uso, y
+  `pruebas/comprobar.py` las sigue midiendo sobre su siembra.

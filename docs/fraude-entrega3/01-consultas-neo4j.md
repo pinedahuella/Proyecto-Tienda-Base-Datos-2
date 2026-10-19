@@ -14,6 +14,8 @@ Las consultas A.1 a A.5 (ver `neo4j/README.md`) contestan una pregunta cada una.
 
 Ninguna prueba fraude sola. Cada una senala un conjunto de cuentas para que alguien lo mire, y el documento 02 dice como se suman.
 
+**Desde el 2026-10-17 el backend no usa la B.1 ni la B.5** (limpieza de fraude de Jose David, migracion 042). Una cadena abierta no concentra reputacion en nadie y en los datos solo repetia anillos que ya salian; el favor devuelto siempre salia sobre el mismo par que el `mutuo` de la A.1, y ahora va dentro de el: el par guarda las horas entre la ida y la vuelta y el puntaje suma un bono. Los dos archivos siguen en `neo4j/consultas/`, marcados como fuera de uso.
+
 ## Decisiones comunes a las siete
 
 Los umbrales no van escritos dentro de las consultas. Viven en `B0_parametros.cypher` como `:param` y las consultas los leen como `$nombre`. Asi el backend puede copiar el texto sin tocarlo y pasarle los mismos nombres al driver. Hoy el detector del backend tiene su propia copia de A.1 y A.2 con la ventana escrita a mano, y por eso ya no son el mismo texto que el del repositorio. Con parametros eso no vuelve a pasar.
