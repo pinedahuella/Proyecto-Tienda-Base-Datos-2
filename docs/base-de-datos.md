@@ -228,6 +228,11 @@ ni abrir para editar.
 
 Armar un pedido no es comprarlo.
 
+**Desde el 2026-10-17 el pedido `pendiente` de cada cuenta ES su carrito**
+(migracion 045, ver "El carrito de verdad" mas abajo). Hay uno solo por cuenta,
+nace con el primer producto y no tiene direccion hasta que se paga. Lo de este
+apartado sigue valiendo: pagar lo pasa a `comprado` con las cinco cosas juntas.
+
 Mientras esta **pendiente** se le agregan lineas y se le quitan. Ahi se
 **comprueba** que haya stock, pero no se descuenta nada: el pedido todavia no es
 una venta.
@@ -1334,6 +1339,12 @@ tambien seis de los siete patrones B (`neo4j/consultas/B1..B7`) en la misma
 
 ## Las resenas en Elasticsearch y las senales que no salen del grafo (034 a 039)
 
+> Desde el 2026-10-16 el vector de cada comentario ya no vive en
+> Elasticsearch sino en `vector_comentario` de PostgreSQL (migracion 040, ver
+> "Los vectores, en dos tablas" mas abajo). La cola, las senales y sus reglas
+> no cambiaron; la fuente de estas senales en el catalogo se sigue llamando
+> `elastic`.
+
 Desde el 2026-10-02 cada resena y cada respuesta tiene su copia en el indice
 `mesh_comentarios` de Elasticsearch, con su vector de Ollama. La lleva la cola
 `evento_comentario` (034), con el mismo molde que `evento_producto`: dos
@@ -1447,6 +1458,85 @@ tres catalogos de tipo quedan quietas, sin escrituras. Borrarlas es
 `refactor-fraude-senales-etapa8-borrado.sql`, que esta sin decidir. Antes de
 hacerlo hay que saber que la 016, la 019, la 023 y la 025 las vuelven a crear
 vacias en cada arranque.
+
+## Lo que cambio el 2026-10-16 y 17 (migraciones 040 a 045)
+
+Seis migraciones que salen de 25f0fe0 de Jose David. Sus SQL de referencia
+estan en `backend/elementos Generales/plan pendiente/` y cada migracion lo
+dice en su cabecera. Lo unico que se les cambio es que las siembras del final
+(todas las ofertas a su cola, todas las cuentas a la del grafo) corren una sola
+vez, con la cola vacia: el esquema se vuelve a correr en cada arranque.
+
+### El carrito de verdad (045)
+
+El profesor pidio que **Redis nunca sea la fuente de verdad**. El carrito se
+escribe en Redis y se contesta, y debajo, sin hacer esperar a nadie, se copia al
+pedido `pendiente` de la cuenta:
+
+```
+pedido.fecha_ultima_actividad   el reloj de las 24 h. Si Redis pierde el carrito,
+                                la verdad decide si sigue vivo
+pedido.version                  sube en cada escritura. Redis guarda la que conoce;
+                                si no coincide, el carrito esta desincronizado
+pedido.id_direccion_historial   NULL solo mientras es pendiente (CHECK
+                                pedido_direccion_salvo_pendiente)
+uq_pedido_pendiente_usuario     un carrito por cuenta (indice unico parcial)
+```
+
+Las reservas de una venta relampago tienen su tabla, `reserva_venta_relampago`,
+con su catalogo de estados (`activa`, `confirmada`, `devuelta`, `vencida`): no
+son columnas de `pedido_producto` porque una reserva sigue existiendo como
+historial cuando el carrito se vence y se borra (`ON DELETE SET NULL`). Redis
+decide primero con su script atomico y la reserva de verdad queda aqui; si
+Redis esta caido, se reserva aqui directo y el ticket queda en NULL hasta que
+Redis vuelve. Lo reservado de una oferta es la suma de las activas que no
+vencieron.
+
+Con Redis caido se compra igual, contra PostgreSQL. Ver
+`docs/CONSISTENCIA-CHECKOUT.md` y `pruebas/falla_checkout.sh`.
+
+### Los vectores, en dos tablas (040)
+
+`vector_producto` (1 a 1 con `producto_catalogo`) y `vector_comentario` (1 a 1
+con `comentario`), las dos con FK y `ON DELETE CASCADE` y un indice HNSW de
+coseno. Tablas aparte y no columnas: los triggers de `comentario` encolan cada
+cambio del texto, y si el worker escribiera el vector en la misma fila se
+encolaria solo. `vector_comentario` lleva tambien la valoracion del clasificador
+(`valoracion_texto`, `prob_mala`, `valoracion_modelo`), que se borra cuando el
+vector cambia. El porque de la vuelta a PostgreSQL esta en el ADR-10 de
+`docs/ARQUITECTURA.md`.
+
+### Las compras en el grafo (041)
+
+La cola `evento_grafo_compra` va **por cuenta**, no por pedido: el worker
+relee todas las compras de la cuenta y deja sus nodos `:Compra` iguales a eso.
+Un pedido nuevo, uno cancelado o uno borrado a mano se resuelven igual. Dos
+triggers la llenan, uno en `pedido` (alta, baja, estado, cuenta) y otro en
+`pedido_producto`. Cuenta como compra un pedido `comprado`, `enviado` o
+`entregado`.
+
+### La limpieza de fraude (042)
+
+La evidencia de un caso pasa a ser unica por `(caso, senal)` y no por senal:
+una senal de login (una IP compartida) puede estar en varios casos sin
+fusionarlos. Se quitan los tipos `cadena_abierta`, `favor_devuelto` (ahora sus
+horas van en el `detalle` de `mutuo`) y `carrito_acaparador`, y la regla
+R-CASI-4. La granja de registros cambia su fuente a `elastic`.
+
+### Las ofertas a Elasticsearch y los avisos (043 y 044)
+
+`evento_oferta` es la tercera cola del mismo molde (despues de
+`evento_producto` y `evento_comentario`), con cuatro triggers: `oferta`,
+`producto_catalogo` (nombre), `variante_catalogo` (nombre y estado) y
+`usuarios` (nombre y estado del vendedor). Lleva cada oferta al indice
+`mesh_ofertas`.
+
+`seguimiento_oferta` es lo que un comprador pidio seguir (una busqueda, o la
+baja de precio de una variante), y `aviso_seguimiento_oferta` su unico aviso:
+`id_seguimiento` es UNIQUE, asi que un seguimiento no puede avisar dos veces.
+Mientras espera, cada seguimiento vive tambien como consulta en el percolator
+`mesh_seguimientos`. Se evito llamarlos "alerta" o "notificacion", que ya son
+del fraude.
 
 ## Los historiales no llevan estado
 

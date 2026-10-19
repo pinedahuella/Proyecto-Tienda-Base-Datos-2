@@ -19,26 +19,32 @@
 # A.1: cuentas, ofertas, compras y resenas reales por HTTP, y el caso leido por
 # GET /admin/fraude/alertas-resenas.
 #
+# DESDE EL 2026-10-17 (limpieza de fraude de Jose David, migracion 042) ya no
+# existen cadena_abierta (B.1) ni favor_devuelto (B.5). El favor devuelto va
+# dentro de `mutuo`: el par guarda en su `detalle` las HORAS entre la ida y la
+# vuelta, y el puntaje lo usa como bono. Hasta esa fecha esta prueba esperaba
+# un caso favor_devuelto aparte del mutuo, con la misma clave.
+#
 # QUE HACE
 # ============================================================
 #   1. Registra 4 cuentas con un prefijo unico. La 1 y la 2 pasan a vendedor.
 #   2. La 1 publica tres ofertas (tres productos) y la 2 una. El admin las
 #      aprueba.
-#   3. B.5 favor devuelto. La 1 le compra a la 2 y la califica con 5, y la 2 le
+#   3. Favor devuelto. La 1 le compra a la 2 y la califica con 5, y la 2 le
 #      devuelve el 5 a la 1 enseguida. El disparo inmediato tiene que guardar
-#      un caso `favor_devuelto` con las dos cuentas.
+#      un `mutuo` con las dos cuentas, y en su detalle menos de 1 hora entre la
+#      ida y la vuelta (el bono de +20 del puntaje).
 #   4. B.6 coordinados. La 3 y la 4 compran los tres productos de la 1 y los
 #      califican, las dos, en el mismo rato: tres coincidencias. Tiene que salir
 #      un caso `coordinados` con la 3 y la 4, y SIN la 1: en B.6 el vendedor es
 #      un tercero y no entra en las cuentas del caso (excepcion del backend en
 #      SQL_CUENTAS_DE_ANILLO).
-#   5. La unicidad nueva. El par 1-2 tambien es un anillo `mutuo` (A.1). Con la
-#      023 son dos filas distintas con la misma clave; con la unicidad vieja el
-#      segundo INSERT habria pisado al primero.
-#   6. Controles. La 3 y la 4 no salen en ningun favor_devuelto, y el par 1-2 no
-#      sale en ningun coordinados.
-#   7. El filtro ?tipo= acepta los tipos nuevos y rechaza con 400 el reservado
-#      `anillo_en_el_tiempo` (B.4 no se persiste).
+#   5. Los tipos quitados no vuelven: ni una senal cadena_abierta ni
+#      favor_devuelto en la base, y el catalogo ya no los tiene.
+#   6. Controles. La 3 y la 4 no salen en ningun mutuo, y el par 1-2 no sale en
+#      ningun coordinados.
+#   7. El filtro ?tipo= acepta los tipos de la familia B y rechaza con 400 el
+#      reservado `anillo_en_el_tiempo` (B.4 no se persiste) y los dos quitados.
 #   8. Opcional, con ESPERA_B7 > 0: B.7 reputacion expres solo corre en el
 #      worker de cada 15 minutos. Las cuatro cuentas tienen minutos de vida, asi
 #      que la 1 tiene que salir como vendedor con reputacion en minutos.
@@ -126,13 +132,15 @@ titulo "0. Todo arriba"
 ADMIN=$(entrar "admin@mesh.com" "Admin123")
 [ -n "$ADMIN" ] && OK "sesion de admin" || { echo "  No se pudo entrar como admin."; exit 1; }
 # Por nombre y no contando la familia: desde la 035 a la 039 patron_resenas
-# tambien lleva las senales de texto (resenas repetidas, notas incoherentes...)
-# y ya son 16; los 7 de la familia B siguen siendo estos.
+# tambien lleva las senales de texto (resenas repetidas, notas incoherentes...).
+# De la familia B quedan 5 desde la 042: sin cadena_abierta ni favor_devuelto.
 tipos=$(sql "SELECT count(*) FROM tipo_senal_fraude t JOIN familia_senal_fraude f USING (id_familia_senal_fraude)
              WHERE f.familia_senal_fraude_nombre = 'patron_resenas'
-               AND t.tipo_senal_fraude_nombre IN ('cadena_abierta', 'satelites', 'persistente', 'anillo_en_el_tiempo',
-                                                  'favor_devuelto', 'coordinados', 'reputacion_expres');")
-[ "$tipos" = "7" ] && OK "la 031 esta aplicada, los 7 tipos de la familia B" || { echo "  Faltan tipos de patron_resenas en tipo_senal_fraude ($tipos de 7). Corre .\\arrancar.ps1."; exit 1; }
+               AND t.tipo_senal_fraude_nombre IN ('satelites', 'persistente', 'anillo_en_el_tiempo',
+                                                  'coordinados', 'reputacion_expres');")
+[ "$tipos" = "5" ] && OK "la 031 esta aplicada, los 5 tipos que quedan de la familia B" || { echo "  Faltan tipos de patron_resenas en tipo_senal_fraude ($tipos de 5). Corre .\\arrancar.ps1."; exit 1; }
+quitados=$(sql "SELECT count(*) FROM tipo_senal_fraude WHERE tipo_senal_fraude_nombre IN ('cadena_abierta', 'favor_devuelto', 'carrito_acaparador');")
+[ "$quitados" = "0" ] && OK "la 042 esta aplicada: cadena_abierta, favor_devuelto y carrito_acaparador ya no estan" || { echo "  Siguen $quitados tipos que la 042 quita. Corre .\\arrancar.ps1."; exit 1; }
 
 
 titulo "1. Cuatro cuentas nuevas, prefijo $PREF"
@@ -201,16 +209,22 @@ comprar_y_resenar() {
 }
 
 
-titulo "3. B.5 favor devuelto"
+titulo "3. Favor devuelto, que desde la 042 es un mutuo con sus horas"
 comprar_y_resenar 1 2 "${PRODUCTOS[1]}"
 comprar_y_resenar 2 1 "${PRODUCTOS[0]}"
-echo "  esperando hasta $ESPERA s el caso favor_devuelto..."
-esperar_caso favor_devuelto "${PREF}1,${PREF}2" "$ESPERA"
-ID_FAVOR="$CASO"
-[ -n "$ID_FAVOR" ] && OK "caso favor_devuelto $ID_FAVOR con ${PREF}1 y ${PREF}2" || FALLA "no aparecio el favor_devuelto de ${PREF}1 y ${PREF}2 en $ESPERA s"
-if [ -n "$ID_FAVOR" ]; then
-    n=$(sql "SELECT count(*) FROM senal_fraude_resena WHERE id_senal_fraude=$ID_FAVOR;")
+echo "  esperando hasta $ESPERA s el caso mutuo..."
+esperar_caso mutuo "${PREF}1,${PREF}2" "$ESPERA"
+ID_MUTUO="$CASO"
+# Si los dos productos fueran el mismo, A.2 lo llamaria reiterado (ver arriba).
+[ -z "$ID_MUTUO" ] && ID_MUTUO=$(buscar_caso reiterado "${PREF}1,${PREF}2")
+[ -n "$ID_MUTUO" ] && OK "caso mutuo $ID_MUTUO con ${PREF}1 y ${PREF}2" || FALLA "no aparecio el mutuo de ${PREF}1 y ${PREF}2 en $ESPERA s"
+if [ -n "$ID_MUTUO" ]; then
+    n=$(sql "SELECT count(*) FROM senal_fraude_resena WHERE id_senal_fraude=$ID_MUTUO;")
     [ "$n" = "2" ] && OK "la evidencia son las 2 resenas del intercambio" || FALLA "la evidencia guardada es de $n resenas"
+    horas=$(sql "SELECT detalle->>'horas' FROM senal_fraude WHERE id_senal_fraude=$ID_MUTUO;")
+    python -c "import sys; sys.exit(0 if '$horas' and float('$horas') < 1 else 1)" 2>/dev/null \
+        && OK "su detalle guarda las horas entre la ida y la vuelta ($horas): menos de 1 h, el bono de +20" \
+        || FALLA "el detalle del mutuo no trae horas de menos de 1 ('$horas')"
 fi
 
 
@@ -230,31 +244,35 @@ if [ -n "$ID_COORD" ]; then
 fi
 
 
-titulo "5. Dos tipos sobre el mismo par son dos filas"
-esperar_caso mutuo "${PREF}1,${PREF}2" "$ESPERA"
-ID_MUTUO="$CASO"
-[ -z "$ID_MUTUO" ] && ID_MUTUO=$(buscar_caso reiterado "${PREF}1,${PREF}2")
-if [ -n "$ID_MUTUO" ] && [ -n "$ID_FAVOR" ]; then
-    [ "$ID_MUTUO" != "$ID_FAVOR" ] && OK "el mutuo ($ID_MUTUO) y el favor_devuelto ($ID_FAVOR) son filas distintas" \
-        || FALLA "el mutuo y el favor_devuelto son la misma fila"
-    claves=$(sql "SELECT count(DISTINCT clave) || '|' || count(*) FROM senal_fraude WHERE id_senal_fraude IN ($ID_MUTUO, $ID_FAVOR);")
-    [ "$claves" = "1|2" ] && OK "con la misma clave, que senal_fraude permite por (tipo, clave)" || FALLA "claves y filas, $claves"
-else
-    FALLA "falta el mutuo ($ID_MUTUO) o el favor_devuelto ($ID_FAVOR) para comparar"
-fi
+titulo "5. Los tipos quitados no vuelven"
+# El detector ya no los busca y la 042 los borra en cada arranque: con este
+# mismo intercambio, antes del 10-17 salian un favor_devuelto y una cadena.
+n=$(sql "SELECT count(*) FROM senal_fraude s JOIN tipo_senal_fraude t USING (id_tipo_senal_fraude)
+          WHERE t.tipo_senal_fraude_nombre IN ('cadena_abierta', 'favor_devuelto');")
+[ "$n" = "0" ] && OK "ni una senal cadena_abierta ni favor_devuelto en la base" || FALLA "hay $n senales de tipos quitados"
+otras=$(sql "SELECT count(*) FROM senal_fraude WHERE clave = (SELECT clave FROM senal_fraude WHERE id_senal_fraude=${ID_MUTUO:-0})
+              AND id_senal_fraude <> ${ID_MUTUO:-0}
+              AND id_tipo_senal_fraude IN (SELECT id_tipo_senal_fraude FROM tipo_senal_fraude t JOIN familia_senal_fraude f USING (id_familia_senal_fraude)
+                                            WHERE f.familia_senal_fraude_nombre IN ('anillo_resenas', 'patron_resenas'));")
+[ "$otras" = "0" ] && OK "el par 1-2 sale una sola vez, como mutuo" || FALLA "el par 1-2 sale en $otras senales mas de resenas"
+
 
 
 titulo "6. Controles"
-[ "$(casos_con favor_devuelto "${PREF}3")" = "0" ] && OK "${PREF}3 no sale en ningun favor_devuelto" || FALLA "${PREF}3 salio en un favor_devuelto"
-[ "$(casos_con favor_devuelto "${PREF}4")" = "0" ] && OK "${PREF}4 no sale en ningun favor_devuelto" || FALLA "${PREF}4 salio en un favor_devuelto"
+[ "$(casos_con mutuo "${PREF}3")" = "0" ] && OK "${PREF}3 no sale en ningun mutuo" || FALLA "${PREF}3 salio en un mutuo"
+[ "$(casos_con mutuo "${PREF}4")" = "0" ] && OK "${PREF}4 no sale en ningun mutuo" || FALLA "${PREF}4 salio en un mutuo"
 [ "$(casos_con coordinados "${PREF}1")" = "0" ] && OK "${PREF}1, el vendedor, no sale en ningun coordinados" || FALLA "${PREF}1 salio en un coordinados"
 [ "$(casos_con coordinados "${PREF}2")" = "0" ] && OK "${PREF}2 no sale en ningun coordinados" || FALLA "${PREF}2 salio en un coordinados"
 
 
 titulo "7. El filtro por tipo"
-for t in cadena_abierta satelites persistente favor_devuelto coordinados reputacion_expres; do
+for t in mutuo satelites persistente coordinados reputacion_expres; do
     c=$(curl -s -o /dev/null -w '%{http_code}' "$API/admin/fraude/alertas-resenas?tipo=$t&pagina=1&limite=1" -H "Cookie: $ADMIN")
     [ "$c" = "200" ] && OK "?tipo=$t, 200" || FALLA "?tipo=$t contesto $c"
+done
+for t in cadena_abierta favor_devuelto; do
+    c=$(curl -s -o /dev/null -w '%{http_code}' "$API/admin/fraude/alertas-resenas?tipo=$t&pagina=1&limite=1" -H "Cookie: $ADMIN")
+    [ "$c" = "400" ] && OK "?tipo=$t, 400 (quitado el 2026-10-17)" || FALLA "?tipo=$t contesto $c"
 done
 c=$(curl -s -o /dev/null -w '%{http_code}' "$API/admin/fraude/alertas-resenas?tipo=anillo_en_el_tiempo" -H "Cookie: $ADMIN")
 [ "$c" = "400" ] && OK "?tipo=anillo_en_el_tiempo, 400 (B.4 no se guarda)" || FALLA "?tipo=anillo_en_el_tiempo contesto $c"

@@ -1,21 +1,32 @@
 #!/usr/bin/env bash
-# pruebas/carrito.sh -- las 4 rutas del carrito sobre Redis (Entrega 2, 1.5 pts).
+# pruebas/carrito.sh -- las rutas del carrito: Redis delante, PostgreSQL la verdad.
 #
 #   bash pruebas/carrito.sh
 #
-# Comprueba lo que la rubrica pide demostrar, y no solo que las rutas contesten:
+# Desde el 2026-10-17 (carrito-postgres-verdad.md de Jose David, a pedido del
+# profesor: "Redis nunca es la fuente de verdad") cada escritura va a Redis y se
+# contesta, y debajo, sin hacer esperar a nadie, se copia al pedido `pendiente`
+# de la cuenta en PostgreSQL. Hasta esa fecha esta prueba afirmaba lo contrario
+# (que agregar y quitar NO tocaban PostgreSQL) y pasaba solo porque media antes
+# de que terminara la copia.
 #
-#   - el carrito vive en Redis y NO escribe en PostgreSQL al agregar o quitar
-#   - cada linea guarda una FOTO (precio ya con descuento, nombre, imagen,
-#     vendedor) que GET /carrito sirve sin preguntarle a nadie mas
-#   - tiene un TTL configurado EXPLICITAMENTE
-#   - el TTL se RENUEVA en cada toque -> es expiracion por INACTIVIDAD, que es
-#     lo que pide el enunciado, y no un plazo fijo desde que se creo
-#   - agregar NO reserva stock, asi que cuando el carrito caduca no hay nada
-#     que liberar. Ese es el "efecto sobre el checkout" que hay que documentar
-#   - una linea que no se puede comprar se marca, no se esconde
+# Comprueba, todo por HTTP y mirando las bases sin tocarlas:
 #
-# Deja la base y Redis como estaban.
+#   - el carrito nace con el primer producto, en Redis y en PostgreSQL
+#   - agregar y quitar SI llegan a PostgreSQL (el pedido pendiente y sus
+#     lineas, con la version que Redis conoce), y no reservan stock
+#   - un solo pedido pendiente por cuenta
+#   - el TTL de Redis esta puesto y se RENUEVA en cada toque, igual que
+#     fecha_ultima_actividad en PostgreSQL (expira por inactividad)
+#   - una linea que no se puede comprar se marca, no se esconde; una oferta
+#     que no existe da 404
+#   - cada linea guarda una FOTO del precio que se vio
+#   - si Redis pierde el carrito, se reconstruye desde PostgreSQL
+#   - vaciar lo borra de las dos
+#
+# La unica escritura a mano es acelerar el reloj de Redis con EXPIRE y quitar
+# la clave para simular que Redis la perdio (lo que pasa si se reinicia). Deja
+# el carrito de la cuenta como estaba.
 
 set -u
 
@@ -55,12 +66,43 @@ for k in sys.argv[1].split('.'):
     if d is None: break
     d = d.get(k) if isinstance(d,dict) else None
 print('' if d is None else d)" "$1"; }
+codigo(){ curl -s -o /dev/null -w '%{http_code}' "$@"; }
+
+# Lo que dice PostgreSQL del carrito de la cuenta: cuantos pendientes, y de la
+# linea pedida su cantidad (vacio si no esta).
+PENDIENTE="(SELECT id_estado_pedido FROM estado_pedido WHERE estado_pedido_nombre='pendiente')"
+pendientes() { sql "SELECT count(*) FROM pedido WHERE id_usuario=$ID_USUARIO AND id_estado_pedido=$PENDIENTE;"; }
+cantidad_pg() {
+    sql "SELECT pp.cantidad FROM pedido p JOIN pedido_producto pp USING (id_pedido)
+          JOIN precio_historial ph USING (id_precio_historial)
+         WHERE ph.id_oferta=$1 AND p.id_usuario=$ID_USUARIO AND p.id_estado_pedido=$PENDIENTE;"
+}
+# La copia a PostgreSQL es asincrona: se espera hasta 6 s a que diga $2.
+esperar_cantidad() {
+    local i
+    for i in $(seq 1 30); do
+        [ "$(cantidad_pg "$1")" = "$2" ] && return 0
+        sleep 0.2
+    done
+    return 1
+}
+esperar_pendientes() {
+    local i
+    for i in $(seq 1 30); do
+        [ "$(pendientes)" = "$1" ] && return 0
+        sleep 0.2
+    done
+    return 1
+}
 
 titulo "0. Todo arriba"
-[ "$(curl -s -o /dev/null -w '%{http_code}' -m 8 "$API/carrito")" = "401" ] \
+[ "$(codigo -m 8 "$API/carrito")" = "401" ] \
     && OK "el backend sirve /carrito" \
     || { echo "  El backend no responde en $API, o /carrito no existe."; exit 1; }
 [ "$(R PING)" = "PONG" ] && OK "Redis responde" || { echo "  Redis no responde."; exit 1; }
+[ "$(sql "SELECT to_regclass('public.reserva_venta_relampago') IS NOT NULL;")" = "t" ] \
+    && OK "PostgreSQL tiene el carrito de verdad (migracion 045)" \
+    || { echo "  Falta la migracion 045. Corre .\\arrancar.ps1"; exit 1; }
 
 C=$(curl -s -i -X POST "$API/usuario/login" -H "Content-Type: application/json" \
      -d "{\"identificador\":\"$CUENTA\",\"contrasena\":\"$CLAVE\"}" \
@@ -70,101 +112,110 @@ C=$(curl -s -i -X POST "$API/usuario/login" -H "Content-Type: application/json" 
 ID_USUARIO=$(sql "SELECT id_usuario FROM usuarios WHERE correo_electronico='$CUENTA';")
 LLAVE="mesh:carrito:$ID_USUARIO"
 
-# Se guarda lo que hubiera para devolverlo al final: la cuenta es de todos y
-# alguien puede tener algo a medias.
-ANTES=$(R HGETALL "$LLAVE" | paste - - 2>/dev/null)
-R DEL "$LLAVE" >/dev/null
+# Se guarda lo que hubiera para devolverlo al final, por la API: la cuenta es
+# de todos y alguien puede tener algo a medias.
+ANTES=$(curl -s "$API/carrito" -H "Cookie: $C" | python -c "
+import sys,json
+try:
+    for l in json.load(sys.stdin)['payload']['lineas']: print('%s %s' % (l['id_oferta'], l['cantidad']))
+except Exception: pass")
+curl -s -X DELETE "$API/carrito" -H "Cookie: $C" >/dev/null
+ped_comprados=$(sql "SELECT count(*) FROM pedido WHERE id_estado_pedido<>$PENDIENTE;")
 
 
 titulo "1. Nace con el primer producto, no con una ruta de crear"
 
 vacio=$(curl -s "$API/carrito" -H "Cookie: $C")
-[ "$(echo "$vacio" | campo payload.total_lineas)" = "0" ] && OK "carrito vacio = no hay clave" || FALLA "el carrito vacio no dio 0 lineas"
-[ "$(R EXISTS "$LLAVE")" = "0" ] && OK "leer un carrito vacio NO crea la clave" || FALLA "un GET creo la clave"
+[ "$(echo "$vacio" | campo payload.total_lineas)" = "0" ] && OK "carrito vacio = 0 lineas" || FALLA "el carrito vacio no dio 0 lineas"
+[ "$(R EXISTS "$LLAVE")" = "0" ] && OK "leer un carrito vacio NO crea la clave de Redis" || FALLA "un GET creo la clave"
+[ "$(pendientes)" = "0" ] && OK "ni un pedido pendiente en PostgreSQL" || FALLA "hay $(pendientes) pendiente(s) con el carrito vacio"
 
 OFERTA=$(sql "SELECT o.id_oferta FROM oferta o JOIN estado_oferta eo USING(id_estado_oferta)
-              WHERE eo.estado_oferta_nombre='activa' AND o.stock>=5 ORDER BY o.id_oferta LIMIT 1;")
+              WHERE eo.estado_oferta_nombre='activa' AND o.stock>=5 AND NOT o.es_inventario_limitado
+              ORDER BY o.id_oferta LIMIT 1;")
 r=$(curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":2}')
 [ "$(echo "$r" | campo ok)" = "True" ] && OK "PUT crea el carrito con la primera linea" || FALLA "PUT: $(echo "$r" | campo mensaje)"
-[ "$(R EXISTS "$LLAVE")" = "1" ] && OK "la clave $LLAVE existe" || FALLA "no se creo la clave"
-[ "$(R TYPE "$LLAVE")" = "hash" ] && OK "es un HASH (id_oferta -> linea en JSON)" || FALLA "no es un hash"
+[ "$(R TYPE "$LLAVE")" = "hash" ] && OK "en Redis es un HASH (id_oferta -> linea en JSON)" || FALLA "no hay hash en $LLAVE"
+esperar_cantidad "$OFERTA" 2 && OK "y debajo llego a PostgreSQL: pedido pendiente con la linea en 2" || FALLA "PostgreSQL dice '$(cantidad_pg "$OFERTA")' y no 2"
+[ "$(pendientes)" = "1" ] && OK "un solo pedido pendiente: es el carrito" || FALLA "$(pendientes) pendientes"
+[ -z "$(sql "SELECT id_direccion_historial FROM pedido WHERE id_usuario=$ID_USUARIO AND id_estado_pedido=$PENDIENTE;")" ] \
+    && OK "sin direccion: se elige al pagar" || FALLA "el pendiente ya tiene direccion"
 
 
-titulo "2. Agregar y quitar NO escriben en PostgreSQL"
+titulo "2. Agregar y quitar SI escriben en PostgreSQL, y no reservan stock"
 
-# Es la mitad del argumento de la entrega: el carrito salio del modelo
-# relacional. Si al agregar se escribiera un pedido, no habria salido.
-ped_antes=$(sql "SELECT count(*) FROM pedido;")
-lin_antes=$(sql "SELECT count(*) FROM pedido_producto;")
-curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":3}' >/dev/null
-curl -s -X DELETE "$API/carrito/lineas/$OFERTA" -H "Cookie: $C" >/dev/null
-curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":2}' >/dev/null
-ped_desp=$(sql "SELECT count(*) FROM pedido;")
-lin_desp=$(sql "SELECT count(*) FROM pedido_producto;")
-[ "$ped_antes" = "$ped_desp" ] && OK "no nacio ningun pedido ($ped_antes antes y despues)" || FALLA "pedidos: $ped_antes -> $ped_desp"
-[ "$lin_antes" = "$lin_desp" ] && OK "no nacio ninguna linea de pedido" || FALLA "lineas: $lin_antes -> $lin_desp"
-
-# Y tampoco reserva stock: por eso caducar no libera nada.
+version_antes=$(sql "SELECT version FROM pedido WHERE id_usuario=$ID_USUARIO AND id_estado_pedido=$PENDIENTE;")
 stock_antes=$(sql "SELECT stock FROM oferta WHERE id_oferta=$OFERTA;")
-curl -s "$API/carrito" -H "Cookie: $C" >/dev/null
-stock_desp=$(sql "SELECT stock FROM oferta WHERE id_oferta=$OFERTA;")
-[ "$stock_antes" = "$stock_desp" ] \
-    && OK "agregar NO reservo stock ($stock_antes) -> caducar no libera nada" \
-    || FALLA "el stock se movio: $stock_antes -> $stock_desp"
+curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":3}' >/dev/null
+esperar_cantidad "$OFERTA" 3 && OK "cambiar a 3 llego a PostgreSQL" || FALLA "PostgreSQL dice '$(cantidad_pg "$OFERTA")' y no 3"
+version_desp=$(sql "SELECT version FROM pedido WHERE id_usuario=$ID_USUARIO AND id_estado_pedido=$PENDIENTE;")
+[ "${version_desp:-0}" -gt "${version_antes:-0}" ] 2>/dev/null \
+    && OK "la version del carrito subio ($version_antes -> $version_desp)" || FALLA "version $version_antes -> $version_desp"
+v_redis=$(R HGET "$LLAVE" _v)
+[ "$v_redis" = "$version_desp" ] && OK "Redis conoce esa misma version (_v = $v_redis)" || FALLA "_v en Redis = '$v_redis', PostgreSQL = $version_desp"
+[ "$(R HEXISTS "$LLAVE" _d)" = "0" ] && OK "y no esta marcado como desincronizado" || FALLA "Redis tiene la marca _d"
+[ "$(sql "SELECT stock FROM oferta WHERE id_oferta=$OFERTA;")" = "$stock_antes" ] \
+    && OK "agregar NO reservo stock ($stock_antes) -> caducar no libera nada" || FALLA "el stock se movio"
+[ "$(sql "SELECT count(*) FROM pedido WHERE id_estado_pedido<>$PENDIENTE;")" = "$ped_comprados" ] \
+    && OK "no nacio ningun pedido comprado" || FALLA "cambio el numero de pedidos comprados"
+
+curl -s -X DELETE "$API/carrito/lineas/$OFERTA" -H "Cookie: $C" >/dev/null
+esperar_pendientes 0 && OK "quitar la ultima linea borra el pendiente: un carrito vacio no existe" || FALLA "quedo $(pendientes) pendiente(s)"
+[ "$(R EXISTS "$LLAVE")" = "0" ] && OK "ni en Redis" || FALLA "la clave de Redis sobrevivio"
+curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":2}' >/dev/null
+esperar_cantidad "$OFERTA" 2 || FALLA "no volvio a nacer en PostgreSQL"
 
 
-titulo "3. El TTL: puesto a proposito y RENOVADO en cada toque"
+titulo "3. Expira por inactividad, en las dos"
 
 ttl=$(R TTL "$LLAVE")
-[ "$ttl" -gt 0 ] 2>/dev/null && OK "el carrito tiene TTL ($ttl s). Sin EXPIRE seria -1" || FALLA "TTL = $ttl (no vence nunca)"
+[ "$ttl" -gt 0 ] 2>/dev/null && OK "el carrito tiene TTL en Redis ($ttl s). Sin EXPIRE seria -1" || FALLA "TTL = $ttl (no vence nunca)"
 
 # La prueba que separa "expira por inactividad" de "expira a plazo fijo": se
-# baja el TTL a mano, se toca el carrito, y tiene que volver arriba. Con un
-# plazo fijo desde la creacion seguiria bajando.
+# baja el TTL a mano, se toca el carrito, y tiene que volver arriba.
 R EXPIRE "$LLAVE" 100 >/dev/null
 bajo=$(R TTL "$LLAVE")
 curl -s "$API/carrito" -H "Cookie: $C" >/dev/null
 tras_leer=$(R TTL "$LLAVE")
 [ "$tras_leer" -gt "$bajo" ] && OK "un GET lo renovo: $bajo s -> $tras_leer s" || FALLA "el GET no renovo el TTL ($bajo -> $tras_leer)"
 
+act_antes=$(sql "SELECT extract(epoch FROM fecha_ultima_actividad) FROM pedido WHERE id_usuario=$ID_USUARIO AND id_estado_pedido=$PENDIENTE;")
+sleep 1
 R EXPIRE "$LLAVE" 100 >/dev/null
-curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":2}' >/dev/null
+curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":4}' >/dev/null
 tras_put=$(R TTL "$LLAVE")
 [ "$tras_put" -gt 100 ] && OK "un PUT tambien lo renovo: 100 s -> $tras_put s" || FALLA "el PUT no renovo el TTL"
+esperar_cantidad "$OFERTA" 4 || FALLA "el PUT de 4 no llego a PostgreSQL"
+act_desp=$(sql "SELECT extract(epoch FROM fecha_ultima_actividad) FROM pedido WHERE id_usuario=$ID_USUARIO AND id_estado_pedido=$PENDIENTE;")
+python -c "import sys; sys.exit(0 if float('$act_desp') > float('$act_antes') else 1)" 2>/dev/null \
+    && OK "y en PostgreSQL se movio fecha_ultima_actividad: las 24 h las decide la verdad" \
+    || FALLA "fecha_ultima_actividad no se movio ($act_antes -> $act_desp)"
 
 
 titulo "4. Lo que no se puede comprar se MARCA, no se esconde"
 
-# Una linea que desaparece sola deja a la persona sin saber por que le cambio
-# el total. Se queda, marcada, con el motivo.
 POCA=$(sql "SELECT o.id_oferta FROM oferta o JOIN estado_oferta eo USING(id_estado_oferta)
-            WHERE eo.estado_oferta_nombre='activa' AND o.stock BETWEEN 1 AND 8 ORDER BY o.id_oferta LIMIT 1;")
+            WHERE eo.estado_oferta_nombre='activa' AND o.stock BETWEEN 1 AND 8 AND NOT o.es_inventario_limitado
+            ORDER BY o.id_oferta LIMIT 1;")
 ST=$(sql "SELECT stock FROM oferta WHERE id_oferta=$POCA;")
 curl -s -X PUT "$API/carrito/lineas/$POCA" -H "Content-Type: application/json" -H "Cookie: $C" -d "{\"cantidad\":$((ST+3))}" >/dev/null
 motivo=$(curl -s "$API/carrito" -H "Cookie: $C" | python -c "
 import sys,json
 for l in json.load(sys.stdin)['payload']['lineas']:
     if l['id_oferta']==$POCA: print(l['motivo'] or 'ninguno')")
-[ "$motivo" = "stock_insuficiente" ] && OK "pedir mas que el stock -> motivo '$motivo'" || FALLA "motivo inesperado: $motivo"
+[ "$motivo" = "stock_insuficiente" ] && OK "pedir mas que el stock -> motivo '$motivo', la linea se ve" || FALLA "motivo inesperado: $motivo"
 
-curl -s -X PUT "$API/carrito/lineas/999999" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":1}' >/dev/null
-motivo=$(curl -s "$API/carrito" -H "Cookie: $C" | python -c "
-import sys,json
-for l in json.load(sys.stdin)['payload']['lineas']:
-    if l['id_oferta']==999999: print(l['motivo'] or 'ninguno')")
-[ "$motivo" = "oferta_no_existe" ] && OK "una oferta inventada -> motivo '$motivo', la linea se ve" || FALLA "motivo inesperado: $motivo"
+# Hasta el 2026-10-17 se guardaba con motivo oferta_no_existe. Ahora el PUT la
+# rechaza: PostgreSQL no puede guardar una linea de una oferta que no hay.
+[ "$(codigo -X PUT "$API/carrito/lineas/999999" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":1}')" = "404" ] \
+    && OK "una oferta inventada da 404" || FALLA "una oferta inventada no dio 404"
 
 r=$(curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":9999}')
 [ "$(echo "$r" | campo ok)" = "False" ] && OK "una cantidad absurda se rechaza: $(echo "$r" | campo mensaje)" || FALLA "acepto cantidad 9999"
 
 
-titulo "5. El precio es una FOTO tomada al agregar, guardada en Redis"
+titulo "5. El precio es una FOTO tomada al agregar"
 
-# Desde el 2026-09-23 cada linea guarda nombre, precio, imagen y vendedor
-# junto con la cantidad, y GET /carrito sirve eso sin tocar PostgreSQL ni
-# MongoDB. El precio de la foto ya lleva el descuento de la oferta, si tenia.
-# Si el vendedor lo cambia despues, el aviso sale al pagar, no aqui: eso lo
-# mide pruebas/descuentos.sh.
 precio_real=$(sql "SELECT ROUND(precio * (1 - COALESCE(porcentaje_descuento,0)/100), 2) FROM oferta WHERE id_oferta=$OFERTA;")
 precio_api=$(curl -s "$API/carrito" -H "Cookie: $C" | python -c "
 import sys,json
@@ -177,51 +228,67 @@ import sys,json
 try: d=json.loads(sys.stdin.read())
 except Exception: print('no-es-json'); sys.exit()
 print('%s|%s|%s' % (d.get('cantidad'), d.get('precio'), 'con-nombre' if d.get('nombre_producto') else 'sin-nombre'))")
-[ "$foto" = "2|$precio_api|con-nombre" ] \
-    && OK "en Redis la linea es un JSON con cantidad 2, precio $precio_api y nombre" \
+[ "$foto" = "4|$precio_api|con-nombre" ] \
+    && OK "en Redis la linea es un JSON con cantidad 4, precio $precio_api y nombre" \
     || FALLA "la foto de Redis no cuadra con la API ($foto)"
+precio_pg=$(sql "SELECT ROUND(ph.precio * (1 - COALESCE(ph.porcentaje_descuento,0)/100), 2)
+                  FROM pedido p JOIN pedido_producto pp USING (id_pedido) JOIN precio_historial ph USING (id_precio_historial)
+                 WHERE ph.id_oferta=$OFERTA AND p.id_usuario=$ID_USUARIO AND p.id_estado_pedido=$PENDIENTE;")
+[ "$precio_pg" = "$precio_api" ] && OK "y en PostgreSQL la linea apunta a la fila de precio_historial que se vio ($precio_pg)" || FALLA "PostgreSQL guarda $precio_pg y la API ensena $precio_api"
 
 
-titulo "6. Vaciar"
+titulo "6. Redis pierde el carrito y PostgreSQL lo devuelve"
+
+# Lo que pasa si Redis se reinicia. Se quita la clave (la segunda escritura a
+# mano de esta prueba) y se pide el carrito.
+R DEL "$LLAVE" >/dev/null
+r=$(curl -s "$API/carrito" -H "Cookie: $C")
+[ "$(echo "$r" | campo payload.total_lineas)" = "2" ] && OK "el GET trae las 2 lineas desde PostgreSQL" || FALLA "trajo $(echo "$r" | campo payload.total_lineas) lineas"
+[ "$(R EXISTS "$LLAVE")" = "1" ] && OK "y Redis se reconstruyo" || FALLA "Redis no se reconstruyo"
+[ "$(echo "$r" | campo payload.sincronizado)" = "True" ] && OK "sincronizado: true" || FALLA "sincronizado = $(echo "$r" | campo payload.sincronizado)"
+[ "$(echo "$r" | campo payload.fuente)" = "redis" ] && OK "fuente: redis (Redis responde)" || FALLA "fuente = $(echo "$r" | campo payload.fuente)"
+r=$(curl -s -X POST "$API/carrito/sincronizar" -H "Cookie: $C")
+[ "$(echo "$r" | campo payload.sincronizado)" = "True" ] && OK "POST /carrito/sincronizar sobre uno sano no cambia nada" || FALLA "sincronizar: $(echo "$r" | campo mensaje)"
+
+
+titulo "7. Vaciar"
 
 curl -s -X DELETE "$API/carrito" -H "Cookie: $C" >/dev/null
-[ "$(R EXISTS "$LLAVE")" = "0" ] && OK "DELETE /carrito borra la clave entera" || FALLA "la clave sobrevivio"
+[ "$(R EXISTS "$LLAVE")" = "0" ] && OK "DELETE /carrito borra la clave de Redis" || FALLA "la clave sobrevivio"
+esperar_pendientes 0 && OK "y el pedido pendiente de PostgreSQL" || FALLA "quedo $(pendientes) pendiente(s)"
 [ "$(curl -s "$API/carrito" -H "Cookie: $C" | campo payload.total_lineas)" = "0" ] && OK "y el GET vuelve a decir 0 lineas" || FALLA "el GET no da 0"
 
 
-titulo "7. El carrito es de la cuenta, no del navegador"
+titulo "8. El carrito es de la cuenta, no del navegador"
 
-# No hay id de carrito que guardar: sale del token. Dos sesiones de cuentas
-# distintas no se ven entre si.
 C2=$(curl -s -i -X POST "$API/usuario/login" -H "Content-Type: application/json" \
       -d '{"identificador":"comprador.sur@mesh.com","contrasena":"Comprador123"}' \
     | grep -i "^set-cookie" | sed 's/set-cookie: //i' | cut -d';' -f1)
 curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":1}' >/dev/null
-otras=$(curl -s "$API/carrito" -H "Cookie: $C2" | campo payload.total_lineas)
-[ "$otras" = "0" ] && OK "la otra cuenta no ve este carrito" || FALLA "la otra cuenta vio $otras linea(s)"
-[ "$(curl -s -o /dev/null -w '%{http_code}' "$API/carrito")" = "401" ] && OK "sin sesion no hay carrito (401)" || FALLA "contesto sin sesion"
+otras=$(curl -s "$API/carrito" -H "Cookie: $C2" | python -c "
+import sys,json
+print(sum(1 for l in json.load(sys.stdin)['payload']['lineas'] if l['id_oferta']==$OFERTA and l['cantidad']==1))" 2>/dev/null)
+[ "$otras" = "0" ] && OK "la otra cuenta no ve esta linea" || FALLA "la otra cuenta vio la linea"
+[ "$(codigo "$API/carrito")" = "401" ] && OK "sin sesion no hay carrito (401)" || FALLA "contesto sin sesion"
 
 
 titulo "LIMPIEZA"
-R DEL "$LLAVE" >/dev/null
-ID2=$(sql "SELECT id_usuario FROM usuarios WHERE correo_electronico='comprador.sur@mesh.com';")
-R DEL "mesh:carrito:$ID2" >/dev/null
+curl -s -X DELETE "$API/carrito" -H "Cookie: $C" >/dev/null
+esperar_pendientes 0 || FALLA "no se pudo vaciar el carrito de prueba"
 if [ -n "$ANTES" ]; then
-    # Cada campo vuelve tal cual estaba: la linea en JSON, o el ticket t:<id>
-    # de una venta relampago.
-    while IFS=$'\t' read -r of valor; do
-        [ -n "$of" ] && R HSET "$LLAVE" "$of" "$valor" >/dev/null
+    while read -r of cant; do
+        [ -n "$of" ] && curl -s -X PUT "$API/carrito/lineas/$of" -H "Content-Type: application/json" -H "Cookie: $C" -d "{\"cantidad\":$cant}" >/dev/null
     done <<< "$ANTES"
-    R EXPIRE "$LLAVE" 86400 >/dev/null
-    OK "se devolvio el carrito que habia antes"
+    OK "se devolvio por la API el carrito que habia antes"
 else
     OK "no habia carrito previo que devolver"
 fi
-[ "$(sql "SELECT count(*) FROM pedido;")" = "$ped_antes" ] && OK "PostgreSQL quedo igual ($ped_antes pedidos)" || FALLA "cambio el numero de pedidos"
+[ "$(sql "SELECT count(*) FROM pedido WHERE id_estado_pedido<>$PENDIENTE;")" = "$ped_comprados" ] \
+    && OK "PostgreSQL quedo igual ($ped_comprados pedidos que no son carrito)" || FALLA "cambio el numero de pedidos"
 
 
 titulo "RESULTADO"
 echo "  $ok OK, $fallo FALLA"
 [ "$fallo" -gt 0 ] && exit 1
-echo "  El carrito vive en Redis, expira por inactividad y no reserva stock."
+echo "  El carrito va a Redis y queda guardado en PostgreSQL, expira por inactividad y no reserva stock."
 exit 0

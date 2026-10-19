@@ -18,7 +18,8 @@
 # Se corre el mismo checkout cinco veces, cambiando solo que hay debajo:
 #
 #   linea base   todo vivo               tiene que comprar
-#   escenario A  Redis parado            el carrito vive ahi
+#   escenario A  Redis parado            tiene que comprar: desde el 2026-10-17
+#                                        el carrito de verdad esta en PostgreSQL
 #   escenario B  MongoDB parado          solo aporta nombres, no esta en el COMMIT
 #   escenario C  PostgreSQL parado       el dinero y el stock viven ahi
 #   recuperacion todo vivo otra vez      tiene que volver a comprar
@@ -173,6 +174,20 @@
 # producto_catalogo y variante_catalogo) y el recalculo del catalogo en Mongo
 # va por el outbox evento_producto (migracion 030). Desde ahi el escenario B
 # EXIGE que la compra salga con MongoDB parado, y es FALLA si no sale.
+#
+# Y EL 2026-10-17 CAMBIO EL ESCENARIO A (25f0fe0 de Jose David, migracion 045,
+# a pedido del profesor: "Redis nunca es la fuente de verdad"). El carrito es el
+# pedido `pendiente` de la cuenta en PostgreSQL y Redis su copia rapida, asi que
+# con Redis parado la compra va directo a PostgreSQL, sin el candado de Redis:
+# el FOR UPDATE del pedido evita el doble cobro. Desde ahi el escenario A EXIGE
+# que compre. Dos cosas mas cambiaron con eso, y se miden distinto:
+#
+#   - el carrito ya es una fila de `pedido` (pendiente) desde el primer PUT, y
+#     pagar no suma una fila sino que la pasa a `comprado`. Por eso los pedidos
+#     se cuentan sin los pendientes.
+#   - si el carrito sobrevivio se pregunta al backend (GET /carrito), no a la
+#     clave de Redis: con Redis parado la compra no pudo borrar su copia, y la
+#     que manda es PostgreSQL.
 
 set -u
 
@@ -403,7 +418,8 @@ clasificar() {
 # kardex que falta deja el historico del stock mintiendo para siempre.
 F_PEDIDOS=""; F_PAGOS=""; F_MOV=""; F_STOCK=""
 foto() {
-    F_PEDIDOS=$(sql "SELECT count(*) FROM pedido;")
+    # Sin los pendientes: desde la 045 el carrito ES un pedido pendiente.
+    F_PEDIDOS=$(sql "SELECT count(*) FROM pedido p JOIN estado_pedido e USING (id_estado_pedido) WHERE e.estado_pedido_nombre <> 'pendiente';")
     F_PAGOS=$(sql "SELECT count(*) FROM pago;")
     F_MOV=$(sql "SELECT count(*) FROM stock_movimiento;")
     F_STOCK=$(sql "SELECT stock FROM oferta WHERE id_oferta=$OFERTA;")
@@ -649,10 +665,12 @@ escenario() {
     foto
     mostrar_foto "despues"
 
-    _carrito=$(R EXISTS "$LLAVE_CARRITO")
+    # Cuantas lineas tiene el carrito segun el backend, que lo lee de
+    # PostgreSQL si Redis no lo tiene. Ver la cabecera, el cambio del 10-17.
+    _carrito=$(curl -s -m 20 "$API/carrito" -H "Cookie: $SESION" | campo payload.total_lineas)
     _candado=$(R EXISTS "$LLAVE_CANDADO")
     _ttl=$(R TTL "$LLAVE_CANDADO")
-    echo "          carrito en Redis $_carrito   candado $_candado   ttl del candado $_ttl"
+    echo "          lineas en el carrito $_carrito   candado $_candado   ttl del candado $_ttl"
 
     echo
     echo "  El final fue '$_final', y con todo vivo habia sido '$BASE_FINAL'"
@@ -725,11 +743,11 @@ escenario() {
     if [ "$_final" = "compro" ]; then
         [ "$_carrito" = "0" ] \
             && OK "compro y el carrito se vacio, como toca" \
-            || HALLAZGO "compro y el carrito sigue lleno. Es la ventana del punto 6 del documento"
+            || FALLA "compro y el carrito sigue con $_carrito linea(s): se podria pagar dos veces lo mismo"
     else
         [ "$_carrito" = "1" ] \
             && OK "no compro y el carrito sigue entero, no hay que rehacerlo" \
-            || HALLAZGO "no compro y ademas se perdio el carrito"
+            || HALLAZGO "no compro y ademas se perdio el carrito ($_carrito lineas)"
     fi
 }
 
@@ -738,14 +756,15 @@ escenario() {
 # 2. ESCENARIO A. REDIS PARADO
 # ============================================================
 #
-# Redis es donde vive el carrito y donde se toma el candado que evita el doble
-# cobro. Sin el no hay nada que comprar, asi que comprar de todos modos seria
-# haber cobrado por algo que no se pudo leer.
+# Hasta el 2026-10-17 aqui se exigia que NO comprara: el carrito vivia solo en
+# Redis. Desde la 045 el carrito de verdad es el pedido pendiente de
+# PostgreSQL y Redis es la copia rapida, asi que sin Redis se compra igual,
+# directo contra PostgreSQL (el FOR UPDATE del pedido hace de candado).
 escenario "$REDIS" \
     "2. ESCENARIO A. REDIS PARADO A LA HORA DE PAGAR" \
     vivo_redis \
-    "no-debe-comprar" \
-    "El carrito y el candado del checkout viven en Redis. Sin Redis no hay que cobrar."
+    "debe-comprar" \
+    "El carrito de verdad esta en PostgreSQL desde la 045. Redis es la copia rapida."
 
 
 # ============================================================
@@ -838,6 +857,7 @@ if [ "$fallo" -gt 0 ]; then
 fi
 
 echo "  Se paro Redis, MongoDB y PostgreSQL a la hora de pagar, una por una."
-echo "  Ninguna caida cobro a medias, ninguna dejo la cuenta bloqueada, y con"
-echo "  las tres arriba otra vez la tienda vuelve a vender."
+echo "  Sin Redis y sin MongoDB se compra igual, sin PostgreSQL no. Ninguna caida"
+echo "  cobro a medias, ninguna dejo la cuenta bloqueada, y con las tres arriba"
+echo "  otra vez la tienda vuelve a vender."
 exit 0

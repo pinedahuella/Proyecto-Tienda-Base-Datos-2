@@ -21,10 +21,10 @@
 #              a Redis con ACL DRYRUN si lo dejaria pasar. Escribe una sola clave
 #              bajo mesh:demo:acceso y la borra al final
 #   semantica  Busca un producto por nombre y pide sus parecidos a
-#              Elasticsearch con la misma consulta kNN que SimilaresService
-#              (el vector vive en el documento de mesh_productos desde el
-#              2026-10-02), con la similitud de cada uno, y la compara con la
-#              busqueda exacta contra todos para ensenar lo que ahorra el HNSW
+#              PostgreSQL con la misma consulta que SimilaresService (pgvector,
+#              tabla vector_producto desde la migracion 040), con la similitud
+#              de cada uno, y la compara con la busqueda exacta contra todos
+#              para ensenar lo que ahorra el indice HNSW
 #   facetas    La consulta de elastic/pruebas/facetas.py contra el indice real.
 #              Solo lee
 #   vectores   Cuantos productos y cuantas resenas tienen vector, cuantos
@@ -107,7 +107,6 @@ function ClickHouse([string]$sql) {
 
 $ES_URL = 'http://localhost:9200'
 $ES_INDICE = 'mesh_productos'
-$ES_INDICE_COMENTARIOS = 'mesh_comentarios'
 
 # Un POST a Elasticsearch leido como UTF-8. Invoke-RestMethod de PowerShell 5.1
 # no siempre respeta el charset de la respuesta y las tildes del texto de una
@@ -118,14 +117,10 @@ function Es-Post([string]$ruta, [string]$cuerpo) {
     return ([Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json)
 }
 
+# Los vectores viven en PostgreSQL desde la migracion 040 (2026-10-16): la
+# tabla vector_producto, con un indice HNSW de pgvector.
 function Contar-ConVector {
-    try {
-        return [int](Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_count" -ContentType 'application/json' `
-            -Body '{"query":{"exists":{"field":"vector"}}}' -TimeoutSec 20).count
-    } catch {
-        Mal "Elasticsearch no contesto o no existe el indice $ES_INDICE. Corre .rrancar.ps1"
-        exit 1
-    }
+    return [int](@(Psql "SELECT count(*) FROM vector_producto;")[0])
 }
 
 function Mongo([string]$js) {
@@ -211,12 +206,12 @@ if ($Parte -eq 'acceso') {
 # semantica
 # ============================================================
 if ($Parte -eq 'semantica') {
-    Contenedor 'mesh-elastic'
+    Contenedor 'mesh-postgres'
     Contenedor 'mesh-mongo'
 
     $conVector = Contar-ConVector
     if ($conVector -eq 0) {
-        Mal "No hay vectores en $ES_INDICE. Corre .\arrancar.ps1, que los calcula en el paso 7d"
+        Mal "No hay vectores en vector_producto. Corre .\arrancar.ps1, que los calcula en el paso 7d"
         exit 1
     }
 
@@ -230,52 +225,45 @@ db.productos.find({ nombre: { `$regex: $patron, `$options: 'i' }, estado: 'activ
   });
 "@
     if ($candidatos.Count -eq 0) { Mal "Ningun producto activo dice '$Producto'. Prueba con otra palabra"; exit 1 }
-    $base = $null
-    $doc = $null
-    foreach ($c in $candidatos) {
-        try {
-            $d = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_doc/$($c.id)?_source_includes=vector,vector_grupo" -TimeoutSec 20
-            if ($d.found -and $d._source.vector) { $base = $c; $doc = $d; break }
-        } catch { }
-    }
+    $conFila = @{}
+    Psql "SELECT id_producto_mongo FROM vector_producto WHERE id_producto_mongo IN ($(($candidatos | ForEach-Object { [long]$_.id }) -join ','));" |
+        ForEach-Object { $conFila[[long]$_] = $true }
+    $base = $candidatos | Where-Object { $conFila.ContainsKey([long]$_.id) } | Select-Object -First 1
     if (-not $base) { Mal "Esos productos todavia no tienen vector. Corre .\etl\cargar_vectores.ps1"; exit 1 }
     $id = [long]$base.id
     Ok "$($base.nombre), de $($base.cat) (id $id)"
 
-    # La misma consulta que SimilaresService del backend: kNN sobre `vector`
-    # con 200 candidatos, solo activos, sin el propio ni su grupo, y despues
-    # uno por grupo. Elasticsearch puntua (1 + coseno) / 2; se vuelve al coseno.
-    $filtro = @{ bool = @{ filter = @(@{ term = @{ estado = 'activo' } }); must_not = @(@{ ids = @{ values = @("$id") } }) } }
-    if ($doc._source.vector_grupo) { $filtro.bool.must_not += @{ term = @{ vector_grupo = $doc._source.vector_grupo } } }
-    $knn = @{
-        size = 200; _source = @('vector_grupo')
-        knn = @{ field = 'vector'; query_vector = $doc._source.vector; k = 200; num_candidates = 400; filter = $filtro }
-    } | ConvertTo-Json -Depth 10 -Compress
-    # Exacto, comparando contra TODOS: script_score con cosineSimilarity. Es lo
-    # que el indice HNSW se ahorra.
-    $exacto = @{
-        size = 200; _source = @('vector_grupo')
-        query = @{ script_score = @{ query = $filtro; script = @{ source = "cosineSimilarity(params.v, 'vector') + 1.0"; params = @{ v = $doc._source.vector } } } }
-    } | ConvertTo-Json -Depth 10 -Compress
-
-    function Uno-PorGrupo($hits) {
+    # La misma consulta que SimilaresService del backend: los 200 mas cercanos
+    # por coseno (<=>), solo activos, sin el propio ni su grupo, con el vector
+    # como constante (asi el ORDER BY puede usar el indice HNSW) y los mismos
+    # ajustes que buscarCercanos(): ef_search 400 e iterative_scan. Despues,
+    # uno por grupo, aqui abajo.
+    $consulta = @"
+SELECT vector::text AS v, grupo AS g FROM vector_producto WHERE id_producto_mongo = $id \gset
+BEGIN;
+SELECT set_config('hnsw.ef_search', '400', true) AS ef, set_config('hnsw.iterative_scan', 'strict_order', true) AS it \gset
+SELECT id_producto_mongo || '|' || grupo || '|' || (1 - (vector <=> :'v'::vector))
+  FROM vector_producto
+ WHERE activo AND id_producto_mongo <> $id AND grupo <> :'g'
+ ORDER BY vector <=> :'v'::vector
+ LIMIT 200;
+COMMIT;
+"@
+    function Uno-PorGrupo($filas) {
         $vistos = @{}
         $r = [ordered]@{}
-        foreach ($h in $hits) {
-            $clave = if ($h._source.vector_grupo) { $h._source.vector_grupo } else { "id:$($h._id)" }
-            if ($vistos.ContainsKey($clave)) { continue }
-            $vistos[$clave] = $true
-            $r[[long]$h._id] = $h._score
+        foreach ($f in $filas) {
+            $c = $f.Split('|')
+            if ($c.Count -ne 3 -or $vistos.ContainsKey($c[1])) { continue }
+            $vistos[$c[1]] = $true
+            $r[[long]$c[0]] = [double]::Parse($c[2], [Globalization.CultureInfo]::InvariantCulture)
             if ($r.Count -eq 6) { break }
         }
         return $r
     }
 
     Paso "Los mas parecidos por su descripcion"
-    # Dos veces cada una: la primera paga la carga del indice en memoria.
-    $null = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $knn -TimeoutSec 60
-    $rKnn = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $knn -TimeoutSec 60
-    $sim = Uno-PorGrupo $rKnn.hits.hits
+    $sim = Uno-PorGrupo (Psql $consulta)
     if ($sim.Count -eq 0) { Av "No salio ninguno parecido"; exit 0 }
     $nombres = @{}
     Mongo @"
@@ -290,24 +278,54 @@ db.productos.find({ _id: { `$in: [$(($sim.Keys) -join ',')] } }, { nombre: 1, 'c
         if ($nombre.Length -gt 45) { $nombre = $nombre.Substring(0, 45) }
         $cat = if ($n) { $n.cat } else { '' }
         $color = if ($n -and $n.cat -eq $base.cat) { 'Green' } else { 'Gray' }
-        $coseno = [math]::Round((2 * [double]$sim[$k] - 1) * 100, 1)
+        $coseno = [math]::Round($sim[$k] * 100, 1)
         Write-Host ("   {0,8}% {1,-46} {2}" -f $coseno, $nombre, $cat) -ForegroundColor $color
     }
     Write-Host "   En verde, los de la misma categoria. Nadie le dijo la categoria al modelo, solo leyo el texto" -ForegroundColor DarkGray
 
-    Paso "Como lo resuelve Elasticsearch, con el indice HNSW o comparando contra todos"
-    $null = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $exacto -TimeoutSec 60
-    $rExacto = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $exacto -TimeoutSec 60
-    $simExacto = Uno-PorGrupo $rExacto.hits.hits
-    Ok "kNN con el indice HNSW, $($rKnn.took) ms. Comparando contra los $conVector, $($rExacto.took) ms"
-    if ((@($sim.Keys) -join ',') -eq (@($simExacto.Keys) -join ',')) {
-        Ok "Los dos dan los mismos $($sim.Count), en el mismo orden"
-    } else {
-        Av "El indice dio otros que la busqueda exacta: HNSW es aproximado. Exacto $(@($simExacto.Keys) -join ','), indice $(@($sim.Keys) -join ',')"
+    Paso "Como lo resuelve PostgreSQL, con el indice HNSW o comparando contra todos"
+    # EXPLAIN ANALYZE de la misma consulta dos veces: una obligando al indice
+    # (enable_seqscan off) y otra sin el (enable_indexscan off), que es el
+    # recorrido exacto. Cada una corre dos veces y se queda la segunda, que ya
+    # no paga la carga en memoria.
+    function Medir([string]$ajuste) {
+        $sql = @"
+SELECT vector::text AS v, grupo AS g FROM vector_producto WHERE id_producto_mongo = $id \gset
+BEGIN;
+SET LOCAL $ajuste = off;
+SELECT set_config('hnsw.ef_search', '400', true) AS ef, set_config('hnsw.iterative_scan', 'strict_order', true) AS it \gset
+EXPLAIN (ANALYZE, COSTS OFF)
+SELECT id_producto_mongo FROM vector_producto
+ WHERE activo AND id_producto_mongo <> $id AND grupo <> :'g'
+ ORDER BY vector <=> :'v'::vector LIMIT 200;
+EXPLAIN (ANALYZE, COSTS OFF)
+SELECT id_producto_mongo FROM vector_producto
+ WHERE activo AND id_producto_mongo <> $id AND grupo <> :'g'
+ ORDER BY vector <=> :'v'::vector LIMIT 200;
+SELECT string_agg(x || '|' || g || '|' || s, ',') FROM (
+  SELECT id_producto_mongo AS x, grupo AS g, (1 - (vector <=> :'v'::vector)) AS s FROM vector_producto
+   WHERE activo AND id_producto_mongo <> $id AND grupo <> :'g'
+   ORDER BY vector <=> :'v'::vector LIMIT 200) t;
+COMMIT;
+"@
+        $salida = Psql $sql
+        $tiempos = @($salida | Where-Object { $_ -match 'Execution Time: ([\d.]+) ms' } | ForEach-Object { [double]::Parse(($_ -replace '.*Execution Time: ([\d.]+) ms.*', '$1'), [Globalization.CultureInfo]::InvariantCulture) })
+        $usaIndice = [bool]($salida | Where-Object { $_ -match 'idx_vector_producto_hnsw' })
+        $ids = Uno-PorGrupo ((@($salida)[-1]) -split ',')
+        return [pscustomobject]@{ ms = $tiempos[-1]; indice = $usaIndice; ids = @($ids.Keys) }
     }
-    Ok "$conVector productos con vector de 768 dimensiones, dentro de su documento de $ES_INDICE"
-    Write-Host "   El indice HNSW recorre un grafo de vecinos y no compara contra todos. El vector vive en el" -ForegroundColor DarkGray
-    Write-Host "   mismo documento que el texto y los filtros, asi que una sola consulta los combina" -ForegroundColor DarkGray
+    $conIndice = Medir 'enable_seqscan'
+    $exacto = Medir 'enable_indexscan'
+    $queUsa = if ($conIndice.indice) { 'con el indice HNSW' } else { 'sin indice (la tabla es chica y PostgreSQL prefirio recorrerla)' }
+    Ok "$queUsa, $([math]::Round($conIndice.ms, 1)) ms. Comparando contra los $conVector, $([math]::Round($exacto.ms, 1)) ms"
+    if (($conIndice.ids -join ',') -eq ($exacto.ids -join ',')) {
+        Ok "Los dos dan los mismos $($conIndice.ids.Count), en el mismo orden"
+    } else {
+        Av "El indice dio otros que la busqueda exacta: HNSW es aproximado. Exacto $($exacto.ids -join ','), indice $($conIndice.ids -join ',')"
+    }
+    Ok "$conVector productos con vector de 768 dimensiones, en la tabla vector_producto"
+    Write-Host "   El indice HNSW recorre un grafo de vecinos y no compara contra todos. ef_search dice cuantos" -ForegroundColor DarkGray
+    Write-Host "   candidatos mira, e iterative_scan sigue buscando si el filtro (activo, grupo) descarta" -ForegroundColor DarkGray
 
     Paso "Lo mismo por la app, GET /productos/$id/similares"
     $api = Api "/productos/$id/similares"
@@ -332,37 +350,26 @@ db.productos.find({ _id: { `$in: [$(($sim.Keys) -join ',')] } }, { nombre: 1, 'c
 # vectores
 # ============================================================
 if ($Parte -eq 'vectores') {
-    Contenedor 'mesh-elastic'
+    Contenedor 'mesh-postgres'
     Contenedor 'mesh-mongo'
 
-    Paso "Los vectores que hay en Elasticsearch"
-    $total = [int](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_count" -TimeoutSec 20).count
-    $conVector = Contar-ConVector
-    $agg = @{
-        size = 0; query = @{ exists = @{ field = 'vector' } }
-        aggs = @{
-            activos = @{ filter = @{ term = @{ estado = 'activo' } } }
-            grupos = @{ cardinality = @{ field = 'vector_grupo' } }
-            modelos = @{ terms = @{ field = 'vector_modelo'; size = 5 } }
-        }
-    } | ConvertTo-Json -Depth 10 -Compress
-    $a = (Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_search" -ContentType 'application/json' -Body $agg -TimeoutSec 30).aggregations
-    Ok "$conVector de $total documentos de $ES_INDICE con vector, $($a.activos.doc_count) activos, en $($a.grupos.value) grupos distintos"
-    Ok "Modelo $((@($a.modelos.buckets) | ForEach-Object { $_.key }) -join ', ')"
+    Paso "Los vectores de los productos, en vector_producto (PostgreSQL)"
+    $f = @(Psql @"
+SELECT (SELECT count(*) FROM producto_catalogo) || '|' || count(*) || '|' || count(*) FILTER (WHERE activo) || '|' ||
+       count(DISTINCT grupo) || '|' || coalesce(string_agg(DISTINCT modelo, ', '), '')
+  FROM vector_producto;
+"@)[0].Split('|')
+    Ok "$($f[1]) de $($f[0]) productos de producto_catalogo con vector, $($f[2]) activos, en $($f[3]) grupos distintos"
+    Ok "Modelo $($f[4])"
 
-    Paso "Los vectores de las resenas, en $ES_INDICE_COMENTARIOS"
-    try {
-        $c = [int](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_count" -TimeoutSec 20).count
-        $cv = [int](Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE_COMENTARIOS/_count" -ContentType 'application/json' `
-            -Body '{"query":{"exists":{"field":"vector"}}}' -TimeoutSec 20).count
-        Ok "$c comentarios indexados, $cv con vector (las respuestas de menos de 15 letras van sin vector)"
-    } catch {
-        Av "El indice $ES_INDICE_COMENTARIOS no existe. Lo crea .\arrancar.ps1 en el paso Indice de comentarios"
-    }
-    if (docker ps --filter "name=^mesh-postgres$" --format "{{.Names}}") {
-        $cola = @(Psql "SELECT count(*) FILTER (WHERE procesado_en IS NULL) || '|' || count(*) FILTER (WHERE procesado_en IS NULL AND intentos > 0) FROM evento_comentario;")[0].Split('|')
-        Ok "$($cola[0]) comentarios esperan al worker en evento_comentario, $($cola[1]) con algun fallo"
-    }
+    Paso "Los vectores de las resenas, en vector_comentario (PostgreSQL)"
+    $c = @(Psql @"
+SELECT (SELECT count(*) FROM comentario) || '|' || count(*) || '|' || count(*) FILTER (WHERE valoracion_texto IS NOT NULL)
+  FROM vector_comentario;
+"@)[0].Split('|')
+    Ok "$($c[1]) de $($c[0]) comentarios con vector (las respuestas de menos de 15 letras van sin vector), $($c[2]) valorados"
+    $cola = @(Psql "SELECT count(*) FILTER (WHERE procesado_en IS NULL) || '|' || count(*) FILTER (WHERE procesado_en IS NULL AND intentos > 0) FROM evento_comentario;")[0].Split('|')
+    Ok "$($cola[0]) comentarios esperan al worker en evento_comentario, $($cola[1]) con algun fallo"
 
     Paso "Los productos que esperan al worker del backend"
     $m = Mongo @"
@@ -372,7 +379,7 @@ print(JSON.stringify({
 }));
 "@
     Ok "$($m[0].total) productos en MongoDB, $($m[0].pendientes) marcados con pendiente_vector"
-    Write-Host "   Crear o editar un producto lo marca. VectoresSyncService lo recalcula cada 3 horas" -ForegroundColor DarkGray
+    Write-Host "   Crear o editar un producto lo marca. VectoresSyncService lo mira cada 10 segundos" -ForegroundColor DarkGray
     Write-Host "   y solo le pide el vector a Ollama si cambio el nombre, la categoria o la descripcion" -ForegroundColor DarkGray
     Write-Host "   Al arrancar, etl\cargar_vectores.ps1 pone al dia todo el catalogo con el mismo md5" -ForegroundColor DarkGray
 
@@ -393,7 +400,7 @@ print(JSON.stringify({
 # intencion
 # ============================================================
 if ($Parte -eq 'intencion') {
-    Contenedor 'mesh-elastic'
+    Contenedor 'mesh-postgres'
 
     Paso "Lo que la persona quiere, con sus palabras: '$Texto'"
     try {
@@ -423,7 +430,7 @@ if ($Parte -eq 'intencion') {
     Ok "Por nombre salen $($porNombre.Count), y casi nunca son lo que se busca:"
     foreach ($f in $porNombre) { Write-Host "          $($f.nombre)" -ForegroundColor DarkGray }
     Write-Host '   La frase se vuelve vector con Ollama y se compara contra el vector de cada resena' -ForegroundColor DarkGray
-    Write-Host '   (mesh_comentarios) y de cada producto (mesh_productos). En /buscar sale arriba.' -ForegroundColor DarkGray
+    Write-Host '   (vector_comentario) y de cada producto (vector_producto), en PostgreSQL. En /buscar sale arriba.' -ForegroundColor DarkGray
     exit 0
 }
 
@@ -432,33 +439,43 @@ if ($Parte -eq 'intencion') {
 # clasificador
 # ============================================================
 if ($Parte -eq 'clasificador') {
-    Contenedor 'mesh-elastic'
+    Contenedor 'mesh-postgres'
 
-    Paso 'Como leyo el clasificador cada resena de mesh_comentarios'
-    $agg = @{
-        size = 0; query = @{ term = @{ es_respuesta = $false } }
-        aggs = @{ v = @{ terms = @{ field = 'valoracion_texto'; size = 10 } } }
-    } | ConvertTo-Json -Depth 10 -Compress
-    $a = Es-Post "/$ES_INDICE_COMENTARIOS/_search" $agg
-    foreach ($b in $a.aggregations.v.buckets) {
-        $que = switch ($b.key) { 'mala' { 'el texto es malo' } 'buena' { 'el texto es bueno' } 'dudosa' { 'no esta seguro' } 'corta' { 'menos de 100 letras, no se lee' } default { '' } }
-        Ok ("{0,4} {1,-7} {2}" -f $b.doc_count, $b.key, $que)
+    Paso 'Como leyo el clasificador cada resena, en vector_comentario'
+    # Solo las raices de una resena se valoran (las respuestas no).
+    $filas = Psql @"
+SELECT v.valoracion_texto || '|' || count(*)
+  FROM resena r JOIN vector_comentario v ON v.id_comentario = r.id_comentario
+ WHERE v.valoracion_texto IS NOT NULL
+ GROUP BY v.valoracion_texto ORDER BY count(*) DESC;
+"@
+    foreach ($l in $filas) {
+        $b = $l.Split('|')
+        $que = switch ($b[0]) { 'mala' { 'el texto es malo' } 'buena' { 'el texto es bueno' } 'dudosa' { 'no esta seguro' } 'corta' { 'menos de 100 letras, no se lee' } default { '' } }
+        Ok ("{0,4} {1,-7} {2}" -f $b[1], $b[0], $que)
     }
 
     Paso 'Resenas cuyas estrellas contradicen el texto'
-    $q = @{
-        size = 8; _source = @('comentario', 'calificacion', 'prob_mala')
-        query = @{ bool = @{ should = @(
-            @{ bool = @{ filter = @(@{ term = @{ valoracion_texto = 'mala' } }, @{ range = @{ calificacion = @{ gte = 4 } } }) } },
-            @{ bool = @{ filter = @(@{ term = @{ valoracion_texto = 'buena' } }, @{ range = @{ calificacion = @{ lte = 2 } } }) } }
-        ); minimum_should_match = 1 } }
-    } | ConvertTo-Json -Depth 12 -Compress
-    $r = Es-Post "/$ES_INDICE_COMENTARIOS/_search" $q
-    Ok "$($r.hits.total.value) en total. Algunas:"
-    foreach ($h in $r.hits.hits) {
-        $t = $h._source.comentario
+    # La misma regla que NotasIncoherentesDetectorService: texto malo con 4 o 5
+    # estrellas, o bueno con 1 o 2. El texto viaja en base64 para que las tildes
+    # y los saltos de linea no rompan la fila.
+    $contra = "((v.valoracion_texto = 'mala' AND r.calificacion >= 4) OR (v.valoracion_texto = 'buena' AND r.calificacion <= 2))"
+    $total = @(Psql "SELECT count(*) FROM resena r JOIN vector_comentario v ON v.id_comentario = r.id_comentario WHERE $contra;")[0]
+    $algunas = Psql @"
+SELECT r.calificacion || '|' || coalesce(v.prob_mala::text, '') || '|' || encode(convert_to(c.comentario, 'UTF8'), 'base64')
+  FROM resena r
+  JOIN vector_comentario v ON v.id_comentario = r.id_comentario
+  JOIN comentario c ON c.id_comentario = r.id_comentario
+ WHERE $contra
+ ORDER BY r.id_resena DESC LIMIT 8;
+"@
+    Ok "$total en total. Algunas:"
+    foreach ($l in $algunas) {
+        $b = $l.Split('|', 3)
+        $t = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String(($b[2] -replace '\s', '')))
         if ($t.Length -gt 100) { $t = $t.Substring(0, 100) + '...' }
-        Write-Host ("   {0} estrellas, probabilidad de mala {1:N2}" -f $h._source.calificacion, [double]$h._source.prob_mala) -ForegroundColor White
+        $prob = if ($b[1]) { [double]::Parse($b[1], [Globalization.CultureInfo]::InvariantCulture) } else { 0 }
+        Write-Host ("   {0} estrellas, probabilidad de mala {1:N2}" -f $b[0], $prob) -ForegroundColor White
         Write-Host "          $t" -ForegroundColor DarkGray
     }
     Write-Host '   El modelo es una regresion logistica entrenada a mano con 400 resenas escritas para esto.' -ForegroundColor DarkGray

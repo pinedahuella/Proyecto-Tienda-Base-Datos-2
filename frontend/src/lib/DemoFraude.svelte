@@ -14,7 +14,7 @@
 	 *
 	 *   demo-evento-fraude.ps1     los tres ataques de login, por HTTP directo
 	 *   demo-anillo-resenas.ps1    el anillo de cuentas que se califican entre si
- *   demo-patrones-resenas.ps1  cadena, favor devuelto y coordinados (familia B)
+ *   demo-patrones-resenas.ps1  favor devuelto (un mutuo con sus horas) y coordinados
 	 *   arrancar.ps1 -Productos    carga un lote de productos con semilla
 	 *
 	 * Los dos primeros SI se disparan desde aqui, con fetch: son peticiones
@@ -203,12 +203,13 @@
 	// Mismo mecanismo que el cierre del anillo: comprar de verdad lo hace
 	// `demo-patrones-resenas.ps1` (una pagina no puede entrar con otras
 	// cuentas sin sacar al admin de su sesion), y aqui se arma el comando.
-	// Solo los tres que el backend revisa al llegar cada resena
-	// (`PatronesFraudeDetectorService.detectarInmediato`): B.1, B.5 y B.6.
+	// Solo los que el backend revisa al llegar cada resena: el favor devuelto
+	// (desde el 2026-10-17 un `mutuo` con las horas de ida y vuelta en su
+	// detalle) y B.6. La cadena abierta (B.1) se quito ese dia.
 	// ---------------------------------------------------------------
 
 	interface PatronB {
-		id: 'cadena' | 'favor' | 'coordinados';
+		id: 'favor' | 'coordinados';
 		nombre: string;
 		explica: string;
 		filtro: string;
@@ -216,16 +217,10 @@
 
 	const PATRONES_B: PatronB[] = [
 		{
-			id: 'cadena',
-			nombre: 'Cadena de calificaciones',
-			explica: 'Tres cuentas nuevas. A le compra a B y le pone 5, B le compra a C y le pone 5. Nadie cierra el circulo.',
-			filtro: 'Cadena de calificaciones'
-		},
-		{
 			id: 'favor',
 			nombre: 'Favor devuelto',
-			explica: 'Dos cuentas se compran una a la otra y se ponen 5 en minutos. El par tambien sale como mutuo.',
-			filtro: 'Se devuelven la nota en horas'
+			explica: 'Dos cuentas se compran una a la otra y se ponen 5 en minutos. Sale como mutuo, y las pocas horas entre la ida y la vuelta le suben el puntaje.',
+			filtro: 'Se califican entre si'
 		},
 		{
 			id: 'coordinados',
@@ -382,7 +377,7 @@
 			</button>
 		</div>
 		<p class="por-que">
-			Los tres a la vez. Tambien estan en Comandos, grupo Demos de fraude. Reputacion en minutos
+			Los dos a la vez. Tambien estan en Comandos, grupo Demos de fraude. Reputacion en minutos
 			sale sola a los 15 minutos con estas mismas cuentas. Persistente pide resenas de tres meses
 			y no se arma en vivo.
 		</p>

@@ -5,9 +5,15 @@ cuando alguien escribe mal el nombre de un producto.
 
 ```
 localhost:9200    la API, sin contrasena y solo en local
-indices           mesh_productos               el buscador del catalogo
-                  mesh_eventos_autenticacion   el log de logins (ver al final)
+indices           mesh_productos               el buscador del catalogo       001_indice.json
+                  mesh_eventos_autenticacion   el log de logins (ver al final) 002_eventos_autenticacion.json
+                  mesh_ofertas                 el buscador de ofertas         004_ofertas.json
+                  mesh_seguimientos            el percolator de los avisame   005_seguimientos.json
 ```
+
+El `003_comentarios.json` (`mesh_comentarios`, las resenas con su vector) ya no
+existe: desde el 2026-10-16 los vectores viven en PostgreSQL (ver "Los vectores
+volvieron a PostgreSQL", abajo).
 
 ## Por que hace falta, si ya hay cuatro bases
 
@@ -136,58 +142,73 @@ proposito dos veces. La prueba detecto las dos.
 
 ```bash
 bash etl/cargar_busqueda.sh
-powershell -File etl/cargar_vectores.ps1
 ```
 
 Y sale solo con `.\arrancar.ps1` cuando el indice esta vacio o desfasado: cuando
 sus documentos no son los de MongoDB (TODOS, no solo los activos: hasta el
 2026-10-04 se comparaba contra los activos y se rehacia en cada arranque), o
-cuando nacio sin el campo `vector`.
+cuando todavia trae el campo `vector` del mapeo del 2026-10-02 al 10-16.
 
-## El vector de cada producto vive aqui (desde el 2026-10-02)
+## Los vectores volvieron a PostgreSQL (2026-10-16)
 
-`001_indice.json` trae cuatro campos mas: `vector` (`dense_vector` de 768, coseno),
-`vector_hash` (md5 del texto con que se calculo), `vector_grupo` (md5 de categoria
-y descripcion, para no recomendar las copias del generador) y `vector_modelo`. Los
-escribe `etl/cargar_vectores.ps1` al arrancar y `VectoresSyncService` del backend
-al editar un producto, cada uno con actualizaciones parciales, sin pisar el texto
-que mantiene el worker del buscador. Los parecidos de la ficha salen de un kNN
-sobre este campo.
+Del 2026-10-02 al 10-16 el vector de cada producto iba en su documento de
+`mesh_productos` (los campos `vector`, `vector_hash`, `vector_grupo` y
+`vector_modelo`) y el de cada resena en un tercer indice, `mesh_comentarios`
+(`003_comentarios.json`). A pedido del profesor (25f0fe0 de Jose David,
+migracion 040) volvieron a PostgreSQL, a las tablas `vector_producto` y
+`vector_comentario` con pgvector. El porque, medido, esta en el ADR-10 de
+`docs/ARQUITECTURA.md`: con el mismo catalogo pgvector da el coseno exacto en
+1000 de 1001 productos y el `int8_hnsw` de Elasticsearch en 317.
 
-**Rehacer el indice no pierde los vectores.** Antes de tirarlo, el ETL (arrancar y
-`cargar_busqueda.sh`) copia esos cuatro campos con `_reindex` a
-`mesh_productos_vectores_previos` (el vector con `index: false`, sin grafo), y
-`cargar_vectores.ps1` los devuelve sin Ollama si el texto no cambio. Medido: 48 s
-en vez de unos 7 minutos.
+Lo que quedo de esa epoca y como se limpia solo:
 
-## El tercer indice: las resenas (desde el 2026-10-02)
+- `001_indice.json` ya no trae los campos de vector. Una maquina que tenga el
+  indice viejo lo rehace en el siguiente `.\arrancar.ps1`, DESPUES de que
+  `etl/cargar_vectores.ps1` copie esos vectores a `vector_producto` sin Ollama
+  (mismo hash, mismo modelo). Medido el 2026-10-18 en la base local: 3105 de
+  3105 copiados.
+- `mesh_comentarios` y `mesh_productos_vectores_previos` los borra arrancar,
+  despues de encolar los comentarios para que el worker del backend calcule sus
+  vectores en `vector_comentario`.
 
-`003_comentarios.json` es `mesh_comentarios`: el texto de cada resena y de cada
-respuesta con su vector, el id de la resena, del producto, del vendedor y del autor,
-y la valoracion del clasificador de resenas (`valoracion_texto`, `prob_mala`,
-`valoracion_modelo`). Lo llena el worker del backend desde la cola
-`evento_comentario` (migracion 034); ningun ETL lo tira. Lo crea arrancar antes del
-backend y, la vez que lo crea, encola todos los comentarios que ya hay. Si ya
-existe, le agrega con un `PUT _mapping` los campos que le falten.
+Elasticsearch se queda con lo suyo: la busqueda por palabras de
+`mesh_productos` (difusa, sugerencias, facetas, "quisiste decir"), las ofertas,
+el percolator y el log de autenticacion. La busqueda hibrida pide las palabras
+aqui y el significado a PostgreSQL, y las junta por posicion.
 
-**El vector va en `flat`, no en HNSW.** Medido el 2026-10-04: con textos repetidos
-(44 copias de uno) el grafo HNSW cuantizado que Elasticsearch pone por defecto se
-atascaba, y para "zapatos comodos para caminar todo el dia" un kNN con 100
-candidatos daba 0,30 contra el 0,81 de la busqueda exacta. `flat` compara contra
-todos; con unos miles de resenas sigue tardando milisegundos. arrancar rehace el
-indice si lo encuentra en HNSW.
+## El buscador de ofertas, `mesh_ofertas` (desde el 2026-10-17)
 
-**Un campo que llega antes que su mapeo se mapea mal.** El 2026-10-04 el backend
-escribio `valoracion_texto` antes de que el mapeo lo tuviera y Elasticsearch lo
-creo como `text`: las agregaciones de las notas incoherentes no cuentan sobre
-`text`. Se arreglo rehaciendo el indice. Por eso el mapeo de este archivo tiene que
-llegar ANTES que el codigo que escribe el campo.
+`004_ofertas.json`. Un documento por oferta con lo justo para encontrarla:
+nombre del producto y de la variante, vendedor (usuario, nombre y estado),
+precio, descuento, precio final, stock y estado. No van las fechas ni la
+aprobacion: el indice sirve para encontrar, lo demas se lee de PostgreSQL. Es
+`dynamic: strict`, asi que un campo de mas en el worker falla en
+`evento_oferta.ultimo_error` en vez de crearse adivinado.
+
+Lo llena el worker `EventoOfertaSyncService` del backend (cada 5 s) desde la
+cola `evento_oferta` (migracion 043), que alimentan cuatro triggers: la oferta,
+el nombre del producto, el nombre y estado de la variante, y el nombre y estado
+del vendedor. Lo lee `GET /vendedor/ofertas/buscar`, con un `resumen` hecho con
+agregaciones. El worker no crea el indice: lo crea arrancar (paso 9e) y, la vez
+que lo crea, encola todas las ofertas. Prueba: `bash pruebas/ofertas_y_seguimientos.sh`.
+
+## El percolator, `mesh_seguimientos` (desde el 2026-10-17)
+
+`005_seguimientos.json`. Al reves que los demas, aqui se guardan CONSULTAS:
+cada "avisame" de un comprador (una busqueda que no encontro nada, o la baja de
+precio de una variante) es una consulta guardada en el campo `consulta`, de
+tipo `percolator`, con el id del seguimiento. Cada oferta que indexa el worker
+de ofertas se pasa por aqui; la primera que coincide genera UN aviso en
+PostgreSQL y la consulta se borra. `nombre_completo` junta producto y variante
+con `copy_to` para que "laptop 16 gb" coincida aunque las palabras esten en los
+dos.
+
+La verdad es `seguimiento_oferta` de PostgreSQL (migracion 044). Si el indice se
+pierde o no cuadra con los seguimientos que esperan, arrancar lo rehace y
+vuelve a cargar sus consultas: las arma PostgreSQL con jsonb, con la misma forma
+que `consultaDelSeguimiento()` del backend (ver `Preparar-IndiceSeguimientos`).
 
 ## Lo que NO esta aqui
-
-**La ruta que lo consulta.** Es de `backend/` y todavia no existe. Hasta que
-exista, este indice se prueba con `curl` contra el 9200 y con
-`bash pruebas/busqueda.sh`, que es como se documenta en la entrega.
 
 **El millon de productos.** El indice aguanta de sobra; lo que hay que resolver
 antes es de donde salen esos ids sin pisar los que reparte PostgreSQL (ver

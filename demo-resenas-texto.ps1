@@ -1,8 +1,10 @@
 # demo-resenas-texto.ps1
 # Arma en vivo el fraude de resenas que NO sale del grafo, con cuentas nuevas y
 # compras REALES, y confirma por la API del admin que cada senal quedo
-# guardada: lo que se ve en el TEXTO de las resenas (mesh_comentarios en
-# Elasticsearch) y las resenas de compras que despues se cancelaron.
+# guardada: lo que se ve en el TEXTO de las resenas (el vector y la valoracion
+# de cada una en vector_comentario de PostgreSQL, desde la migracion 040; antes
+# en mesh_comentarios de Elasticsearch) y las resenas de compras que despues se
+# cancelaron.
 #
 #   .\demo-resenas-texto.ps1                          los cuatro casos
 #   .\demo-resenas-texto.ps1 -Caso copiadas           resenas copiadas
@@ -51,9 +53,20 @@ param(
     [int]$Espera = 120,
     [switch]$SinAbrir,
     [string]$Backend = 'http://localhost:3000',
-    [string]$Frontend = 'http://localhost:5173',
-    [string]$Elastic = 'http://localhost:9200'
+    [string]$Frontend = 'http://localhost:5173'
 )
+
+# PostgreSQL solo se MIRA (las resenas ya tienen vector y valoracion?). Todo lo
+# que se hace va por el backend.
+$env_ = @{}
+Get-Content (Join-Path $PSScriptRoot '.env') | ForEach-Object {
+    if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.+)$') { $env_[$Matches[1]] = $Matches[2].Trim() }
+}
+function Psql-Uno([string]$sql) {
+    $r = docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -qtAX -c $sql 2>&1
+    if ($LASTEXITCODE -ne 0) { return $null }
+    return "$r".Trim()
+}
 
 function Paso($t) { Write-Host "`n>> $t" -ForegroundColor Cyan }
 function Ok($t)   { Write-Host "   $t" -ForegroundColor Green }
@@ -175,17 +188,15 @@ function Cancelar($Comprador, $IdPedido) {
     Ok "$($Comprador.Usuario) cancelo el pedido $IdPedido y se le devolvio el dinero"
 }
 
-# Espera a que las resenas de esas cuentas esten en mesh_comentarios con su
-# valoracion del clasificador.
+# Espera a que las resenas de esas cuentas tengan su vector y la valoracion del
+# clasificador en vector_comentario. Los pone el backend (EventoComentarioSyncService
+# y ValoracionComentariosService); aqui solo se cuentan.
 function EsperarValoradas([long[]]$Ids, [int]$Cuantas) {
-    $consulta = Cuerpo @{ query = @{ bool = @{ filter = @(
-        @{ terms = @{ id_usuario = $Ids } }, @{ term = @{ es_respuesta = $false } }, @{ exists = @{ field = 'valoracion_texto' } }
-    ) } } }
+    $sql = "SELECT count(*) FROM resena r JOIN vector_comentario v ON v.id_comentario = r.id_comentario " +
+           "WHERE r.id_usuario IN ($($Ids -join ',')) AND v.valoracion_texto IS NOT NULL;"
     for ($i = 0; $i -lt $Espera; $i += 3) {
-        try {
-            $n = (Invoke-RestMethod -Method Post -Uri "$Elastic/mesh_comentarios/_count" -ContentType 'application/json' -Body $consulta -TimeoutSec 10).count
-            if ($n -ge $Cuantas) { return $true }
-        } catch { }
+        $n = Psql-Uno $sql
+        if ($n -match '^\d+$' -and [int]$n -ge $Cuantas) { return $true }
         Start-Sleep -Seconds 3
     }
     return $false
@@ -204,10 +215,11 @@ $esperadas = @()
 Paso 'Revisando que Mesh este arriba'
 try { Invoke-RestMethod -Uri "$Backend/db" -TimeoutSec 5 -UseBasicParsing *> $null }
 catch { Mal "El backend no contesta en $Backend"; exit 1 }
-try { Invoke-RestMethod -Uri "$Elastic/mesh_comentarios/_count" -TimeoutSec 5 | Out-Null }
-catch { Mal "No esta el indice mesh_comentarios. Corre .\arrancar.ps1"; exit 1 }
+if ((Psql-Uno "SELECT to_regclass('public.vector_comentario') IS NOT NULL;") -ne 't') {
+    Mal "No esta la tabla vector_comentario (migracion 040). Corre .\arrancar.ps1"; exit 1
+}
 $admin = Entrar 'admin@mesh.com' 'Admin123'
-Ok 'Backend y Elasticsearch arriba, sesion de admin lista'
+Ok 'Backend y PostgreSQL arriba, sesion de admin lista'
 
 Write-Host ''
 Write-Host '=============================================================='
@@ -277,9 +289,9 @@ try {
 }
 
 if ($totalTexto -gt 0) {
-    Paso "Esperando que las $totalTexto resenas de texto lleguen a Elasticsearch con su valoracion, hasta $Espera s"
+    Paso "Esperando que las $totalTexto resenas de texto tengan su vector y su valoracion, hasta $Espera s"
     if (EsperarValoradas $idsTexto $totalTexto) {
-        Ok "Las $totalTexto estan en mesh_comentarios con su vector y su valoracion"
+        Ok "Las $totalTexto estan en vector_comentario con su vector y su valoracion"
     } else {
         Mal 'No llegaron todas. Mira que el backend este corriendo y que Ollama conteste (GET /vectores)'
         exit 1

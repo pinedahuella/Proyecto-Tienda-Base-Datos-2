@@ -241,11 +241,11 @@ const CATALOGO = [
   },
   {
     id: 'demo-patrones', grupo: 'Demos de fraude', titulo: 'Patrones de resenas que salen al instante',
-    explica: 'Cuentas nuevas que compran y califican de verdad. cadena: A califica a B y B a C. favor: dos cuentas se ponen 5 una a la otra. coordinados: dos cuentas califican los mismos productos a la vez. Cada caso sale en segundos en Fraude, Resenas en anillo, filtrando por su tipo. A los 15 minutos el worker suma Reputacion en minutos con estas mismas cuentas.',
+    explica: 'Cuentas nuevas que compran y califican de verdad. favor: dos cuentas se ponen 5 una a la otra en minutos y sale como mutuo, con las horas de ida y vuelta como bono. coordinados: dos cuentas califican los mismos productos a la vez. Cada caso sale en segundos en Fraude, Resenas en anillo, filtrando por su tipo. A los 15 minutos el worker suma Reputacion en minutos con estas mismas cuentas.',
     script: 'demo-patrones-resenas.ps1', confirmar: 'SI',
     peligro: 'Deja cuentas, pedidos y movimientos de inventario reales. No hay como deshacerlo.',
     campos: [
-      { nombre: 'patron', etiqueta: 'Patron', tipo: 'opcion', opciones: ['todos', 'cadena', 'favor', 'coordinados'], defecto: 'todos' },
+      { nombre: 'patron', etiqueta: 'Patron', tipo: 'opcion', opciones: ['todos', 'favor', 'coordinados'], defecto: 'todos' },
     ],
     construir: (v) => ['-Patron', v.patron],
   },
@@ -322,7 +322,7 @@ const CATALOGO = [
   },
   {
     id: 'final-semantica', grupo: 'Demos de la Entrega final', titulo: 'Productos parecidos por su descripcion',
-    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen segun su descripcion, con el porcentaje de parecido. El vector vive en el documento del producto en Elasticsearch: compara cuanto tarda con el indice HNSW y comparando contra todos, y que den lo mismo. Al final se los pide a la ruta de la ficha, GET /productos/:id/similares, y comprueba que sean los mismos. Si el backend esta apagado, ese ultimo paso solo avisa.',
+    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen segun su descripcion, con el porcentaje de parecido. El vector vive en PostgreSQL, en vector_producto (pgvector): compara cuanto tarda con el indice HNSW y comparando contra todos, y que den lo mismo. Al final se los pide a la ruta de la ficha, GET /productos/:id/similares, y comprueba que sean los mismos. Si el backend esta apagado, ese ultimo paso solo avisa.',
     script: 'demo-entrega-final.ps1', confirmar: null,
     campos: [
       { nombre: 'producto', etiqueta: 'Palabra del nombre', tipo: 'texto', patron: '^[A-Za-z0-9 ]{2,30}$', defecto: 'laptop' },
@@ -340,7 +340,7 @@ const CATALOGO = [
   },
   {
     id: 'final-vectores', grupo: 'Demos de la Entrega final', titulo: 'Quien mantiene los vectores al dia',
-    explica: 'Cuantos productos tienen vector en Elasticsearch, cuantas resenas tienen el suyo en mesh_comentarios, cuantos esperan a los workers del backend (los que un vendedor creo o edito, las resenas nuevas) y si el backend llega a Ollama con el modelo descargado. Solo lee.',
+    explica: 'Cuantos productos tienen vector en vector_producto y cuantas resenas el suyo en vector_comentario (PostgreSQL), cuantos esperan a los workers del backend (los que un vendedor creo o edito, las resenas nuevas) y si el backend llega a Ollama con el modelo descargado. Solo lee.',
     script: 'demo-entrega-final.ps1', confirmar: null,
     campos: [],
     construir: () => ['-Parte', 'vectores'],

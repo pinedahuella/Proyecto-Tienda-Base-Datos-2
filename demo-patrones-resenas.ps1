@@ -3,27 +3,28 @@
 # al instante, con cuentas nuevas y compras REALES, y confirma por la API del
 # admin que cada caso quedo guardado con su tipo.
 #
-#   .\demo-patrones-resenas.ps1                       los tres patrones
-#   .\demo-patrones-resenas.ps1 -Patron cadena        solo B.1
-#   .\demo-patrones-resenas.ps1 -Patron favor         solo B.5
+#   .\demo-patrones-resenas.ps1                       los dos patrones
+#   .\demo-patrones-resenas.ps1 -Patron favor         solo el favor devuelto
 #   .\demo-patrones-resenas.ps1 -Patron coordinados   solo B.6
 #   .\demo-patrones-resenas.ps1 -SinAbrir             no abre el panel al final
 #
 # QUE ARMA CADA PATRON
 # ==================================================
-#   cadena (B.1, tipo cadena_abierta). Tres cuentas A, B y C. A le compra a B
-#     y la califica con 5, B le compra a C y la califica con 5. Nadie cierra
-#     el circulo: es una cadena, no un ciclo (el ciclo es A.1).
-#   favor (B.5, tipo favor_devuelto). Dos cuentas se compran una a la otra y
-#     se ponen 5 en minutos. Ese mismo par tambien sale como mutuo (A.1): son
-#     dos casos distintos a proposito.
+#   favor (tipo mutuo). Dos cuentas se compran una a la otra y se ponen 5 en
+#     minutos. Hasta el 2026-10-17 era su propia senal, favor_devuelto (B.5);
+#     desde la limpieza de fraude de Jose David (migracion 042) va dentro de
+#     mutuo: las horas entre la ida y la vuelta quedan en su detalle y suman
+#     como bono al puntaje (+20 en menos de 1 h).
 #   coordinados (B.6, tipo coordinados). Un vendedor con tres productos y dos
 #     compradoras que compran y califican los tres en el mismo rato. El caso
 #     lleva a las dos compradoras y NO al vendedor, que es un tercero.
 #
-# Los tres los revisa el backend en cuanto llega cada resena
-# (PatronesFraudeDetectorService.detectarInmediato), asi que salen en
-# segundos. Los otros tres tipos de la familia B no se arman aqui:
+# La cadena abierta (B.1) se quito el 2026-10-17: una cadena A->B->C no
+# concentra reputacion en nadie, y en los datos solo repetia anillos que ya
+# salian como ciclo. -Patron cadena ya no existe.
+#
+# Los dos los revisa el backend en cuanto llega cada resena, asi que salen en
+# segundos. Los otros tipos de la familia B no se arman aqui:
 #   satelites (B.2) y reputacion expres (B.7) los revisa el worker cada 15
 #     minutos. B.7 sale solo con estas mismas cuentas: todas son nuevas, y a
 #     los 15 minutos cada vendedor de la demo aparece con reputacion en minutos.
@@ -39,7 +40,7 @@
 # asi que tambien puede sumar una alerta de varias cuentas desde la misma IP.
 
 param(
-    [ValidateSet('todos', 'cadena', 'favor', 'coordinados')]
+    [ValidateSet('todos', 'favor', 'coordinados')]
     [string]$Patron = 'todos',
 
     [ValidatePattern('^[A-Za-z0-9]{0,20}$')]
@@ -153,9 +154,8 @@ function EsperarCaso([string]$Tipo, [string[]]$Usuarios) {
 }
 
 $NOMBRES = @{
-    cadena_abierta = 'Cadena de calificaciones'
-    favor_devuelto = 'Se devuelven la nota en horas'
-    coordinados    = 'Califican juntas lo mismo'
+    mutuo       = 'Se califican entre si (con las horas de ida y vuelta)'
+    coordinados = 'Califican juntas lo mismo'
 }
 $resultado = @()
 function Confirmar([string]$Tipo, [string[]]$Usuarios) {
@@ -182,27 +182,15 @@ Write-Host ' Hace compras y resenas REALES. No se deshace.' -ForegroundColor Yel
 Write-Host '=============================================================='
 
 try {
-    if ($Patron -in 'todos', 'cadena') {
-        Paso 'Cadena de calificaciones (B.1): A califica a B, B califica a C'
-        $a = NuevaCuenta "${Prefijo}c1" $false
-        $b = NuevaCuenta "${Prefijo}c2" $true
-        $c = NuevaCuenta "${Prefijo}c3" $true
-        Publicar $b $PRODUCTOS[0]
-        Publicar $c $PRODUCTOS[1]
-        ComprarYResenar $a $b $PRODUCTOS[0]
-        ComprarYResenar $b $c $PRODUCTOS[1]
-        Confirmar 'cadena_abierta' @($a.Usuario, $b.Usuario, $c.Usuario)
-    }
-
     if ($Patron -in 'todos', 'favor') {
-        Paso 'Favor devuelto (B.5): dos cuentas se ponen 5 una a la otra'
+        Paso 'Favor devuelto: dos cuentas se ponen 5 una a la otra en minutos'
         $x = NuevaCuenta "${Prefijo}f1" $true
         $y = NuevaCuenta "${Prefijo}f2" $true
         Publicar $x $PRODUCTOS[0]
         Publicar $y $PRODUCTOS[1]
         ComprarYResenar $x $y $PRODUCTOS[1]
         ComprarYResenar $y $x $PRODUCTOS[0]
-        Confirmar 'favor_devuelto' @($x.Usuario, $y.Usuario)
+        Confirmar 'mutuo' @($x.Usuario, $y.Usuario)
     }
 
     if ($Patron -in 'todos', 'coordinados') {

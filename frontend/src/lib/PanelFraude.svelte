@@ -694,11 +694,9 @@
 		| 'mutuo'
 		| 'ciclo'
 		| 'reiterado'
-		| 'cadena_abierta'
 		| 'satelites'
 		| 'persistente'
 		| 'anillo_en_el_tiempo'
-		| 'favor_devuelto'
 		| 'coordinados'
 		| 'reputacion_expres'
 		| 'resenas_repetidas'
@@ -762,11 +760,9 @@
 		mutuo: 'Se califican entre si',
 		ciclo: 'Ciclo de calificaciones',
 		reiterado: 'Reiteracion sobre los mismos productos',
-		cadena_abierta: 'Cadena de calificaciones',
 		satelites: 'Cuentas que solo califican a un vendedor',
 		persistente: 'Siempre califica al mismo vendedor',
 		anillo_en_el_tiempo: 'Anillo que vuelve con el tiempo',
-		favor_devuelto: 'Se devuelven la nota en horas',
 		coordinados: 'Califican juntas lo mismo',
 		reputacion_expres: 'Reputacion en minutos',
 		resenas_repetidas: 'Repite la misma resena',
@@ -785,10 +781,8 @@
 		'mutuo',
 		'ciclo',
 		'reiterado',
-		'cadena_abierta',
 		'satelites',
 		'persistente',
-		'favor_devuelto',
 		'coordinados',
 		'reputacion_expres',
 		'resenas_repetidas',
@@ -958,7 +952,6 @@
 		| 'vistas_infladas'
 		| 'compras_en_rafaga'
 		| 'ip_multicuenta_compras'
-		| 'carrito_acaparador'
 		| 'devoluciones_seriales'
 		| 'granja_de_registros';
 	type FiltroTipoHallazgo = 'todos' | TipoHallazgo;
@@ -989,7 +982,6 @@
 		vistas_infladas: 'Vistas infladas',
 		compras_en_rafaga: 'Compras en rafaga',
 		ip_multicuenta_compras: 'Varias cuentas, una IP',
-		carrito_acaparador: 'Carrito acaparador',
 		devoluciones_seriales: 'Devoluciones seriales',
 		granja_de_registros: 'Granja de registros'
 	};
@@ -998,7 +990,6 @@
 		vistas_infladas: 'Un producto con demasiadas vistas por sesion, como si alguien refrescara su ficha.',
 		compras_en_rafaga: 'Una cuenta con muchos pedidos en pocos minutos.',
 		ip_multicuenta_compras: 'Varias cuentas que compran desde la misma IP.',
-		carrito_acaparador: 'Mete muchas unidades al carrito y casi no compra.',
 		devoluciones_seriales: 'Devuelve la mitad o mas de lo que compra.',
 		granja_de_registros: 'Muchas cuentas registradas desde la misma IP en una hora.'
 	};
@@ -1256,7 +1247,6 @@
 		'R-CASI-1': 'Se califican entre si y compraron o se registraron desde la misma IP',
 		'R-CASI-2': 'Recibieron resenas de cuentas con menos de una hora de vida',
 		'R-CASI-3': 'Califico un producto y despues lo devolvio',
-		'R-CASI-4': 'El mismo ciclo volvio en dos o mas olas',
 		'R-CASI-5': 'Califican juntas y compraron o se registraron desde la misma IP'
 	};
 
@@ -2182,7 +2172,7 @@
 
 	<p class="intro">
 		Grupos de cuentas cuyo patron de calificaciones no se explica por el uso normal de la
-		tienda. Se califican entre si o en cadena, se devuelven la nota, califican juntas, o
+		tienda. Se califican entre si, se devuelven la nota en minutos, califican juntas, o
 		inflan a un vendedor con cuentas recien creadas.
 		Cada 15 minutos, y de inmediato tras cada resena nueva, un worker recorre el grafo de
 		relaciones entre cuentas, resenas y productos sobre una ventana de 60 dias y guarda lo que
@@ -2530,7 +2520,6 @@
 
 	.tipo-ciclo,
 	.tipo-reiterado,
-	.tipo-favor_devuelto,
 	.tipo-coordinados,
 	.tipo-reputacion_expres,
 	.tipo-anillo_de_texto,
@@ -2543,7 +2532,6 @@
 	}
 
 	.tipo-mutuo,
-	.tipo-cadena_abierta,
 	.tipo-satelites,
 	.tipo-persistente,
 	.tipo-anillo_en_el_tiempo,

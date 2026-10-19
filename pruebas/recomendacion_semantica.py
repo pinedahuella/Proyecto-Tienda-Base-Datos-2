@@ -2,19 +2,20 @@
 
 Uso:  python pruebas/recomendacion_semantica.py
 
-Necesita Elasticsearch, MongoDB y el backend arriba, y los vectores ya
+Necesita PostgreSQL, MongoDB y el backend arriba, y los vectores ya
 cargados por etl/cargar_vectores.ps1 (o por .\\arrancar.ps1, que lo corre). No
 necesita Ollama, porque prueba lo que ya quedo guardado.
 
-Desde el 2026-10-02 el vector de cada producto vive en su documento de
-mesh_productos (Elasticsearch) y los parecidos los busca SimilaresService con
-kNN. Antes vivia en producto_vector de PostgreSQL y esta prueba llamaba a
-productos_similares(); la consulta ahora esta en el backend, asi que los
-parecidos se piden a la ruta que usa la ficha, GET /productos/:id/similares.
+Donde vivio el vector de cada producto: producto_vector de PostgreSQL hasta el
+2026-10-02, su documento de mesh_productos (Elasticsearch, kNN) hasta el
+2026-10-16, y desde entonces la tabla vector_producto (migracion 040,
+pgvector, a pedido del profesor). La consulta esta en el backend, asi que los
+parecidos se piden a la ruta que usa la ficha, GET /productos/:id/similares, y
+PostgreSQL solo se mira.
 
 Que se comprueba
-  1. Cada documento del indice tiene su vector, de 768 y del mismo modelo, y
-     cada producto de MongoDB tiene documento.
+  1. Cada producto de producto_catalogo tiene su vector, de 768 y del mismo
+     modelo, y cada producto de MongoDB esta en producto_catalogo.
   2. Los parecidos de un producto son de su misma categoria mucho mas seguido
      de lo que daria el azar. El control es ese azar, medido con los mismos
      productos, no un numero supuesto.
@@ -48,8 +49,6 @@ def leer_env():
 
 
 ENV = leer_env()
-ES = os.environ.get('ES', 'http://localhost:9200')
-INDICE = 'mesh_productos'
 BACKEND = os.environ.get('BACKEND', 'http://localhost:3000')
 
 
@@ -61,22 +60,22 @@ def pedir(url, cuerpo=None):
 
 
 def documentos():
-    """id -> {estado, grupo, modelo, tiene} de cada documento, sin traer el vector entero.
+    """id -> {grupo, modelo, dims, tiene} de cada producto de producto_catalogo.
 
-    Las 768 dimensiones no se cuentan documento por documento: las fija el
-    mapeo (dense_vector con dims 768) y Elasticsearch rechaza un vector de
-    otro largo al escribirlo. Se mira el mapeo, en main."""
+    Se mira PostgreSQL, sin traer los vectores: vector_dims() dice el largo de
+    cada uno, y un producto sin fila en vector_producto sale con tiene=False."""
+    sql = ("SELECT pc.id_producto_mongo || '|' || coalesce(v.grupo, '') || '|' || coalesce(v.modelo, '') || '|' || "
+           "coalesce(vector_dims(v.vector)::text, '0') FROM producto_catalogo pc "
+           "LEFT JOIN vector_producto v USING (id_producto_mongo);")
+    r = subprocess.run(['docker', 'exec', 'mesh-postgres', 'psql', '-U', ENV['DB_USER'], '-d', ENV['DB_NAME'],
+                        '-qtAX', '-c', sql], capture_output=True, text=True, encoding='utf-8')
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip())
     out = {}
-    r = pedir(ES + '/' + INDICE + '/_search?scroll=1m', {
-        'size': 1000, 'sort': ['_doc'], '_source': ['estado', 'vector_grupo', 'vector_modelo'],
-        'script_fields': {'tiene': {'script': "doc['vector'].size()"}},
-    })
-    while r['hits']['hits']:
-        for h in r['hits']['hits']:
-            src = h.get('_source', {})
-            out[int(h['_id'])] = {'estado': src.get('estado'), 'grupo': src.get('vector_grupo'),
-                                  'modelo': src.get('vector_modelo'), 'tiene': h['fields']['tiene'][0] > 0}
-        r = pedir(ES + '/_search/scroll', {'scroll': '1m', 'scroll_id': r['_scroll_id']})
+    for linea in r.stdout.splitlines():
+        c = linea.strip().split('|')
+        if len(c) == 4:
+            out[int(c[0])] = {'grupo': c[1] or None, 'modelo': c[2] or None, 'dims': int(c[3]), 'tiene': c[3] != '0'}
     return out
 
 
@@ -130,11 +129,10 @@ def main():
     docs = documentos()
     con_vector = set(i for i, d in docs.items() if d['tiene'])
     revisar(len(cat) > 0, '%d productos en MongoDB' % len(cat))
-    revisar(set(docs) == set(cat), '%d documentos en %s, uno por producto de MongoDB' % (len(docs), INDICE))
-    revisar(con_vector == set(docs), '%d con vector, todos los del indice' % len(con_vector))
-    mapeo = pedir(ES + '/' + INDICE + '/_mapping/field/vector')[INDICE]['mappings']['vector']['mapping']['vector']
-    revisar(mapeo.get('type') == 'dense_vector' and mapeo.get('dims') == 768, 'todos con 768 dimensiones (dense_vector del mapeo)')
-    modelos = set(d['modelo'] for d in docs.values())
+    revisar(set(cat) <= set(docs), '%d productos en producto_catalogo, todos los de MongoDB' % len(docs))
+    revisar(con_vector == set(docs), '%d con vector en vector_producto, todos los del catalogo' % len(con_vector))
+    revisar(all(docs[i]['dims'] == 768 for i in con_vector), 'todos con 768 dimensiones (vector_dims)')
+    modelos = set(d['modelo'] for d in docs.values() if d['tiene'])
     revisar(len(modelos) == 1, 'todos del mismo modelo, %s' % ', '.join(str(m) for m in modelos))
 
     print('2. Los parecidos son de la misma categoria mucho mas que al azar')
@@ -160,7 +158,7 @@ def main():
 
     print('3. Lo que la ruta no devuelve')
     revisar(all(p not in similares(p) for p in muestra[:20]), 'nunca el propio producto')
-    inactivos = set(i for i, d in docs.items() if d['estado'] != 'activo' and i in con_vector)
+    inactivos = set(i for i, d in cat.items() if not d['activo'] and i in con_vector)
     vistos = set()
     for p in muestra[:20]:
         vistos.update(similares(p))

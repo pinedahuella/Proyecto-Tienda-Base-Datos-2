@@ -1,37 +1,32 @@
 // pruebas/vectores_worker.cjs
 //   cd backend; npm run build; cd ..; node pruebas/vectores_worker.cjs
-// Necesita Elasticsearch, Mongo y Ollama arriba, y el producto 1 con vector (lo deja el paso 7d de arrancar).
+// Necesita PostgreSQL, Mongo y Ollama arriba, y el producto 1 con vector (lo deja el paso 7d de arrancar).
 //
 // Prueba el worker de vectores de David (VectoresSyncService) con su codigo compilado:
 // marca un producto como editado, corre el worker a mano y compara el vector que
 // calcula el backend con el que dejo el ETL. El producto queda igual que antes.
 //
-// Desde el 2026-10-02 el vector vive en el documento de mesh_productos de
-// Elasticsearch y no en producto_vector de PostgreSQL; la prueba lee y escribe
-// ahi. Lo que comprueba es lo mismo.
+// Donde vivio el vector: producto_vector de PostgreSQL hasta el 2026-10-02, el
+// documento de mesh_productos de Elasticsearch hasta el 2026-10-16, y desde
+// entonces la tabla vector_producto (migracion 040, pgvector). La prueba lee y
+// escribe ahi. Lo que comprueba es lo mismo.
 const path = require('path');
 const BACK = path.join(__dirname, '..', 'backend');
 process.chdir(BACK);
 require(path.join(BACK, 'node_modules', 'dotenv')).config({ path: path.join(BACK, '.env'), quiet: true });
 const mongo = require(path.join(BACK, 'dist', 'database', 'mongo'));
+const { pool } = require(path.join(BACK, 'dist', 'database', 'postgres'));
 const { OLLAMA_URL, OLLAMA_MODELO } = require(path.join(BACK, 'dist', 'database', 'ollama'));
 const { VectoresSyncService } = require(path.join(BACK, 'dist', 'services', 'productos', 'vectores-sync.service'));
 
-const ES = `http://${process.env.ELASTIC_HOST ?? 'localhost'}:${process.env.ELASTIC_PORT ?? 9200}`;
-const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
-
-async function es(metodo, ruta, cuerpo) {
-  const r = await fetch(`${ES}${ruta}`, {
-    method: metodo,
-    headers: { 'Content-Type': 'application/json' },
-    body: cuerpo ? JSON.stringify(cuerpo) : undefined,
-  });
-  if (!r.ok) throw new Error(`Elasticsearch contesto ${r.status} en ${ruta}: ${await r.text()}`);
-  return r.json();
-}
-
 const leer = async (id) =>
-  (await es('GET', `/${INDICE}/_doc/${id}?_source_includes=vector,vector_hash,vector_grupo,vector_modelo`))._source;
+  (
+    await pool.query(
+      `SELECT vector::text AS vector, texto_hash, grupo, activo, modelo
+         FROM vector_producto WHERE id_producto_mongo = $1`,
+      [id],
+    )
+  ).rows[0];
 
 function coseno(a, b) {
   let p = 0, na = 0, nb = 0;
@@ -48,36 +43,38 @@ function coseno(a, b) {
 
   const ID = 1;
   const antes = await leer(ID);
-  if (!antes.vector) throw new Error(`El producto ${ID} no tiene vector. Corre .\\etl\\cargar_vectores.ps1`);
-  console.log(`Producto ${ID}: hash ${antes.vector_hash}, ${antes.vector.length} dimensiones`);
+  if (!antes) throw new Error(`El producto ${ID} no tiene vector en vector_producto. Corre .\\etl\\cargar_vectores.ps1`);
+  const vAntes = JSON.parse(antes.vector);
+  console.log(`Producto ${ID}: hash ${antes.texto_hash}, ${vAntes.length} dimensiones`);
 
-  // 1. Se simula una edicion: bandera en Mongo y un hash viejo en el documento,
-  //    para que el worker tenga que pedirle el vector a Ollama y no lo salte.
+  // 1. Se simula una edicion: bandera en Mongo y un hash viejo en la fila, para
+  //    que el worker tenga que pedirle el vector a Ollama y no lo salte.
   await db.collection('productos').updateOne({ _id: ID }, { $set: { pendiente_vector: true } });
-  await es('POST', `/${INDICE}/_update/${ID}?refresh=true`, { doc: { vector_hash: 'hash-viejo-de-prueba' } });
+  await pool.query(`UPDATE vector_producto SET texto_hash = $2 WHERE id_producto_mongo = $1`, [ID, '0'.repeat(32)]);
 
-  // 2. El worker, a mano (el de verdad corre cada 3 horas).
+  // 2. El worker, a mano (el de verdad corre cada 10 s).
   const t0 = Date.now();
   await new VectoresSyncService().recalcular();
   const ms = Date.now() - t0;
 
   // 3. Como quedo
-  await es('POST', `/${INDICE}/_refresh`);
   const despues = await leer(ID);
+  const vDespues = JSON.parse(despues.vector);
   const doc = await db.collection('productos').findOne({ _id: ID }, { projection: { pendiente_vector: 1 } });
-  const distancia = 1 - coseno(antes.vector, despues.vector);
+  const distancia = 1 - coseno(vAntes, vDespues);
 
   const ok = [];
   const mal = [];
-  (despues.vector_hash === antes.vector_hash ? ok : mal).push(`el hash vuelve a ser el del ETL (${despues.vector_hash})`);
+  (despues.texto_hash === antes.texto_hash ? ok : mal).push(`el hash vuelve a ser el del ETL (${despues.texto_hash})`);
   (distancia < 1e-4 ? ok : mal).push(`el vector del backend es el mismo del ETL, distancia ${distancia.toExponential(2)}`);
-  (despues.vector.length === 768 ? ok : mal).push('768 dimensiones');
-  (despues.vector_grupo === antes.vector_grupo && despues.vector_modelo === antes.vector_modelo ? ok : mal).push('grupo y modelo iguales');
+  (vDespues.length === 768 ? ok : mal).push('768 dimensiones');
+  (despues.grupo === antes.grupo && despues.modelo === antes.modelo && despues.activo === antes.activo ? ok : mal).push('grupo, modelo y activo iguales');
   (!doc.pendiente_vector ? ok : mal).push('la bandera pendiente_vector se bajo en Mongo');
 
   console.log(`El worker tardo ${ms} ms`);
   ok.forEach((x) => console.log(`  OK     ${x}`));
   mal.forEach((x) => console.log(`  FALLA  ${x}`));
   console.log(`${ok.length} OK, ${mal.length} FALLA`);
+  await pool.end().catch(() => undefined);
   process.exit(mal.length ? 1 : 0);
 })().catch(async (e) => { console.error('No se pudo correr.', e); process.exit(2); });

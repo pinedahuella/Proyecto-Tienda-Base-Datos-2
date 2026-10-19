@@ -21,11 +21,9 @@
 			| 'mutuo'
 			| 'ciclo'
 			| 'reiterado'
-			| 'cadena_abierta'
 			| 'satelites'
 			| 'persistente'
 			| 'anillo_en_el_tiempo'
-			| 'favor_devuelto'
 			| 'coordinados'
 			| 'reputacion_expres'
 			| 'resenas_repetidas'
@@ -50,11 +48,9 @@
 		mutuo: 'Anillo de resenas, se califican entre si',
 		ciclo: 'Anillo de resenas en ciclo',
 		reiterado: 'Anillo de resenas sobre los mismos productos',
-		cadena_abierta: 'Cadena de calificaciones entre cuentas',
 		satelites: 'Cuentas que solo califican a un vendedor',
 		persistente: 'Una cuenta califica siempre al mismo vendedor',
 		anillo_en_el_tiempo: 'Anillo de resenas que vuelve con el tiempo',
-		favor_devuelto: 'Dos cuentas se devuelven la nota en horas',
 		coordinados: 'Dos cuentas califican juntas lo mismo',
 		reputacion_expres: 'Vendedor nuevo con resenas de cuentas nuevas',
 		resenas_repetidas: 'Una cuenta escribe la misma resena una y otra vez',

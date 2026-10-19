@@ -37,19 +37,19 @@ flowchart TB
     FE -- "HTTP + cookie de sesion" --> BE
 
     subgraph persistencia[PERSISTENCIA]
-        PG[("PostgreSQL 18 :5432<br/><b>FUENTE DE VERDAD</b><br/>76 tablas, con reglas de descuento,<br/>senales de fraude y copia del catalogo")]
+        PG[("PostgreSQL 18 + pgvector :5432<br/><b>FUENTE DE VERDAD</b><br/>con reglas de descuento, senales de fraude,<br/>copia del catalogo, el carrito de verdad<br/>y los vectores (vector_producto, vector_comentario)")]
         MG[("MongoDB :27018<br/><b>CATALOGO, HISTORIAL Y LOG DE LOGIN</b><br/>productos, productos_eventos, categorias,<br/>eventos_autenticacion")]
-        RD[("Redis :6379<br/><b>TRANSITORIO Y ATOMICO</b><br/>carrito, reservas, candado,<br/>contadores de fraude del login,<br/>vencimiento de descuentos, rankings<br/>y recomendaciones ya calculadas")]
-        N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>163 nodos y 281 relaciones,<br/>4 tipos de arista,<br/>anillos y familia B de patrones")]
-        ES[("Elasticsearch :9200<br/><b>BUSQUEDA DE TEXTO, POR SIGNIFICADO Y EVENTOS DE LOGIN</b><br/>mesh_productos, difusa y sin tildes, con el vector de cada producto<br/>mesh_comentarios, las resenas con su vector<br/>mesh_eventos_autenticacion")]
+        RD[("Redis :6379<br/><b>RAPIDO Y ATOMICO, NUNCA LA VERDAD</b><br/>copia del carrito, reservas, candado,<br/>contadores de fraude del login,<br/>rankings y combos ya calculados")]
+        N4[("Neo4j :7687<br/><b>RELACIONES ENTRE CUENTAS</b><br/>resenas y compras como nodos,<br/>anillos, familia B,<br/>para ti y tambien compraron")]
+        ES[("Elasticsearch :9200<br/><b>BUSQUEDA DE TEXTO Y PERCOLATOR</b><br/>mesh_productos, difusa y sin tildes<br/>mesh_ofertas, el buscador de ofertas<br/>mesh_seguimientos, los avisame (percolator)<br/>mesh_eventos_autenticacion")]
         CH[("ClickHouse :8123<br/><b>EVENTOS EN EL TIEMPO</b><br/>seis tablas de eventos de producto y buscador,<br/>copia de logueos y resumen diario,<br/>tendencias y recomendaciones")]
     end
 
     BE -- "pedidos, pagos, ofertas,<br/>stock, resenas, usuarios,<br/>senal_fraude" --> PG
     BE -- "catalogo, historial,<br/>cada intento de login" --> MG
-    BE -- "carrito, reservas,<br/>candado de checkout,<br/>contadores del login" --> RD
-    BE -- "panel de fraude<br/>(solo lectura)" --> N4
-    BE -- "buscador, productos parecidos (kNN)<br/>y busqueda por intencion" --> ES
+    BE -- "carrito (se contesta aqui),<br/>reservas, candado de checkout,<br/>contadores del login" --> RD
+    BE -- "panel de fraude, para ti<br/>y tambien compraron (solo lectura)" --> N4
+    BE -- "buscador, buscador de ofertas,<br/>avisame (crea la consulta)" --> ES
     BE -- "vista de producto (escribe),<br/>tendencias y fraude por IP (lee)" --> CH
 
     PG -. "etl/cargar.js<br/>POR LOTES" .-> MG
@@ -58,13 +58,14 @@ flowchart TB
     PG -. "etl/cargar_grafo.sh + worker<br/>COLA evento_grafo" .-> N4
     MG -. "etl/cargar_busqueda.sh + worker<br/>BANDERA pendiente_busqueda" .-> ES
     MG -. "worker cada 5 s<br/>BANDERA pendiente_elastic" .-> ES
-    MG -. "etl/cargar_vectores.ps1 + worker, con Ollama<br/>BANDERA pendiente_vector" .-> ES
-    PG -. "worker cada 10 s, con Ollama<br/>COLA evento_comentario" .-> ES
-    ES -. "resenas repetidas y anillo de texto,<br/>cada 15 min<br/>senal_fraude" .-> PG
+    MG -. "etl/cargar_vectores.ps1 + worker, con Ollama<br/>BANDERA pendiente_vector, a vector_producto" .-> PG
+    RD -. "copia asincrona del carrito<br/>al pedido pendiente y sus reservas" .-> PG
+    PG -. "worker cada 5 s<br/>COLA evento_oferta, y el percolator" .-> ES
+    PG -. "worker cada 10 s<br/>COLA evento_grafo_compra" .-> N4
     PG -. "etl/cargar_eventos.sh<br/>INCREMENTAL por marca de agua<br/>CONGELADA desde el 2026-09-10" .-> CH
     PG -. "etl/cargar_compras.sh<br/>compras y devoluciones, en cada arranque" .-> CH
     N4 -. "detectores de anillos y familia B,<br/>cada 15 min y al llegar una resena<br/>senal_fraude" .-> PG
-    CH -. "mas vendidos y mas vistos cada 10 min,<br/>tambien vieron y para ti cada 15 min" .-> RD
+    CH -. "mas vendidos y mas vistos cada 10 min,<br/>tambien vieron cada 15 min, combos cada 30 min" .-> RD
     CH -. "disparador de reglas automaticas,<br/>cada 60 s, cuenta ventas recientes" .-> PG
     RD -. "clave de descuento vencida,<br/>cada minuto se quita de oferta" .-> PG
 
@@ -142,11 +143,11 @@ en `etl/README.md`, y que hacer con ella se decide con el profesor.
 
 | Motor | Que guarda | Por que ahi |
 |---|---|---|
-| **PostgreSQL** | usuarios, direcciones, categorias, **ofertas**, `precio_historial`, pedidos, lineas, pagos, kardex, resenas y las alertas de fraude del login | Es lo que necesita transaccion. La compra entera es atomica y el descuento de stock va con `SELECT ... FOR UPDATE`. Entrega 1: cero sobreventas sobre 555 ofertas |
+| **PostgreSQL** | usuarios, direcciones, categorias, **ofertas**, `precio_historial`, pedidos (el `pendiente` de cada cuenta es su carrito), lineas, pagos, kardex, reservas de venta relampago, resenas, las senales de fraude y los vectores (pgvector) | Es lo que necesita transaccion. La compra entera es atomica y el descuento de stock va con `SELECT ... FOR UPDATE`. Entrega 1: cero sobreventas sobre 555 ofertas. Los vectores van aqui desde el 2026-10-16 (ADR-10, abajo) |
 | **MongoDB** | el catalogo, su historial de eventos, y desde el 2026-09-10 el log de autenticacion | Los atributos varian por categoria: lo que describe una laptop no describe una camisa. Un esquema fijo serian columnas casi todas nulas. El historial es append de eventos, y se reconstruye el estado a una fecha |
-| **Redis** | carrito, venta relampago, candado de checkout y los contadores de fraude del login | Lo transitorio (el carrito vence solo por inactividad, un contador de fallos a los 60 s) y lo que tiene que ser atomico sin bloquear (`inventario_limitado.lua`) |
-| **Neo4j** | el grafo de calificaciones y domicilios | Preguntas de varios saltos y de largo variable. El porque, con la comparativa contra columnar, en `docs/DECISION-GRAFOS-VS-COLUMNAR.md` |
-| **Elasticsearch** | el indice del catalogo y el de eventos de autenticacion | Escribir "labtop" y que encuentre "laptop". El `$text` de Mongo Community no tiene difusa, y la Entrega 3 pide el motor dedicado. El de eventos es para agregar por IP y por cuenta, y todavia no lo lee ninguna ruta. Ver `elastic/README.md` |
+| **Redis** | la copia rapida del carrito, la venta relampago, el candado de checkout y los contadores de fraude del login | Lo que tiene que contestar al instante y lo que tiene que ser atomico sin bloquear (`inventario_limitado.lua`). Desde el 2026-10-17 **nunca es la fuente de verdad** (pedido del profesor): el carrito y las reservas se copian a PostgreSQL, y si Redis se cae se compra contra PostgreSQL |
+| **Neo4j** | el grafo de calificaciones, domicilios y, desde el 2026-10-16, compras | Preguntas de varios saltos y de largo variable: los anillos de fraude, "para ti" (lo que compraron quienes compraron lo mismo que tu) y "tambien compraron". El porque, con la comparativa contra columnar, en `docs/DECISION-GRAFOS-VS-COLUMNAR.md` |
+| **Elasticsearch** | el indice del catalogo, el de ofertas, el percolator de los avisos y el de eventos de autenticacion | Escribir "labtop" y que encuentre "laptop", en productos y en ofertas. El percolator guarda CONSULTAS y les lanza cada oferta que cambia: es el "avisame cuando llegue". El de eventos agrupa los registros por IP (la granja de registros). Ver `elastic/README.md` |
 | **ClickHouse** | los eventos: vistas de producto, logueos y registros | Tendencia y fraude sobre millones de filas con hora. Guarda por columna, y las preguntas se hacen despues con SQL. Ver `clickhouse/README.md` |
 
 ### La base columnar SI esta, desde el 2026-09-06, y llego por la puerta que el ADR dejo abierta
@@ -285,20 +286,39 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **2026-09-30** | El refactor de fraude que pidio el profesor (7453ffe de Jose David, migraciones 031 a 033). Los tres detectores, Neo4j, ClickHouse y el login, guardan en una sola tabla, `senal_fraude`, una fila por tipo y clave con sus cuentas, resenas, productos, pedidos e IP. Los casos y los avisos al usuario cuelgan de la senal. `anillo_fraude`, `hallazgo_evento_fraude` y `alerta_fraude` quedan sin escrituras. Solo el Mermaid y el `.drawio` cambian de nombre de tabla; no hay flecha nueva |
 | **2026-10-02 y 04** | Los vectores se mudan de **pgvector** a **Elasticsearch** (fa3281c de Jose David; la migracion 036 retira `producto_vector` y `productos_similares()`). El de cada producto va en su documento de `mesh_productos` y los parecidos salen de un kNN; el de cada resena va en el indice nuevo `mesh_comentarios`, que llena la cola `evento_comentario` (migracion 034) con un worker. Del texto de las resenas salen dos senales de fraude nuevas, `resenas_repetidas` y `anillo_de_texto` (035), y la busqueda por intencion. La 037 deja el tipo `nota_no_cuadra` para el clasificador de resenas. `mesh_comentarios` lleva el vector en `flat` y no en HNSW: con resenas repetidas el grafo HNSW no encontraba las mejores (medido en `docs/BACKEND-PENDIENTE.md`) |
 | **2026-10-04, tarde** | Lo de 3305cf3 y 1f1f480 de Jose David. Las notas incoherentes (el clasificador de reseñas dice si un texto es malo; migración 037) y las reseñas parecidas (038) salen de **Elasticsearch**; las reseñas con la compra cancelada salen de **PostgreSQL**, con la fuente nueva `postgres` (039). Las señales de texto y la de cancelación se revisan al momento, no solo cada 15 minutos. El buscador gana la búsqueda **híbrida** (palabras y significado en una lista, por posición) y el "tal vez quisiste decir", y proponer un producto sugiere categoría y parecidos con el vector |
+| **2026-10-16 y 17** | Lo de 25f0fe0 de Jose David, a pedido del profesor (migraciones 040 a 045). **Todos los vectores vuelven a PostgreSQL** con pgvector: `vector_producto` y `vector_comentario`, con indice HNSW; `mesh_comentarios` y los campos de vector de `mesh_productos` se retiran (040). Las **compras pasan al grafo** como nodos `:Compra`, por la cola `evento_grafo_compra`, y "para ti" y "tambien compraron" se leen de **Neo4j** en vivo; `ParaTiSyncService` se borra (041). La limpieza de fraude quita `cadena_abierta`, `favor_devuelto` (ahora un bono de `mutuo`) y `carrito_acaparador`, la granja de registros sale de **Elasticsearch** y una senal de login ya no une casos (042). **Elasticsearch** gana el buscador de ofertas (`mesh_ofertas`, cola `evento_oferta`, 043) y el percolator de los "avisame" (`mesh_seguimientos`, 044). **Redis nunca es la fuente de verdad**: el carrito es el pedido `pendiente` de PostgreSQL y las reservas de venta relampago viven en `reserva_venta_relampago` (045). **ClickHouse** suma los combos (cada 30 min a Redis) y las busquedas sin resultados (`termino_normalizado`) |
 | **2026-10-01** | Comprar sin MongoDB, del diseno de Jose David (6f89237, migraciones 029 y 030). El nombre, el estado y la portada de cada variante se copian a **PostgreSQL** (`producto_catalogo` y `variante_catalogo`), y el recalculo del catalogo en **MongoDB** va por la cola `evento_producto` con un worker. El checkout ya solo necesita PostgreSQL y Redis; medido con MongoDB parado en `pruebas/falla_checkout.sh` |
 
 El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el
 compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. Cuando toco no
-hubo que cambiar de imagen, la migracion 024 solo crea la extension. Desde el
-2026-10-04 ya no se usa (la 036 quita la tabla y la funcion), pero la imagen se
-queda: cambiarla toca el volumen de datos y no aporta nada.
+hubo que cambiar de imagen, la migracion 024 solo crea la extension. Del
+2026-10-04 al 10-16 no se uso (la 036 quito la tabla y la funcion), y la imagen
+se quedo por eso: cambiarla toca el volumen de datos. Desde la 040 se vuelve a
+usar.
 
-**Por que el vector se mudo a Elasticsearch**, el ADR-10 replanteado. Con
-pgvector, buscar "parecidos que esten activos y no sean copias" era una tabla
-aparte con su propia copia de los ids y del estado, y el buscador de texto otro
-motor. En Elasticsearch el vector vive en el mismo documento que el nombre, el
-estado y las facetas, asi que una sola consulta los combina (el filtro de
-`SimilaresService` es un `bool` normal dentro del kNN) y no hay una segunda copia
-que se pueda quedar atras. Lo mismo para las resenas: su texto, su vector y su
-calificacion en un documento. Lo que se pierde es la consulta en SQL junto a las
-compras; hoy no la usa nadie.
+**ADR-10, los vectores en PostgreSQL, segunda vez.** Paso por tres lugares:
+
+| Desde | Donde | Por que |
+|---|---|---|
+| 2026-09-25 | `producto_vector` en PostgreSQL (024, 027) | La recomendacion semantica de la Entrega final |
+| 2026-10-02 | el documento de `mesh_productos` y el indice `mesh_comentarios` de Elasticsearch (036) | El vector vivia junto al nombre, el estado y las facetas, y una sola consulta kNN los combinaba |
+| 2026-10-16 | `vector_producto` y `vector_comentario` en PostgreSQL (040) | Lo pidio el profesor: las consultas por vectores con pgvector. Y se midio que gana en exactitud |
+
+Lo que decidio la vuelta, medido por Jose David con el mismo catalogo
+(`backend/cambio_propuestas/2026-10-16_2100-vectores-a-pgvector.md`): los
+similares de los 1103 productos contra el coseno exacto calculado aparte dan
+**1000 de 1001 iguales** con pgvector (el otro es un empate a 4e-8) y **317**
+con Elasticsearch, cuyo indice `int8_hnsw` cuantiza los vectores con errores de
+hasta 0,016. Los cuatro detectores de fraude por texto dieron **exactamente** las
+mismas senales con los mismos vectores. Y la comparacion de todas las resenas
+contra todas, que antes traia los vectores a Node, ahora la hace PostgreSQL sin
+que los vectores salgan de la base.
+
+Por que tablas aparte y no columnas: los triggers de `comentario` encolan cada
+cambio del texto, y si el worker escribiera el vector en la misma fila se
+encolaria solo; un vector pesa unos 3 KB y haria mas pesada cada lectura de
+resenas; y "sin vector" es no tener fila. El nombre no es `producto_vector`
+porque la 036 lo borra en cada arranque. Lo que se pierde respecto a
+Elasticsearch es combinar el vector con el texto en una consulta: la hibrida
+pide las palabras a Elasticsearch y el significado a PostgreSQL, y las junta
+por posicion.
