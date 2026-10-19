@@ -2657,6 +2657,65 @@ if (-not (Test-Path $sqlResenas)) {
 
 
 # ------------------------------------------------------------
+# 5d. Los pedidos de los combos
+# ------------------------------------------------------------
+# 18 pedidos de 2 y 3 productos que se compran juntos (una laptop con su
+# monitor y sus audifonos, el escritorio con su lampara...), de 8 cuentas
+# combo1@mesh.com a combo8@mesh.com. Sin ellos casi todos los pedidos son de un
+# solo producto, y los combos de la portada y "tambien compraron" de la ficha
+# salen casi vacios. El porque de cada numero esta en semilla-combos/README.md.
+#
+# Corre en CADA arranque, como las resenas de arriba: si las cuentas ya existen
+# no hace nada, y si no, entra entera. Va antes de ClickHouse y de Neo4j para
+# que el ETL de compras la copie en este mismo arranque; los triggers de la 041
+# la dejan en la cola del grafo. Las fechas son relativas al dia de la siembra.
+#
+# No corta el arranque: sin ella la tienda funciona igual.
+Paso "Pedidos de los combos"
+$sqlCombos = "$PSScriptRoot\semilla-combos\combos.sql"
+if (-not (Test-Path $sqlCombos)) {
+    Aviso "No esta semilla-combos\combos.sql. El resto sigue."
+} else {
+    docker cp "$sqlCombos" "mesh-postgres:/tmp/semilla_combos.sql" 2>&1 | Out-Null
+    $salidaCombos = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -v ON_ERROR_STOP=1 -q `
+        -f /tmp/semilla_combos.sql 2>&1 | Out-String -Width 4096
+    if ($LASTEXITCODE -ne 0) {
+        Aviso "Los pedidos de los combos no entraron. El resto sigue:"
+        Write-Host $salidaCombos -ForegroundColor Yellow
+    } elseif ($salidaCombos -match 'semilla de combos: ya estaban (\d+) de las 8 cuentas') {
+        Ok "Ya estaban ($($Matches[1]) de 8 cuentas combo*@mesh.com), no se toco nada"
+    } elseif ($salidaCombos -match 'semilla de combos: 8 cuentas nuevas, (\d+) pedidos, (\d+) lineas') {
+        Ok "8 cuentas nuevas y $($Matches[1]) pedidos pagados, con $($Matches[2]) lineas; los combos que quedaron:"
+        # Cada grupo sembrado y en cuantos pedidos de la semilla esta. Con
+        # productos y no producto_catalogo: en una base nueva el catalogo se copia
+        # de Mongo mas abajo y aqui todavia esta vacio.
+        $consultaCombos = @"
+SELECT string_agg(pc.nombre, ' + ' ORDER BY pc.nombre) || '  (' || g.pedidos || ' pedidos)'
+  FROM (SELECT s.productos, count(*) AS pedidos
+          FROM (SELECT pp.id_pedido, array_agg(DISTINCT pp.id_producto_mongo ORDER BY pp.id_producto_mongo) AS productos
+                  FROM pedido_producto pp
+                  JOIN pedido pe ON pe.id_pedido = pp.id_pedido
+                  JOIN usuarios u ON u.id_usuario = pe.id_usuario
+                 WHERE u.correo_electronico LIKE 'combo_@mesh.com'
+                 GROUP BY pp.id_pedido) s
+         GROUP BY s.productos) g
+  CROSS JOIN LATERAL unnest(g.productos) AS x(id)
+  JOIN productos pc ON pc.id_producto = x.id
+ GROUP BY g.productos, g.pedidos
+ ORDER BY g.pedidos DESC, 1
+"@
+        $listaCombos = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX -c $consultaCombos 2>$null
+        foreach ($combo in @($listaCombos)) {
+            if ("$combo".Trim() -ne '') { Write-Host "     $("$combo".Trim())" }
+        }
+    } else {
+        Aviso "La semilla de los combos no dijo que hizo:"
+        Write-Host $salidaCombos -ForegroundColor Yellow
+    }
+}
+
+
+# ------------------------------------------------------------
 # 6. MongoDB
 # ------------------------------------------------------------
 # El contenedor ya subio con el "docker compose up -d" de arriba. Aqui se
@@ -3479,6 +3538,35 @@ SELECT round(extract(epoch FROM r.fecha_registro)::numeric, 3),
                 return -1
             }
             return $lineas.Count
+        }
+
+        # Lo contrario de copiar: los pedidos que un quitar.sql borro de
+        # PostgreSQL y anoto en pedido_quitado (la 046). Sus lineas se borran de
+        # las dos tablas antes de copiar. Solo los que ya NO estan en pedido: una
+        # fila puesta ahi por error no se lleva una venta que existe. Mismo
+        # comando que el de etl/cargar_compras.sh.
+        function Quitar-Compras {
+            $ids = docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -qtAX -c "SELECT coalesce(string_agg(q.id_pedido::text, ',' ORDER BY q.id_pedido), '') FROM pedido_quitado q WHERE q.aplicado_en IS NULL AND NOT EXISTS (SELECT 1 FROM pedido p WHERE p.id_pedido = q.id_pedido)"
+            if ($LASTEXITCODE -ne 0) { return -1 }
+            $ids = "$ids".Trim()
+            if ($ids -eq '') { return 0 }
+            foreach ($tabla in @('compra_producto', 'devolucion_producto')) {
+                docker exec -i mesh-clickhouse clickhouse-client `
+                    --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
+                    --database $env_['CLICKHOUSE_DB'] `
+                    --query "ALTER TABLE $tabla DELETE WHERE lote = 'real' AND id_pedido IN ($ids) SETTINGS mutations_sync = 2" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) { return -1 }
+            }
+            docker exec mesh-postgres psql -U $env_['DB_USER'] -d $env_['DB_NAME'] -qtAX `
+                -c "UPDATE pedido_quitado SET aplicado_en = now() WHERE aplicado_en IS NULL AND id_pedido IN ($ids)" | Out-Null
+            return @($ids -split ',').Count
+        }
+
+        $nQ = Quitar-Compras
+        if ($nQ -lt 0) {
+            Aviso "No se pudieron borrar de ClickHouse los pedidos quitados (pedido_quitado). Se reintenta en el proximo arranque."
+        } elseif ($nQ -gt 0) {
+            Ok "$nQ pedido(s) quitados de PostgreSQL, borrados tambien de ClickHouse"
         }
 
         $nV = Copiar-Compras "compra_producto" "venta"
