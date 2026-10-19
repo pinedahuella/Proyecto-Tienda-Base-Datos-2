@@ -3,7 +3,51 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-18, noche**.
+Ultima actualizacion: **2026-10-18, noche (2)**.
+
+**EMPIEZA AQUI (18-10, noche). Semilla de combos y pedidos quitados que tambien se borran de ClickHouse.**
+Lo que David dejo en `backend/cambio_propuestas/2026-10-17_0015-combos.md`: la portada "Se compran juntos" y la
+ficha "Quienes lo compraron tambien llevaron" necesitaban pedidos de varios productos que tengan sentido juntos.
+No se toco `backend/`.
+
+```
+semilla-combos/  combos.sql (idempotente: si ya existe cualquiera de las 8 cuentas no toca nada), quitar.sql y
+                 README. 8 cuentas combo1..combo8@mesh.com (clave Comprador123) con direccion, 18 pedidos y 45
+                 lineas de 8 combos (3 trios y 5 pares), cada combo en 2 o 3 pedidos, comprados con
+                 crear_pedido, agregar_linea y comprar_pedido, fechas relativas en los ultimos 180 dias
+arrancar.ps1     paso 5d "Pedidos de los combos" (dice si sembro o si ya estaban y lista los combos) y, en el
+                 ETL de ClickHouse, Quitar-Compras antes de copiar
+migracion 046    pedido_quitado: desde psql no se llega a ClickHouse, asi que cada quitar.sql anota los pedidos
+                 que borra y el ETL de compras (arrancar.ps1 y etl/cargar_compras.sh) los borra de
+                 compra_producto y devolucion_producto y marca aplicado_en
+clasificador     su quitar.sql tambien anota (motivo semilla-clasificador). generar.js NO corre hoy: lee los
+                 vectores de Elasticsearch y desde la 040 viven en PostgreSQL; el .sql se cambio a mano
+huerfanas        las 480 lineas de los pedidos 771 a 1250 ya se borraron de ClickHouse; etl_compras.sh en verde
+```
+
+Probado con la base LOCAL:
+
+```
+arrancar.ps1    tres veces: la segunda no duplica; quitar.sql y arrancar otra vez deja la misma foto (cuentas,
+                pedidos, lineas, stock de cada oferta, ClickHouse y grafo)
+desde cero      mesh_limpia: entra sin error, segunda pasada sin duplicar, borrada al terminar
+backend         /productos/combos trae los combos sembrados, tambien-compraron y para-ti coherentes, conciliacion
+                del grafo cuadrada (832 y 832), ninguna senal, hallazgo ni caso de fraude con las cuentas combo
+pruebas         las 35 con exit 0: etl_compras 30 (antes 5 FALLA, con parte 7 nueva del borrado), grafo_compras
+                30, recomendaciones 29, carrito 42, carrito_vencimiento 25, oferta_limitada 33, descuentos 98,
+                reglas 44 y 61, ofertas_paginadas 40 (3 SIN MEDIR de siempre), ofertas_y_seguimientos 56,
+                busquedas_sin_resultados 13, busqueda 13, alertas_login 52, anillos 27 y 40, eventos 31,
+                tendencias 53 y 28, etl_mongo 21, resenas 15, notas 10, fusion 0 FALLA, granja 6, vectores 5,
+                clasificador 5, recomendacion_semantica 15, facetas.py 19, prueba_acceso 31, prueba_carrito,
+                prueba_restaurar 20, prueba_concurrencia sin sobreventa, mas_vendidos, falla_checkout 32
+Edge            1536x730 sin ventana: portada con "Se compran juntos" y ficha de la Laptop Aurora 14 con sus
+                audifonos y su monitor primero en "Quienes lo compraron tambien llevaron"
+```
+
+- **Hasta el 26-10 la portada muestra 5 de los 8 combos**: los pedidos 6 y 10 de la semilla original (muchos
+  productos sueltos) llenan los demas lugares con trios sin sentido y salen solos de la ventana de 180 dias ese
+  dia. Sugerencia para David en `docs/BACKEND-PENDIENTE.md` (MAX_PRODUCTOS_POR_PEDIDO mas bajo).
+- backend/.env vuelto a 100.64.42.11 al terminar.
 
 **EMPIEZA AQUI (18-10). Lo de David del 16 y 17 (25f0fe0) llevado a todas las capas y probado en la base local.**
 Meme pidio revisar lo nuevo de GitHub, aplicarlo en todos lados y probarlo a fondo. David subio 126 archivos de

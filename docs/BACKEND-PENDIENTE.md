@@ -72,10 +72,28 @@ de despues; el detalle de lo medido esta en `docs/TRASPASO.md`, EMPIEZA AQUI
    del clasificador) ya no pasa con la version en SQL: en la base local da 3 por
    cuenta y 3 por vendedor, y el clasificador sigue marcando 8 resenas.
 
-**Sin hacer, a proposito:** las semillas con pedidos de varios productos para que
-haya combos. La semilla (`migrations/datos/001_catalogo.sql`) la escribe
-`generador.js` y sumarle pedidos cambia los conteos que esperan varias pruebas;
-queda para decidirlo con Meme. Hoy hay 4 combos en la base local.
+**Hecho despues (18-10, noche): las semillas de combos que pedias.** Decidido con
+Meme: una semilla aparte, `semilla-combos/`, con el molde de la del clasificador
+(idempotente, su `quitar.sql` y su paso en arrancar, el 5d). 8 cuentas
+`combo1@mesh.com` a `combo8@mesh.com` y 18 pedidos de 2 y 3 productos que tienen
+sentido juntos, comprados con `crear_pedido`, `agregar_linea` y `comprar_pedido`,
+con fechas en los ultimos 180 dias; cada combo en 2 o 3 pedidos. Sin senales de
+fraude (revisado detector por detector, ver `semilla-combos/README.md`). Con tu
+backend tal cual: `GET /productos/combos` los trae, tambien compraron y para ti
+salen coherentes y la conciliacion del grafo cuadra.
+
+Ademas, la migracion `046_pedido_quitado`: los `quitar.sql` de las semillas anotan
+ahi los pedidos que borran y el ETL de compras los borra tambien de ClickHouse.
+Eso limpio las 480 lineas huerfanas de los pedidos 771 a 1250.
+
+**Una idea para ti (no es un error):** `CombosSyncService` cuenta pedidos de hasta
+`MAX_PRODUCTOS_POR_PEDIDO = 30` productos. Los pedidos 6 y 10 de
+`migrations/datos/` (las compras grandes que respaldan las resenas, de 6 y 8
+productos, del 2026-04-29) dan 4 trios sin sentido (balon de futbol, un libro y dos
+colonias) que hoy ocupan 4 de los 10 lugares de la portada y dejan fuera 3 combos
+sembrados. Salen solos de la ventana el 26 de octubre. Con un tope de 4 o 5
+productos por pedido no entrarian nunca, y un carrito de 6 productos distintos ya
+se parece mas a una compra grande que a un combo.
 
 ---
 
