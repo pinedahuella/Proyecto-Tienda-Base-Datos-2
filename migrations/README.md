@@ -126,6 +126,7 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `043_evento_oferta.sql` | La cola `evento_oferta` del buscador de ofertas (25f0fe0), con triggers en `oferta`, `producto_catalogo`, `variante_catalogo` y `usuarios`. Siembra una sola vez |
 | `044_seguimiento_ofertas.sql` | Los "avisame" del comprador (25f0fe0): `seguimiento_oferta`, `aviso_seguimiento_oferta` (un aviso por seguimiento, UNIQUE) y su catalogo de tipos |
 | `045_carrito_en_postgres.sql` | Redis nunca es la verdad (25f0fe0): el pedido `pendiente` de cada cuenta es su carrito (`version`, `fecha_ultima_actividad`, sin direccion hasta pagar, uno por cuenta) y `reserva_venta_relampago` con su catalogo de estados |
+| `046_pedido_quitado.sql` | La cola `pedido_quitado` (2026-10-18): los quitar.sql de las semillas anotan aqui cada pedido que borran, y el ETL de compras borra sus lineas de `compra_producto` y `devolucion_producto` en ClickHouse. Antes ClickHouse se quedaba con ellas para siempre |
 
 **De la 034 a la 039, las senales que no salen del grafo.** Son del 2 al 4 de
 octubre y siguen un mismo molde: el backend las detecta y la migracion solo

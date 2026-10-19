@@ -28,6 +28,10 @@
 # explicacion larga en etl/extraer_compras.sql. Lo que el backend ya escribio se
 # respeta, y solo se agrega lo que falta. Se puede correr cuantas veces se quiera.
 #
+# LO UNICO QUE BORRA. Las lineas de los pedidos anotados en pedido_quitado (la
+# 046), que son los que un quitar.sql de una semilla borro de PostgreSQL. Nada
+# mas: lo que falta en PostgreSQL sin estar anotado ahi no se toca.
+#
 # LA FECHA VIAJA COMO EPOCA, no como texto, para no depender de la zona del
 # servidor de ClickHouse. Tambien explicado en extraer_compras.sql.
 #
@@ -119,8 +123,41 @@ copiar() { # tabla, motivo, etiqueta
     fi
 }
 
+# Lo contrario de copiar: los pedidos que un quitar.sql borro de PostgreSQL y
+# anoto en pedido_quitado (migrations/046_pedido_quitado.sql). Sin esto
+# ClickHouse se quedaba con sus lineas para siempre. Solo los que ya NO estan en
+# pedido: una fila puesta ahi por error no se lleva una venta que existe. Va
+# antes de copiar y de contar, para que la cuenta de abajo ya los descuente.
+quitar() {
+    local hay ids
+    hay="$(docker exec mesh-postgres psql -U "$DB_USER" -d "$DB_NAME" -qtAX -c \
+        "SELECT to_regclass('pedido_quitado') IS NOT NULL" | tr -d '\r')"
+    if [ "$hay" != "t" ]; then
+        echo "  pedido_quitado no existe todavia (falta la migracion 046): no se borra nada"
+        return 0
+    fi
+    ids="$(docker exec mesh-postgres psql -U "$DB_USER" -d "$DB_NAME" -qtAX -c \
+        "SELECT coalesce(string_agg(q.id_pedido::text, ',' ORDER BY q.id_pedido), '') FROM pedido_quitado q WHERE q.aplicado_en IS NULL AND NOT EXISTS (SELECT 1 FROM pedido p WHERE p.id_pedido = q.id_pedido)" | tr -d '\r')"
+    if [ -z "$ids" ]; then
+        echo "  pedidos quitados          0 por borrar"
+        return 0
+    fi
+    local tabla antes despues total=0
+    for tabla in compra_producto devolucion_producto; do
+        antes="$(ch "SELECT count() FROM $tabla WHERE lote = 'real' AND id_pedido IN ($ids)")"
+        ch "ALTER TABLE $tabla DELETE WHERE lote = 'real' AND id_pedido IN ($ids) SETTINGS mutations_sync = 2" > /dev/null || return 1
+        despues="$(ch "SELECT count() FROM $tabla WHERE lote = 'real' AND id_pedido IN ($ids)")"
+        [ "$despues" = "0" ] || return 1
+        total=$((total + antes))
+    done
+    docker exec mesh-postgres psql -U "$DB_USER" -d "$DB_NAME" -qtAX -c \
+        "UPDATE pedido_quitado SET aplicado_en = now() WHERE aplicado_en IS NULL AND id_pedido IN ($ids)" > /dev/null
+    echo "  pedidos quitados          $(echo "$ids" | tr ',' '\n' | grep -c .) pedido(s), $total linea(s) borradas de ClickHouse"
+}
+
 echo "Copia de compras y devoluciones a ClickHouse ($CH_BASE)"
 fallo=0
+quitar || { echo "  no se pudieron borrar los pedidos quitados" >&2; fallo=1; }
 copiar compra_producto     venta      "ventas"      || fallo=1
 copiar devolucion_producto devolucion "devoluciones" || fallo=1
 exit $fallo

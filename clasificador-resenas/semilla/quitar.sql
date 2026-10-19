@@ -6,6 +6,13 @@
 -- stock devuelto. Las cuentas se quedan. Se corre a mano:
 --   docker cp clasificador-resenas/semilla/quitar.sql mesh-postgres:/tmp/quitar.sql
 --   docker exec mesh-postgres psql -U <DB_USER> -d <DB_NAME> -v ON_ERROR_STOP=1 -f /tmp/quitar.sql
+--   bash etl/cargar_compras.sh
+--
+-- La ultima linea las borra de ClickHouse: cada pedido borrado queda anotado
+-- en pedido_quitado (la 046) y el ETL de compras borra sus lineas de
+-- compra_producto y devolucion_producto. arrancar.ps1 corre ese ETL en cada
+-- arranque. Antes de la 046 ClickHouse se quedaba con ellas (480 lineas del
+-- 2026-10-04).
 -- ============================================================
 
 BEGIN;
@@ -87,6 +94,11 @@ UPDATE oferta o SET stock = o.stock + m.cantidad
          WHERE sm.id_pedido IN (SELECT id_pedido FROM pedidos_sembrados)
          GROUP BY sm.id_oferta) m
  WHERE o.id_oferta = m.id_oferta;
+
+-- Para ClickHouse: el ETL de compras los borra de alli.
+INSERT INTO pedido_quitado (id_pedido, motivo)
+SELECT id_pedido, 'semilla-clasificador' FROM pedidos_sembrados
+ON CONFLICT (id_pedido) DO UPDATE SET aplicado_en = NULL, fecha = now(), motivo = EXCLUDED.motivo;
 
 DELETE FROM senal_fraude_pedido WHERE id_pedido IN (SELECT id_pedido FROM pedidos_sembrados);
 DELETE FROM stock_movimiento WHERE id_pedido IN (SELECT id_pedido FROM pedidos_sembrados);

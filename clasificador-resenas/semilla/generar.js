@@ -437,6 +437,13 @@ v(`-- las resenas de las ${CUENTAS.length} cuentas, sus respuestas y votos, y su
 v(`-- stock devuelto. Las cuentas se quedan. Se corre a mano:`);
 v(`--   docker cp clasificador-resenas/semilla/quitar.sql mesh-postgres:/tmp/quitar.sql`);
 v(`--   docker exec mesh-postgres psql -U <DB_USER> -d <DB_NAME> -v ON_ERROR_STOP=1 -f /tmp/quitar.sql`);
+v(`--   bash etl/cargar_compras.sh`);
+v(`--`);
+v(`-- La ultima linea las borra de ClickHouse: cada pedido borrado queda anotado`);
+v(`-- en pedido_quitado (la 046) y el ETL de compras borra sus lineas de`);
+v(`-- compra_producto y devolucion_producto. arrancar.ps1 corre ese ETL en cada`);
+v(`-- arranque. Antes de la 046 ClickHouse se quedaba con ellas (480 lineas del`);
+v(`-- 2026-10-04).`);
 v(`-- ============================================================`);
 v(``);
 v(`BEGIN;`);
@@ -479,6 +486,11 @@ v(`          JOIN motivo_movimiento mm ON mm.id_motivo_movimiento = sm.id_motivo
 v(`         WHERE sm.id_pedido IN (SELECT id_pedido FROM pedidos_sembrados)`);
 v(`         GROUP BY sm.id_oferta) m`);
 v(` WHERE o.id_oferta = m.id_oferta;`);
+v(``);
+v(`-- Para ClickHouse: el ETL de compras los borra de alli.`);
+v(`INSERT INTO pedido_quitado (id_pedido, motivo)`);
+v(`SELECT id_pedido, 'semilla-clasificador' FROM pedidos_sembrados`);
+v(`ON CONFLICT (id_pedido) DO UPDATE SET aplicado_en = NULL, fecha = now(), motivo = EXCLUDED.motivo;`);
 v(``);
 v(`DELETE FROM senal_fraude_pedido WHERE id_pedido IN (SELECT id_pedido FROM pedidos_sembrados);`);
 v(`DELETE FROM stock_movimiento WHERE id_pedido IN (SELECT id_pedido FROM pedidos_sembrados);`);

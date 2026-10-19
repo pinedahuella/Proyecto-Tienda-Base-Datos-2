@@ -32,8 +32,14 @@ datos/          480 resenas escritas a mano, de hasta 250 caracteres (la app ace
 vectores/       el vector de cada resena (no se sube, se regenera)
 semilla/        generar.js escribe resenas.sql (las 480 sembradas como resenas de
                 verdad, de 40 cuentas con su compra pagada, cada una en el producto
-                del que habla su texto) y quitar.sql (la deshace). arrancar.ps1 corre
-                resenas.sql en cada arranque, en el paso Resenas del clasificador
+                del que habla su texto) y quitar.sql (la deshace, y desde el 18-10
+                anota sus pedidos en pedido_quitado para que el ETL de compras los
+                borre tambien de ClickHouse). arrancar.ps1 corre resenas.sql en cada
+                arranque, en el paso Resenas del clasificador. OJO: generar.js lee los
+                vectores de los productos de Elasticsearch, y desde la 040 viven en
+                vector_producto de PostgreSQL; hoy no corre ("No hay productos con
+                vector en Elasticsearch"). El cambio del 18-10 a quitar.sql se hizo
+                en el generador y a mano en el .sql, igual
 modelo/         regresion_logistica.json y red_neuronal.json, listos para el backend;
                 verificacion.json para comprobar que el backend calcula lo mismo;
                 reporte.txt con las notas de la ultima corrida

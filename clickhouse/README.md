@@ -423,7 +423,7 @@ Si diera una fila, el contenedor sigue con la configuracion vieja y hay que rein
   arrancar y cada 30 min y deja el JSON en Redis (`mesh:productos:combos`); la
   ruta solo lee Redis. La portada lo ensena como "Se compran juntos". No
   necesito esquema nuevo. Con la semilla casi no hay combos: hacen falta pedidos
-  de varios productos.
+  de varios productos (ya los hay, ver abajo, 2026-10-18).
 - **Busquedas sin resultados.** `busqueda_realizada` gana `termino_normalizado`,
   una columna MATERIALIZED (minusculas, sin tildes, sin espacios de mas) que
   ClickHouse calcula sola en cada INSERT. Esta en `001_esquema.sql` sin el
@@ -439,3 +439,45 @@ Si diera una fila, el contenedor sigue con la configuracion vieja y hay que rein
   sale de Elasticsearch: `evento_registro` esta vacia desde el 2026-09-10. Las
   dos consultas siguen en `consultas/` marcadas como fuera de uso, y
   `pruebas/comprobar.py` las sigue midiendo sobre su siembra.
+
+# Los pedidos quitados ya se borran de aqui (2026-10-18)
+
+`compra_producto` y `devolucion_producto` son una copia de `stock_movimiento` y el
+ETL de compras solo agregaba. Cuando un `quitar.sql` de una semilla borraba sus
+pedidos de PostgreSQL, sus lineas se quedaban aqui para siempre: 480 lineas de los
+pedidos 771 a 1250, de la semilla del clasificador quitada el 2026-10-04. Por eso
+arrancar avisaba "las ventas no cuadran" y `pruebas/etl_compras.sh` daba 5 FALLA.
+
+- **La cola `pedido_quitado`** (`migrations/046_pedido_quitado.sql`). Desde psql
+  no se llega a ClickHouse, asi que los `quitar.sql` (`semilla-combos/` y
+  `clasificador-resenas/semilla/`) anotan ahi cada pedido que borran, en la misma
+  transaccion.
+- **El ETL la vacia** (`etl/cargar_compras.sh` y su gemelo en `arrancar.ps1`): al
+  empezar, borra de las dos tablas las lineas `lote = 'real'` de esos pedidos con
+  `ALTER TABLE ... DELETE ... SETTINGS mutations_sync = 2` y marca `aplicado_en`.
+  Solo los pedidos que ya NO estan en PostgreSQL: una fila anotada por error no se
+  lleva una venta que existe. No borra nada mas; lo que falte en PostgreSQL sin
+  estar anotado se queda, y el conteo lo sigue diciendo.
+- **Las 480 de antes** se anotaron una vez a mano (los pedidos que ClickHouse
+  tenia y PostgreSQL no, motivo `semilla-clasificador, quitada el 2026-10-04`) y
+  el arranque siguiente las borro: 809 ventas en los dos lados. En otra PC con el
+  mismo aviso se hace igual, despues de comprobar que esos pedidos no existen:
+
+  ```
+  -- en ClickHouse, los pedidos que tiene (igual con devolucion_producto):
+  SELECT arrayStringConcat(groupUniqArray(toString(id_pedido)), ',') FROM compra_producto WHERE lote = 'real'
+  -- en PostgreSQL, con esa lista:
+  INSERT INTO pedido_quitado (id_pedido, motivo)
+  SELECT x.id, 'lineas huerfanas' FROM unnest(string_to_array('<lista>', ',')::bigint[]) AS x(id)
+   WHERE NOT EXISTS (SELECT 1 FROM pedido p WHERE p.id_pedido = x.id) ON CONFLICT DO NOTHING;
+  ```
+
+  y despues `bash etl/cargar_compras.sh`.
+- **Prueba:** la parte 7 de `pruebas/etl_compras.sh` mete una linea de un pedido
+  inventado, comprueba que sin anotarlo el ETL no la toca, que anotado la borra y
+  marca la fila, y que un pedido vivo anotado por error conserva sus lineas.
+
+**La semilla de combos** (`semilla-combos/`, paso 5d de arrancar): 18 pedidos de 2
+y 3 productos de 8 cuentas `combo*@mesh.com`, copiados aqui por el mismo ETL. Con
+ella `GET /productos/combos` tiene los 8 combos sembrados; el detalle esta en su
+README.

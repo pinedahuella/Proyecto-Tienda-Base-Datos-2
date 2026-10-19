@@ -1029,6 +1029,22 @@ verdad: borrando 16 ventas y 2 devoluciones del destino y viendo que las recuper
 camino pasa la lista de pares por la linea de comandos de Windows (unos 32 mil caracteres),
 asi que **a partir de unos 3000 pares hay que usar el .sh**.
 
+**Lo unico que borra (2026-10-18).** Al empezar, las lineas de los pedidos anotados en
+`pedido_quitado` (`migrations/046_pedido_quitado.sql`), que son los que un `quitar.sql` de
+una semilla borro de PostgreSQL (`semilla-combos/` y `clasificador-resenas/semilla/`). Antes
+ClickHouse se quedaba con ellas para siempre: 480 lineas de los pedidos 771 a 1250 desde el
+2026-10-04, y arrancar decia que las ventas no cuadraban. Solo borra pedidos que ya no estan
+en PostgreSQL, y marca cada fila con `aplicado_en`:
+
+```
+bash etl/cargar_compras.sh
+  pedidos quitados          18 pedido(s), 45 linea(s) borradas de ClickHouse
+  compra_producto      ventas: 0 nueva(s). PostgreSQL 809, ClickHouse (real) 809  -> cuadra
+  devolucion_producto  devoluciones: 0 nueva(s). PostgreSQL 22, ClickHouse (real) 22  -> cuadra
+```
+
+`pruebas/etl_compras.sh` lo mide en su parte 7. El detalle esta en `clickhouse/README.md`.
+
 ## 4. La copia de logueos escribia en UTC, y ya no (arreglado el mismo dia)
 
 `extraer_eventos.sql` formateaba la fecha como texto en UTC y ClickHouse la lee en la zona

@@ -26,10 +26,15 @@
 #      verde sobre una linea que no se ejecuta no es un verde).
 #   6. QUE RESPETA LO AJENO. Las filas de otro lote (las que siembra
 #      clickhouse/lote) y las que el backend escribio con su IP no cambian.
+#   7. QUE BORRA LO QUITADO, Y SOLO ESO. Una linea de un pedido que no existe en
+#      PostgreSQL se queda mientras nadie lo anote; anotado en pedido_quitado
+#      (la 046, lo que hacen los quitar.sql de las semillas), el ETL la borra y
+#      marca la fila. Un pedido que SI existe, anotado por error, no se borra.
 #
 # LO QUE BORRA Y RESTAURA. Del destino borra los pedidos 10 y 11 (compras) y el
 # 18 (devoluciones), que son filas puramente copiadas por el ETL: ninguna del
-# backend, asi que se pueden recuperar SIN perder nada. De PostgreSQL solo LEE.
+# backend, asi que se pueden recuperar SIN perder nada. De PostgreSQL solo LEE,
+# salvo en la parte 7: dos filas de pedido_quitado que borra al terminar.
 #
 # LO QUE NO CUBRE. La negativa a correr con la clave de ordenacion vieja: para
 # probarla habria que rehacer la tabla y esta prueba no toca la estructura.
@@ -174,6 +179,50 @@ titulo "6. Lo ajeno no se mueve"
 # ============================================================
 igual "las filas de otros lotes no cambiaron" "$ajenas_antes" "$(ch "SELECT count() FROM compra_producto WHERE lote != 'real'")"
 igual "las filas que escribio el backend con su IP siguen igual" "$del_backend_antes" "$(ch "SELECT count() FROM compra_producto WHERE lote = 'real' AND ip != toIPv6('::')")"
+
+# ============================================================
+titulo "7. Lo quitado de PostgreSQL se borra de ClickHouse, y solo eso"
+# ============================================================
+# Un pedido que no existe en PostgreSQL: una linea suya en ClickHouse es justo
+# lo que dejaba un quitar.sql antes de la 046. Y uno que si existe y que el ETL
+# copio, anotado por error, para ver que no se lo lleva.
+if [ "$(pg "SELECT to_regclass('pedido_quitado') IS NOT NULL")" != "t" ]; then
+    FALLA "no existe pedido_quitado: falta la migracion 046 (corre arrancar.ps1)"
+else
+    FALSO=$(( $(pg "SELECT coalesce(max(id_pedido), 0) FROM pedido") + 1000000 ))
+    while [ "$(ch "SELECT count() FROM compra_producto WHERE id_pedido = $FALSO")" != "0" ] \
+          || [ "$(pg "SELECT count(*) FROM pedido_quitado WHERE id_pedido = $FALSO")" != "0" ]; do
+        FALSO=$((FALSO + 1))
+    done
+    VIVO=$(ch "SELECT toString(min(id_pedido)) FROM compra_producto WHERE lote = 'real' AND ip = toIPv6('::')")
+    YA_ANOTADO=$(pg "SELECT count(*) FROM pedido_quitado WHERE id_pedido = $VIVO")
+    c_vivo=$(ch "SELECT count() FROM compra_producto WHERE lote = 'real' AND id_pedido = $VIVO")
+    echo "  (pedido inventado $FALSO; pedido vivo $VIVO con $c_vivo linea(s))"
+
+    ch "INSERT INTO compra_producto (fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip, lote) VALUES (now64(3) - INTERVAL 1 DAY, 1, 1, 1, 1, $FALSO, '::', 'real')" >/dev/null
+    igual "la linea del pedido inventado esta en ClickHouse" 1 "$(ch "SELECT count() FROM compra_producto WHERE lote = 'real' AND id_pedido = $FALSO")"
+
+    salida=$(bash "$RAIZ/etl/cargar_compras.sh" 2>&1)
+    igual "sin anotarlo, el ETL no la toca" 1 "$(ch "SELECT count() FROM compra_producto WHERE lote = 'real' AND id_pedido = $FALSO")"
+    igual "y dice que no cuadra" 1 "$(echo "$salida" | grep -c -- '-> NO CUADRA')"
+
+    pg "INSERT INTO pedido_quitado (id_pedido, motivo) VALUES ($FALSO, 'pruebas/etl_compras.sh')" >/dev/null
+    if [ "$YA_ANOTADO" = "0" ]; then
+        pg "INSERT INTO pedido_quitado (id_pedido, motivo) VALUES ($VIVO, 'pruebas/etl_compras.sh, por error')" >/dev/null
+    fi
+    salida=$(bash "$RAIZ/etl/cargar_compras.sh" 2>&1); codigo=$?
+    echo "$salida" | sed 's/^/  | /'
+    igual "anotado, el ETL la borra" 0 "$(ch "SELECT count() FROM compra_producto WHERE lote = 'real' AND id_pedido = $FALSO")"
+    igual "y marca la fila como aplicada" 1 "$(pg "SELECT count(*) FROM pedido_quitado WHERE id_pedido = $FALSO AND aplicado_en IS NOT NULL")"
+    igual "el pedido vivo anotado por error conserva sus lineas" "$c_vivo" "$(ch "SELECT count() FROM compra_producto WHERE lote = 'real' AND id_pedido = $VIVO")"
+    igual "y su fila sigue pendiente, para que alguien la mire" 1 "$(pg "SELECT count(*) FROM pedido_quitado WHERE id_pedido = $VIVO AND aplicado_en IS NULL")"
+    igual "el ETL sale con 0 y todo cuadra otra vez" "0 2" "$codigo $(echo "$salida" | grep -c -- '-> cuadra')"
+
+    pg "DELETE FROM pedido_quitado WHERE id_pedido = $FALSO" >/dev/null
+    if [ "$YA_ANOTADO" = "0" ]; then
+        pg "DELETE FROM pedido_quitado WHERE id_pedido = $VIVO" >/dev/null
+    fi
+fi
 
 echo
 echo "=============================================================="
