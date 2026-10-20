@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
-import neo4j, { Driver } from 'neo4j-driver';
+import neo4j, { Driver, Session, SessionMode } from 'neo4j-driver';
+import { Cortacircuitos, conLimite } from '../helpers/cortacircuitos';
 import { obligatoria } from '../helpers/entorno';
 
 const logger = new Logger('Neo4j');
@@ -42,6 +43,83 @@ export const neo4jDriver: Driver = neo4j.driver(
 );
 
 /**
+ * El cortacircuitos de Neo4j (helpers/cortacircuitos.ts): despues de una caida,
+ * 15 s sin preguntarle. Lo usan las dos funciones de abajo, que son las unicas
+ * puertas del backend al grafo.
+ */
+export const cortacircuitosNeo4j = new Cortacircuitos('Neo4j');
+
+/**
+ * Cuanto puede tardar una consulta antes de dar al grafo por congelado. El
+ * driver tiene limite para abrir una conexion (8 s) y para conseguirla del pool
+ * (10 s), pero no para una conexion ya abierta que deja de contestar: con la
+ * red cortada a mitad de una consulta, `run()` esperaba para siempre. Las
+ * consultas mas pesadas del backend (los detectores de anillos) tardan menos de
+ * 2 s con los datos de la tienda.
+ */
+const LIMITE_CONSULTA_MS = 20_000;
+
+/** El error de una consulta que no se hizo porque Neo4j esta en pausa o congelado. */
+function errorNeo4jNoResponde(mensaje: string): Error {
+  return Object.assign(new Error(mensaje), { code: 'ServiceUnavailable' });
+}
+
+/**
+ * Corre `trabajo` en una sesion nueva con el cortacircuitos y el limite de
+ * tiempo. La sesion se cierra sin esperar si el grafo no contesto: cerrarla
+ * tambien le habla al servidor y se quedaria colgada igual.
+ */
+async function enSesion<T>(
+  modo: SessionMode,
+  trabajo: (sesion: Session) => Promise<T>,
+): Promise<T> {
+  return cortacircuitosNeo4j.correr(
+    async () => {
+      const sesion = neo4jDriver.session({ defaultAccessMode: modo });
+      let respondio = false;
+      try {
+        const resultado = await conLimite(
+          trabajo(sesion),
+          LIMITE_CONSULTA_MS,
+          () =>
+            errorNeo4jNoResponde(
+              `Neo4j no respondio en ${LIMITE_CONSULTA_MS / 1000} s`,
+            ),
+        );
+        respondio = true;
+        return resultado;
+      } finally {
+        if (respondio) {
+          await sesion.close();
+        } else {
+          void sesion.close().catch(() => undefined);
+        }
+      }
+    },
+    esCaidaDeNeo4j,
+    () => errorNeo4jNoResponde('Neo4j en pausa despues de una caida'),
+  );
+}
+
+/**
+ * Si un error quiere decir "Neo4j no responde": el driver no llego
+ * (`ServiceUnavailable`, `SessionExpired`), un error pasajero del servidor, o
+ * el limite de tiempo de arriba. Un error de la consulta
+ * (`Neo.ClientError.*`) no es una caida.
+ */
+export function esCaidaDeNeo4j(error: unknown): boolean {
+  const codigo = (error as { code?: string } | undefined)?.code;
+  if (typeof codigo !== 'string') {
+    return false;
+  }
+  return (
+    codigo === 'ServiceUnavailable' ||
+    codigo === 'SessionExpired' ||
+    codigo.startsWith('Neo.TransientError')
+  );
+}
+
+/**
  * Corre una consulta de solo lectura contra el grafo y devuelve las filas
  * ya como objetos planos. Abre una sesion, la usa y la cierra: es el patron
  * recomendado del driver (una sesion es barata, no se comparte entre
@@ -54,15 +132,10 @@ export async function consultarGrafo<T = Record<string, unknown>>(
   cypher: string,
   parametros: Record<string, unknown> = {},
 ): Promise<T[]> {
-  const sesion = neo4jDriver.session({
-    defaultAccessMode: neo4j.session.READ,
-  });
-  try {
+  return enSesion(neo4j.session.READ, async (sesion) => {
     const resultado = await sesion.run(cypher, parametros);
     return resultado.records.map((registro) => registro.toObject() as T);
-  } finally {
-    await sesion.close();
-  }
+  });
 }
 
 /**
@@ -79,14 +152,9 @@ export async function ejecutarGrafo(
   cypher: string,
   parametros: Record<string, unknown> = {},
 ): Promise<void> {
-  const sesion = neo4jDriver.session({
-    defaultAccessMode: neo4j.session.WRITE,
-  });
-  try {
+  await enSesion(neo4j.session.WRITE, async (sesion) => {
     await sesion.run(cypher, parametros);
-  } finally {
-    await sesion.close();
-  }
+  });
 }
 
 logger.log(`Driver de Neo4j listo para bolt://${host}:${port}`);

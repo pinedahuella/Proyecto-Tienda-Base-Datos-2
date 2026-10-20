@@ -110,7 +110,12 @@ export class RegistroOfertasSyncService implements OnApplicationBootstrap {
     if (sobran.length > 0) {
       await redis.hdel(clave, ...sobran.map(String));
     }
-    for (const id of faltan) {
+    // Todas las correctas, no solo las que faltan: las que ya estaban pueden
+    // tener el stock o el precio viejos (una compra los cambia sin pasar por
+    // los escritos reactivos). El refresco de cada cambio lo hace el worker de
+    // evento_oferta; esto es la red de seguridad si esa cola esta detenida,
+    // por ejemplo con Elasticsearch caido (2026-10-20).
+    for (const id of idsCorrectos) {
       await this.registro.sincronizar(id);
     }
 

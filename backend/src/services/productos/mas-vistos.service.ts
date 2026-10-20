@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { redis } from '../../database/redis';
-import { manejarErrorRedis } from '../../helpers/manejar-error-redis';
+import { ErrorConexion } from '../../helpers/errores';
+import { manejarErrorClickHouse } from '../../helpers/manejar-error-clickhouse';
+import {
+  esRedisInalcanzable,
+  manejarErrorRedis,
+} from '../../helpers/manejar-error-redis';
+import { Memoria } from '../../helpers/tarjetas-producto';
 import {
   MasVistosSyncService,
   ProductoTarjetaMasVisto,
@@ -10,6 +16,9 @@ import {
  * Lee el ranking de "productos mas vistos" y su detalle desde Redis --
  * mismo patron que `MasVendidosService`: nunca toca ClickHouse ni Mongo en
  * el momento, solo lee lo que ya dejo cacheado `MasVistosSyncService`.
+ *
+ * Sin Redis (2026-10-20), igual que `MasVendidosService`: la misma consulta
+ * del worker en el momento, guardada un minuto.
  */
 @Injectable()
 export class MasVistosService {
@@ -17,13 +26,45 @@ export class MasVistosService {
 
   private static readonly LIMITE_MOSTRADO = 8;
 
-  async obtener(): Promise<ProductoTarjetaMasVisto[]> {
-    const idsOrdenados = await this.leerRankingRedis();
-    if (idsOrdenados.length === 0) {
-      return [];
-    }
+  private readonly sinRedis = new Memoria<ProductoTarjetaMasVisto[]>(60_000);
 
-    return this.leerDetalleRedis(idsOrdenados);
+  constructor(private readonly sync: MasVistosSyncService) {}
+
+  async obtener(): Promise<ProductoTarjetaMasVisto[]> {
+    if (esRedisInalcanzable()) {
+      return this.desdeClickHouse();
+    }
+    try {
+      const idsOrdenados = await this.leerRankingRedis();
+      if (idsOrdenados.length === 0) {
+        return [];
+      }
+
+      return await this.leerDetalleRedis(idsOrdenados);
+    } catch (error) {
+      if (esRedisInalcanzable(error)) {
+        return this.desdeClickHouse();
+      }
+      throw error;
+    }
+  }
+
+  /** El ranking calculado en el momento, sin Redis. */
+  private async desdeClickHouse(): Promise<ProductoTarjetaMasVisto[]> {
+    try {
+      return await this.sinRedis.obtener(async () => {
+        const calculado = await this.sync.calcular();
+        return (calculado?.tarjetas ?? []).slice(
+          0,
+          MasVistosService.LIMITE_MOSTRADO,
+        );
+      });
+    } catch (error) {
+      if (error instanceof ErrorConexion) {
+        throw error;
+      }
+      manejarErrorClickHouse(this.logger, error);
+    }
   }
 
   private async leerRankingRedis(): Promise<number[]> {

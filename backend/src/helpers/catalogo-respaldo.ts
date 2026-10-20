@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { Decimal128 } from 'mongodb';
-import { mongoClient, mongoDb } from '../database/mongo';
+import { cortacircuitosMongo, mongoClient, mongoDb } from '../database/mongo';
 import { pool } from '../database/postgres';
 import { CategoriaValida } from '../models/categoria';
 import { ESTADO_PRODUCTO_VISIBLE } from '../models/estado-producto';
@@ -35,16 +35,12 @@ import { expresionPrecioFinal } from './precio-descuento';
  *
  * Con Mongo caido, cada consulta tarda 3 s en rendirse (`database/mongo.ts`).
  * Para no cobrar esos 3 s en cada peticion, despues de una caida se va directo
- * a PostgreSQL durante `PAUSA_MS`, y despues se vuelve a probar Mongo.
+ * a PostgreSQL durante 15 s (el cortacircuitos de Mongo, `cortacircuitosMongo`),
+ * y despues se vuelve a probar Mongo.
  */
 
 const logger = new Logger('CatalogoRespaldo');
 
-/** Cuanto se va directo al respaldo despues de ver a Mongo caido. */
-const PAUSA_MS = 15_000;
-
-/** Hasta cuando no se le pregunta a Mongo. 0 = Mongo responde. */
-let mongoCaidoHasta = 0;
 /** Si la ultima vez se uso el respaldo: para avisar en el log solo al entrar y al salir. */
 let enRespaldo = false;
 
@@ -66,12 +62,13 @@ export async function conRespaldoDeMongo<T>(
   deMongo: () => Promise<T>,
   dePostgres: () => Promise<T>,
 ): Promise<T> {
-  if (Date.now() >= mongoCaidoHasta) {
+  if (!cortacircuitosMongo.enPausa()) {
     try {
       if (enRespaldo) {
         await mongoClient.connect();
       }
       const resultado = await deMongo();
+      cortacircuitosMongo.registrarRespuesta();
       if (enRespaldo) {
         enRespaldo = false;
         logger.log('MongoDB volvio: el catalogo sale otra vez de Mongo');
@@ -81,7 +78,7 @@ export async function conRespaldoDeMongo<T>(
       if (!esCaidaDeMongo(error)) {
         throw error;
       }
-      mongoCaidoHasta = Date.now() + PAUSA_MS;
+      cortacircuitosMongo.registrarCaida(error);
       if (!enRespaldo) {
         enRespaldo = true;
         logger.warn(

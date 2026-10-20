@@ -189,4 +189,11 @@ export interface Producto {
  */
 export interface ProductoConOfertas extends Producto {
   ofertas: OfertaVendedor[];
+  /**
+   * `true` cuando PostgreSQL no respondio y no se sabe quien lo vende: la ficha
+   * sale igual, con `ofertas` vacio, y la pagina avisa que por ahora no se
+   * puede comprar (2026-10-20). Sin la marca, una lista vacia diria "nadie lo
+   * vende", que es otra cosa.
+   */
+  ofertas_no_disponibles?: true;
 }

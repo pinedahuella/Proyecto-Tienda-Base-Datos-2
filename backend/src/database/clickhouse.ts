@@ -1,5 +1,10 @@
 import { Logger } from '@nestjs/common';
-import { createClient } from '@clickhouse/client';
+import {
+  ClickHouseClient,
+  ClickHouseError,
+  createClient,
+} from '@clickhouse/client';
+import { Cortacircuitos } from '../helpers/cortacircuitos';
 import { obligatoria } from '../helpers/entorno';
 
 const logger = new Logger('ClickHouse');
@@ -25,7 +30,7 @@ const database = obligatoria('CLICKHOUSE_DB');
 const usuario = obligatoria('CLICKHOUSE_USER');
 const contrasena = obligatoria('CLICKHOUSE_PASSWORD');
 
-export const clickhouse = createClient({
+const cliente = createClient({
   url: `http://${host}:${port}`,
   username: usuario,
   password: contrasena,
@@ -33,6 +38,45 @@ export const clickhouse = createClient({
   // Sin esto, una caida de ClickHouse deja la peticion HTTP colgada mucho
   // mas de lo razonable -- mismo motivo que el commandTimeout de redis.ts.
   request_timeout: 8000,
+});
+
+/**
+ * El cortacircuitos de ClickHouse (helpers/cortacircuitos.ts): despues de una
+ * caida, 15 s sin preguntarle, asi que cada seccion que lo usa no espera sus
+ * 8 s. Una respuesta del servidor con error (`ClickHouseError`: sintaxis, un
+ * tipo invalido) no es una caida; cualquier otro fallo es que no se llego.
+ */
+export const cortacircuitosClickHouse = new Cortacircuitos('ClickHouse');
+
+const CON_CORTACIRCUITOS = new Set<PropertyKey>([
+  'query',
+  'insert',
+  'command',
+  'exec',
+]);
+
+/**
+ * El cliente de siempre, con `query`, `insert`, `command` y `exec` pasando por
+ * el cortacircuitos. Mismo tipo y mismos metodos: nada del resto del backend
+ * cambia.
+ */
+export const clickhouse: ClickHouseClient = new Proxy(cliente, {
+  get(objetivo, propiedad, receptor) {
+    const valor: unknown = Reflect.get(objetivo, propiedad, receptor);
+    if (typeof valor !== 'function') {
+      return valor;
+    }
+    const metodo = valor as (...args: unknown[]) => Promise<unknown>;
+    if (!CON_CORTACIRCUITOS.has(propiedad)) {
+      return metodo.bind(objetivo);
+    }
+    return (...args: unknown[]) =>
+      cortacircuitosClickHouse.correr(
+        () => metodo.apply(objetivo, args),
+        (error) => !(error instanceof ClickHouseError),
+        () => new Error('ClickHouse en pausa despues de una caida'),
+      );
+  },
 });
 
 logger.log(

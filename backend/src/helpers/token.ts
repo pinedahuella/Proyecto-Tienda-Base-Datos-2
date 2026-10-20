@@ -8,7 +8,7 @@ const ALGORITMO = 'HS256';
 // 2 horas, en segundos. Un solo numero: de aqui sale tanto la expiracion
 // del token como la duracion de la cookie donde va a viajar, para que no
 // puedan quedar desincronizados.
-const DURACION_SEGUNDOS = 60 * 60 * 2;
+export const DURACION_SEGUNDOS = 60 * 60 * 2;
 
 /** Nombre de la cookie donde el navegador guarda el token. */
 export const NOMBRE_COOKIE_TOKEN = 'mesh_token';

@@ -1,5 +1,6 @@
 import { Logger } from '@nestjs/common';
 import Redis from 'ioredis';
+import { Cortacircuitos } from '../helpers/cortacircuitos';
 import { obligatoria } from '../helpers/entorno';
 
 const logger = new Logger('Redis');
@@ -19,10 +20,13 @@ const logger = new Logger('Redis');
  * peticion HTTP para siempre:
  *
  *   connectTimeout        cuanto espera abrir el socket antes de rendirse
- *   commandTimeout        un comando que no termina en 10 s falla, en vez de
+ *   commandTimeout        un comando que no termina en 3 s falla, en vez de
  *                         quedar encolado indefinidamente esperando que Redis
  *                         vuelva -- eso es lo que convierte "Redis caido" en
- *                         un 503 rapido y no en una peticion colgada
+ *                         un 503 rapido y no en una peticion colgada. Los
+ *                         comandos de la tienda tardan milesimas; hasta el
+ *                         2026-10-20 eran 10 s, y con Redis congelado cada
+ *                         seccion de la portada esperaba eso
  *   maxRetriesPerRequest  3 reintentos por comando durante una reconexion
  *                         corta; despues falla
  */
@@ -35,9 +39,93 @@ export const redis = new Redis({
   port,
   password: contrasena,
   connectTimeout: 10000,
-  commandTimeout: 10000,
+  commandTimeout: 3000,
   maxRetriesPerRequest: 3,
 });
+
+/** Los mensajes con que ioredis avisa que no llego a Redis. */
+const MENSAJES_SIN_CONEXION =
+  /connection is closed|econnrefused|etimedout|econnreset|enotfound|command timed out|max retries|reached the max retries|stream isn't writeable|connect etimedout|ehostunreach/i;
+
+/**
+ * Si un error de un comando quiere decir "Redis no responde" y no una
+ * respuesta de Redis (el error de un script, un tipo equivocado).
+ */
+export function esFalloDeConexionRedis(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === 'MaxRetriesPerRequestError' ||
+      MENSAJES_SIN_CONEXION.test(error.message))
+  );
+}
+
+/**
+ * El cortacircuitos de Redis (helpers/cortacircuitos.ts): despues de una caida,
+ * 15 s sin mandarle comandos. `esRedisInalcanzable()` lo mira, asi que el
+ * carrito se va a PostgreSQL y los rankings a ClickHouse sin esperar.
+ */
+export const cortacircuitosRedis = new Cortacircuitos('Redis');
+
+/**
+ * Los comandos con que ioredis abre y revisa la conexion. Pasan siempre: si el
+ * cortacircuitos los frenara, el cliente no podria volver a conectarse.
+ */
+const COMANDOS_DE_CONEXION = new Set([
+  'auth',
+  'hello',
+  'info',
+  'select',
+  'client',
+  'ping',
+  'readonly',
+  'quit',
+]);
+
+/**
+ * Todo comando de ioredis pasa por `sendCommand` (tambien los de un `multi` y
+ * los de un script), asi que el cortacircuitos va aqui y no en cada llamada.
+ *
+ * Si un comando se queda sin respuesta (Redis congelado: la conexion sigue
+ * abierta pero nadie contesta), se fuerza una reconexion. Mientras reconecta,
+ * el cliente no esta `ready` y `esRedisInalcanzable()` lo ve en el acto; sin
+ * esto el cliente seguia `ready` sobre una conexion muerta y cada comando
+ * esperaba su limite entero.
+ */
+type ComandoRedis = Parameters<Redis['sendCommand']>[0];
+type StreamRedis = Parameters<Redis['sendCommand']>[1];
+const enviar = redis.sendCommand.bind(redis) as (
+  comando: ComandoRedis,
+  stream?: StreamRedis,
+) => Promise<unknown>;
+redis.sendCommand = ((comando: ComandoRedis, stream?: StreamRedis) => {
+  if (stream != null || COMANDOS_DE_CONEXION.has(comando.name)) {
+    return enviar(comando, stream);
+  }
+  if (cortacircuitosRedis.enPausa()) {
+    comando.reject(
+      new Error('Connection is closed: Redis en pausa despues de una caida'),
+    );
+    return comando.promise;
+  }
+  const promesa = enviar(comando, stream);
+  promesa.then(
+    () => cortacircuitosRedis.registrarRespuesta(),
+    (error: unknown) => {
+      if (!esFalloDeConexionRedis(error)) {
+        return;
+      }
+      cortacircuitosRedis.registrarCaida(error);
+      // Solo desde `ready`: con muchos comandos vencidos a la vez, uno basta.
+      if (
+        /command timed out/i.test((error as Error).message) &&
+        redis.status === 'ready'
+      ) {
+        redis.disconnect(true);
+      }
+    },
+  );
+  return promesa;
+}) as typeof redis.sendCommand;
 
 /**
  * Obligatorio: en Node, un evento "error" que nadie escucha mata el

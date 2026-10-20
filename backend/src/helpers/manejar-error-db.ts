@@ -58,7 +58,14 @@ export function esFalloDeConexion(error: unknown): boolean {
     return true;
   }
 
-  return error instanceof Error && /connection terminated/i.test(error.message);
+  // Los dos limites de database/postgres.ts (2026-10-20): no se consiguio
+  // conexion a tiempo, o una consulta se quedo sin respuesta (base congelada).
+  return (
+    error instanceof Error &&
+    /connection terminated|timeout exceeded when trying to connect|query read timeout/i.test(
+      error.message,
+    )
+  );
 }
 
 /** El error en una linea, para el log. Un `AggregateError` (el driver probo

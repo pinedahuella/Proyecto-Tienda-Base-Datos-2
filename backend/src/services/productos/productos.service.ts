@@ -306,9 +306,18 @@ export class ProductosService {
       manejarErrorConexionMongo(this.logger, error);
     }
 
-    const ofertas = await this.obtenerOfertasReales(idProducto);
-
-    return { ...producto, ofertas };
+    // Las ofertas son de PostgreSQL. Si no responde, la ficha se ensena igual
+    // (el producto ya salio de Mongo) sin vendedores y con la marca: lo que se
+    // vino a ver se ve, y comprar no se puede hasta que vuelva (2026-10-20).
+    try {
+      const ofertas = await this.obtenerOfertasReales(idProducto);
+      return { ...producto, ofertas };
+    } catch (error) {
+      if (error instanceof ErrorConexion) {
+        return { ...producto, ofertas: [], ofertas_no_disponibles: true };
+      }
+      throw error;
+    }
   }
 
   /**

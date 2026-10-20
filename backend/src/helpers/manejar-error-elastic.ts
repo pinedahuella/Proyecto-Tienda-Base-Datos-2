@@ -1,5 +1,5 @@
 import { Logger } from '@nestjs/common';
-import { errors } from '@elastic/elasticsearch';
+import { esCaidaDeElastic } from '../database/elastic';
 import { ErrorConexion } from './errores';
 
 /**
@@ -15,11 +15,7 @@ export function manejarErrorConexionElastic(
 ): never {
   logger.error(error instanceof Error ? error.message : String(error));
 
-  if (
-    error instanceof errors.ConnectionError ||
-    error instanceof errors.TimeoutError ||
-    error instanceof errors.NoLivingConnectionsError
-  ) {
+  if (esCaidaDeElastic(error)) {
     throw new ErrorConexion('No se pudo conectar con Elasticsearch');
   }
 

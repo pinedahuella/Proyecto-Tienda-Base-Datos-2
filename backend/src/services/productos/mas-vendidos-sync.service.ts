@@ -1,11 +1,11 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { Decimal128 } from 'mongodb';
 import { clickhouse } from '../../database/clickhouse';
 import { redis } from '../../database/redis';
-import { mongoDb } from '../../database/mongo';
-import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
-import { Producto } from '../../models/producto';
+import {
+  TarjetaProducto,
+  tarjetasDeProductos,
+} from '../../helpers/tarjetas-producto';
 
 /**
  * La version acotada de un producto que cachea este worker y lee
@@ -14,32 +14,19 @@ import { Producto } from '../../models/producto';
  * calificacion y si sigue con existencias. Sin `variantes[]`, sin
  * `categoria`, sin `caracteristicas_adicionales`/`caracteristicas_personalizadas`:
  * esta vitrina nunca necesita mostrar eso (ver el comentario de la clase).
+ * Desde el 2026-10-20 la arma `tarjetasDeProductos`, compartida con las demas
+ * vitrinas.
  */
-export interface ProductoTarjetaMasVendido {
-  _id: number;
-  nombre: string;
-  /** La primera imagen de la primera variante, o `null` si no tiene ninguna. */
-  imagen: string | null;
-  precio_tienda: Decimal128 | null;
-  precio_desde: Decimal128 | null;
-  hay_descuento: boolean;
-  resenas_promedio: number;
-  resenas_total: number;
-  /** Unidades activas entre todos los vendedores. `0` = agotado en todos lados. */
-  stock_total: number;
-}
+export type ProductoTarjetaMasVendido = TarjetaProducto;
 
-/** Forma cruda que devuelve la proyeccion de Mongo, antes de aplanar la imagen. */
-interface FilaProductoProyectado {
-  _id: number;
-  nombre: string;
-  precio_tienda: Decimal128 | null;
-  precio_desde: Decimal128 | null;
-  hay_descuento: boolean;
-  resenas_promedio: number;
-  resenas_total: number;
-  stock_total: number;
-  variantes: { imagenes: string[] }[];
+/** Lo que calcula una corrida: el ranking y la tarjeta de cada producto. */
+export interface RankingCalculado {
+  /** Del mas vendido al menos, con lo que vendio. */
+  filas: FilaRankingClickHouse[];
+  /** De que ventana salio, para el log. */
+  ventana: string;
+  /** Las tarjetas de los que siguen `activo`, en el orden del ranking. */
+  tarjetas: TarjetaProducto[];
 }
 
 /**
@@ -135,28 +122,18 @@ export class MasVendidosSyncService implements OnApplicationBootstrap {
     this.procesando = true;
 
     try {
-      let filas = await this.consultarVentana(24, 'HOUR');
-      let ventana = 'ultimas 24h';
-
-      if (filas.length === 0) {
-        filas = await this.consultarVentana(7, 'DAY');
-        ventana = 'ultimos 7 dias (sin compras en 24h)';
-      }
-
-      if (filas.length === 0) {
+      const calculado = await this.calcular();
+      if (calculado == null) {
         this.logger.log(
           'worker de mas vendidos: sin compras en 24h ni en 7 dias -- se deja el ranking anterior tal cual',
         );
         return;
       }
 
-      const ids = filas.map((fila) => Number(fila.id_producto));
-      const productos = await this.consultarProductosMongo(ids);
-
-      await this.reemplazarRanking(filas);
-      await this.reemplazarDetalle(productos);
+      await this.reemplazarRanking(calculado.filas);
+      await this.reemplazarDetalle(calculado.tarjetas);
       this.logger.log(
-        `worker de mas vendidos: ranking recalculado con ${filas.length} producto(s) (${ventana}), ${productos.length} con detalle cacheado`,
+        `worker de mas vendidos: ranking recalculado con ${calculado.filas.length} producto(s) (${calculado.ventana}), ${calculado.tarjetas.length} con detalle cacheado`,
       );
     } catch (error) {
       this.logger.warn(
@@ -170,6 +147,35 @@ export class MasVendidosSyncService implements OnApplicationBootstrap {
   /** Ver el comentario de la clase -- corre una vez, al arrancar. */
   async onApplicationBootstrap(): Promise<void> {
     await this.recalcular();
+  }
+
+  /**
+   * El calculo de una corrida, sin tocar Redis: el ranking de ClickHouse (24 h,
+   * o 7 dias si en 24 h no hubo compras) y las tarjetas. `null` si no hubo
+   * ninguna compra en 7 dias. Lo usa el worker para llenar Redis y
+   * `MasVendidosService` cuando Redis no esta (2026-10-20): la vitrina sale de
+   * la misma consulta, en el momento.
+   */
+  async calcular(): Promise<RankingCalculado | null> {
+    let filas = await this.consultarVentana(24, 'HOUR');
+    let ventana = 'ultimas 24h';
+
+    if (filas.length === 0) {
+      filas = await this.consultarVentana(7, 'DAY');
+      ventana = 'ultimos 7 dias (sin compras en 24h)';
+    }
+
+    if (filas.length === 0) {
+      return null;
+    }
+
+    filas = ordenarComoRedis(filas);
+    const ids = filas.map((fila) => Number(fila.id_producto));
+    const porId = await tarjetasDeProductos(ids);
+    const tarjetas = ids
+      .map((id) => porId.get(id))
+      .filter((t): t is TarjetaProducto => t != null);
+    return { filas, ventana, tarjetas };
   }
 
   /**
@@ -222,65 +228,13 @@ export class MasVendidosSyncService implements OnApplicationBootstrap {
   }
 
   /**
-   * La version acotada (`ProductoTarjetaMasVendido`) de cada producto
-   * ganador -- no el documento completo (ver el comentario de la clase).
-   * La proyeccion pide solo los campos de la tarjeta, mas
-   * `variantes.imagenes` (Mongo no deja combinar un `$slice` sobre
-   * `variantes` con una subruta de esa misma proyeccion en un `find` --
-   * "path collision" -- asi que vienen las imagenes de TODAS las variantes,
-   * cada una sin el resto de sus campos, y en JS se toma solo la primera
-   * imagen de la primera variante); el resto de cada variante (precio,
-   * stock, caracteristicas) nunca viaja desde Mongo. Solo `activo`: un
-   * producto que se desactivo no debe quedar cacheado como si se pudiera
-   * mostrar (ver el comentario de la clase sobre la ventana de hasta 10 min
-   * que esto abre).
-   */
-  private async consultarProductosMongo(
-    ids: number[],
-  ): Promise<ProductoTarjetaMasVendido[]> {
-    const filas = await mongoDb
-      .collection<Producto>('productos')
-      .find<FilaProductoProyectado>(
-        { _id: { $in: ids }, estado: ESTADO_PRODUCTO_VISIBLE },
-        {
-          projection: {
-            _id: 1,
-            nombre: 1,
-            precio_tienda: 1,
-            precio_desde: 1,
-            hay_descuento: 1,
-            resenas_promedio: 1,
-            resenas_total: 1,
-            stock_total: 1,
-            'variantes.imagenes': 1,
-          },
-        },
-      )
-      .toArray();
-
-    return filas.map((fila) => ({
-      _id: fila._id,
-      nombre: fila.nombre,
-      imagen: fila.variantes[0]?.imagenes[0] ?? null,
-      precio_tienda: fila.precio_tienda,
-      precio_desde: fila.precio_desde,
-      hay_descuento: fila.hay_descuento,
-      resenas_promedio: fila.resenas_promedio,
-      resenas_total: fila.resenas_total,
-      stock_total: fila.stock_total,
-    }));
-  }
-
-  /**
    * Reemplazo atomico del HASH de detalle -- mismo patron `RENAME` que
    * `reemplazarRanking`. Si ningun producto del ranking quedo `activo`
    * (caso raro: los mas vendidos son justo los que se desactivaron), no hay
    * nada que renombrar -- se borra la clave directo en vez de armar un
    * `RENAME` sobre una clave temporal vacia (Redis lo rechaza).
    */
-  private async reemplazarDetalle(
-    productos: ProductoTarjetaMasVendido[],
-  ): Promise<void> {
+  private async reemplazarDetalle(productos: TarjetaProducto[]): Promise<void> {
     if (productos.length === 0) {
       await redis.del(MasVendidosSyncService.CLAVE_DETALLE);
       return;
@@ -303,7 +257,28 @@ export class MasVendidosSyncService implements OnApplicationBootstrap {
   }
 }
 
-interface FilaRankingClickHouse {
+/**
+ * El orden en que Redis devuelve el ranking (`ZREVRANGE`): de mayor a menor
+ * total, y los empates por miembro en orden de texto descendente. ClickHouse no
+ * promete orden entre empates, asi que el ranking calculado en el momento (sin
+ * Redis) se ordena igual que el guardado, para que la vitrina no cambie de
+ * orden segun de donde salga.
+ */
+export function ordenarComoRedis(
+  filas: FilaRankingClickHouse[],
+): FilaRankingClickHouse[] {
+  return [...filas].sort(
+    (a, b) =>
+      Number(b.total) - Number(a.total) ||
+      (a.id_producto < b.id_producto
+        ? 1
+        : a.id_producto > b.id_producto
+          ? -1
+          : 0),
+  );
+}
+
+export interface FilaRankingClickHouse {
   id_producto: string;
   total: string;
 }

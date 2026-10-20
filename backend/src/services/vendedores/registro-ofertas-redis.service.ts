@@ -130,6 +130,64 @@ export class RegistroOfertasRedisService {
     }
   }
 
+  /**
+   * Lo mismo que guarda una de las dos llaves, armado en el momento desde
+   * PostgreSQL: las ofertas con descuento (o en venta relampago con descuento,
+   * con `ventaRelampago`), con las mismas condiciones que
+   * `RegistroOfertasSyncService.reconciliar()`. Los nombres y la imagen salen
+   * de la copia del catalogo (`producto_catalogo` y `variante_catalogo`), no de
+   * Mongo, asi que no necesita ninguna otra base.
+   *
+   * Es el respaldo de las vitrinas de la portada cuando Redis no esta
+   * (`OfertasDestacadasService`, 2026-10-20). Las ofertas nacen en
+   * PostgreSQL: el HASH de Redis es solo la copia ya armada.
+   */
+  async desdePostgres(
+    ventaRelampago: boolean,
+  ): Promise<(OfertaRegistroRedis & { id_oferta: number })[]> {
+    const { rows } = await pool.query<
+      FilaOfertaRegistro & {
+        id_oferta: string;
+        nombre_producto: string | null;
+        nombre_variante: string | null;
+        imagen: string | null;
+      }
+    >(
+      `SELECT o.id_oferta, o.precio, o.porcentaje_descuento,
+              ${expresionPrecioFinal('o')}::text AS precio_final,
+              o.stock, o.es_inventario_limitado,
+              o.id_producto_mongo, o.id_producto_variante_mongo,
+              u.usuario AS vendedor_usuario,
+              u.nombre || COALESCE(' ' || u.apellido, '') AS vendedor_nombre,
+              pc.nombre AS nombre_producto,
+              vc.nombre_variante, vc.imagen
+         FROM oferta o
+         JOIN usuarios u ON u.id_usuario = o.id_usuario
+         LEFT JOIN producto_catalogo pc ON pc.id_producto_mongo = o.id_producto_mongo
+         LEFT JOIN variante_catalogo vc
+                ON vc.id_producto_mongo = o.id_producto_mongo
+               AND vc.id_producto_variante_mongo = o.id_producto_variante_mongo
+        WHERE o.porcentaje_descuento IS NOT NULL
+          AND o.es_inventario_limitado = $1
+        ORDER BY o.id_oferta`,
+      [ventaRelampago],
+    );
+    return rows.map((fila) => ({
+      id_oferta: Number(fila.id_oferta),
+      id_producto: Number(fila.id_producto_mongo),
+      id_producto_variante: Number(fila.id_producto_variante_mongo),
+      nombre_producto: fila.nombre_producto ?? '(producto no encontrado)',
+      nombre_variante: fila.nombre_variante ?? '(variante no encontrada)',
+      imagen: fila.imagen,
+      precio: fila.precio,
+      porcentaje_descuento: fila.porcentaje_descuento!,
+      precio_final: fila.precio_final,
+      vendedor_usuario: fila.vendedor_usuario,
+      vendedor_nombre: fila.vendedor_nombre,
+      stock: fila.stock,
+    }));
+  }
+
   /** Quita la oferta de las dos llaves -- usado cuando ya no tiene descuento. */
   private async quitarDeAmbos(idOferta: number): Promise<void> {
     await redis.hdel(

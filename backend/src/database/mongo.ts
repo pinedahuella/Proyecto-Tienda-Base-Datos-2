@@ -1,4 +1,5 @@
 import { MongoClient } from 'mongodb';
+import { Cortacircuitos } from '../helpers/cortacircuitos';
 import { obligatoria } from '../helpers/entorno';
 
 /**
@@ -30,5 +31,16 @@ const uri = `mongodb://${encodeURIComponent(usuario)}:${encodeURIComponent(contr
 export const mongoClient = new MongoClient(uri, {
   serverSelectionTimeoutMS: 3000,
   connectTimeoutMS: 3000,
+  // Una conexion ya abierta a un Mongo congelado (la red cortada a mitad de
+  // camino) esperaba para siempre: el driver trae 0, sin limite. Ninguna
+  // consulta del backend se acerca a 20 s (2026-10-20).
+  socketTimeoutMS: 20_000,
 });
 export const mongoDb = mongoClient.db(nombreBase);
+
+/**
+ * El cortacircuitos de MongoDB (helpers/cortacircuitos.ts). Lo usa el respaldo
+ * del catalogo (`conRespaldoDeMongo`): despues de una caida, 15 s directo a la
+ * copia en PostgreSQL sin esperar los 3 s del driver en cada peticion.
+ */
+export const cortacircuitosMongo = new Cortacircuitos('MongoDB');

@@ -1,6 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { redis } from '../../database/redis';
-import { manejarErrorRedis } from '../../helpers/manejar-error-redis';
+import { ErrorConexion } from '../../helpers/errores';
+import { manejarErrorClickHouse } from '../../helpers/manejar-error-clickhouse';
+import {
+  esRedisInalcanzable,
+  manejarErrorRedis,
+} from '../../helpers/manejar-error-redis';
+import { Memoria } from '../../helpers/tarjetas-producto';
 import {
   MasVendidosSyncService,
   ProductoTarjetaMasVendido,
@@ -16,6 +22,13 @@ import {
  * 10 minutos desactualizado (nombre, precio, imagen, o incluso que ya no
  * este `activo`); es el mismo trato que ya tiene el propio ranking, ahora
  * extendido al detalle.
+ *
+ * **Sin Redis (2026-10-20).** Redis es solo la copia ya calculada; el ranking
+ * sale de ClickHouse. Si Redis no responde, se hace en el momento la misma
+ * consulta que hace el worker (`MasVendidosSyncService.calcular()`), en vez de
+ * dar 503 y dejar la portada sin la vitrina. Lo calculado se guarda un minuto
+ * en memoria (`Memoria`): la portada la pide todo el que entra. Si tambien
+ * ClickHouse esta caido, 503 como antes.
  */
 @Injectable()
 export class MasVendidosService {
@@ -28,6 +41,10 @@ export class MasVendidosService {
    */
   private static readonly LIMITE_MOSTRADO = 8;
 
+  private readonly sinRedis = new Memoria<ProductoTarjetaMasVendido[]>(60_000);
+
+  constructor(private readonly sync: MasVendidosSyncService) {}
+
   /**
    * El ranking completo: primero los ids en orden desde el ZSET, luego el
    * detalle de esos productos desde el HASH de Redis, ya en el orden
@@ -38,12 +55,42 @@ export class MasVendidosService {
    * respuesta.
    */
   async obtener(): Promise<ProductoTarjetaMasVendido[]> {
-    const idsOrdenados = await this.leerRankingRedis();
-    if (idsOrdenados.length === 0) {
-      return [];
+    if (esRedisInalcanzable()) {
+      return this.desdeClickHouse();
     }
+    try {
+      const idsOrdenados = await this.leerRankingRedis();
+      if (idsOrdenados.length === 0) {
+        return [];
+      }
 
-    return this.leerDetalleRedis(idsOrdenados);
+      return await this.leerDetalleRedis(idsOrdenados);
+    } catch (error) {
+      if (esRedisInalcanzable(error)) {
+        return this.desdeClickHouse();
+      }
+      throw error;
+    }
+  }
+
+  /** El ranking calculado en el momento, sin Redis. */
+  private async desdeClickHouse(): Promise<ProductoTarjetaMasVendido[]> {
+    try {
+      return await this.sinRedis.obtener(async () => {
+        const calculado = await this.sync.calcular();
+        return (calculado?.tarjetas ?? []).slice(
+          0,
+          MasVendidosService.LIMITE_MOSTRADO,
+        );
+      });
+    } catch (error) {
+      // Un ErrorConexion ya viene clasificado (las tarjetas con Mongo y la
+      // copia de PostgreSQL caidos); lo demas es de la consulta a ClickHouse.
+      if (error instanceof ErrorConexion) {
+        throw error;
+      }
+      manejarErrorClickHouse(this.logger, error);
+    }
   }
 
   /**

@@ -1,40 +1,23 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { Decimal128 } from 'mongodb';
 import { clickhouse } from '../../database/clickhouse';
 import { redis } from '../../database/redis';
-import { mongoDb } from '../../database/mongo';
-import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
-import { Producto } from '../../models/producto';
+import {
+  TarjetaProducto,
+  tarjetasDeProductos,
+} from '../../helpers/tarjetas-producto';
+import {
+  ordenarComoRedis,
+  type FilaRankingClickHouse,
+  type RankingCalculado,
+} from './mas-vendidos-sync.service';
 
 /**
  * Version acotada de un producto, igual criterio que
  * `ProductoTarjetaMasVendido` en `mas-vendidos-sync.service.ts`: solo los
  * campos que pinta una tarjeta de "mas vistos".
  */
-export interface ProductoTarjetaMasVisto {
-  _id: number;
-  nombre: string;
-  imagen: string | null;
-  precio_tienda: Decimal128 | null;
-  precio_desde: Decimal128 | null;
-  hay_descuento: boolean;
-  resenas_promedio: number;
-  resenas_total: number;
-  stock_total: number;
-}
-
-interface FilaProductoProyectado {
-  _id: number;
-  nombre: string;
-  precio_tienda: Decimal128 | null;
-  precio_desde: Decimal128 | null;
-  hay_descuento: boolean;
-  resenas_promedio: number;
-  resenas_total: number;
-  stock_total: number;
-  variantes: { imagenes: string[] }[];
-}
+export type ProductoTarjetaMasVisto = TarjetaProducto;
 
 /**
  * Worker que recalcula el ranking de "productos mas vistos" a partir de
@@ -79,28 +62,18 @@ export class MasVistosSyncService {
     this.procesando = true;
 
     try {
-      let filas = await this.consultarVentana(24, 'HOUR');
-      let ventana = 'ultimas 24h';
-
-      if (filas.length === 0) {
-        filas = await this.consultarVentana(7, 'DAY');
-        ventana = 'ultimos 7 dias (sin vistas en 24h)';
-      }
-
-      if (filas.length === 0) {
+      const calculado = await this.calcular();
+      if (calculado == null) {
         this.logger.log(
           'worker de mas vistos: sin vistas en 24h ni en 7 dias -- se deja el ranking anterior tal cual',
         );
         return;
       }
 
-      const ids = filas.map((fila) => Number(fila.id_producto));
-      const productos = await this.consultarProductosMongo(ids);
-
-      await this.reemplazarRanking(filas);
-      await this.reemplazarDetalle(productos);
+      await this.reemplazarRanking(calculado.filas);
+      await this.reemplazarDetalle(calculado.tarjetas);
       this.logger.log(
-        `worker de mas vistos: ranking recalculado con ${filas.length} producto(s) (${ventana}), ${productos.length} con detalle cacheado`,
+        `worker de mas vistos: ranking recalculado con ${calculado.filas.length} producto(s) (${calculado.ventana}), ${calculado.tarjetas.length} con detalle cacheado`,
       );
     } catch (error) {
       this.logger.warn(
@@ -109,6 +82,35 @@ export class MasVistosSyncService {
     } finally {
       this.procesando = false;
     }
+  }
+
+  /**
+   * El calculo de una corrida, sin tocar Redis: el ranking de ClickHouse (24 h,
+   * o 7 dias si en 24 h no hubo vistas) y las tarjetas. `null` si no hubo
+   * ninguna vista en 7 dias. Lo usa el worker para llenar Redis y
+   * `MasVistosService` cuando Redis no esta (2026-10-20). Mismo molde que
+   * `MasVendidosSyncService.calcular()`.
+   */
+  async calcular(): Promise<RankingCalculado | null> {
+    let filas = await this.consultarVentana(24, 'HOUR');
+    let ventana = 'ultimas 24h';
+
+    if (filas.length === 0) {
+      filas = await this.consultarVentana(7, 'DAY');
+      ventana = 'ultimos 7 dias (sin vistas en 24h)';
+    }
+
+    if (filas.length === 0) {
+      return null;
+    }
+
+    filas = ordenarComoRedis(filas);
+    const ids = filas.map((fila) => Number(fila.id_producto));
+    const porId = await tarjetasDeProductos(ids);
+    const tarjetas = ids
+      .map((id) => porId.get(id))
+      .filter((t): t is TarjetaProducto => t != null);
+    return { filas, ventana, tarjetas };
   }
 
   /**
@@ -151,50 +153,7 @@ export class MasVistosSyncService {
     );
   }
 
-  /**
-   * Proyeccion acotada de cada producto ganador -- mismo criterio y misma
-   * forma que `MasVendidosSyncService.consultarProductosMongo`, solo
-   * `activo` para no cachear un producto que ya no se puede mostrar.
-   */
-  private async consultarProductosMongo(
-    ids: number[],
-  ): Promise<ProductoTarjetaMasVisto[]> {
-    const filas = await mongoDb
-      .collection<Producto>('productos')
-      .find<FilaProductoProyectado>(
-        { _id: { $in: ids }, estado: ESTADO_PRODUCTO_VISIBLE },
-        {
-          projection: {
-            _id: 1,
-            nombre: 1,
-            precio_tienda: 1,
-            precio_desde: 1,
-            hay_descuento: 1,
-            resenas_promedio: 1,
-            resenas_total: 1,
-            stock_total: 1,
-            'variantes.imagenes': 1,
-          },
-        },
-      )
-      .toArray();
-
-    return filas.map((fila) => ({
-      _id: fila._id,
-      nombre: fila.nombre,
-      imagen: fila.variantes[0]?.imagenes[0] ?? null,
-      precio_tienda: fila.precio_tienda,
-      precio_desde: fila.precio_desde,
-      hay_descuento: fila.hay_descuento,
-      resenas_promedio: fila.resenas_promedio,
-      resenas_total: fila.resenas_total,
-      stock_total: fila.stock_total,
-    }));
-  }
-
-  private async reemplazarDetalle(
-    productos: ProductoTarjetaMasVisto[],
-  ): Promise<void> {
+  private async reemplazarDetalle(productos: TarjetaProducto[]): Promise<void> {
     if (productos.length === 0) {
       await redis.del(MasVistosSyncService.CLAVE_DETALLE);
       return;
@@ -215,11 +174,6 @@ export class MasVistosSyncService {
       MasVistosSyncService.CLAVE_DETALLE,
     );
   }
-}
-
-interface FilaRankingClickHouse {
-  id_producto: string;
-  total: string;
 }
 
 function mensajeCorto(error: unknown): string {

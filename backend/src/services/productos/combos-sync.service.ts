@@ -1,32 +1,18 @@
 import { Injectable, Logger, OnApplicationBootstrap } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { Decimal128 } from 'mongodb';
 import { clickhouse } from '../../database/clickhouse';
 import { redis } from '../../database/redis';
-import { mongoDb } from '../../database/mongo';
-import { ESTADO_PRODUCTO_VISIBLE } from '../../models/estado-producto';
-import { Producto } from '../../models/producto';
-import { ProductoTarjetaMasVendido } from './mas-vendidos-sync.service';
+import {
+  TarjetaProducto,
+  tarjetasDeProductos,
+} from '../../helpers/tarjetas-producto';
 
 /** Un combo listo para mostrar: los productos que se compran juntos. */
 export interface Combo {
   /** En cuantos pedidos distintos aparecen todos juntos. */
   pedidos: number;
   /** Dos o tres productos, en orden de id. */
-  productos: ProductoTarjetaMasVendido[];
-}
-
-/** Forma cruda que devuelve la proyeccion de Mongo, antes de aplanar la imagen. */
-interface FilaProductoProyectado {
-  _id: number;
-  nombre: string;
-  precio_tienda: Decimal128 | null;
-  precio_desde: Decimal128 | null;
-  hay_descuento: boolean;
-  resenas_promedio: number;
-  resenas_total: number;
-  stock_total: number;
-  variantes: { imagenes: string[] }[];
+  productos: TarjetaProducto[];
 }
 
 interface FilaComboClickHouse {
@@ -92,27 +78,11 @@ export class CombosSyncService implements OnApplicationBootstrap {
     }
     this.procesando = true;
     try {
-      const grupos = quitarParesDentroDeTrios(await this.consultarCombos());
-      const tarjetas = await this.consultarProductosMongo([
-        ...new Set(grupos.flatMap((g) => g.productos)),
-      ]);
-      const combos: Combo[] = [];
-      for (const grupo of grupos) {
-        const productos = grupo.productos
-          .map((id) => tarjetas.get(id))
-          .filter((p): p is ProductoTarjetaMasVendido => p != null);
-        // Si alguno ya no esta activo, el combo entero no se muestra.
-        if (productos.length === grupo.productos.length) {
-          combos.push({ pedidos: grupo.pedidos, productos });
-        }
-        if (combos.length === CombosSyncService.TOPE_ALMACENADO) {
-          break;
-        }
-      }
+      const { combos, grupos } = await this.calcular();
       // Una sola clave: SET la reemplaza de una vez, nadie lee una a medias.
       await redis.set(CombosSyncService.CLAVE, JSON.stringify(combos));
       this.logger.log(
-        `worker de combos: ${combos.length} combo(s) guardados (${grupos.length} grupo(s) en ${CombosSyncService.MIN_PEDIDOS}+ pedidos de los ultimos ${CombosSyncService.VENTANA_DIAS} dias)`,
+        `worker de combos: ${combos.length} combo(s) guardados (${grupos} grupo(s) en ${CombosSyncService.MIN_PEDIDOS}+ pedidos de los ultimos ${CombosSyncService.VENTANA_DIAS} dias)`,
       );
     } catch (error) {
       this.logger.warn(
@@ -126,6 +96,34 @@ export class CombosSyncService implements OnApplicationBootstrap {
   /** Ver el comentario de la clase -- corre una vez, al arrancar. */
   async onApplicationBootstrap(): Promise<void> {
     await this.recalcular();
+  }
+
+  /**
+   * El calculo de una corrida, sin tocar Redis: los grupos de ClickHouse y la
+   * tarjeta de cada producto. Un combo con algun producto que ya no esta
+   * `activo` no sale entero. `grupos` es cuantos grupos dio ClickHouse, para
+   * el log. Lo usa el worker para llenar Redis y `CombosService` cuando Redis
+   * no esta (2026-10-20).
+   */
+  async calcular(): Promise<{ combos: Combo[]; grupos: number }> {
+    const grupos = quitarParesDentroDeTrios(await this.consultarCombos());
+    const tarjetas = await tarjetasDeProductos([
+      ...new Set(grupos.flatMap((g) => g.productos)),
+    ]);
+    const combos: Combo[] = [];
+    for (const grupo of grupos) {
+      const productos = grupo.productos
+        .map((id) => tarjetas.get(id))
+        .filter((p): p is TarjetaProducto => p != null);
+      // Si alguno ya no esta activo, el combo entero no se muestra.
+      if (productos.length === grupo.productos.length) {
+        combos.push({ pedidos: grupo.pedidos, productos });
+      }
+      if (combos.length === CombosSyncService.TOPE_ALMACENADO) {
+        break;
+      }
+    }
+    return { combos, grupos: grupos.length };
   }
 
   /**
@@ -179,53 +177,6 @@ export class CombosSyncService implements OnApplicationBootstrap {
       productos: fila.productos.map(Number),
       pedidos: Number(fila.pedidos),
     }));
-  }
-
-  /**
-   * La tarjeta de cada producto (la misma version acotada de "mas vendidos"),
-   * solo de los `activo`. Ver `MasVendidosSyncService.consultarProductosMongo`.
-   */
-  private async consultarProductosMongo(
-    ids: number[],
-  ): Promise<Map<number, ProductoTarjetaMasVendido>> {
-    if (ids.length === 0) {
-      return new Map();
-    }
-    const filas = await mongoDb
-      .collection<Producto>('productos')
-      .find<FilaProductoProyectado>(
-        { _id: { $in: ids }, estado: ESTADO_PRODUCTO_VISIBLE },
-        {
-          projection: {
-            _id: 1,
-            nombre: 1,
-            precio_tienda: 1,
-            precio_desde: 1,
-            hay_descuento: 1,
-            resenas_promedio: 1,
-            resenas_total: 1,
-            stock_total: 1,
-            'variantes.imagenes': 1,
-          },
-        },
-      )
-      .toArray();
-    return new Map(
-      filas.map((fila) => [
-        fila._id,
-        {
-          _id: fila._id,
-          nombre: fila.nombre,
-          imagen: fila.variantes[0]?.imagenes[0] ?? null,
-          precio_tienda: fila.precio_tienda,
-          precio_desde: fila.precio_desde,
-          hay_descuento: fila.hay_descuento,
-          resenas_promedio: fila.resenas_promedio,
-          resenas_total: fila.resenas_total,
-          stock_total: fila.stock_total,
-        },
-      ]),
-    );
   }
 }
 

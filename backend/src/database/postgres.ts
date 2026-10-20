@@ -1,6 +1,8 @@
 import { Logger } from '@nestjs/common';
-import { Pool } from 'pg';
+import { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
+import { Cortacircuitos, conLimite } from '../helpers/cortacircuitos';
 import { obligatoria } from '../helpers/entorno';
+import { esFalloDeConexion } from '../helpers/manejar-error-db';
 
 const logger = new Logger('Postgres');
 
@@ -19,7 +21,86 @@ export const pool = new Pool({
   user: obligatoria('DB_USER'),
   password: obligatoria('DB_PASSWORD'),
   database: obligatoria('DB_NAME'),
+  // Los dos limites que no tenia (2026-10-20). Sin el primero, con la red
+  // cortada cada conexion nueva esperaba lo que tarda Windows en rendirse, unos
+  // 21 s (medido el 19-10 con la PC de Jose David). Sin el segundo, una
+  // conexion ya abierta a una base congelada esperaba para siempre. Ninguna
+  // consulta de la tienda se acerca a 30 s.
+  connectionTimeoutMillis: 5000,
+  query_timeout: 30_000,
 });
+
+/**
+ * El cortacircuitos de PostgreSQL (helpers/cortacircuitos.ts): despues de una
+ * caida, 15 s sin pedir conexiones. Es la base que manda, asi que lo que
+ * depende de ella falla al instante con 503 (comprar, entrar) y lo que tiene
+ * otro camino lo toma sin esperar: la sesion ya abierta se cree al token
+ * (sesion.guard.ts), el carrito se ve desde Redis y el catalogo desde Mongo.
+ */
+export const cortacircuitosPostgres = new Cortacircuitos('PostgreSQL');
+
+/** El error de lo que no se intento porque PostgreSQL esta en pausa. 08006 = connection_failure. */
+function errorEnPausa(): Error {
+  return Object.assign(new Error('PostgreSQL en pausa despues de una caida'), {
+    code: '08006',
+  });
+}
+
+/**
+ * `pool.query` y `pool.connect` pasan por el cortacircuitos. La forma con
+ * callback pasa directo: es la que usa el propio pool por dentro (su `query`
+ * llama a `connect(callback)`), y contarla dos veces no hace falta.
+ */
+const consultar = pool.query.bind(pool) as (...args: unknown[]) => unknown;
+pool.query = ((...args: unknown[]) => {
+  if (typeof args[args.length - 1] === 'function') {
+    return consultar(...args);
+  }
+  return cortacircuitosPostgres.correr(
+    () => consultar(...args) as Promise<unknown>,
+    esFalloDeConexion,
+    errorEnPausa,
+  );
+}) as typeof pool.query;
+
+/**
+ * Una consulta de las que tardan milesimas (una fila por su llave) con un limite
+ * propio y corto. Es para el camino de cada peticion: la revision de la sesion
+ * (`SesionGuard`) y el perfil de `/usuario/yo`. Con PostgreSQL congelado, una
+ * conexion ya abierta del pool no contesta y la consulta esperaba los 30 s de
+ * `query_timeout` (medido el 2026-10-20: la primera peticion con sesion tardo
+ * 30.3 s). Con esto se rinde a los `ms`, avisa al cortacircuitos y el que
+ * llama sigue por su camino sin PostgreSQL.
+ *
+ * El error lleva `ETIMEDOUT`, asi que `esFalloDeConexion` lo reconoce como
+ * cualquier otra caida.
+ */
+export async function consultaCorta<T extends QueryResultRow>(
+  texto: string,
+  valores: unknown[],
+  ms = 3000,
+): Promise<QueryResult<T>> {
+  return conLimite(pool.query<T>(texto, valores), ms, () => {
+    const error = Object.assign(
+      new Error(`PostgreSQL no respondio en ${ms / 1000} s`),
+      { code: 'ETIMEDOUT' },
+    );
+    cortacircuitosPostgres.registrarCaida(error);
+    return error;
+  });
+}
+
+const conectar = pool.connect.bind(pool) as (...args: unknown[]) => unknown;
+pool.connect = ((...args: unknown[]) => {
+  if (typeof args[0] === 'function') {
+    return conectar(...args);
+  }
+  return cortacircuitosPostgres.correr(
+    () => conectar() as Promise<PoolClient>,
+    esFalloDeConexion,
+    errorEnPausa,
+  );
+}) as typeof pool.connect;
 
 /**
  * Cuando una conexion que estaba en reposo se cae (por ejemplo, se apago

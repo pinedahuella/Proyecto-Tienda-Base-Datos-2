@@ -829,6 +829,14 @@
 			return;
 		}
 
+		if (r.estado === 503) {
+			// La compra la escribe una sola base en una transaccion: si no responde,
+			// no se cobro nada y el carrito sigue como estaba (medido con
+			// pruebas/falla_checkout.sh y en docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md).
+			error = 'No pudimos completar la compra ahora. Tu carrito sigue guardado: intenta de nuevo en un momento.';
+			return;
+		}
+
 		error = r.estado === 0 ? 'No se pudo conectar con el servidor' : r.mensaje;
 	}
 

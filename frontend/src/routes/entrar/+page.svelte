@@ -69,7 +69,13 @@
 		// la contrasena no coincide o si la cuenta esta suspendida, para no
 		// delatar cual de las tres fue. Marcar un campo lo delataria igual.
 		if (!respuesta.ok || !respuesta.payload) {
-			errorGeneral = respuesta.mensaje;
+			// Un 503 es que la tienda no puede revisar cuentas en este momento (la
+			// base que las guarda no responde). Ninguna pantalla nombra la base,
+			// pero si se puede decir que pasa y que se puede seguir mirando.
+			errorGeneral =
+				respuesta.estado === 503
+					? 'No podemos iniciar sesion en este momento. Intenta de nuevo en un momento; mientras tanto puedes seguir mirando la tienda.'
+					: respuesta.mensaje;
 			return;
 		}
 

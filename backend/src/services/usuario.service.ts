@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { pool } from '../database/postgres';
+import { consultaCorta, pool } from '../database/postgres';
 import { compararContrasena, hashearContrasena } from '../helpers/contrasena';
 import {
   ErrorConflicto,
@@ -7,7 +7,14 @@ import {
   ErrorSesion,
   ErrorValidacion,
 } from '../helpers/errores';
-import { manejarErrorConexion } from '../helpers/manejar-error-db';
+import {
+  esFalloDeConexion,
+  manejarErrorConexion,
+} from '../helpers/manejar-error-db';
+import {
+  guardarPerfilDeSesion,
+  leerPerfilDeSesion,
+} from '../helpers/perfil-sesion';
 import { firmarToken } from '../helpers/token';
 import {
   esTextoNoVacio,
@@ -161,7 +168,11 @@ export class UsuarioService {
       id_rol_usuario: usuario.id_rol_usuario,
     });
 
-    return { usuario: this.aUsuarioRegistrado(usuario), token };
+    const registrado = this.aUsuarioRegistrado(usuario);
+    // La copia del perfil para cuando PostgreSQL no responda (perfil-sesion.ts).
+    // Sin await: no frena el login aunque Redis tarde.
+    void guardarPerfilDeSesion(registrado);
+    return { usuario: registrado, token };
   }
 
   /**
@@ -175,7 +186,7 @@ export class UsuarioService {
   async obtenerPorId(idUsuario: string): Promise<UsuarioRegistrado> {
     let fila: Usuario | undefined;
     try {
-      const resultado = await pool.query<Usuario>(
+      const resultado = await consultaCorta<Usuario>(
         `SELECT id_usuario, correo_electronico, usuario, nombre, apellido,
                 contrasena_hash, fecha_nacimiento, fecha_creacion,
                 id_rol_usuario, id_estado_usuario
@@ -185,6 +196,9 @@ export class UsuarioService {
       );
       fila = resultado.rows[0];
     } catch (error) {
+      if (esFalloDeConexion(error)) {
+        return this.perfilSinPostgres(idUsuario, error);
+      }
       this.manejarErrorBaseDatos(error);
     }
 
@@ -192,7 +206,30 @@ export class UsuarioService {
       throw new ErrorSesion('Token invalido o expirado');
     }
 
-    return this.aUsuarioRegistrado(fila);
+    const registrado = this.aUsuarioRegistrado(fila);
+    void guardarPerfilDeSesion(registrado);
+    return registrado;
+  }
+
+  /**
+   * PostgreSQL no respondio: el perfil sale de la copia que se guardo en Redis
+   * al iniciar sesion (perfil-sesion.ts). Si no hay copia, o Redis tampoco
+   * responde, 503 como siempre.
+   */
+  private async perfilSinPostgres(
+    idUsuario: string,
+    errorPostgres: unknown,
+  ): Promise<UsuarioRegistrado> {
+    let copia: UsuarioRegistrado | null = null;
+    try {
+      copia = await leerPerfilDeSesion(idUsuario);
+    } catch {
+      // Redis tampoco responde: se reporta la caida de PostgreSQL.
+    }
+    if (copia == null) {
+      manejarErrorConexion(this.logger, errorPostgres);
+    }
+    return copia;
   }
 
   /**
@@ -206,7 +243,8 @@ export class UsuarioService {
   async estaActivo(idUsuario: string): Promise<boolean> {
     let fila: { id_estado_usuario: number } | undefined;
     try {
-      const resultado = await pool.query<{ id_estado_usuario: number }>(
+      // Con limite corto: corre en cada peticion con sesion (consultaCorta).
+      const resultado = await consultaCorta<{ id_estado_usuario: number }>(
         'SELECT id_estado_usuario FROM usuarios WHERE id_usuario = $1',
         [idUsuario],
       );

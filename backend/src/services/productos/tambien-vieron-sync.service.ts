@@ -3,6 +3,7 @@ import { Interval } from '@nestjs/schedule';
 import { clickhouse } from '../../database/clickhouse';
 import { redis } from '../../database/redis';
 import { mongoDb } from '../../database/mongo';
+import { productosPorIds } from '../../helpers/catalogo-respaldo';
 import { Producto } from '../../models/producto';
 
 /** Umbrales de R2 -- fijos, mismos valores probados en `clickhouse/consultas/parametros.txt`. */
@@ -250,6 +251,26 @@ export class TambienVieronSyncService {
       );
       return new Map();
     }
+  }
+
+  /**
+   * El calculo de un solo producto, sin tocar Redis: la afinidad desde
+   * ClickHouse y el documento de cada candidato (de Mongo, o de la copia del
+   * catalogo en PostgreSQL si Mongo no responde). Es lo mismo que el worker
+   * guarda en `mesh:producto:<id>:tambien-vieron`; lo usa
+   * `TambienVieronService` cuando Redis no esta (2026-10-20).
+   */
+  async calcularUno(idProducto: number): Promise<TambienVieronCacheado[]> {
+    const candidatos = await this.calcularAfinidad(idProducto);
+    const productos = await productosPorIds(
+      candidatos.map((c) => c.id_producto),
+      { soloVisibles: false },
+    );
+    const porId = new Map(productos.map((p) => [p._id, p]));
+    return candidatos.map((candidato) => ({
+      ...candidato,
+      producto: porId.get(candidato.id_producto) ?? null,
+    }));
   }
 
   /** Publica y estatica para que `TambienVieronService` arme la misma clave al leer. */

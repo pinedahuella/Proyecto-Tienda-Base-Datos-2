@@ -56,11 +56,13 @@ const esperar = (ms: number) => new Promise<void>((resolver) => setTimeout(resol
  */
 const PIEZAS_INTERNAS = /postgres|mongo|redis|neo4j|clickhouse|elastic|ollama|cypher/i;
 const NO_DISPONIBLE = 'No pudimos cargar esto ahora. Intenta de nuevo en un momento.';
+/** Lo mismo cuando lo que fallo fue hacer algo (agregar, guardar, pagar) y no leer. */
+const NO_SE_PUDO = 'No pudimos completar esto ahora. Intenta de nuevo en un momento.';
 
-function sinPiezasInternas(mensaje: string | undefined, estado: number): string | undefined {
+function sinPiezasInternas(mensaje: string | undefined, estado: number, metodo: string): string | undefined {
 	if (typeof mensaje !== 'string' || !PIEZAS_INTERNAS.test(mensaje)) return mensaje;
 	console.warn(`[Mesh] ${estado}: ${mensaje}`);
-	return NO_DISPONIBLE;
+	return metodo === 'GET' ? NO_DISPONIBLE : NO_SE_PUDO;
 }
 
 /**
@@ -125,7 +127,11 @@ export async function pedir<T>(ruta: string, opciones: RequestInit = {}): Promis
 	try {
 		const cuerpo = (await respuesta.json()) as RespuestaApi<T>;
 		if (cuerpo && cuerpo.ok === false) {
-			cuerpo.mensaje = sinPiezasInternas(cuerpo.mensaje, respuesta.status) as string;
+			cuerpo.mensaje = sinPiezasInternas(
+				cuerpo.mensaje,
+				respuesta.status,
+				(opciones.method ?? 'GET').toUpperCase()
+			) as string;
 		}
 		return { ...cuerpo, estado: respuesta.status };
 	} catch {

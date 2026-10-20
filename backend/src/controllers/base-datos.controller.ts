@@ -1,4 +1,6 @@
 import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import { Cortacircuitos } from '../helpers/cortacircuitos';
+import { exito } from '../helpers/respuesta';
 import { BaseDatosService } from '../services/base-datos.service';
 
 /**
@@ -25,5 +27,19 @@ export class BaseDatosController {
     }
 
     return respuesta;
+  }
+
+  // GET /db/cortacircuitos
+  // Lo que el backend vio la ultima vez que le hablo a cada base
+  // (helpers/cortacircuitos.ts): si respondio o desde cuando la da por caida.
+  // No prueba nada, solo cuenta lo que ya paso: lo leen las pruebas de caidas
+  // y el panel de comandos. Es para quien mantiene la tienda, la pagina no lo
+  // usa.
+  @Get('cortacircuitos')
+  cortacircuitos() {
+    return exito(
+      Cortacircuitos.estados(),
+      'Estado de cada base segun el backend',
+    );
   }
 }

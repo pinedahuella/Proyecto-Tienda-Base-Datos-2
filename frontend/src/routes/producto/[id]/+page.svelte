@@ -134,6 +134,8 @@
 		hay_descuento?: boolean;
 		/** Las ofertas de verdad, que solo trae esta ruta y no el listado. */
 		ofertas: Oferta[];
+		/** El backend no pudo leer las ofertas (2026-10-20): no se sabe quien lo vende. */
+		ofertas_no_disponibles?: boolean;
 	}
 
 	let id = $derived(Number(page.params.id));
@@ -986,7 +988,14 @@
 						     varias personas a precios distintos, y hay que poder elegir a
 						     cual comprarle. Las trae GET /productos/:id desde PostgreSQL,
 						     no del documento: precio y stock cambian en cada venta. -->
-						{#if ofertas.length === 0}
+						{#if producto.ofertas_no_disponibles}
+							<!-- El backend no pudo saber quien lo vende (la base de las
+							     ofertas no respondio): no es que nadie lo venda. -->
+							<p class="nota">
+								Ahora no podemos mostrar quien vende esta presentacion ni comprarla. Intenta de nuevo
+								en un momento.
+							</p>
+						{:else if ofertas.length === 0}
 							<p class="nota">Nadie vende esta presentacion todavia.</p>
 						{:else}
 							<ul class="ofertas">

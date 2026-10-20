@@ -7,6 +7,7 @@ import { esFalloDeConexion } from '../../helpers/manejar-error-db';
 import { expresionPrecioFinal } from '../../helpers/precio-descuento';
 import type { DocumentoOferta } from '../../dto/buscar-ofertas';
 import { PercolarSeguimientosService } from '../compradores/percolar-seguimientos.service';
+import { RegistroOfertasRedisService } from './registro-ofertas-redis.service';
 
 export const INDICE_OFERTAS =
   process.env.ELASTIC_INDICE_OFERTAS ?? 'mesh_ofertas';
@@ -86,6 +87,7 @@ export class EventoOfertaSyncService {
 
   constructor(
     private readonly percolarSeguimientos: PercolarSeguimientosService,
+    private readonly registroOfertasRedis: RegistroOfertasRedisService,
   ) {}
 
   @Interval('evento-oferta', EventoOfertaSyncService.INTERVALO_MS)
@@ -177,6 +179,15 @@ export class EventoOfertaSyncService {
 
       await this.marcarProcesados(hechos);
       await this.marcarFallidos(fallidos);
+
+      // La copia de las vitrinas de ofertas en Redis (mesh:ofertas:*) tambien
+      // se queda vieja con cada compra o cancelacion, que cambian el stock sin
+      // pasar por ofertas.service.ts. Esta cola ve todos los cambios de una
+      // oferta, asi que se refrescan aqui (2026-10-20; antes la vitrina podia
+      // ensenar un stock de hace horas). sincronizar() nunca lanza.
+      for (const evento of hechos) {
+        await this.registroOfertasRedis.sincronizar(Number(evento.id_oferta));
+      }
 
       this.logger.log(
         `worker de ofertas: ${eventos.length} evento(s), ${hechos.length - borrados} indexada(s), ${borrados} borrada(s), ${fallidos.length} con error, ${cumplidos} seguimiento(s) cumplido(s)`,
