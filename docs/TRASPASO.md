@@ -29,17 +29,29 @@ Contra la PC de Jose David, en verde todo menos:
 
 - **prueba_acceso 19 FALLA**: sus contrasenas de `inspeccion` y `operador` de Redis son otras. Hay que
   pedirselas y pasarlas por el ambiente (remoto/README.md).
-- **recomendacion_semantica 1 FALLA, fallo real nuestro**: `producto_catalogo` tiene 102 productos (1001 a 1102)
-  que ya no estan en Mongo ni tienen vector, de un `-Borrar 102` en esa PC. `migrations/lote/borrar_lote.sql`
-  es del 03-09 y no borra de `producto_catalogo` ni de `vector_producto` (029 y 040 son posteriores). Sin
-  arreglar: arreglarlo es tocar el SQL y borrar esas filas en la base del amigo; decidirlo con Meme.
+- **recomendacion_semantica 1 FALLA, fallo real nuestro, ARREGLADO**: `producto_catalogo` tenia 102 productos
+  (1001 a 1102) que ya no estaban en Mongo ni tenian vector, de un `-Borrar 102` en esa PC.
+  `migrations/lote/borrar_lote.sql` era del 03-09 y no borraba de `producto_catalogo` (029 y 040 son
+  posteriores). Ahora lo borra (sus variantes y su vector se van por la cascada) y se comprueba en el bloque
+  de verificacion; validado con EXPLAIN, el -Borrar entero no se volvio a correr (pide un lote generado en una
+  base local). Con permiso de Meme se borraron los 102 en la base del amigo, en una transaccion que exigia
+  que fueran exactamente 102 sin oferta, pedido ni resena y que no estuvieran en Mongo: producto_catalogo
+  quedo en 1001, igual que Mongo y vector_producto (202 variantes se fueron con ellos). La prueba otra vez:
+  15 OK, 0 FALLA.
 - **SIN MEDIR por sus datos**: busqueda parte 4 y notas.sh (no hay producto que viva solo en Mongo; se crea uno
   desde el panel del vendedor), las devoluciones de etl_compras, falla_checkout (en remoto no se tumban bases).
 
+**La semilla de fraude, sembrada en la base del amigo** (con permiso de Meme), como el paso 5e de arrancar
+pero por el psql falso: 3 vendedores y 21 compradores `fraude.*@mesh.com`, 26 resenas, 35 pedidos (3
+cancelados). El backend de aqui calculo y valoro los 26 vectores y paso todo al grafo por sus colas, despues
+`bash etl/cargar_compras.sh` (35 ventas y 3 devoluciones nuevas, cuadra) y `node pruebas/correr_detectores_fraude.cjs`.
+Salieron las 8 senales y ninguna de mas con esas cuentas: satelites, persistente, reputacion_expres,
+resenas_repetidas, compras_en_rafaga, devoluciones_seriales (por cuenta), notas_incoherentes_producto en el
+Sillin Vertebra SR-2 (p71) y resenas_parecidas_producto en los Guantes Zarpa 300 (p66). Su proximo
+`.\arrancar.ps1` dira que ya estaban y no tocara nada.
+
 Sin hacer, a proposito:
 
-- **La semilla de fraude en la base del amigo**: no se escribio nada. Su base tiene la 046 y los combos pero no
-  las cuentas `fraude.*@mesh.com`. Se siembra con el psql falso o con su proximo `.\arrancar.ps1`; Meme decide.
 - Lo de "luego" de Meme: los 3 puntos del profesor (backend) y las resenas del clasificador que no hablan de su
   producto.
 

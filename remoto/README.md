@@ -128,10 +128,11 @@ SIN MEDIR       falla_checkout (todo es tumbar bases), las devoluciones de etl_c
                 ningun producto que viva solo en Mongo; se crea uno desde el panel del vendedor), los 3
                 de siempre de ofertas_paginadas
 de la otra PC   prueba_acceso 12 OK y 19 FALLA, las contrasenas de inspeccion y operador
-de sus datos    recomendacion_semantica 14 OK y 1 FALLA: producto_catalogo tiene 102 productos (1001 a
-                1102) que ya no estan en Mongo ni tienen vector. Son los de un -Borrar 102 en esa PC:
-                migrations/lote/borrar_lote.sql no borra de producto_catalogo ni de vector_producto
-                (es anterior a las migraciones 029 y 040)
+de sus datos    recomendacion_semantica dio 14 OK y 1 FALLA: producto_catalogo tenia 102 productos (1001
+                a 1102) que ya no estaban en Mongo ni tenian vector, de un -Borrar 102 en esa PC.
+                migrations/lote/borrar_lote.sql no borraba de producto_catalogo (es anterior a las
+                migraciones 029 y 040). Arreglado el archivo, borrados los 102 alla con permiso de Meme,
+                y la prueba otra vez: 15 OK, 0 FALLA
 ```
 
 Y una demo en PowerShell, `demo-evento-fraude.ps1 -Tipo multi_cuenta_ip_lenta`:

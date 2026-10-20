@@ -249,6 +249,13 @@ DELETE FROM producto_caracteristica WHERE id_producto IN (SELECT id_producto FRO
 DELETE FROM productos_historial     WHERE id_producto IN (SELECT id_producto FROM borrado_ids);
 DELETE FROM productos               WHERE id_producto IN (SELECT id_producto FROM borrado_ids);
 
+-- La copia del catalogo en PostgreSQL (migracion 029) y su vector (040). Sus
+-- variantes (variante_catalogo) y el vector (vector_producto) se van solos, son
+-- ON DELETE CASCADE desde producto_catalogo. Este archivo es anterior a las dos
+-- migraciones y no la borraba: el producto se iba de productos y de Mongo y
+-- seguia aqui sin vector (medido el 2026-10-19 en la PC de Jose David, 102).
+DELETE FROM producto_catalogo WHERE id_producto_mongo IN (SELECT id_producto FROM borrado_ids);
+
 
 -- ============================================================
 -- Comprobarse a si mismo
@@ -272,6 +279,13 @@ BEGIN
     FROM productos_variantes WHERE id_producto IN (SELECT id_producto FROM borrado_ids);
     IF v_mal > 0 THEN
         RAISE EXCEPTION '% variantes se quedaron sin su producto', v_mal;
+    END IF;
+
+    -- 2b. ni su copia en el catalogo de PostgreSQL
+    SELECT count(*) INTO v_mal
+    FROM producto_catalogo WHERE id_producto_mongo IN (SELECT id_producto FROM borrado_ids);
+    IF v_mal > 0 THEN
+        RAISE EXCEPTION '% productos borrados siguen en producto_catalogo', v_mal;
     END IF;
 
     -- 3. no quedo ninguna oferta apuntando a un producto borrado
