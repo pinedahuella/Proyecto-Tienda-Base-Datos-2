@@ -337,7 +337,7 @@
 			{:else if error !== ''}
 				<p class="aviso malo">{error}</p>
 			{:else if resultados.length === 0 && sugeridos.length > 0}
-				<p class="aviso">No encontramos eso. Te pueden interesar estos:</p>
+				<p class="aviso">No encontramos eso. Quizas te interesen estos</p>
 				{#each sugeridos as r (r.id_producto)}
 					<button type="button" class="fila" onclick={() => abrirSugerido(r)}>
 						<span class="texto">

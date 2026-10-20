@@ -3,7 +3,82 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-19, noche (3)**.
+Ultima actualizacion: **2026-10-20, madrugada**.
+
+**EMPIEZA AQUI (20-10, madrugada). Lo que pidio el profesor, los tres puntos: la tienda sigue con una base caida, las facetas filtran en la consulta y una busqueda sin sentido trae sugeridos.**
+Meme dio permiso para tocar `backend/` y las bases de la PC de Jose David. Para David, el detalle de lo
+que cambio en su backend: `backend/cambio_propuestas/2026-10-20_0200-caidas-con-respaldo-y-buscador.md`.
+Lo que pasa con cada base, para el profesor: `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` (reescrito). El plan
+de la noche, paso por paso: `docs/PLAN-NOCHE-2026-10-20.md`.
+
+```
+cortacircuitos  helpers/cortacircuitos.ts en las seis bases: tras una caida, 15 s sin preguntarle, linea
+                "[Cortacircuitos] X no responde / X volvio", GET /db/cortacircuitos. Limites nuevos: pg
+                20 conexiones, 10 s para conectar y 120 s por consulta (red), Redis 3 s por comando, Neo4j 20 s (3 s la pagina), Mongo
+                socket 20 s, Elastic sin reintento (3 s la pagina)
+Redis           los 4 rankings con la consulta del worker en vivo (ClickHouse), ofertas destacadas desde
+                PostgreSQL. Arreglado: la copia de ofertas en Redis no se refrescaba con las compras
+PostgreSQL      la sesion abierta sigue por su token (SesionGuard), perfil copiado en Redis, carrito desde
+                Redis, ficha sin vendedores con ofertas_no_disponibles. No se paga ni se entra de nuevo
+Elasticsearch   el buscador (facetado, simple, admin, hibrida, intencion, sugerencias) sale de la copia del
+                catalogo en PostgreSQL con la regla de texto del indice (048 APLICADA en la base de David)
+Neo4j           para ti y tambien compraron en SQL sobre los pedidos, identicos al grafo
+facetas         filtros en el filter de la consulta, agregaciones sueltas (facetado.service.ts, facetas.py)
+sugeridos       con 0 resultados y sin filtros: vectores, mas vendidos o mas resenados, aparte; total 0
+demo en vivo    remoto/interruptor.cjs + remoto/caidas.ps1, y en el panel el grupo Caida de una base
+pruebas         pruebas/caidas.mjs (en correr_todas): 46 OK apagadas y 46 OK congeladas
+arreglos        notas.sh 10 OK (el mongosh falso no traducia el /tmp de un guion suelto; si habia
+                productos solo en Mongo) y neo4j/correr_patrones.sh Todo bien (el control -206 coincidia
+                con la cadena real 203-204-205-206)
+```
+
+Medido contra la PC de Jose David, con el interruptor (apagada y congelada):
+
+- Redis: las 8 vitrinas iguales con y sin Redis; 60-115 ms apagada, la primera 3.2 s congelada (antes 503 a
+  los 10 s).
+- PostgreSQL: con sesion abierta todo 200 en menos de 1.5 s, pagar/agregar/entrar 503 en 0.2 s; congelada
+  la primera 3.4 s (consultaCorta de la sesion).
+- Elasticsearch: totales y facetas identicos a los del indice, 50-760 ms; congelada la primera 3.5 s
+  (antes 22 s).
+- Neo4j: 8 de 8 recomendaciones iguales, con el mismo porque; congelada la primera 3 s.
+- `elastic/pruebas/facetas.py` 24 OK, `pruebas/caidas.mjs` 46 OK en las dos formas.
+- Falso positivo encontrado en la bateria y arreglado: el cortacircuitos de PostgreSQL se abria con la base
+  sana cuando 60 logins a la vez se esperaban en la misma fila (pool lleno / consulta larga). Ahora solo lo
+  abren fallos de conexion (esCaidaDePostgres).
+- `tsc`, eslint de todo el backend (se arreglo un formato de `pedidos.service.ts` de 25f0fe0) y
+  `svelte-check` limpios.
+
+`pruebas/correr_todas.sh` en modo remoto: Claude Code la DETUVO por memoria baja en la prueba 17 de 39.
+Las 16 que alcanzaron: etl_compras 30, grafo_compras 25, recomendaciones 29, carrito 42, carrito_vencimiento
+25, oferta_limitada 33, descuentos 98, reglas_descuento 44, reglas_periodo 61, ofertas_y_seguimientos 50,
+busquedas_sin_resultados 13, alertas_login 52, anillos_familia_b 40 (todas 0 FALLA), ofertas_paginadas y
+busqueda con sus SIN MEDIR de siempre, y anillos.sh 3 FALLA por el falso positivo de PostgreSQL de arriba.
+Arreglado y repetido: anillos.sh 27 OK, caidas.mjs 46 OK apagadas y 46 congeladas. **No se relanzo la
+bateria entera** (pidio no hacerlo solo por la memoria): faltan de eventos.sh a falla_checkout.sh. Para
+correrla: `source remoto/activar.sh` y `bash pruebas/correr_todas.sh` (unos 40 min), mejor con poco abierto.
+
+Visto en Edge a 1536x730 con cada base caida (12 capturas, todas abiertas): portada sin Redis con sus
+vitrinas, ficha sin Mongo con el aviso, labtop sin Elasticsearch con el panel de filtros y la categoria
+recortando las facetas, asdffff con Te pueden interesar, para ti y tambien compraron sin Neo4j, sin viste
+hace poco con ClickHouse caido, y con PostgreSQL caido la sesion abierta, la ficha sin vendedores y el aviso
+al entrar. Ninguna pantalla nombra una base. Los sugeridos juntan las copias de un lote (L1-0880) en una.
+
+Cosas para saber:
+
+- `frontend/src/routes/buscar/+page.svelte` quedo en LF, como los otros 853 archivos del indice (era el
+  unico con CRLF). Por eso su diff de 099857c es enorme; lo que cambio de verdad son los sugeridos.
+- El backend tarda unos 3 minutos en arrancar contra la PC de David (los workers de arranque).
+- La primera busqueda por vector con Ollama frio tarda ~8 s; los sugeridos le dan 3 s y pasan a lo mas
+  vendido.
+- Sin respaldo, a proposito: crear un avisame (el percolator es de Elasticsearch), el buscador de ofertas
+  del vendedor (la lista normal sigue), viste hace poco y las tendencias (las vistas solo viven en
+  ClickHouse), iniciar sesion sin PostgreSQL.
+- Pendientes del frontend que NO se tocaron (no los pidio Meme): pasar un pedido a enviado y entregado, y
+  la serie por dia para las graficas (`docs/BACKEND-PENDIENTE.md`).
+
+Como quedo la maquina: backend (directo a 100.64.42.11, sin interruptor), frontend en 5173, Ollama y panel de
+comandos ARRIBA, para que Meme pruebe. Docker local y WSL apagados. `backend/.env` en 100.64.42.11 sin tocar.
+Para apagar: los node de backend, frontend y panel, y ollama serve.
 
 **EMPIEZA AQUI (19-10, noche 3). Respaldo del catalogo: la tienda se ve sin MongoDB (4d63929).**
 El punto 1 del profesor ("apagan una base y la aplicacion sigue, con las que quedan"). Jose David dio permiso

@@ -74,7 +74,7 @@
 			// pero si se puede decir que pasa y que se puede seguir mirando.
 			errorGeneral =
 				respuesta.estado === 503
-					? 'No podemos iniciar sesion en este momento. Intenta de nuevo en un momento; mientras tanto puedes seguir mirando la tienda.'
+					? 'Ahora no podemos iniciar sesion. Intenta de nuevo en un momento, mientras tanto puedes seguir mirando la tienda.'
 					: respuesta.mensaje;
 			return;
 		}

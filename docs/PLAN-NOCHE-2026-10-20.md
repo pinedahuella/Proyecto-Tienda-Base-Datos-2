@@ -78,7 +78,7 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
 - [x] 8. sugeridos aparte (services/buscador/sugeridos.service.ts: vectores sin umbral, mas
         vendidos, mas resenados), total sigue 0 para ClickHouse; frontend: /buscar "Te pueden
         interesar" y la cabecera, sin registrar el clic.
-- [ ] 9. Frontend: avisos sin nombrar bases, sugeridos, carrito y login sin PostgreSQL.
+- [x] 9. Frontend: avisos sin nombrar bases (api.ts), sugeridos en /buscar y la cabecera, entrar y checkout con 503, aviso de la ficha. Textos sin dos puntos ni punto y coma.
 - [x] 10. Las 2 pruebas que fallaban, las dos eran de la herramienta y no de los datos:
         notas.sh 10 OK (remoto/bin/mongosh no traducia el /tmp de un guion pasado suelto; SI habia
         productos solo en Mongo, 1103 y 1104). correr_patrones.sh "Todo bien" (el control '-206'
@@ -89,8 +89,8 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
         cortacircuitos de PostgreSQL bajo carga (pool lleno / consulta larga). Arreglado (esCaidaDePostgres,
         consultaCorta mira pool.waitingCount, query_timeout 120 s, max 20): anillos.sh 27 OK, caidas 46+46.
         NO se relanzo la bateria completa (Claude Code pide no hacerlo solo); quedan sin correr de la 18 a la 39.
-- [ ] 12. Edge 1536x730 de cada caida, abrir cada captura.
-- [ ] 13. Docs: QUE-PASA-SI-SE-CAE-UNA-BASE.md, cambio_propuestas, TRASPASO, memoria. Commit y push.
+- [x] 12. Edge 1536x730: 12 capturas de las caidas + 2 finales, todas abiertas. Ninguna pantalla nombra una base. De ahi salio juntar las copias de lote en los sugeridos.
+- [x] 13. Docs al dia (QUE-PASA con guion de clase, cambio_propuestas, TRASPASO, BACKEND-PENDIENTE, ARQUITECTURA, comandos.txt, migrations y remoto README, PREGUNTAS 142-148), memoria. Backend directo otra vez.
 
 ## Si sobra tiempo (no lo pidio Meme, esta en docs/BACKEND-PENDIENTE.md como pedido del frontend)
 
@@ -108,6 +108,8 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
 - No editar el producto 21 por la API (etl_mongo.sh).
 
 ## Bitacora
+
+- 02:30 pasos 9, 12 y 13 hechos; todo pusheado; backend directo a la PC de David, interruptor apagado.
 
 - 02:10 paso 11, docs del 13 escritos; falso positivo de PG arreglado; commit. Sigue el 12 (Edge).
 
