@@ -433,8 +433,73 @@
 		}))
 	);
 
+	/**
+	 * Los filtros del buscador de ofertas (GET /vendedor/ofertas/buscar), que
+	 * hasta el 2026-10-19 era otra tarjeta encima de esta lista y no dejaba
+	 * editar lo que encontraba. Ahora es ESTE buscador: con texto o con alguno de
+	 * estos filtros, la lista sale de ahi (tolera errores de tecleo, mira la
+	 * variante, "laptop 16 gb") agrupada por producto, y cada producto se abre y
+	 * se edita como siempre. Sin nada puesto, el catalogo de 20 en 20.
+	 */
+	let fStock = $state('');
+	let fDescuento = $state('');
+	let fOrden = $state('');
+
+	let buscaOfertas = $derived(fNombre.trim() !== '' || fStock !== '' || fDescuento !== '' || fOrden !== '');
+
 	/** true si hay algun filtro puesto. */
-	let hayFiltro = $derived(fNombre.trim() !== '' || fCategoria !== '');
+	let hayFiltro = $derived(buscaOfertas || fCategoria !== '');
+
+	/** Lo que el buscador de ofertas manda de cada una; aqui solo hace falta el producto. */
+	interface OfertaEncontrada {
+		id_oferta: string;
+		id_producto: string;
+		nombre_producto: string;
+	}
+
+	/**
+	 * La busqueda de ofertas, agrupada por producto en el orden en que vienen
+	 * (la mas parecida primero, o el orden elegido). Con categoria, se cruza con
+	 * los productos de esa categoria. Deja la lista sin "Ver mas": trae hasta 100
+	 * ofertas, que en productos sobra.
+	 */
+	async function buscarOfertasDelCatalogo() {
+		const params = new URLSearchParams();
+		if (fNombre.trim()) params.set('q', fNombre.trim().slice(0, 100));
+		if (fStock) params.set('stock', fStock);
+		if (fDescuento) params.set('con_descuento', fDescuento);
+		if (fOrden) params.set('orden', fOrden);
+		params.set('pagina', '1');
+		params.set('limite', '100');
+
+		const [r, enCategoria] = await Promise.all([
+			pedir<{ ofertas: OfertaEncontrada[] }>(`/vendedor/ofertas/buscar?${params}`),
+			fCategoria !== ''
+				? pedir<ProductosPaginados>(`/productos?limite=200&id_categoria=${encodeURIComponent(fCategoria)}`)
+				: Promise.resolve(null)
+		]);
+		if (expiro(r)) return;
+		if (!r.ok || !r.payload) {
+			errorCatalogo = mensajeUtil(r);
+			productosCatalogo = [];
+			return;
+		}
+		const deCategoria = enCategoria && enCategoria.ok && enCategoria.payload
+			? new Map(enCategoria.payload.productos.map((p) => [p._id, p]))
+			: null;
+
+		const vistos = new Set<number>();
+		const lista: ProductoEnBusqueda[] = [];
+		for (const o of r.payload.ofertas ?? []) {
+			const id = Number(o.id_producto);
+			if (!Number.isFinite(id) || vistos.has(id)) continue;
+			if (deCategoria && !deCategoria.has(id)) continue;
+			vistos.add(id);
+			lista.push(deCategoria?.get(id) ?? { _id: id, nombre: o.nombre_producto });
+		}
+		productosCatalogo = lista;
+		cursor = null;
+	}
 
 	let temporizadorFiltro: ReturnType<typeof setTimeout> | null = null;
 
@@ -458,6 +523,9 @@
 		fCategoria = '';
 		fCategoriaTexto = '';
 		fCategoriaElegida = false;
+		fStock = '';
+		fDescuento = '';
+		fOrden = '';
 		void cargarTanda(true);
 	}
 
@@ -676,12 +744,41 @@
 	 * filtrada por estado. Con busqueda son las de `completas`, filtradas aqui por
 	 * estado y por texto.
 	 */
+	/**
+	 * Lo que encontro el buscador de ofertas para el texto de la caja, en su
+	 * orden (la mas parecida primero). Tolera errores de tecleo y entiende
+	 * "laptop 16 gb". null mientras no conteste o si falla: entonces se filtra
+	 * aqui, por "contiene", como antes.
+	 */
+	let idsBuscador = $state<string[] | null>(null);
+	let temporizadorLista: ReturnType<typeof setTimeout> | null = null;
+
+	async function preguntarAlBuscador() {
+		const q = busquedaLista.trim();
+		if (q === '') {
+			idsBuscador = null;
+			return;
+		}
+		const r = await pedir<{ ofertas: OfertaEncontrada[] }>(
+			`/vendedor/ofertas/buscar?q=${encodeURIComponent(q.slice(0, 100))}&pagina=1&limite=100`
+		);
+		if (busquedaLista.trim() !== q) return;
+		idsBuscador = r.ok && r.payload ? (r.payload.ofertas ?? []).map((o) => String(o.id_oferta)) : null;
+	}
+
 	let listaFiltrada = $derived.by(() => {
 		const texto = plano(busquedaLista.trim());
 		if (texto === '') return ofertas;
 
 		const base = completas ?? [];
 		const porEstado = filtro === 'todas' ? base : base.filter((o) => o.estado === filtro);
+
+		if (idsBuscador) {
+			const puesto = new Map(idsBuscador.map((id, i) => [id, i]));
+			return porEstado
+				.filter((o) => puesto.has(String(o.id_oferta)))
+				.sort((a, b) => (puesto.get(String(a.id_oferta)) ?? 0) - (puesto.get(String(b.id_oferta)) ?? 0));
+		}
 
 		// Busca en el producto Y en la variante: quien tiene casi mil ofertas suele
 		// acordarse de una por la talla o el color, no por el nombre completo.
@@ -833,6 +930,9 @@
 	 * Ver la explicacion de `busquedaLista`.
 	 */
 	async function alBuscarEnLista() {
+		if (temporizadorLista) clearTimeout(temporizadorLista);
+		idsBuscador = null;
+		temporizadorLista = setTimeout(() => void preguntarAlBuscador(), ESPERA_MS);
 		if (busquedaLista.trim() === '' || completas !== null || cargandoCompletas) return;
 		cargandoCompletas = true;
 		const r = await pedir<Oferta[]>('/vendedor/ofertas');
@@ -862,6 +962,14 @@
 		// Al filtrar se empieza de cero: el cursor de la tanda anterior es de
 		// otra busqueda y saltaria productos.
 		if (reiniciar) cursor = null;
+
+		// Con texto o con un filtro de ofertas, la lista sale del buscador de
+		// ofertas (ver `buscaOfertas`), de una sola vez.
+		if (buscaOfertas) {
+			if (reiniciar) await buscarOfertasDelCatalogo();
+			cargandoTanda = false;
+			return;
+		}
 
 		const partes = [`limite=${POR_TANDA}`];
 		if (!reiniciar && cursor !== null) partes.push(`despues_de=${cursor}`);
@@ -2118,11 +2226,9 @@
 					tienda ni se puede comprar. Al rechazar hay que decir por que: el vendedor lo lee
 					y corrige.
 				{:else if vista === 'catalogo'}
-					La tienda oferta todo el catalogo, asi que se entra por el producto: abre uno y
-					ajusta ahi el precio y las existencias de cada presentacion.
+					Busca un producto, abrelo y cambia su precio o sus existencias.
 				{:else if vista === 'lista'}
-					Lo que vendes, a que precio y con cuantas unidades. El producto es del catalogo
-					compartido; la oferta es tuya.
+					Lo que vendes, a que precio y cuantas unidades te quedan.
 				{:else if administraLaTienda}
 					Busca el producto y ponle precio a una presentacion que todavia no ofrezcas.
 				{:else}
@@ -2283,7 +2389,7 @@
 					bind:value={fNombre}
 					oninput={alFiltrarNombre}
 					autocomplete="off"
-					placeholder="Nombre del producto"
+					placeholder="Producto o presentacion, por ejemplo laptop 16 gb"
 				/>
 			</label>
 
@@ -2308,6 +2414,26 @@
 					opcional
 					compacto
 				/>
+			</div>
+
+			<div class="selectores-filtro">
+				<select bind:value={fStock} onchange={() => cargarTanda(true)} aria-label="Existencias">
+					<option value="">Con y sin existencias</option>
+					<option value="con_stock">Con existencias</option>
+					<option value="agotadas">Agotadas</option>
+				</select>
+				<select bind:value={fDescuento} onchange={() => cargarTanda(true)} aria-label="Descuento">
+					<option value="">Con y sin descuento</option>
+					<option value="true">Con descuento</option>
+					<option value="false">Sin descuento</option>
+				</select>
+				<select bind:value={fOrden} onchange={() => cargarTanda(true)} aria-label="Orden">
+					<option value="">Mas parecidos primero</option>
+					<option value="precio_asc">Mas baratos primero</option>
+					<option value="precio_desc">Mas caros primero</option>
+					<option value="stock_asc">Menos existencias primero</option>
+					<option value="recientes">Mas nuevos primero</option>
+				</select>
 			</div>
 
 			{#if hayFiltro}
@@ -2420,7 +2546,7 @@
 													{#if mia.es_inventario_limitado}
 														<span
 															class="relampago"
-															title="El stock de esta oferta lo lleva Redis mientras la venta este abierta"
+															title="Mientras la venta relampago este abierta, estas son las unidades que le quedan"
 														>
 															Venta relampago abierta
 															{textoHasta(mia.fecha_vencimiento_venta_limitada)}
@@ -2673,7 +2799,7 @@
 						bind:value={busquedaLista}
 						oninput={alBuscarEnLista}
 						autocomplete="off"
-						placeholder="Buscar por producto o presentacion"
+						placeholder="Producto o presentacion, por ejemplo laptop 16 gb"
 					/>
 				</label>
 			</div>
@@ -2743,7 +2869,7 @@
 								{#if o.es_inventario_limitado}
 									<span
 										class="relampago"
-										title="El stock de esta oferta lo lleva Redis mientras la venta este abierta"
+										title="Mientras la venta relampago este abierta, estas son las unidades que le quedan"
 									>
 										Venta relampago abierta
 										{textoHasta(o.fecha_vencimiento_venta_limitada)}
@@ -3647,6 +3773,18 @@
 
 	.campo-filtro input {
 		width: 100%;
+	}
+
+	/* Los tres filtros de ofertas, en una linea debajo del buscador. */
+	.selectores-filtro {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--e2);
+		flex-basis: 100%;
+	}
+
+	.selectores-filtro select {
+		flex: 1 1 180px;
 	}
 
 	/* La barra de la lista: las pestanas a la izquierda y el buscador a la

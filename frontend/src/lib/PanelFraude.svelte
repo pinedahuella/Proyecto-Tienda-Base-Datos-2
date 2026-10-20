@@ -655,7 +655,7 @@
 			case 'descartada':
 				return 'No hay alertas descartadas.';
 			default:
-				return 'Ningun intento de entrada ha cruzado un limite. Se vigilan nueve senales: cuatro contadores de Redis en el propio login y cinco consultas contra el historial en Elasticsearch.';
+				return 'Ninguna entrada sospechosa por ahora.';
 		}
 	}
 
@@ -987,7 +987,7 @@
 	};
 
 	const QUE_ES_HALLAZGO: Record<TipoHallazgo, string> = {
-		vistas_infladas: 'Un producto con demasiadas vistas por sesion, como si alguien refrescara su ficha.',
+		vistas_infladas: 'Un producto que una misma persona abre una y otra vez.',
 		compras_en_rafaga: 'Una cuenta con muchos pedidos en pocos minutos.',
 		ip_multicuenta_compras: 'Varias cuentas que compran desde la misma IP.',
 		devoluciones_seriales: 'Devuelve la mitad o mas de lo que compra.',
@@ -1010,8 +1010,48 @@
 		unidades_compradas: 'Unidades compradas',
 		unidades_devueltas: 'Unidades devueltas',
 		veces: 'Veces',
-		tasa: 'Tasa'
+		tasa: 'Tasa',
+		compradas: 'Compradas',
+		devueltas: 'Devueltas',
+		tasa_devolucion: 'Devuelve',
+		pedidos_en_el_periodo: 'Pedidos en el mes',
+		cuentas_en_la_peor_ventana: 'Cuentas creadas juntas',
+		contradictorias: 'Notas que contradicen el texto',
+		resenas_valoradas: 'Resenas leidas',
+		porcentaje: 'Porcentaje',
+		fallos: 'Intentos fallidos',
+		ips_distintas: 'Lugares distintos',
+		distancia_km: 'Distancia en km',
+		velocidad_kmh: 'Velocidad en km por hora',
+		logins_exitosos_previos: 'Entradas anteriores',
+		ips_conocidas: 'Lugares conocidos',
+		resenas_parecidas: 'Resenas casi iguales',
+		resenas_con_gemela: 'Resenas casi iguales',
+		resenas_analizadas: 'Resenas leidas',
+		horas: 'Horas entre una y otra',
+		minutos: 'Minutos',
+		autor_minutos_vida: 'Minutos de vida de la cuenta',
+		regularidad: 'Regularidad'
 	};
+
+	/**
+	 * Lo que NO se ensena de un detalle: los parametros con que se midio (el
+	 * umbral, la ventana, el modelo, los minimos) y los ids internos. A quien
+	 * revisa le dicen nada; "umbral coseno 0.92" en pantalla es ruido.
+	 */
+	const DATO_INTERNO = /^(id_|umbral|ventana|modelo|largo|min_|max_|minimo|maximo|porcentaje_minimo|dias_|horas_|limite|lote|clave|version|cuenta$|vendedor$|producto$|empezo$|primera$|ultima$|ventana_inicio)/;
+
+	function datoVisible(k: string, v: unknown): boolean {
+		return !DATO_INTERNO.test(k) && (typeof v === 'number' || (typeof v === 'string' && v.length < 40));
+	}
+
+	/** Un valor de detalle escrito para una persona: las tasas como porcentaje. */
+	function valorDato(k: string, v: unknown): string {
+		if (typeof v !== 'number') return String(v);
+		if ((k === 'tasa' || k.startsWith('tasa_')) && v <= 1) return `${Math.round(v * 100)} %`;
+		if (k === 'porcentaje') return `${Math.round(v)} %`;
+		return String(Math.round(v * 100) / 100);
+	}
 
 	/** Las claves que son un id interno no se ensenan: la cuenta ya sale con su nombre. */
 	const CLAVE_VISIBLE: Partial<Record<TipoHallazgo, string>> = {
@@ -1021,10 +1061,10 @@
 
 	function datosHallazgo(h: Hallazgo): { nombre: string; valor: string }[] {
 		return Object.entries(h.detalle ?? {})
-			.filter(([k, v]) => !k.startsWith('id_') && (typeof v === 'number' || typeof v === 'string'))
+			.filter(([k, v]) => datoVisible(k, v))
 			.map(([k, v]) => ({
 				nombre: NOMBRE_DATO[k] ?? k.replace(/_/g, ' '),
-				valor: k === 'tasa' && typeof v === 'number' && v <= 1 ? `${Math.round(v * 100)} %` : String(v)
+				valor: valorDato(k, v)
 			}));
 	}
 
@@ -1132,7 +1172,7 @@
 
 	function etiquetaHallazgos(): string {
 		if (filtroVistoHallazgos === 'todas') {
-			return `${totalHallazgos} ${totalHallazgos === 1 ? 'hallazgo' : 'hallazgos'}`;
+			return `${totalHallazgos} ${totalHallazgos === 1 ? 'caso' : 'casos'}`;
 		}
 		const nombre = NOMBRE_FILTRO[filtroVistoHallazgos].toLowerCase();
 		return `${totalHallazgos} ${totalHallazgos === 1 ? nombre.slice(0, -1) : nombre}`;
@@ -1141,11 +1181,11 @@
 	function textoVacioHallazgos(): string {
 		switch (filtroVistoHallazgos) {
 			case 'pendiente':
-				return 'No hay hallazgos pendientes de revisar.';
+				return 'No hay nada pendiente de revisar.';
 			case 'revisada':
-				return 'No hay hallazgos revisados.';
+				return 'No hay nada revisado.';
 			case 'descartada':
-				return 'No hay hallazgos descartados.';
+				return 'No hay nada descartado.';
 			default:
 				return 'El detector todavia no encontro nada raro en compras, carritos ni registros.';
 		}
@@ -1160,7 +1200,7 @@
 			case 'descartada':
 				return 'No hay anillos descartados.';
 			default:
-				return 'Ningun anillo ni patron de resenas sigue activo en la ventana de 60 dias.';
+				return 'Ningun grupo de resenas sospechoso en los ultimos 60 dias.';
 		}
 	}
 
@@ -1272,8 +1312,8 @@
 	/** Los numeros de la evidencia que valen la pena. Las listas (IPs, identificadores) se quedan en su pestana. */
 	function datosEvidencia(e: EvidenciaCaso): string {
 		return Object.entries(e.metricas ?? {})
-			.filter(([k, v]) => !k.startsWith('id_') && (typeof v === 'number' || typeof v === 'string'))
-			.map(([k, v]) => `${NOMBRE_DATO[k] ?? k.replace(/_/g, ' ')} ${typeof v === 'number' ? Math.round(v * 100) / 100 : v}`)
+			.filter(([k, v]) => datoVisible(k, v))
+			.map(([k, v]) => `${(NOMBRE_DATO[k] ?? k.replace(/_/g, ' ')).toLowerCase()} ${valorDato(k, v)}`)
 			.join(', ');
 	}
 
@@ -1522,9 +1562,8 @@
 	</div>
 
 	<p class="intro">
-		Un caso junta lo que encuentran las otras pestanas cuando toca a las mismas cuentas, y le pone
-		un puntaje. Mas puntos si viene de varias fuentes y si es reciente. Casi confirmado quiere decir
-		que cumple una regla que casi nunca tiene otra explicacion. Se recalculan al arrancar y cada 15 minutos.
+		Junta todo lo sospechoso de las mismas cuentas y le pone puntos. Casi confirmado quiere decir
+		que es muy dificil que sea otra cosa.
 	</p>
 
 	<div class="filtros-alertas">
@@ -1578,7 +1617,7 @@
 					{#if c.reglas_cumplidas.length > 0}
 						<ul class="reglas">
 							{#each c.reglas_cumplidas as regla (regla)}
-								<li><span class="clave">{regla}</span> {QUE_ES_REGLA[regla] ?? ''}</li>
+								<li>{QUE_ES_REGLA[regla] ?? regla}</li>
 							{/each}
 						</ul>
 					{/if}
@@ -1771,10 +1810,8 @@
 	</div>
 
 	<p class="intro">
-		Nueve senales vigilan las entradas al portal: cuatro contadores de Redis en el propio login y
-		cinco consultas contra el historial completo en Elasticsearch (toma de cuenta, viaje imposible
-		y tres patrones repartidos en 24 horas). Cuando una cruza su limite queda aqui una alerta para
-		que alguien la mire. Nadie se bloquea solo: esto avisa, no frena.
+		Intentos de entrar que no parecen normales: muchas claves malas, muchas cuentas desde un
+		mismo lugar o una cuenta que entra desde otro pais. Esto solo avisa, no bloquea a nadie.
 	</p>
 
 	<div class="filtros-alertas">
@@ -1995,10 +2032,8 @@
 	</div>
 
 	<p class="intro">
-		Lo que se ve en los eventos de la tienda y no en las resenas. Compras muy seguidas, varias
-		cuentas desde la misma IP, carritos que apartan sin comprar, devoluciones en serie o cuentas
-		creadas en lote. Una vez al dia el sistema revisa los ultimos 30 dias en ClickHouse y guarda
-		lo que encuentra para revisarlo aqui.
+		Compras muy seguidas, varias cuentas comprando desde un mismo lugar, productos con visitas
+		infladas o cuentas que devuelven casi todo. Se revisa una vez al dia.
 	</p>
 
 	<div class="filtros-alertas">
@@ -2171,13 +2206,8 @@
 	</div>
 
 	<p class="intro">
-		Grupos de cuentas cuyo patron de calificaciones no se explica por el uso normal de la
-		tienda. Se califican entre si, se devuelven la nota en minutos, califican juntas, o
-		inflan a un vendedor con cuentas recien creadas.
-		Cada 15 minutos, y de inmediato tras cada resena nueva, un worker recorre el grafo de
-		relaciones entre cuentas, resenas y productos sobre una ventana de 60 dias y guarda lo que
-		encuentra, con estado propio para que un admin lo trabaje como una cola. Cuentas que
-		comparten direccion todavia no se detecta.
+		Cuentas que se ponen buenas notas entre si, que copian la misma resena o que inflan a un
+		vendedor con cuentas recien creadas. Se revisa al llegar cada resena y cada 15 minutos.
 	</p>
 
 	<!--
@@ -2189,17 +2219,14 @@
 	{#if conciliacion}
 		<p class="sincro" class:atrasado={!conciliacion.cuadra}>
 			{#if conciliacion.cuadra}
-				Grafo al dia con PostgreSQL, sincronizado {hace(conciliacion.ultima_sincronizacion)}.
+				Al dia, revisado {hace(conciliacion.ultima_sincronizacion)}.
 			{:else}
 				<strong>Esta lista puede estar incompleta.</strong>
 				{#if conciliacion.cola && conciliacion.cola.pendientes > 0}
-					El grafo no cuadra con PostgreSQL y hay {conciliacion.cola.pendientes}
-					{conciliacion.cola.pendientes === 1 ? 'cambio' : 'cambios'} sin aplicar.
+					Faltan {conciliacion.cola.pendientes}
+					{conciliacion.cola.pendientes === 1 ? 'resena' : 'resenas'} por revisar.
 				{:else}
-					El grafo no cuadra con PostgreSQL.
-				{/if}
-				{#if conciliacion.sugerencia}
-					{conciliacion.sugerencia}
+					Faltan resenas por revisar.
 				{/if}
 			{/if}
 			{#if conciliacion.cola && conciliacion.cola.apartados > 0}

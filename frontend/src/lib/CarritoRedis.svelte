@@ -372,11 +372,7 @@
 		{/if}
 	</div>
 
-	<p class="intro">
-		Se guarda en <strong>Redis</strong> para que sea rapido y en <strong>PostgreSQL</strong>, que
-		es la copia que vale. Caduca a las 24 horas sin tocarlo, y el reloj vuelve a empezar cada vez
-		que lo abres o lo cambias.
-	</p>
+	<p class="intro">Tu carrito se guarda 24 horas desde la ultima vez que lo tocas.</p>
 
 	<!-- El precio es el de cuando agregaste. Decirlo aqui y no en el checkout:
 	     es donde la persona mira los numeros y decide. -->
@@ -411,10 +407,7 @@
 	{:else if !hayLineas}
 		<div class="caja">
 			<h3>Tu carrito esta vacio</h3>
-			<p class="gris">
-				Un carrito vacio no ocupa nada: no existe ni en Redis ni en PostgreSQL hasta que
-				agregas el primer producto.
-			</p>
+			<p class="gris">Agrega un producto desde su ficha y aparece aqui.</p>
 		</div>
 	{:else if carrito}
 		{#if desincronizado}
@@ -429,7 +422,7 @@
 		{/if}
 		{#if carrito.fuente === 'postgres'}
 			<p class="gris" role="status">
-				Redis no responde: el carrito va directo a PostgreSQL y puede ir mas lento.
+				Tu carrito puede ir un poco mas lento ahora, pero funciona igual.
 			</p>
 		{/if}
 		{#if noComprables.length > 0}

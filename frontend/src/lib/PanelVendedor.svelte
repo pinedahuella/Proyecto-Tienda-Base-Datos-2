@@ -1351,16 +1351,12 @@
 		<div class="bloque">
 			<h3>{productoHistorial.nombre}</h3>
 			<p class="menor">
-				Se reconstruye juntando el evento de creacion y las modificaciones anteriores a la fecha que
-				elijas. Reconstruye <strong>nombre, descripcion, categoria y variantes</strong>: son los
-				campos que guardan los eventos del catalogo.
+				Asi estaban su <strong>nombre, descripcion, categoria y variantes</strong> en la fecha que
+				elijas.
 			</p>
 			<p class="menor">
-				El <strong>precio</strong> y las <strong>existencias</strong> no salen de esos eventos:
-				al volverse multi-vendedor un producto dejo de tener un precio -- tiene uno por
-				vendedor. Se piden aparte, a <code>precio_historial</code> y a
-				<code>stock_movimiento</code> de PostgreSQL, y son los de la oferta de la tienda. Las
-				caracteristicas no llevan historial: se ven las de hoy.
+				El <strong>precio</strong> y las <strong>existencias</strong> que salen son los de la
+				tienda en esa fecha. Las caracteristicas se ven como estan hoy.
 			</p>
 
 			<div class="par">

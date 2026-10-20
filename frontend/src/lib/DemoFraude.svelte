@@ -45,19 +45,19 @@
 		{
 			id: 'fuerza_bruta_cuenta',
 			nombre: 'Fuerza bruta contra una cuenta',
-			explica: '6 intentos fallidos contra LA MISMA cuenta en un minuto (el umbral es 5).',
+			explica: '6 claves malas a la misma cuenta en un minuto. Avisa desde 5.',
 			necesitaCuenta: true
 		},
 		{
 			id: 'fuerza_bruta_ip',
 			nombre: 'Fuerza bruta desde una IP',
-			explica: '8 intentos repartidos en 2 identificadores desde este equipo (el umbral de la IP es 8, sin que ninguno de los dos cruce el de cuenta).',
+			explica: '8 claves malas desde esta computadora, repartidas en 2 cuentas. Avisa desde 8.',
 			necesitaCuenta: false
 		},
 		{
 			id: 'multi_cuenta_ip',
 			nombre: 'Varias cuentas desde la misma IP',
-			explica: '4 cuentas reales, un fallo cada una, todas desde este equipo (el umbral es 4 cuentas distintas).',
+			explica: '4 cuentas distintas probadas desde esta computadora, una clave mala cada una. Avisa desde 4.',
 			necesitaCuenta: false
 		}
 	];
@@ -250,10 +250,7 @@
 		<h2>Demostraciones</h2>
 	</div>
 	<p class="intro">
-		Para la defensa. Cada bloque dispara una senal de fraude de verdad contra el sistema en
-		ejecucion, con cuentas y compras reales -- no hay boton de deshacer. Son la version visual de
-		<code>demo-evento-fraude.ps1</code>, <code>demo-anillo-resenas.ps1</code>,
-		<code>demo-patrones-resenas.ps1</code> y <code>arrancar.ps1 -Productos</code>.
+		Cada bloque arma un fraude de verdad, con cuentas y compras reales. No se puede deshacer.
 	</p>
 
 	<article class="bloque">
@@ -337,10 +334,7 @@
 					</button>
 				</div>
 				<p class="por-que">
-					Por que el ultimo paso es un comando y no un clic: comprar de verdad recorre
-					PostgreSQL, Redis y Mongo con la misma transaccion que usa un comprador real, y ese
-					camino ya esta escrito y probado en el script. Repetirlo aqui con fetch habria sido
-					una segunda copia de la misma logica, y una copia es lo que se desincroniza primero.
+					El ultimo paso es un comando porque hace compras de verdad, igual que un comprador.
 				</p>
 				<a class="ver" href="/panel?s=fraude">Abrir Fraude para ver el anillo</a>
 			</div>
@@ -432,9 +426,6 @@
 		font-size: var(--f-base);
 	}
 
-	.intro code {
-		font-size: 0.92em;
-	}
 
 	.bloque {
 		padding: 18px 20px;

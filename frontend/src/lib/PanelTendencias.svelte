@@ -4,6 +4,7 @@
 	import { NOMBRE_PRECIO, NOMBRE_CALIFICACION } from './buscador';
 	import TendenciasAuto from './TendenciasAuto.svelte';
 	import TendenciasSenales from './TendenciasSenales.svelte';
+	import Barras from './graficas/Barras.svelte';
 
 	/**
 	 * Panel de tendencias. Es la pantalla de la familia COLUMNAR del proyecto,
@@ -116,76 +117,87 @@
 		explica: string;
 	}
 
+	// Vistas, busquedas, clics y filtros cuentan SESIONES distintas, y el carrito
+	// CUENTAS distintas; en pantalla las dos son "personas". Una persona que mira
+	// algo cien veces cuenta una sola.
 	const RANKINGS: Ranking[] = [
 		{
 			clave: 'vista',
 			nombre: 'Vistas',
 			agrupa: 'producto',
-			unidad: ['sesion distinta', 'sesiones distintas'],
-			explica:
-				'Cuantas sesiones distintas abrieron la ficha. Una persona que la mira cien veces cuenta una sola. La ficha es publica, por eso se cuentan sesiones y no cuentas.'
+			unidad: ['persona', 'personas'],
+			explica: 'Cuantas personas abrieron cada producto. Si alguien lo abre muchas veces, cuenta una.'
 		},
 		{
 			clave: 'carrito',
 			nombre: 'Carrito',
 			agrupa: 'producto',
-			unidad: ['cuenta distinta', 'cuentas distintas'],
-			explica:
-				'Cuantas cuentas distintas lo agregaron al carrito. El carrito exige cuenta, asi que aqui se cuentan cuentas.'
+			unidad: ['persona', 'personas'],
+			explica: 'Cuantas personas lo pusieron en su carrito.'
 		},
 		{
 			clave: 'compra',
 			nombre: 'Compras',
 			agrupa: 'producto',
 			unidad: ['unidad', 'unidades'],
-			explica: 'Unidades vendidas en pedidos pagados. Cada unidad cuenta, sin dividir por persona.'
+			explica: 'Cuantas unidades se vendieron de cada producto.'
 		},
 		{
 			clave: 'devolucion',
 			nombre: 'Devoluciones',
 			agrupa: 'producto',
 			unidad: ['unidad', 'unidades'],
-			explica:
-				'Unidades devueltas de pedidos que ya estaban pagados. Cancelar un pedido pendiente no cuenta.'
+			explica: 'Cuantas unidades se devolvieron despues de pagarlas.'
 		},
 		{
 			clave: 'busqueda',
 			nombre: 'Busquedas',
 			agrupa: 'termino',
-			unidad: ['sesion distinta', 'sesiones distintas'],
-			explica: 'Que tan buscado esta cada termino, en sesiones distintas y no en teclazos.'
+			unidad: ['persona', 'personas'],
+			explica: 'Lo que mas escribe la gente en el buscador.'
 		},
 		{
 			clave: 'busqueda-clic',
-			nombre: 'Clics de busqueda',
+			nombre: 'Clics en resultados',
 			agrupa: 'termino',
-			unidad: ['sesion distinta', 'sesiones distintas'],
-			explica:
-				'Que terminos terminan en un clic sobre un resultado, en sesiones distintas. Un termino muy buscado y poco cliqueado suele ser un buscador que no encuentra lo que la gente quiere.'
+			unidad: ['persona', 'personas'],
+			explica: 'Busquedas que terminaron en un clic. Si algo se busca mucho y casi no tiene clics, la gente no encuentra lo que quiere.'
 		},
 		{
 			clave: 'categorias-mas-buscadas',
-			nombre: 'Categorias filtradas',
+			nombre: 'Categorias',
 			agrupa: 'faceta',
-			unidad: ['sesion distinta', 'sesiones distintas'],
-			explica:
-				'Que categorias marca la gente en el panel de /buscar. Solo cuentan las busquedas facetadas, la de la cabecera no filtra.'
+			unidad: ['persona', 'personas'],
+			explica: 'Las categorias que mas eligen en los filtros de busqueda.'
 		},
 		{
 			clave: 'precios-mas-buscados',
-			nombre: 'Precios filtrados',
+			nombre: 'Precios',
 			agrupa: 'faceta',
-			unidad: ['sesion distinta', 'sesiones distintas'],
-			explica: 'Que rango de precio marca la gente al buscar. Dice cuanto esta dispuesta a gastar.'
+			unidad: ['persona', 'personas'],
+			explica: 'Los rangos de precio que mas eligen. Dice cuanto quieren gastar.'
 		},
 		{
 			clave: 'calificaciones-mas-buscadas',
-			nombre: 'Estrellas filtradas',
+			nombre: 'Estrellas',
 			agrupa: 'faceta',
-			unidad: ['sesion distinta', 'sesiones distintas'],
-			explica: 'Cuantas veces se pide un minimo de estrellas al buscar.'
+			unidad: ['persona', 'personas'],
+			explica: 'Cuantas veces piden un minimo de estrellas al buscar.'
 		}
 	];
+
+	/** El color de cada ranking, el mismo que su tarjeta en el resumen. */
+	const COLOR: Record<Clave, string> = {
+		vista: 'var(--g1)',
+		carrito: 'var(--g5)',
+		compra: 'var(--g3)',
+		devolucion: 'var(--g4)',
+		busqueda: 'var(--g2)',
+		'busqueda-clic': 'var(--g6)',
+		'categorias-mas-buscadas': 'var(--g1)',
+		'precios-mas-buscados': 'var(--g2)',
+		'calificaciones-mas-buscadas': 'var(--g3)'
+	};
 
 	/** Las ventanas que se pueden pedir. La ruta tope en 365, que es el TTL de las tablas. */
 	const VENTANAS = [1, 7, 14, 30, 90, 365];
@@ -396,18 +408,14 @@
 		{/if}
 	</div>
 
-	<p class="intro">
-		Lo que se mira aqui son eventos, no ventas. Cada vista, cada carrito, cada compra y cada
-		busqueda queda guardada con su hora, y de ese rastro sale lo que se esta calentando antes de
-		que llegue a la tabla de pedidos.
-	</p>
+	<p class="intro">Lo que la gente mira, compra y busca en la tienda.</p>
 
 	<div class="pestanas" role="group" aria-label="Como ver las tendencias">
 		<button type="button" class:activa={vista === 'auto'} aria-pressed={vista === 'auto'} onclick={() => (vista = 'auto')}>
-			Automaticas y mis consultas
+			Resumen
 		</button>
 		<button type="button" class:activa={vista === 'senales'} aria-pressed={vista === 'senales'} onclick={() => (vista = 'senales')}>
-			Senales
+			Para revisar
 		</button>
 		<button type="button" class:activa={vista === 'rankings'} aria-pressed={vista === 'rankings'} onclick={() => (vista = 'rankings')}>
 			Rankings
@@ -434,7 +442,7 @@
 
 	<div class="mandos">
 		<label>
-			<span>Ventana</span>
+			<span>Dias</span>
 			<select value={String(dias)} onchange={(e) => cambiarVentana(e.currentTarget.value)}>
 				{#each VENTANAS as v (v)}
 					<option value={String(v)}>{etiquetaVentana(v)}</option>
@@ -462,18 +470,10 @@
 
 	<!-- Lo que mide esta pestana. Va siempre, antes de cualquier cifra: el mismo 40
 	     quiere decir cosas distintas segun la pestana. -->
-	<p class="mide">
-		<strong>{actual.nombre}.</strong>
-		{actual.explica}
-	</p>
-
-	<p class="aviso">
-		Aqui solo cuentan los eventos reales, los que mando el portal o salieron de un pedido pagado.
-		Lo que siembra el generador de lotes no entra en ninguna de estas listas.
-	</p>
+	<p class="mide">{actual.explica}</p>
 
 	{#if cargando}
-		<p class="gris">Midiendo el rastro de eventos...</p>
+		<p class="gris">Calculando...</p>
 	{:else if error}
 		<div class="fallo" role="alert">
 			<p>{error}</p>
@@ -483,43 +483,19 @@
 		<!-- El vacio CON su denominador. Un cero solo es una duda; un cero que dice
 		     contra que se midio es un resultado. -->
 		<p class="vacio">
-			No hubo ningun evento de {actual.nombre.toLowerCase()} en {dias === 1
-				? 'el ultimo dia'
-				: `los ultimos ${dias} dias`}. La consulta corrio bien y no devolvio filas, o sea que no
-			falta nada, no paso.
+			Nada en {dias === 1 ? 'el ultimo dia' : `los ultimos ${dias} dias`}.
 		</p>
 	{:else}
-		<ul class="lista">
-			{#each filas as f, i (f.id)}
-				<li class="fila">
-					<div class="fila-cabeza">
-						<span class="puesto">{i + 1}</span>
-						{#if f.enlace}
-							<a class="nombre" href={f.enlace}>{f.titulo}</a>
-						{:else}
-							<span class="nombre sin-enlace">{f.titulo}</span>
-						{/if}
-						{#if f.detalle}
-							<span class="detalle">{f.detalle}</span>
-						{/if}
-						<span class="total">
-							{f.total}
-							<small>{f.total === 1 ? actual.unidad[0] : actual.unidad[1]}</small>
-						</span>
-					</div>
-
-					<div class="barra" aria-hidden="true">
-						<span style="width: {ancho(f.total)}%"></span>
-					</div>
-				</li>
-			{/each}
-		</ul>
+		<div class="tarjeta-lista">
+			<Barras
+				color={COLOR[clave]}
+				unidad={actual.unidad[1]}
+				filas={filas.map((f) => ({ id: f.id, nombre: f.titulo, valor: f.total, detalle: f.detalle, enlace: f.enlace }))}
+			/>
+		</div>
 
 		{#if direccion === 'negativo'}
-			<p class="pie">
-				Solo aparecen los que tuvieron al menos un evento en la ventana. Lo que no se movio nada
-				no sale en ninguna lista.
-			</p>
+			<p class="pie">Solo salen los que tuvieron algo de movimiento en esos dias.</p>
 		{/if}
 	{/if}
 	{/if}
@@ -624,12 +600,6 @@
 		color: var(--tinta);
 	}
 
-	.aviso {
-		max-width: 640px;
-		margin-bottom: var(--e5);
-		font-size: var(--f-ms);
-		color: var(--gris-2);
-	}
 
 	.gris {
 		color: var(--gris);
@@ -667,91 +637,30 @@
 		color: var(--gris-2);
 	}
 
-	/* -- la lista -- */
-
-	.lista {
-		list-style: none;
-		display: flex;
-		flex-direction: column;
-		gap: var(--e3);
-	}
-
-	.fila {
-		padding: 14px 18px;
+	.tarjeta-lista {
+		padding: 20px 22px;
+		background: var(--off);
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
 	}
 
-	.fila-cabeza {
-		display: flex;
-		align-items: baseline;
-		gap: var(--e2);
-		flex-wrap: wrap;
-	}
+	/* -- la lista -- */
 
-	.puesto {
-		min-width: 22px;
-		font-size: var(--f-sm);
-		color: var(--gris-2);
-	}
 
-	.nombre {
-		font-size: var(--f-base);
-		font-weight: 500;
-		color: var(--indigo);
-		overflow-wrap: anywhere;
-	}
 
-	/* Un producto ya borrado no tiene a donde llevar: se pinta en gris y sin
-	   subrayado, para que no parezca un enlace roto. */
-	.nombre.sin-enlace {
-		color: var(--gris);
-		font-weight: 400;
-	}
 
-	.detalle {
-		font-size: var(--f-sm);
-		color: var(--gris);
-	}
 
-	/* El total es lo primero que se busca al mirar la fila, y va al final para
-	   que la columna de cifras quede alineada a la derecha. */
-	.total {
-		margin-left: auto;
-		font-size: var(--f-md);
-		font-weight: 500;
-		color: var(--tinta);
-		white-space: nowrap;
-	}
 
-	.total small {
-		font-size: var(--f-sm);
-		font-weight: 400;
-		color: var(--gris);
-	}
 
-	.barra {
-		height: 8px;
-		margin-top: var(--e2);
-		background: var(--panel);
-		border-radius: 999px;
-		overflow: hidden;
-	}
 
-	.barra span {
-		display: block;
-		height: 100%;
-		background: var(--indigo);
-		border-radius: 999px;
-	}
+
+
+
 
 	@media (max-width: 620px) {
 		.tendencias {
 			padding: 18px 16px;
 		}
 
-		.total {
-			margin-left: 0;
-		}
 	}
 </style>

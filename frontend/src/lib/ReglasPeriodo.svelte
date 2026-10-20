@@ -28,6 +28,7 @@
 	import { onMount } from 'svelte';
 	import { pedir, conJson, mensajeUtil, type RespuestaApi } from './api';
 	import { textoConflictoDescuento, textoPorcentaje } from './descuento';
+	import Autocompletar from './Autocompletar.svelte';
 
 	let { alExpirarSesion }: { alExpirarSesion?: () => void } = $props();
 
@@ -98,6 +99,8 @@
 	let error = $state('');
 
 	let idOfertaNueva = $state('');
+	let textoOfertaNueva = $state('');
+	let ofertaNuevaElegida = $state(false);
 	let nueva = $state<Borrador>(vacio());
 	let creando = $state(false);
 	let errorCrear = $state('');
@@ -234,6 +237,8 @@
 			return;
 		}
 		idOfertaNueva = '';
+		textoOfertaNueva = '';
+		ofertaNuevaElegida = false;
 		nueva = vacio();
 		await cargar(1);
 	}
@@ -339,15 +344,21 @@
 	<form class="nueva" onsubmit={crear}>
 		<h3>Nueva regla</h3>
 		<div class="campos">
-			<label class="ancho">
-				Oferta
-				<select bind:value={idOfertaNueva} disabled={ofertas.length === 0}>
-					<option value="">{ofertas.length === 0 ? 'Todavia no tienes ofertas' : 'Elige una'}</option>
-					{#each ofertas as o (o.id_oferta)}
-						<option value={o.id_oferta}>{o.nombre_producto}, {o.nombre_variante}</option>
-					{/each}
-				</select>
-			</label>
+			<!-- Con buscador y no con un <select>: la tienda tiene cientos de
+			     ofertas y desplegarlas todas de golpe no se puede recorrer. -->
+			<div class="ancho">
+				<Autocompletar
+					id="regla-fecha-oferta"
+					etiqueta="Oferta"
+					opciones={ofertas.map((o) => ({ texto: `${o.nombre_producto}, ${o.nombre_variante}`, valor: String(o.id_oferta) }))}
+					bind:valor={textoOfertaNueva}
+					bind:elegido={ofertaNuevaElegida}
+					alElegir={(v) => (idOfertaNueva = v)}
+					marcador={ofertas.length === 0 ? 'Todavia no tienes ofertas' : 'Escribe el producto'}
+					deshabilitado={ofertas.length === 0}
+					mostrarAlEnfocar
+				/>
+			</div>
 			{@render camposBorrador(nueva, 'n')}
 		</div>
 		{#if errorCrear}

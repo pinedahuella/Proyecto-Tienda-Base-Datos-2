@@ -250,6 +250,17 @@
 		   segundo recuadro pegado debajo del primero en vez de como algo que
 		   esta encima -- que es justo lo que se veia mal en el buscador. */
 		--sombra: 0 16px 36px rgba(22, 24, 31, 0.16), 0 2px 6px rgba(22, 24, 31, 0.07);
+
+		/* Los colores de las graficas (lib/graficas): el indigo de la marca y
+		   cinco que se distinguen de el y entre si, tambien para quien no ve
+		   bien el rojo contra el verde (van alternados con el ambar y el
+		   turquesa). En oscuro se aclaran, como el indigo. */
+		--g1: #2f3a8f;
+		--g2: #c27a1a;
+		--g3: #1d7a46;
+		--g4: #b3352c;
+		--g5: #167a8a;
+		--g6: #7a3fb0;
 	}
 
 	/* Tema oscuro. Los nombres significan lo mismo: --tinta es siempre el texto
@@ -288,6 +299,13 @@
 		--sombra: 0 18px 40px rgba(0, 0, 0, 0.6), 0 2px 8px rgba(0, 0, 0, 0.45);
 
 		--hilo: #191f3a;
+
+		--g1: #8a9ae4;
+		--g2: #f0b45c;
+		--g3: #6fd29a;
+		--g4: #e08b81;
+		--g5: #5fc8d6;
+		--g6: #c39ae8;
 	}
 
 	:global(*),

@@ -29,6 +29,7 @@
 	import { onMount } from 'svelte';
 	import { pedir, conJson, mensajeUtil, type RespuestaApi } from './api';
 	import { textoConflictoDescuento, textoPorcentaje } from './descuento';
+	import Autocompletar from './Autocompletar.svelte';
 
 	let { alExpirarSesion }: { alExpirarSesion?: () => void } = $props();
 
@@ -81,6 +82,8 @@
 	let error = $state('');
 
 	let idOfertaNueva = $state('');
+	let textoOfertaNueva = $state('');
+	let ofertaNuevaElegida = $state(false);
 	let nueva = $state<Borrador>(vacio());
 	let creando = $state(false);
 	let errorCrear = $state('');
@@ -190,6 +193,8 @@
 			return;
 		}
 		idOfertaNueva = '';
+		textoOfertaNueva = '';
+		ofertaNuevaElegida = false;
 		nueva = vacio();
 		await cargar(1);
 	}
@@ -273,15 +278,21 @@
 	<form class="nueva" onsubmit={crear}>
 		<h3>Nueva regla</h3>
 		<div class="campos">
-			<label class="ancho">
-				Oferta
-				<select bind:value={idOfertaNueva} disabled={libres.length === 0}>
-					<option value="">{libres.length === 0 ? 'Todas tus ofertas ya tienen regla' : 'Elige una'}</option>
-					{#each libres as o (o.id_oferta)}
-						<option value={o.id_oferta}>{o.nombre_producto}, {o.nombre_variante}</option>
-					{/each}
-				</select>
-			</label>
+			<!-- Con buscador y no con un <select>: la tienda tiene cientos de
+			     ofertas y desplegarlas todas de golpe no se puede recorrer. -->
+			<div class="ancho">
+				<Autocompletar
+					id="regla-ventas-oferta"
+					etiqueta="Oferta"
+					opciones={libres.map((o) => ({ texto: `${o.nombre_producto}, ${o.nombre_variante}`, valor: String(o.id_oferta) }))}
+					bind:valor={textoOfertaNueva}
+					bind:elegido={ofertaNuevaElegida}
+					alElegir={(v) => (idOfertaNueva = v)}
+					marcador={libres.length === 0 ? 'Todas tus ofertas ya tienen regla' : 'Escribe el producto'}
+					deshabilitado={libres.length === 0}
+					mostrarAlEnfocar
+				/>
+			</div>
 			{@render camposBorrador(nueva, 'n')}
 		</div>
 		{#if errorCrear}
@@ -496,10 +507,6 @@
 	}
 
 	.campos input[type='number'],
-	.campos select {
-		width: 100%;
-		min-width: 0;
-	}
 
 	.principal {
 		color: #fff;

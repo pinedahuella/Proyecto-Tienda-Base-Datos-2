@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { mensajeUtil, pedir } from './api';
+	import Barras from './graficas/Barras.svelte';
 
 	/**
 	 * Las tres tendencias de la propuesta (docs/fraude-entrega3/03-consultas-clickhouse.md),
@@ -83,27 +84,23 @@
 	const PESTANAS: { clave: Clave; nombre: string; explica: string }[] = [
 		{
 			clave: 'ascenso',
-			nombre: 'En ascenso',
-			explica:
-				'Productos que se miran cada dia mas que antes. Piden al menos 20 vistas recientes y crecer 1.5 veces. Si las vistas por persona son muchas, puede ser alguien inflandolo y no una tendencia.'
+			nombre: 'Cada vez mas vistos',
+			explica: 'Productos que la gente esta mirando mas que antes. Si una sola persona los abre muchas veces, puede no ser interes real.'
 		},
 		{
 			clave: 'embudo',
-			nombre: 'Donde se cae la venta',
-			explica:
-				'Productos que mucha gente mira y casi nadie compra, o que se devuelven mucho. Lo primero apunta a precio, fotos o descripcion; lo segundo a que el producto no es lo que dice.'
+			nombre: 'Donde se pierde la venta',
+			explica: 'Productos que muchos miran y pocos compran, o que se devuelven mucho. Conviene revisar su precio, sus fotos o su descripcion.'
 		},
 		{
 			clave: 'busquedas',
 			nombre: 'Busquedas sin respuesta',
-			explica:
-				'Lo que al menos 3 sesiones buscaron y no encontraron, o encontraron y no les convencio. Es demanda que hoy se va a otra tienda.'
+			explica: 'Lo que la gente busco y no encontro, o encontro y no le convencio. Son ventas que se van a otra tienda.'
 		},
 		{
 			clave: 'sin_resultados',
-			nombre: 'Lo que no tenemos',
-			explica:
-				'Lo mas buscado que no dio ningun resultado, sin filtros puestos. Junta las formas de escribir lo mismo (mayusculas, tildes, errores de tecleo) y cuenta sesiones distintas.'
+			nombre: 'Lo que piden y no tenemos',
+			explica: 'Lo mas buscado que no encontro nada. Junta las distintas formas de escribir lo mismo.'
 		}
 	];
 
@@ -195,16 +192,10 @@
 	}
 
 	function vacio(): string {
-		if (clave === 'ascenso') {
-			return `Ningun producto crecio lo suficiente en los ultimos ${diasRecientes} dias. La consulta corrio bien, nada paso el umbral.`;
-		}
-		if (clave === 'embudo') {
-			return `Ningun producto tiene un problema de venta en los ultimos ${diasVentana} dias. La consulta corrio bien, nada paso el umbral.`;
-		}
-		if (clave === 'sin_resultados') {
-			return `Nadie busco algo que no tengamos en los ultimos ${diasVentana} dias. La consulta corrio bien y no devolvio filas.`;
-		}
-		return `Ninguna busqueda se quedo sin respuesta en los ultimos ${diasVentana} dias. La consulta corrio bien, nada paso el umbral.`;
+		if (clave === 'ascenso') return `Ningun producto crecio en los ultimos ${diasRecientes} dias.`;
+		if (clave === 'embudo') return `Ningun producto pierde ventas en los ultimos ${diasVentana} dias.`;
+		if (clave === 'sin_resultados') return `En los ultimos ${diasVentana} dias todo lo que buscaron lo tenemos.`;
+		return `Ninguna busqueda se quedo sin respuesta en los ultimos ${diasVentana} dias.`;
 	}
 
 	function cuando(valor: string): string {
@@ -253,7 +244,7 @@
 			</label>
 		{:else}
 			<label>
-				<span>Ventana</span>
+				<span>Dias</span>
 				<select value={String(diasVentana)} onchange={(e) => { diasVentana = Number(e.currentTarget.value) || 30; void cargar(); }}>
 					{#each DIAS_VENTANA as d (d)}
 						<option value={String(d)}>Ultimos {d} dias</option>
@@ -269,13 +260,13 @@
 				{/each}
 			</select>
 		</label>
-		<button type="button" onclick={cargar} disabled={cargando}>Volver a medir</button>
+		<button type="button" onclick={cargar} disabled={cargando}>Actualizar</button>
 	</div>
 
-	<p class="mide"><strong>{actual.nombre}.</strong> {actual.explica}</p>
+	<p class="mide">{actual.explica}</p>
 
 	{#if cargando}
-		<p class="gris">Midiendo...</p>
+		<p class="gris">Calculando...</p>
 	{:else if error}
 		<div class="fallo" role="alert">
 			<p>{error}</p>
@@ -284,87 +275,80 @@
 	{:else if filas === 0}
 		<p class="vacio">{vacio()}</p>
 	{:else if clave === 'ascenso'}
-		<ul class="lista">
-			{#each ascenso as f, i (`${f.producto?._id ?? 'x'}#${i}`)}
-				<li class="fila">
-					<div class="cabeza">
-						{#if f.producto}
-							<a class="nombre" href="/producto/{f.producto._id}">{nombreProducto(f.producto)}</a>
-						{:else}
-							<span class="nombre sin-enlace">{nombreProducto(null)}</span>
-						{/if}
-						{#if f.producto?.categoria?.nombre}
-							<span class="detalle">{f.producto.categoria.nombre}</span>
-						{/if}
-						<span class="cifra">x{uno(f.veces)}</span>
-					</div>
-					<p class="datos">
-						{uno(f.por_dia_ahora)} vistas al dia, antes {uno(f.por_dia_antes)}.
-						<span class:alerta={num(f.vistas_por_persona) >= 5}>{uno(f.vistas_por_persona)} por persona</span>
-					</p>
-				</li>
-			{/each}
-		</ul>
+		<Barras
+			color="var(--g1)"
+			filas={ascenso.map((f, i) => ({
+				id: `${f.producto?._id ?? 'x'}#${i}`,
+				nombre: nombreProducto(f.producto),
+				valor: num(f.por_dia_ahora),
+				antes: num(f.por_dia_antes),
+				texto: `${uno(f.por_dia_ahora)} al dia`,
+				detalle: num(f.vistas_por_persona) >= 5 ? `ojo, ${uno(f.vistas_por_persona)} vistas por persona` : null,
+				enlace: f.producto ? `/producto/${f.producto._id}` : null
+			}))}
+		/>
+		<p class="leyenda"><span class="muestra antes"></span> vistas al dia antes <span class="muestra ahora"></span> vistas al dia ahora</p>
 	{:else if clave === 'embudo'}
-		<ul class="lista">
+		<ul class="embudos">
 			{#each embudo as f, i (`${f.producto?._id ?? 'x'}#${i}`)}
-				<li class="fila">
+				{@const vieron = Math.max(num(f.sesiones), num(f.en_carrito), num(f.pedidos), num(f.devueltas), 1)}
+				<li>
 					<div class="cabeza">
 						{#if f.producto}
 							<a class="nombre" href="/producto/{f.producto._id}">{nombreProducto(f.producto)}</a>
 						{:else}
 							<span class="nombre sin-enlace">{nombreProducto(null)}</span>
 						{/if}
-						<span class="diagnostico">
-							{f.diagnostico === 'devolucion_alta' ? 'Se devuelve mucho' : 'Mucho interes, poca compra'}
+						<span class="diagnostico" class:devuelve={f.diagnostico === 'devolucion_alta'}>
+							{f.diagnostico === 'devolucion_alta' ? 'Se devuelve mucho' : 'Lo miran y no lo compran'}
 						</span>
 					</div>
+					<div class="pasos">
+						{#each [
+							{ nombre: 'Lo vieron', valor: num(f.sesiones), color: 'var(--g1)' },
+							{ nombre: 'Al carrito', valor: num(f.en_carrito), color: 'var(--g5)' },
+							{ nombre: 'Lo compraron', valor: num(f.pedidos), color: 'var(--g3)' },
+							{ nombre: 'Lo devolvieron', valor: num(f.devueltas), color: 'var(--g4)' }
+						] as p (p.nombre)}
+							<div class="paso">
+								<span class="paso-nombre">{p.nombre}</span>
+								<span class="paso-barra"><span style="width: {Math.max((p.valor / vieron) * 100, p.valor > 0 ? 2 : 0)}%; background: {p.color}"></span></span>
+								<span class="paso-cifra">{p.valor}</span>
+							</div>
+						{/each}
+					</div>
 					<p class="datos">
-						{num(f.sesiones)} sesiones lo vieron, {num(f.en_carrito)} al carrito, {num(f.pedidos)}
-						{num(f.pedidos) === 1 ? 'pedido' : 'pedidos'}. Compra {pct(f.conversion)}.
-						{#if num(f.unidades) > 0}
-							Volvieron {num(f.devueltas)} de {num(f.unidades)} ({pct(f.tasa_devolucion)}).
+						{#if f.diagnostico === 'devolucion_alta'}
+							Vuelve el {pct(f.tasa_devolucion)} de lo que se vende.
+						{:else if num(f.sesiones) > 0 && num(f.conversion) <= 1}
+							Solo lo compra el {pct(f.conversion)} de quienes lo ven.
 						{/if}
 					</p>
 				</li>
 			{/each}
 		</ul>
 	{:else if clave === 'sin_resultados'}
-		<ul class="lista">
-			{#each sinResultados as f, i (`${f.termino}#${i}`)}
-				<li class="fila">
-					<div class="cabeza">
-						<span class="nombre sin-enlace">{f.termino}</span>
-						<span class="cifra">{num(f.sesiones)} {num(f.sesiones) === 1 ? 'sesion' : 'sesiones'}</span>
-					</div>
-					<p class="datos">
-						{#if (f.como_lo_escribieron ?? []).length > 1}
-							Lo escribieron asi: {f.como_lo_escribieron.join(', ')}.
-						{/if}
-						Ultima vez el {cuando(f.ultima_busqueda)}
-					</p>
-				</li>
-			{/each}
-		</ul>
+		<Barras
+			color="var(--g2)"
+			unidad="personas"
+			filas={sinResultados.map((f, i) => ({
+				id: `${f.termino}#${i}`,
+				nombre: f.termino,
+				valor: num(f.sesiones),
+				detalle: (f.como_lo_escribieron ?? []).length > 1 ? `tambien ${f.como_lo_escribieron.filter((x) => x !== f.termino).slice(0, 3).join(', ')}` : null
+			}))}
+		/>
 	{:else}
-		<ul class="lista">
-			{#each busquedas as f, i (`${f.termino}#${i}`)}
-				<li class="fila">
-					<div class="cabeza">
-						<span class="nombre sin-enlace">{f.termino.trim() === '' ? '(vacio)' : f.termino}</span>
-						<span class="diagnostico">
-							{f.diagnostico === 'no_tenemos' ? 'No lo tenemos' : 'Hay resultados, nadie entra'}
-						</span>
-					</div>
-					<p class="datos">
-						{num(f.busquedas)} busquedas en {num(f.sesiones)} sesiones.
-						{#if f.diagnostico === 'no_convence'}
-							Hasta {num(f.mas_resultados)} resultados y {num(f.clics)} clics.
-						{/if}
-					</p>
-				</li>
-			{/each}
-		</ul>
+		<Barras
+			color="var(--g6)"
+			unidad="personas"
+			filas={busquedas.map((f, i) => ({
+				id: `${f.termino}#${i}`,
+				nombre: f.termino.trim() === '' ? '(vacio)' : f.termino,
+				valor: num(f.sesiones),
+				detalle: f.diagnostico === 'no_tenemos' ? 'no lo tenemos' : `${num(f.clics)} clics en ${num(f.mas_resultados)} resultados`
+			}))}
+		/>
 	{/if}
 </div>
 
@@ -449,19 +433,7 @@
 		border-radius: var(--r2);
 	}
 
-	.lista {
-		list-style: none;
-		display: flex;
-		flex-direction: column;
-		gap: var(--e3);
-		padding: 0;
-	}
 
-	.fila {
-		padding: 14px 18px;
-		border: 1px solid var(--linea);
-		border-radius: var(--r2);
-	}
 
 	.cabeza {
 		display: flex;
@@ -482,21 +454,12 @@
 		color: var(--tinta);
 	}
 
-	.detalle {
-		font-size: var(--f-sm);
-		color: var(--gris);
-	}
 
-	.cifra,
 	.diagnostico {
 		margin-left: auto;
 		white-space: nowrap;
 	}
 
-	.cifra {
-		font-size: var(--f-md);
-		font-weight: 500;
-	}
 
 	.diagnostico {
 		padding: 2px 10px;
@@ -512,14 +475,97 @@
 		color: var(--gris);
 	}
 
-	.alerta {
-		color: var(--rojo);
-	}
 
 	@media (max-width: 620px) {
-		.cifra,
 		.diagnostico {
 			margin-left: 0;
 		}
+	}
+
+	/* -- las barras y el embudo -- */
+
+	.leyenda {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px 14px;
+		margin-top: var(--e3);
+		font-size: var(--f-xs);
+		color: var(--gris);
+	}
+
+	.muestra {
+		display: inline-block;
+		width: 18px;
+		height: 8px;
+		margin-right: -8px;
+		border-radius: 999px;
+	}
+
+	.muestra.antes {
+		background: color-mix(in srgb, var(--g1) 28%, transparent);
+	}
+
+	.muestra.ahora {
+		background: var(--g1);
+	}
+
+	.embudos {
+		list-style: none;
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+		gap: var(--e3);
+	}
+
+	.embudos li {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		padding: 16px 18px;
+		background: var(--off);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+	}
+
+	.diagnostico.devuelve {
+		color: var(--rojo);
+	}
+
+	.pasos {
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+	}
+
+	.paso {
+		display: grid;
+		grid-template-columns: 96px 1fr 36px;
+		align-items: center;
+		gap: var(--e2);
+		font-size: var(--f-sm);
+	}
+
+	.paso-nombre {
+		color: var(--gris);
+	}
+
+	.paso-barra {
+		height: 10px;
+		background: var(--panel);
+		border-radius: 999px;
+		overflow: hidden;
+	}
+
+	.paso-barra span {
+		display: block;
+		height: 100%;
+		border-radius: 999px;
+	}
+
+	.paso-cifra {
+		font-weight: 600;
+		text-align: right;
+		color: var(--tinta);
+		font-variant-numeric: tabular-nums;
 	}
 </style>

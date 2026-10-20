@@ -8,7 +8,6 @@
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
-	import BuscarOfertas from '$lib/BuscarOfertas.svelte';
 	import ReglasDescuento from '$lib/ReglasDescuento.svelte';
 	import ReglasPeriodo from '$lib/ReglasPeriodo.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
@@ -832,7 +831,6 @@
 
 				<div class="hoja" class:oculta={seccionViva !== 'ofertas'}>
 					{#if visitadas.has('ofertas')}
-						<BuscarOfertas alExpirarSesion={expiro} {administraLaTienda} />
 						<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
 					{/if}
 				</div>
@@ -906,7 +904,6 @@
 					     nadie, mientras que la oferta -- precio, existencias y estado --
 					     si es del vendedor. Es lo suyo, asi que va arriba. -->
 					{#if visitadas.has('ofertas')}
-						<BuscarOfertas alExpirarSesion={expiro} {administraLaTienda} />
 						<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
 					{/if}
 				</div>

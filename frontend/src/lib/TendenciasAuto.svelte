@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { mensajeUtil, pedir } from './api';
+	import Barras from './graficas/Barras.svelte';
 
 	/**
 	 * Las consultas AUTOMATICAS y las PROPIAS del panel de Tendencias.
@@ -60,15 +61,22 @@
 		unidad: [string, string];
 		/** Si el total SUMA entre ventanas, y por tanto se puede comparar restando. */
 		suma: boolean;
+		/** El color de su tarjeta (los de lib/graficas). */
+		color: string;
+		/** Que cuenta la cifra, dicho para cualquiera ("personas que lo vieron"). */
+		dice: string;
 	}
 
+	// Vistas, busquedas y clics cuentan SESIONES distintas y el carrito CUENTAS
+	// distintas; en pantalla las dos son "personas", que es lo que una persona
+	// entiende. La diferencia queda aqui y en la ayuda de cada ranking completo.
 	const MEDIDAS: Medida[] = [
-		{ clave: 'vista', nombre: 'Vistas', agrupa: 'producto', unidad: ['sesion distinta', 'sesiones distintas'], suma: false },
-		{ clave: 'carrito', nombre: 'Carrito', agrupa: 'producto', unidad: ['cuenta distinta', 'cuentas distintas'], suma: false },
-		{ clave: 'compra', nombre: 'Compras', agrupa: 'producto', unidad: ['unidad', 'unidades'], suma: true },
-		{ clave: 'devolucion', nombre: 'Devoluciones', agrupa: 'producto', unidad: ['unidad', 'unidades'], suma: true },
-		{ clave: 'busqueda', nombre: 'Busquedas', agrupa: 'termino', unidad: ['sesion distinta', 'sesiones distintas'], suma: false },
-		{ clave: 'busqueda-clic', nombre: 'Clics de busqueda', agrupa: 'termino', unidad: ['sesion distinta', 'sesiones distintas'], suma: false }
+		{ clave: 'vista', nombre: 'Lo mas visto', agrupa: 'producto', unidad: ['persona', 'personas'], suma: false, color: 'var(--g1)', dice: 'personas que lo vieron' },
+		{ clave: 'carrito', nombre: 'Lo que mas llevan al carrito', agrupa: 'producto', unidad: ['persona', 'personas'], suma: false, color: 'var(--g5)', dice: 'personas que lo agregaron' },
+		{ clave: 'compra', nombre: 'Lo mas vendido', agrupa: 'producto', unidad: ['unidad', 'unidades'], suma: true, color: 'var(--g3)', dice: 'unidades vendidas' },
+		{ clave: 'devolucion', nombre: 'Lo mas devuelto', agrupa: 'producto', unidad: ['unidad', 'unidades'], suma: true, color: 'var(--g4)', dice: 'unidades devueltas' },
+		{ clave: 'busqueda', nombre: 'Lo mas buscado', agrupa: 'termino', unidad: ['persona', 'personas'], suma: false, color: 'var(--g2)', dice: 'personas que lo buscaron' },
+		{ clave: 'busqueda-clic', nombre: 'Busquedas que terminan en clic', agrupa: 'termino', unidad: ['persona', 'personas'], suma: false, color: 'var(--g6)', dice: 'personas que entraron a un resultado' }
 	];
 
 	const medidaDe = (clave: Clave): Medida => MEDIDAS.find((m) => m.clave === clave) ?? MEDIDAS[0];
@@ -91,7 +99,7 @@
 	 * una semana), y las compras en ascenso.
 	 */
 	const DE_FABRICA: Consulta[] = [
-		{ id: 'fija-ascenso', nombre: 'Compras en ascenso', clave: 'compra', dias: 30, limite: 8, direccion: 'positivo', comparar: true, fija: true },
+		{ id: 'fija-ascenso', nombre: 'Lo que mas esta creciendo', clave: 'compra', dias: 30, limite: 8, direccion: 'positivo', comparar: true, fija: true },
 		...MEDIDAS.map<Consulta>((m) => ({
 			id: 'fija-' + m.clave,
 			nombre: m.nombre,
@@ -218,10 +226,10 @@
 		}
 
 		if (!medidaDe(c.clave).suma) {
-			return { cargando: false, error: 'Solo se puede comparar compras y devoluciones, que suman unidades.', filas: [] };
+			return { cargando: false, error: 'Solo se pueden comparar las compras y las devoluciones.', filas: [] };
 		}
 		if (c.dias * 2 > 365) {
-			return { cargando: false, error: 'Comparar necesita el doble de la ventana y el maximo es 365 dias. Usa 182 o menos.', filas: [] };
+			return { cargando: false, error: 'Para comparar usa 182 dias o menos.', filas: [] };
 		}
 
 		const [ahoraP, totalP] = await Promise.all([
@@ -260,7 +268,7 @@
 				? filas.filter((f) => f.total > 0).sort((a, b) => (b.veces ?? 0) - (a.veces ?? 0) || b.total - a.total)
 				: filas.filter((f) => (f.antes ?? 0) > f.total).sort((a, b) => (b.antes ?? 0) - b.total - ((a.antes ?? 0) - a.total));
 
-		const nota = `Los ultimos ${c.dias} dias contra los ${c.dias} anteriores, sobre los ${filas.length} productos con movimiento en ${c.dias * 2} dias.`;
+		const nota = `De ${filas.length} productos que se vendieron en los ultimos ${c.dias * 2} dias.`;
 		return { cargando: false, error: '', filas: elegidas.slice(0, c.limite), nota };
 	}
 
@@ -359,8 +367,18 @@
 		delete resultados[c.id];
 	}
 
+	/** El nombre corto de cada medida, para el constructor y lo que se guarda. */
+	const CORTO: Record<Clave, string> = {
+		vista: 'Vistas',
+		carrito: 'Carrito',
+		compra: 'Compras',
+		devolucion: 'Devoluciones',
+		busqueda: 'Busquedas',
+		'busqueda-clic': 'Clics en resultados'
+	};
+
 	function describir(c: Consulta): string {
-		const m = medidaDe(c.clave);
+		const m = { nombre: CORTO[c.clave] };
 		const cuando = c.dias === 1 ? 'ultimo dia' : `ultimos ${c.dias} dias`;
 		const orden = c.direccion === 'positivo' ? 'los que mas' : 'los que menos';
 		if (c.comparar) {
@@ -373,122 +391,101 @@
 
 	function subtitulo(c: Consulta): string {
 		const cuando = c.dias === 1 ? 'Ultimo dia' : `Ultimos ${c.dias} dias`;
-		if (c.comparar) return `${cuando} contra los ${c.dias} anteriores`;
-		// La unidad va aqui y no en cada fila: en una tarjeta angosta "sesiones
-		// distintas" al lado de cada numero le quitaba el sitio al nombre del producto.
-		const orden = c.direccion === 'positivo' ? 'los ' + c.limite + ' que mas' : 'los ' + c.limite + ' que menos';
-		return `${cuando}, ${orden}, en ${medidaDe(c.clave).unidad[1]}`;
+		if (c.comparar) return `Ventas de los ${cuando.toLowerCase()} contra los ${c.dias} anteriores`;
+		// La unidad va aqui y no en cada fila: en una tarjeta angosta "unidades
+		// vendidas" al lado de cada numero le quitaba el sitio al nombre.
+		return `${cuando}, en ${medidaDe(c.clave).dice}`;
 	}
 
-	function veces(f: Fila): string {
-		if ((f.antes ?? 0) === 0) return f.total > 0 ? 'nuevo' : '0';
-		return `${(f.veces ?? 0).toFixed(1)} veces`;
+	/** Una fila de la consulta como la pinta lib/graficas/Barras. */
+	function aBarras(filas: Fila[], comparar: boolean) {
+		return filas.map((f) => ({
+			id: f.id,
+			nombre: f.titulo,
+			valor: f.total,
+			antes: comparar ? (f.antes ?? 0) : null,
+			enlace: f.enlace
+		}));
 	}
 
-	/** El ancho de una barra, en porcentaje del mayor valor que se dibuja. */
-	function pct(valor: number, tope: number): number {
-		return Math.max(0, Math.min(100, (valor / tope) * 100));
+	/** El primero de cada ranking de fabrica, para los destacados de arriba. */
+	function primero(clave: Clave): Fila | null {
+		const r = resultados['fija-' + clave];
+		return r && !r.cargando && !r.error && r.filas.length ? r.filas[0] : null;
 	}
 
-	/** El texto que sale al pasar el cursor por una fila, con el nombre completo. */
-	function detalle(f: Fila, comparar: boolean, m: Medida): string {
-		if (comparar) return `${f.titulo}, ${f.antes ?? 0} en el periodo anterior y ${f.total} ahora`;
-		return `${f.titulo}, ${f.total} ${f.total === 1 ? m.unidad[0] : m.unidad[1]}`;
-	}
+	const DESTACADOS: { clave: Clave; rotulo: string }[] = [
+		{ clave: 'compra', rotulo: 'El mas vendido' },
+		{ clave: 'vista', rotulo: 'El mas visto' },
+		{ clave: 'busqueda', rotulo: 'Lo mas buscado' },
+		{ clave: 'devolucion', rotulo: 'El mas devuelto' }
+	];
+
 </script>
-
-<!--
-	Las filas de un ranking, una sola vez para las tarjetas de fabrica y para la
-	vista previa del constructor.
-
-	La barra mide contra el MAYOR valor que se dibuja en esa tarjeta, asi que se
-	comparan entre si y no contra un tope inventado. Una barra de cero no existe,
-	pero una de uno junto a una de cuarenta y cinco se queda con un minimo para
-	que se vea.
-
-	En "en ascenso" la barra es el periodo actual y la marca vertical es donde
-	estaba el periodo anterior: de un vistazo se ve cuanto se movio cada producto.
-	Un producto nuevo no tiene marca, porque antes no vendia nada.
--->
-{#snippet ranking(filas: Fila[], comparar: boolean, m: Medida)}
-	{@const tope = Math.max(1, ...filas.map((x) => Math.max(x.total, x.antes ?? 0)))}
-	<ol class="filas">
-		{#each filas as f, i (f.id)}
-			<li title={detalle(f, comparar, m)}>
-				<span class="puesto" class:podio={i < 3}>{i + 1}</span>
-				{#if f.enlace}
-					<a href={f.enlace} class="nombre">{f.titulo}</a>
-				{:else}
-					<span class="nombre">{f.titulo}</span>
-				{/if}
-				{#if comparar}
-					<span class="cifra">
-						<strong>{f.antes} a {f.total}</strong>
-						<small class="chip" class:nuevo={(f.antes ?? 0) === 0}>{veces(f)}</small>
-					</span>
-				{:else}
-					<span class="cifra">
-						<strong>{f.total}</strong>
-					</span>
-				{/if}
-				<span class="pista" aria-hidden="true">
-					<span class="ahora" style="width: {pct(f.total, tope)}%"></span>
-					{#if comparar && (f.antes ?? 0) > 0}
-						<span class="antes" style="left: {pct(f.antes ?? 0, tope)}%"></span>
-					{/if}
-				</span>
-			</li>
-		{/each}
-	</ol>
-	{#if comparar && filas.some((x) => (x.antes ?? 0) > 0)}
-		<p class="leyenda">
-			<span class="muestra-ahora"></span> periodo actual
-			<span class="muestra-antes"></span> periodo anterior
-		</p>
-	{/if}
-{/snippet}
 
 <div class="auto">
 	<div class="cabeza">
-		<h3>Consultas automaticas</h3>
-		<button type="button" class="suave" onclick={medirTodo}>Volver a medir todo</button>
+		<h3>Este mes</h3>
+		<button type="button" class="suave" onclick={medirTodo}>Actualizar</button>
 	</div>
-	<p class="nota">
-		Se calculan solas al abrir esta pantalla, no hay que pulsar nada. Las de abajo son las de fabrica y
-		las que guardes tu con el constructor.
-	</p>
+
+	<!-- Lo primero de cada ranking, en grande: se lee de un vistazo sin bajar. -->
+	<div class="destacados">
+		{#each DESTACADOS as d (d.clave)}
+			{@const f = primero(d.clave)}
+			{@const m = medidaDe(d.clave)}
+			<div class="destacado" style="--color: {m.color}">
+				<span class="rotulo">{d.rotulo}</span>
+				{#if f}
+					{#if f.enlace}
+						<a class="quien" href={f.enlace} title={f.titulo}>{f.titulo}</a>
+					{:else}
+						<span class="quien" title={f.titulo}>{f.titulo}</span>
+					{/if}
+					<span class="cuanto"><strong>{f.total}</strong> {m.dice}</span>
+				{:else}
+					<span class="quien vacio">{resultados['fija-' + d.clave]?.cargando === false ? 'Nada este mes' : '...'}</span>
+				{/if}
+			</div>
+		{/each}
+	</div>
 
 	<div class="rejilla">
 		{#each todas as c (c.id)}
 			{@const m = medidaDe(c.clave)}
 			{@const res = resultados[c.id]}
-			<article class="tarjeta" class:destacada={c.id === 'fija-ascenso'}>
+			<article class="tarjeta" class:destacada={c.id === 'fija-ascenso'} style="--color: {c.comparar ? 'var(--g3)' : m.color}">
 				<header>
 					<div>
 						<h4>{c.nombre}</h4>
 						<p class="sub">{subtitulo(c)}</p>
 					</div>
 					{#if c.fija && !c.comparar}
-						<button type="button" class="suave" onclick={() => verRanking(c.clave)}>Ver completo</button>
+						<button type="button" class="suave" onclick={() => verRanking(c.clave)}>Ver mas</button>
 					{:else if !c.fija}
 						<button type="button" class="suave" onclick={() => quitar(c)}>Quitar</button>
 					{/if}
 				</header>
 
 				{#if !res || res.cargando}
-					<p class="gris">Midiendo...</p>
+					<p class="gris">Calculando...</p>
 				{:else if res.error}
 					<p class="fallo" role="alert">{res.error}</p>
 				{:else if res.filas.length === 0}
-					<p class="gris">
-						{c.comparar
-							? 'Ningun producto cumple, ni sube ni baja en esta ventana.'
-							: 'Sin eventos reales en esta ventana.'}
-					</p>
+					<p class="gris">{c.comparar ? 'Nada sube ni baja en estos dias.' : 'Nada en estos dias.'}</p>
 				{:else}
-					{@render ranking(res.filas, c.comparar, m)}
-					{#if res.nota}
-						<p class="pie">{res.nota}</p>
+					<Barras
+						filas={aBarras(res.filas, c.comparar)}
+						color={c.comparar ? 'var(--g3)' : m.color}
+						compacta={!c.comparar}
+						columnas={c.id === 'fija-ascenso' ? 2 : 1}
+					/>
+					{#if c.comparar}
+						<p class="leyenda">
+							<span class="muestra antes"></span> mes anterior
+							<span class="muestra ahora"></span> este mes
+							{#if res.nota}<span class="pie">{res.nota}</span>{/if}
+						</p>
 					{/if}
 				{/if}
 			</article>
@@ -496,24 +493,20 @@
 	</div>
 
 	<div class="constructor">
-		<h3>Crear mi propia consulta</h3>
-		<p class="nota">
-			Elige que medir, cuantos dias, cuantos resultados y en que orden. Con compras y devoluciones se
-			puede comparar contra el periodo anterior para ver que sube o que baja. Si la guardas, se calcula
-			sola cada vez que abras esta pantalla.
-		</p>
+		<h3>Arma tu propio ranking</h3>
+		<p class="nota">Elige que ver y de cuantos dias. Si lo guardas, aparece arriba cada vez que entres.</p>
 
 		<div class="mandos">
 			<label>
-				<span>Que medir</span>
+				<span>Que ver</span>
 				<select bind:value={bClave} onchange={() => { if (!puedeComparar) bComparar = false; avisoComparar = false; }}>
 					{#each MEDIDAS as m (m.clave)}
-						<option value={m.clave}>{m.nombre}</option>
+						<option value={m.clave}>{CORTO[m.clave]}</option>
 					{/each}
 				</select>
 			</label>
 			<label>
-				<span>Dias hacia atras</span>
+				<span>Dias</span>
 				<input type="number" min="1" max="365" bind:value={bDias} />
 			</label>
 			<label>
@@ -531,20 +524,19 @@
 
 		<label class="comparar" class:apagado={!puedeComparar}>
 			<input type="checkbox" bind:checked={bComparar} onchange={alCambiarComparar} />
-			Comparar contra el periodo anterior
+			Comparar con los dias anteriores
 			{#if !puedeComparar}
 				<small class:aviso={avisoComparar}>
-					Solo funciona con compras y devoluciones. Las demas cuentan sesiones o cuentas distintas, y
-					dos periodos no se pueden restar sin dar un numero falso.
+					Solo para compras y devoluciones.
 					{#if avisoComparar}
-						<button type="button" class="enlace" onclick={pasarACompras}>Pasar a compras y comparar</button>
+						<button type="button" class="enlace" onclick={pasarACompras}>Pasar a compras</button>
 					{/if}
 				</small>
 			{/if}
 		</label>
 
 		<div class="acciones">
-			<button type="button" class="primaria" onclick={consultar}>Consultar</button>
+			<button type="button" class="primaria" onclick={consultar}>Ver</button>
 		</div>
 
 		{#if bError}
@@ -553,7 +545,7 @@
 
 		{#if bResultado && bConsulta}
 			{@const m = medidaDe(bConsulta.clave)}
-			<article class="tarjeta previa">
+			<article class="tarjeta previa" style="--color: {m.color}">
 				<header>
 					<div>
 						<h4>{describir(bConsulta)}</h4>
@@ -561,20 +553,19 @@
 					</div>
 				</header>
 				{#if bResultado.cargando}
-					<p class="gris">Midiendo...</p>
+					<p class="gris">Calculando...</p>
 				{:else if bResultado.error}
 					<p class="fallo" role="alert">{bResultado.error}</p>
 				{:else if bResultado.filas.length === 0}
-					<p class="gris">Sin resultados en esta ventana.</p>
+					<p class="gris">Nada en estos dias.</p>
 				{:else}
-					{@render ranking(bResultado.filas, bConsulta.comparar, m)}
-					{#if bResultado.nota}<p class="pie">{bResultado.nota}</p>{/if}
+					<Barras filas={aBarras(bResultado.filas, bConsulta.comparar)} color={m.color} compacta />
 				{/if}
 
 				{#if !bResultado.cargando && !bResultado.error}
 					<div class="guardar">
-						<input type="text" placeholder="Nombre de la consulta (opcional)" maxlength="60" bind:value={bNombre} />
-						<button type="button" class="primaria" onclick={guardar}>Guardar como automatica</button>
+						<input type="text" placeholder="Ponle un nombre (opcional)" maxlength="60" bind:value={bNombre} />
+						<button type="button" class="primaria" onclick={guardar}>Guardar</button>
 					</div>
 				{/if}
 			</article>
@@ -586,23 +577,24 @@
 	.auto {
 		display: flex;
 		flex-direction: column;
-		gap: var(--e3, 16px);
+		gap: var(--e4);
 	}
 
 	.cabeza {
 		display: flex;
 		align-items: center;
-		gap: var(--e2, 10px);
+		gap: var(--e2);
 		flex-wrap: wrap;
 	}
 
 	h3 {
-		font-size: var(--f-lg, 1.15rem);
+		font-size: var(--f-lg);
 		margin-right: auto;
 	}
 
 	h4 {
-		font-size: var(--f-base);
+		font-size: var(--f-md);
+		color: var(--tinta);
 	}
 
 	.nota,
@@ -617,24 +609,102 @@
 		max-width: 680px;
 	}
 
+	/* -- los destacados -- */
+
+	.destacados {
+		display: grid;
+		grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+		gap: var(--e3);
+	}
+
+	.destacado {
+		position: relative;
+		display: flex;
+		flex-direction: column;
+		gap: 6px;
+		min-width: 0;
+		padding: 16px 18px 16px 20px;
+		background: var(--panel);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+		overflow: hidden;
+	}
+
+	.destacado::before {
+		content: '';
+		position: absolute;
+		inset: 0 auto 0 0;
+		width: 4px;
+		background: var(--color);
+	}
+
+	.rotulo {
+		font-size: var(--f-xs);
+		font-weight: 600;
+		letter-spacing: 0.06em;
+		text-transform: uppercase;
+		color: var(--color);
+	}
+
+	.quien {
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		font-size: var(--f-md);
+		font-weight: 600;
+		color: var(--tinta);
+		text-decoration: none;
+	}
+
+	a.quien:hover {
+		text-decoration: underline;
+	}
+
+	.quien.vacio {
+		font-weight: 400;
+		color: var(--gris);
+	}
+
+	.cuanto {
+		font-size: var(--f-sm);
+		color: var(--gris);
+	}
+
+	.cuanto strong {
+		font-size: var(--f-lg);
+		color: var(--tinta);
+		font-variant-numeric: tabular-nums;
+	}
+
+	/* -- las tarjetas -- */
+
 	.rejilla {
 		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-		gap: var(--e3, 16px);
+		grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
+		gap: var(--e4);
 	}
 
 	.tarjeta {
+		position: relative;
 		display: flex;
 		flex-direction: column;
-		gap: 10px;
-		padding: 16px 18px;
-		background: var(--blanco);
+		gap: 14px;
+		padding: 18px 20px;
+		background: var(--off);
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
+		overflow: hidden;
+	}
+
+	.tarjeta::before {
+		content: '';
+		position: absolute;
+		inset: 0 0 auto 0;
+		height: 3px;
+		background: var(--color);
 	}
 
 	.tarjeta.destacada {
-		border-color: var(--indigo);
 		grid-column: 1 / -1;
 	}
 
@@ -645,182 +715,34 @@
 		gap: 10px;
 	}
 
-	.filas {
-		list-style: none;
-		margin: 0;
-		padding: 0;
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-	}
-
-	.filas li {
-		display: grid;
-		grid-template-columns: 24px minmax(0, 1fr) auto;
-		grid-template-areas: 'p n c' '. b b';
-		align-items: center;
-		column-gap: 10px;
-		row-gap: 6px;
-		/* El relleno y el margen negativo dejan la fila con aire para el
-		   resaltado al pasar el cursor sin correr el texto de la tarjeta. */
-		padding: 6px 8px;
-		margin: 0 -8px;
-		border-radius: var(--r);
-		transition: background var(--t);
-	}
-
-	.filas li:hover {
-		background: var(--off);
-	}
-
-	/* El puesto es una insignia redonda. Los tres primeros van tenidos de indigo,
-	   el resto queda en gris: el podio se lee sin gastar un color mas. */
-	.puesto {
-		grid-area: p;
-		display: grid;
-		place-items: center;
-		width: 24px;
-		height: 24px;
-		border-radius: 50%;
-		font-size: var(--f-xs);
-		font-weight: 600;
-		font-variant-numeric: tabular-nums;
-		color: var(--gris);
-		background: var(--off);
-		border: 1px solid var(--linea);
-	}
-
-	.puesto.podio {
-		color: var(--indigo);
-		background: var(--indigo-cl);
-		border-color: transparent;
-	}
-
-	.nombre {
-		grid-area: n;
-		min-width: 0;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-		color: var(--indigo);
-	}
-
-	span.nombre {
-		color: var(--tinta);
-	}
-
-	.cifra {
-		grid-area: c;
-		display: flex;
-		align-items: baseline;
-		gap: 6px;
-		text-align: right;
-		white-space: nowrap;
-	}
-
-	.cifra strong {
-		font-variant-numeric: tabular-nums;
-		color: var(--tinta);
-	}
-
-	.cifra small {
-		color: var(--gris);
-	}
-
-	/* "2.3 veces" o "nuevo" como una etiqueta chica. Va tenida de indigo y no
-	   de verde: el verde de estado esta reservado para lo que es bueno o malo,
-	   y que un producto suba no siempre lo es. */
-	.cifra .chip {
-		padding: 1px 8px;
-		border-radius: 999px;
-		font-size: var(--f-xs);
-		color: var(--indigo);
-		background: var(--indigo-cl);
-	}
-
-	.cifra .chip.nuevo {
-		color: var(--sobre-indigo);
-		background: var(--indigo);
-	}
-
-	/* La pista de la barra es del mismo indigo pero casi transparente, asi se
-	   ve en claro y en oscuro sin una variable nueva. */
-	.pista {
-		grid-area: b;
-		position: relative;
-		display: block;
-		height: 8px;
-		border-radius: 4px;
-		background: color-mix(in srgb, var(--indigo) 12%, transparent);
-	}
-
-	/* Ancla en el cero, la punta del dato redondeada. El minimo de 4px es para
-	   que un 1 junto a un 45 no desaparezca. */
-	.ahora {
-		display: block;
-		height: 100%;
-		min-width: 4px;
-		border-radius: 4px;
-		background: var(--indigo);
-		transition: width 0.5s ease;
-	}
-
-	/* La marca del periodo anterior. Sobresale de la pista para verse aunque
-	   caiga dentro de la barra, y lleva un borde del color de la tarjeta para
-	   separarse de ella. */
-	.antes {
-		position: absolute;
-		top: -3px;
-		bottom: -3px;
-		width: 3px;
-		margin-left: -1px;
-		border-radius: 2px;
-		background: var(--tinta);
-		box-shadow: 0 0 0 1px var(--blanco);
-	}
-
 	.leyenda {
 		display: flex;
 		align-items: center;
 		flex-wrap: wrap;
 		gap: 6px 14px;
-		margin: 2px 0 0;
 		font-size: var(--f-xs);
 		color: var(--gris);
 	}
 
-	.muestra-ahora,
-	.muestra-antes {
+	.leyenda .pie {
+		margin-left: auto;
+		font-size: var(--f-xs);
+	}
+
+	.muestra {
 		display: inline-block;
-		vertical-align: middle;
-		margin-right: 4px;
-	}
-
-	.muestra-ahora {
-		width: 16px;
+		width: 18px;
 		height: 8px;
-		border-radius: 4px;
-		background: var(--indigo);
+		margin-right: -8px;
+		border-radius: 999px;
 	}
 
-	.muestra-antes {
-		width: 3px;
-		height: 14px;
-		border-radius: 2px;
-		background: var(--tinta);
+	.muestra.antes {
+		background: color-mix(in srgb, var(--g3) 28%, transparent);
 	}
 
-	/* La tarjeta ancha (compras en ascenso) reparte sus filas en columnas: a
-	   1100 px de ancho una sola columna deja el nombre en un extremo y la cifra
-	   en el otro, y obliga a bajar por la pagina. */
-	.tarjeta.destacada .filas {
-		display: grid;
-		grid-template-columns: repeat(auto-fill, minmax(330px, 1fr));
-		gap: 4px 32px;
-	}
-
-	.tarjeta.destacada {
-		background: linear-gradient(180deg, var(--indigo-cl), var(--blanco) 90px);
+	.muestra.ahora {
+		background: var(--g3);
 	}
 
 	.fallo {
@@ -834,7 +756,8 @@
 		display: flex;
 		flex-direction: column;
 		gap: 12px;
-		padding-top: 18px;
+		margin-top: var(--e3);
+		padding-top: 20px;
 		border-top: 1px solid var(--linea);
 	}
 
@@ -881,13 +804,12 @@
 	}
 
 	.comparar small {
-		flex-basis: 100%;
 		color: var(--gris);
 		font-size: var(--f-sm);
 	}
 
 	.comparar small.aviso {
-		padding: 8px 10px;
+		padding: 6px 10px;
 		color: var(--tinta);
 		background: var(--panel);
 		border-left: 3px solid var(--rojo);
@@ -923,10 +845,18 @@
 		border: 1px solid var(--linea);
 		border-radius: var(--r);
 		cursor: pointer;
+		transition:
+			border-color var(--t),
+			color var(--t);
+	}
+
+	button.suave:hover {
+		color: var(--indigo);
+		border-color: var(--indigo);
 	}
 
 	button.primaria {
-		color: #fff;
+		color: var(--sobre-indigo);
 		background: var(--indigo);
 		border-color: var(--indigo);
 		font-size: var(--f-base);

@@ -4,6 +4,43 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 
 ---
 
+## LO QUE PIDIO EL PROFESOR (a otro grupo que ya expuso) Y LO QUE PIDE EL FRONTEND, 2026-10-19
+
+Meme paso tres audios de un companero que ya expuso. Se reviso Mesh contra cada
+punto sin tocar nada; los tres son de `backend/`:
+
+1. **Apagar una base en vivo y que la tienda siga.** No le basta un script:
+   quiere ver en la pagina que pasa al hacer `docker stop` de cada base. Hoy
+   esta probado con `pruebas/falla_checkout.sh` (Redis, Mongo y PostgreSQL) y
+   las pruebas que paran Neo4j y Elasticsearch, pero no hay un guion para
+   ensenarlo en la pantalla, ni esta revisado que muestra cada pagina con cada
+   base caida (por ejemplo la portada con Mongo apagado).
+2. **Las facetas de Elasticsearch.** `services/buscador/facetado.service.ts:197`
+   aplica los filtros con `post_filter`, despues de las agregaciones. Lo que dijo
+   el profesor: la categoria tiene que ir filtrada en la consulta desde el
+   principio, no "despues en los agregados".
+3. **Una busqueda sin sentido ("asdffff") tiene que devolver algo.** Hoy
+   `/buscador/productos` y la hibrida devuelven 0 (medido con asdffff, qwertyzx
+   y zzzz). La forma mas directa: si la busqueda da 0, una segunda consulta con
+   `function_score` sobre `resenas_total` y `resenas_promedio` (ya estan en
+   `mesh_productos`) que traiga los mas populares con stock, y el frontend dice
+   "No encontramos X, quizas te interese".
+
+Y dos del frontend:
+
+4. **Pasar un pedido a enviado y a entregado.** El catalogo `estado_pedido`
+   tiene los cinco estados, pero solo hay `comprar_pedido` y `cancelar_pedido`:
+   ningun pedido llega nunca a enviado ni a entregado. Reportes ya dibuja el
+   camino entero (Sin pagar, Pagados, Enviados, Entregados) y dice que por ahora
+   no se marcan. Haria falta la funcion en PostgreSQL y una ruta para el
+   vendedor (o el admin).
+5. **Una serie por dia para las graficas.** Reportes y Tendencias ya tienen
+   graficas (lib/graficas, en SVG), pero todas las rutas devuelven totales o
+   rankings. Con ventas, vistas y busquedas por dia (ClickHouse, `toDate(fecha)`)
+   saldria la grafica de linea en el tiempo.
+
+---
+
 ## LO DE 25f0fe0 (16 y 17 de octubre), llevado a todas las capas el 2026-10-18
 
 Todo lo que tus planes dejaban como "le toca a otros" esta hecho y probado en la

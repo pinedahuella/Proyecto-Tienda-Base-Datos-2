@@ -1137,11 +1137,7 @@
 				</section>
 			{/if}
 
-			<p class="menor pie-modal">
-				Lo del catalogo se reconstruye con su historial de eventos, que ensena el producto
-				aunque hoy ya no se venda. El precio y las existencias salen de PostgreSQL, que es
-				donde vive la oferta.
-			</p>
+			<p class="menor pie-modal">Asi era el producto cuando lo compraste, aunque hoy ya no se venda.</p>
 		</div>
 	</div>
 {/if}
