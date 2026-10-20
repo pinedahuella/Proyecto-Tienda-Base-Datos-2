@@ -21,14 +21,39 @@ export const pool = new Pool({
   user: obligatoria('DB_USER'),
   password: obligatoria('DB_PASSWORD'),
   database: obligatoria('DB_NAME'),
-  // Los dos limites que no tenia (2026-10-20). Sin el primero, con la red
-  // cortada cada conexion nueva esperaba lo que tarda Windows en rendirse, unos
-  // 21 s (medido el 19-10 con la PC de Jose David). Sin el segundo, una
-  // conexion ya abierta a una base congelada esperaba para siempre. Ninguna
-  // consulta de la tienda se acerca a 30 s.
-  connectionTimeoutMillis: 5000,
-  query_timeout: 30_000,
+  // Los limites que no tenia (2026-10-20). Sin el primero, con la red cortada
+  // cada conexion nueva esperaba lo que tarda Windows en rendirse, unos 21 s
+  // (medido el 19-10 con la PC de Jose David); vale tambien para esperar turno
+  // con el pool lleno. Sin el segundo, una conexion ya abierta a una base
+  // congelada esperaba para siempre; es solo una red, generosa a proposito: con
+  // 30 s cortaba transacciones de fraude que se esperan entre si por la misma
+  // fila (medido el 20-10 con la bateria de pruebas). 20 conexiones y no las 10
+  // de fabrica, para que esa espera de turno sea rara.
+  max: 20,
+  connectionTimeoutMillis: 10_000,
+  query_timeout: 120_000,
 });
+
+/**
+ * Si un error quiere decir que PostgreSQL no responde, para el cortacircuitos.
+ * Es `esFalloDeConexion` menos dos casos que tambien dan 503 a quien los sufre
+ * pero NO son la base caida: esperar turno con el pool lleno ("timeout exceeded
+ * when trying to connect", pg-pool) y una consulta que paso el `query_timeout`.
+ * Los dos pasan con la base sana y ocupada; si abrieran el cortacircuitos, una
+ * rafaga de carga dejaria la tienda 15 s sin PostgreSQL (paso el 20-10 en la
+ * bateria de pruebas, antes de separarlos).
+ */
+export function esCaidaDePostgres(error: unknown): boolean {
+  return (
+    esFalloDeConexion(error) &&
+    !(
+      error instanceof Error &&
+      /timeout exceeded when trying to connect|query read timeout/i.test(
+        error.message,
+      )
+    )
+  );
+}
 
 /**
  * El cortacircuitos de PostgreSQL (helpers/cortacircuitos.ts): despues de una
@@ -58,7 +83,7 @@ pool.query = ((...args: unknown[]) => {
   }
   return cortacircuitosPostgres.correr(
     () => consultar(...args) as Promise<unknown>,
-    esFalloDeConexion,
+    esCaidaDePostgres,
     errorEnPausa,
   );
 }) as typeof pool.query;
@@ -67,13 +92,16 @@ pool.query = ((...args: unknown[]) => {
  * Una consulta de las que tardan milesimas (una fila por su llave) con un limite
  * propio y corto. Es para el camino de cada peticion: la revision de la sesion
  * (`SesionGuard`) y el perfil de `/usuario/yo`. Con PostgreSQL congelado, una
- * conexion ya abierta del pool no contesta y la consulta esperaba los 30 s de
- * `query_timeout` (medido el 2026-10-20: la primera peticion con sesion tardo
- * 30.3 s). Con esto se rinde a los `ms`, avisa al cortacircuitos y el que
- * llama sigue por su camino sin PostgreSQL.
+ * conexion ya abierta del pool no contesta y la consulta esperaba el
+ * `query_timeout` entero (medido el 2026-10-20: la primera peticion con sesion
+ * tardo 30.3 s). Con esto se rinde a los `ms` y el que llama sigue por su
+ * camino sin PostgreSQL.
  *
- * El error lleva `ETIMEDOUT`, asi que `esFalloDeConexion` lo reconoce como
- * cualquier otra caida.
+ * Avisa al cortacircuitos solo si el pool no tenia a nadie esperando turno: con
+ * el pool lleno, tardar es estar ocupada, no caida.
+ *
+ * El error lleva `ETIMEDOUT`, asi que `esFalloDeConexion` lo reconoce y quien
+ * llama lo trata como una caida.
  */
 export async function consultaCorta<T extends QueryResultRow>(
   texto: string,
@@ -85,7 +113,9 @@ export async function consultaCorta<T extends QueryResultRow>(
       new Error(`PostgreSQL no respondio en ${ms / 1000} s`),
       { code: 'ETIMEDOUT' },
     );
-    cortacircuitosPostgres.registrarCaida(error);
+    if (pool.waitingCount === 0) {
+      cortacircuitosPostgres.registrarCaida(error);
+    }
     return error;
   });
 }
@@ -97,7 +127,7 @@ pool.connect = ((...args: unknown[]) => {
   }
   return cortacircuitosPostgres.correr(
     () => conectar() as Promise<PoolClient>,
-    esFalloDeConexion,
+    esCaidaDePostgres,
     errorEnPausa,
   );
 }) as typeof pool.connect;

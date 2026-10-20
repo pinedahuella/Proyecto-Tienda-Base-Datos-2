@@ -61,6 +61,7 @@ else
         redis/mas_vendidos.sh
         neo4j/correr_patrones.sh
         clickhouse/correr_consultas.sh
+        pruebas/caidas.mjs
         pruebas/falla_checkout.sh
     )
 fi

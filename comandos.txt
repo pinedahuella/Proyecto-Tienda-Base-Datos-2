@@ -15,8 +15,11 @@ falta que nada de Mesh este corriendo: sirve justo para levantarlo.
   Reconstruir bases    rehacer el grafo, rehacer Mongo, borrar todo y empezar de cero
   Demos de fraude      una senal de login, el anillo de resenas, el login desde otro pais
   Demo de Redis        llaves sin TTL y una con TTL, para explicar el tiempo de vida
+  Caida de una base    apagar, congelar y prender cada base en vivo para ver que la
+                       tienda sigue (ver APAGAR UNA BASE EN VIVO, abajo)
 
-Son 29 comandos en cinco grupos. Cada tarjeta muestra el comando exacto que va a correr y tiene un boton Copiar,
+Hay mas grupos de demos (descuentos, Entrega final, resenas), y la cuenta cambia;
+el 2026-10-20 eran 46 comandos en nueve grupos. Cada tarjeta muestra el comando exacto que va a correr y tiene un boton Copiar,
 por si prefieres pegarlo en la terminal. Abajo va saliendo lo que imprime, con
 un boton Parar. Solo corre un comando a la vez.
 
@@ -503,6 +506,25 @@ Dentro de mongosh:
 Ojo con las comillas: desde PowerShell, lo que lleve parentesis va en comillas
 SIMPLES. Con comillas dobles la shell del contenedor contesta
 "Syntax error: ( unexpected", porque PowerShell se las come antes de enviarlas.
+
+
+APAGAR UNA BASE EN VIVO
+--------------------------------------------------
+Lo que pidio el profesor: apagar una base con la tienda abierta y ver que sigue
+respondiendo con las que quedan. Funciona con las bases aqui o en otra PC.
+
+  .\remoto\caidas.ps1 -Accion levantar             interruptor y backend apuntado a el (unos 3 minutos)
+  .\remoto\caidas.ps1 -Accion apagar -Base redis   como un docker stop (postgres, mongo, redis, neo4j,
+                                                   clickhouse, elastic o todas)
+  .\remoto\caidas.ps1 -Accion congelar -Base mongo la red cortada: acepta y no contesta
+  .\remoto\caidas.ps1 -Accion prender -Base redis  vuelve; el backend la usa solo a los 15 s
+  .\remoto\caidas.ps1 -Accion estado
+  .\remoto\caidas.ps1 -Accion quitar               backend directo a las bases otra vez
+  node pruebas/caidas.mjs [--congeladas]          la prueba que lo recorre todo solo
+
+Con las bases aqui tambien vale parar el contenedor: docker stop mesh-redis y
+docker start mesh-redis. Lo que pasa con cada base esta en
+docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md.
 
 
 APAGAR

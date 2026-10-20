@@ -254,7 +254,10 @@ export class PedidosCompradorService {
     }
     const idPedido = Number(idPedidoParametro);
 
-    const { estadoPedido } = await this.verificarPedidoPropio(idPedido, idUsuario);
+    const { estadoPedido } = await this.verificarPedidoPropio(
+      idPedido,
+      idUsuario,
+    );
     if (estadoPedido === 'pendiente') {
       // El pendiente es el carrito: cancelarlo lo dejaria a medias en Redis.
       throw new ErrorConflicto(

@@ -1,4 +1,13 @@
-import { Controller, Get, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  HttpException,
+  HttpStatus,
+  UseGuards,
+} from '@nestjs/common';
+import { Roles } from '../decorators/roles.decorator';
+import { SesionGuard } from '../guards/sesion.guard';
+import { ID_ROL_ADMIN } from '../models/rol-usuario';
 import { Cortacircuitos } from '../helpers/cortacircuitos';
 import { exito } from '../helpers/respuesta';
 import { BaseDatosService } from '../services/base-datos.service';
@@ -32,10 +41,13 @@ export class BaseDatosController {
   // GET /db/cortacircuitos
   // Lo que el backend vio la ultima vez que le hablo a cada base
   // (helpers/cortacircuitos.ts): si respondio o desde cuando la da por caida.
-  // No prueba nada, solo cuenta lo que ya paso: lo leen las pruebas de caidas
-  // y el panel de comandos. Es para quien mantiene la tienda, la pagina no lo
-  // usa.
+  // No prueba nada, solo cuenta lo que ya paso: lo lee pruebas/caidas.mjs. Es
+  // para quien mantiene la tienda, la pagina no lo usa. Solo el admin: el
+  // motivo de una caida trae hosts y puertos internos, y la tienda puede estar
+  // publicada (mesh.ledkid.com).
   @Get('cortacircuitos')
+  @UseGuards(SesionGuard)
+  @Roles(ID_ROL_ADMIN)
   cortacircuitos() {
     return exito(
       Cortacircuitos.estados(),

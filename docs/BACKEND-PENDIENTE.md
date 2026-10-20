@@ -7,7 +7,17 @@ Para Jose David. Todo lo de abajo es `backend/`, que nadie mas toca.
 ## LO QUE PIDIO EL PROFESOR (a otro grupo que ya expuso) Y LO QUE PIDE EL FRONTEND, 2026-10-19
 
 Meme paso tres audios de un companero que ya expuso. Se reviso Mesh contra cada
-punto sin tocar nada; los tres son de `backend/`:
+punto sin tocar nada; los tres son de `backend/`.
+
+**LOS TRES HECHOS el 2026-10-20, con permiso de Meme para tocar `backend/`.**
+Detalle para revisar en `backend/cambio_propuestas/2026-10-20_0200-caidas-con-respaldo-y-buscador.md`,
+lo que pasa con cada base en `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`. En corto: (1)
+cortacircuitos y respaldo en las seis bases, demo en vivo con
+`remoto/caidas.ps1` o el panel (grupo Caida de una base) y la prueba
+`pruebas/caidas.mjs`, 46 OK; (2) los filtros van en el `filter` de la consulta y
+las agregaciones sueltas, `facetas.py` 24 OK; (3) `sugeridos` aparte cuando no
+hay resultados (vectores, mas vendidos o mas resenados), con `total` en 0 para el
+reporte de busquedas sin resultados. Lo de abajo queda como estaba escrito:
 
 1. **Apagar una base en vivo y que la tienda siga.** No le basta un script:
    quiere ver en la pagina que pasa al hacer `docker stop` de cada base. Hoy

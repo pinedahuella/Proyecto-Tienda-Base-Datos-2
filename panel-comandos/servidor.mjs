@@ -52,6 +52,8 @@ const FRONTENDS_OK = ['http://localhost:5173', 'http://127.0.0.1:5173', 'https:/
 
 const ARRANCAR = 'arrancar.ps1';
 const SERVICIOS = 'panel-comandos/servicios.ps1';
+const CAIDAS = 'remoto/caidas.ps1';
+const BASES_CAIDA = ['postgres', 'mongo', 'redis', 'neo4j', 'clickhouse', 'elastic', 'todas'];
 
 const CATALOGO = [
   // --- Arrancar y parar ---------------------------------------------------
@@ -289,6 +291,47 @@ const CATALOGO = [
     construir: (v) => ['-Parte', v.parte, '-Duracion', v.duracion],
   },
 
+  // --- Caida de una base --------------------------------------------------
+  // Lo que pidio el profesor: apagar una base en vivo y ver que la tienda sigue.
+  // Funciona igual con las bases aqui que en otra PC: remoto/interruptor.cjs se
+  // pone entre el backend y cada base, y apagarla es dejar de reenviar su puerto.
+  // Ver remoto/caidas.ps1 y docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md.
+  {
+    id: 'caida-preparar', grupo: 'Caida de una base', titulo: 'Preparar la demo de caidas',
+    explica: 'Levanta el interruptor y reinicia el backend apuntado a el. Desde ahi cada base se puede apagar y prender sin tocar la maquina que la tiene. Tarda unos tres minutos, lo que tarda el backend en arrancar.',
+    script: CAIDAS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'levantar'],
+  },
+  {
+    id: 'caida-apagar', grupo: 'Caida de una base', titulo: 'Apagar una base',
+    explica: 'Apagada es como un docker stop: la base rechaza la conexion al instante. Congelada es la red cortada: acepta y no contesta, y el backend espera su limite antes de darla por caida. Abre la tienda y mira que sigue saliendo.',
+    script: CAIDAS, confirmar: null,
+    campos: [
+      { nombre: 'base', etiqueta: 'Base', tipo: 'opcion', opciones: BASES_CAIDA, defecto: 'redis' },
+      { nombre: 'como', etiqueta: 'Como', tipo: 'opcion', opciones: ['apagar', 'congelar'], defecto: 'apagar' },
+    ],
+    construir: (v) => ['-Accion', v.como, '-Base', v.base],
+  },
+  {
+    id: 'caida-prender', grupo: 'Caida de una base', titulo: 'Prender una base',
+    explica: 'La vuelve a conectar. El backend la usa otra vez solo, en unos 15 segundos, sin reiniciar nada.',
+    script: CAIDAS, confirmar: null,
+    campos: [{ nombre: 'base', etiqueta: 'Base', tipo: 'opcion', opciones: BASES_CAIDA, defecto: 'redis' }],
+    construir: (v) => ['-Accion', 'prender', '-Base', v.base],
+  },
+  {
+    id: 'caida-estado', grupo: 'Caida de una base', titulo: 'Ver que bases estan apagadas',
+    explica: 'Como ve el backend cada base a traves del interruptor.',
+    script: CAIDAS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'estado'],
+  },
+  {
+    id: 'caida-quitar', grupo: 'Caida de una base', titulo: 'Terminar la demo de caidas',
+    explica: 'Reinicia el backend hablando directo con las bases y apaga el interruptor. Tarda unos tres minutos.',
+    script: CAIDAS, campos: [], confirmar: null,
+    construir: () => ['-Accion', 'quitar'],
+  },
+
   // --- Demo de Redis ------------------------------------------------------
   {
     id: 'redis-sin-ttl', grupo: 'Demo de Redis', titulo: 'Dejar llaves sin TTL para explicarlas',
@@ -454,7 +497,9 @@ const SOLO_CON_BASES_AQUI = new Set([
   'demo-pais-precalentar', 'demo-pais', 'demo-pais-limpiar',
 ]);
 // Los que no tocan ninguna base: corren igual que siempre.
-const SIN_BASES = new Set(['estado', 'backend', 'frontend', 'parar-backend', 'parar-frontend', 'publicar', 'despublicar']);
+const SIN_BASES = new Set(['estado', 'backend', 'frontend', 'parar-backend', 'parar-frontend', 'publicar', 'despublicar',
+  // Los de caidas hablan con remoto/interruptor.cjs, aqui, y no con las bases.
+  'caida-preparar', 'caida-apagar', 'caida-prender', 'caida-estado', 'caida-quitar']);
 
 /** La PC de las bases si backend/.env apunta a otra, o null si son las de aqui. */
 function basesRemotas() {

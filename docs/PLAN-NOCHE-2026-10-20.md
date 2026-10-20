@@ -83,7 +83,12 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
         notas.sh 10 OK (remoto/bin/mongosh no traducia el /tmp de un guion pasado suelto; SI habia
         productos solo en Mongo, 1103 y 1104). correr_patrones.sh "Todo bien" (el control '-206'
         coincidia con la cadena REAL 203-204-205-206; ahora sembrado() exige el signo negativo).
-- [ ] 11. Prueba nueva de caidas con los interruptores + correr_todas en remoto en verde.
+- [x] 11. pruebas/caidas.mjs (en correr_todas): 46 OK apagadas y 46 OK congeladas. Panel: grupo Caida de una
+        base (caida-preparar/apagar/prender/estado/quitar). correr_todas en remoto lo DETUVO Claude Code por
+        memoria baja en la prueba 17 de 39: 15 bien, anillos.sh 3 FALLA por un falso positivo del
+        cortacircuitos de PostgreSQL bajo carga (pool lleno / consulta larga). Arreglado (esCaidaDePostgres,
+        consultaCorta mira pool.waitingCount, query_timeout 120 s, max 20): anillos.sh 27 OK, caidas 46+46.
+        NO se relanzo la bateria completa (Claude Code pide no hacerlo solo); quedan sin correr de la 18 a la 39.
 - [ ] 12. Edge 1536x730 de cada caida, abrir cada captura.
 - [ ] 13. Docs: QUE-PASA-SI-SE-CAE-UNA-BASE.md, cambio_propuestas, TRASPASO, memoria. Commit y push.
 
@@ -103,6 +108,8 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
 - No editar el producto 21 por la API (etl_mongo.sh).
 
 ## Bitacora
+
+- 02:10 paso 11, docs del 13 escritos; falso positivo de PG arreglado; commit. Sigue el 12 (Edge).
 
 - 01:35 paso 10 hecho; commit. Sigue el 9 (frontend) y el 11 (prueba de caidas + correr_todas).
 

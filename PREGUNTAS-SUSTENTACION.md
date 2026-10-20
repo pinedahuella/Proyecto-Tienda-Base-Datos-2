@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 138 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 148 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las líneas son las del código en main al 20 de septiembre de 2026, salvo las preguntas 32 a 34 y la 119, que están al 23 de septiembre. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
 
@@ -24,7 +24,8 @@ Las líneas son las del código en main al 20 de septiembre de 2026, salvo las p
 - [Parte 6. Fraude de login y de IP](#parte-6-fraude-de-login-y-de-ip), preguntas 83 a 101
 - [Parte 7. Arquitectura, seguridad y entrega final](#parte-7-arquitectura-seguridad-y-entrega-final), preguntas 102 a 115
 - [Parte 8. Entrega final, lo que hoy hay en el repositorio](#parte-8-entrega-final-lo-que-hoy-hay-en-el-repositorio), preguntas 116 a 131
-- [Parte 9. Lo que cambió el 16 y 17 de octubre](#parte-9-lo-que-cambió-el-16-y-17-de-octubre), preguntas 132 a 138
+- [Parte 9. Lo que cambió el 16 y 17 de octubre](#parte-9-lo-que-cambió-el-16-y-17-de-octubre), preguntas 132 a 141
+- [Parte 10. Lo que cambió el 19 y 20 de octubre](#parte-10-lo-que-cambió-el-19-y-20-de-octubre), preguntas 142 a 148
 
 ---
 
@@ -1073,7 +1074,7 @@ Se compra igual. Desde el 17 de octubre el carrito de verdad es el pedido `pendi
 
 - Dónde se ve. `pruebas/falla_checkout.sh`, 32 OK: con Redis parado compra, con MongoDB parado compra, con PostgreSQL parado no, y en los tres nada queda a medias. `docs/CONSISTENCIA-CHECKOUT.md`, sección 0 bis.
 - Lo que pide el profesor. Entrega 3, estrategia de consistencia y prueba de falla simulada, y su directiva de que Redis nunca sea la verdad.
-- Ojo si preguntan por lo que no se cubre. `SesionGuard` mira PostgreSQL en cada petición con sesión, así que con PostgreSQL caído nada con sesión responde. Es un control de seguridad de todo el backend y se dejó así.
+- Ojo si preguntan por lo que no se cubre. Hasta el 20 de octubre `SesionGuard` miraba PostgreSQL en cada petición con sesión, y con PostgreSQL caído nada con sesión respondía. Desde ese día, si PostgreSQL no contesta se le cree al token firmado (ver la pregunta 144).
 
 ### 133. ¿Dónde viven las reservas de una venta relámpago?
 En dos lugares con roles distintos. Redis decide primero con su script Lua, atómico, y rechaza al que llega tarde sin bloquear a nadie. La reserva de verdad queda en `reserva_venta_relampago` de PostgreSQL, con su ticket, su vencimiento de 15 minutos y su estado (`activa`, `confirmada`, `devuelta`, `vencida`). Si Redis pierde la venta, `ReservasVentaRelampagoSyncService` la reconstruye desde PostgreSQL con la operación `restaurar`.
@@ -1131,3 +1132,49 @@ Con la cabecera X-Forwarded-For. El backend corre con `trustProxy: 'loopback'`: 
 
 - Dónde se ve. `demo-evento-fraude.ps1 -Tipo viaje_imposible`, `backend/src/main.ts` (trustProxy) y `backend/src/helpers/contexto-peticion.ts` (geoip-lite).
 - Ojo si preguntan si eso es hacer trampa. La cabecera solo se cree si la petición viene de localhost, que es justo lo que hace un proxy de verdad; desde afuera no se puede inventar. Para hacerlo con una IP real de otro país está `demo-fraude-pais.ps1`, que sale por Tor.
+
+## Parte 10. Lo que cambió el 19 y 20 de octubre
+
+Lo que pidió el profesor en la revisión de otro grupo: que la tienda siga respondiendo con una base apagada y que se vea en vivo, que los filtros de Elasticsearch vayan en la consulta y que una búsqueda sin sentido traiga al menos un producto. Todo medido contra las bases de la computadora de José David.
+
+### 142. ¿Qué pasa si apagan una base en plena demostración?
+La tienda sigue con las que quedan. Cada base tiene un cortacircuitos en el backend: la primera petición después de la caída espera lo que tarda la base en no contestar, y durante los 15 segundos siguientes el backend ni le pregunta y va directo al respaldo. Lo que la base daba sale de otra. Sin MongoDB, el catálogo sale de su copia en PostgreSQL. Sin Redis, los rankings se calculan en ClickHouse en el momento. Sin Elasticsearch, el buscador busca en la copia del catálogo. Sin Neo4j, las recomendaciones salen de los pedidos. Sin ClickHouse, solo faltan viste hace poco y las tendencias, porque las vistas no viven en otro lado. Sin PostgreSQL, se mira todo pero no se paga.
+
+- Dónde se ve. `backend/src/helpers/cortacircuitos.ts` y los respaldos `catalogo-respaldo.ts`, `buscador-respaldo.ts`, `recomendaciones-respaldo.ts` y `tarjetas-producto.ts`. `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`, base por base, con lo medido.
+- Cómo se muestra en vivo. En el panel de comandos, grupo Caída de una base, o `.\remoto\caidas.ps1 -Accion apagar -Base redis`. Un interruptor se pone entre el backend y cada base, así se puede apagar una sin tocar la máquina que la tiene. Con las bases en la misma máquina, también vale `docker stop mesh-redis`.
+- Cómo se comprueba. `node pruebas/caidas.mjs` apaga las seis una por una, revisa cada cosa del documento y las prende otra vez. 46 OK, apagadas y congeladas.
+
+### 143. ¿Por qué con Redis caído los rankings salen iguales?
+Porque Redis nunca fue el que los calcula. Un worker hace la consulta en ClickHouse cada 10 minutos y deja el resultado en Redis para contestar rápido. Sin Redis, el backend hace esa misma consulta en el momento y la recuerda un minuto. Se compararon las ocho vitrinas con y sin Redis y salieron idénticas, en el mismo orden (los empates se ordenan como los ordena Redis).
+
+- Dónde se ve. `calcular()` en `mas-vendidos-sync.service.ts`, `mas-vistos-sync.service.ts` y `combos-sync.service.ts`, y `calcularUno()` en `tambien-vieron-sync.service.ts`. Las ofertas destacadas salen de la tabla `oferta` con `RegistroOfertasRedisService.desdePostgres`.
+- Ojo si preguntan si encontraron algo raro. Sí. La copia de las ofertas destacadas en Redis no se actualizaba cuando una compra bajaba el stock, y la vitrina podía mostrar unidades que ya no había. Ahora la refresca la cola `evento_oferta` con cada cambio.
+
+### 144. ¿Qué pasa con alguien que ya entró si se cae PostgreSQL?
+Sigue dentro. La sesión es un token firmado que dura hasta dos horas. Normalmente el backend le pregunta a PostgreSQL en cada petición si la cuenta sigue activa, y si la base no contesta se le cree al token. Si contesta que la cuenta está suspendida, se corta como siempre. El nombre para la cabecera sale de una copia del perfil en Redis, sin la contraseña, y el carrito de la copia de Redis. Lo que no se puede es pagar, agregar al carrito o entrar con otra cuenta.
+
+- Dónde se ve. `backend/src/guards/sesion.guard.ts`, `backend/src/helpers/perfil-sesion.ts`, y la ficha con `ofertas_no_disponibles` en `productos.service.ts`.
+- Ojo si preguntan por qué no se puede iniciar sesión sin PostgreSQL. Se podrían copiar las cuentas a otra base, pero las contraseñas quedarían en dos lugares que proteger y una cuenta suspendida podría entrar con la copia vieja. Se prefirió que quien ya estaba dentro siga y quien no, mire la tienda sin cuenta.
+
+### 145. ¿Cómo busca la tienda sin Elasticsearch?
+En la copia del catálogo en PostgreSQL, con la misma regla de texto que el índice. La migración 048 trae `mesh_normalizar`, que quita tildes y mayúsculas como el analizador del índice, y `mesh_coincide`, que tolera errores de tecleo con la misma tolerancia que `fuzziness: AUTO` usando la distancia de Levenshtein. Las palabras que están en muchos productos pesan menos, como en el puntaje de Elasticsearch. Los filtros del panel y sus conteos también se calculan. Comparado con Elasticsearch, los totales y los conteos de todos los filtros salieron idénticos.
+
+- Dónde se ve. `migrations/048_buscador_respaldo.sql` y `backend/src/helpers/buscador-respaldo.ts`.
+- Lo que no tiene. El tal vez quisiste decir, que es del corrector de Elasticsearch.
+
+### 146. ¿Por qué los filtros van en la consulta y no en un post_filter?
+Porque si el filtro ya se sabe, se filtra antes de agregar. Hasta el 20 de octubre los filtros iban en `post_filter`, que corre después de las agregaciones, y cada faceta se contaba con los filtros de las otras. Ahora van en el `filter` de la consulta junto con el de activo, y las agregaciones cuentan solo lo que quedó, así cada número del panel es cuántos resultados hay de verdad con esa opción sumada. Dentro de una faceta las opciones siguen sumándose, entre facetas se cruzan.
+
+- Dónde se ve. `backend/src/services/buscador/facetado.service.ts` y `elastic/pruebas/facetas.py`, 24 OK, que comprueba que la consulta no lleva `post_filter` y que la faceta de categoría se recorta con lo elegido.
+- Lo que pide el profesor. Lo dijo en la revisión del 19 de octubre, que los filtros no se pongan después en los agregados.
+
+### 147. ¿Qué devuelve una búsqueda como asdffff?
+Cero resultados y, aparte, productos sugeridos. Primero los más cercanos por significado (el vector de lo escrito contra los vectores de los productos, sin el umbral de la búsqueda híbrida), y si eso no se puede, lo más vendido, y si tampoco, los más reseñados. La página dice que no encontró nada y debajo muestra Te pueden interesar.
+
+- Dónde se ve. `backend/src/services/buscador/sugeridos.service.ts`, la página `/buscar` y la lista de la cabecera.
+- Ojo si preguntan por qué van aparte. Para que la búsqueda se siga contando como sin resultados en ClickHouse. Si los sugeridos contaran como resultados, asdffff desaparecería del reporte de búsquedas sin resultados del administrador sin avisar.
+
+### 148. ¿Cómo se ve en el registro que una base se cayó y volvió?
+Con dos líneas por base, una al caer y otra al volver, y con la ruta `GET /db/cortacircuitos`, que dice qué base ve caída y desde cuándo.
+
+- Dónde se ve. `[Cortacircuitos] Redis no responde (Command timed out): pausa de 15 s` y `[Cortacircuitos] Redis volvio`. Cada respaldo deja además la suya, `[CatalogoRespaldo]`, `[BuscadorRespaldo]`, `[RecomendacionesRespaldo]` y `[SesionGuard]`.

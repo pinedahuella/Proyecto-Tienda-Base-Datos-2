@@ -99,9 +99,35 @@ se saltan esa parte (ver abajo). Desactivar la quita.
    aviso. La cuenta `desarrollador1@mesh.com` la crea `demo-anillo-resenas.ps1`
    en la base que se use: en una base nueva hay que crearla otra vez.
 
+## Apagar una base para el backend (el interruptor)
+
+Desde el 2026-10-20, para mostrar en vivo que la tienda sigue con una base caida
+(lo pidio el profesor) sin tocar la PC que la tiene:
+
+```
+.\remoto\caidas.ps1 -Accion levantar            interruptor + backend apuntado a el (~3 min)
+.\remoto\caidas.ps1 -Accion apagar   -Base redis
+.\remoto\caidas.ps1 -Accion congelar -Base mongo
+.\remoto\caidas.ps1 -Accion prender  -Base redis
+.\remoto\caidas.ps1 -Accion estado
+.\remoto\caidas.ps1 -Accion quitar               backend directo a las bases otra vez
+```
+
+`interruptor.cjs` reenvia un puerto de aqui a cada base (los de siempre mas
+10000, Mongo al 37018) y se controla por HTTP en `127.0.0.1:5198`. El backend se
+arranca con `DB_HOST`, `MONGO_PORT`, etc. apuntando a esos puertos (dotenv no
+pisa lo que ya esta en el ambiente, `backend/.env` no se toca). **Apagada** deja
+de escuchar y corta las conexiones (como un `docker stop`); **congelada** acepta y
+no contesta (la red cortada, lo que se vio el 19-10 con la PC de Jose David). El
+destino es el `DB_HOST` de `backend/.env`, asi que sirve igual con el Docker de
+aqui. Lo mismo esta en el panel de comandos, grupo Caida de una base, y
+`node pruebas/caidas.mjs [--congeladas]` lo recorre solo (46 OK en las dos formas
+el 20-10). Lo que pasa con cada base: `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`.
+
 ## Lo que no se puede en remoto
 
-- **Parar una base de la otra PC.** `docker stop` y `docker start` salen con 1.
+- **Parar una base de la otra PC.** `docker stop` y `docker start` salen con 1
+  (para el backend, el interruptor de arriba hace lo mismo).
   Con `SIN_CAIDA=1`, `pruebas/grafo_compras.sh` y
   `pruebas/ofertas_y_seguimientos.sh` se saltan su parte de la caida, y
   `pruebas/falla_checkout.sh`, que no es otra cosa, dice SIN MEDIR y sale con 0.
@@ -132,9 +158,10 @@ en verde        etl_compras 29, grafo_compras 25, recomendaciones 29, carrito 42
                 prueba_carrito, prueba_restaurar 20, prueba_concurrencia (50 conexiones, sin
                 sobreventa), mas_vendidos, neo4j/correr_patrones, clickhouse/correr_consultas
 SIN MEDIR       falla_checkout (todo es tumbar bases), las devoluciones de etl_compras (alla todas las
-                escribio el backend con su IP, ninguna el ETL), busqueda parte 4 y notas.sh (alla no hay
-                ningun producto que viva solo en Mongo; se crea uno desde el panel del vendedor), los 3
-                de siempre de ofertas_paginadas
+                escribio el backend con su IP, ninguna el ETL), busqueda parte 4, los 3 de siempre de
+                ofertas_paginadas. notas.sh se dio aqui por SIN MEDIR "porque alla no hay productos
+                solo en Mongo", y no era eso: si hay (1103 y 1104); el mongosh falso no traducia el
+                /tmp de un guion pasado suelto. Arreglado el 20-10: 10 OK
 de la otra PC   prueba_acceso 12 OK y 19 FALLA, las contrasenas de inspeccion y operador
 de sus datos    recomendacion_semantica dio 14 OK y 1 FALLA: producto_catalogo tenia 102 productos (1001
                 a 1102) que ya no estaban en Mongo ni tenian vector, de un -Borrar 102 en esa PC.

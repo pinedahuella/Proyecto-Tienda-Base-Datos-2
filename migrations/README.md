@@ -66,10 +66,10 @@ copia de una tabla vieja a una nueva con `ON CONFLICT DO UPDATE`, en el arranque
 siguiente vuelve a pisar la nueva con lo viejo. La 031 y la 032 copian solo
 mientras exista la columna que la 033 quita, y ese es su marcador.
 
-## Los treinta y nueve archivos de esquema
+## Los cuarenta y ocho archivos de esquema
 
 Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
-"los catorce" con quince en la carpeta, "los veinte" con veintiuno, y "los veinticinco" con treinta y tres, y "los treinta y tres" con treinta y nueve. Es la misma trampa que este documento
+"los catorce" con quince en la carpeta, "los veinte" con veintiuno, y "los veinticinco" con treinta y tres, "los treinta y tres" con treinta y nueve, y "los treinta y nueve" con cuarenta y ocho. Es la misma trampa que este documento
 avisa mas abajo para las comprobaciones: una lista escrita a mano caduca sin
 avisar. Antes de creerle a esta, cuentalos:
 
@@ -128,6 +128,7 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `045_carrito_en_postgres.sql` | Redis nunca es la verdad (25f0fe0): el pedido `pendiente` de cada cuenta es su carrito (`version`, `fecha_ultima_actividad`, sin direccion hasta pagar, uno por cuenta) y `reserva_venta_relampago` con su catalogo de estados |
 | `046_pedido_quitado.sql` | La cola `pedido_quitado` (2026-10-18): los quitar.sql de las semillas anotan aqui cada pedido que borran, y el ETL de compras borra sus lineas de `compra_producto` y `devolucion_producto` en ClickHouse. Antes ClickHouse se quedaba con ellas para siempre |
 | `047_catalogo_respaldo.sql` | La copia del catalogo alcanza para que la tienda se vea sin MongoDB (2026-10-19): `producto_catalogo` suma `estado`, `id_categoria`, `descripcion` y `fecha_creacion`. Con Mongo caido el backend arma el catalogo, la ficha y las tarjetas desde esta copia (`backend/src/helpers/catalogo-respaldo.ts`); las llena el backend al escribir un producto y el paso 7e de arrancar |
+| `048_buscador_respaldo.sql` | El buscador sale de PostgreSQL cuando Elasticsearch no responde (2026-10-20): las extensiones `unaccent`, `fuzzystrmatch` y `pg_trgm`, `mesh_normalizar()` (sin tildes y en minusculas, como el analizador del indice) y `mesh_coincide()` (la tolerancia de `fuzziness: AUTO`), con indices de trigramas sobre los nombres de `producto_catalogo` y `variante_catalogo`. La usa `backend/src/helpers/buscador-respaldo.ts` |
 
 **De la 034 a la 039, las senales que no salen del grafo.** Son del 2 al 4 de
 octubre y siguen un mismo molde: el backend las detecta y la migracion solo
