@@ -48,6 +48,22 @@ const ESPERA_MS = 1500;
 const esperar = (ms: number) => new Promise<void>((resolver) => setTimeout(resolver, ms));
 
 /**
+ * Ninguna pantalla nombra una base de datos ni una pieza interna. Cuando una
+ * base se cae, el backend contesta "No se pudo conectar con MongoDB" (503), y
+ * a quien esta comprando eso no le sirve: no sabe que es ni puede hacer nada.
+ * Si un error trae uno de estos nombres, se cambia por un texto que si entiende
+ * y el original queda en la consola para quien tenga que depurar.
+ */
+const PIEZAS_INTERNAS = /postgres|mongo|redis|neo4j|clickhouse|elastic|ollama|cypher/i;
+const NO_DISPONIBLE = 'No pudimos cargar esto ahora. Intenta de nuevo en un momento.';
+
+function sinPiezasInternas(mensaje: string | undefined, estado: number): string | undefined {
+	if (typeof mensaje !== 'string' || !PIEZAS_INTERNAS.test(mensaje)) return mensaje;
+	console.warn(`[Mesh] ${estado}: ${mensaje}`);
+	return NO_DISPONIBLE;
+}
+
+/**
  * fetch, pero aguanta que el backend se este reiniciando.
  *
  * Reintenta en dos casos y solo en el navegador (al renderizar en el servidor
@@ -100,7 +116,7 @@ export async function pedir<T>(ruta: string, opciones: RequestInit = {}): Promis
 	} catch {
 		return {
 			ok: false,
-			mensaje: 'No se pudo contactar al servidor. Revisa que el backend este corriendo.',
+			mensaje: 'No se pudo conectar. Revisa tu internet e intenta de nuevo.',
 			payload: null as T,
 			estado: 0
 		};
@@ -108,6 +124,9 @@ export async function pedir<T>(ruta: string, opciones: RequestInit = {}): Promis
 
 	try {
 		const cuerpo = (await respuesta.json()) as RespuestaApi<T>;
+		if (cuerpo && cuerpo.ok === false) {
+			cuerpo.mensaje = sinPiezasInternas(cuerpo.mensaje, respuesta.status) as string;
+		}
 		return { ...cuerpo, estado: respuesta.status };
 	} catch {
 		return {
@@ -156,7 +175,7 @@ export function mensajeUtil(respuesta: {
 	const generico = 'No se pudo completar la operacion. Intenta de nuevo.';
 
 	if (respuesta.estado === 0) {
-		return 'No se pudo conectar con el servidor. Revisa que el backend este corriendo.';
+		return 'No se pudo conectar. Revisa tu internet e intenta de nuevo.';
 	}
 
 	// SE MIRAN LOS DOS NOMBRES, Y ESA LINEA ES LA QUE HACIA FALTA.
