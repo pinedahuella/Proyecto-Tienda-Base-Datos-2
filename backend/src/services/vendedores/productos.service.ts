@@ -61,7 +61,10 @@ import {
 import { UsuarioService } from '../../services/usuario.service';
 import { ProductosService } from '../../services/productos/productos.service';
 import { CORREO_TIENDA } from '../../helpers/constantes';
-import { escribirConCatalogoPostgres } from '../../helpers/catalogo-postgres';
+import {
+  actualizarEstadoCatalogo,
+  escribirConCatalogoPostgres,
+} from '../../helpers/catalogo-postgres';
 import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 
 const ESTADO_PRODUCTO_NUEVO = 'borrador';
@@ -646,6 +649,9 @@ export class ProductosVendedorService {
           [propuesta.id_propuesta_producto, razon],
         );
       }
+      // La copia del catalogo (047): aprobar es lo que vuelve publico el
+      // producto tambien para el respaldo sin Mongo.
+      await actualizarEstadoCatalogo(cliente, idProducto, nuevoEstado);
 
       await cliente.query('COMMIT');
     } catch (error) {
@@ -736,6 +742,7 @@ export class ProductosVendedorService {
       eventoABorrar = await this.crearEventoModificacion(idProducto, {
         estado: 'en_revision',
       });
+      await actualizarEstadoCatalogo(cliente, idProducto, 'en_revision');
 
       await cliente.query('COMMIT');
     } catch (error) {
@@ -1351,10 +1358,17 @@ export class ProductosVendedorService {
         );
       };
 
-      if (nombre != null || variantes != null) {
+      if (
+        nombre != null ||
+        variantes != null ||
+        descripcion != null ||
+        estado != null ||
+        categoriaCambia
+      ) {
         // Cambia algo que vive tambien en la copia del catalogo en
-        // PostgreSQL (nombre del producto o variantes): misma transaccion.
-        // La compensacion devuelve a Mongo los valores que tenia.
+        // PostgreSQL (nombre, variantes, y desde la 047 estado, descripcion y
+        // categoria, que usa el respaldo cuando Mongo no responde): misma
+        // transaccion. La compensacion devuelve a Mongo los valores que tenia.
         const previo = productoActual as unknown as Record<string, unknown>;
         const reversaSet: Record<string, unknown> = {};
         const reversaUnset: Record<string, ''> = {};
@@ -1373,6 +1387,14 @@ export class ProductosVendedorService {
           {
             _id: idProducto,
             nombre: nombre ?? productoActual.nombre,
+            estado: estado ?? productoActual.estado,
+            descripcion: descripcion ?? productoActual.descripcion,
+            categoria: {
+              id_categoria: categoriaCambia
+                ? idCategoriaNueva
+                : productoActual.categoria.id_categoria,
+            },
+            fecha_creacion: productoActual.fecha_creacion,
             variantes: variantes ?? productoActual.variantes,
           },
           escribirMongo,

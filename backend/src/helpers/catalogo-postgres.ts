@@ -3,10 +3,19 @@ import type { PoolClient } from 'pg';
 import { pool } from '../database/postgres';
 import { manejarErrorConexion } from './manejar-error-db';
 
-/** Lo minimo de un producto de Mongo que se copia a PostgreSQL. */
+/**
+ * Lo minimo de un producto de Mongo que se copia a PostgreSQL. Desde la 047
+ * tambien el estado, la categoria, la descripcion y la fecha de creacion: con
+ * eso el respaldo (`catalogo-respaldo.ts`) muestra el catalogo y la ficha
+ * cuando Mongo no responde.
+ */
 export interface ProductoParaCatalogo {
   _id: number;
   nombre: string;
+  estado: string;
+  descripcion: string | null;
+  categoria: { id_categoria: number };
+  fecha_creacion: Date;
   variantes: {
     id_producto_variante: number;
     nombre_variante: string;
@@ -26,10 +35,24 @@ export async function sincronizarCatalogo(
   producto: ProductoParaCatalogo,
 ): Promise<void> {
   await cliente.query(
-    `INSERT INTO producto_catalogo (id_producto_mongo, nombre) VALUES ($1, $2)
+    `INSERT INTO producto_catalogo
+       (id_producto_mongo, nombre, estado, descripcion, id_categoria, fecha_creacion)
+     VALUES ($1, $2, $3, $4, $5, $6)
      ON CONFLICT (id_producto_mongo)
-     DO UPDATE SET nombre = EXCLUDED.nombre, fecha_actualizacion = now()`,
-    [producto._id, producto.nombre],
+     DO UPDATE SET nombre = EXCLUDED.nombre,
+                   estado = EXCLUDED.estado,
+                   descripcion = EXCLUDED.descripcion,
+                   id_categoria = EXCLUDED.id_categoria,
+                   fecha_creacion = EXCLUDED.fecha_creacion,
+                   fecha_actualizacion = now()`,
+    [
+      producto._id,
+      producto.nombre,
+      producto.estado,
+      producto.descripcion ?? null,
+      producto.categoria.id_categoria,
+      producto.fecha_creacion,
+    ],
   );
 
   const ids = producto.variantes.map((v) => v.id_producto_variante);
@@ -71,6 +94,26 @@ export async function sincronizarCatalogo(
         AND id_producto_variante_mongo <> ALL($2::bigint[])
         AND estado <> 'inactiva'`,
     [producto._id, ids],
+  );
+}
+
+/**
+ * Solo el estado del producto en la copia, dentro de la transaccion `cliente`.
+ * Lo usan revisar y reenviar una propuesta, que cambian el estado en Mongo y
+ * ya tienen su propia transaccion de PostgreSQL (la compensacion de Mongo es
+ * la suya). Aprobar es lo que vuelve publico un producto: sin esto el respaldo
+ * no lo mostraria.
+ */
+export async function actualizarEstadoCatalogo(
+  cliente: PoolClient,
+  idProducto: number,
+  estado: string,
+): Promise<void> {
+  await cliente.query(
+    `UPDATE producto_catalogo
+        SET estado = $2, fecha_actualizacion = now()
+      WHERE id_producto_mongo = $1`,
+    [idProducto, estado],
   );
 }
 

@@ -1,6 +1,14 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { mongoDb } from '../../database/mongo';
-import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
+import {
+  ErrorConexion,
+  ErrorNoEncontrado,
+  ErrorValidacion,
+} from '../../helpers/errores';
+import {
+  categoriasValidasDesdePostgres,
+  conRespaldoDeMongo,
+} from '../../helpers/catalogo-respaldo';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import {
   Categoria,
@@ -27,21 +35,29 @@ export class CategoriasService {
    */
   async listarValidas(): Promise<CategoriaValida[]> {
     try {
-      const documentos = await mongoDb
-        .collection<CategoriaDocumento>('categorias')
-        .find(
-          { categoria_padre: { $ne: null } },
-          { projection: { nombre: 1, categoria_padre: 1 } },
-        )
-        .sort({ nombre: 1 })
-        .toArray();
+      // Sin Mongo salen de `categorias` en PostgreSQL, que es de donde Mongo
+      // copia las suyas (helpers/catalogo-respaldo.ts): los filtros del
+      // catalogo siguen funcionando.
+      return await conRespaldoDeMongo<CategoriaValida[]>(async () => {
+        const documentos = await mongoDb
+          .collection<CategoriaDocumento>('categorias')
+          .find(
+            { categoria_padre: { $ne: null } },
+            { projection: { nombre: 1, categoria_padre: 1 } },
+          )
+          .sort({ nombre: 1 })
+          .toArray();
 
-      return documentos.map((documento) => ({
-        id_categoria: documento._id,
-        nombre: documento.nombre,
-        categoria_padre: documento.categoria_padre as string,
-      }));
+        return documentos.map((documento) => ({
+          id_categoria: documento._id,
+          nombre: documento.nombre,
+          categoria_padre: documento.categoria_padre as string,
+        }));
+      }, categoriasValidasDesdePostgres);
     } catch (error) {
+      if (error instanceof ErrorConexion) {
+        throw error;
+      }
       manejarErrorConexionMongo(this.logger, error);
     }
   }

@@ -118,6 +118,11 @@
 		variantes: Variante[];
 		caracteristicas_adicionales?: Caracteristica[];
 		caracteristicas_personalizadas?: Caracteristica[];
+		/**
+		 * El backend no pudo leer el catalogo completo y armo el producto con su
+		 * copia minima: sin caracteristicas ni detalles de cada presentacion.
+		 */
+		desde_respaldo?: boolean;
 		/** El precio de la tienda, que es el que se ensena. */
 		precio_tienda: Decimal | null;
 		/** El mas barato al que se ofrece, de cualquier vendedor. */
@@ -819,6 +824,9 @@
 						<p class="desde-p">{producto.total_ofertas} vendedores lo tienen</p>
 					{/if}
 					<p class="desc">{producto.descripcion ?? ''}</p>
+					{#if producto.desde_respaldo}
+						<p class="sin-detalles">Algunos detalles de este producto no se pueden mostrar ahora.</p>
+					{/if}
 
 					<!-- Las existencias, que es lo primero que se pregunta -->
 					<div
@@ -1334,6 +1342,12 @@
 
 	.desc {
 		margin-top: 0.7rem;
+		color: var(--gris);
+	}
+
+	.sin-detalles {
+		margin-top: 0.4rem;
+		font-size: var(--f-sm);
 		color: var(--gris);
 	}
 

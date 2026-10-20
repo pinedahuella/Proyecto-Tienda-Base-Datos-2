@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { clickhouse } from '../../database/clickhouse';
-import { mongoDb } from '../../database/mongo';
+import { productosPorIds } from '../../helpers/catalogo-respaldo';
 import { manejarErrorClickHouse } from '../../helpers/manejar-error-clickhouse';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import {
@@ -307,10 +307,8 @@ export class AdminTendenciasAvanzadasService {
     }
     let productos: Producto[];
     try {
-      productos = await mongoDb
-        .collection<Producto>('productos')
-        .find({ _id: { $in: idsProducto } })
-        .toArray();
+      // Sin Mongo, de la copia del catalogo en PostgreSQL.
+      productos = await productosPorIds(idsProducto, { soloVisibles: false });
     } catch (error) {
       manejarErrorConexionMongo(this.logger, error);
     }

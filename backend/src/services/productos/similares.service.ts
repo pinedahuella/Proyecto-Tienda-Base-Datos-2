@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { mongoDb } from '../../database/mongo';
+import { productosPorIds } from '../../helpers/catalogo-respaldo';
 import { pool } from '../../database/postgres';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
@@ -49,10 +49,8 @@ export class SimilaresService {
     const ids = filas.map((fila) => fila.id_producto);
     let productoPorId: Map<number, Producto>;
     try {
-      const productos = await mongoDb
-        .collection<Producto>('productos')
-        .find({ _id: { $in: ids } })
-        .toArray();
+      // Sin Mongo, de la copia del catalogo en PostgreSQL.
+      const productos = await productosPorIds(ids, { soloVisibles: false });
       productoPorId = new Map(productos.map((p) => [p._id, p]));
     } catch (error) {
       manejarErrorConexionMongo(this.logger, error);

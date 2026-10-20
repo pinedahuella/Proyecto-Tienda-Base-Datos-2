@@ -2,7 +2,17 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Decimal128, Document } from 'mongodb';
 import { mongoDb } from '../../database/mongo';
 import { pool } from '../../database/postgres';
-import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
+import {
+  ErrorConexion,
+  ErrorNoEncontrado,
+  ErrorValidacion,
+} from '../../helpers/errores';
+import {
+  conRespaldoDeMongo,
+  FiltrosCatalogo,
+  paginaDesdePostgres,
+  productosDesdePostgres,
+} from '../../helpers/catalogo-respaldo';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { CORREO_TIENDA } from '../../helpers/constantes';
@@ -122,19 +132,27 @@ export class ProductosService {
   async listar(query: ListarProductosQuery): Promise<ProductosPagina> {
     const limite = validarLimite(query.limite);
     const despuesDe = validarDespuesDe(query.despues_de);
-    const filtro = this.construirFiltro(query);
+    const filtros = this.leerFiltros(query);
 
-    if (despuesDe != null) {
-      filtro._id = { $gt: despuesDe };
-    }
-
+    // Sin Mongo, la misma pagina sale de la copia del catalogo en PostgreSQL
+    // (helpers/catalogo-respaldo.ts).
     try {
-      const productos = await mongoDb
-        .collection<Producto>('productos')
-        .find(filtro)
-        .sort({ _id: 1 })
-        .limit(limite)
-        .toArray();
+      const productos = await conRespaldoDeMongo<Producto[]>(
+        () => {
+          const filtro = this.filtroMongo(filtros);
+          if (despuesDe != null) {
+            filtro._id = { $gt: despuesDe };
+          }
+          return mongoDb
+            .collection<Producto>('productos')
+            .find(filtro)
+            .sort({ _id: 1 })
+            .limit(limite)
+            .toArray();
+        },
+        async () =>
+          (await paginaDesdePostgres(filtros, { limite, despuesDe })).productos,
+      );
 
       const siguienteCursor =
         productos.length === limite
@@ -143,6 +161,9 @@ export class ProductosService {
 
       return { productos, siguiente_cursor: siguienteCursor };
     } catch (error) {
+      if (error instanceof ErrorConexion) {
+        throw error;
+      }
       manejarErrorConexionMongo(this.logger, error);
     }
   }
@@ -160,44 +181,70 @@ export class ProductosService {
   ): Promise<ProductosPaginados> {
     const limite = validarLimite(query.limite);
     const pagina = validarPagina(query.pagina);
-    const filtro = this.construirFiltro(query);
+    const filtros = this.leerFiltros(query);
     const saltar = (pagina - 1) * limite;
 
     try {
-      const pipeline: Document[] = [
-        { $match: filtro },
-        {
-          $facet: {
-            productos: [
-              { $sort: { _id: 1 } },
-              { $skip: saltar },
-              { $limit: limite },
-            ],
-            total: [{ $count: 'total' }],
-          },
+      const { productos, totalProductos } = await conRespaldoDeMongo<{
+        productos: Producto[];
+        totalProductos: number;
+      }>(
+        async () => {
+          const pipeline: Document[] = [
+            { $match: this.filtroMongo(filtros) },
+            {
+              $facet: {
+                productos: [
+                  { $sort: { _id: 1 } },
+                  { $skip: saltar },
+                  { $limit: limite },
+                ],
+                total: [{ $count: 'total' }],
+              },
+            },
+          ];
+
+          const [resultado] = await mongoDb
+            .collection<Producto>('productos')
+            .aggregate<{
+              productos: Producto[];
+              total: { total: number }[];
+            }>(pipeline)
+            .toArray();
+
+          return {
+            productos: resultado.productos,
+            totalProductos: resultado.total[0]?.total ?? 0,
+          };
         },
-      ];
+        // Sin Mongo, la misma pagina y el mismo total desde la copia del
+        // catalogo en PostgreSQL (helpers/catalogo-respaldo.ts).
+        async () => {
+          const respaldo = await paginaDesdePostgres(filtros, {
+            limite,
+            saltar,
+          });
+          return {
+            productos: respaldo.productos,
+            totalProductos: respaldo.total,
+          };
+        },
+      );
 
-      const [resultado] = await mongoDb
-        .collection<Producto>('productos')
-        .aggregate<{
-          productos: Producto[];
-          total: { total: number }[];
-        }>(pipeline)
-        .toArray();
-
-      const totalProductos = resultado.total[0]?.total ?? 0;
       const totalPaginas =
         totalProductos === 0 ? 0 : Math.ceil(totalProductos / limite);
 
       return {
-        productos: resultado.productos,
+        productos,
         pagina,
         limite,
         total_productos: totalProductos,
         total_paginas: totalPaginas,
       };
     } catch (error) {
+      if (error instanceof ErrorConexion) {
+        throw error;
+      }
       manejarErrorConexionMongo(this.logger, error);
     }
   }
@@ -223,21 +270,37 @@ export class ProductosService {
     }
     const idProducto = Number(idProductoParametro);
 
+    // Sin Mongo, el producto sale de la copia del catalogo en PostgreSQL
+    // (helpers/catalogo-respaldo.ts), sin sus caracteristicas y con
+    // `desde_respaldo: true`. Las ofertas ya salian de PostgreSQL.
     let producto: Producto;
     try {
-      const encontrado = await mongoDb
-        .collection<Producto>('productos')
-        .findOne({
-          _id: idProducto,
-          estado: ESTADO_PRODUCTO_VISIBLE,
-        });
-
-      if (encontrado == null) {
-        throw new ErrorNoEncontrado('No existe un producto con ese id');
-      }
-      producto = encontrado;
+      producto = await conRespaldoDeMongo<Producto>(
+        async () => {
+          const encontrado = await mongoDb
+            .collection<Producto>('productos')
+            .findOne({
+              _id: idProducto,
+              estado: ESTADO_PRODUCTO_VISIBLE,
+            });
+          if (encontrado == null) {
+            throw new ErrorNoEncontrado('No existe un producto con ese id');
+          }
+          return encontrado;
+        },
+        async () => {
+          const [encontrado] = await productosDesdePostgres([idProducto], true);
+          if (encontrado == null) {
+            throw new ErrorNoEncontrado('No existe un producto con ese id');
+          }
+          return encontrado;
+        },
+      );
     } catch (error) {
-      if (error instanceof ErrorNoEncontrado) {
+      if (
+        error instanceof ErrorNoEncontrado ||
+        error instanceof ErrorConexion
+      ) {
         throw error;
       }
       manejarErrorConexionMongo(this.logger, error);
@@ -766,13 +829,13 @@ export class ProductosService {
   }
 
   /**
-   * Arma el filtro de Mongo a partir de los query params ya validados. Lo
-   * comparten listar() y listarPaginado(): los mismos filtros fijos y
-   * dinamicos aplican en las dos rutas, solo cambia como se pagina despues.
+   * Valida los query params del catalogo y los deja listos. Lo comparten
+   * listar() y listarPaginado(): los mismos filtros fijos y dinamicos aplican
+   * en las dos rutas, solo cambia como se pagina despues. Los leen tanto
+   * filtroMongo() como el respaldo en PostgreSQL (`paginaDesdePostgres`), asi
+   * que los dos validan exactamente igual.
    */
-  private construirFiltro(
-    query: FiltrosProductosQuery,
-  ): Record<string, unknown> {
+  private leerFiltros(query: FiltrosProductosQuery): FiltrosCatalogo {
     const idCategoria = validarEnteroPositivo(
       query.id_categoria,
       'id_categoria',
@@ -814,24 +877,50 @@ export class ProductosService {
       'resenas_total_max',
     );
 
+    // Filtros dinamicos: cualquier query param que no sea uno de los fijos
+    // es una caracteristica adicional (ver construirFiltrosDinamicos).
+    const caracteristicas = this.construirFiltrosDinamicos(query);
+
+    return {
+      nombre: query.nombre ? query.nombre : null,
+      // Lista blanca, no lista negra: solo ESTADO_PRODUCTO_VISIBLE es parte de
+      // la busqueda publica, sin importar que se pida -- no es un filtro
+      // opcional que se pueda ampliar. Si ?estado= pide cualquier otro valor,
+      // no hay (ni puede haber) ningun producto que lo cumpla a la vez que sea
+      // visible, asi que la respuesta es una lista vacia, nunca un error.
+      estadoImposible:
+        query.estado != null && query.estado !== ESTADO_PRODUCTO_VISIBLE,
+      idCategoria,
+      precioMin,
+      precioMax,
+      precioTiendaMin,
+      precioTiendaMax,
+      estadoVariante: query.estado_variante ? query.estado_variante : null,
+      stockMin,
+      stockMax,
+      stockTiendaMin,
+      stockTiendaMax,
+      resenasPromedioMin,
+      resenasPromedioMax,
+      resenasTotalMin,
+      resenasTotalMax,
+      caracteristicas,
+    };
+  }
+
+  /** El filtro de Mongo para unos filtros ya leidos con leerFiltros(). */
+  private filtroMongo(f: FiltrosCatalogo): Record<string, unknown> {
     const filtro: Record<string, unknown> = {};
 
-    if (query.nombre) {
-      filtro.nombre = { $regex: escaparRegex(query.nombre), $options: 'i' };
+    if (f.nombre) {
+      filtro.nombre = { $regex: escaparRegex(f.nombre), $options: 'i' };
     }
-    // Lista blanca, no lista negra: solo ESTADO_PRODUCTO_VISIBLE es parte de
-    // la busqueda publica, sin importar que se pida -- no es un filtro
-    // opcional que se pueda ampliar. Si ?estado= pide cualquier otro valor,
-    // no hay (ni puede haber) ningun producto que lo cumpla a la vez que sea
-    // visible: $in: [] es el idiom estandar de Mongo para "nunca hace match",
-    // asi que la respuesta sigue siendo una lista vacia, nunca un error.
-    const condicionEstado: Record<string, unknown> =
-      query.estado != null && query.estado !== ESTADO_PRODUCTO_VISIBLE
-        ? { $in: [] }
-        : { $eq: ESTADO_PRODUCTO_VISIBLE };
-    filtro.estado = condicionEstado;
-    if (idCategoria != null) {
-      filtro['categoria.id_categoria'] = idCategoria;
+    // $in: [] es el idiom estandar de Mongo para "nunca hace match".
+    filtro.estado = f.estadoImposible
+      ? { $in: [] }
+      : { $eq: ESTADO_PRODUCTO_VISIBLE };
+    if (f.idCategoria != null) {
+      filtro['categoria.id_categoria'] = f.idCategoria;
     }
 
     // Los dos precios ya vienen calculados en la raiz del documento: no hace
@@ -847,44 +936,44 @@ export class ProductosService {
     //
     // Quien de verdad quiera filtrar solo lo de la tienda tiene
     // precio_tienda_min/max, igual que stock_tienda_min/max para el stock.
-    const rangoPrecio = this.construirRangoDecimal(precioMin, precioMax);
+    const rangoPrecio = this.construirRangoDecimal(f.precioMin, f.precioMax);
     if (rangoPrecio != null) {
       filtro.precio_desde = rangoPrecio;
     }
 
     const rangoPrecioTienda = this.construirRangoDecimal(
-      precioTiendaMin,
-      precioTiendaMax,
+      f.precioTiendaMin,
+      f.precioTiendaMax,
     );
     if (rangoPrecioTienda != null) {
       filtro.precio_tienda = rangoPrecioTienda;
     }
 
-    if (query.estado_variante) {
-      filtro.variantes = { $elemMatch: { estado: query.estado_variante } };
+    if (f.estadoVariante) {
+      filtro.variantes = { $elemMatch: { estado: f.estadoVariante } };
     }
 
     // stock_total (entre todos los vendedores activos) y stock_tienda (solo
     // la tienda) ya vienen calculados en la raiz: son dos preguntas
     // distintas ("hay quien lo venda" contra "lo tiene la tienda"), asi que
     // van en dos campos y no se combinan.
-    if (stockMin != null || stockMax != null) {
+    if (f.stockMin != null || f.stockMax != null) {
       const rango: Record<string, number> = {};
-      if (stockMin != null) {
-        rango.$gte = stockMin;
+      if (f.stockMin != null) {
+        rango.$gte = f.stockMin;
       }
-      if (stockMax != null) {
-        rango.$lte = stockMax;
+      if (f.stockMax != null) {
+        rango.$lte = f.stockMax;
       }
       filtro.stock_total = rango;
     }
-    if (stockTiendaMin != null || stockTiendaMax != null) {
+    if (f.stockTiendaMin != null || f.stockTiendaMax != null) {
       const rango: Record<string, number> = {};
-      if (stockTiendaMin != null) {
-        rango.$gte = stockTiendaMin;
+      if (f.stockTiendaMin != null) {
+        rango.$gte = f.stockTiendaMin;
       }
-      if (stockTiendaMax != null) {
-        rango.$lte = stockTiendaMax;
+      if (f.stockTiendaMax != null) {
+        rango.$lte = f.stockTiendaMax;
       }
       filtro.stock_tienda = rango;
     }
@@ -895,20 +984,20 @@ export class ProductosService {
     // bajan a variantes[]. resenas_promedio se compara como numero normal (es
     // un double en el documento, no Decimal128: no es dinero).
     const rangoResenasTotal: Record<string, number> = {};
-    if (resenasTotalMin != null) {
-      rangoResenasTotal.$gte = resenasTotalMin;
+    if (f.resenasTotalMin != null) {
+      rangoResenasTotal.$gte = f.resenasTotalMin;
     }
-    if (resenasTotalMax != null) {
-      rangoResenasTotal.$lte = resenasTotalMax;
+    if (f.resenasTotalMax != null) {
+      rangoResenasTotal.$lte = f.resenasTotalMax;
     }
 
-    if (resenasPromedioMin != null || resenasPromedioMax != null) {
+    if (f.resenasPromedioMin != null || f.resenasPromedioMax != null) {
       const rango: Record<string, number> = {};
-      if (resenasPromedioMin != null) {
-        rango.$gte = Number(resenasPromedioMin);
+      if (f.resenasPromedioMin != null) {
+        rango.$gte = Number(f.resenasPromedioMin);
       }
-      if (resenasPromedioMax != null) {
-        rango.$lte = Number(resenasPromedioMax);
+      if (f.resenasPromedioMax != null) {
+        rango.$lte = Number(f.resenasPromedioMax);
       }
       filtro.resenas_promedio = rango;
       // Filtrar por nota implica "tiene notas": un producto sin resenas
@@ -928,7 +1017,7 @@ export class ProductosService {
     // es una caracteristica adicional. Se busca tanto en el producto como en
     // sus variantes, sin exigir que sea la misma variante entre si de otros
     // filtros dinamicos.
-    const condicionesDinamicas = this.construirFiltrosDinamicos(query);
+    const condicionesDinamicas = f.caracteristicas;
     if (condicionesDinamicas.length > 0) {
       filtro.$and = condicionesDinamicas;
     }

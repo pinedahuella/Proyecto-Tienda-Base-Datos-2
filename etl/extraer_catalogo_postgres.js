@@ -39,13 +39,26 @@ db.productos.find(
     {
         _id: 1,
         nombre: 1,
+        estado: 1,
+        descripcion: 1,
+        'categoria.id_categoria': 1,
+        fecha_creacion: 1,
         'variantes.id_producto_variante': 1,
         'variantes.nombre_variante': 1,
         'variantes.estado': 1,
         'variantes.imagenes': 1
     }
 ).forEach(function (producto) {
-    productos.push({ id: producto._id, nombre: producto.nombre });
+    // Desde la 047 tambien estado, categoria, descripcion y fecha de creacion:
+    // lo que el respaldo del backend necesita para ensenar el producto sin Mongo.
+    productos.push({
+        id: producto._id,
+        nombre: producto.nombre,
+        estado: producto.estado,
+        descripcion: producto.descripcion == null ? null : producto.descripcion,
+        id_categoria: producto.categoria ? producto.categoria.id_categoria : null,
+        fecha_creacion: producto.fecha_creacion || null
+    });
     (producto.variantes || []).forEach(function (variante) {
         const imagenes = variante.imagenes || [];
         variantes.push({
@@ -71,12 +84,19 @@ const sql = [
     'CREATE TEMP TABLE catalogo_mongo ON COMMIT DROP AS SELECT ' + MARCA + json + MARCA + '::jsonb AS j;',
     '',
     'WITH escritos AS (',
-    '    INSERT INTO producto_catalogo (id_producto_mongo, nombre)',
-    "    SELECT (p->>'id')::bigint, p->>'nombre'",
+    '    INSERT INTO producto_catalogo',
+    '           (id_producto_mongo, nombre, estado, descripcion, id_categoria, fecha_creacion)',
+    "    SELECT (p->>'id')::bigint, p->>'nombre', p->>'estado', p->>'descripcion',",
+    "           (p->>'id_categoria')::bigint, (p->>'fecha_creacion')::timestamptz",
     "      FROM catalogo_mongo, jsonb_array_elements(j->'productos') p",
     '    ON CONFLICT (id_producto_mongo) DO UPDATE',
-    '       SET nombre = EXCLUDED.nombre, fecha_actualizacion = now()',
-    '     WHERE producto_catalogo.nombre IS DISTINCT FROM EXCLUDED.nombre',
+    '       SET nombre = EXCLUDED.nombre, estado = EXCLUDED.estado,',
+    '           descripcion = EXCLUDED.descripcion, id_categoria = EXCLUDED.id_categoria,',
+    '           fecha_creacion = EXCLUDED.fecha_creacion, fecha_actualizacion = now()',
+    '     WHERE (producto_catalogo.nombre, producto_catalogo.estado, producto_catalogo.descripcion,',
+    '            producto_catalogo.id_categoria, producto_catalogo.fecha_creacion)',
+    '           IS DISTINCT FROM (EXCLUDED.nombre, EXCLUDED.estado, EXCLUDED.descripcion,',
+    '                             EXCLUDED.id_categoria, EXCLUDED.fecha_creacion)',
     '    RETURNING 1)',
     'SELECT count(*) FROM escritos;',
     '',

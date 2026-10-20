@@ -16,7 +16,7 @@ apago el 18 de octubre con una prueba automatica que se explica al final.
 | Base | Para que sirve | Se puede comprar | Que se ve en la tienda | Que se pierde |
 |---|---|---|---|---|
 | PostgreSQL | Pedidos, pagos, stock, cuentas y el carrito | No | La compra no se hace y avisa | Nada, no queda nada a medias |
-| MongoDB | Ficha de cada producto | Si | El catalogo y la ficha avisan que no se pudieron cargar | El registro de entradas de ese rato |
+| MongoDB | Ficha completa de cada producto | Si | El catalogo y la ficha salen de una copia en PostgreSQL, sin las caracteristicas | El registro de entradas de ese rato |
 | Redis | Rankings ya calculados, copia rapida del carrito | Si | Desaparecen lo mas vendido, lo mas visto y se compran juntos | Nada |
 | Elasticsearch | Buscador | Si | El buscador avisa que no se pudo cargar | Nada, los cambios esperan en una cola |
 | Neo4j | Recomendaciones y anillos de fraude | Si | Para ti se cambia por lo mas visto, y desaparece quienes lo compraron tambien llevaron | Nada, los cambios esperan en una cola |
@@ -71,15 +71,22 @@ caracteristicas. Tambien guarda el registro de seguridad de cada entrada a la
 tienda (quien entro, desde donde y si la clave estaba bien). Lo que hace falta
 para cobrar ya esta copiado en PostgreSQL.
 
-Que se ve en la tienda.
+PostgreSQL guarda ademas una copia minima de cada producto. Es el nombre, el
+estado, la categoria, la descripcion y cada variante con su foto de portada. La
+mantiene al dia el mismo backend, que escribe en las dos bases en la misma
+operacion cada vez que un vendedor crea o cambia un producto. Los precios, el
+stock, los vendedores y las notas ya vivian en PostgreSQL.
 
-- En la portada, la lista de productos del catalogo cambia por el aviso de que
-  no se pudo cargar, con el boton Reintentar. Arriba siguen saliendo lo mas
-  vendido, las ofertas con descuento y se compran juntos.
-- Al abrir un producto, la ficha entera cambia por el mismo aviso.
-- El buscador sigue encontrando productos, porque tiene su propia copia.
+Que se ve en la tienda. Casi nada cambia. El catalogo, sus filtros, la ficha de
+cada producto, para ti, quienes lo compraron tambien llevaron y los productos
+parecidos salen de la copia de PostgreSQL. En la ficha falta la pestana de
+detalles (las caracteristicas, que solo estan en MongoDB), y en su lugar dice
+Algunos detalles de este producto no se pueden mostrar ahora. Filtrar por una
+caracteristica, como la memoria de una laptop, avisa que no se pudo cargar.
 
-Que se midio.
+Que se midio, en dos tiempos.
+
+Antes de la copia, con MongoDB apagada en la otra computadora.
 
 - Se entro a la cuenta en medio segundo y se compro una unidad. La compra se
   hizo (respuesta 201, pedido 1065) en menos de 2 segundos y el stock bajo de 6
@@ -94,17 +101,39 @@ Que se midio.
   pasar al buscador cuando Elasticsearch estaba apagada tambien se pasaron
   solas, y no quedo ninguna pendiente.
 
+Con la copia, con MongoDB sin responder para el backend.
+
+- Se pidieron 71 cosas a la tienda (catalogo con todos sus filtros y paginas,
+  35 fichas, categorias, recomendaciones y tendencias) con MongoDB y sin
+  MongoDB, y se compararon campo por campo. Salieron 362 comparaciones iguales y
+  1 distinta, la del filtro por caracteristica, que avisa a proposito. El tiempo
+  de las 71 fue casi el mismo, 12.4 segundos con MongoDB y 12.6 sin MongoDB.
+- MongoDB se apago con la tienda en uso. La primera ficha tardo 3.2 segundos,
+  lo que tarda en rendirse la conexion, y las siguientes 70 milesimas, porque
+  la tienda recuerda por 15 segundos que MongoDB no esta y va directo a la
+  copia. Al prenderla otra vez, a los 15 segundos las fichas volvieron a salir
+  de MongoDB, sin reiniciar nada.
+- La tienda tambien arranco con MongoDB apagada. La primera ficha tardo 2.2
+  segundos y las siguientes 0.15, todas desde la copia, y al prender MongoDB la
+  tienda se conecto sola.
+
 Que se pierde. El registro de seguridad de las entradas que se hicieron en ese
 rato. La persona entra igual, pero su entrada no queda anotada, y por eso los
-detectores de fraude de entradas no la ven.
+detectores de fraude de entradas no la ven. Tampoco se pueden crear ni cambiar
+productos mientras MongoDB no esta, porque la ficha completa vive ahi.
 
 Como verlo.
 
-- En la pagina, abrir un producto cualquiera.
-- En el registro del backend salen lineas de `LogService` que dicen que no se
-  pudo guardar el evento de autenticacion, una por cada entrada perdida, y
-  lineas de `EventoProductoSyncService` que dicen que Mongo no responde y que se
-  reintenta en la proxima corrida.
+- En la pagina, abrir un producto cualquiera y leer el aviso de los detalles.
+- En el registro del backend, una linea de `CatalogoRespaldo` dice que MongoDB
+  no responde y que el catalogo sale de la copia en PostgreSQL, y otra dice que
+  MongoDB volvio. Tambien salen lineas de `LogService` por cada entrada que no
+  se pudo anotar.
+- En la base, la copia es la tabla `producto_catalogo`.
+
+  ```
+  SELECT estado, count(*) FROM producto_catalogo GROUP BY estado
+  ```
 
 ## Redis
 
@@ -258,6 +287,10 @@ Como verlo.
   en una cola de PostgreSQL. Cuando la otra base vuelve, se procesa sola.
 - Lo que cuesta calcular, como los rankings, se guarda ya listo en Redis. Si la
   base de donde sale se cae, se sigue mostrando el ultimo calculo.
+- Lo que la persona vino a ver, el catalogo y la ficha de cada producto, tiene
+  una copia minima en PostgreSQL. Si MongoDB se cae, la tienda la usa y solo
+  esconde las caracteristicas, y cuando MongoDB vuelve la tienda regresa a ella
+  sola.
 - Lo que solo sirve para analizar, como una vista o una busqueda, se manda sin
   esperar. Si la base no esta se pierde ese dato, pero la persona que esta
   comprando no espera ni ve un error.
