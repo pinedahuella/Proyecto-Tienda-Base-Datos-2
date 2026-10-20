@@ -1,14 +1,14 @@
 # Arquitectura de Mesh
 
-**Al 2026-09-20.** Es el diagrama de arquitectura que pide el enunciado, y **no
-es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 50 tablas de
+**Al 2026-10-20.** Es el diagrama de arquitectura que pide el enunciado, y **no
+es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 86 tablas de
 PostgreSQL y sus llaves y lo genera `python docs/generar-er.py` desde la base
 viva; este dibuja los **seis** motores de persistencia, quien escribe en cada
 uno y por donde viajan los datos entre ellos.
 
-**El `.drawio` de arquitectura se rehizo el 2026-09-19** con
+**El `.drawio` de arquitectura se rehizo el 2026-09-19 y se puso al dia el 2026-10-20** con
 `python docs/generar-arquitectura.py`: seis motores, lo que hace el backend con
-cada uno y las ocho rutas de datos entre motores, numeradas y explicadas en su
+cada uno y las doce rutas de datos entre motores, numeradas y explicadas en su
 leyenda. `--informe` saca la variante compacta que va en el Word, y `--grafo` el
 dibujo del modelo de Neo4j. El anterior quedo como
 `diagrama-arquitectura-2026-09-03.drawio`.
@@ -67,7 +67,10 @@ flowchart TB
     N4 -. "detectores de anillos y familia B,<br/>cada 15 min y al llegar una resena<br/>senal_fraude" .-> PG
     CH -. "mas vendidos y mas vistos cada 10 min,<br/>tambien vieron cada 15 min, combos cada 30 min" .-> RD
     CH -. "disparador de reglas automaticas,<br/>cada 60 s, cuenta ventas recientes" .-> PG
-    RD -. "clave de descuento vencida,<br/>cada minuto se quita de oferta" .-> PG
+    PG -. "worker cada 10 s<br/>las reservas rehacen el contador<br/>de la venta relampago si Redis lo perdio" .-> RD
+    RD -. "contador del login que cruza su umbral<br/>senal_fraude" .-> PG
+    ES -. "login retrospectivo y granja de registros,<br/>cada 15 min, senal_fraude" .-> PG
+    CH -. "hallazgos de compras y navegacion,<br/>una vez al dia, senal_fraude" .-> PG
 
     subgraph herramientas[INSPECCION, no son parte del sistema]
         H["pgAdmin :5050 · dbgate :3001 · RedisInsight :5540 · Kibana :5601<br/>Neo4j Browser :7474 · ClickHouse play :8123/play"]
@@ -288,6 +291,7 @@ El detalle, con las trampas del entorno, esta en `docs/TRASPASO.md`.
 | **2026-10-04, tarde** | Lo de 3305cf3 y 1f1f480 de Jose David. Las notas incoherentes (el clasificador de reseñas dice si un texto es malo; migración 037) y las reseñas parecidas (038) salen de **Elasticsearch**; las reseñas con la compra cancelada salen de **PostgreSQL**, con la fuente nueva `postgres` (039). Las señales de texto y la de cancelación se revisan al momento, no solo cada 15 minutos. El buscador gana la búsqueda **híbrida** (palabras y significado en una lista, por posición) y el "tal vez quisiste decir", y proponer un producto sugiere categoría y parecidos con el vector |
 | **2026-10-16 y 17** | Lo de 25f0fe0 de Jose David, a pedido del profesor (migraciones 040 a 045). **Todos los vectores vuelven a PostgreSQL** con pgvector: `vector_producto` y `vector_comentario`, con indice HNSW; `mesh_comentarios` y los campos de vector de `mesh_productos` se retiran (040). Las **compras pasan al grafo** como nodos `:Compra`, por la cola `evento_grafo_compra`, y "para ti" y "tambien compraron" se leen de **Neo4j** en vivo; `ParaTiSyncService` se borra (041). La limpieza de fraude quita `cadena_abierta`, `favor_devuelto` (ahora un bono de `mutuo`) y `carrito_acaparador`, la granja de registros sale de **Elasticsearch** y una senal de login ya no une casos (042). **Elasticsearch** gana el buscador de ofertas (`mesh_ofertas`, cola `evento_oferta`, 043) y el percolator de los "avisame" (`mesh_seguimientos`, 044). **Redis nunca es la fuente de verdad**: el carrito es el pedido `pendiente` de PostgreSQL y las reservas de venta relampago viven en `reserva_venta_relampago` (045). **ClickHouse** suma los combos (cada 30 min a Redis) y las busquedas sin resultados (`termino_normalizado`) |
 | **2026-10-01** | Comprar sin MongoDB, del diseno de Jose David (6f89237, migraciones 029 y 030). El nombre, el estado y la portada de cada variante se copian a **PostgreSQL** (`producto_catalogo` y `variante_catalogo`), y el recalculo del catalogo en **MongoDB** va por la cola `evento_producto` con un worker. El checkout ya solo necesita PostgreSQL y Redis; medido con MongoDB parado en `pruebas/falla_checkout.sh` |
+| **2026-10-20, tarde** | El `.drawio` y su PNG se ponen al dia con lo de octubre: vectores en PostgreSQL, compras en Neo4j, buscador de ofertas y avisame en Elasticsearch, combos en ClickHouse y Redis, reservas de venta relampago que rehacen el contador de Redis. Sale la flecha del descuento con TTL en Redis, que desde la migracion 028 (2026-09-26) es una columna de PostgreSQL. 86 tablas y 107 llaves foraneas |
 | **2026-10-19 y 20** | Lo que pidio el profesor, que la tienda siga con una base apagada. Cada base tiene un cortacircuitos (`backend/src/helpers/cortacircuitos.ts`) y lo que daba sale de otra. Sin **MongoDB**, el catalogo y la ficha salen de la copia en **PostgreSQL** (047). Sin **Redis**, los rankings se calculan en el momento en **ClickHouse** y las ofertas destacadas en **PostgreSQL**. Sin **Elasticsearch**, el buscador busca en la copia del catalogo con la misma regla de texto (048). Sin **Neo4j**, para ti y tambien compraron salen de los pedidos en **PostgreSQL**. Sin **PostgreSQL**, la sesion abierta sigue por su token y el perfil copiado en **Redis**, y no se paga. Las facetas de **Elasticsearch** filtran en la consulta y no en `post_filter`. El detalle por base esta en `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`. No hay flechas nuevas de datos en el dibujo, solo lecturas de respaldo |
 
 El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el

@@ -3,7 +3,36 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-20, 11:00**.
+Ultima actualizacion: **2026-10-20, 17:00**.
+
+**EMPIEZA AQUI (20-10, tarde). Revision entera antes de la presentacion, datos de prueba limpiados e informes al dia.**
+Commiteado (e366d91, 00c376a y el de los informes) y pusheado, Meme lo pidio.
+
+Medido contra las bases de 100.64.42.11: bateria 39 de 41 (etl_compras fallaba por datos, ya arreglado;
+correr_patrones es la carrera de Neo4j de siempre), caidas.mjs 51 OK apagadas y 51 congeladas, demo_concurrencia
+con Elasticsearch, MongoDB y Redis caidas juntas (2 de 4 ganan, pagan en 0.7 s), las 9 partes de
+demo-entrega-final.ps1 en verde, tsc y svelte-check en 0.
+
+Datos arreglados por la API o con la misma limpieza que hace la demo:
+- ClickHouse sin las 10 ventas de demo_concurrencia de las 07:46 (pedidos 1350 a 1359, oferta 6159). etl_compras
+  cuadra otra vez, 934 y 934.
+- Retiradas las 59 ofertas a Q15 de las cuentas famb*/anit* que dejan anillos.sh y anillos_familia_b.sh. Lo mas
+  vendido decia "desde Q15.00". Si se corren otra vez, vuelven.
+- Producto 1105 "ayuda" inactivo y su oferta 6179 retirada. Ofertas 4 y 7 (laptops) sin la venta relampago al 80 %,
+  y 331 y 333 sin el 50 % que les quedo de las pruebas de las 11:34. La 11 (laptop al 10 %) se queda, es la venta
+  relampago que sale en el inicio.
+- Tendencias sin 27 busquedas basura (asdf*, asisifsfasaa, gggg..., un texto pegado del panel).
+
+Arreglado en el repo: Fraude en telefono ya no se sale (botones de Casos envuelven, el select Tipo se encoge);
+el comentario suelto de catalogo-respaldo.ts; diagrama de arquitectura al 20-10 (vectores en PostgreSQL, compras en
+Neo4j, ofertas y avisame en Elasticsearch, combos, 86 tablas y 107 llaves); Reporte Entrega Final al 20-10, 20
+paginas, con la vuelta a pgvector (ADR-10 y sus dos revisiones en 2.2); Entrega 3 con 346 commits, 86 tablas y
+caidas 51; los generadores ya no dejan una hoja en blanco antes de una seccion ni separan un codigo de su leyenda.
+PREGUNTAS-SUSTENTACION.md 108 y 118 al dia. Fuera del repo: ENTREGAS-3-Y-4.txt al dia y la fecha de la guia.
+
+Lo que queda: la red con la PC de Jose David se corto un minuto a las 13:14 (las seis bases a la vez), revisarla
+antes de presentar. No correr la bateria justo antes de presentar, mete casos y anillos de fraude nuevos.
+docs/ARQUITECTURA.md tambien al 20-10 (el Mermaid con las mismas flechas que el diagrama).
 
 **EMPIEZA AQUI (20-10, de 09:45 a 11:00). El Word de la Entrega 3 con lo nuevo, y /buscar sin resultados a lo ancho.**
 SIN commitear (Meme no lo pidio).

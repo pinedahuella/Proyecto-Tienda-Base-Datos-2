@@ -189,8 +189,21 @@ def parrafo(texto="", tam=T_CUERPO, negrita=False, alineado=None, interlineado=1
     return p
 
 
+def quitar_espacio_final():
+    """El parrafo vacio que dejan una tabla o una lista al terminar sobra antes de
+    un salto de pagina, y si cae justo al pie de una hoja se lleva una en blanco."""
+    cuerpo = d.element.body
+    ultimo = cuerpo[-1]
+    if ultimo.tag == qn("w:sectPr"):
+        ultimo = ultimo.getprevious()
+    if (ultimo is not None and ultimo.tag == qn("w:p") and not ultimo.findall(qn("w:r"))
+            and ultimo.find(qn("w:pPr") + "/" + qn("w:sectPr")) is None):
+        cuerpo.remove(ultimo)
+
+
 def h1(texto, numero=None):
     """Titulo de seccion. Empieza en pagina nueva, como en el reporte anterior."""
+    quitar_espacio_final()
     p = parrafo()
     p.paragraph_format.page_break_before = True
     etiqueta = ("%d. %s" % (numero, texto)) if numero else texto
@@ -227,10 +240,10 @@ def bloque_fijo(texto, leyenda=""):
         p = d.add_paragraph()
         fmt(p, None, 1.0)
         p.paragraph_format.left_indent = Inches(0.3)
-        # no partir un bloque corto entre dos paginas
+        # no partir un bloque corto entre dos paginas, ni separarlo de su leyenda
         if len(lineas) <= 24:
             p.paragraph_format.keep_together = True
-            if k < len(lineas) - 1:
+            if k < len(lineas) - 1 or leyenda:
                 p.paragraph_format.keep_with_next = True
         run(p, linea if linea else " ", tam=T_FIJA, fuente=FUENTE_FIJA)
     if leyenda:

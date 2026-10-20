@@ -38,79 +38,86 @@ ALTO_DB = 250
 # entre vecinos. clave, titulo, rol, lineas, relleno, borde
 CAJAS = [
     ("neo4j", "Neo4j 5", "RELACIONES ENTRE CUENTAS", [
-        "cuentas, reseñas, productos",
-        "y domicilios, 3 aristas por reseña",
+        "cuentas, reseñas, productos,",
+        "domicilios y compras como nodo",
         "anillos cerrados de varios saltos",
-        "7 patrones de reseñas, familia B",
-        "cadena, favor devuelto, coordinados",
+        "familia B, satélites, persistentes,",
+        "coordinados y reputación exprés",
+        "para ti y también compraron,",
+        "recorridos de dos saltos en vivo",
     ], "#E1D5E7", "#9673A6"),
     ("pg", "PostgreSQL 18", "FUENTE DE VERDAD", [
-        "76 tablas y 97 llaves foráneas",
+        "86 tablas y 107 llaves foráneas",
         "pedidos, pagos, ofertas, stock",
-        "reglas de descuento automáticas",
-        "y por fecha, hallazgos F1 a F6",
-        "copia del catálogo para comprar",
-        "reseñas y señales de fraude",
-        "colas de grafo, producto y comentarios",
+        "la verdad del carrito y las reservas",
+        "de venta relámpago",
+        "vectores con pgvector e índice HNSW",
+        "respaldo del catálogo y del buscador",
+        "reseñas, señales y casos de fraude",
+        "colas hacia los otros motores",
     ], "#DAE8FC", "#6C8EBF"),
     ("mongo", "MongoDB", "CATÁLOGO Y LOG DE LOGIN", [
-        "productos 3105, productos_eventos",
+        "productos 1003, productos_eventos",
         "categorias, eventos_autenticacion",
         "atributos que varían por categoría",
         "historial por eventos",
+        "el texto de donde sale el vector",
     ], "#D5E8D4", "#82B366"),
-    ("es", "Elasticsearch 8", "BÚSQUEDA DE TEXTO Y POR SIGNIFICADO", [
-        "mesh_productos, 3105 con su vector",
-        "mesh_comentarios, reseñas con vector",
+    ("es", "Elasticsearch 8", "BÚSQUEDA DE TEXTO", [
+        "mesh_productos, 1003 productos",
+        "mesh_ofertas, buscador del vendedor",
+        "mesh_seguimientos, avísame",
+        "con percolator",
         "mesh_eventos_autenticacion",
         "búsqueda difusa que ignora tildes",
-        "parecidos y por intención con kNN",
+        "quisiste decir y facetas",
+        "granja de registros por IP",
     ], "#FFF2CC", "#D6B656"),
     ("ch", "ClickHouse", "EVENTOS EN EL TIEMPO", [
         "base columnar, mesh_eventos",
         "vista, carrito, compra, devolución,",
         "búsqueda y clic, más el resumen diario",
         "tendencias, embudo y búsquedas",
-        "sin respuesta",
-        "recomendaciones, vistos, también",
-        "vieron y para ti",
+        "sin resultados",
+        "más vistos, también vieron",
+        "y combos de 2 y 3 productos",
+        "hallazgos de compras y navegación",
     ], "#FFE6CC", "#D79B00"),
     ("redis", "Redis 8", "TRANSITORIO Y ATÓMICO", [
-        "carrito con expiración por inactividad",
-        "inventario limitado con script Lua",
+        "copia rápida del carrito",
+        "venta relámpago con script Lua",
         "candado de checkout",
         "contadores de fraude del login",
-        "vencimiento de descuentos con TTL",
         "tres usuarios de ACL por servicio",
-        "más vendidos y más vistos",
-        "recomendaciones ya calculadas",
+        "más vendidos, más vistos, combos",
+        "y también vieron, ya calculados",
     ], "#F8CECC", "#B85450"),
 ]
 
 # flechas de coordinacion entre motores, la leyenda las explica
 FLUJOS = [
-    (1, "pg", "mongo", "PostgreSQL a MongoDB, etl/cargar.js por lotes, conserva lo que el vendedor edita desde la aplicación, y la cola evento_producto, que un worker vacía recalculando precio, stock y nota del producto que cambió"),
-    (2, "pg", "neo4j", "PostgreSQL a Neo4j, cada reseña tocada entra en la cola evento_grafo y un worker la vacía cada 10 segundos"),
+    (1, "pg", "mongo", "PostgreSQL a MongoDB, etl/cargar.js por lotes, conserva lo que el vendedor edita desde la aplicación, y la cola evento_producto, que un worker vacía cada 5 segundos recalculando precio, stock y nota del producto que cambió"),
+    (2, "pg", "neo4j", "PostgreSQL a Neo4j, cada reseña tocada entra en la cola evento_grafo y cada compra en evento_grafo_compra, y un worker vacía cada una cada 10 segundos"),
     (3, "neo4j", "pg", "Neo4j a PostgreSQL, los detectores de anillos y de la familia B corren cada 15 minutos, B también al llegar una reseña, y guardan lo que encuentran en senal_fraude"),
-    (4, "mongo", "es", "MongoDB a Elasticsearch, la marca pendiente_busqueda cada 10 segundos, los intentos de login cada 5, y el vector de cada producto, que etl/cargar_vectores.ps1 y un worker le piden a Ollama y guardan en su documento"),
-    (5, "es", "pg", "Elasticsearch a PostgreSQL, el análisis retrospectivo del login y los detectores sobre el texto de las reseñas (repetidas, parecidas, anillo de texto y notas incoherentes) corren cada 15 minutos y dejan señales en senal_fraude"),
+    (4, "mongo", "es", "MongoDB a Elasticsearch, la marca pendiente_busqueda cada 10 segundos y los intentos de login cada 5"),
+    (5, "es", "pg", "Elasticsearch a PostgreSQL, el análisis retrospectivo del login y la granja de registros por IP corren cada 15 minutos y dejan señales en senal_fraude"),
     (6, "redis", "pg", "Redis a PostgreSQL, un contador de fallos de login que cruza su umbral deja o suma una señal en senal_fraude"),
-    (7, "pg", "ch", "PostgreSQL a ClickHouse, etl/cargar_compras.sh copia compras y devoluciones en cada arranque"),
-    (8, "ch", "redis", "ClickHouse a Redis, cada 10 minutos se recalculan más vendidos y más vistos, y cada 15 también vieron y para ti"),
-    (9, "ch", "pg", "ClickHouse a PostgreSQL, cada 60 segundos el disparador cuenta las ventas recientes y aplica la regla automática, y una vez al día los hallazgos F1 a F6 van a senal_fraude"),
-    (10, "redis", "pg", "Redis a PostgreSQL, cada minuto un descuento cuya clave de vencimiento ya no existe se quita de oferta"),
-    (11, "mongo", "pg", "MongoDB a PostgreSQL, el nombre, estado y portada de cada variante se copian a variante_catalogo para comprar sin MongoDB"),
-    (12, "pg", "es", "PostgreSQL a Elasticsearch, cada reseña o respuesta tocada entra en la cola evento_comentario y un worker la indexa en mesh_comentarios con su vector de Ollama"),
+    (7, "pg", "ch", "PostgreSQL a ClickHouse, etl/cargar_compras.sh copia compras y devoluciones en cada arranque y borra las de los pedidos anotados en pedido_quitado"),
+    (8, "ch", "redis", "ClickHouse a Redis, cada 10 minutos se recalculan más vendidos y más vistos, cada 15 también vieron y cada 30 los combos"),
+    (9, "ch", "pg", "ClickHouse a PostgreSQL, cada 60 segundos el disparador cuenta las ventas recientes y aplica la regla automática, y una vez al día los hallazgos de compras y navegación van a senal_fraude"),
+    (10, "pg", "redis", "PostgreSQL a Redis, cada 10 segundos las reservas de venta relámpago guardadas en PostgreSQL rehacen el contador de Redis si se perdió, y cada 10 minutos se borran en las dos los carritos vencidos"),
+    (11, "mongo", "pg", "MongoDB a PostgreSQL, el nombre, estado y portada de cada producto y variante se copian a producto_catalogo y variante_catalogo para comprar y ver la tienda sin MongoDB, y cada 10 segundos el texto de cada producto que cambió pasa por Ollama y su vector queda en vector_producto"),
+    (12, "pg", "es", "PostgreSQL a Elasticsearch, cada oferta tocada entra en la cola evento_oferta, un worker la indexa en mesh_ofertas cada 5 segundos y la percola contra mesh_seguimientos, y el aviso queda en PostgreSQL"),
 ]
 
 # lo que el backend hace con cada motor, escrito sobre su flecha
 USO = {
-    "neo4j": "lee el panel de fraude",
-    "pg": "pedidos, pagos, ofertas, reglas, reseñas",
+    "neo4j": "para ti, también compraron y fraude",
+    "pg": "pedidos, pagos, carrito, reseñas, vectores",
     "mongo": "catálogo, historial, intentos de login",
-    "es": "busca productos, parecidos y por intención",
-    "ch": "escribe eventos, lee rankings y recomendaciones",
-    "redis": "carrito, reservas, candado, descuentos",
+    "es": "busca productos y ofertas, avísame",
+    "ch": "escribe eventos, lee tendencias y rankings",
+    "redis": "carrito, venta relámpago, candado",
 }
 
 
@@ -255,7 +262,7 @@ def construir():
     x0 = 40
 
     L.texto(x0, 14, 1500, 30, "Mesh, arquitectura políglota con seis motores de persistencia", 20, negrita=True)
-    L.texto(x0, 48, 1700, 24, "Estado al 4 de octubre de 2026. Las flechas continuas son lo que hace el backend, "
+    L.texto(x0, 48, 1700, 24, "Estado al 20 de octubre de 2026. Las flechas continuas son lo que hace el backend, "
             "las punteadas y numeradas son datos que viajan de un motor a otro, y su mecanismo está en la leyenda.",
             11, gris=True)
 
@@ -263,15 +270,16 @@ def construir():
     # flecha a cada motor baje derecha, sin cruzar otras cajas.
     ancho_be = ancho_total
     L.rect("cliente", x0, 90, 300, 62, "<b>Frontend</b><br>SvelteKit, puerto 5173", "#E6E6F5", "#3D3D99")
-    L.rect("workers", x0 + 400, 80, 1380, 84,
-           "<b>Workers del backend</b><br>grafo 10 s, buscador 10 s, login a Elasticsearch 5 s, anillos y familia B 15 min, "
-           "fraude retrospectivo 15 min, hallazgos F1 a F6 cada día, más vendidos y más vistos 10 min, también vieron y para ti 15 min, "
-           "vencimientos de venta relámpago y descuento 1 min, reglas automáticas 60 s, reglas por fecha 15 min, "
-           "registro de ofertas en Redis 10 min, reseñas a Elasticsearch 10 s, clasificador de reseñas 30 s, "
-           "señales de texto y de compras canceladas 15 min y al momento",
+    L.rect("workers", x0 + 400, 80, 1380, 104,
+           "<b>Workers del backend</b><br>grafo de reseñas y de compras 10 s, buscador 10 s, catálogo a MongoDB 5 s, "
+           "ofertas a Elasticsearch 5 s, login a Elasticsearch 5 s, vectores de productos y de reseñas 10 s, clasificador de reseñas 30 s, "
+           "reservas de venta relámpago 10 s, ventas relámpago y descuentos vencidos 1 min, reglas automáticas 60 s, reglas por fecha 15 min, "
+           "carritos vencidos 10 min, más vendidos y más vistos 10 min, también vieron 15 min, combos 30 min, registro de ofertas en Redis 10 min, "
+           "anillos, familia B, señales de texto y de compras canceladas 15 min y al momento, fraude retrospectivo del login 15 min, "
+           "casos de fraude 15 min, hallazgos de compras y navegación cada día",
            "#FFFFFF", "#888888", sizes=11, dash=True, alinea="left")
     L.rect("backend", x0, 216, ancho_be, 56,
-           "<b>Backend</b>, NestJS con Fastify, puerto 3000. Escribe en cinco motores y lee de los seis",
+           "<b>Backend</b>, NestJS con Fastify, puerto 3000. Lee y escribe en los seis motores",
            "#E6E6F5", "#3D3D99")
     L.flecha("cliente", "backend", (0.08, 1.0), (0.08 * 300.0 / ancho_be, 0.0), "HTTP con cookie de sesión")
 
@@ -318,8 +326,8 @@ def construir():
             "Kibana 5601, Neo4j Browser 7474 y ClickHouse play 8123.", 11, gris=True)
     y += 24
     L.texto(x0, y, 1800, 22,
-            "Todo corre en una sola máquina, en diez contenedores de un mismo Docker, más uno de un solo uso que prepara las "
-            "vistas de Kibana. Cada motor guarda lo que le corresponde por la forma de la pregunta que va a recibir.", 11, gris=True)
+            "Todo corre en diez contenedores de un mismo Docker, más uno de un solo uso que prepara las vistas de Kibana y el de "
+            "Ollama, que solo se levanta si la PC no lo tiene. Cada motor guarda lo que le corresponde por la forma de la pregunta que va a recibir.", 11, gris=True)
     return L
 
 
