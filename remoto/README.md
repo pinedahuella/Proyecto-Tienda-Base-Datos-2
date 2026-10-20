@@ -91,6 +91,14 @@ PostgreSQL basta; el servicio puede quedar parado).
 Activar pone ademas `SIN_CAIDA=1`: las pruebas que tumban una base a proposito
 se saltan esa parte (ver abajo). Desactivar la quita.
 
+5. El panel de comandos (`.\panel-comandos.ps1`, y la pestana Comandos de las
+   cuentas `desarrollador*`) lo hace solo: si `backend/.env` apunta a otra PC,
+   cada demo corre con el modo remoto puesto y se quita al terminar, el estado
+   de las seis bases se mira en esa PC, y lo que arranca o rehace bases (y las
+   demos de otro pais, que usan los contenedores de Tor de aqui) se niega con un
+   aviso. La cuenta `desarrollador1@mesh.com` la crea `demo-anillo-resenas.ps1`
+   en la base que se use: en una base nueva hay que crearla otra vez.
+
 ## Lo que no se puede en remoto
 
 - **Parar una base de la otra PC.** `docker stop` y `docker start` salen con 1.

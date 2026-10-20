@@ -441,6 +441,34 @@ function validarCampo(campo, crudo) {
   throw new ErrorDeUso('Tipo de campo desconocido');
 }
 
+// El modo remoto (remoto/README.md): con backend/.env apuntando a otra PC (las bases
+// en la de Jose David, por Tailscale) no hay contenedores aqui y el docker de verdad
+// no sirve. Las demos corren con el modo remoto puesto (remoto/activar.ps1, que
+// levanta el tunel y pone el docker falso) y se quita al terminar. Lo que arranca o
+// rehace bases, y las demos que usan los contenedores de Tor, se niegan: eso se hace
+// en la PC que tiene las bases.
+const SOLO_CON_BASES_AQUI = new Set([
+  'todo', 'bases', 'productos', 'borrar-lote', 'productos-mongo', 'borrar-mongo', 'etl',
+  'reiniciar-grafo', 'reiniciar-mongo', 'reiniciar-todo',
+  'entrar-pais', 'entrar-paises', 'entrar-pais-estado', 'entrar-pais-cerrar',
+  'demo-pais-precalentar', 'demo-pais', 'demo-pais-limpiar',
+]);
+// Los que no tocan ninguna base: corren igual que siempre.
+const SIN_BASES = new Set(['estado', 'backend', 'frontend', 'parar-backend', 'parar-frontend', 'publicar', 'despublicar']);
+
+/** La PC de las bases si backend/.env apunta a otra, o null si son las de aqui. */
+function basesRemotas() {
+  let host = 'localhost';
+  try {
+    const m = readFileSync(path.join(RAIZ, 'backend', '.env'), 'utf8').match(/^DB_HOST=(.*)$/m);
+    if (m) host = m[1].trim();
+  } catch { return null; }
+  if (['', 'localhost', '127.0.0.1', '::1'].includes(host)) return null;
+  // Va dentro de un comando de PowerShell: solo una IP o un nombre simple.
+  if (!/^[A-Za-z0-9.-]+$/.test(host)) throw new ErrorDeUso('backend/.env tiene un DB_HOST que no entiendo');
+  return host;
+}
+
 /** Devuelve { comando, script, args } o lanza ErrorDeUso. Nada se interpreta con shell. */
 function armar(id, valoresCrudos) {
   const c = CATALOGO.find((x) => x.id === id);
@@ -451,12 +479,22 @@ function armar(id, valoresCrudos) {
   const ruta = c.script.replaceAll('/', '\\');
   // Los valores ya pasaron por un patron cerrado, asi que las comillas simples bastan.
   const texto = args.map((a) => (/^-[A-Za-z]+$/.test(a) ? a : `'${a.replaceAll("'", "''")}'`)).join(' ');
+  const remota = basesRemotas();
+  if (remota && SOLO_CON_BASES_AQUI.has(c.id)) {
+    throw new ErrorDeUso(`Las bases estan en otra PC (${remota}). Esto se hace alla, o vuelve a las de aqui con .\\usar-bases-remotas.ps1 -Local`);
+  }
+  const llamada = `& '.\\${ruta}' ${texto}`;
+  // Con las bases en otra PC: el modo remoto antes, y quitarlo siempre al final,
+  // tambien si el comando falla o se cancela (el tunel tiene los puertos).
+  const cuerpo = remota && !SIN_BASES.has(c.id)
+    ? `. '.\\remoto\\activar.ps1' -Ip '${remota}'; if (-not $env:MESH_REMOTO) { exit 1 }; $codigo = 1; try { ${llamada}; $codigo = $LASTEXITCODE } finally { . '.\\remoto\\desactivar.ps1' }; exit $codigo`
+    : `${llamada}; exit $LASTEXITCODE`;
   return {
     c,
     // Lo que se muestra y se copia, tal como se escribiria en la terminal
     comando: `.\\${ruta}${texto ? ' ' + texto.replaceAll("'", '') : ''}`,
     // Lo que se ejecuta. UTF-8 para que las tildes de los scripts lleguen bien
-    ps: `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; & '.\\${ruta}' ${texto}; exit $LASTEXITCODE`,
+    ps: `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $OutputEncoding=[Text.Encoding]::UTF8; ${cuerpo}`,
   };
 }
 
@@ -569,11 +607,12 @@ function parar() {
 // Estado de los servicios, sin ejecutar nada: solo se prueba si el puerto abre
 // ---------------------------------------------------------------------------
 
-function puertoAbierto(puerto) {
+function puertoAbierto(puerto, host = 'localhost') {
   return new Promise((resolver) => {
     // 'localhost' y no 127.0.0.1: vite preview escucha solo en IPv6 ([::1]) y con
-    // 127.0.0.1 la tienda salia apagada estando arriba.
-    const s = net.connect({ port: puerto, host: 'localhost', timeout: 800 });
+    // 127.0.0.1 la tienda salia apagada estando arriba. Una base en otra PC va por
+    // Tailscale: mas plazo.
+    const s = net.connect({ port: puerto, host, timeout: host === 'localhost' ? 800 : 3000 });
     s.on('connect', () => { s.destroy(); resolver(true); });
     s.on('timeout', () => { s.destroy(); resolver(false); });
     s.on('error', () => resolver(false));
@@ -583,12 +622,12 @@ function puertoAbierto(puerto) {
 const SERVICIOS_VIGILADOS = [
   { nombre: 'Backend', puerto: 3000 },
   { nombre: 'Tienda', puerto: 5173 },
-  { nombre: 'PostgreSQL', puerto: 5432 },
-  { nombre: 'MongoDB', puerto: 27018 },
-  { nombre: 'Redis', puerto: 6379 },
-  { nombre: 'Neo4j', puerto: 7687 },
-  { nombre: 'ClickHouse', puerto: 8123 },
-  { nombre: 'Elasticsearch', puerto: 9200 },
+  { nombre: 'PostgreSQL', puerto: 5432, base: true },
+  { nombre: 'MongoDB', puerto: 27018, base: true },
+  { nombre: 'Redis', puerto: 6379, base: true },
+  { nombre: 'Neo4j', puerto: 7687, base: true },
+  { nombre: 'ClickHouse', puerto: 8123, base: true },
+  { nombre: 'Elasticsearch', puerto: 9200, base: true },
 ];
 
 // ---------------------------------------------------------------------------
@@ -680,7 +719,12 @@ const servidor = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/estado') {
-      const estados = await Promise.all(SERVICIOS_VIGILADOS.map(async (s) => ({ ...s, arriba: await puertoAbierto(s.puerto) })));
+      // Las bases se prueban donde estan: aqui, o en la PC de backend/.env (modo remoto).
+      let remota = null;
+      try { remota = basesRemotas(); } catch { /* un DB_HOST raro: se prueban aqui */ }
+      const estados = await Promise.all(SERVICIOS_VIGILADOS.map(async (s) => ({
+        ...s, arriba: await puertoAbierto(s.puerto, s.base && remota ? remota : 'localhost'),
+      })));
       return responder(res, 200, estados);
     }
 

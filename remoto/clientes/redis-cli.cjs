@@ -13,6 +13,7 @@
 //
 // Entiende lo que usan las pruebas:
 //   -h host -p puerto -n base -a contrasena --user u --pass p --no-auth-warning
+//   REDISCLI_AUTH en el ambiente, si no vino -a
 //   --raw / --no-raw (no cambian nada: siempre crudo)
 //   -x                      el ultimo argumento sale de stdin
 //   --scan [--pattern P] [--count N]
@@ -46,6 +47,9 @@ for (let i = 0; i < args.length; i++) {
   }
 }
 if (op.host === 'localhost') op.host = '127.0.0.1';
+// Como el de verdad: sin -a, la contrasena puede venir en REDISCLI_AUTH
+// (demo-redis-sin-ttl.ps1 la pasa asi, con docker exec -e).
+if (op.pass == null && process.env.REDISCLI_AUTH) op.pass = process.env.REDISCLI_AUTH;
 
 function leerStdin() {
   return new Promise((resolve) => {
