@@ -1,8 +1,12 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { elasticClient } from '../../database/elastic';
+import { elasticClient, OPCIONES_BUSQUEDA } from '../../database/elastic';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import { ErrorConexion, ErrorValidacion } from '../../helpers/errores';
+import {
+  conRespaldoDeElastic,
+  documentosDesdeCopia,
+} from '../../helpers/buscador-respaldo';
 import { pedirVectores } from '../../helpers/vectores-ollama';
 import { aVectorPg, buscarCercanos } from '../../helpers/vectores-pgvector';
 import { redondear } from '../../helpers/similitud-vectores';
@@ -271,16 +275,36 @@ export class BuscadorIntencionService {
     if (ids.length === 0) {
       return [];
     }
-    const respuesta = await elasticClient.mget<DocumentoProducto>({
-      index: INDICE_PRODUCTOS,
-      ids: ids.map(String),
-    });
-    const docs = new Map<number, DocumentoProducto>();
-    for (const doc of respuesta.docs) {
-      if ('found' in doc && doc.found && doc._source?.estado === 'activo') {
-        docs.set(Number(doc._id), doc._source);
-      }
-    }
+    // Sin Elasticsearch, los documentos salen de la copia del catalogo en
+    // PostgreSQL (buscador-respaldo.ts): los vectores ya vivian ahi, asi que
+    // la busqueda por intencion entera funciona sin Elasticsearch.
+    const docs = await conRespaldoDeElastic(
+      async () => {
+        const respuesta = await elasticClient.mget<DocumentoProducto>(
+          {
+            index: INDICE_PRODUCTOS,
+            ids: ids.map(String),
+          },
+          OPCIONES_BUSQUEDA,
+        );
+        const encontrados = new Map<number, DocumentoProducto>();
+        for (const doc of respuesta.docs) {
+          if ('found' in doc && doc.found && doc._source?.estado === 'activo') {
+            encontrados.set(Number(doc._id), doc._source);
+          }
+        }
+        return encontrados;
+      },
+      async () => {
+        const encontrados = new Map<number, DocumentoProducto>();
+        for (const [id, doc] of await documentosDesdeCopia(ids)) {
+          if (doc.estado === 'activo') {
+            encontrados.set(id, doc);
+          }
+        }
+        return encontrados;
+      },
+    );
 
     const resultados: ResultadoIntencion[] = [];
     for (const [id, doc] of docs) {

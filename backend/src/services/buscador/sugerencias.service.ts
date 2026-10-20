@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { elasticClient } from '../../database/elastic';
+import { elasticClient, OPCIONES_BUSQUEDA } from '../../database/elastic';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import { ErrorValidacion } from '../../helpers/errores';
+import {
+  autocompletarDesdeCopia,
+  conRespaldoDeElastic,
+} from '../../helpers/buscador-respaldo';
 import { Sugerencia } from '../../dto/buscar-sugerencias';
 
 const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
@@ -38,35 +42,46 @@ export class BuscadorSugerenciasService {
       throw new ErrorValidacion('Escribe al menos una letra para sugerir');
     }
 
+    const tope = this.aLimite(limite);
     try {
-      const respuesta = await elasticClient.search<DocumentoNombre>({
-        index: INDICE,
-        size: this.aLimite(limite),
-        _source: ['nombre'],
-        query: {
-          bool: {
-            must: [
-              {
-                multi_match: {
-                  query: texto,
-                  type: 'bool_prefix',
-                  fields: [
-                    'nombre.escribiendo',
-                    'nombre.escribiendo._2gram',
-                    'nombre.escribiendo._3gram',
+      // Sin Elasticsearch, el principio de los nombres de la copia del
+      // catalogo en PostgreSQL (buscador-respaldo.ts).
+      return await conRespaldoDeElastic(
+        async () => {
+          const respuesta = await elasticClient.search<DocumentoNombre>(
+            {
+              index: INDICE,
+              size: tope,
+              _source: ['nombre'],
+              query: {
+                bool: {
+                  must: [
+                    {
+                      multi_match: {
+                        query: texto,
+                        type: 'bool_prefix',
+                        fields: [
+                          'nombre.escribiendo',
+                          'nombre.escribiendo._2gram',
+                          'nombre.escribiendo._3gram',
+                        ],
+                      },
+                    },
                   ],
+                  filter: [{ term: { estado: 'activo' } }],
                 },
               },
-            ],
-            filter: [{ term: { estado: 'activo' } }],
-          },
-        },
-      });
+            },
+            OPCIONES_BUSQUEDA,
+          );
 
-      return respuesta.hits.hits.map((hit) => ({
-        id_producto: Number(hit._id),
-        nombre: hit._source?.nombre ?? '',
-      }));
+          return respuesta.hits.hits.map((hit) => ({
+            id_producto: Number(hit._id),
+            nombre: hit._source?.nombre ?? '',
+          }));
+        },
+        () => autocompletarDesdeCopia(texto, tope),
+      );
     } catch (error) {
       manejarErrorConexionElastic(this.logger, error);
     }

@@ -4,10 +4,8 @@ import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import { idUsuarioDeCookieOpcional } from '../../helpers/sesion-opcional';
 import type { BuscarProductosFacetadoQuery } from '../../dto/buscar-productos-facetado';
-import {
-  BuscadorFacetadoService,
-  separarPorComas,
-} from '../../services/buscador/facetado.service';
+import { separarPorComas } from '../../helpers/facetas-buscador';
+import { BuscadorFacetadoService } from '../../services/buscador/facetado.service';
 import { EventosService } from '../../services/eventos/eventos.service';
 
 /**

@@ -42,6 +42,8 @@
 
 	/** Lo ultimo que devolvio el servidor. */
 	let resultados = $state<ResultadoBusqueda[]>([]);
+	/** Con cero resultados, lo que el backend propone en su lugar. Ver Busqueda.sugeridos. */
+	let sugeridos = $state<ResultadoBusqueda[]>([]);
 
 	/** El motivo por el que no hay lista, cuando no la hay. */
 	let error = $state('');
@@ -108,6 +110,7 @@
 		if (mia !== ultimaConsulta) return;
 
 		resultados = salida.resultados;
+		sugeridos = salida.sugeridos ?? [];
 		error = salida.error;
 		cargando = false;
 		buscado = true;
@@ -195,6 +198,16 @@
 		if (!verTodo) registrarClicBusqueda(texto.trim(), r.id_producto, posicion);
 		cerrar();
 		await goto(`/producto/${r.id_producto}?origen=buscador`);
+	}
+
+	/**
+	 * Un sugerido no es un resultado de la busqueda: abrirlo no se registra como
+	 * clic de busqueda, para no mezclarlo con las posiciones de los resultados
+	 * de verdad en las tendencias.
+	 */
+	async function abrirSugerido(r: ResultadoBusqueda) {
+		cerrar();
+		await goto(`/producto/${r.id_producto}`);
 	}
 
 	/** Manda a la pagina de resultados con lo que haya escrito. */
@@ -323,6 +336,23 @@
 				<p class="aviso">Buscando</p>
 			{:else if error !== ''}
 				<p class="aviso malo">{error}</p>
+			{:else if resultados.length === 0 && sugeridos.length > 0}
+				<p class="aviso">No encontramos eso. Te pueden interesar estos:</p>
+				{#each sugeridos as r (r.id_producto)}
+					<button type="button" class="fila" onclick={() => abrirSugerido(r)}>
+						<span class="texto">
+							<span class="nombre">{r.nombre}</span>
+							<span class="bajo">
+								{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
+								{#if r.hay_descuento}<span class="descuento">Con descuento</span>{/if}
+								{#if r.stock_total <= 0}<span class="dato agotado">Sin existencias</span>{/if}
+							</span>
+						</span>
+						<span class="cifras">
+							{#if precioVisible(r)}<span class="precio">{precioVisible(r)}</span>{/if}
+						</span>
+					</button>
+				{/each}
 			{:else if resultados.length === 0}
 				<p class="aviso">No hay productos que se parezcan a eso</p>
 			{:else}

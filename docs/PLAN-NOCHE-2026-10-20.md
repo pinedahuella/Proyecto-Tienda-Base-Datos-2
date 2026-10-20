@@ -62,15 +62,29 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
         (helpers/perfil-sesion.ts) para /usuario/yo; consultaCorta 3 s para guard y perfil; ficha con
         ofertas_no_disponibles; frontend: entrar 503, checkout 503, aviso de la ficha, api.ts
         distingue cargar/completar. Medido apagada y congelada: todo 200 salvo pagar/agregar/entrar 503.
-- [ ] 5. Elasticsearch caido: buscador desde la copia del catalogo en PostgreSQL.
+- [x] 5. Elasticsearch caido: helpers/buscador-respaldo.ts (conRespaldoDeElastic, buscarEnCopia con
+        facetas, documentosDesdeCopia, autocompletarDesdeCopia) en facetado, simple, admin, hibrida,
+        intencion y sugerencias. Migracion 048 (unaccent, fuzzystrmatch, pg_trgm, mesh_normalizar,
+        mesh_coincide = fuzziness AUTO) APLICADA en la base de David. Medido: totales y facetas
+        identicos a Elasticsearch, 50-760 ms; congelado 3.5 s la primera (OPCIONES_BUSQUEDA 3 s).
+        Sin respaldo, a proposito: buscador de ofertas del vendedor (la lista normal sigue) y crear
+        un "avisame" (el percolator es de Elasticsearch).
 - [ ] 6. Neo4j caido: tambien compraron desde PostgreSQL (pedidos), para ti con plan B.
-- [ ] 7. Facetas sin post_filter (punto 2) + facetas.py + docs.
-- [ ] 8. Busqueda nunca vacia (punto 3) + frontend + reporte intacto.
+- [x] 7. Facetas: filtros en el filter de la consulta, aggs sueltas (facetado.service.ts y
+        elastic/pruebas/facetas.py, 24 OK contra la PC de David), elastic/README.md y ejemplo.
+- [x] 8. sugeridos aparte (services/buscador/sugeridos.service.ts: vectores sin umbral, mas
+        vendidos, mas resenados), total sigue 0 para ClickHouse; frontend: /buscar "Te pueden
+        interesar" y la cabecera, sin registrar el clic.
 - [ ] 9. Frontend: avisos sin nombrar bases, sugeridos, carrito y login sin PostgreSQL.
 - [ ] 10. Las 2 pruebas que fallaban: neo4j/correr_patrones.sh B.1 y pruebas/notas.sh (producto solo en Mongo).
 - [ ] 11. Prueba nueva de caidas con los interruptores + correr_todas en remoto en verde.
 - [ ] 12. Edge 1536x730 de cada caida, abrir cada captura.
 - [ ] 13. Docs: QUE-PASA-SI-SE-CAE-UNA-BASE.md, cambio_propuestas, TRASPASO, memoria. Commit y push.
+
+## Si sobra tiempo (no lo pidio Meme, esta en docs/BACKEND-PENDIENTE.md como pedido del frontend)
+
+- Pasar un pedido a enviado y entregado (funcion en PG + ruta).
+- Serie por dia para las graficas (ClickHouse toDate(fecha)).
 
 ## Notas para mi mismo (trampas de esta noche)
 
@@ -83,6 +97,8 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
 - No editar el producto 21 por la API (etl_mongo.sh).
 
 ## Bitacora
+
+- 01:15 pasos 5, 7 y 8 hechos y medidos; commit. Sigue el 6 (Neo4j).
 
 - 00:50 pasos 1 a 4 hechos y medidos con el interruptor; commit.
 

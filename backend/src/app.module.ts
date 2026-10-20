@@ -74,6 +74,7 @@ import { BuscadorProductosController } from './controllers/buscador/productos.co
 import { BuscadorProductosService } from './services/buscador/productos.service';
 import { BuscadorFacetadoController } from './controllers/buscador/facetado.controller';
 import { BuscadorFacetadoService } from './services/buscador/facetado.service';
+import { SugeridosBusquedaService } from './services/buscador/sugeridos.service';
 import { BuscadorSugerenciasController } from './controllers/buscador/sugerencias.controller';
 import { BuscadorSugerenciasService } from './services/buscador/sugerencias.service';
 import { BuscadorIntencionController } from './controllers/buscador/intencion.controller';
@@ -252,6 +253,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BaseDatosVectoresService,
     BuscadorProductosService,
     BuscadorFacetadoService,
+    SugeridosBusquedaService,
     BuscadorSugerenciasService,
     BuscadorIntencionService,
     BuscadorHibridoService,

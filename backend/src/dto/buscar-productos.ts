@@ -22,6 +22,12 @@ export interface RespuestaBusquedaProductos {
    * se hizo con lo que la persona escribio, no con esto.
    */
   quisiste_decir: string | null;
+  /**
+   * Sin resultados, productos para ensenar en vez de una lista vacia
+   * (`SugeridosBusquedaService`). Van aparte: la busqueda se sigue contando
+   * como sin resultados. Vacio si hubo resultados.
+   */
+  sugeridos: ResultadoBusquedaProducto[];
 }
 
 /**

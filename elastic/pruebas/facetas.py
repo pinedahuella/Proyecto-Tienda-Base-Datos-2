@@ -10,14 +10,16 @@ Solo usa la biblioteca estandar.
 POST /mesh_productos/_search y es lo que la ruta tiene que mandar, tal cual.
 
 Como funciona, en corto
-- El texto va en `query`, igual que hoy en BuscadorService, difuso y solo activos.
-- Los filtros elegidos van en `post_filter`, asi recortan los resultados pero no
-  las agregaciones.
-- Cada faceta es una agregacion `filter` que aplica los filtros de LAS OTRAS
-  facetas y no el suyo. Asi, con Laptops elegida, la faceta de categoria sigue
-  mostrando cuantos hay en Monitores, y el usuario puede sumar una segunda
-  categoria. Dentro de una faceta las opciones se suman con OR, entre facetas
-  con AND.
+- El texto va en el `must` de la consulta, difuso, como en BuscadorService.
+- Los filtros elegidos van en el `filter` de la misma consulta, junto con el de
+  activo. Asi se filtra ANTES de agregar: las agregaciones cuentan solo lo que
+  paso todos los filtros, y cada numero del panel es cuantos resultados hay de
+  verdad con esa opcion sumada a lo ya elegido. Dentro de una faceta las
+  opciones se suman con OR, entre facetas con AND.
+- Hasta el 2026-10-20 los filtros iban en `post_filter` (despues de agregar) y
+  cada faceta se contaba con los filtros de las otras. El profesor lo observo:
+  si el filtro ya se sabe, se filtra antes y no despues en los agregados. La
+  contra, aceptada: con una categoria elegida las demas salen del panel.
 
 Cada comprobacion tiene su control. Sale con 1 si algo falla.
 """
@@ -72,28 +74,19 @@ FACETAS = ('categoria', 'precio', 'calificacion', 'disponible')
 def consulta(texto, elegidos=None, tamano=20):
     """El cuerpo de la busqueda. `elegidos` es {'categoria': ['7'], 'precio': ['250-500'], ...}."""
     elegidos = elegidos or {}
-    filtros = {f: filtro_de(f, elegidos.get(f)) for f in FACETAS}
-
-    def menos(faceta):
-        return [q for f, q in filtros.items() if q is not None and f != faceta]
-
-    def envolver(faceta, agg):
-        return {'filter': {'bool': {'filter': menos(faceta)}}, 'aggs': {'valores': agg}}
-
+    filtros = [q for q in (filtro_de(f, elegidos.get(f)) for f in FACETAS) if q is not None]
     texto_q = {'multi_match': {'query': texto, 'fields': ['nombre^3', 'descripcion', 'variantes'], 'fuzziness': 'AUTO'}}
-    todos = [q for q in filtros.values() if q is not None]
     return {
         'size': tamano,
-        'query': {'bool': {'must': [texto_q], 'filter': [{'term': {'estado': 'activo'}}]}},
-        'post_filter': {'bool': {'filter': todos}},
+        'query': {'bool': {'must': [texto_q], 'filter': [{'term': {'estado': 'activo'}}] + filtros}},
         'aggs': {
-            'categoria': envolver('categoria', {
+            'categoria': {
                 'terms': {'field': 'id_categoria', 'size': 50},
                 'aggs': {'nombre': {'terms': {'field': 'categoria_nombre.exacto', 'size': 1}}},
-            }),
-            'precio': envolver('precio', {'range': {'field': 'precio_desde', 'keyed': True, 'ranges': RANGOS_PRECIO}}),
-            'calificacion': envolver('calificacion', {'range': {'field': 'resenas_promedio', 'keyed': True, 'ranges': RANGOS_NOTA}}),
-            'disponible': envolver('disponible', {'filter': {'range': {'stock_total': {'gt': 0}}}}),
+            },
+            'precio': {'range': {'field': 'precio_desde', 'keyed': True, 'ranges': RANGOS_PRECIO}},
+            'calificacion': {'range': {'field': 'resenas_promedio', 'keyed': True, 'ranges': RANGOS_NOTA}},
+            'disponible': {'filter': {'range': {'stock_total': {'gt': 0}}}},
         },
     }
 
@@ -123,10 +116,10 @@ def facetas(resp):
     a = resp['aggregations']
     return {
         'categoria': {str(b['key']): {'nombre': (b['nombre']['buckets'] or [{'key': '?'}])[0]['key'], 'cantidad': b['doc_count']}
-                      for b in a['categoria']['valores']['buckets']},
-        'precio': {k: v['doc_count'] for k, v in a['precio']['valores']['buckets'].items()},
-        'calificacion': {k: v['doc_count'] for k, v in a['calificacion']['valores']['buckets'].items()},
-        'disponible': a['disponible']['valores']['doc_count'],
+                      for b in a['categoria']['buckets']},
+        'precio': {k: v['doc_count'] for k, v in a['precio']['buckets'].items()},
+        'calificacion': {k: v['doc_count'] for k, v in a['calificacion']['buckets'].items()},
+        'disponible': a['disponible']['doc_count'],
     }
 
 
@@ -168,19 +161,26 @@ def main():
 
     cat_id, cat = max(f0['categoria'].items(), key=lambda kv: kv[1]['cantidad'])
     print('2. Eligiendo la categoria %s (%s)' % (cat['nombre'], cat_id))
-    r1 = buscar(consulta(texto, {'categoria': [cat_id]}))
+    c1 = consulta(texto, {'categoria': [cat_id]})
+    revisar('post_filter' not in c1 and {'terms': {'id_categoria': [int(cat_id)]}} in c1['query']['bool']['filter'],
+            'el filtro va en la consulta, no en un post_filter')
+    r1 = buscar(c1)
     f1 = facetas(r1)
     revisar(total(r1) == cat['cantidad'], 'los resultados son los que prometia la faceta, %d' % cat['cantidad'])
-    revisar(f1['categoria'] == f0['categoria'], 'la faceta de categoria no se recorta con su propio filtro')
-    revisar(sum(f1['precio'].values()) == total(r1), 'la de precio si se recorta, suma %d' % total(r1))
+    revisar(list(f1['categoria']) == [cat_id] and f1['categoria'][cat_id]['cantidad'] == total(r1),
+            'la faceta de categoria ya se cuenta con el filtro: solo queda la elegida, con %d' % total(r1))
+    revisar(sum(f1['precio'].values()) == total(r1), 'la de precio tambien, suma %d' % total(r1))
+    revisar(f1['disponible'] <= total(r1), 'con existencias no pasa de lo filtrado')
     revisar(all(h['_source']['id_categoria'] == int(cat_id) for h in r1['hits']['hits']), 'cada resultado es de esa categoria')
 
     otras = [k for k in f0['categoria'] if k != cat_id]
     if otras:
         dos = [cat_id, otras[0]]
         r2 = buscar(consulta(texto, {'categoria': dos}))
+        f2 = facetas(r2)
         revisar(total(r2) == cat['cantidad'] + f0['categoria'][otras[0]]['cantidad'],
                 'dos categorias se suman con OR, %d' % total(r2))
+        revisar(sorted(f2['categoria']) == sorted(dos), 'y la faceta muestra justo esas dos')
 
     rango = max(f1['precio'].items(), key=lambda kv: kv[1])[0]
     print('3. Sumando el precio %s' % rango)
@@ -188,11 +188,13 @@ def main():
     f3 = facetas(r3)
     revisar(total(r3) == f1['precio'][rango], 'categoria Y precio da lo que prometia la faceta de precio, %d' % total(r3))
     revisar(f3['categoria'][cat_id]['cantidad'] == total(r3), 'la faceta de categoria ya mira el precio elegido')
+    revisar(all(v == 0 for k, v in f3['precio'].items() if k != rango), 'los otros rangos de precio quedan en 0')
     revisar(all(h['_source']['id_categoria'] == int(cat_id) for h in r3['hits']['hits']), 'control, siguen siendo de la categoria')
 
     print('4. Solo con existencias')
     r4 = buscar(consulta(texto, {'disponible': ['si']}))
     revisar(total(r4) == f0['disponible'], 'da lo que prometia la faceta, %d' % total(r4))
+    revisar(facetas(r4)['disponible'] == total(r4), 'y ya todos los que quedan tienen existencias')
     revisar(all(h['_source']['stock_total'] > 0 for h in r4['hits']['hits']), 'ninguno sin existencias')
 
     print('5. La tolerancia sigue funcionando con facetas')

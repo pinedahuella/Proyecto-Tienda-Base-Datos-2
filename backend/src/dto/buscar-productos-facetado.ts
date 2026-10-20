@@ -37,7 +37,14 @@ export interface RespuestaFacetada {
     categoria: FacetaCategoria[];
     precio: FacetaRango[];
     calificacion: FacetaRango[];
-    /** Cuantos resultados tienen existencias, del total (sin el filtro propio). */
+    /** Cuantos de los resultados tienen existencias. */
     disponible: number;
   };
+  /**
+   * Con `total` 0 y sin filtros elegidos, productos para ensenar en vez de una
+   * pagina vacia (`SugeridosBusquedaService`). Van aparte: no son resultados,
+   * y la busqueda se sigue contando como sin resultados. Vacio en los demas
+   * casos.
+   */
+  sugeridos: ResultadoBusquedaProducto[];
 }

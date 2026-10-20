@@ -121,18 +121,33 @@ calificacion   range sobre resenas_promedio, 4 o mas y 3 o mas
 disponible     filter sobre stock_total mayor que cero
 ```
 
-El texto va en `query` y los filtros elegidos en `post_filter`, asi recortan la
-lista pero no los conteos. Cada faceta aplica los filtros de las otras y no el
-suyo, por eso con Laptops elegida la faceta de categoria sigue diciendo cuantos
-hay en Monitores. Dentro de una faceta las opciones se suman, entre facetas se
-cruzan.
+El texto va en el `must` de la consulta y los filtros elegidos en su `filter`,
+junto con el de activo. Se filtra antes de agregar: los conteos salen de lo que
+ya paso todos los filtros, y cada numero del panel es cuantos resultados hay de
+verdad con esa opcion sumada a lo elegido. Dentro de una faceta las opciones se
+suman, entre facetas se cruzan.
+
+Hasta el 2026-10-20 los filtros iban en `post_filter`, que corre despues de las
+agregaciones, y cada faceta se contaba con los filtros de las otras (con Laptops
+elegida, la faceta seguia diciendo cuantos habia en Monitores). El profesor lo
+observo en la revision de otro grupo: si el filtro ya se sabe, va en la consulta
+desde el principio y no despues en los agregados. Se cambio la consulta, el
+backend (`services/buscador/facetado.service.ts`) y esta prueba. La contra,
+aceptada: con una categoria elegida las demas salen del panel, y para cambiar de
+categoria se quita la elegida.
+
+Sin Elasticsearch, el backend hace la misma busqueda con los mismos filtros y
+las mismas facetas sobre la copia del catalogo en PostgreSQL
+(`backend/src/helpers/buscador-respaldo.ts`, migracion 048). Y si una busqueda
+no encuentra nada, la respuesta trae `sugeridos` aparte, para que la pagina
+nunca quede vacia (ver `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`).
 
 El autocompletado usa `nombre.escribiendo` con `bool_prefix`. La busqueda de
 hoy no lo usa, y con "lap" trae 507 productos de cualquier tipo. Con
 `autocompletar()` trae los que empiezan por "lap".
 
 ```bash
-python elastic/pruebas/facetas.py      # solo Elasticsearch arriba, 19 OK
+python elastic/pruebas/facetas.py      # solo Elasticsearch arriba, 24 OK
 ```
 
 Cada comprobacion tiene su control, y se probo rompiendo la consulta a

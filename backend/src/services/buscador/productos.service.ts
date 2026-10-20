@@ -1,7 +1,11 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { elasticClient } from '../../database/elastic';
+import { elasticClient, OPCIONES_BUSQUEDA } from '../../database/elastic';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import { ErrorValidacion } from '../../helpers/errores';
+import {
+  buscarEnCopia,
+  conRespaldoDeElastic,
+} from '../../helpers/buscador-respaldo';
 import {
   pedirCorreccion,
   textoCorregido,
@@ -10,6 +14,7 @@ import {
   RespuestaBusquedaProductos,
   ResultadoBusquedaProducto,
 } from '../../dto/buscar-productos';
+import { SugeridosBusquedaService } from './sugeridos.service';
 
 const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
 const LIMITE_DEFECTO = 20;
@@ -61,12 +66,23 @@ interface DocumentoIndice {
 export class BuscadorProductosService {
   private readonly logger = new Logger(BuscadorProductosService.name);
 
-  /** GET /buscador/productos -- publica. Nunca ve nada que no sea `activo`. */
+  constructor(private readonly sugeridos: SugeridosBusquedaService) {}
+
+  /**
+   * GET /buscador/productos -- publica. Nunca ve nada que no sea `activo`.
+   * Sin resultados, suma los `sugeridos` (`SugeridosBusquedaService`, a pedido
+   * del profesor el 2026-10-19: buscar una locura trae al menos un producto).
+   */
   async buscar(
     nombre: string | undefined,
     limite: string | undefined,
   ): Promise<RespuestaBusquedaProductos> {
-    return this.ejecutar(nombre, limite, true);
+    const respuesta = await this.ejecutar(nombre, limite, true);
+    const sugeridos =
+      respuesta.resultados.length === 0
+        ? await this.sugeridos.sugerir((nombre ?? '').trim())
+        : [];
+    return { ...respuesta, sugeridos };
   }
 
   /**
@@ -90,7 +106,7 @@ export class BuscadorProductosService {
     nombre: string | undefined,
     limite: string | undefined,
     soloActivos: boolean,
-  ): Promise<RespuestaBusquedaProductos> {
+  ): Promise<Omit<RespuestaBusquedaProductos, 'sugeridos'>> {
     const texto = (nombre ?? '').trim();
     if (!texto) {
       throw new ErrorValidacion('Escribe el nombre del producto que buscas');
@@ -104,28 +120,44 @@ export class BuscadorProductosService {
       },
     };
 
+    const tope = this.aLimite(limite);
     try {
-      const respuesta = await elasticClient.search<DocumentoIndice>({
-        index: INDICE,
-        size: this.aLimite(limite),
-        suggest: soloActivos ? pedirCorreccion(texto) : undefined,
-        query: soloActivos
-          ? {
-              bool: {
-                must: [textoQuery],
-                filter: [{ term: { estado: 'activo' } }],
-              },
-            }
-          : textoQuery,
-      });
+      // Sin Elasticsearch, de la copia del catalogo en PostgreSQL
+      // (buscador-respaldo.ts), sin el "quisiste decir".
+      return await conRespaldoDeElastic(
+        async () => {
+          const respuesta = await elasticClient.search<DocumentoIndice>(
+            {
+              index: INDICE,
+              size: tope,
+              suggest: soloActivos ? pedirCorreccion(texto) : undefined,
+              query: soloActivos
+                ? {
+                    bool: {
+                      must: [textoQuery],
+                      filter: [{ term: { estado: 'activo' } }],
+                    },
+                  }
+                : textoQuery,
+            },
+            OPCIONES_BUSQUEDA,
+          );
 
-      return {
-        resultados: respuesta.hits.hits.map((hit) => this.aResultado(hit)),
-        quisiste_decir: textoCorregido(
-          texto,
-          respuesta.suggest as Parameters<typeof textoCorregido>[1],
-        ),
-      };
+          return {
+            resultados: respuesta.hits.hits.map((hit) => this.aResultado(hit)),
+            quisiste_decir: textoCorregido(
+              texto,
+              respuesta.suggest as Parameters<typeof textoCorregido>[1],
+            ),
+          };
+        },
+        async () => ({
+          resultados: (
+            await buscarEnCopia({ texto, limite: tope, soloActivos })
+          ).resultados,
+          quisiste_decir: null,
+        }),
+      );
     } catch (error) {
       manejarErrorConexionElastic(this.logger, error);
     }

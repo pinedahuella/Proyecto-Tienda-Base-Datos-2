@@ -1,12 +1,18 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { elasticClient } from '../../database/elastic';
+import { elasticClient, OPCIONES_BUSQUEDA } from '../../database/elastic';
 import { describirError } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import { ErrorValidacion } from '../../helpers/errores';
+import {
+  buscarEnCopia,
+  conRespaldoDeElastic,
+  documentosDesdeCopia,
+} from '../../helpers/buscador-respaldo';
 import { pedirVectores } from '../../helpers/vectores-ollama';
 import { aVectorPg, buscarCercanos } from '../../helpers/vectores-pgvector';
 import { redondear } from '../../helpers/similitud-vectores';
 import { RespuestaHibrida, ResultadoHibrido } from '../../dto/buscar-hibrida';
+import { ResultadoBusquedaProducto } from '../../dto/buscar-productos';
 
 const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
 
@@ -176,48 +182,65 @@ export class BuscadorHibridoService {
    * principal. */
   private async buscarPorTexto(texto: string): Promise<Candidato[]> {
     try {
-      const respuesta = await elasticClient.search<DocumentoIndice>({
-        index: INDICE,
-        size: CANDIDATOS,
-        _source: CAMPOS_DEVUELTOS,
-        query: {
-          bool: {
-            must: [
-              {
-                multi_match: {
-                  query: texto,
-                  fields: ['nombre^3', 'descripcion', 'variantes'],
-                  fuzziness: 'AUTO',
-                  // Con una o dos palabras deben estar todas; con mas, el 70 %.
-                  // Sin esto, una frase ("algo para escuchar musica") trae
-                  // cualquier producto que tenga "para" o "algo": ruido que le
-                  // gana a la busqueda por significado.
-                  minimum_should_match: '2<70%',
+      // Sin Elasticsearch, la copia del catalogo en PostgreSQL con la misma
+      // regla de cuantas palabras tienen que coincidir (buscador-respaldo.ts).
+      const encontrados = await conRespaldoDeElastic(
+        async () => {
+          const respuesta = await elasticClient.search<DocumentoIndice>(
+            {
+              index: INDICE,
+              size: CANDIDATOS,
+              _source: CAMPOS_DEVUELTOS,
+              query: {
+                bool: {
+                  must: [
+                    {
+                      multi_match: {
+                        query: texto,
+                        fields: ['nombre^3', 'descripcion', 'variantes'],
+                        fuzziness: 'AUTO',
+                        // Con una o dos palabras deben estar todas; con mas, el 70 %.
+                        // Sin esto, una frase ("algo para escuchar musica") trae
+                        // cualquier producto que tenga "para" o "algo": ruido que le
+                        // gana a la busqueda por significado.
+                        minimum_should_match: '2<70%',
+                      },
+                    },
+                  ],
+                  // Fijo en el codigo: lo publico nunca ve un producto que no este activo.
+                  filter: [{ term: { estado: 'activo' } }],
                 },
               },
-            ],
-            // Fijo en el codigo: lo publico nunca ve un producto que no este activo.
-            filter: [{ term: { estado: 'activo' } }],
-          },
+            },
+            OPCIONES_BUSQUEDA,
+          );
+          return respuesta.hits.hits.map((hit) => ({
+            id: Number(hit._id),
+            doc: hit._source,
+            valor: hit._score ?? 0,
+          }));
         },
-      });
-      return this.aCandidatos(
-        respuesta.hits.hits.map((hit) => ({
-          id: Number(hit._id),
-          doc: hit._source,
-          valor: hit._score ?? 0,
-        })),
+        async () => {
+          const copia = await buscarEnCopia({
+            texto,
+            limite: CANDIDATOS,
+            soloActivos: true,
+            exigirMayoria: true,
+          });
+          // Sin el puntaje de Elasticsearch: la combinacion usa la posicion.
+          return copia.resultados.map((r, i) => ({
+            id: r.id_producto,
+            doc: deResultado(r),
+            valor: CANDIDATOS - i,
+          }));
+        },
       );
+      return this.aCandidatos(encontrados);
     } catch (error) {
       manejarErrorConexionElastic(this.logger, error);
     }
   }
 
-  /**
-   * Por significado: el vector de la frase contra `vector_producto`. `null` si
-   * Ollama no da el vector o PostgreSQL falla: la busqueda sigue solo con las
-   * palabras.
-   */
   private async buscarPorSignificado(
     texto: string,
   ): Promise<Candidato[] | null> {
@@ -264,29 +287,47 @@ export class BuscadorHibridoService {
   private async documentos(
     ids: number[],
   ): Promise<Map<number, DocumentoIndice>> {
-    const docs = new Map<number, DocumentoIndice>();
     if (ids.length === 0) {
-      return docs;
+      return new Map();
     }
     try {
-      const respuesta = await elasticClient.mget<DocumentoIndice>({
-        index: INDICE,
-        ids: ids.map(String),
-        _source: CAMPOS_DEVUELTOS,
-      });
-      for (const doc of respuesta.docs) {
-        if ('found' in doc && doc.found && doc._source?.estado === 'activo') {
-          docs.set(Number(doc._id), doc._source);
-        }
-      }
-      return docs;
+      return await conRespaldoDeElastic(
+        async () => {
+          const docs = new Map<number, DocumentoIndice>();
+          const respuesta = await elasticClient.mget<DocumentoIndice>(
+            {
+              index: INDICE,
+              ids: ids.map(String),
+              _source: CAMPOS_DEVUELTOS,
+            },
+            OPCIONES_BUSQUEDA,
+          );
+          for (const doc of respuesta.docs) {
+            if (
+              'found' in doc &&
+              doc.found &&
+              doc._source?.estado === 'activo'
+            ) {
+              docs.set(Number(doc._id), doc._source);
+            }
+          }
+          return docs;
+        },
+        async () => {
+          const docs = new Map<number, DocumentoIndice>();
+          for (const [id, doc] of await documentosDesdeCopia(ids)) {
+            if (doc.estado === 'activo') {
+              docs.set(id, doc);
+            }
+          }
+          return docs;
+        },
+      );
     } catch (error) {
       manejarErrorConexionElastic(this.logger, error);
     }
   }
 
-  /** Numera los candidatos en el orden en que llegan, saltando los que no
-   * tienen documento. */
   private aCandidatos(
     encontrados: {
       id: number;
@@ -355,4 +396,19 @@ export class BuscadorHibridoService {
 
     return resultados.sort((a, b) => b.puntaje - a.puntaje).slice(0, tope);
   }
+}
+
+/** Un resultado de la copia, con la forma del documento del indice. */
+function deResultado(r: ResultadoBusquedaProducto): DocumentoIndice {
+  return {
+    nombre: r.nombre,
+    estado: r.estado,
+    categoria_nombre: r.categoria,
+    precio_desde: r.precio_desde,
+    precio_tienda: r.precio_tienda,
+    hay_descuento: r.hay_descuento,
+    stock_total: r.stock_total,
+    resenas_promedio: r.resenas_promedio,
+    resenas_total: r.resenas_total,
+  };
 }

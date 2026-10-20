@@ -448,38 +448,7 @@ export async function paginaDesdePostgres(
   const limite = p(pagina.limite);
 
   const { rows } = await pool.query<{ total: number; ids: string[] }>(
-    `WITH tienda AS (
-         SELECT id_usuario FROM usuarios WHERE correo_electronico = $1
-       ),
-       activa AS (
-         SELECT id_estado_oferta FROM estado_oferta WHERE estado_oferta_nombre = 'activa'
-       ),
-       por_variante AS (
-         SELECT o.id_producto_mongo AS id,
-                MAX(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
-                         THEN ${expresionPrecioFinal('o')} END) AS precio_tienda,
-                MIN(CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
-                         THEN ${expresionPrecioFinal('o')} END) AS precio_desde,
-                SUM(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
-                          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
-                         THEN o.stock ELSE 0 END) AS stock_tienda,
-                SUM(CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
-                         THEN o.stock ELSE 0 END) AS stock_total
-           FROM oferta o
-          GROUP BY o.id_producto_mongo, o.id_producto_variante_mongo
-       ),
-       pp AS (
-         SELECT id, MIN(precio_tienda) AS precio_tienda, MIN(precio_desde) AS precio_desde,
-                SUM(stock_tienda) AS stock_tienda, SUM(stock_total) AS stock_total
-           FROM por_variante
-          GROUP BY id
-       ),
-       n AS (
-         SELECT id_producto_mongo AS id, ROUND(AVG(calificacion), 2) AS promedio,
-                COUNT(*) AS total
-           FROM resena
-          GROUP BY id_producto_mongo
-       ),
+    `WITH ${ctePreciosYNotas('$1')},
        filtrados AS (
          SELECT pc.id_producto_mongo AS id
            FROM producto_catalogo pc
@@ -499,6 +468,55 @@ export async function paginaDesdePostgres(
     productos: await productosDesdePostgres(ids, true),
     total: rows[0].total,
   };
+}
+
+/**
+ * Lo que la tarjeta de un producto calcula desde PostgreSQL, como CTE para
+ * pegar detras de un `WITH`: `pp` por producto (precio de la tienda, precio
+ * desde, stock de la tienda, stock total y si alguna oferta activa tiene
+ * descuento) y `n` por producto (promedio y cantidad de resenas). Son las
+ * mismas cuentas que `ProductosService.recalcularUnProducto` guarda en Mongo.
+ * `parametroTienda` es el `$n` con el correo de la cuenta de la tienda.
+ *
+ * La usan el catalogo sin Mongo (`paginaDesdePostgres`) y el buscador sin
+ * Elasticsearch (`buscador-respaldo.ts`).
+ */
+export function ctePreciosYNotas(parametroTienda: string): string {
+  return `tienda AS (
+         SELECT id_usuario FROM usuarios WHERE correo_electronico = ${parametroTienda}
+       ),
+       activa AS (
+         SELECT id_estado_oferta FROM estado_oferta WHERE estado_oferta_nombre = 'activa'
+       ),
+       por_variante AS (
+         SELECT o.id_producto_mongo AS id,
+                MAX(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
+                         THEN ${expresionPrecioFinal('o')} END) AS precio_tienda,
+                MIN(CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                         THEN ${expresionPrecioFinal('o')} END) AS precio_desde,
+                SUM(CASE WHEN o.id_usuario = (SELECT id_usuario FROM tienda)
+                          AND o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                         THEN o.stock ELSE 0 END) AS stock_tienda,
+                SUM(CASE WHEN o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                         THEN o.stock ELSE 0 END) AS stock_total,
+                bool_or(o.id_estado_oferta = (SELECT id_estado_oferta FROM activa)
+                        AND o.porcentaje_descuento IS NOT NULL) AS hay_descuento
+           FROM oferta o
+          GROUP BY o.id_producto_mongo, o.id_producto_variante_mongo
+       ),
+       pp AS (
+         SELECT id, MIN(precio_tienda) AS precio_tienda, MIN(precio_desde) AS precio_desde,
+                SUM(stock_tienda) AS stock_tienda, SUM(stock_total) AS stock_total,
+                bool_or(hay_descuento) AS hay_descuento
+           FROM por_variante
+          GROUP BY id
+       ),
+       n AS (
+         SELECT id_producto_mongo AS id, ROUND(AVG(calificacion), 2) AS promedio,
+                COUNT(*) AS total
+           FROM resena
+          GROUP BY id_producto_mongo
+       )`;
 }
 
 /**

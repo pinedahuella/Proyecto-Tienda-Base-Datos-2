@@ -1,10 +1,20 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { elasticClient } from '../../database/elastic';
+import { elasticClient, OPCIONES_BUSQUEDA } from '../../database/elastic';
 import { manejarErrorConexionElastic } from '../../helpers/manejar-error-elastic';
 import {
   pedirCorreccion,
   textoCorregido,
 } from '../../helpers/correccion-busqueda';
+import {
+  buscarEnCopia,
+  conRespaldoDeElastic,
+} from '../../helpers/buscador-respaldo';
+import {
+  FiltrosElegidos,
+  RANGOS_NOTA,
+  RANGOS_PRECIO,
+  leerFiltrosElegidos,
+} from '../../helpers/facetas-buscador';
 import { ResultadoBusquedaProducto } from '../../dto/buscar-productos';
 import {
   BuscarProductosFacetadoQuery,
@@ -12,59 +22,14 @@ import {
   FacetaRango,
   RespuestaFacetada,
 } from '../../dto/buscar-productos-facetado';
+import { SugeridosBusquedaService } from './sugeridos.service';
 
 const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
 const LIMITE_DEFECTO = 20;
 const LIMITE_MAXIMO = 50;
 
-type NombreFaceta = 'categoria' | 'precio' | 'calificacion' | 'disponible';
-const FACETAS: NombreFaceta[] = [
-  'categoria',
-  'precio',
-  'calificacion',
-  'disponible',
-];
-
-interface RangoPrecio {
-  key: string;
-  from?: number;
-  to?: number;
-}
-/** Los cortes salen de los percentiles medidos el 2026-09-25 sobre 3105
- * productos activos (ver `elastic/pruebas/facetas.py`). */
-const RANGOS_PRECIO: RangoPrecio[] = [
-  { key: 'hasta-250', to: 250 },
-  { key: '250-500', from: 250, to: 500 },
-  { key: '500-1000', from: 500, to: 1000 },
-  { key: '1000-3000', from: 1000, to: 3000 },
-  { key: 'desde-3000', from: 3000 },
-];
-
-interface RangoNota {
-  key: string;
-  from: number;
-}
-const RANGOS_NOTA: RangoNota[] = [
-  { key: '4-o-mas', from: 4 },
-  { key: '3-o-mas', from: 3 },
-];
-
-/** Una clausula de Elasticsearch (query DSL), o null si la faceta no tiene
- * ningun valor elegido. */
+/** Una clausula de Elasticsearch (query DSL). */
 type ClausulaFiltro = Record<string, unknown>;
-
-/**
- * `categoria=7,9` -> `['7','9']`. Vacio o ausente -> `[]`. Exportada
- * (no un metodo privado) para que `BuscadorFacetadoController` la reuse al
- * armar el evento de analitica en ClickHouse, sin volver a parsear el
- * mismo query param dos veces.
- */
-export function separarPorComas(valor: string | undefined): string[] {
-  return (valor ?? '')
-    .split(',')
-    .map((v) => v.trim())
-    .filter((v) => v !== '');
-}
 
 /** Mismo documento indexado que `BuscadorProductosService`. */
 interface DocumentoIndice {
@@ -89,86 +54,128 @@ interface BucketRango {
   doc_count: number;
 }
 interface Agregaciones {
-  categoria: { valores: { buckets: BucketTerms[] } };
-  precio: { valores: { buckets: Record<string, BucketRango> } };
-  calificacion: { valores: { buckets: Record<string, BucketRango> } };
-  disponible: { valores: { doc_count: number } };
+  categoria: { buckets: BucketTerms[] };
+  precio: { buckets: Record<string, BucketRango> };
+  calificacion: { buckets: Record<string, BucketRango> };
+  disponible: { doc_count: number };
 }
 
 /**
- * El buscador FACETADO de la Entrega 3 (`GET /buscador/productos/facetado`,
- * pendiente de conectar a un controller). Puerto a TypeScript de
- * `elastic/pruebas/facetas.py::consulta()`/`facetas()` -- la consulta a
- * Elasticsearch es EXACTAMENTE la misma, cambia solo el lenguaje. Cuatro
- * facetas (categoria, precio, calificacion, disponible): cada una se agrega
- * con los filtros de las OTRAS ya aplicados (nunca el suyo propio), asi que
- * elegir una opcion no hace desaparecer las demas del panel -- las opciones
- * se suman con OR dentro de una faceta, con AND entre facetas distintas
- * (`post_filter`).
+ * El buscador FACETADO (`GET /buscador/productos/facetado`), el de la pagina
+ * /buscar. Puerto a TypeScript de `elastic/pruebas/facetas.py::consulta()` y
+ * `facetas()`: la consulta a Elasticsearch es la misma, cambia solo el
+ * lenguaje. Cuatro facetas: categoria, precio, calificacion y disponible.
  *
- * A diferencia de `BuscadorProductosService.buscar()`, aca `nombre` puede
- * venir vacio (navegar solo por facetas, sin texto) -- pendiente de decidir
- * si eso hace falta validarlo distinto cuando se conecte el controller.
+ * **Los filtros van en la consulta (2026-10-20, a pedido del profesor).** Hasta
+ * ese dia los filtros elegidos iban en `post_filter`, que se aplica DESPUES de
+ * las agregaciones, y cada faceta se contaba con los filtros de las otras. El
+ * profesor lo observo: si el filtro ya se sabe, se filtra antes, en la
+ * consulta, y los agregados se calculan sobre lo que ya quedo. Ahora los
+ * filtros elegidos van en el `filter` del `bool` junto con el de `activo`, y
+ * las agregaciones cuentan solo los productos que pasaron todos: cada numero
+ * del panel dice cuantos resultados hay de verdad con esa opcion sumada a lo
+ * ya elegido. Dentro de una faceta las opciones siguen sumandose con OR (dos
+ * categorias), entre facetas con AND. La contra, aceptada: al elegir una
+ * categoria las demas salen del panel, porque ya no hay resultados en ellas;
+ * para cambiar de categoria se quita la elegida.
+ *
+ * Sin Elasticsearch, la busqueda sale de la copia del catalogo en PostgreSQL
+ * (`buscarEnCopia`), con los mismos filtros y las mismas facetas contadas igual.
+ *
+ * Sin resultados y sin filtros elegidos, se suman los `sugeridos`
+ * (`SugeridosBusquedaService`): la pagina nunca queda vacia, y el total sigue
+ * siendo 0 para el reporte de busquedas sin resultados.
+ *
+ * `nombre` puede venir vacio: navegar solo por facetas, sin texto.
  */
 @Injectable()
 export class BuscadorFacetadoService {
   private readonly logger = new Logger(BuscadorFacetadoService.name);
 
+  constructor(private readonly sugeridos: SugeridosBusquedaService) {}
+
   async buscar(
     query: BuscarProductosFacetadoQuery,
   ): Promise<RespuestaFacetada> {
     const texto = (query.nombre ?? '').trim();
-    const filtros: Record<NombreFaceta, ClausulaFiltro | null> = {
-      categoria: this.filtroDe('categoria', separarPorComas(query.categoria)),
-      precio: this.filtroDe('precio', separarPorComas(query.precio)),
-      calificacion: this.filtroDe(
-        'calificacion',
-        separarPorComas(query.calificacion),
-      ),
-      disponible: this.filtroDe(
-        'disponible',
-        separarPorComas(query.disponible),
-      ),
-    };
+    const elegidos = leerFiltrosElegidos(query);
+    const limite = this.aLimite(query.limite);
 
+    let respuesta: Omit<RespuestaFacetada, 'sugeridos'>;
     try {
-      const respuesta = await elasticClient.search<DocumentoIndice>({
-        index: INDICE,
-        ...this.construirConsulta(texto, filtros, this.aLimite(query.limite)),
-      });
-
-      return {
-        resultados: respuesta.hits.hits.map((hit) => this.aResultado(hit)),
-        total: this.aNumeroTotal(respuesta.hits.total),
-        quisiste_decir:
-          texto === ''
-            ? null
-            : textoCorregido(
-                texto,
-                respuesta.suggest as Parameters<typeof textoCorregido>[1],
-              ),
-        facetas: this.aFacetas(
-          respuesta.aggregations as unknown as Agregaciones,
-        ),
-      };
+      respuesta = await conRespaldoDeElastic(
+        () => this.desdeElastic(texto, elegidos, limite),
+        async () => {
+          const copia = await buscarEnCopia({
+            texto,
+            limite,
+            soloActivos: true,
+            filtros: elegidos,
+          });
+          return {
+            resultados: copia.resultados,
+            total: copia.total,
+            quisiste_decir: null,
+            facetas: copia.facetas,
+          };
+        },
+      );
     } catch (error) {
       manejarErrorConexionElastic(this.logger, error);
     }
+
+    const sinFiltros =
+      elegidos.categorias.length === 0 &&
+      elegidos.precios.length === 0 &&
+      elegidos.calificacionMinima == null &&
+      !elegidos.disponible;
+    const sugeridos =
+      respuesta.total === 0 && texto !== '' && sinFiltros
+        ? await this.sugeridos.sugerir(texto)
+        : [];
+    return { ...respuesta, sugeridos };
+  }
+
+  private async desdeElastic(
+    texto: string,
+    elegidos: FiltrosElegidos,
+    limite: number,
+  ): Promise<Omit<RespuestaFacetada, 'sugeridos'>> {
+    const respuesta = await elasticClient.search<DocumentoIndice>(
+      {
+        index: INDICE,
+        ...this.construirConsulta(texto, elegidos, limite),
+      },
+      OPCIONES_BUSQUEDA,
+    );
+
+    return {
+      resultados: respuesta.hits.hits.map((hit) => this.aResultado(hit)),
+      total: this.aNumeroTotal(respuesta.hits.total),
+      quisiste_decir:
+        texto === ''
+          ? null
+          : textoCorregido(
+              texto,
+              respuesta.suggest as Parameters<typeof textoCorregido>[1],
+            ),
+      facetas: this.aFacetas(respuesta.aggregations as unknown as Agregaciones),
+    };
   }
 
   /**
-   * El cuerpo de la busqueda -- mismo `consulta()` de `facetas.py`, con UNA
-   * diferencia real: `facetas.py` siempre recibe un texto (sus pruebas
-   * nunca mandan uno vacio), pero aca `nombre` puede venir vacio a
-   * proposito (navegar solo por facetas, sin texto -- decision del
-   * usuario, 2026-09-26). Un `multi_match` con `query: ''` no es "sin
-   * filtro de texto", es "no encuentra nada" (probado en vivo: `?categoria=7`
-   * solo, sin `nombre`, daba `total: 0` con este cambio sin hacer). Por eso,
-   * con texto vacio, se usa `match_all` en vez de `multi_match`.
+   * El cuerpo de la busqueda -- mismo `consulta()` de `facetas.py`. El texto va
+   * en el `must`, difuso; los filtros elegidos y el de `activo`, en el
+   * `filter`; las agregaciones, sueltas, sobre lo que quedo.
+   *
+   * Con texto vacio se usa `match_all`: un `multi_match` con `query: ''` no es
+   * "sin filtro de texto", es "no encuentra nada" (probado en vivo:
+   * `?categoria=7` solo, sin `nombre`, daba `total: 0`; decision del usuario,
+   * 2026-09-26).
    */
   private construirConsulta(
     texto: string,
-    filtros: Record<NombreFaceta, ClausulaFiltro | null>,
+    elegidos: FiltrosElegidos,
     tamano: number,
   ) {
     const textoQuery =
@@ -181,9 +188,6 @@ export class BuscadorFacetadoService {
               fuzziness: 'AUTO',
             },
           };
-    const todos = FACETAS.map((faceta) => filtros[faceta]).filter(
-      (clausula): clausula is ClausulaFiltro => clausula != null,
-    );
 
     return {
       size: tamano,
@@ -191,70 +195,48 @@ export class BuscadorFacetadoService {
       query: {
         bool: {
           must: [textoQuery],
-          filter: [{ term: { estado: 'activo' } }],
+          filter: [
+            { term: { estado: 'activo' } },
+            ...this.clausulasDeFiltro(elegidos),
+          ],
         },
       },
-      post_filter: { bool: { filter: todos } },
       aggs: {
-        categoria: this.envolver('categoria', filtros, {
+        categoria: {
           terms: { field: 'id_categoria', size: 50 },
           aggs: {
             nombre: { terms: { field: 'categoria_nombre.exacto', size: 1 } },
           },
-        }),
-        precio: this.envolver('precio', filtros, {
+        },
+        precio: {
           range: { field: 'precio_desde', keyed: true, ranges: RANGOS_PRECIO },
-        }),
-        calificacion: this.envolver('calificacion', filtros, {
+        },
+        calificacion: {
           range: {
             field: 'resenas_promedio',
             keyed: true,
             ranges: RANGOS_NOTA,
           },
-        }),
-        disponible: this.envolver('disponible', filtros, {
-          filter: { range: { stock_total: { gt: 0 } } },
-        }),
+        },
+        disponible: { filter: { range: { stock_total: { gt: 0 } } } },
       },
     };
   }
 
-  /** Envuelve la agregacion de una faceta con los filtros de las DEMAS
-   * (nunca el suyo) -- mismo `envolver()`/`menos()` de `facetas.py`. */
-  private envolver(
-    faceta: NombreFaceta,
-    filtros: Record<NombreFaceta, ClausulaFiltro | null>,
-    agregacion: Record<string, unknown>,
-  ) {
-    const menos = FACETAS.filter((otra) => otra !== faceta)
-      .map((otra) => filtros[otra])
-      .filter((clausula): clausula is ClausulaFiltro => clausula != null);
-
-    return {
-      filter: { bool: { filter: menos } },
-      aggs: { valores: agregacion },
-    };
-  }
-
-  /** El filtro de UNA faceta, con sus valores sumados con OR. `null` si no
-   * hay nada elegido -- mismo `filtro_de()` de `facetas.py`. */
-  private filtroDe(
-    faceta: NombreFaceta,
-    valores: string[],
-  ): ClausulaFiltro | null {
-    if (valores.length === 0) {
-      return null;
+  /**
+   * Una clausula por faceta con algo elegido -- mismo `filtro_de()` de
+   * `facetas.py`. Las opciones de una misma faceta se suman con OR; las
+   * clausulas, entre si, con AND (van todas en el `filter`).
+   */
+  private clausulasDeFiltro(elegidos: FiltrosElegidos): ClausulaFiltro[] {
+    const clausulas: ClausulaFiltro[] = [];
+    if (elegidos.categorias.length > 0) {
+      clausulas.push({ terms: { id_categoria: elegidos.categorias } });
     }
-    switch (faceta) {
-      case 'categoria':
-        return { terms: { id_categoria: valores.map(Number) } };
-
-      case 'precio': {
-        const rangos = new Map(RANGOS_PRECIO.map((r) => [r.key, r]));
-        const should = valores
-          .map((valor) => rangos.get(valor))
-          .filter((rango): rango is RangoPrecio => rango != null)
-          .map((rango) => {
+    if (elegidos.precios.length > 0) {
+      clausulas.push({
+        bool: {
+          should: elegidos.precios.map((rango) => {
             const range: Record<string, number> = {};
             if (rango.from != null) {
               range.gte = rango.from;
@@ -263,27 +245,20 @@ export class BuscadorFacetadoService {
               range.lt = rango.to;
             }
             return { range: { precio_desde: range } };
-          });
-        return should.length > 0
-          ? { bool: { should, minimum_should_match: 1 } }
-          : null;
-      }
-
-      case 'calificacion': {
-        // Las opciones se contienen (4-o-mas cabe dentro de 3-o-mas), asi
-        // que vale la mas baja -- el numero sale del propio valor, no de
-        // RANGOS_NOTA (que solo describe la agregacion).
-        const minimos = valores
-          .map((valor) => Number(valor.split('-')[0]))
-          .filter((numero) => !Number.isNaN(numero));
-        return minimos.length > 0
-          ? { range: { resenas_promedio: { gte: Math.min(...minimos) } } }
-          : null;
-      }
-
-      case 'disponible':
-        return { range: { stock_total: { gt: 0 } } };
+          }),
+          minimum_should_match: 1,
+        },
+      });
     }
+    if (elegidos.calificacionMinima != null) {
+      clausulas.push({
+        range: { resenas_promedio: { gte: elegidos.calificacionMinima } },
+      });
+    }
+    if (elegidos.disponible) {
+      clausulas.push({ range: { stock_total: { gt: 0 } } });
+    }
+    return clausulas;
   }
 
   /** `limite` sin validar puede venir vacio, negativo o gigante: se acota. */
@@ -305,12 +280,13 @@ export class BuscadorFacetadoService {
   /** La respuesta de ES en la forma que espera la pantalla -- mismo
    * `facetas()` de `facetas.py`, pero como arreglos en vez de objetos. */
   private aFacetas(aggregations: Agregaciones): RespuestaFacetada['facetas'] {
-    const categoria: FacetaCategoria[] =
-      aggregations.categoria.valores.buckets.map((bucket) => ({
+    const categoria: FacetaCategoria[] = aggregations.categoria.buckets.map(
+      (bucket) => ({
         id: Number(bucket.key),
         nombre: bucket.nombre?.buckets[0]?.key ?? '?',
         cantidad: bucket.doc_count,
-      }));
+      }),
+    );
     const aRango = (buckets: Record<string, BucketRango>): FacetaRango[] =>
       Object.entries(buckets).map(([clave, bucket]) => ({
         clave,
@@ -319,9 +295,9 @@ export class BuscadorFacetadoService {
 
     return {
       categoria,
-      precio: aRango(aggregations.precio.valores.buckets),
-      calificacion: aRango(aggregations.calificacion.valores.buckets),
-      disponible: aggregations.disponible.valores.doc_count,
+      precio: aRango(aggregations.precio.buckets),
+      calificacion: aRango(aggregations.calificacion.buckets),
+      disponible: aggregations.disponible.doc_count,
     };
   }
 

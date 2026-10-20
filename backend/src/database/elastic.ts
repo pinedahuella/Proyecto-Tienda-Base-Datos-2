@@ -39,6 +39,15 @@ const cliente = new Client({
 });
 
 /**
+ * El limite de las busquedas que hace una persona en la pagina (facetada,
+ * simple, hibrida, intencion, sugerencias), que tardan menos de 0.2 s. Los 8 s
+ * del cliente son para los workers, que mandan lotes de cientos de documentos.
+ * Con Elasticsearch congelado, la primera busqueda tardaba esos 8 s antes de
+ * pasar a la copia del catalogo (medido el 2026-10-20); con esto, 3.
+ */
+export const OPCIONES_BUSQUEDA = { requestTimeout: 3000 } as const;
+
+/**
  * El cortacircuitos de Elasticsearch (helpers/cortacircuitos.ts): despues de
  * una caida, 15 s sin preguntarle. Solo cuentan como caida los tres errores de
  * no llegar; una respuesta con error (indice que no existe, consulta mal

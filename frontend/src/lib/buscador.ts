@@ -70,6 +70,12 @@ export interface Busqueda {
 	 * manda el backend desde 3305cf3; la ruta de admin no lo trae.
 	 */
 	quisiste_decir?: string | null;
+	/**
+	 * Sin resultados, productos que el backend propone para no dejar la
+	 * busqueda vacia (2026-10-20). No son resultados: la busqueda cuenta como
+	 * sin resultados y asi se pinta, con estos debajo.
+	 */
+	sugeridos?: ResultadoBusqueda[];
 }
 
 /** Lo minimo que se escribe antes de molestar al servidor. */
@@ -115,7 +121,9 @@ export async function buscarProductos(
 		ruta += `&sesion=${encodeURIComponent(sesionAnalitica())}`;
 	}
 
-	const respuesta = await pedir<ResultadoBusqueda[] | { resultados?: ResultadoBusqueda[]; quisiste_decir?: string | null }>(ruta);
+	const respuesta = await pedir<
+		ResultadoBusqueda[] | { resultados?: ResultadoBusqueda[]; quisiste_decir?: string | null; sugeridos?: ResultadoBusqueda[] }
+	>(ruta);
 
 	if (!respuesta.ok) {
 		return { resultados: [], error: mensajeUtil(respuesta) };
@@ -130,7 +138,8 @@ export async function buscarProductos(
 	return {
 		resultados: Array.isArray(p?.resultados) ? p.resultados : [],
 		error: '',
-		quisiste_decir: p?.quisiste_decir ?? null
+		quisiste_decir: p?.quisiste_decir ?? null,
+		sugeridos: Array.isArray(p?.sugeridos) ? p.sugeridos : []
 	};
 }
 
@@ -367,6 +376,7 @@ interface PayloadFacetado {
 	resultados?: ResultadoBusqueda[];
 	total?: number;
 	quisiste_decir?: string | null;
+	sugeridos?: ResultadoBusqueda[];
 	facetas?: {
 		categoria?: { id: number | string; nombre: string; cantidad: number }[];
 		precio?: { clave: string; cantidad: number }[];
@@ -413,5 +423,12 @@ export async function buscarFacetado(texto: string, elegidos: Elegidos, limite =
 				disponible: f.disponible ?? 0
 			}
 		: null;
-	return { resultados, error: '', facetas, total: p.total ?? resultados.length, quisiste_decir: p.quisiste_decir ?? null };
+	return {
+		resultados,
+		error: '',
+		facetas,
+		total: p.total ?? resultados.length,
+		quisiste_decir: p.quisiste_decir ?? null,
+		sugeridos: Array.isArray(p.sugeridos) ? p.sugeridos : []
+	};
 }

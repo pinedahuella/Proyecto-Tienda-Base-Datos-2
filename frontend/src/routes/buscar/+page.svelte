@@ -102,6 +102,13 @@
 	 */
 	let esHibrida = $state(false);
 	let quisisteDecir = $state<string | null>(null);
+	/**
+	 * Sin resultados y sin filtros, lo que el backend propone para que la
+	 * pagina no quede vacia (2026-10-20, lo pidio el profesor: buscar una locura
+	 * tiene que traer al menos un producto). No son resultados: el conteo dice 0
+	 * y la busqueda queda registrada como sin resultados.
+	 */
+	let sugeridos = $state<ResultadoBusqueda[]>([]);
 	let facetas = $state<Facetas | null>(null);
 	let total = $state(0);
 	let error = $state('');
@@ -156,6 +163,7 @@
 
 		if (texto.length < MINIMO_LETRAS) {
 			resultados = [];
+			sugeridos = [];
 			facetas = null;
 			error = '';
 			cargando = false;
@@ -194,6 +202,7 @@
 			esHibrida = usarHibrida;
 			resultados = usarHibrida ? hibridos : salida.resultados;
 			quisisteDecir = salida.quisiste_decir ?? null;
+			sugeridos = salida.sugeridos ?? [];
 			facetas = salida.facetas;
 			total = salida.total;
 			error = salida.error;
@@ -287,38 +296,70 @@
 	<title>{consulta ? `${consulta} en Mesh` : 'Buscar en Mesh'}</title>
 </svelte:head>
 
-{#snippet seccionIntencion()}
-{#if consulta.length >= MINIMO_LETRAS && (intencion.length > 0 || buscandoIntencion)}
-	<section class="intencion" class:arriba={fraseArriba} aria-label="Lo que cuentan otros compradores">
-		<h2>Lo que cuentan otros compradores</h2>
-		<p class="sub">Productos cuyas resenas hablan de lo que buscas, aunque no usen tus palabras.</p>
-		{#if buscandoIntencion && intencion.length === 0}
-			<p class="vacio">Leyendo resenas</p>
-		{:else}
-			<ul class="tarjetas">
-				{#each intencion as r (r.id_producto)}
-					<li>
-						<a class="tarjeta" href="/producto/{r.id_producto}">
-							<span class="nombre">{r.nombre}</span>
-							{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
-							{#if r.motivo}
-								<blockquote>
-									<span class="cita">{r.motivo.comentario}</span>
-									<span class="quien">Le dio {estrellas(r.motivo.calificacion)}</span>
-								</blockquote>
-							{:else}
-								<span class="quien">Por su descripcion</span>
-							{/if}
-							{#if precioVisible(r)}<span class="precio">{precioVisible(r)}</span>{/if}
-						</a>
-					</li>
-				{/each}
-			</ul>
-		{/if}
-	</section>
-{/if}
-{/snippet}
-
+{#snippet seccionIntencion()}
+
+{#if consulta.length >= MINIMO_LETRAS && (intencion.length > 0 || buscandoIntencion)}
+
+	<section class="intencion" class:arriba={fraseArriba} aria-label="Lo que cuentan otros compradores">
+
+		<h2>Lo que cuentan otros compradores</h2>
+
+		<p class="sub">Productos cuyas resenas hablan de lo que buscas, aunque no usen tus palabras.</p>
+
+		{#if buscandoIntencion && intencion.length === 0}
+
+			<p class="vacio">Leyendo resenas</p>
+
+		{:else}
+
+			<ul class="tarjetas">
+
+				{#each intencion as r (r.id_producto)}
+
+					<li>
+
+						<a class="tarjeta" href="/producto/{r.id_producto}">
+
+							<span class="nombre">{r.nombre}</span>
+
+							{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
+
+							{#if r.motivo}
+
+								<blockquote>
+
+									<span class="cita">{r.motivo.comentario}</span>
+
+									<span class="quien">Le dio {estrellas(r.motivo.calificacion)}</span>
+
+								</blockquote>
+
+							{:else}
+
+								<span class="quien">Por su descripcion</span>
+
+							{/if}
+
+							{#if precioVisible(r)}<span class="precio">{precioVisible(r)}</span>{/if}
+
+						</a>
+
+					</li>
+
+				{/each}
+
+			</ul>
+
+		{/if}
+
+	</section>
+
+{/if}
+
+{/snippet}
+
+
+
 <Cabecera />
 
 <main class="env">
@@ -393,6 +434,39 @@
 			</div>
 			<a class="boton" href="/">Ver todo el catalogo</a>
 		</div>
+		{#if sugeridos.length > 0}
+			<!-- Los sugeridos no llevan ?origen=buscador ni registran el clic: no son
+			     resultados de esta busqueda y mezclarlos ensuciaria las tendencias. -->
+			<section class="sugeridos" aria-labelledby="t-sugeridos">
+				<h2 id="t-sugeridos">Te pueden interesar</h2>
+				<ul class="lista">
+					{#each sugeridos as r (r.id_producto)}
+						<li>
+							<a class="fila" href="/producto/{r.id_producto}">
+								<span class="texto">
+									<span class="nombre">{r.nombre}</span>
+									<span class="bajo">
+										{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
+										{#if r.hay_descuento}<span class="descuento">Con descuento</span>{/if}
+										{#if nota(r)}<span class="dato">{nota(r)}</span>{/if}
+										<span class="dato" class:agotado={r.stock_total <= 0}>
+											{r.stock_total > 0 ? `${r.stock_total} disponibles` : 'Sin existencias'}
+										</span>
+									</span>
+								</span>
+								<span class="cifras">
+									{#if precioVisible(r)}
+										<span class="precio">{precioVisible(r)}</span>
+									{:else}
+										<span class="sin-precio">Sin precio</span>
+									{/if}
+								</span>
+							</a>
+						</li>
+					{/each}
+				</ul>
+			</section>
+		{/if}
 	{:else}
 		<div class="con-filtros" class:sin-panel={!facetas}>
 			{#if facetas}
@@ -541,6 +615,16 @@
 <Pie />
 
 <style>
+	.sugeridos {
+		margin-top: 2rem;
+	}
+
+	.sugeridos h2 {
+		margin: 0 0 0.75rem;
+		font-size: var(--f-lg);
+		font-weight: 600;
+	}
+
 	.intencion {
 		margin-top: 2.5rem;
 		padding-top: 1.5rem;
