@@ -2690,15 +2690,20 @@
 		gap: var(--e3);
 	}
 
+	/* En telefono el select se encoge con la pantalla; la lista abierta sigue
+	   mostrando cada tipo entero. */
 	.filtro-tipo {
 		display: flex;
 		align-items: center;
 		gap: var(--e2);
+		max-width: 100%;
 		margin-bottom: var(--e4);
 		font-size: var(--f-ms);
 	}
 
 	.filtro-tipo select {
+		min-width: 0;
+		max-width: 100%;
 		padding: 0.3rem 0.5rem;
 		font-family: inherit;
 		font-size: var(--f-ms);
@@ -2828,6 +2833,7 @@
 
 	.triage {
 		display: flex;
+		flex-wrap: wrap;
 		gap: var(--e2);
 		margin-top: var(--e3);
 		padding-top: var(--e3);
