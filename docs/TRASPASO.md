@@ -3,7 +3,48 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-18, noche (2)**.
+Ultima actualizacion: **2026-10-19, noche (2)**.
+
+**EMPIEZA AQUI (19-10, noche 2). El modo remoto medido contra la PC de Jose David, y el documento de fraude.**
+No se toco `backend/`. Pusheado en main: 94335e0 (modo remoto) y becbbba (documento).
+
+```
+remoto/          commiteado (antes estaba sin subir). Medido entero contra 100.64.42.11 con el Docker local
+                 apagado: lo que salio y lo que se arreglo esta en remoto/README.md, seccion Medido.
+                 Nuevo: redis-benchmark y pg_isready, docker exec de comandos comunes (true, cat, rm),
+                 docker ps con ^nombre$, el \o de psql y el '/tmp/ de los guiones de mongosh, la ruta
+                 de los clientes de Node (no arrancaban), y activar pone SIN_CAIDA=1
+pruebas          carrito.sh (elegia dos veces la misma oferta), etl_compras.sh (mide las compras aunque
+                 no haya devoluciones copiadas por el ETL), falla_checkout.sh (SIN MEDIR con SIN_CAIDA),
+                 recomendacion_semantica.py (docker falso por el bash de Git), correr_todas.sh (no le
+                 pasa SALIDA a las pruebas: eventos.sh se caia entera)
+demo             demo-evento-fraude.ps1 -Tipo multi_cuenta_ip_lenta en modo remoto, de punta a punta
+docs             FRAUDE-DETECCION-Y-CASOS.md (lo pidio el amigo de Meme): los 31 tipos con su detector,
+                 umbral y puntos, que entra a un caso y que no, la union por cuentas, nucleo y periferia,
+                 el puntaje, los niveles, las reglas R-CASI tal como las revisa el codigo y la vida de un
+                 caso. FRAUDE-CATALOGO.md corregido: el texto se valora desde 100 caracteres, no 40
+```
+
+Contra la PC de Jose David, en verde todo menos:
+
+- **prueba_acceso 19 FALLA**: sus contrasenas de `inspeccion` y `operador` de Redis son otras. Hay que
+  pedirselas y pasarlas por el ambiente (remoto/README.md).
+- **recomendacion_semantica 1 FALLA, fallo real nuestro**: `producto_catalogo` tiene 102 productos (1001 a 1102)
+  que ya no estan en Mongo ni tienen vector, de un `-Borrar 102` en esa PC. `migrations/lote/borrar_lote.sql`
+  es del 03-09 y no borra de `producto_catalogo` ni de `vector_producto` (029 y 040 son posteriores). Sin
+  arreglar: arreglarlo es tocar el SQL y borrar esas filas en la base del amigo; decidirlo con Meme.
+- **SIN MEDIR por sus datos**: busqueda parte 4 y notas.sh (no hay producto que viva solo en Mongo; se crea uno
+  desde el panel del vendedor), las devoluciones de etl_compras, falla_checkout (en remoto no se tumban bases).
+
+Sin hacer, a proposito:
+
+- **La semilla de fraude en la base del amigo**: no se escribio nada. Su base tiene la 046 y los combos pero no
+  las cuentas `fraude.*@mesh.com`. Se siembra con el psql falso o con su proximo `.\arrancar.ps1`; Meme decide.
+- Lo de "luego" de Meme: los 3 puntos del profesor (backend) y las resenas del clasificador que no hablan de su
+  producto.
+
+Como quedo la maquina: todo apagado (backend, frontend, Docker, WSL, Ollama), Tailscale conectado y
+`backend/.env` apuntando a 100.64.42.11.
 
 **EMPIEZA AQUI (18-10, noche). Semilla de combos y pedidos quitados que tambien se borran de ClickHouse.**
 Lo que David dejo en `backend/cambio_propuestas/2026-10-17_0015-combos.md`: la portada "Se compran juntos" y la
