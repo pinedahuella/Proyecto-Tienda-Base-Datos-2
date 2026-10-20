@@ -61,7 +61,7 @@ Cada 15 minutos; coordinados y persistente tambien al escribir una resena.
 
 Cada 15 minutos, y las de notas incoherentes tambien al valorar una resena
 nueva. Usan el vector de cada resena (Ollama) y la valoracion del clasificador
-(`clasificador-resenas/`). Ventana de 180 dias; resenas de 40 caracteres o mas.
+(`clasificador-resenas/`). Ventana de 180 dias; resenas de 100 caracteres o mas (las mas cortas no se valoran).
 "Gemela" es otra resena con coseno de 0.92 o mas.
 
 | Tipo | Que es | Umbral | Como se ve |
