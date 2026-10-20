@@ -72,19 +72,15 @@ function errorNeo4jNoResponde(mensaje: string): Error {
 async function enSesion<T>(
   modo: SessionMode,
   trabajo: (sesion: Session) => Promise<T>,
+  limiteMs = LIMITE_CONSULTA_MS,
 ): Promise<T> {
   return cortacircuitosNeo4j.correr(
     async () => {
       const sesion = neo4jDriver.session({ defaultAccessMode: modo });
       let respondio = false;
       try {
-        const resultado = await conLimite(
-          trabajo(sesion),
-          LIMITE_CONSULTA_MS,
-          () =>
-            errorNeo4jNoResponde(
-              `Neo4j no respondio en ${LIMITE_CONSULTA_MS / 1000} s`,
-            ),
+        const resultado = await conLimite(trabajo(sesion), limiteMs, () =>
+          errorNeo4jNoResponde(`Neo4j no respondio en ${limiteMs / 1000} s`),
         );
         respondio = true;
         return resultado;
@@ -131,12 +127,24 @@ export function esCaidaDeNeo4j(error: unknown): boolean {
 export async function consultarGrafo<T = Record<string, unknown>>(
   cypher: string,
   parametros: Record<string, unknown> = {},
+  limiteMs = LIMITE_CONSULTA_MS,
 ): Promise<T[]> {
-  return enSesion(neo4j.session.READ, async (sesion) => {
-    const resultado = await sesion.run(cypher, parametros);
-    return resultado.records.map((registro) => registro.toObject() as T);
-  });
+  return enSesion(
+    neo4j.session.READ,
+    async (sesion) => {
+      const resultado = await sesion.run(cypher, parametros);
+      return resultado.records.map((registro) => registro.toObject() as T);
+    },
+    limiteMs,
+  );
 }
+
+/**
+ * El limite de las consultas que pide una persona desde la pagina (para ti,
+ * tambien compraron): tardan decimas. Con Neo4j congelado, la primera esperaba
+ * los 20 s de los detectores de fraude antes de pasar a PostgreSQL.
+ */
+export const LIMITE_CONSULTA_PAGINA_MS = 3000;
 
 /**
  * Corre una consulta que ESCRIBE en el grafo. Hasta el worker del outbox

@@ -1,10 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import neo4j from 'neo4j-driver';
-import { consultarGrafo } from '../../database/neo4j';
-import { ErrorValidacion } from '../../helpers/errores';
+import {
+  consultarGrafo,
+  LIMITE_CONSULTA_PAGINA_MS,
+} from '../../database/neo4j';
+import { ErrorConexion, ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorGrafo } from '../../helpers/manejar-error-grafo';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import { aNumero, soloActivos } from '../../helpers/recomendaciones-grafo';
+import {
+  conRespaldoDeNeo4j,
+  paraTiDesdePostgres,
+} from '../../helpers/recomendaciones-respaldo';
 import { Producto } from '../../models/producto';
 
 /** Cuantas recomendaciones devuelve la ruta. */
@@ -109,22 +116,37 @@ export class ParaTiService {
     maxProductos: number,
   ): Promise<{ id: number; compradores: number; porque: number[] }[]> {
     try {
-      const filas = await consultarGrafo<{
-        id: unknown;
-        compradores: unknown;
-        porque: unknown[];
-      }>(CYPHER_PARA_TI, {
-        id: neo4j.int(idUsuario),
-        maxProductos: neo4j.int(maxProductos),
-        candidatos: neo4j.int(CANDIDATOS),
-        maxPorque: neo4j.int(MAX_PORQUE),
-      });
-      return filas.map((fila) => ({
-        id: aNumero(fila.id),
-        compradores: aNumero(fila.compradores),
-        porque: fila.porque.map(aNumero),
-      }));
+      // Sin Neo4j, la misma pregunta sobre los pedidos en PostgreSQL
+      // (recomendaciones-respaldo.ts, 2026-10-20).
+      return await conRespaldoDeNeo4j(
+        async () => {
+          const filas = await consultarGrafo<{
+            id: unknown;
+            compradores: unknown;
+            porque: unknown[];
+          }>(
+            CYPHER_PARA_TI,
+            {
+              id: neo4j.int(idUsuario),
+              maxProductos: neo4j.int(maxProductos),
+              candidatos: neo4j.int(CANDIDATOS),
+              maxPorque: neo4j.int(MAX_PORQUE),
+            },
+            LIMITE_CONSULTA_PAGINA_MS,
+          );
+          return filas.map((fila) => ({
+            id: aNumero(fila.id),
+            compradores: aNumero(fila.compradores),
+            porque: fila.porque.map(aNumero),
+          }));
+        },
+        () =>
+          paraTiDesdePostgres(idUsuario, maxProductos, CANDIDATOS, MAX_PORQUE),
+      );
     } catch (error) {
+      if (error instanceof ErrorConexion) {
+        throw error;
+      }
       manejarErrorGrafo(this.logger, error);
     }
   }

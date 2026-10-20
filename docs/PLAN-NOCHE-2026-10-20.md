@@ -69,7 +69,10 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
         identicos a Elasticsearch, 50-760 ms; congelado 3.5 s la primera (OPCIONES_BUSQUEDA 3 s).
         Sin respaldo, a proposito: buscador de ofertas del vendedor (la lista normal sigue) y crear
         un "avisame" (el percolator es de Elasticsearch).
-- [ ] 6. Neo4j caido: tambien compraron desde PostgreSQL (pedidos), para ti con plan B.
+- [x] 6. Neo4j caido: helpers/recomendaciones-respaldo.ts, las dos consultas Cypher en SQL sobre
+        pedido_producto (estados comprado/enviado/entregado, como el grafo). 8/8 identicas con y sin
+        Neo4j (apagado y congelado), el porque en el orden de Cypher. Limite de pagina 3 s.
+        buscar/+page.svelte quedo en LF como los otros 853 archivos (era el unico CRLF en el indice).
 - [x] 7. Facetas: filtros en el filter de la consulta, aggs sueltas (facetado.service.ts y
         elastic/pruebas/facetas.py, 24 OK contra la PC de David), elastic/README.md y ejemplo.
 - [x] 8. sugeridos aparte (services/buscador/sugeridos.service.ts: vectores sin umbral, mas
@@ -97,6 +100,8 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
 - No editar el producto 21 por la API (etl_mongo.sh).
 
 ## Bitacora
+
+- 01:20 paso 6 hecho y medido; commit. Sigue el 9 (revisar frontend) y el 10 (las 2 pruebas).
 
 - 01:15 pasos 5, 7 y 8 hechos y medidos; commit. Sigue el 6 (Neo4j).
 

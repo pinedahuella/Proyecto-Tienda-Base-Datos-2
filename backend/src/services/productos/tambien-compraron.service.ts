@@ -1,9 +1,17 @@
 import { Injectable, Logger } from '@nestjs/common';
 import neo4j from 'neo4j-driver';
-import { consultarGrafo } from '../../database/neo4j';
+import {
+  consultarGrafo,
+  LIMITE_CONSULTA_PAGINA_MS,
+} from '../../database/neo4j';
 import { manejarErrorGrafo } from '../../helpers/manejar-error-grafo';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
+import { ErrorConexion } from '../../helpers/errores';
 import { aNumero, soloActivos } from '../../helpers/recomendaciones-grafo';
+import {
+  conRespaldoDeNeo4j,
+  tambienCompraronDesdePostgres,
+} from '../../helpers/recomendaciones-respaldo';
 import { Producto } from '../../models/producto';
 
 /** Cuantas recomendaciones devuelve la ruta. */
@@ -70,18 +78,32 @@ export class TambienCompraronService {
     idProducto: number,
   ): Promise<{ id: number; compradores: number }[]> {
     try {
-      const filas = await consultarGrafo<{ id: unknown; compradores: unknown }>(
-        CYPHER_TAMBIEN_COMPRARON,
-        {
-          id: neo4j.int(idProducto),
-          candidatos: neo4j.int(CANDIDATOS),
+      // Sin Neo4j, la misma pregunta sobre los pedidos en PostgreSQL
+      // (recomendaciones-respaldo.ts, 2026-10-20).
+      return await conRespaldoDeNeo4j(
+        async () => {
+          const filas = await consultarGrafo<{
+            id: unknown;
+            compradores: unknown;
+          }>(
+            CYPHER_TAMBIEN_COMPRARON,
+            {
+              id: neo4j.int(idProducto),
+              candidatos: neo4j.int(CANDIDATOS),
+            },
+            LIMITE_CONSULTA_PAGINA_MS,
+          );
+          return filas.map((fila) => ({
+            id: aNumero(fila.id),
+            compradores: aNumero(fila.compradores),
+          }));
         },
+        () => tambienCompraronDesdePostgres(idProducto, CANDIDATOS),
       );
-      return filas.map((fila) => ({
-        id: aNumero(fila.id),
-        compradores: aNumero(fila.compradores),
-      }));
     } catch (error) {
+      if (error instanceof ErrorConexion) {
+        throw error;
+      }
       manejarErrorGrafo(this.logger, error);
     }
   }
