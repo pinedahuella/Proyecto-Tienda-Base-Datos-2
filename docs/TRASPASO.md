@@ -20,8 +20,9 @@ arrancar.ps1     paso 5d "Pedidos de los combos" (dice si sembro o si ya estaban
 migracion 046    pedido_quitado: desde psql no se llega a ClickHouse, asi que cada quitar.sql anota los pedidos
                  que borra y el ETL de compras (arrancar.ps1 y etl/cargar_compras.sh) los borra de
                  compra_producto y devolucion_producto y marca aplicado_en
-clasificador     su quitar.sql tambien anota (motivo semilla-clasificador). generar.js NO corre hoy: lee los
-                 vectores de Elasticsearch y desde la 040 viven en PostgreSQL; el .sql se cambio a mano
+clasificador     su quitar.sql tambien anota (motivo semilla-clasificador). generar.js lee desde el 19-10 los
+                 vectores de vector_producto de PostgreSQL y corre de nuevo; resenas.sql regenerado (20 resenas
+                 que caian en productos de prueba del panel ahora caen en productos de verdad)
 huerfanas        las 480 lineas de los pedidos 771 a 1250 ya se borraron de ClickHouse; etl_compras.sh en verde
 ```
 

@@ -4,9 +4,11 @@
 //   node clasificador-resenas/semilla/generar.js
 //
 // Necesita los vectores de las resenas (python clasificador-resenas/1_vectorizar.py,
-// que los deja en clasificador-resenas/vectores/) y Elasticsearch arriba con los
-// vectores de los productos (los deja arrancar.ps1). arrancar.ps1 NO lo corre:
-// usa el resenas.sql que sale de aqui, que va en el repo.
+// que los deja en clasificador-resenas/vectores/) y PostgreSQL arriba con los
+// vectores de los productos en vector_producto (los deja arrancar.ps1). Entra
+// por localhost con las credenciales del .env de la raiz; PG_HOST y PG_PORT
+// cambian a donde. arrancar.ps1 NO lo corre: usa el resenas.sql que sale de
+// aqui, que va en el repo.
 //
 // Siembra en la tienda las 480 resenas escritas a mano para el clasificador
 // (clasificador-resenas/datos/), como resenas de verdad: 40 cuentas de
@@ -53,6 +55,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { createRequire } = require('module');
 
 const RAIZ = path.join(__dirname, '..');
 const SALIDA = path.join(__dirname, 'resenas.sql');
@@ -107,33 +110,57 @@ const LUGARES = [
 // ------------------------------------------------------------
 // Los vectores: los de las resenas del clasificador y los de los productos
 // ------------------------------------------------------------
-const ES = process.env.ES ?? 'http://localhost:9200';
+// Los de los productos salen de vector_producto (pgvector, migracion 040), solo
+// los activos. Del 2026-10-02 al 10-16 vivian en mesh_productos de
+// Elasticsearch y de ahi los leia este generador; son los mismos numeros, los
+// copio arrancar sin pasar por Ollama.
+const REPO = path.join(RAIZ, '..');
 const SUFIJO_COPIA = / [A-Z][0-9]+-[0-9]+$/;
 
 const VECTORES_RESENAS = new Map(
   JSON.parse(fs.readFileSync(path.join(RAIZ, 'vectores', 'vectores.json'), 'utf8')).items.map((x) => [x.id, x.vector]),
 );
 
-async function productosOriginales() {
-  const pedir = async (ruta, cuerpo) => {
-    const r = await fetch(`${ES}${ruta}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cuerpo) });
-    if (!r.ok) throw new Error(`Elasticsearch contesto ${r.status} en ${ruta}`);
-    return r.json();
-  };
-  const salida = [];
-  let pagina = await pedir('/mesh_productos/_search?scroll=1m', {
-    size: 500, sort: ['_doc'],
-    query: { bool: { filter: [{ term: { estado: 'activo' } }, { exists: { field: 'vector' } }] } },
-    _source: ['nombre', 'categoria_nombre', 'categoria_padre', 'vector'],
-  });
-  while (pagina.hits.hits.length) {
-    for (const h of pagina.hits.hits) {
-      if (!SUFIJO_COPIA.test(h._source.nombre)) salida.push(h._source);
-    }
-    pagina = await pedir('/_search/scroll', { scroll: '1m', scroll_id: pagina._scroll_id });
+function leerEnv() {
+  const env = {};
+  for (const linea of fs.readFileSync(path.join(REPO, '.env'), 'utf8').split(/\r?\n/)) {
+    const m = /^\s*([A-Z_]+)\s*=\s*(.*)$/.exec(linea);
+    if (m) env[m[1]] = m[2].trim();
   }
-  // Por nombre: el orden de Elasticsearch no es estable entre maquinas.
-  return salida.sort((a, b) => (a.nombre < b.nombre ? -1 : a.nombre > b.nombre ? 1 : 0));
+  return env;
+}
+
+async function productosOriginales() {
+  const env = leerEnv();
+  const { Client } = createRequire(path.join(REPO, 'backend', 'package.json'))('pg');
+  const pg = new Client({
+    host: process.env.PG_HOST ?? 'localhost',
+    port: Number(process.env.PG_PORT ?? env.DB_PORT ?? 5432),
+    user: env.DB_USER,
+    password: env.DB_PASSWORD,
+    database: env.DB_NAME,
+  });
+  await pg.connect();
+  try {
+    // El nombre y la categoria de la tabla productos: es la que mira la SQL
+    // para encontrar la oferta (p.nombre = v_fila.producto).
+    const { rows } = await pg.query(
+      `SELECT p.nombre, c.nombre AS categoria_nombre, cp.nombre AS categoria_padre,
+              v.vector::text AS vector
+         FROM vector_producto v
+         JOIN productos p        ON p.id_producto = v.id_producto_mongo
+         JOIN categorias c       ON c.id_categoria = p.id_categoria
+         LEFT JOIN categorias cp ON cp.id_categoria = c.id_categoria_padre
+        WHERE v.activo`,
+    );
+    const salida = rows
+      .filter((r) => !SUFIJO_COPIA.test(r.nombre))
+      .map((r) => ({ ...r, vector: JSON.parse(r.vector) }));
+    // Por nombre: el orden de la consulta no es estable entre maquinas.
+    return salida.sort((a, b) => (a.nombre < b.nombre ? -1 : a.nombre > b.nombre ? 1 : 0));
+  } finally {
+    await pg.end();
+  }
 }
 
 function coseno(a, b) {
@@ -144,7 +171,7 @@ function coseno(a, b) {
 
 (async () => {
 const PRODUCTOS = await productosOriginales();
-if (PRODUCTOS.length === 0) throw new Error('No hay productos con vector en Elasticsearch. Corre .\\arrancar.ps1');
+if (PRODUCTOS.length === 0) throw new Error('No hay productos con vector en vector_producto de PostgreSQL. Corre .\\arrancar.ps1');
 
 // ------------------------------------------------------------
 // Las resenas, en orden fijo
@@ -152,7 +179,10 @@ if (PRODUCTOS.length === 0) throw new Error('No hay productos con vector en Elas
 const RESENAS = [];
 for (const archivo of fs.readdirSync(path.join(RAIZ, 'datos')).filter((f) => f.endsWith('.json')).sort()) {
   for (const r of JSON.parse(fs.readFileSync(path.join(RAIZ, 'datos', archivo), 'utf8'))) {
-    if (r.texto.length > 250) throw new Error(`${r.id} tiene ${r.texto.length} caracteres y la app acepta hasta 250`);
+    // Lo mismo que validarComentarioResena del backend: de 40 a 350, sin los
+    // espacios de las puntas.
+    const largo = r.texto.trim().length;
+    if (largo < 40 || largo > 350) throw new Error(`${r.id} tiene ${largo} caracteres y la app acepta de 40 a 350`);
     RESENAS.push(r);
   }
 }
@@ -424,9 +454,10 @@ fs.writeFileSync(SALIDA, lineas.join('\n'), 'utf8');
 // base.
 //
 // Todo pasa por las tablas de siempre, asi que los triggers dejan cada cambio
-// en sus colas: evento_grafo quita las resenas de Neo4j, evento_comentario las
-// quita de mesh_comentarios y evento_producto recalcula en Mongo la nota y el
-// stock de cada producto tocado. Lo hacen los workers del backend.
+// en sus colas: evento_grafo quita las resenas de Neo4j, el vector de cada
+// comentario se va de vector_comentario en cascada, y evento_producto recalcula
+// en Mongo la nota y el stock de cada producto tocado. Lo hacen los workers del
+// backend.
 const q = [];
 const v = (x) => q.push(x);
 v(`-- ============================================================`);

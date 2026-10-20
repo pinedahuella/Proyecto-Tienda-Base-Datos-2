@@ -35,11 +35,12 @@ semilla/        generar.js escribe resenas.sql (las 480 sembradas como resenas d
                 del que habla su texto) y quitar.sql (la deshace, y desde el 18-10
                 anota sus pedidos en pedido_quitado para que el ETL de compras los
                 borre tambien de ClickHouse). arrancar.ps1 corre resenas.sql en cada
-                arranque, en el paso Resenas del clasificador. OJO: generar.js lee los
-                vectores de los productos de Elasticsearch, y desde la 040 viven en
-                vector_producto de PostgreSQL; hoy no corre ("No hay productos con
-                vector en Elasticsearch"). El cambio del 18-10 a quitar.sql se hizo
-                en el generador y a mano en el .sql, igual
+                arranque, en el paso Resenas del clasificador. generar.js lee los
+                vectores de los productos de vector_producto de PostgreSQL (desde el
+                19-10; antes de Elasticsearch) por localhost con el .env de la raiz.
+                Al pasarlo, 20 resenas que caian en productos de prueba del panel
+                (crepas, barbuchin) pasaron a productos de verdad: 464 de 480 caen
+                en el producto del que habla su texto
 modelo/         regresion_logistica.json y red_neuronal.json, listos para el backend;
                 verificacion.json para comprobar que el backend calcula lo mismo;
                 reporte.txt con las notas de la ultima corrida

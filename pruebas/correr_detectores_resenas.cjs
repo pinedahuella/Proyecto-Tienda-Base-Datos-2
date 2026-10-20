@@ -2,8 +2,10 @@
 //   node pruebas/correr_detectores_resenas.cjs
 // Corre una vez, con el codigo compilado del backend (backend/dist), los
 // detectores de fraude de resenas que no salen del grafo: los cuatro que leen
-// el texto en mesh_comentarios (resenas repetidas, anillo de texto, notas
-// incoherentes y resenas parecidas) y el de resenas con la compra cancelada.
+// el vector de cada resena en vector_comentario de PostgreSQL (resenas
+// repetidas, anillo de texto, notas incoherentes y resenas parecidas; hasta el
+// 2026-10-16, en mesh_comentarios de Elasticsearch) y el de resenas con la
+// compra cancelada.
 // En el backend corren solos cada 15 minutos, y desde 1f1f480 tambien al
 // escribir la resena o al cancelar el pedido; esto es la red de seguridad de
 // una demo o de una prueba. Guardan en senal_fraude igual que cuando los corre
