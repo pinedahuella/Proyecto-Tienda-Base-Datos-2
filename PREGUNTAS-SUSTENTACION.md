@@ -1111,3 +1111,23 @@ Dos usos más de ClickHouse. Los combos son los grupos de 2 y 3 productos que m�
 Tres señales que no aportaban. La cadena abierta, porque una cadena A, B, C no concentra reputación en nadie y en los datos solo repetía anillos que ya salían. El favor devuelto, porque siempre salía sobre el mismo par que el mutuo: ahora las horas entre la ida y la vuelta van en el detalle del mutuo y suman como bono (+20 en menos de una hora). El carrito acaparador, porque con el carrito en PostgreSQL apartar sin comprar ya no retiene unidades. Además la granja de registros pasó a Elasticsearch, donde sí están los registros, y una IP compartida dejó de unir casos.
 
 - Dónde se ve. `migrations/042_limpieza_fraude.sql` y `backend/elementos Generales/plan pendiente/limpieza-fraude.md`. `pruebas/anillos_familia_b.sh`, 40 OK: el favor devuelto sale como mutuo con 1 segundo entre ida y vuelta, y los tipos quitados dan 400. Las consultas viejas (`B1`, `B5`, `F4`, `F6`) quedan en el repositorio marcadas como fuera de uso.
+
+### 139. ¿Cuántos tipos de fraude detecta Mesh y cómo se demuestra cada uno?
+31 tipos en el catálogo (`tipo_senal_fraude`) y 30 que de verdad genera un detector; `anillo_en_el_tiempo` está en el catálogo pero quedó fuera de alcance. Son siete familias: anillos de reseñas y patrones de reseñas (Neo4j), el texto de las reseñas (los vectores de `vector_comentario`), reseñas con la compra cancelada (PostgreSQL), el login en el momento (Redis y Elasticsearch), el login lento de 24 horas y la granja de registros (Elasticsearch), y compras y navegación (ClickHouse). Cada tipo sale o de la semilla o de una demo en vivo, y cada uno se probó en la base local.
+
+- Dónde se ve. `docs/FRAUDE-CATALOGO.md`, con una tabla por familia: qué es, el umbral y el comando de cada demo. En el panel, Fraude, en cuatro pestañas: Casos, Intentos de entrada, Reseñas en anillo y Compras y navegación.
+- Cómo se arma en clase. `.\demo-evento-fraude.ps1 -Tipo <tipo>` para los 10 de login, `.\demo-compras-fraude.ps1` para los 4 de compras, `.\demo-anillo-resenas.ps1`, `.\demo-patrones-resenas.ps1` y `.\demo-resenas-texto.ps1` para las reseñas. Cada una tarda menos de un minuto y confirma en PostgreSQL que la señal subió.
+- Ojo si preguntan por qué hay que correr algo para ver las de compras. Su detector corre una vez al día y Nest no lo dispara al arrancar; `node pruebas/correr_detectores_fraude.cjs` corre todos los detectores una vez, igual que lo haría su reloj. Las demos que lo necesitan lo corren solas.
+
+### 140. ¿Para qué es la semilla de fraude y cómo se sabe que no inventa señales de más?
+Para los tipos que no se pueden armar frente al profesor. `persistente` pide reseñas en tres meses distintos; satélites, reputación exprés, reseñas repetidas, parecidas y notas incoherentes en un producto, ráfaga y devoluciones no tenían demo. `semilla-fraude/fraude.sql` los siembra con cuentas propias (`fraude.*@mesh.com`) y fechas relativas al día en que se siembra; arrancar la corre en el paso 5e.
+
+- Dónde se ve. `semilla-fraude/README.md`, con la tabla de cada grupo y su umbral.
+- Ojo si preguntan si un grupo dispara otra cosa. No, y se midió: después de sembrar salen esas ocho señales y ninguna otra con esas cuentas. Los números están puestos para no cruzar el umbral de un vecino: reputación exprés lleva dos cuentas porque con tres también serían satélites, y las reseñas parecidas caen de a dos por vendedor porque con tres en uno ya es un anillo de texto (eso salió en la primera prueba y se corrigió).
+- Ojo si preguntan cómo se quita. `semilla-fraude/quitar.sql` borra cuentas, reseñas, pedidos, ofertas y las señales que salieron de ellas, y anota los pedidos en `pedido_quitado` para que el ETL los borre de ClickHouse.
+
+### 141. ¿Cómo se demuestra un viaje imposible sin salir de la máquina?
+Con la cabecera X-Forwarded-For. El backend corre con `trustProxy: 'loopback'`: cuando la petición viene de la misma máquina (el proxy de Vite, el túnel), toma la IP de esa cabecera. La demo manda cada login diciendo de qué IP viene, una de Guatemala y otra de Tokio, y `geoip-lite` las ubica igual que a una real: 12 325 km en segundos, la señal sale con la distancia y la velocidad en su detalle.
+
+- Dónde se ve. `demo-evento-fraude.ps1 -Tipo viaje_imposible`, `backend/src/main.ts` (trustProxy) y `backend/src/helpers/contexto-peticion.ts` (geoip-lite).
+- Ojo si preguntan si eso es hacer trampa. La cabecera solo se cree si la petición viene de localhost, que es justo lo que hace un proxy de verdad; desde afuera no se puede inventar. Para hacerlo con una IP real de otro país está `demo-fraude-pais.ps1`, que sale por Tor.

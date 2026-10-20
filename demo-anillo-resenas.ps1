@@ -6,6 +6,7 @@
 #   .\demo-anillo-resenas.ps1
 #   .\demo-anillo-resenas.ps1 -Cuentas 3
 #   .\demo-anillo-resenas.ps1 -Cuentas 4 -Prefijo desarrollador
+#   .\demo-anillo-resenas.ps1 -Cuentas 2 -SinAbrir     no abre el panel al final
 #
 # QUE HACE, EN ORDEN
 # ==================================================
@@ -43,7 +44,10 @@ param(
 
     [string]$Prefijo = 'desarrollador',
     [string]$Backend = 'http://localhost:3000',
-    [string]$Frontend = 'http://localhost:5173'
+    [string]$Frontend = 'http://localhost:5173',
+
+    # No abre el panel al final (para correrla desde otra prueba).
+    [switch]$SinAbrir
 )
 
 function Paso($t) { Write-Host "`n>> $t" -ForegroundColor Cyan }
@@ -221,4 +225,4 @@ Write-Host "=============================================================="
 Write-Host " Anillo armado: $($miembros.Correo -join ' -> ') -> $($miembros[0].Correo)" -ForegroundColor Yellow
 Write-Host " Panel: $Frontend/panel?s=fraude&t=resenas" -ForegroundColor Yellow
 Write-Host "=============================================================="
-Start-Process "$Frontend/panel?s=fraude&t=resenas"
+if (-not $SinAbrir) { Start-Process "$Frontend/panel?s=fraude&t=resenas" }

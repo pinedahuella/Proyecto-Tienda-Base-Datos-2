@@ -6,6 +6,8 @@
 #   .\demo-patrones-resenas.ps1                       los dos patrones
 #   .\demo-patrones-resenas.ps1 -Patron favor         solo el favor devuelto
 #   .\demo-patrones-resenas.ps1 -Patron coordinados   solo B.6
+#   .\demo-patrones-resenas.ps1 -Patron satelites     solo B.2
+#   .\demo-patrones-resenas.ps1 -Patron expres        solo B.7
 #   .\demo-patrones-resenas.ps1 -SinAbrir             no abre el panel al final
 #
 # QUE ARMA CADA PATRON
@@ -23,13 +25,23 @@
 # concentra reputacion en nadie, y en los datos solo repetia anillos que ya
 # salian como ciclo. -Patron cadena ya no existe.
 #
-# Los dos los revisa el backend en cuanto llega cada resena, asi que salen en
-# segundos. Los otros tipos de la familia B no se arman aqui:
-#   satelites (B.2) y reputacion expres (B.7) los revisa el worker cada 15
-#     minutos. B.7 sale solo con estas mismas cuentas: todas son nuevas, y a
-#     los 15 minutos cada vendedor de la demo aparece con reputacion en minutos.
+#   satelites (B.2, tipo satelites). Un vendedor con tres productos y tres
+#     cuentas recien nacidas que solo le compran a el y le ponen 5. El caso
+#     lleva al vendedor y a las tres.
+#   expres (B.7, tipo reputacion_expres). Un vendedor recien nacido y una
+#     cuenta recien nacida que le pone 5 enseguida.
+#
+# Favor y coordinados los revisa el backend en cuanto llega cada resena, asi
+# que salen en segundos. Satelites y expres los revisa el worker cada 15
+# minutos (agrupan por vendedor): la demo corre ese detector una vez
+# (pruebas/correr_detectores_fraude.cjs patrones), que es lo que haria el
+# reloj. Ojo: en vivo todo nace hoy, asi que los satelites TAMBIEN cumplen
+# reputacion expres (vendedor nuevo, cuentas de minutos); es cierto, y el panel
+# muestra las dos. Para ver satelites solo, sin expres, esta la semilla
+# (semilla-fraude/, fraude.vendedor.satelites). Cualquier otro vendedor nuevo
+# de esta demo tambien sale en reputacion expres a los 15 minutos.
 #   persistente (B.3) pide resenas repartidas en tres meses distintos; no se
-#     puede armar en vivo.
+#     puede armar en vivo: sale de la semilla (fraude.persistente).
 #
 # Cada corrida usa un prefijo nuevo (demo + mes, dia, hora, minuto y segundo),
 # asi que se puede repetir sin chocar con la anterior. Los casos quedan
@@ -40,7 +52,7 @@
 # asi que tambien puede sumar una alerta de varias cuentas desde la misma IP.
 
 param(
-    [ValidateSet('todos', 'favor', 'coordinados')]
+    [ValidateSet('todos', 'favor', 'coordinados', 'satelites', 'expres')]
     [string]$Patron = 'todos',
 
     [ValidatePattern('^[A-Za-z0-9]{0,20}$')]
@@ -154,8 +166,18 @@ function EsperarCaso([string]$Tipo, [string[]]$Usuarios) {
 }
 
 $NOMBRES = @{
-    mutuo       = 'Se califican entre si (con las horas de ida y vuelta)'
-    coordinados = 'Califican juntas lo mismo'
+    mutuo             = 'Se califican entre si (con las horas de ida y vuelta)'
+    coordinados       = 'Califican juntas lo mismo'
+    satelites         = 'Cuentas que solo existen para un vendedor'
+    reputacion_expres = 'Reputacion en minutos'
+}
+
+# Satelites y expres no se revisan al llegar la resena: se corre el detector
+# del grafo una vez, como lo haria su reloj de 15 minutos.
+function CorrerPatrones {
+    Paso 'Corriendo el detector de patrones una vez (su reloj es de 15 minutos)'
+    & node (Join-Path $PSScriptRoot 'pruebas\correr_detectores_fraude.cjs') patrones 2>&1 |
+        Select-String -Pattern 'OK |FALLA' | ForEach-Object { Write-Host "   $($_.Line.Trim())" -ForegroundColor DarkGray }
 }
 $resultado = @()
 function Confirmar([string]$Tipo, [string[]]$Usuarios) {
@@ -205,6 +227,30 @@ try {
         }
         Confirmar 'coordinados' @($p.Usuario, $q.Usuario)
     }
+
+    if ($Patron -in 'todos', 'satelites') {
+        Paso 'Satelites (B.2): tres cuentas nuevas que solo le compran a un vendedor'
+        $v = NuevaCuenta "${Prefijo}s0" $true
+        foreach ($pr in $PRODUCTOS) { Publicar $v $pr }
+        $sats = @()
+        for ($k = 0; $k -lt 3; $k++) {
+            $s = NuevaCuenta "${Prefijo}s$($k + 1)" $false
+            ComprarYResenar $s $v $PRODUCTOS[$k]
+            $sats += $s
+        }
+        CorrerPatrones
+        Confirmar 'satelites' (@($v.Usuario) + @($sats | ForEach-Object { $_.Usuario }))
+    }
+
+    if ($Patron -in 'todos', 'expres') {
+        Paso 'Reputacion en minutos (B.7): un vendedor y una cuenta recien nacidos'
+        $v = NuevaCuenta "${Prefijo}e0" $true
+        Publicar $v $PRODUCTOS[0]
+        $a = NuevaCuenta "${Prefijo}e1" $false
+        ComprarYResenar $a $v $PRODUCTOS[0]
+        CorrerPatrones
+        Confirmar 'reputacion_expres' @($v.Usuario, $a.Usuario)
+    }
 } catch {
     Mal "La demo se detuvo: $($_.Exception.Message)"
     exit 1
@@ -219,7 +265,7 @@ if ($fallos -eq 0) {
     Write-Host " $fallos de $($resultado.Count) patrones no aparecieron." -ForegroundColor Red
 }
 Write-Host ' Verlos: panel del admin, Fraude, Resenas en anillo, filtro por tipo.' -ForegroundColor Yellow
-Write-Host ' En 15 minutos el worker suma Reputacion en minutos con estas cuentas.' -ForegroundColor Yellow
+Write-Host ' Los vendedores nuevos de esta demo salen tambien en Reputacion en minutos.' -ForegroundColor Yellow
 Write-Host '=============================================================='
 if (-not $SinAbrir) { Start-Process "$Frontend/panel?s=fraude&t=resenas" }
 if ($fallos -gt 0) { exit 1 }

@@ -2716,6 +2716,46 @@ SELECT string_agg(pc.nombre, ' + ' ORDER BY pc.nombre) || '  (' || g.pedidos || 
 
 
 # ------------------------------------------------------------
+# 5e. La semilla de fraude
+# ------------------------------------------------------------
+# Los tipos de fraude que no se pueden armar en vivo o que no tenian demo:
+# satelites, persistente (pide 3 meses), reputacion expres, resenas repetidas,
+# resenas parecidas y notas incoherentes en un producto, compras en rafaga y
+# devoluciones seriales. Cuentas fraude.*@mesh.com, cada grupo hecho para
+# disparar solo su senal. El porque de cada numero esta en
+# semilla-fraude/README.md y el catalogo entero en docs/FRAUDE-CATALOGO.md.
+#
+# Corre en CADA arranque, como los combos: si las cuentas ya existen no hace
+# nada. Va antes de ClickHouse y de Neo4j por lo mismo que los combos. Las
+# senales salen cuando el backend corre sus detectores (cada 15 minutos, y el
+# de compras una vez al dia); para no esperar:
+#   node pruebas/correr_detectores_fraude.cjs
+#
+# No corta el arranque: sin ella la tienda funciona igual.
+Paso "Semilla de fraude"
+$sqlFraude = "$PSScriptRoot\semilla-fraude\fraude.sql"
+if (-not (Test-Path $sqlFraude)) {
+    Aviso "No esta semilla-fraude\fraude.sql. El resto sigue."
+} else {
+    docker cp "$sqlFraude" "mesh-postgres:/tmp/semilla_fraude.sql" 2>&1 | Out-Null
+    $salidaFraude = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -v ON_ERROR_STOP=1 -q `
+        -f /tmp/semilla_fraude.sql 2>&1 | Out-String -Width 4096
+    if ($LASTEXITCODE -ne 0) {
+        Aviso "La semilla de fraude no entro. El resto sigue:"
+        Write-Host $salidaFraude -ForegroundColor Yellow
+    } elseif ($salidaFraude -match 'semilla de fraude: ya estaban (\d+) cuentas') {
+        Ok "Ya estaban ($($Matches[1]) cuentas fraude.*@mesh.com), no se toco nada"
+    } elseif ($salidaFraude -match 'semilla de fraude: ([^\r\n]+)') {
+        Ok "$($Matches[1].Trim())"
+        Write-Host "     las senales salen con los detectores del backend; para no esperar: node pruebas/correr_detectores_fraude.cjs"
+    } else {
+        Aviso "La semilla de fraude no dijo que hizo:"
+        Write-Host $salidaFraude -ForegroundColor Yellow
+    }
+}
+
+
+# ------------------------------------------------------------
 # 6. MongoDB
 # ------------------------------------------------------------
 # El contenedor ya subio con el "docker compose up -d" de arriba. Aqui se
