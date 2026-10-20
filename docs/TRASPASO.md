@@ -58,6 +58,26 @@ correctas):
   API como tienda@mesh.com. Quedan 0 reglas por fecha.
 - Nota para David: backend/cambio_propuestas/2026-10-20_1100-buscador-escribiendo-y-fechas-de-reglas.md.
 
+Panel del admin sin MongoDB (Meme lo vio a las 11:50 con Mongo, Neo4j, ClickHouse y Elasticsearch apagados en la
+PC de David, de verdad, no con el interruptor):
+- Ofertas daba "No pudimos cargar" al abrir un producto, y EDITAR una oferta guardaba en PostgreSQL y contestaba
+  503 al armar la respuesta. ofertas.service.ts: consultarProductosLigeros, obtenerConMisOfertas y crear pasan por
+  conRespaldoDeMongo con la copia (productosDesdePostgres). Medido sin Mongo: abrir 0.1 s, lista 0.5 s, editar 200.
+- Catalogo daba "No pudimos cargar": listarPropios, listarPropiosPaginado y obtenerPropio con la copia
+  (catalogoPanelDesdePostgres en helpers/catalogo-respaldo.ts, mismo orden y filtro por nombre). 1003 productos.
+- Crear o editar un producto y su historial siguen necesitando Mongo (a proposito, QUE-PASA lo dice).
+- pruebas/caidas.mjs suma 4 comprobaciones en MongoDB (lista de ofertas, abrir, editar con el mismo precio,
+  catalogo del panel). SIN CORRER entera: cuando la corri estaban cuatro bases apagadas alla. Comprobadas a mano
+  contra el backend con Mongo caido de verdad.
+- Sin commitear todavia.
+- Medido despues con Mongo caido de verdad: demo_concurrencia --usuarios 4 --stock 2 publico la oferta (crear con la
+  copia), vendio exactamente 2 y pago en 1.7 s, y limpio. Mongo, Elastic y Redis caidas juntas NO se han medido.
+
+Guia de estudio de Meme para el 21-10 (fraudes de devolucion y de ClickHouse, casos, las cuatro reglas R-CASI,
+tendencias, regla por ventas rapidas y el guion de la demo de caidas): docs/GUIA-ESTUDIO-2026-10-21.txt. Revisada
+contra el codigo; corrige tres cosas de sus notas (el bono de ida y vuelta sube cuanto mas rapido, la regla 2 es de
+cuentas de menos de 60 minutos, no hay deteccion por dispositivo).
+
 Como quedo la maquina: backend directo (interruptor quitado despues de la demo con Redis), frontend, panel y
 Ollama arriba.
 

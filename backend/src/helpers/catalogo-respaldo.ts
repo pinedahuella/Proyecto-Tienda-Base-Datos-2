@@ -339,6 +339,45 @@ export async function productosDesdePostgres(
 }
 
 /**
+ * La pagina del catalogo del panel de la tienda y el admin (todos los
+ * estados, los mas nuevos primero, filtro por nombre que contiene el texto
+ * sin mirar tildes ni mayusculas) desde la copia, cuando MongoDB no responde.
+ * Mismo orden y mismo filtro que `listarPropiosPaginado`. Sin `limite` trae
+ * todos, como `listarPropios`.
+ */
+export async function catalogoPanelDesdePostgres(opciones: {
+  nombre?: string;
+  limite?: number;
+  saltar?: number;
+}): Promise<{ productos: ProductoRespaldo[]; total: number }> {
+  // El texto va como literal de LIKE: sin % ni _ que hagan de comodin.
+  const texto = (opciones.nombre ?? '').replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { rows } = await pool.query<{ id: string; total: string }>(
+    `SELECT pc.id_producto_mongo AS id, count(*) OVER () AS total
+       FROM producto_catalogo pc
+      WHERE $1 = '' OR mesh_normalizar(pc.nombre) LIKE '%' || mesh_normalizar($1) || '%'
+      ORDER BY pc.fecha_creacion DESC NULLS LAST, pc.id_producto_mongo DESC
+      LIMIT $2 OFFSET $3`,
+    [texto, opciones.limite ?? null, opciones.saltar ?? 0],
+  );
+  let total = rows.length > 0 ? Number(rows[0].total) : 0;
+  if (rows.length === 0 && (opciones.saltar ?? 0) > 0) {
+    // Una pagina despues del final: el total sigue siendo el de verdad.
+    const conteo = await pool.query<{ total: string }>(
+      `SELECT count(*) AS total FROM producto_catalogo pc
+        WHERE $1 = '' OR mesh_normalizar(pc.nombre) LIKE '%' || mesh_normalizar($1) || '%'`,
+      [texto],
+    );
+    total = Number(conteo.rows[0].total);
+  }
+  const productos = await productosDesdePostgres(
+    rows.map((fila) => Number(fila.id)),
+    false,
+  );
+  return { productos, total };
+}
+
+/**
  * Los filtros del catalogo ya validados (`ProductosService.leerFiltros`).
  * Mongo y el respaldo leen los mismos, asi que validan igual.
  */

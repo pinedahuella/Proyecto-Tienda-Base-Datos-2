@@ -48,3 +48,19 @@ se borró por la API (pausada y DELETE) como `tienda@mesh.com`.
 
 En la pantalla los dos meses van juntos, el año es una lista (este y los cuatro
 siguientes) y el día máximo sigue al mes.
+
+## 3. El panel de ofertas y el catalogo sin MongoDB (11:50)
+
+Con MongoDB apagado en tu PC, el panel del admin no abria un producto en Ofertas
+ni la lista del Catalogo, y editar una oferta la guardaba en PostgreSQL pero
+contestaba 503 al buscar el nombre en Mongo para la respuesta.
+
+- `services/vendedores/ofertas.service.ts`: `consultarProductosLigeros`,
+  `obtenerConMisOfertas` y `crear` pasan por `conRespaldoDeMongo` con la copia
+  del catalogo (`productosDesdePostgres`).
+- `services/vendedores/productos.service.ts`: `listarPropios`,
+  `listarPropiosPaginado` y `obtenerPropio` igual, con
+  `catalogoPanelDesdePostgres` (nuevo en `helpers/catalogo-respaldo.ts`: todos
+  los estados, mas nuevos primero, nombre que contiene el texto sin tildes).
+- Crear y editar productos y su historial siguen pidiendo Mongo.
+- `pruebas/caidas.mjs` tiene cuatro comprobaciones nuevas en la parte de MongoDB.

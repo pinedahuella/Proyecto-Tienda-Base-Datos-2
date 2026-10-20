@@ -10,6 +10,11 @@ import {
 } from '../../helpers/errores';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
+import {
+  catalogoPanelDesdePostgres,
+  conRespaldoDeMongo,
+  productosDesdePostgres,
+} from '../../helpers/catalogo-respaldo';
 import { esTextoNoVacio } from '../../helpers/validaciones-perfil';
 import {
   validarCaracteristicasCatalogo,
@@ -1490,11 +1495,15 @@ export class ProductosVendedorService {
     await this.exigirTiendaOAdmin(idUsuario);
 
     try {
-      return await mongoDb
-        .collection<Producto>('productos')
-        .find({})
-        .sort({ fecha_creacion: -1 })
-        .toArray();
+      return await conRespaldoDeMongo<Producto[]>(
+        () =>
+          mongoDb
+            .collection<Producto>('productos')
+            .find({})
+            .sort({ fecha_creacion: -1 })
+            .toArray(),
+        async () => (await catalogoPanelDesdePostgres({})).productos,
+      );
     } catch (error) {
       manejarErrorConexionMongo(this.logger, error);
     }
@@ -1549,12 +1558,33 @@ export class ProductosVendedorService {
         },
       ];
 
-      const [resultado] = await mongoDb
-        .collection<Producto>('productos')
-        .aggregate<{ productos: Producto[]; total: { total: number }[] }>(
-          pipeline,
-        )
-        .toArray();
+      // Sin MongoDB, la misma pagina desde la copia del catalogo, para que el
+      // panel se pueda mirar (crear y editar productos si necesitan Mongo).
+      const resultado = await conRespaldoDeMongo<{
+        productos: Producto[];
+        total: { total: number }[];
+      }>(
+        async () =>
+          (
+            await mongoDb
+              .collection<Producto>('productos')
+              .aggregate<{ productos: Producto[]; total: { total: number }[] }>(
+                pipeline,
+              )
+              .toArray()
+          )[0],
+        async () => {
+          const copia = await catalogoPanelDesdePostgres({
+            nombre: query.nombre,
+            limite,
+            saltar,
+          });
+          return {
+            productos: copia.productos,
+            total: [{ total: copia.total }],
+          };
+        },
+      );
 
       const totalProductos = resultado.total[0]?.total ?? 0;
       const totalPaginas =
@@ -1589,9 +1619,14 @@ export class ProductosVendedorService {
     const idProducto = Number(idProductoParametro);
 
     try {
-      const producto = await mongoDb
-        .collection<Producto>('productos')
-        .findOne({ _id: idProducto });
+      const producto = await conRespaldoDeMongo<Producto | null>(
+        () =>
+          mongoDb
+            .collection<Producto>('productos')
+            .findOne({ _id: idProducto }),
+        async () =>
+          (await productosDesdePostgres([idProducto], false))[0] ?? null,
+      );
 
       if (producto == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');

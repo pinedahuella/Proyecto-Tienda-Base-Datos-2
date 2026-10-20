@@ -189,9 +189,18 @@ Que se midio.
   se compro igual, la compra se hizo en menos de 2 segundos, y al volver MongoDB
   los cambios que esperaban en su cola llegaron solos en 20 segundos.
 
+En el panel de la tienda y del admin (desde el 20 de octubre). Las ofertas
+viven en PostgreSQL, asi que se ven, se abren y se cambian igual. Precio,
+existencias, descuento, venta relampago, pausar y publicar una oferta nueva
+sobre un producto que ya existe. El nombre de cada producto sale de la copia.
+La lista del catalogo tambien sale, con su busqueda por nombre. Antes las dos
+pantallas decian que no se pudo cargar, y editar una oferta la guardaba pero
+contestaba que habia fallado.
+
 Que se pierde. El registro de seguridad de las entradas de ese rato. La persona
 entra igual, pero su entrada no queda anotada. Tampoco se pueden crear ni cambiar
-productos mientras MongoDB no esta, porque la ficha completa vive ahi.
+productos ni ver su historial mientras MongoDB no esta, porque la ficha completa
+y sus cambios viven ahi.
 
 Como verlo.
 

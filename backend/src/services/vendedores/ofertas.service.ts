@@ -10,6 +10,10 @@ import {
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
 import {
+  conRespaldoDeMongo,
+  productosDesdePostgres,
+} from '../../helpers/catalogo-respaldo';
+import {
   validarIdProducto,
   validarIdProductoVariante,
   validarStockInicial,
@@ -64,6 +68,19 @@ import { ProductosService } from '../productos/productos.service';
 import { InventarioLimitadoService } from '../inventario-limitado/inventario-limitado.service';
 import { RegistroOfertasRedisService } from './registro-ofertas-redis.service';
 import { CORREO_TIENDA } from '../../helpers/constantes';
+
+/** Un producto de la copia del catalogo, recortado a lo que lleva una oferta. */
+function aLigero(producto: Producto): ProductoLigero {
+  return {
+    _id: producto._id,
+    nombre: producto.nombre,
+    variantes: producto.variantes.map((v) => ({
+      id_producto_variante: v.id_producto_variante,
+      nombre_variante: v.nombre_variante,
+      imagenes: v.imagenes ?? [],
+    })),
+  };
+}
 
 const REGEX_ID = /^\d+$/;
 const CODIGO_UNIQUE_VIOLATION = '23505';
@@ -274,20 +291,27 @@ export class OfertasVendedorService {
 
     let producto: ProductoLigero;
     try {
-      const encontrado = await mongoDb
-        .collection<Producto>('productos')
-        .findOne<ProductoLigero>(
-          { _id: idProducto, estado: ESTADO_PRODUCTO_VISIBLE },
-          {
-            projection: {
-              _id: 1,
-              nombre: 1,
-              'variantes.id_producto_variante': 1,
-              'variantes.nombre_variante': 1,
-              'variantes.imagenes': 1,
+      // La oferta se escribe solo en PostgreSQL, asi que sin MongoDB se puede
+      // publicar igual: el producto se comprueba en la copia del catalogo.
+      const encontrado = await conRespaldoDeMongo<ProductoLigero | null>(
+        () =>
+          mongoDb.collection<Producto>('productos').findOne<ProductoLigero>(
+            { _id: idProducto, estado: ESTADO_PRODUCTO_VISIBLE },
+            {
+              projection: {
+                _id: 1,
+                nombre: 1,
+                'variantes.id_producto_variante': 1,
+                'variantes.nombre_variante': 1,
+                'variantes.imagenes': 1,
+              },
             },
-          },
-        );
+          ),
+        async () => {
+          const [copia] = await productosDesdePostgres([idProducto], true);
+          return copia ? aLigero(copia) : null;
+        },
+      );
 
       if (encontrado == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
@@ -1111,9 +1135,16 @@ export class OfertasVendedorService {
 
     let producto: Producto;
     try {
-      const encontrado = await mongoDb
-        .collection<Producto>('productos')
-        .findOne({ _id: idProducto });
+      // Sin MongoDB, de la copia del catalogo: sin las caracteristicas, pero
+      // con las variantes, que es lo que hace falta para ver y cambiar ofertas.
+      const encontrado = await conRespaldoDeMongo<Producto | null>(
+        () =>
+          mongoDb
+            .collection<Producto>('productos')
+            .findOne({ _id: idProducto }),
+        async () =>
+          (await productosDesdePostgres([idProducto], false))[0] ?? null,
+      );
 
       if (encontrado == null) {
         throw new ErrorNoEncontrado('No existe un producto con ese id');
@@ -1537,25 +1568,36 @@ export class OfertasVendedorService {
     }
   }
 
+  /**
+   * El nombre, las variantes y la portada de `idsProducto`. Sin MongoDB salen
+   * de la copia del catalogo en PostgreSQL (`conRespaldoDeMongo`): antes del
+   * 2026-10-20 cualquier lista de ofertas daba 503, y editar una oferta
+   * guardaba el cambio y aun asi contestaba 503 al armar la respuesta.
+   */
   private async consultarProductosLigeros(
     idsProducto: number[],
   ): Promise<ProductoLigero[]> {
     try {
-      return await mongoDb
-        .collection<Producto>('productos')
-        .find<ProductoLigero>(
-          { _id: { $in: idsProducto } },
-          {
-            projection: {
-              _id: 1,
-              nombre: 1,
-              'variantes.id_producto_variante': 1,
-              'variantes.nombre_variante': 1,
-              'variantes.imagenes': 1,
-            },
-          },
-        )
-        .toArray();
+      return await conRespaldoDeMongo<ProductoLigero[]>(
+        () =>
+          mongoDb
+            .collection<Producto>('productos')
+            .find<ProductoLigero>(
+              { _id: { $in: idsProducto } },
+              {
+                projection: {
+                  _id: 1,
+                  nombre: 1,
+                  'variantes.id_producto_variante': 1,
+                  'variantes.nombre_variante': 1,
+                  'variantes.imagenes': 1,
+                },
+              },
+            )
+            .toArray(),
+        async () =>
+          (await productosDesdePostgres(idsProducto, false)).map(aLigero),
+      );
     } catch (error) {
       manejarErrorConexionMongo(this.logger, error);
     }

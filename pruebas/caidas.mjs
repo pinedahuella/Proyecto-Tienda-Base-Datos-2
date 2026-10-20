@@ -84,6 +84,25 @@ const CASOS = {
       revisar(busca.codigo === 200 && busca.p?.total > 0, 'el buscador sigue', resumen(busca));
       const carrito = await pedir('/carrito', { galleta: g.comprador });
       revisar(carrito.codigo === 200, 'el carrito sigue', resumen(carrito));
+      // El panel del admin (20-10): las ofertas viven en PostgreSQL y el
+      // nombre sale de la copia, asi que se ven y se cambian sin Mongo.
+      const ofertas = await pedir('/vendedor/ofertas/paginado?pagina=1&limite=5', { galleta: g.admin });
+      revisar(ofertas.codigo === 200 && ofertas.p?.ofertas?.length > 0 && !ofertas.p.ofertas.some((o) => o.nombre_producto.startsWith('(')),
+        'las ofertas del panel salen con su nombre', resumen(ofertas));
+      const abierto = await pedir(`/vendedor/ofertas/producto/${PRODUCTO}`, { galleta: g.admin });
+      revisar(abierto.codigo === 200 && abierto.p?.variantes?.length > 0, 'abrir un producto en Ofertas sigue', resumen(abierto));
+      const conOferta = abierto.p?.variantes?.find((v) => v.mi_oferta);
+      if (conOferta) {
+        // El mismo precio que ya tiene: guarda sin cambiar nada.
+        const precio = String(conOferta.mi_oferta.precio);
+        const editar = await pedir(`/vendedor/ofertas/${conOferta.mi_oferta.id_oferta}`, { galleta: g.admin, metodo: 'PATCH', cuerpo: { precio } });
+        revisar(editar.codigo === 200 && editar.p?.precio === precio, 'editar una oferta contesta bien (antes guardaba y daba 503)', resumen(editar));
+      } else {
+        falla(`el producto ${PRODUCTO} no tiene oferta de la tienda para probar editar`);
+      }
+      const catalogo = await pedir('/vendedor/productos/paginado?pagina=1&limite=5&nombre=guantes', { galleta: g.admin });
+      revisar(catalogo.codigo === 200 && catalogo.p?.productos?.length > 0 && catalogo.p.total_productos > 0,
+        'el catalogo del panel sale y filtra por nombre', resumen(catalogo));
     },
     async volvio() {
       const ficha = await pedir(`/productos/${PRODUCTO}`);
