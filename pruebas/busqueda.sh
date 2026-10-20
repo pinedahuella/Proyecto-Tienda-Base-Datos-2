@@ -392,6 +392,54 @@ else
 fi
 
 # ============================================================
+# 6. Una locura no deja la pagina vacia, y lo que trae lo elige Elasticsearch
+# ============================================================
+titulo "6. ASDFFFF TRAE PRODUCTOS, Y SALEN DE ELASTICSEARCH"
+
+# Lo pidio el profesor (2026-10-19): buscar una locura tiene que traer por lo
+# menos un producto relacionado. Desde el 2026-10-20 los elige Elasticsearch
+# (sugeridos.service.ts, consultaSugeridos); el backend por fuera (vectores,
+# lo mas vendido) queda para cuando Elasticsearch no esta, y eso lo mira
+# pruebas/caidas.mjs.
+if backend_vivo; then
+    LOCURA=$(curl -s --max-time 8 --get --data-urlencode 'nombre=asdffff' \
+        "$API/buscador/productos/facetado" 2>/dev/null | python -c "
+import json, re, sys
+try:
+    p = json.load(sys.stdin).get('payload') or {}
+except Exception:
+    p = {}
+s = p.get('sugeridos') or []
+base = {re.sub(r'(\s+[LM]\d+-\d{4})+$', '', x.get('nombre', '')) for x in s}
+activos = all(x.get('estado') == 'activo' for x in s)
+print('%s|%s|%s|%s|%s' % (p.get('total'), len(s), len(base), p.get('sugeridos_desde'), 'si' if activos else 'no'))
+")
+    IFS='|' read -r L_TOTAL L_CUANTOS L_DISTINTOS L_DESDE L_ACTIVOS <<< "$LOCURA"
+    if [ "$L_TOTAL" = "0" ]; then
+        OK "asdffff sigue contando 0 resultados, para el reporte de busquedas sin resultados"
+    else
+        FALLA "asdffff dio total $L_TOTAL, se esperaba 0"
+    fi
+    if [ "${L_CUANTOS:-0}" -gt 0 ] 2>/dev/null; then
+        OK "y trae $L_CUANTOS sugeridos"
+    else
+        FALLA "asdffff no trajo ningun sugerido: la pagina queda vacia"
+    fi
+    if [ "$L_DESDE" = "elasticsearch" ]; then
+        OK "los sugeridos salen de Elasticsearch (sugeridos_desde = $L_DESDE)"
+    else
+        FALLA "los sugeridos salen de '$L_DESDE' y no de Elasticsearch, que esta arriba"
+    fi
+    if [ -n "$L_CUANTOS" ] && [ "$L_DISTINTOS" = "$L_CUANTOS" ] && [ "$L_ACTIVOS" = "si" ]; then
+        OK "son productos distintos (sin copias de lote repetidas) y todos activos"
+    else
+        FALLA "de $L_CUANTOS sugeridos hay $L_DISTINTOS distintos, activos todos: $L_ACTIVOS"
+    fi
+else
+    SIN_MEDIR "el backend no contesta en $API: los sugeridos son del backend"
+fi
+
+# ============================================================
 # RESULTADO
 # ============================================================
 titulo "RESULTADO"

@@ -12,7 +12,10 @@
             "p": "La Entrega 3 agrega dos cosas. Un motor de búsqueda que tolera errores de escritura, ordena por relevancia y calcula filtros facetados con sus propias agregaciones, y una estrategia de consistencia para el checkout, que en este punto ya toca varias bases a la vez y puede fallar a medias. Hicimos además la evaluación opcional de un motor NewSQL para los pagos."
           },
           {
-            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 304 commits sobre `main` entre el 15 de agosto y el 8 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre. Esta versión, del 6 de octubre, la pone al día con lo que cambió después."
+            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 340 commits sobre `main` entre el 15 de agosto y el 20 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre y la segunda del 8 de octubre."
+          },
+          {
+            "p": "Esta versión, del 20 de octubre, suma lo que se pidió al revisar la entrega. Que la tienda siga respondiendo cuando se apaga cualquiera de las seis bases, y que eso se pueda ver en vivo. Que los filtros del buscador se apliquen dentro de la consulta. Y que una búsqueda sin sentido, como asdffff, no deje la página vacía. Está en las secciones 2.4, 2.6, 2.7 y 5."
           }
         ]
       },
@@ -32,30 +35,30 @@
                   "Buscador implementado, con tolerancia a variaciones y filtros facetados",
                   "5",
                   "2",
-                  "Prueba del buscador y prueba de facetas con 19 comprobaciones en verde, cada una con su control"
+                  "Prueba del buscador y prueba de facetas con 26 comprobaciones en verde, filtros dentro de la consulta, buscador que sigue sin Elasticsearch y productos sugeridos cuando no hay resultados"
                 ],
                 [
                   "Documento de estrategia de consistencia para el checkout distribuido",
                   "5",
                   "3",
-                  "`docs/CONSISTENCIA-CHECKOUT.md`, once puntos de falla con su mecanismo"
+                  "`docs/CONSISTENCIA-CHECKOUT.md`, catorce puntos de falla con su mecanismo"
                 ],
                 [
                   "Evidencia de la prueba de falla simulada y su manejo",
                   "4",
-                  "4",
-                  "Prueba de falla del checkout con 32 comprobaciones en verde. Desde el 1 de octubre se compra aunque MongoDB esté caído"
+                  "4 y 5",
+                  "Prueba de falla del checkout con 32 comprobaciones en verde, que desde el 17 de octubre compra sin Redis y sin MongoDB, y prueba de caídas con 47, con cada una de las seis bases apagada y congelada"
                 ],
                 [
                   "Calidad del informe y del repositorio",
                   "1",
-                  "6",
-                  "Diagrama de arquitectura al 4 de octubre, diagrama entidad relación generado desde la base y arranque en un solo comando"
+                  "7",
+                  "Diagrama de arquitectura, diagrama entidad relación generado desde la base y arranque en un solo comando"
                 ],
                 [
                   "Evaluación NewSQL para pagos, opcional",
                   "extra",
-                  "5",
+                  "6",
                   "Registro ADR-8 con cuatro alternativas y las condiciones en las que la respuesta cambiaría"
                 ]
               ],
@@ -85,11 +88,11 @@
                 ],
                 [
                   "5.3 Registro de decisiones arquitectónicas",
-                  "ADR-9 en 2.1 y ADR-8 en 5"
+                  "ADR-9 en 2.1 y ADR-8 en 6"
                 ],
                 [
                   "5.4 Documentación para levantar el sistema",
-                  "Sección 6.3, un solo comando que también carga el índice de búsqueda"
+                  "Sección 7.3, un solo comando que también carga el índice de búsqueda"
                 ]
               ],
               "anchos": [
@@ -105,7 +108,7 @@
         "titulo": "1.3. Distribución de responsabilidades",
         "bloques": [
           {
-            "p": "Mantuvimos el reparto de las entregas anteriores. José David Navichoque Pineda se encargó del backend y José Manuel González Corado del frontend, las migraciones, los ETL, los scripts de cada base, las pruebas, la documentación y el arranque. Cuando una parte necesitaba algo de la otra lo dejábamos escrito en `docs/BACKEND-PENDIENTE.md`, con la consulta ya probada."
+            "p": "Mantuvimos el reparto de las entregas anteriores. José David Navichoque Pineda se encargó del backend y José Manuel González Corado del frontend, las migraciones, los ETL, los scripts de cada base, las pruebas, la documentación y el arranque. Cuando una parte necesitaba algo de la otra lo dejábamos escrito en `docs/BACKEND-PENDIENTE.md`, con la consulta ya probada. Los cambios del 19 y el 20 de octubre tocaron también el backend, y los hizo José Manuel con el visto bueno de José David, en cuya computadora viven las bases con las que se probó todo."
           },
           {
             "tabla": {
@@ -132,8 +135,13 @@
                 ],
                 [
                   "Checkout",
-                  "`CarritoService`, el candado, las reservas, los mensajes de error por base caída y la copia del catálogo en PostgreSQL para comprar sin MongoDB",
+                  "`CarritoService`, el candado, las reservas, la copia del catálogo en PostgreSQL para comprar sin MongoDB y el carrito en PostgreSQL de la migración 045",
                   "Función `comprar_carrito()`, migraciones 029 y 030 en el arranque, documento de consistencia y prueba de falla simulada"
+                ],
+                [
+                  "Una base caída",
+                  "Las bases de prueba en su computadora, apagadas y prendidas para medir",
+                  "Respaldo de cada base en las otras, cortacircuitos, interruptor para apagarlas en vivo, prueba de caídas, buscador sin Elasticsearch y productos sugeridos"
                 ],
                 [
                   "NewSQL y arquitectura",
@@ -160,12 +168,12 @@
                 [
                   "José Manuel González Corado",
                   "José Manuel González Corado",
-                  "187"
+                  "217"
                 ],
                 [
                   "José David Navichoque Pineda",
                   "pinedahuella",
-                  "112"
+                  "118"
                 ],
                 [
                   "Juan Pablo Torres García",
@@ -175,10 +183,10 @@
                 [
                   "Total",
                   "",
-                  "304"
+                  "340"
                 ]
               ],
-              "leyenda": "Commits por integrante en el historial de git al 8 de octubre de 2026.",
+              "leyenda": "Commits por integrante en el historial de git al 20 de octubre de 2026.",
               "anchos": [
                 2.4,
                 2.4,
@@ -292,7 +300,7 @@
             "p": "Cuando lo escrito no existe en el catálogo, la misma consulta pide una corrección con el `term` suggester sobre el nombre, solo para las palabras que no aparecen en el índice y de tres letras o más. La página de resultados la muestra como tal vez quisiste decir. Con frases de tres palabras o más la corrección sale poco útil, así que ahí no se muestra."
           },
           {
-            "p": "Después de esta entrega el buscador sumó una búsqueda híbrida, que mezcla las palabras con el significado de la frase. Se cuenta en el informe de la Entrega final, junto con los vectores que usa."
+            "p": "Después de esta entrega el buscador sumó una búsqueda híbrida, que mezcla las palabras con el significado de la frase. Se cuenta en el informe de la Entrega final, junto con los vectores que usa. Cuando Elasticsearch no está, los productos sugeridos de la sección 2.6 usan esos mismos vectores."
           }
         ]
       },
@@ -303,7 +311,10 @@
             "p": "Los filtros de la página de resultados los calcula Elasticsearch con agregaciones, sobre los mismos resultados de la búsqueda. Hay cuatro facetas, categoría con `terms`, precio y calificación con `range`, y existencias con `filter`. Los tramos de precio salen de los percentiles del catálogo, con la mediana alrededor de Q500 y el percentil 90 alrededor de Q3600."
           },
           {
-            "p": "El texto va en `query` y los filtros elegidos en `post_filter`, así recortan la lista sin recortar los conteos. Cada faceta es una agregación que aplica los filtros de las otras facetas y no el suyo. Por eso, con Laptops elegida, la faceta de categoría sigue diciendo cuántos productos hay en Monitores y la persona puede sumar esa categoría. Dentro de una faceta las opciones se suman y entre facetas se cruzan."
+            "p": "Los filtros elegidos van dentro de la consulta, en el `filter` de la `bool`, junto al texto buscado. Así Elasticsearch filtra primero y las agregaciones se calculan sobre lo que de verdad queda. Con Laptops elegida, la faceta de categoría muestra solo Laptops con su conteo, y la de precio reparte solo las laptops entre sus tramos. Dentro de una faceta las opciones se suman y entre facetas se cruzan."
+          },
+          {
+            "p": "Hasta el 20 de octubre los filtros iban en `post_filter`, que recorta la lista de resultados después de agregar. El panel seguía mostrando todas las categorías con sus conteos aunque la lista ya estuviera filtrada. En la revisión se pidió que el filtro se aplicara en la búsqueda misma, para que el panel describa lo que la persona tiene delante, y lo cambiamos en el backend y en la prueba."
           },
           {
             "tabla": {
@@ -314,31 +325,47 @@
               "filas": [
                 [
                   "Las categorías suman el total de resultados",
-                  "334 de 334"
+                  "109 de 109"
                 ],
                 [
-                  "Los tramos de precio no se pisan ni dejan huecos",
-                  "suman 334"
+                  "Los tramos de precio suman el total",
+                  "109"
+                ],
+                [
+                  "Los tramos de precio se tocan, sin huecos entre ellos",
+                  "sí"
+                ],
+                [
+                  "Los tramos de la prueba son los mismos del backend",
+                  "sí"
                 ],
                 [
                   "Al elegir Laptops los resultados son los que prometía la faceta",
-                  "217"
+                  "71"
                 ],
                 [
-                  "La faceta de categoría no se recorta con su propio filtro",
-                  "igual antes y después"
+                  "Con Laptops elegida la faceta de categoría solo muestra Laptops",
+                  "71"
+                ],
+                [
+                  "Con Laptops elegida los tramos de precio suman lo filtrado",
+                  "71"
                 ],
                 [
                   "Dos categorías se suman",
-                  "254"
+                  "86"
                 ],
                 [
                   "Laptops con precio desde Q3000 da lo que prometía la faceta de precio",
-                  "205"
+                  "68"
+                ],
+                [
+                  "Con precio elegido los otros tramos quedan en cero",
+                  "sí"
                 ],
                 [
                   "Solo con existencias",
-                  "332, ninguno agotado"
+                  "108, ninguno agotado"
                 ],
                 [
                   "labtop encuentra sobre todo Laptops",
@@ -353,11 +380,11 @@
                 4.6,
                 1.9
               ],
-              "leyenda": "Prueba de facetas, python elastic/pruebas/facetas.py, 19 OK y 0 FALLA, buscando laptop."
+              "leyenda": "Prueba de facetas, python elastic/pruebas/facetas.py, 26 OK y 0 FALLA, buscando laptop el 20 de octubre."
             }
           },
           {
-            "p": "Para comprobar que la prueba no aprueba sin mirar la rompimos dos veces a propósito. Una vez hicimos que cada faceta aplicara también su propio filtro, y otra movimos el borde de un tramo de precio. En los dos casos la prueba falló justo en la comprobación que correspondía."
+            "p": "Para comprobar que la prueba no aprueba sin mirar la rompimos a propósito y devolvimos los filtros a `post_filter`. Falló en 7 de las 24 comprobaciones que tenía entonces, justo en la que mira que el filtro vaya en la consulta y en las que esperan el panel recortado a lo elegido. También movimos el tramo de 500 a 1000 para que empezara en 600. La suma de los tramos no lo notaba, porque ningún resultado caía en el hueco, así que agregamos dos comprobaciones, que los tramos se toquen entre sí y que sean los mismos del backend. Con ese cambio fallan las dos."
           }
         ]
       },
@@ -369,6 +396,34 @@
           },
           {
             "p": "Cada vez que un producto cambia en MongoDB queda marcado con `pendiente_busqueda`, y un worker del backend lo pasa al índice cada 10 segundos. Además `etl/cargar_busqueda.sh` puede tirar el índice y reconstruirlo entero, y `arrancar.ps1` lo hace solo cuando el índice está vacío o desfasado. Como el índice no guarda nada propio, reconstruirlo siempre deja el mismo resultado."
+          }
+        ]
+      },
+      {
+        "titulo": "2.6. Una búsqueda que no encuentra nada",
+        "bloques": [
+          {
+            "p": "Si alguien busca algo sin sentido, como asdffff, la página dice que no encontró nada y debajo ofrece productos que pueden interesar. Los elige Elasticsearch con una segunda consulta, más tolerante que la de la búsqueda. Acepta hasta dos letras distintas en palabras de cualquier largo y mira también el nombre de la categoría, de modo que lo que se parece a lo escrito, aunque sea de lejos, sale primero. Si nada se parece, el mismo motor ordena los productos activos por cuántas reseñas tienen, por su nota y por si hay existencias, así que siempre trae algo mientras haya un producto a la venta. Esa consulta tarda entre 7 y 23 milésimas."
+          },
+          {
+            "p": "Si Elasticsearch no responde, los sugeridos salen del backend. Primero los más cercanos por significado, comparando el vector de lo escrito con los vectores de los productos, sin el umbral de parecido de la búsqueda híbrida. Si eso no se puede, lo más vendido, y si tampoco, los productos con más reseñas. El vector de lo escrito se espera como mucho 3 segundos, porque con el modelo frío el primero tarda unos 8. En los dos casos los productos que son copias de un mismo lote se juntan en uno, para que las tarjetas sean productos distintos. La respuesta dice de dónde salieron, y la prueba del buscador revisa que con Elasticsearch arriba sean suyos."
+          },
+          {
+            "p": "Los sugeridos van aparte de los resultados. La búsqueda sigue contando cero resultados y así se guarda en ClickHouse, de modo que el reporte de búsquedas sin resultados del administrador sigue mostrando lo que la gente busca y la tienda no tiene. Si se contaran como resultados, esas búsquedas desaparecerían del reporte sin avisar. Con un filtro elegido no se sugiere nada, porque ahí el vacío lo explica el filtro."
+          }
+        ]
+      },
+      {
+        "titulo": "2.7. El buscador cuando Elasticsearch no está",
+        "bloques": [
+          {
+            "p": "Con Elasticsearch apagado el buscador contestaba un error a los 22 segundos. Ahora sale de la copia del catálogo en PostgreSQL, que ya tenía el nombre, la descripción, la categoría y las variantes de cada producto, mientras los precios, el stock y las notas ya vivían ahí. Lo que faltaba era comparar texto parecido, y lo agrega la migración 048 con tres extensiones que trae PostgreSQL, `unaccent`, `fuzzystrmatch` y `pg_trgm`."
+          },
+          {
+            "p": "La función `mesh_normalizar()` pasa todo a minúsculas y quita las tildes, igual que el analizador `espanol_llano` del índice. La función `mesh_coincide()` mide cuánto se parece una palabra buscada a la más parecida de un texto con la misma tolerancia que `fuzziness` automática. Palabras de una o dos letras tienen que ser iguales, de tres a cinco aceptan una letra distinta y de seis o más dos. Así labtop sigue encontrando Laptop. El nombre pesa el triple, como en el índice, y las palabras raras pesan más que las que están en todos lados."
+          },
+          {
+            "p": "Los filtros del panel y sus conteos se calculan con las mismas reglas, dentro de la consulta. Buscamos laptop, labtop, audifonos, camisa, laptop gamer, silla de comedor y asdffff con y sin Elasticsearch, y los totales y los conteos de todos los filtros salieron idénticos. Los primeros resultados son los mismos productos, y más abajo cambia el orden entre productos que se llaman igual. Sin Elasticsearch cada búsqueda tardó entre 50 y 760 milésimas. Lo único que falta en ese rato es el tal vez quisiste decir."
           }
         ]
       }
@@ -397,14 +452,24 @@
                   "no"
                 ],
                 [
-                  "Redis, carrito",
-                  "Las líneas y sus cantidades",
+                  "Redis, copia del carrito",
+                  "Las líneas y sus cantidades, para contestar rápido",
                   "no"
                 ],
                 [
                   "Redis, contador de venta relámpago",
-                  "Las unidades apartadas",
+                  "Decide primero quién aparta las unidades",
                   "no"
+                ],
+                [
+                  "PostgreSQL, pedido pendiente de la cuenta",
+                  "El carrito de verdad desde el 17 de octubre",
+                  "sí"
+                ],
+                [
+                  "PostgreSQL, `reserva_venta_relampago`",
+                  "Las unidades apartadas, de donde Redis se reconstruye",
+                  "sí"
                 ],
                 [
                   "PostgreSQL, `producto_catalogo` y `variante_catalogo`",
@@ -412,7 +477,7 @@
                   "se leen en la misma base"
                 ],
                 [
-                  "PostgreSQL, `comprar_carrito()`",
+                  "PostgreSQL, `comprar_pedido()`",
                   "Pedido, líneas, stock, kardex y pago",
                   "sí"
                 ],
@@ -441,10 +506,10 @@
             }
           },
           {
-            "p": "La función `comprar_carrito()` de la migración 012 crea el pedido, agrega cada línea y cobra en una sola llamada. Dentro, cada oferta se bloquea con `FOR UPDATE` y siempre en el mismo orden, así dos compras de los mismos productos no se esperan una a la otra para siempre. Si cualquier paso falla no queda ni pedido, ni pago, ni stock descontado."
+            "p": "Pagar es `POST /carrito/comprar`. Bloquea el pedido pendiente de la cuenta y cada oferta con `FOR UPDATE`, siempre en orden de identificador, así dos compras de los mismos productos no se esperan una a la otra para siempre. Si Redis está, compara su copia del carrito con PostgreSQL. Después comprueba disponibilidad, reservas y precio, y llama a `cambiar_direccion_pedido()` y `comprar_pedido()` en la misma transacción. Si cualquier paso falla no queda ni pedido, ni pago, ni stock descontado."
           },
           {
-            "p": "Desde el 1 de octubre MongoDB ya no está en el camino de la compra. Lo que el checkout leía de ahí se copia a PostgreSQL con las migraciones 029 y 030, así que pagar solo necesita PostgreSQL y Redis. La sección 4.3 cuenta cómo se llegó a eso."
+            "p": "Desde el 1 de octubre MongoDB ya no está en el camino de la compra, porque lo que el checkout leía de ahí se copia a PostgreSQL con las migraciones 029 y 030. Desde el 17 de octubre tampoco Redis. En la revisión se pidió que Redis nunca fuera la fuente de verdad, y la migración 045 hizo del carrito el pedido pendiente de la cuenta en PostgreSQL, con Redis como copia rápida. Pagar solo necesita PostgreSQL. La sección 4.3 cuenta cómo se llegó a eso."
           }
         ]
       },
@@ -461,7 +526,7 @@
               "filas": [
                 [
                   "Doble clic en pagar",
-                  "Candado en Redis por cuenta, 30 segundos",
+                  "Candado en Redis por cuenta, 30 segundos, y el `FOR UPDATE` del pedido pendiente",
                   "reintento idempotente"
                 ],
                 [
@@ -486,8 +551,8 @@
                 ],
                 [
                   "El proceso muere entre el COMMIT y el vaciado del carrito",
-                  "El carrito vence solo",
-                  "ventana aceptada"
+                  "El carrito que se compra es el pedido, y el COMMIT lo pasa a comprado. Lo que quede en Redis no coincide y se descarta",
+                  "todo o nada"
                 ],
                 [
                   "Dos compras a la vez sobre la misma oferta",
@@ -513,6 +578,21 @@
                   "MongoDB cae durante el checkout",
                   "La compra sale igual con la copia del catálogo en PostgreSQL",
                   "copia dentro de la transacción"
+                ],
+                [
+                  "Redis cae durante el checkout",
+                  "Se compra contra PostgreSQL y el `FOR UPDATE` del pedido hace de candado",
+                  "todo o nada"
+                ],
+                [
+                  "Redis pierde el carrito o la venta relámpago",
+                  "El carrito se reconstruye desde PostgreSQL al leerlo y la venta desde `reserva_venta_relampago`",
+                  "reintento idempotente"
+                ],
+                [
+                  "La copia del carrito a PostgreSQL falla",
+                  "El carrito queda desincronizado, la pantalla lo dice con un botón y el checkout no cobra hasta sincronizar",
+                  "rechazo explícito"
                 ]
               ],
               "anchos": [
@@ -520,11 +600,11 @@
                 2.9,
                 1.4
               ],
-              "leyenda": "Los once puntos de falla de docs/CONSISTENCIA-CHECKOUT.md con el mecanismo adoptado."
+              "leyenda": "Los catorce puntos de falla de docs/CONSISTENCIA-CHECKOUT.md con el mecanismo adoptado."
             }
           },
           {
-            "p": "Usamos los tres mecanismos que menciona el enunciado. Los reintentos idempotentes cubren el doble cobro, el grafo y los números del catálogo, la compensación cubre las unidades apartadas de una compra que falla, y la ventana de consistencia eventual cubre todo lo que es copia, con su tiempo declarado."
+            "p": "Usamos los tres mecanismos que menciona el enunciado. Los reintentos idempotentes cubren el doble cobro, el grafo, los números del catálogo y un Redis que pierde lo que tenía, la compensación cubre las unidades apartadas de una compra que falla, y la ventana de consistencia eventual cubre todo lo que es copia, con su tiempo declarado."
           }
         ]
       },
@@ -551,7 +631,7 @@
             "p": "Antes y después de cada escenario cuenta en PostgreSQL los pedidos, los pagos, el kardex y el stock de la oferta, y revisa el carrito en Redis y el candado de checkout."
           },
           {
-            "p": "Cada escenario lleva su regla. Con Redis o PostgreSQL parado la compra no debe salir, porque ahí viven el carrito, el dinero y el stock. Con MongoDB parado la compra sí debe salir desde el 1 de octubre, y la prueba falla si no sale."
+            "p": "Cada escenario lleva su regla. Con PostgreSQL parado la compra no debe salir, porque ahí viven el carrito, el dinero y el stock. Con MongoDB parado la compra sí debe salir desde el 1 de octubre, y con Redis parado desde el 17 de octubre. La prueba falla si no sale."
           }
         ]
       },
@@ -570,19 +650,19 @@
                 [
                   "Todo vivo",
                   "201, comprado",
-                  "Pedido, pago, kardex y stock de 7 a 6",
+                  "Pedido, pago, kardex y stock de 15 a 14",
                   "Se vacía"
                 ],
                 [
                   "Redis parado",
-                  "503, No se pudo conectar con Redis",
-                  "Intacto",
-                  "Entero"
+                  "201, comprado",
+                  "Pedido, pago, kardex y stock de 14 a 13",
+                  "Se vacía"
                 ],
                 [
                   "MongoDB parado",
                   "201, comprado",
-                  "Pedido, pago, kardex y stock juntos",
+                  "Pedido, pago, kardex y stock de 13 a 12",
                   "Se vacía"
                 ],
                 [
@@ -594,7 +674,7 @@
                 [
                   "Todo vivo otra vez",
                   "201, comprado",
-                  "Vuelve a vender, stock de 7 a 6",
+                  "Vuelve a vender, stock de 12 a 11",
                   "Se vacía"
                 ]
               ],
@@ -604,14 +684,14 @@
                 1.9,
                 1.0
               ],
-              "leyenda": "Prueba de falla del checkout, 32 OK y 0 FALLA, corrida el 1 de octubre."
+              "leyenda": "Prueba de falla del checkout, 32 OK y 0 FALLA, corrida el 18 de octubre con el carrito en PostgreSQL."
             }
           },
           {
-            "p": "Ninguna caída cobró a medias. Con Redis o PostgreSQL parado, PostgreSQL quedó con los mismos pedidos, pagos, kardex y stock que antes, el candado de Redis quedó suelto para reintentar de inmediato y la persona recibió un mensaje que dice qué base falta. Con MongoDB parado la compra salió y las cuatro tablas se movieron juntas, y al volver MongoDB el worker recalculó los productos que quedaron en la cola."
+            "p": "Ninguna caída cobró a medias. Con PostgreSQL parado quedaron los mismos pedidos, pagos, kardex y stock que antes, el candado de Redis quedó suelto para reintentar de inmediato y el carrito quedó entero. La respuesta dice qué base falta, para quien revisa la consola, y la página le muestra a la persona un aviso común de que no se pudo completar la compra y que su carrito sigue guardado. Con Redis o MongoDB parado la compra salió y las cuatro tablas se movieron juntas."
           },
           {
-            "p": "Las corridas del 6 y el 11 de septiembre dieron 31 OK con otra respuesta en ese escenario. Con MongoDB parado la compra contestaba 503 y no escribía nada. Esa diferencia es el hallazgo de la sección siguiente."
+            "p": "Las corridas del 6 y el 11 de septiembre dieron 31 OK con otra respuesta en dos escenarios. Con Redis o MongoDB parado la compra contestaba 503 y no escribía nada. Que la parara Redis era de esperar, porque el carrito vivía solo ahí. Que la parara MongoDB es el hallazgo de la sección siguiente."
           }
         ]
       },
@@ -625,7 +705,207 @@
             "p": "La resolvimos el 1 de octubre. La migración 029 crea `producto_catalogo` y `variante_catalogo` en PostgreSQL con lo que el checkout lee, y el backend la escribe al editar un producto. La 030 agrega la cola `evento_producto`, que llenan triggers de oferta y reseña en la misma transacción, para que un worker recalcule después los números del catálogo en MongoDB. El arranque pone la copia al día en su paso 7e."
           },
           {
-            "p": "Después del cambio, el escenario de MongoDB en la prueba exige que la compra salga, y salió. Es el mismo instrumento que encontró el problema, midiendo que ya no está."
+            "p": "Después del cambio, el escenario de MongoDB en la prueba exige que la compra salga, y salió. Es el mismo instrumento que encontró el problema, midiendo que ya no está. El 17 de octubre pasó lo mismo con Redis. Con el carrito de verdad en PostgreSQL el escenario de Redis cambió de regla, ahora exige que la compra salga, y el 18 de octubre salió."
+          },
+          {
+            "p": "Esta prueba mira el momento de pagar. La sección 5 hace lo mismo con toda la tienda y con las seis bases."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "titulo": "LA TIENDA CON UNA BASE CAÍDA",
+    "subsecciones": [
+      {
+        "titulo": "5.1. La idea",
+        "bloques": [
+          {
+            "p": "La prueba de la sección 4 mira una sola cosa, que ninguna caída cobre a medias. En la revisión se pidió más. Que con cualquiera de las seis bases apagada la tienda siga respondiendo con las que quedan, y que se pueda mostrar en vivo con la tienda abierta."
+          },
+          {
+            "p": "Lo que lo hace posible es que PostgreSQL es la verdad. El dinero, el stock y los pedidos solo se escriben ahí, en una transacción. Las otras bases guardan copias o datos de apoyo, y cada copia tiene de dónde rehacerse. Cuando una se cae, el backend pregunta a la fuente de esa copia en el momento, y la tienda sigue mostrando lo mismo, a veces con un poco menos de detalle."
+          },
+          {
+            "p": "Ninguna pantalla nombra la base que se cayó, porque a quien compra no le sirve saberlo. Cuando algo de verdad no se puede, como pagar sin PostgreSQL, ve un aviso común que dice que no se pudo completar y que intente en un momento. El nombre de la base queda en el registro del backend, para quien tenga que arreglarlo."
+          }
+        ]
+      },
+      {
+        "titulo": "5.2. De dónde sale lo que daba cada base",
+        "bloques": [
+          {
+            "tabla": {
+              "cabecera": [
+                "Base caída",
+                "Lo que daba",
+                "De dónde sale mientras no está",
+                "Lo que se pierde"
+              ],
+              "filas": [
+                [
+                  "PostgreSQL",
+                  "Pedidos, pagos, stock, cuentas y carrito",
+                  "La sesión abierta sigue por su token firmado, el perfil y el carrito salen de la copia en Redis, y el catálogo, la ficha, el buscador y las recomendaciones de las otras bases",
+                  "Nada. No se puede pagar, agregar al carrito ni entrar con otra cuenta hasta que vuelva"
+                ],
+                [
+                  "MongoDB",
+                  "La ficha completa de cada producto",
+                  "La copia del catálogo en PostgreSQL, sin las características",
+                  "El registro de las entradas a la tienda de ese rato"
+                ],
+                [
+                  "Redis",
+                  "Rankings calculados, ofertas destacadas y copia del carrito",
+                  "Los cuatro rankings se calculan en el momento en ClickHouse con la misma consulta del worker, las ofertas destacadas salen de PostgreSQL y el carrito del de PostgreSQL",
+                  "Los contadores que vigilan entradas sospechosas"
+                ],
+                [
+                  "Elasticsearch",
+                  "El buscador y sus filtros",
+                  "La copia del catálogo en PostgreSQL con la regla de texto de la sección 2.7",
+                  "Nada, los cambios esperan en una cola"
+                ],
+                [
+                  "Neo4j",
+                  "Para ti y quienes lo compraron también llevaron",
+                  "Las mismas dos consultas sobre los pedidos en PostgreSQL",
+                  "Nada, los cambios esperan en una cola"
+                ],
+                [
+                  "ClickHouse",
+                  "Vistas, búsquedas y tendencias",
+                  "Lo más vendido y lo más visto siguen en Redis. Viste hace poco y las tendencias del administrador no tienen otra fuente y avisan",
+                  "Las vistas, búsquedas y agregados al carrito de ese rato"
+                ]
+              ],
+              "anchos": [
+                1.1,
+                1.5,
+                2.4,
+                1.5
+              ],
+              "leyenda": "Lo que pasa con cada base apagada, del documento docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md."
+            }
+          },
+          {
+            "p": "Con PostgreSQL caída quien ya había entrado sigue dentro. Su sesión es un token firmado que dura hasta dos horas, y cuando PostgreSQL no contesta el backend se lo cree en vez de preguntar si la cuenta sigue activa. Si PostgreSQL contesta que la cuenta está suspendida se corta como siempre. Solo se le cree cuando no se pudo preguntar. La ficha de un producto se ve, y en lugar de los vendedores dice que ahora no se puede mostrar quién lo vende ni comprarlo."
+          },
+          {
+            "p": "Con Redis caída, comparar las ocho vitrinas de la portada con y sin Redis encontró algo que estaba mal con Redis arriba. La copia de las ofertas destacadas no se actualizaba cuando una compra bajaba el stock, y la vitrina podía mostrar unidades que ya no había. Ahora se refresca con cada cambio de una oferta."
+          }
+        ]
+      },
+      {
+        "titulo": "5.3. El cortacircuitos",
+        "bloques": [
+          {
+            "p": "Una base caída no siempre dice que no está. Si la red se corta a mitad de camino, la conexión se queda esperando, y antes de este cambio cada petición esperaba entre 10 y 30 segundos su límite antes de rendirse. Ahora cada base tiene un cortacircuitos. La primera petición después de una caída espera lo que tarda la base en no contestar, y durante los 15 segundos siguientes el backend ni le pregunta y va directo al respaldo. Pasado ese rato la vuelve a probar, y si contesta la usa otra vez sola, sin reiniciar nada."
+          },
+          {
+            "p": "Con cualquiera de las seis bases congelada esa primera espera es de unos 3 segundos. MongoDB y ClickHouse tardaban más. La conexión ya abierta a MongoDB esperaba a que el driver notara la caída, entre 9 y 15 segundos, y la consulta de viste hace poco esperaba los 8 segundos del cliente de ClickHouse. Ahora esas dos consultas tienen su propio límite de 3 segundos, igual que la búsqueda en Elasticsearch, y con cualquiera de las dos congelada la primera petición tarda entre 3.0 y 3.7 segundos. En todos los casos la página sigue y las peticiones siguientes ya no esperan."
+          },
+          {
+            "p": "Cada cortacircuitos deja una línea en el registro del backend cuando la base no responde y otra cuando vuelve, y la ruta `GET /db/cortacircuitos` dice qué base está en pausa y desde cuándo. Solo contesta a la cuenta del administrador, la página no la usa."
+          },
+          {
+            "p": "La batería de pruebas encontró un error en el de PostgreSQL. Con 60 cuentas entrando a la vez, las peticiones se quedaban esperando una conexión libre, el cortacircuitos lo tomaba como base caída y la tienda pasaba 15 segundos sin su base principal estando sana. Ahora solo cuenta como caída un fallo de conexión real. Una fila de espera llena o una consulta larga es carga, y se atiende como carga."
+          }
+        ]
+      },
+      {
+        "titulo": "5.4. Cómo se midió",
+        "bloques": [
+          {
+            "p": "Para apagar una base sin tocar la computadora donde vive pusimos un interruptor entre el backend y cada base, `remoto/interruptor.cjs`. Cada base se puede dejar apagada, que rechaza la conexión al instante como un `docker stop`, o congelada, que acepta la conexión y no contesta, como una red cortada. La segunda es la difícil, porque el backend tiene que darse cuenta solo."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Base caída",
+                "Comparado con todo arriba",
+                "Apagada",
+                "Congelada, primera petición",
+                "Vuelve sola en"
+              ],
+              "filas": [
+                [
+                  "PostgreSQL",
+                  "Sesión, carrito, ficha, catálogo y recomendaciones contestan, pagar y entrar avisan",
+                  "menos de 0.1 s, pagar avisa en 0.2 s",
+                  "3.0 s",
+                  "15.5 s"
+                ],
+                [
+                  "MongoDB",
+                  "362 de 363 comparaciones iguales en 71 pedidos, la distinta avisa a propósito",
+                  "la primera 3.2 s, después menos de 0.4 s",
+                  "3.2 a 3.7 s",
+                  "14 s"
+                ],
+                [
+                  "Redis",
+                  "Las ocho vitrinas iguales, mismos productos y mismo orden",
+                  "menos de 0.11 s",
+                  "3.2 s",
+                  "14 s"
+                ],
+                [
+                  "Elasticsearch",
+                  "Totales y conteos de filtros idénticos en siete búsquedas",
+                  "0.2 a 0.3 s",
+                  "3.3 s",
+                  "15 s"
+                ],
+                [
+                  "Neo4j",
+                  "Ocho de ocho recomendaciones iguales, con el mismo porqué",
+                  "menos de 0.4 s",
+                  "3.2 s",
+                  "15 s"
+                ],
+                [
+                  "ClickHouse",
+                  "Lo más vendido sigue, viste hace poco y tendencias avisan",
+                  "avisa en menos de 0.04 s",
+                  "3.0 a 3.5 s",
+                  "15 s"
+                ]
+              ],
+              "anchos": [
+                1.0,
+                2.3,
+                1.2,
+                1.0,
+                0.9
+              ],
+              "leyenda": "Las comparaciones son del 19 y el 20 de octubre y los tiempos del 20 de octubre en la madrugada, con las bases en la computadora de José David."
+            }
+          },
+          {
+            "p": "La prueba `pruebas/caidas.mjs` hace todo esto sola. Apaga cada base, una por una, comprueba lo que dice la tabla anterior y lo que tiene que avisar, la vuelve a prender y comprueba que la tienda la usa otra vez sin reiniciar nada. Dio 47 comprobaciones bien y ninguna mal con las bases apagadas, y otras 47 con las bases congeladas."
+          }
+        ]
+      },
+      {
+        "titulo": "5.5. Lo que no tiene respaldo, a propósito",
+        "bloques": [
+          {
+            "vin": [
+              "Iniciar sesión sin PostgreSQL. Copiar las cuentas a otra base pondría las contraseñas en dos lugares que proteger, y una cuenta suspendida podría entrar con la copia vieja. Quien no había entrado puede mirar la tienda sin cuenta.",
+              "Viste hace poco y las tendencias del administrador sin ClickHouse. Las vistas solo viven ahí. Se mandan sin esperar respuesta y sin cola, para que quien compra no espere por algo que solo sirve para analizar, y las de ese rato se pierden.",
+              "Crear un avísame sin Elasticsearch, porque la comparación de cada oferta contra los avisos guardados es del propio motor. Tampoco se busca entre las ofertas del panel del vendedor, que sigue viendo y cambiando sus ofertas en la lista de siempre.",
+              "Crear o cambiar productos sin MongoDB, porque la ficha completa vive ahí."
+            ]
+          }
+        ]
+      },
+      {
+        "titulo": "5.6. Cómo se muestra en vivo",
+        "bloques": [
+          {
+            "p": "El panel de comandos del proyecto tiene un grupo, Caída de una base, con un botón para preparar la demostración, que reinicia el backend a través del interruptor, y botones para apagar, congelar y prender cada base. Lo mismo se hace desde una terminal con `remoto/caidas.ps1`. Al final de `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` hay un guion de unos diez minutos que recorre las seis bases con la tienda abierta, empezando por Redis y terminando con PostgreSQL, que es la que manda."
           }
         ]
       }
@@ -635,7 +915,7 @@
     "titulo": "EVALUACIÓN DE UN MOTOR NEWSQL PARA LOS PAGOS",
     "subsecciones": [
       {
-        "titulo": "5.1. El registro de decisión",
+        "titulo": "6.1. El registro de decisión",
         "bloques": [
           {
             "p": "El pago en Mesh es una fila que nace dentro de la misma transacción que el pedido, el descuento de stock y el kardex. Evaluamos si convenía llevarlo a un motor NewSQL, que reparte transacciones ACID entre varios nodos con consenso Raft. El análisis completo está en `docs/DECISION-NEWSQL-PAGOS.md`."
@@ -648,7 +928,7 @@
               "alternativas": "Quedarse en PostgreSQL, mover solo los pagos a NewSQL, mover todo el núcleo transaccional a CockroachDB, o moverlo a YugabyteDB.",
               "decision": "Se queda PostgreSQL.",
               "justificacion": "Mover solo los pagos separa el cobro del stock y obliga a una saga entre motores, justo lo que el checkout evita hoy. Moverlo todo conserva la atomicidad pero reparte entre nodos una carga que un solo nodo aguanta de sobra, vuelve más lenta la fila caliente de la venta relámpago porque cada escritura pasa por consenso, pide al menos tres nodos para tolerar fallos y obliga a portar funciones PL/pgSQL y triggers que en CockroachDB tienen soporte parcial.",
-              "consecuencias": "El checkout sigue siendo una transacción local y fácil de probar. Se asume que PostgreSQL es un punto único de falla, y si cae no se puede comprar hasta que vuelva, sin cobrar a medias."
+              "consecuencias": "El checkout sigue siendo una transacción local y fácil de probar. Se asume que PostgreSQL es un punto único de falla, y si cae no se puede comprar hasta que vuelva, sin cobrar a medias. La sección 5 cuenta lo que sí sigue funcionando en ese rato."
             }
           },
           {
@@ -662,10 +942,10 @@
     "titulo": "ARQUITECTURA ACTUALIZADA",
     "subsecciones": [
       {
-        "titulo": "6.1. El diagrama de arquitectura",
+        "titulo": "7.1. El diagrama de arquitectura",
         "bloques": [
           {
-            "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el índice de búsqueda con su worker. El diagrama está al 4 de octubre, así que también trae la copia del catálogo en PostgreSQL con su cola y lo que sumó la Entrega final."
+            "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el índice de búsqueda con su worker. El diagrama está al 4 de octubre, así que también trae la copia del catálogo en PostgreSQL con su cola y lo que sumó la Entrega final. Los respaldos de la sección 5 no agregan flechas. Usan conexiones del backend que ya están dibujadas, solo que las consultan cuando falta la base de siempre."
           },
           {
             "figura": {
@@ -678,18 +958,21 @@
         ]
       },
       {
-        "titulo": "6.2. El diagrama entidad relación",
+        "titulo": "7.2. El diagrama entidad relación",
         "bloques": [
           {
-            "p": "PostgreSQL tiene hoy 76 tablas y 97 llaves foráneas, de las migraciones 001 a 039. El diagrama se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones."
+            "p": "PostgreSQL tiene hoy 78 tablas y 94 llaves foráneas, de las migraciones 001 a 048, contadas en la base de prueba el 20 de octubre. El diagrama se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones."
           }
         ]
       },
       {
-        "titulo": "6.3. Cómo se levanta el sistema completo",
+        "titulo": "7.3. Cómo se levanta el sistema completo",
         "bloques": [
           {
             "p": "Todo se levanta con `.\\arrancar.ps1`. El script prende los contenedores, corre las migraciones, carga los datos, reconstruye el catálogo en MongoDB, el índice de búsqueda y el grafo, y al final cuenta lo que quedó en cada base contra PostgreSQL en lugar de suponer que salió bien. El backend y el frontend se arrancan después con `npm run start:dev` y `npm run dev`. La guía completa está en `docs/instalacion.md`."
+          },
+          {
+            "p": "Las bases también pueden vivir en otra computadora. Con `usar-bases-remotas.ps1` el backend apunta a ellas, y con `source remoto/activar.sh` las pruebas corren contra esa computadora como si las bases estuvieran aquí. Así se midió todo lo de la sección 5."
           }
         ]
       }
@@ -699,13 +982,16 @@
     "titulo": "CONCLUSIONES",
     "subsecciones": [
       {
-        "titulo": "7.1. Conclusiones",
+        "titulo": "8.1. Conclusiones",
         "bloques": [
           {
             "p": "El motor de búsqueda resolvió algo que ninguna de las bases anteriores hacía bien, encontrar un producto aunque se escriba mal su nombre, y además calcula los filtros de la página de resultados con sus propias agregaciones. El mapeo se hizo campo por campo y el analizador se eligió mirando nuestros nombres de producto."
           },
           {
-            "p": "En el checkout aprendimos que la consistencia se decide punto por punto. El dinero y el stock quedaron en una sola transacción y todo lo demás tiene un mecanismo declarado. La prueba de falla confirmó que ninguna caída cobra a medias, encontró una dependencia con MongoDB que no teníamos escrita, y después de quitarla midió que hoy se compra solo con PostgreSQL y Redis."
+            "p": "En el checkout aprendimos que la consistencia se decide punto por punto. El dinero y el stock quedaron en una sola transacción y todo lo demás tiene un mecanismo declarado. La prueba de falla confirmó que ninguna caída cobra a medias, encontró una dependencia con MongoDB que no teníamos escrita, y después de quitarla midió que hoy se compra solo con PostgreSQL."
+          },
+          {
+            "p": "Lo que más nos enseñó la revisión fue apagar las bases de verdad. Que cada copia tuviera de dónde rehacerse ya estaba en el diseño, pero hasta probarlo la tienda se quedaba esperando a una base caída hasta 30 segundos y varias pantallas quedaban vacías. Con un respaldo por base y un cortacircuitos, hoy la tienda sigue con cualquiera de las seis apagada o congelada, solo la primera petición espera y la base vuelve a usarse sola a los 15 segundos de prenderla. Además, comparar cada pantalla con y sin su base encontró un error que estaba ahí con todo arriba, la copia de las ofertas destacadas que no bajaba con las compras."
           },
           {
             "p": "La evaluación de NewSQL terminó en no migrar, y lo sostenemos con los mismos criterios que las decisiones anteriores. A este volumen un motor distribuido resolvería un problema que no tenemos y haría más lento el que sí tenemos."

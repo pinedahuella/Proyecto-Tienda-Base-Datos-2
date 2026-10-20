@@ -316,14 +316,20 @@ ch "INSERT INTO carrito_producto (fecha,id_producto,id_oferta,id_usuario,cantida
     (now(),$FALSO,1,900000001,2,'127.0.0.1','real'),
     (now(),$FALSO,1,900000001,1,'127.0.0.1','real'),
     (now(),$FALSO,1,900000002,1,'127.0.0.1','real')"
-# compra: cantidades 5 y 3. SUM da 8, COUNT(*) daria 2.
+# compra: cantidades 5 y 3. SUM da 8, COUNT(*) daria 2. Y el pedido 990000005,
+# de 4, que se cancela abajo: desde el 2026-10-20 una compra cancelada no cuenta
+# en lo mas vendido (con el contado daria 12).
 ch "INSERT INTO compra_producto (fecha,id_producto,id_oferta,id_usuario,cantidad,id_pedido,ip,lote) VALUES
     (now(),$FALSO,1,900000001,5,990000001,'127.0.0.1','real'),
-    (now(),$FALSO,1,900000002,3,990000002,'127.0.0.1','real')"
-# devolucion: 2 y 1. SUM da 3, COUNT(*) daria 2.
+    (now(),$FALSO,1,900000002,3,990000002,'127.0.0.1','real'),
+    (now(),$FALSO,1,900000002,4,990000005,'127.0.0.1','real')"
+# devolucion: 2 y 1 de pedidos de antes, mas el 990000005 entero. SUM da 7,
+# COUNT(*) daria 3. Cancelar devuelve el pedido entero, por eso el 990000005
+# va con sus 4.
 ch "INSERT INTO devolucion_producto (fecha,id_producto,id_oferta,id_usuario,cantidad,id_pedido,ip,lote) VALUES
-    (now(),$FALSO,1,900000001,2,990000001,'127.0.0.1','real'),
-    (now(),$FALSO,1,900000002,1,990000002,'127.0.0.1','real')"
+    (now(),$FALSO,1,900000001,2,990000003,'127.0.0.1','real'),
+    (now(),$FALSO,1,900000002,1,990000004,'127.0.0.1','real'),
+    (now(),$FALSO,1,900000002,4,990000005,'127.0.0.1','real')"
 # busqueda: el termino con las sesiones s1, s1 y s2 (distintas 2, COUNT(*) 3),
 # y otro termino de hace 10 dias.
 ch "INSERT INTO busqueda_realizada (fecha,termino,resultados,sesion,lote) VALUES
@@ -342,8 +348,8 @@ titulo "3. La metrica de cada tabla"
 # ============================================================
 igual "vista, 7 dias: sesiones DISTINTAS, no eventos (un COUNT(*) daria 3)" 2 "$(total_falso vista 7)"
 igual "carrito, 7 dias: cuentas DISTINTAS (un COUNT(*) daria 3)" 2 "$(total_falso carrito 7)"
-igual "compra, 7 dias: SUMA de unidades (un COUNT(*) daria 2)" 8 "$(total_falso compra 7)"
-igual "devolucion, 7 dias: SUMA de unidades (un COUNT(*) daria 2)" 3 "$(total_falso devolucion 7)"
+igual "compra, 7 dias: SUMA de unidades sin el pedido cancelado (un COUNT(*) daria 2, contando el cancelado 12)" 8 "$(total_falso compra 7)"
+igual "devolucion, 7 dias: SUMA de unidades (un COUNT(*) daria 3)" 7 "$(total_falso devolucion 7)"
 igual "busqueda: sesiones DISTINTAS por termino (un COUNT(*) daria 3)" 2 "$(total_termino busqueda "$TERMINO" 7)"
 igual "busqueda-clic: sesiones DISTINTAS por termino (un COUNT(*) daria 2)" 1 "$(total_termino busqueda-clic "$TERMINO" 7)"
 

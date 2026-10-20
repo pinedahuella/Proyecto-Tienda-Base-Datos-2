@@ -3,7 +3,135 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-20, madrugada**.
+Ultima actualizacion: **2026-10-20, 08:30**.
+
+**EMPIEZA AQUI (20-10, de 06:00 a 08:30). Los 6 hallazgos arreglados, sugeridos desde Elasticsearch, demo de concurrencia y semilla remota.**
+Meme dio el visto bueno a los arreglos de la seccion de abajo y pidio ademas tres cosas. Todo probado contra
+la PC de Jose David (100.64.42.11) y commiteado.
+
+Arreglado (lo que estaba en "Encontrado y SIN arreglar" de abajo):
+- MongoDB congelada: conRespaldoDeMongo (helpers/catalogo-respaldo.ts) corre deMongo con conLimite de 3 s. Medido
+  3.2 a 3.7 s la primera ficha (antes 9.4 a 15.1).
+- ClickHouse congelada: viste hace poco lleva abort_signal limiteDeTienda() de 3 s (database/clickhouse.ts). Medido
+  3.0 a 3.5 s (antes 8.0). Los paneles y los workers siguen con 8 s.
+- asdffff: sugeridos.service.ts pide 240 vecinos (CUANTOS * 40) en la fuente por significado.
+- facetas.py: dos comprobaciones nuevas, los tramos se tocan y son los de backend/src/helpers/facetas-buscador.ts.
+  26 OK. Con el 500-1000 movido a 600-1000 fallan las dos.
+- notas.sh: espera a que el worker de evento_producto vacie su fila y devuelve el documento a 0 a mano.
+- Calificacion: facetado.service.ts devuelve los tramos en el orden de RANGOS_PRECIO y RANGOS_NOTA (4 o mas primero).
+- /buscar: el encabezado cuenta lo mismo que el panel, "109 productos encontrados, se ven los 50 mas parecidos".
+- Tendencias y Mas vendidos: las compras de un pedido cancelado no cuentan (admin-tendencias.service.ts y
+  mas-vendidos-sync.service.ts, id_pedido NOT IN devolucion_producto, como combos-sync). tendencias.sh siembra un
+  pedido cancelado y espera 8 en compra y 7 en devolucion.
+
+Nuevo:
+- Los sugeridos los elige Elasticsearch (consultaSugeridos en sugeridos.service.ts): fuzziness 2 contra nombre,
+  descripcion, variantes y categoria, peso 10, y si nada se parece, ordena por resenas, nota y existencias. Sin
+  Elasticsearch, lo de antes (vectores, mas vendido, mas resenados). La respuesta trae sugeridos_desde.
+  busqueda.sh parte 6 lo comprueba, caidas.mjs mira que sin Elasticsearch salgan de otra fuente (47 OK en las dos).
+- demo-concurrencia.ps1 (pruebas/demo_concurrencia.mjs): N compradores navegan a la vez, la venta relampago con
+  mas gente que unidades gana exactamente STOCK, pagan todos a la vez y el stock queda en 0. -Caida redis la hace
+  con Redis apagado (decide PostgreSQL con FOR UPDATE). Medido 40 compradores y 10 unidades, con y sin Redis.
+  Usa su propio vendedor, vendconcurrencia@mesh.com, y etl/extraer_compras.sql no copia sus ventas, asi la
+  limpieza (cancela y borra de ClickHouse) no la deshace el siguiente arranque.
+- arrancar.ps1 corre en modo remoto, y el panel de comandos deja generar y borrar productos, volver a migrar,
+  rehacer el grafo y levantar todo con las bases en la otra PC (remoto/README.md). Se niegan rehacer MongoDB y
+  borrar todo, que borran volumenes alla. Probado desde el panel, 3 productos generados y borrados en las tres bases.
+- Las contrasenas de la PC de David estan en remoto/.env.remoto (no se sube). activar.sh las carga.
+  redis/prueba_acceso.sh da 31 OK en remoto.
+
+Encontrado y arreglado de paso (ya existia):
+- Borrar un lote con -Semilla no arrancaba (la guardia de -Semilla no contaba -Borrar), y sin -Semilla mandaba
+  semilla 0 y no borraba nada. Ahora -1 si no se paso.
+- Despues de borrar un lote, la lista de productos vivos se escribia con ">" (UTF-16 en PowerShell 5.1), Mongo la
+  leia como basura y quitaba TODOS los productos de lote (903 el 20-10); el catalogo los volvia a cargar desde
+  PostgreSQL y no se notaba. Ahora WriteAllText en UTF-8 y el script se para si la lista no se lee.
+
+Bateria entera del 20-10 a las 07:00 en remoto: todo en verde salvo correr_patrones (1 FALLA por Neo4j poniendose
+al dia con 6 usuarios durante la prueba, repetida sola Todo bien) y caidas.mjs (corrio contra el backend sin
+sugeridos_desde; con el backend nuevo 47 y 47). falla_checkout SIN MEDIR en remoto como siempre.
+El Word de la Entrega 3 regenerado: 2.6 con los sugeridos de Elasticsearch, tabla 12 y 5.3 con los tiempos
+nuevos, facetas 26, caidas 47. 24 paginas.
+
+Estado al cerrar: backend en el 3000 directo a 100.64.42.11 (interruptor quitado), frontend 5173, panel 5199
+reiniciado, Ollama arriba. Los 20 pedidos de las dos primeras corridas de la demo (oferta 6059 de vendcarga)
+quedaron cancelados y en ClickHouse, como cualquier prueba de vendcarga.
+
+**ANTES (20-10, de 03:30 a 06:00). La bateria entera en remoto, caidas medidas y el Word de la Entrega 3.**
+Meme pidio correr la bateria que se corto, hacer el Word de la Entrega 3 y probar todo, y avisar ANTES de arreglar
+cualquier cosa que falle. No se toco backend/ ni frontend/. SIN commitear (no lo pidio).
+
+La bateria, de eventos.sh a falla_checkout.sh, corrida en remoto contra 100.64.42.11 (OneDrive cerrado para
+hacer sitio, 6 GB libres):
+
+```
+en verde        tendencias 53, tendencias_avanzadas 28, etl_mongo 21, resenas 15, casos_fraude_fusion 0 FALLA,
+                casos_fraude_granja 6, correr_detectores_resenas, correr_detectores_fraude, vectores_worker 5,
+                clasificador_en_postgres 5, recomendacion_semantica 15, facetas.py 24, prueba_carrito,
+                prueba_restaurar 20, prueba_concurrencia, mas_vendidos, clickhouse/correr_consultas
+repetidas solas eventos 31 (la primera vez fallo por la marca 203.0.113.77 que dejo la corrida que se corto por
+                memoria, su trap la limpio al salir), notas 10 (la primera dio 9 y 1: carrera, el worker de
+                evento_producto actualizo la nota antes de que el mongosh remoto mirara), correr_patrones Todo
+                bien (la primera vio 206 y despues 209 usuarios: Neo4j se puso al dia con PG durante la prueba,
+                quedo 209 = 209)
+las 16 primeras tambien, repetidas a las 05:15 con el backend directo: etl_compras 30, grafo_compras 25,
+                recomendaciones 29, carrito 42, carrito_vencimiento 25, oferta_limitada 33, descuentos 98,
+                reglas_descuento 44, reglas_periodo 61, ofertas_paginadas 40 (3 SIN MEDIR de siempre),
+                ofertas_y_seguimientos 50, busquedas_sin_resultados 13, busqueda 10 (1 SIN MEDIR), alertas_login 52,
+                anillos 27, anillos_familia_b 40, todas 0 FALLA
+herramienta     redis/prueba_acceso 12 OK y 19 FALLA, todas de inspeccion y operador: sus contrasenas de la PC
+                de David no estan aqui (remoto/README.md)
+caidas.mjs      con el interruptor: 46 OK apagadas y 46 OK congeladas
+falla_checkout  SIN MEDIR en remoto (SIN_CAIDA=1); la ultima es la del 18-10, 32 OK, sin Redis compra
+```
+
+Tiempos medidos con el interruptor (scratchpad tiempos.mjs, mismo dato en la tabla 12 del Word):
+
+```
+                apagada                        congelada, primera     vuelve sola
+PostgreSQL      < 0.1 s, pagar 503 en 0.2 s    3.0 s                  15.5 s
+MongoDB         la primera 3.2 s, luego < 0.4  9.4, 13.8 y 15.1 s     14 s
+Redis           < 0.11 s                       3.2 s                  14 s
+Elasticsearch   0.2 a 0.3 s                    3.3 s                  15 s
+Neo4j           < 0.4 s                        3.2 s                  15 s
+ClickHouse      viste hace poco 503 en 0.03 s  8.0 s (las tres veces) 15 s
+```
+
+Encontrado y SIN arreglar a esa hora (ARREGLADO despues, ver arriba), con el arreglo propuesto:
+- MongoDB congelada: la primera ficha tarda 9 a 15 s, no 3. La conexion abierta no tiene limite por consulta
+  (socketTimeoutMS 20 s) y espera a que el latido del driver note la caida. Propuesto: limite de 3 s a deMongo()
+  en conRespaldoDeMongo (helpers/catalogo-respaldo.ts), con un Promise.race o el timeoutMS del driver 7.
+- ClickHouse congelada: viste hace poco tarda 8 s en avisar (request_timeout 8000 de database/clickhouse.ts).
+  Propuesto: 3 s solo en esa consulta, como OPCIONES_BUSQUEDA de Elasticsearch.
+- Los sugeridos de asdffff son 4 y no 6. sugeridos.service.ts pide los 36 vectores mas cercanos, y con 1000
+  productos de 102 originales (unas 10 copias de lote por original, mismo vector) quedan 4 grupos. Con 200
+  vecinos salen 6 distintos (medido con la consulta aparte). Propuesto: CUANTOS * 6 a CUANTOS * 40.
+- facetas.py no ve un hueco en un tramo de precio si ningun resultado cae en el (500-1000 movido a 600-1000 dio
+  24 OK). Con los filtros devueltos a post_filter si falla, 7 de 24. Propuesto: comprobar que los tramos se tocan.
+- notas.sh tiene una carrera con el worker de evento_producto desde la 030 (en remoto a veces da 9 y 1).
+- Detalles de pantalla: sin Elasticsearch la faceta de calificacion sale en orden inverso (4 antes que 3); sin
+  filtros el encabezado de /buscar cuenta la lista hibrida (50) y el panel la facetada (109); en Tendencias el
+  mas vendido y el mas devuelto son el mismo libro (107 y 107) porque cuenta en bruto 50 pedidos del 17-10 que
+  estan todos cancelados (Reportes si descuenta lo cancelado).
+- La Entrega 2 y la final tienen "python-docx" en el campo modificado por (la 3 ya no).
+
+Revisado aparte: tsc, eslint y svelte-check limpios; dist compilado despues del ultimo cambio de src; la ruta
+GET /buscador/productos/facetado da lo mismo que la consulta de referencia de facetas.py (109, 71, 86, 68, 108).
+Edge 1536x730, 37 capturas abiertas, 0 errores de JavaScript: portada, buscar (laptop, con categoria, labtop,
+asdffff), ficha, pedidos, perfil, las 8 pestanas del admin y las 4 del vendedor; con Mongo congelada la ficha con
+su aviso, sin Elasticsearch labtop con categoria y asdffff con sugeridos, sin PostgreSQL portada (las fotos
+cargan, la primera captura salio antes de bajarlas), ficha sin vendedores y el aviso al entrar.
+
+El Word: `Reporte Tercera Entrega - DABD2 - Mesh.docx`, 24 paginas, fecha martes 20 de octubre, indice medido
+con Word (dos pasadas). Contenido en contenido-entrega3.json: 1.1 a 1.3 al dia (340 commits), 2.4 facetas en la
+consulta con la tabla de hoy, 2.6 asdffff, 2.7 buscador sin Elasticsearch, 3 y 4 con el carrito en PostgreSQL
+(045, catorce puntos de falla, falla_checkout del 18-10), 5 nueva (la tienda con una base caida, con los tiempos
+de arriba), NewSQL pasa a 6, arquitectura a 7 (78 tablas y 94 llaves, migraciones hasta 048), conclusiones a 8.
+El generador ahora pone last_modified_by. Para rehacerlo: python generar-reporte-entrega3.py,
+.\medir-paginas-entrega3.ps1, python generar-reporte-entrega3.py.
+
+Como quedo la maquina: backend directo a 100.64.42.11 (el interruptor quitado), frontend 5173, Ollama y panel
+arriba. backend/.env sin tocar.
 
 **EMPIEZA AQUI (20-10, madrugada). Lo que pidio el profesor, los tres puntos: la tienda sigue con una base caida, las facetas filtran en la consulta y una busqueda sin sentido trae sugeridos.**
 Meme dio permiso para tocar `backend/` y las bases de la PC de Jose David. Para David, el detalle de lo

@@ -1,13 +1,34 @@
 import { Injectable, Logger } from '@nestjs/common';
+import { elasticClient, OPCIONES_BUSQUEDA } from '../../database/elastic';
 import { pool } from '../../database/postgres';
-import { ResultadoBusquedaProducto } from '../../dto/buscar-productos';
-import { documentosDesdeCopia } from '../../helpers/buscador-respaldo';
+import {
+  FuenteSugeridos,
+  ResultadoBusquedaProducto,
+} from '../../dto/buscar-productos';
+import {
+  DocumentoCopia,
+  documentosDesdeCopia,
+} from '../../helpers/buscador-respaldo';
 import { pedirVectores } from '../../helpers/vectores-ollama';
 import { aVectorPg, buscarCercanos } from '../../helpers/vectores-pgvector';
 import { MasVendidosService } from '../productos/mas-vendidos.service';
 
 /** Cuantos productos se sugieren. */
 const CUANTOS = 6;
+
+const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
+
+export interface Sugeridos {
+  productos: ResultadoBusquedaProducto[];
+  /** `null` si ninguna fuente trajo nada. */
+  desde: FuenteSugeridos | null;
+}
+
+/** Los ids de una fuente, en orden, y sus documentos si la fuente ya los trae. */
+interface Candidatos {
+  ids: number[];
+  docs?: Map<number, DocumentoCopia>;
+}
 
 /**
  * Cuanto se espera el vector de Ollama antes de pasar a la siguiente fuente.
@@ -23,17 +44,24 @@ const LIMITE_MS_OLLAMA = 3000;
  * profesor (2026-10-19): buscar una locura tiene que traer al menos un producto
  * relacionado.
  *
- * Tres fuentes, en orden, y se usa la primera que traiga algo:
+ * Cuatro fuentes, en orden, y se usa la primera que traiga algo:
  *
- *   1. Por significado: el vector de lo escrito (Ollama) contra los vectores
- *      de los productos (pgvector), SIN el umbral de parecido que usa la
- *      busqueda hibrida. Siempre hay un mas cercano, aunque lo escrito no
- *      tenga sentido; es el "producto relacionado" que se puede dar.
- *   2. Lo mas vendido (Redis, o ClickHouse en el momento si Redis no esta).
- *   3. Los productos con mas resenas de la copia del catalogo en PostgreSQL.
+ *   1. Elasticsearch, con una consulta mas floja que la de la busqueda
+ *      (`consultaSugeridos`): lo que se parece a lo escrito, aunque sea de
+ *      lejos, va primero, y si nada se parece, el mismo motor ordena el
+ *      catalogo por resenas y existencias. Siempre trae algo mientras haya un
+ *      producto activo. El profesor lo pidio para el buscador (2026-10-19, "si
+ *      estan usando Elasticsearch ... tiene que salir por lo menos un
+ *      producto"), asi que lo hace Elasticsearch y no el backend por fuera.
+ *   2. Sin Elasticsearch, por significado: el vector de lo escrito (Ollama)
+ *      contra los vectores de los productos (pgvector), SIN el umbral de
+ *      parecido que usa la busqueda hibrida. Siempre hay un mas cercano.
+ *   3. Lo mas vendido (Redis, o ClickHouse en el momento si Redis no esta).
+ *   4. Los productos con mas resenas de la copia del catalogo en PostgreSQL.
  *
- * Las tarjetas salen de la copia del catalogo (`documentosDesdeCopia`): no
- * dependen de Elasticsearch ni de Mongo.
+ * Las tarjetas de la 1 salen del propio indice. Las de las otras tres, de la
+ * copia del catalogo (`documentosDesdeCopia`), que no depende de
+ * Elasticsearch ni de Mongo.
  *
  * Los sugeridos van APARTE de los resultados, a proposito. La busqueda sigue
  * contando 0 resultados, y asi se guarda en ClickHouse: el reporte de
@@ -50,18 +78,26 @@ export class SugeridosBusquedaService {
 
   constructor(private readonly masVendidos: MasVendidosService) {}
 
-  async sugerir(texto: string): Promise<ResultadoBusquedaProducto[]> {
-    const fuentes: [string, () => Promise<number[]>][] = [
-      ['por significado', () => this.porSignificado(texto)],
-      ['lo mas vendido', () => this.masVendidosIds()],
-      ['los mas resenados', () => this.masResenadosIds()],
+  async sugerir(texto: string): Promise<Sugeridos> {
+    const soloIds =
+      (fuente: () => Promise<number[]>) => async (): Promise<Candidatos> => ({
+        ids: await fuente(),
+      });
+    const fuentes: [FuenteSugeridos, () => Promise<Candidatos>][] = [
+      ['elasticsearch', () => this.desdeElastic(texto)],
+      ['significado', soloIds(() => this.porSignificado(texto))],
+      ['mas vendido', soloIds(() => this.masVendidosIds())],
+      ['mas resenados', soloIds(() => this.masResenadosIds())],
     ];
     for (const [nombre, fuente] of fuentes) {
       try {
-        const ids = await fuente();
-        const sugeridos = await this.tarjetas(ids);
-        if (sugeridos.length > 0) {
-          return sugeridos;
+        const { ids, docs } = await fuente();
+        const productos = this.tarjetas(
+          ids,
+          docs ?? (await documentosDesdeCopia(ids)),
+        );
+        if (productos.length > 0) {
+          return { productos, desde: nombre };
         }
       } catch (error) {
         this.logger.warn(
@@ -69,7 +105,45 @@ export class SugeridosBusquedaService {
         );
       }
     }
-    return [];
+    return { productos: [], desde: null };
+  }
+
+  /**
+   * La fuente de Elasticsearch: los documentos del indice, en el orden de
+   * `consultaSugeridos`. Con Elasticsearch caido o en la pausa de su
+   * cortacircuitos falla al momento y se pasa a la siguiente fuente.
+   */
+  private async desdeElastic(texto: string): Promise<Candidatos> {
+    const respuesta = await elasticClient.search<DocumentoCopia>(
+      {
+        index: INDICE,
+        // Muchos mas que los que se ensenan, por las copias de lote (`tarjetas`).
+        size: CUANTOS * 20,
+        _source: [
+          'nombre',
+          'descripcion',
+          'estado',
+          'categoria_nombre',
+          'precio_desde',
+          'precio_tienda',
+          'hay_descuento',
+          'stock_total',
+          'resenas_promedio',
+          'resenas_total',
+        ],
+        query: consultaSugeridos(texto),
+      },
+      OPCIONES_BUSQUEDA,
+    );
+    const ids: number[] = [];
+    const docs = new Map<number, DocumentoCopia>();
+    for (const hit of respuesta.hits.hits) {
+      if (hit._id != null && hit._source != null) {
+        ids.push(Number(hit._id));
+        docs.set(Number(hit._id), hit._source);
+      }
+    }
+    return { ids, docs };
   }
 
   /** Los productos publicos mas cercanos por significado, sin umbral. */
@@ -89,9 +163,11 @@ export class SugeridosBusquedaService {
         LIMIT $2`,
       // Muchos mas que los que se ensenan: las copias de un lote generado
       // tienen la misma descripcion y el mismo vector, y salen todas juntas
-      // (`tarjetas` deja una por producto).
-      [aVectorPg(vector), CUANTOS * 6],
-      CUANTOS * 12,
+      // (`tarjetas` deja una por producto). Con 1000 productos de 102
+      // originales hay unas 10 copias por original, y 36 vecinos daban solo
+      // 4 sugeridos para asdffff (2026-10-20); con 240 salen los 6.
+      [aVectorPg(vector), CUANTOS * 40],
+      CUANTOS * 80,
     );
     return filas.map((fila) => Number(fila.id_producto_mongo));
   }
@@ -125,8 +201,10 @@ export class SugeridosBusquedaService {
    * 2026-10-20). De cada grupo queda el lugar del primero que aparece, con el
    * original si tambien esta.
    */
-  private async tarjetas(ids: number[]): Promise<ResultadoBusquedaProducto[]> {
-    const docs = await documentosDesdeCopia(ids);
+  private tarjetas(
+    ids: number[],
+    docs: Map<number, DocumentoCopia>,
+  ): ResultadoBusquedaProducto[] {
     const porNombre = new Map<string, ResultadoBusquedaProducto>();
     for (const id of ids) {
       const doc = docs.get(id);
@@ -164,3 +242,67 @@ export class SugeridosBusquedaService {
  * Un clon de un clon lleva las dos: "... L1-0493 M77-0002".
  */
 const MARCA_DE_LOTE = /(\s+[LM]\d+-\d{4})+$/;
+
+/**
+ * La consulta de los sugeridos en Elasticsearch, sobre los productos activos.
+ * El texto va en un `should` y no en un `must`, asi que todos los activos
+ * entran y el texto solo ordena.
+ *
+ *   - El texto, con `fuzziness: 2` para cualquier largo (la busqueda usa AUTO,
+ *     que en una palabra de 3 a 5 letras deja 1) y tambien contra el nombre de
+ *     la categoria. Pesa 10, asi que un parecido de lejos (zpatos, audifonoz)
+ *     queda siempre arriba de cualquier producto que no se parezca.
+ *   - Lo que el motor sabe de cada producto, sumado al puntaje: cuantas
+ *     resenas tiene (log1p, para que 47 no aplaste a 12), su nota y si tiene
+ *     existencias. Con un texto que no se parece a nada (asdffff, qwerty) es
+ *     lo unico que ordena, y salen los mejor valorados que se pueden comprar.
+ *
+ * Medido el 2026-10-20 con los 1000 productos de la PC de Jose David: 7 a
+ * 23 ms.
+ */
+export function consultaSugeridos(texto: string) {
+  return {
+    function_score: {
+      query: {
+        bool: {
+          filter: [{ term: { estado: 'activo' } }],
+          should: [
+            {
+              multi_match: {
+                query: texto,
+                fields: [
+                  'nombre^3',
+                  'descripcion',
+                  'variantes',
+                  'categoria_nombre',
+                ],
+                fuzziness: 2,
+                prefix_length: 0,
+                boost: 10,
+              },
+            },
+          ],
+        },
+      },
+      functions: [
+        {
+          field_value_factor: {
+            field: 'resenas_total',
+            modifier: 'log1p' as const,
+            missing: 0,
+          },
+        },
+        {
+          field_value_factor: {
+            field: 'resenas_promedio',
+            factor: 0.2,
+            missing: 0,
+          },
+        },
+        { filter: { range: { stock_total: { gt: 0 } } }, weight: 1 },
+      ],
+      score_mode: 'sum' as const,
+      boost_mode: 'sum' as const,
+    },
+  };
+}

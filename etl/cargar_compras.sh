@@ -109,9 +109,11 @@ copiar() { # tabla, motivo, etiqueta
 
     # La cuenta que dice si quedo cuadrado: lo de PostgreSQL contra lo de
     # ClickHouse, por pares. Un ETL que copia y no cuenta es un ETL que se cree.
+    # Sin las ventas del vendedor de la demo de concurrencia, que
+    # extraer_compras.sql no copia (2026-10-20).
     local en_pg en_ch
     en_pg="$(docker exec mesh-postgres psql -U "$DB_USER" -d "$DB_NAME" -qtAX -c \
-        "SELECT count(*) FROM stock_movimiento sm JOIN motivo_movimiento mm USING (id_motivo_movimiento) WHERE mm.motivo_nombre = '$motivo' AND sm.id_pedido IS NOT NULL" | tr -d '\r')"
+        "SELECT count(*) FROM stock_movimiento sm JOIN motivo_movimiento mm USING (id_motivo_movimiento) JOIN oferta o ON o.id_oferta = sm.id_oferta WHERE mm.motivo_nombre = '$motivo' AND sm.id_pedido IS NOT NULL AND o.id_usuario NOT IN (SELECT id_usuario FROM usuarios WHERE correo_electronico = 'vendconcurrencia@mesh.com')" | tr -d '\r')"
     en_ch="$(ch "SELECT count() FROM $tabla WHERE lote = 'real'")"
 
     printf '  %-20s %s: %s nueva(s). PostgreSQL %s, ClickHouse (real) %s' "$tabla" "$etiqueta" "$filas" "$en_pg" "$en_ch"

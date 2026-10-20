@@ -78,11 +78,11 @@ export class BuscadorProductosService {
     limite: string | undefined,
   ): Promise<RespuestaBusquedaProductos> {
     const respuesta = await this.ejecutar(nombre, limite, true);
-    const sugeridos =
+    const { productos: sugeridos, desde: sugeridos_desde } =
       respuesta.resultados.length === 0
         ? await this.sugeridos.sugerir((nombre ?? '').trim())
-        : [];
-    return { ...respuesta, sugeridos };
+        : { productos: [], desde: null };
+    return { ...respuesta, sugeridos, sugeridos_desde };
   }
 
   /**
@@ -106,7 +106,9 @@ export class BuscadorProductosService {
     nombre: string | undefined,
     limite: string | undefined,
     soloActivos: boolean,
-  ): Promise<Omit<RespuestaBusquedaProductos, 'sugeridos'>> {
+  ): Promise<
+    Omit<RespuestaBusquedaProductos, 'sugeridos' | 'sugeridos_desde'>
+  > {
     const texto = (nombre ?? '').trim();
     if (!texto) {
       throw new ErrorValidacion('Escribe el nombre del producto que buscas');

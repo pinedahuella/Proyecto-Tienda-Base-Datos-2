@@ -50,6 +50,23 @@ _remoto_activar() {
     # Las pruebas que tumban una base a proposito (grafo_compras,
     # ofertas_y_seguimientos) se saltan esa parte: la base es de la otra PC.
     export SIN_CAIDA=1
+    # Las contrasenas de la otra PC (las de inspeccion y operador de Redis son
+    # otras alla), si estan en remoto/.env.remoto, que no se sube. Pisan al
+    # .env de la raiz; desactivar.sh las quita.
+    if [ -f "$_remoto_dir/.env.remoto" ]; then
+        local linea nombre
+        MESH_REMOTO_VARIABLES=""
+        while IFS= read -r linea || [ -n "$linea" ]; do
+            linea="${linea%$'\r'}"
+            if [[ "$linea" =~ ^[[:space:]]*([A-Z_][A-Z0-9_]*)[[:space:]]*=(.*)$ ]]; then
+                nombre="${BASH_REMATCH[1]}"
+                export "$nombre=${BASH_REMATCH[2]}"
+                MESH_REMOTO_VARIABLES="$MESH_REMOTO_VARIABLES $nombre"
+            fi
+        done < "$_remoto_dir/.env.remoto"
+        export MESH_REMOTO_VARIABLES
+        echo "Contrasenas de la otra PC cargadas de remoto/.env.remoto."
+    fi
     echo "Modo remoto: bases en $_remoto_ip, tunel en el pid $pid, docker = remoto/bin/docker."
     if [ ! -x "$_remoto_dir/herramientas/bin/mongosh.exe" ]; then
         echo "Falta mongosh para las pruebas de Mongo: bash remoto/instalar.sh (una vez)."

@@ -13,9 +13,13 @@
 #   docker cp <origen> <destino>       uno de los dos "contenedor:/ruta"
 #   docker ps / docker inspect         como si los seis estuvieran arriba
 #   docker compose ... up -d ...       no hace nada: alla ya estan arriba
-# Lo que no: parar, arrancar o reiniciar un contenedor de la otra PC. Sale con
-# 1 y lo dice; las pruebas que lo hacen (la caida de una base) son de la base
-# local.
+#   docker info / docker volume create no hacen nada y salen con 0, para que
+#                                      arrancar.ps1 no intente abrir Docker
+#                                      Desktop aqui (2026-10-20)
+# Lo que no: parar, arrancar o reiniciar un contenedor de la otra PC, ni borrar
+# sus volumenes (compose down/rm/stop, volume rm, rm, run). Sale con 1 y lo
+# dice; las pruebas que lo hacen (la caida de una base) son de la base local, y
+# rehacer una base desde cero se hace en la PC que la tiene.
 
 source "$(dirname "$0")/../comun.sh"
 BIN="$REMOTO/bin"
@@ -86,6 +90,9 @@ case "$cmd" in
         if [[ "$destino" == *:* && "$destino" != [A-Za-z]:* ]]; then
             local_destino="$(ruta_local "${destino#*:}")"
             mkdir -p "$(dirname "$local_destino")"
+            # El /tmp de los contenedores es el de Git Bash, que es el %TEMP% de
+            # Windows: copiar de %TEMP% a /tmp es el mismo archivo, y ya esta ahi.
+            [ "$origen" -ef "$local_destino" ] && exit 0
             cp -r "$origen" "$local_destino"
         elif [[ "$origen" == *:* && "$origen" != [A-Za-z]:* ]]; then
             cp -r "$(ruta_local "${origen#*:}")" "$destino"
@@ -132,8 +139,33 @@ case "$cmd" in
         ;;
 
     compose)
-        # Alla ya estan arriba; up, ps o lo que sea no hace nada aqui.
+        # Alla ya estan arriba: up y ps no hacen nada aqui. Lo que para o borra
+        # (down -v, rm, stop) se niega: con un 0 aqui, arrancar.ps1 -Reiniciar
+        # creeria que vacio las bases y seguiria sembrando encima.
+        for a in "$@"; do
+            case "$a" in
+                down|rm|stop|restart|kill|pause)
+                    echo "docker falso: no se puede hacer \"docker compose $a\" con las bases de la otra PC; eso se hace alla" >&2
+                    exit 1 ;;
+            esac
+        done
         exit 0
+        ;;
+
+    info)
+        echo "docker falso: modo remoto, bases en ${MESH_REMOTO:-la otra PC}"
+        exit 0
+        ;;
+
+    volume)
+        if [ "${1:-}" = "create" ]; then exit 0; fi
+        echo "docker falso: no se puede hacer \"docker volume ${1:-}\" con las bases de la otra PC; eso se hace alla" >&2
+        exit 1
+        ;;
+
+    logs)
+        echo "docker falso: el registro de los contenedores esta en la otra PC (${MESH_REMOTO:-}), docker logs se mira alla" >&2
+        exit 1
         ;;
 
     start|stop|restart|kill|pause|unpause)

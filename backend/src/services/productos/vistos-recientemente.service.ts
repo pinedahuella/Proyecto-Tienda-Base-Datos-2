@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { clickhouse } from '../../database/clickhouse';
+import { clickhouse, limiteDeTienda } from '../../database/clickhouse';
 import { productosPorIds } from '../../helpers/catalogo-respaldo';
 import { manejarErrorClickHouse } from '../../helpers/manejar-error-clickhouse';
 import { manejarErrorConexionMongo } from '../../helpers/manejar-error-mongo';
@@ -75,6 +75,7 @@ export class VistosRecientementeService {
                  LIMIT {limite:UInt32}`,
         query_params: { usuario, sesion, diasHistorial, limite },
         format: 'JSONEachRow',
+        abort_signal: limiteDeTienda(),
       });
       filas = await resultado.json<FilaVistoRecientemente>();
     } catch (error) {

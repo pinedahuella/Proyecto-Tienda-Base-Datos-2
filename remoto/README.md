@@ -121,8 +121,31 @@ de escuchar y corta las conexiones (como un `docker stop`); **congelada** acepta
 no contesta (la red cortada, lo que se vio el 19-10 con la PC de Jose David). El
 destino es el `DB_HOST` de `backend/.env`, asi que sirve igual con el Docker de
 aqui. Lo mismo esta en el panel de comandos, grupo Caida de una base, y
-`node pruebas/caidas.mjs [--congeladas]` lo recorre solo (46 OK en las dos formas
+`node pruebas/caidas.mjs [--congeladas]` lo recorre solo (47 OK en las dos formas
 el 20-10). Lo que pasa con cada base: `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`.
+
+## arrancar.ps1 y el panel en remoto (desde el 2026-10-20)
+
+`arrancar.ps1` corre entero contra las bases de la otra PC, igual que alla:
+migraciones, catalogo en MongoDB, copia del catalogo, ClickHouse, vectores,
+indices de Elasticsearch y grafo. El docker falso hace sus `docker exec`;
+`compose up`, `info` y `volume create` no hacen nada. Asi se siembran y se
+borran productos desde esta PC:
+
+```powershell
+. .\remoto\activar.ps1
+.\arrancar.ps1 -Productos 5               # o -ProductosMongo 5, -Borrar todos -Semilla 2, -Etl
+. .\remoto\desactivar.ps1
+```
+
+El panel de comandos (cuenta desarrollador) hace lo mismo solo: activa el modo
+remoto, corre el comando y lo desactiva. Probado el 20-10 con 5 y con 3
+productos, generados y borrados, en PostgreSQL, MongoDB y el buscador.
+
+Se niegan `-Reiniciar` y `-ReiniciarMongo` (en el panel, rehacer MongoDB y
+borrar todo): borran volumenes de Docker, y eso se hace en la PC que tiene las
+bases. El docker falso tambien niega `compose down/rm/stop`, `volume rm`, `rm`
+y `run`.
 
 ## Lo que no se puede en remoto
 
@@ -134,8 +157,10 @@ el 20-10). Lo que pasa con cada base: `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`.
   Esas partes son de la base local.
 - **Las contrasenas que alla son otras.** El arranque de la otra PC genero sus
   propias contrasenas de los usuarios `inspeccion` y `operador` de Redis, y
-  `redis/prueba_acceso.sh` da FALLA en todo lo de esos dos usuarios. Se pasan
-  por el ambiente antes de activar (el `.env` de aqui no las pisa):
+  `redis/prueba_acceso.sh` da FALLA en todo lo de esos dos usuarios. Van en
+  `remoto/.env.remoto` (mismo formato que el `.env`, no se sube): `activar.sh`
+  lo carga y pisa al `.env` de la raiz, y `desactivar.sh` lo quita. Sin ese
+  archivo se pueden pasar por el ambiente antes de activar:
 
   ```bash
   export REDIS_INSPECCION_PASSWORD=... REDIS_OPERADOR_PASSWORD=...

@@ -48,6 +48,15 @@ const cliente = createClient({
  */
 export const cortacircuitosClickHouse = new Cortacircuitos('ClickHouse');
 
+/**
+ * Para una consulta que la tienda pinta mientras el comprador espera (viste
+ * hace poco): 3 s y no los 8 s de `request_timeout`, como OPCIONES_BUSQUEDA de
+ * elastic.ts. Con ClickHouse congelado la primera tardaba 8 s (medido el
+ * 20-10). Las consultas de los paneles y los workers siguen con 8 s. Una
+ * funcion porque cada consulta necesita su propia senal.
+ */
+export const limiteDeTienda = () => AbortSignal.timeout(3000);
+
 const CON_CORTACIRCUITOS = new Set<PropertyKey>([
   'query',
   'insert',

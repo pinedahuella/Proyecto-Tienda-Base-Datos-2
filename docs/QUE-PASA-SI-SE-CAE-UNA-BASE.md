@@ -77,7 +77,7 @@ node pruebas/caidas.mjs                 las seis, apagadas
 node pruebas/caidas.mjs --congeladas    las seis, congeladas
 ```
 
-El 20 de octubre dio 46 comprobaciones bien y ninguna mal en las dos formas,
+El 20 de octubre dio 47 comprobaciones bien y ninguna mal en las dos formas,
 con las bases en la computadora de Jose David.
 
 ## Como se mira cada cosa
@@ -181,6 +181,10 @@ Que se midio.
   lo que tarda en rendirse la conexion, y las siguientes 70 milesimas. Al
   prenderla otra vez, a los 15 segundos las fichas volvieron a salir de MongoDB,
   sin reiniciar nada.
+- Congelada (la red cortada a mitad de camino), la primera ficha tardaba entre
+  9 y 15 segundos, porque la conexion ya abierta esperaba a que el driver notara
+  la caida. Desde el 20 de octubre la consulta del catalogo tiene su propio
+  limite de 3 segundos, y la primera ficha tarda entre 3.2 y 3.7 segundos.
 - Antes de la copia (19 de octubre, con MongoDB apagada en la otra computadora)
   se compro igual, la compra se hizo en menos de 2 segundos, y al volver MongoDB
   los cambios que esperaban en su cola llegaron solos en 20 segundos.
@@ -340,6 +344,9 @@ Que se midio el 19 y el 20 de octubre.
 
 - Lo mas vendido, lo mas visto y se compran juntos contestaron bien.
 - Viste hace poco y las tendencias del administrador contestaron 503.
+- Congelada, viste hace poco tardaba 8 segundos en avisar, el limite del
+  cliente de ClickHouse. Desde el 20 de octubre esa consulta tiene 3 segundos, y
+  avisa entre 3.0 y 3.5 segundos.
 - Se registro una vista de producto. La pagina recibio que estaba registrada,
   pero al volver ClickHouse esa vista no estaba.
 
@@ -420,9 +427,16 @@ con las bases.
 
 Tambien lo pidio el profesor. Si alguien busca algo sin sentido, como asdffff,
 la pagina no queda vacia. Dice que no encontro nada y debajo ofrece productos
-que pueden interesar. Primero los mas cercanos por significado (los vectores de
-los productos en PostgreSQL), y si eso no se puede, lo mas vendido, y si
-tampoco, los productos con mas resenas.
+que pueden interesar. Los elige Elasticsearch, con una segunda consulta mas
+tolerante que la de la busqueda (hasta dos letras distintas en cualquier
+palabra, y tambien contra el nombre de la categoria). Lo que se parece a lo
+escrito, aunque sea de lejos, sale primero, y si nada se parece, el mismo motor
+ordena los productos activos por resenas, nota y existencias. Siempre trae algo.
+
+Sin Elasticsearch los elige el backend. Primero los mas cercanos por
+significado (los vectores de los productos en PostgreSQL), y si eso no se
+puede, lo mas vendido, y si tampoco, los productos con mas resenas. La respuesta
+dice de donde salieron (`sugeridos_desde`).
 
 Esos productos van aparte de los resultados. La busqueda se sigue contando como
 sin resultados, y asi se guarda en ClickHouse, para que el reporte de busquedas
@@ -440,5 +454,5 @@ tienda no tiene.
   haciendo en cada ronda una compra de una unidad que despues se cancelo.
 - El 20 de octubre, con el interruptor, cada base apagada y congelada una por
   una, comparando cada respuesta con la que da la tienda con todo arriba, y con
-  pruebas/caidas.mjs, que dio 46 comprobaciones bien y ninguna mal en las dos
+  pruebas/caidas.mjs, que dio 47 comprobaciones bien y ninguna mal en las dos
   formas.

@@ -178,6 +178,22 @@ else
     exit 1
 fi
 
+# Desde la 030 la resena encola el producto en evento_producto, y el worker del
+# backend le pone la nota en Mongo por su cuenta, a veces antes de que esto
+# mire (en remoto dio 9 OK y 1 FALLA, 2026-10-20). Para medir la etapa del ETL
+# y no al worker: se espera a que el worker termine con ese producto (hasta
+# 20 s; sin backend no hay quien lo vacie y se sigue igual) y se devuelve el
+# documento a cero a mano.
+for _ in $(seq 1 20); do
+    PENDIENTE=$(sql "SELECT count(*) FROM evento_producto
+                      WHERE id_producto_mongo = $PRODUCTO AND procesado_en IS NULL")
+    [ "$PENDIENTE" = "0" ] && break
+    sleep 1
+done
+mongo > /dev/null <<JS
+db.productos.updateOne({ _id: $PRODUCTO }, { \$set: { resenas_total: 0, resenas_promedio: 0 } });
+JS
+
 # Antes de correr nada, el documento tiene que seguir en cero. Si ya dijera 5,
 # lo que mide la siguiente comprobacion no seria la etapa nueva.
 ANTES=$(mongo <<JS

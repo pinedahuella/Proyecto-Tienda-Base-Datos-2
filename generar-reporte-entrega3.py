@@ -67,7 +67,7 @@ T_TABLA = Pt(10)
 T_FIJA = Pt(9)
 GRIS = RGBColor(0x44, 0x44, 0x44)
 
-FECHA = "Guatemala, jueves 8 de octubre del 2026"
+FECHA = "Guatemala, martes 20 de octubre del 2026"
 
 d = None
 MARGENES = None
@@ -531,6 +531,7 @@ def main():
 
     d.core_properties.title = "Reporte Tercera Entrega, Mesh"
     d.core_properties.author = "José Manuel González Corado, José David Navichoque Pineda, Juan Pablo Torres García"
+    d.core_properties.last_modified_by = "José Manuel González Corado"
     d.save(SALIDA)
 
     total_sub = sum(len(s["subsecciones"]) for s in secciones)

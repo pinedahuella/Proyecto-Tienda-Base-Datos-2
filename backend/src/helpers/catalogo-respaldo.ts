@@ -1,11 +1,12 @@
 import { Logger } from '@nestjs/common';
-import { Decimal128 } from 'mongodb';
+import { Decimal128, MongoNetworkError } from 'mongodb';
 import { cortacircuitosMongo, mongoClient, mongoDb } from '../database/mongo';
 import { pool } from '../database/postgres';
 import { CategoriaValida } from '../models/categoria';
 import { ESTADO_PRODUCTO_VISIBLE } from '../models/estado-producto';
 import { Producto, ProductoVariante } from '../models/producto';
 import { CORREO_TIENDA } from './constantes';
+import { conLimite } from './cortacircuitos';
 import { ErrorConexion } from './errores';
 import { esFalloDeConexion } from './manejar-error-db';
 import { esCaidaDeMongo } from './manejar-error-mongo';
@@ -34,7 +35,10 @@ import { expresionPrecioFinal } from './precio-descuento';
  * inactiva de mas.
  *
  * Con Mongo caido, cada consulta tarda 3 s en rendirse (`database/mongo.ts`).
- * Para no cobrar esos 3 s en cada peticion, despues de una caida se va directo
+ * Con Mongo congelado y la conexion ya abierta, el driver no tiene ese limite
+ * (espera el socketTimeoutMS de 20 s o a que su latido note la caida: 9 a 15 s
+ * medidos el 20-10), asi que la consulta del respaldo lleva sus propios 3 s
+ * (`LIMITE_MONGO_MS`). Para no cobrar esos 3 s en cada peticion, despues de una caida se va directo
  * a PostgreSQL durante 15 s (el cortacircuitos de Mongo, `cortacircuitosMongo`),
  * y despues se vuelve a probar Mongo.
  */
@@ -43,6 +47,13 @@ const logger = new Logger('CatalogoRespaldo');
 
 /** Si la ultima vez se uso el respaldo: para avisar en el log solo al entrar y al salir. */
 let enRespaldo = false;
+
+/**
+ * Lo que espera el catalogo a Mongo antes de ir a la copia. Una consulta del
+ * catalogo con Mongo arriba tarda menos de 0.1 s, tambien desde la PC de Jose
+ * David por Tailscale.
+ */
+const LIMITE_MONGO_MS = 3000;
 
 /** Un producto armado por el respaldo. */
 export type ProductoRespaldo = Producto & { desde_respaldo?: true };
@@ -64,10 +75,19 @@ export async function conRespaldoDeMongo<T>(
 ): Promise<T> {
   if (!cortacircuitosMongo.enPausa()) {
     try {
-      if (enRespaldo) {
-        await mongoClient.connect();
-      }
-      const resultado = await deMongo();
+      const resultado = await conLimite(
+        (async () => {
+          if (enRespaldo) {
+            await mongoClient.connect();
+          }
+          return deMongo();
+        })(),
+        LIMITE_MONGO_MS,
+        () =>
+          new MongoNetworkError(
+            `MongoDB no respondio en ${LIMITE_MONGO_MS / 1000} s`,
+          ),
+      );
       cortacircuitosMongo.registrarRespuesta();
       if (enRespaldo) {
         enRespaldo = false;

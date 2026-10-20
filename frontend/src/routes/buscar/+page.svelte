@@ -255,11 +255,18 @@
 		goto(url, { keepFocus: true, noScroll: true, replaceState: true });
 	}
 
-	/** Como se lee el conteo. Sin "resultado(s)" ni parentesis. */
+	/**
+	 * Como se lee el conteo. Sin "resultado(s)" ni parentesis. Con el panel de
+	 * filtros a la vista cuenta lo mismo que el panel, tambien con la lista
+	 * hibrida: con laptop decia 50 arriba y los filtros sumaban 109 (visto el
+	 * 2026-10-20). Solo si la hibrida trae mas que la facetada, por lo que
+	 * suma el significado, cuenta la lista.
+	 */
 	let cuantos = $derived.by(() => {
-		const n = esHibrida ? resultados.length : facetas ? total : resultados.length;
+		const conPanel = facetas !== null && total >= resultados.length;
+		const n = conPanel ? total : resultados.length;
 		const texto = n === 1 ? '1 producto encontrado' : `${n} productos encontrados`;
-		return !esHibrida && facetas && total > resultados.length
+		return conPanel && total > resultados.length
 			? `${texto}, se ven los ${resultados.length} mas parecidos`
 			: texto;
 	});

@@ -38,7 +38,8 @@ import { Producto } from '../../models/producto';
  *   - `compra_producto`, `devolucion_producto` -- CONTEO NORMAL (`sum(cantidad)`,
  *     igual que `MasVendidosSyncService`): completar una compra no es
  *     trivial ni repetible sin friccion, asi que cada unidad vendida o
- *     devuelta cuenta por lo que es, sin dividir por persona.
+ *     devuelta cuenta por lo que es, sin dividir por persona. Las compras
+ *     de un pedido cancelado no cuentan (2026-10-20).
  *   - `busqueda_realizada`, `busqueda_clic` -- sesiones distintas, pero
  *     agrupado por `termino`, no por producto: la pregunta es que tan
  *     buscado (o cliqueado) esta un termino, no un producto especifico.
@@ -258,6 +259,15 @@ export class AdminTendenciasService {
     const dias = validarDiasEvento(query.dias);
     const limite = validarLimiteEvento(query.limite);
     const direccion = validarDireccionEvento(query.direccion);
+    // Una venta cancelada no es una venta: sin esto, con 50 pedidos del 17-10
+    // todos cancelados, el mas vendido y el mas devuelto eran el mismo libro
+    // con el mismo numero (visto el 2026-10-20). Cancelar devuelve el pedido
+    // entero, asi que basta con sacar el pedido, como en combos-sync.service.ts
+    // y en Reportes.
+    const sinCancelados =
+      tabla === 'compra_producto'
+        ? 'AND id_pedido NOT IN (SELECT id_pedido FROM devolucion_producto)'
+        : '';
 
     try {
       const resultado = await clickhouse.query({
@@ -265,6 +275,7 @@ export class AdminTendenciasService {
                   FROM ${tabla}
                  WHERE fecha >= now() - INTERVAL {dias:UInt32} DAY
                    AND lote = 'real'
+                   ${sinCancelados}
                  GROUP BY ${columnaAgrupar}
                  ORDER BY total ${direccion}
                  LIMIT {limite:UInt32}`,

@@ -486,13 +486,14 @@ function validarCampo(campo, crudo) {
 
 // El modo remoto (remoto/README.md): con backend/.env apuntando a otra PC (las bases
 // en la de Jose David, por Tailscale) no hay contenedores aqui y el docker de verdad
-// no sirve. Las demos corren con el modo remoto puesto (remoto/activar.ps1, que
-// levanta el tunel y pone el docker falso) y se quita al terminar. Lo que arranca o
-// rehace bases, y las demos que usan los contenedores de Tor, se niegan: eso se hace
-// en la PC que tiene las bases.
+// no sirve. Los comandos corren con el modo remoto puesto (remoto/activar.ps1, que
+// levanta el tunel y pone el docker falso) y se quita al terminar. Asi corren
+// tambien arrancar.ps1 y lo que siembra o rehace productos y el grafo (desde el
+// 2026-10-20, el docker falso hace sus docker exec contra las bases de alla). Se
+// niegan solo los que borran volumenes de Docker (rehacer MongoDB, borrar todo) y
+// las demos que usan los contenedores de Tor: eso se hace en la PC que tiene las bases.
 const SOLO_CON_BASES_AQUI = new Set([
-  'todo', 'bases', 'productos', 'borrar-lote', 'productos-mongo', 'borrar-mongo', 'etl',
-  'reiniciar-grafo', 'reiniciar-mongo', 'reiniciar-todo',
+  'reiniciar-mongo', 'reiniciar-todo',
   'entrar-pais', 'entrar-paises', 'entrar-pais-estado', 'entrar-pais-cerrar',
   'demo-pais-precalentar', 'demo-pais', 'demo-pais-limpiar',
 ]);

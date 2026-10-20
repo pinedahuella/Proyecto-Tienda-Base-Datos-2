@@ -1,4 +1,4 @@
-import { ResultadoBusquedaProducto } from './buscar-productos';
+import { FuenteSugeridos, ResultadoBusquedaProducto } from './buscar-productos';
 
 /**
  * Query params esperados en GET /buscador/productos/facetado. Todos
@@ -47,4 +47,6 @@ export interface RespuestaFacetada {
    * casos.
    */
   sugeridos: ResultadoBusquedaProducto[];
+  /** De donde salieron los `sugeridos`, o `null` si no hay. */
+  sugeridos_desde: FuenteSugeridos | null;
 }

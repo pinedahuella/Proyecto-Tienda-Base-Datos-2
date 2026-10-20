@@ -101,7 +101,7 @@ export class BuscadorFacetadoService {
     const elegidos = leerFiltrosElegidos(query);
     const limite = this.aLimite(query.limite);
 
-    let respuesta: Omit<RespuestaFacetada, 'sugeridos'>;
+    let respuesta: Omit<RespuestaFacetada, 'sugeridos' | 'sugeridos_desde'>;
     try {
       respuesta = await conRespaldoDeElastic(
         () => this.desdeElastic(texto, elegidos, limite),
@@ -129,18 +129,18 @@ export class BuscadorFacetadoService {
       elegidos.precios.length === 0 &&
       elegidos.calificacionMinima == null &&
       !elegidos.disponible;
-    const sugeridos =
+    const { productos: sugeridos, desde: sugeridos_desde } =
       respuesta.total === 0 && texto !== '' && sinFiltros
         ? await this.sugeridos.sugerir(texto)
-        : [];
-    return { ...respuesta, sugeridos };
+        : { productos: [], desde: null };
+    return { ...respuesta, sugeridos, sugeridos_desde };
   }
 
   private async desdeElastic(
     texto: string,
     elegidos: FiltrosElegidos,
     limite: number,
-  ): Promise<Omit<RespuestaFacetada, 'sugeridos'>> {
+  ): Promise<Omit<RespuestaFacetada, 'sugeridos' | 'sugeridos_desde'>> {
     const respuesta = await elasticClient.search<DocumentoIndice>(
       {
         index: INDICE,
@@ -287,16 +287,23 @@ export class BuscadorFacetadoService {
         cantidad: bucket.doc_count,
       }),
     );
-    const aRango = (buckets: Record<string, BucketRango>): FacetaRango[] =>
-      Object.entries(buckets).map(([clave, bucket]) => ({
-        clave,
-        cantidad: bucket.doc_count,
+    // En el orden de RANGOS_PRECIO y RANGOS_NOTA y no en el de la respuesta:
+    // Elasticsearch ordena los tramos por `from`, y la calificacion salia
+    // 3 o mas antes que 4 o mas, al reves que en el respaldo sin Elasticsearch
+    // (buscador-respaldo.ts, visto el 2026-10-20).
+    const aRango = (
+      rangos: { key: string }[],
+      buckets: Record<string, BucketRango>,
+    ): FacetaRango[] =>
+      rangos.map((r) => ({
+        clave: r.key,
+        cantidad: buckets[r.key]?.doc_count ?? 0,
       }));
 
     return {
       categoria,
-      precio: aRango(aggregations.precio.buckets),
-      calificacion: aRango(aggregations.calificacion.buckets),
+      precio: aRango(RANGOS_PRECIO, aggregations.precio.buckets),
+      calificacion: aRango(RANGOS_NOTA, aggregations.calificacion.buckets),
       disponible: aggregations.disponible.doc_count,
     };
   }

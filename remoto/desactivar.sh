@@ -11,5 +11,9 @@ fi
 if [ -n "${MESH_REMOTO_PATH_ANTES:-}" ]; then
     export PATH="$MESH_REMOTO_PATH_ANTES"
 fi
-unset MESH_REMOTO MESH_REMOTO_PATH_ANTES SIN_CAIDA _remoto_dir
+# Las contrasenas de la otra PC que cargo activar.sh (remoto/.env.remoto).
+if [ -n "${MESH_REMOTO_VARIABLES:-}" ]; then
+    unset $MESH_REMOTO_VARIABLES
+fi
+unset MESH_REMOTO MESH_REMOTO_PATH_ANTES MESH_REMOTO_VARIABLES SIN_CAIDA _remoto_dir
 echo "Fuera del modo remoto: docker es otra vez el de verdad."

@@ -23,6 +23,7 @@ Como funciona, en corto
 
 Cada comprobacion tiene su control. Sale con 1 si algo falla.
 """
+import re
 import json
 import os
 import sys
@@ -123,6 +124,22 @@ def facetas(resp):
     }
 
 
+def rangos_del_backend():
+    """RANGOS_PRECIO tal como lo tiene el backend, para ver que este archivo no se quedo atras."""
+    ruta = os.path.join(os.path.dirname(__file__), '..', '..', 'backend', 'src', 'helpers', 'facetas-buscador.ts')
+    with open(ruta, encoding='utf-8') as f:
+        bloque = re.search(r'RANGOS_PRECIO: RangoPrecio\[\] = \[(.*?)\];', f.read(), re.S).group(1)
+    rangos = []
+    for linea in re.findall(r'\{([^}]*)\}', bloque):
+        r = {'key': re.search(r"key: '([^']+)'", linea).group(1)}
+        for lado in ('from', 'to'):
+            m = re.search(lado + r': (\d+)', linea)
+            if m:
+                r[lado] = int(m.group(1))
+        rangos.append(r)
+    return rangos
+
+
 def total(resp):
     return resp['hits']['total']['value']
 
@@ -156,6 +173,15 @@ def main():
     revisar(sum(v['cantidad'] for v in f0['categoria'].values()) == t0,
             'las categorias suman el total, cada producto esta en una sola')
     revisar(sum(f0['precio'].values()) == t0, 'los rangos de precio suman el total, no se pisan ni dejan huecos')
+    # La suma no ve un hueco por el que no pasa ningun resultado (500-1000
+    # movido a 600-1000 seguia sumando 109 con laptop, 2026-10-20): los tramos
+    # tienen que tocarse uno con otro, del primero sin piso al ultimo sin techo.
+    tramos = sorted(RANGOS_PRECIO, key=lambda r: r.get('from', float('-inf')))
+    revisar('from' not in tramos[0] and 'to' not in tramos[-1]
+            and all(a.get('to') == b.get('from') for a, b in zip(tramos, tramos[1:])),
+            'los tramos de precio se tocan, sin huecos entre ellos')
+    revisar(RANGOS_PRECIO == rangos_del_backend(),
+            'los tramos de precio son los de backend/src/helpers/facetas-buscador.ts')
     revisar(f0['calificacion']['4-o-mas'] <= f0['calificacion']['3-o-mas'], '4 o mas cabe dentro de 3 o mas')
     revisar(f0['disponible'] <= t0, 'con existencias no pasa del total')
 

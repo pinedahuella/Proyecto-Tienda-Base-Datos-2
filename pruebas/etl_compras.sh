@@ -82,8 +82,9 @@ if [ "$(ch "SELECT count() FROM devolucion_producto WHERE lote = 'real' AND id_p
     PEDIDO_DEVOLUCION=$(ch "SELECT toString(min(id_pedido)) FROM devolucion_producto WHERE lote = 'real' AND ip = toIPv6('::')")
 fi
 
-# Lo que PostgreSQL tiene, por motivo.
-PG_LINEAS="FROM stock_movimiento sm JOIN motivo_movimiento mm USING (id_motivo_movimiento) JOIN oferta o ON o.id_oferta = sm.id_oferta WHERE sm.id_pedido IS NOT NULL AND mm.motivo_nombre ="
+# Lo que PostgreSQL tiene, por motivo. Sin las ventas del vendedor de la demo
+# de concurrencia, que el ETL no copia (ver etl/extraer_compras.sql).
+PG_LINEAS="FROM stock_movimiento sm JOIN motivo_movimiento mm USING (id_motivo_movimiento) JOIN oferta o ON o.id_oferta = sm.id_oferta WHERE sm.id_pedido IS NOT NULL AND o.id_usuario NOT IN (SELECT id_usuario FROM usuarios WHERE correo_electronico = 'vendconcurrencia@mesh.com') AND mm.motivo_nombre ="
 
 # ============================================================
 titulo "0. Que esta lo necesario"

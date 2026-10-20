@@ -127,6 +127,9 @@ const CASOS = {
       const locura = await pedir('/buscador/productos/facetado?nombre=asdffff');
       revisar(locura.codigo === 200 && locura.p?.total === 0 && locura.p?.sugeridos?.length > 0,
         '"asdffff" no encuentra nada pero trae sugeridos', resumen(locura));
+      // Con Elasticsearch arriba los elige el; sin el, el backend por fuera.
+      revisar(locura.p?.sugeridos_desde != null && locura.p.sugeridos_desde !== 'elasticsearch',
+        `y sin Elasticsearch salen de otra fuente (${locura.p?.sugeridos_desde})`, resumen(locura));
       const hibrida = await pedir('/buscador/productos/hibrida?q=laptop');
       revisar(hibrida.codigo === 200 && largo(hibrida.p) > 0, 'la busqueda hibrida sigue', resumen(hibrida));
       const sugerencias = await pedir('/buscador/productos/sugerencias?prefijo=lap');

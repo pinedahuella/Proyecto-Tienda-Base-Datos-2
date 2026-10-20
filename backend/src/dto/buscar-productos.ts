@@ -28,7 +28,16 @@ export interface RespuestaBusquedaProductos {
    * como sin resultados. Vacio si hubo resultados.
    */
   sugeridos: ResultadoBusquedaProducto[];
+  /** De donde salieron los `sugeridos`, o `null` si no hay. */
+  sugeridos_desde: FuenteSugeridos | null;
 }
+
+/**
+ * De donde salen los sugeridos (`SugeridosBusquedaService`): de Elasticsearch
+ * mientras responda, y sin el, de las otras tres fuentes en ese orden.
+ */
+export type FuenteSugeridos =
+  'elasticsearch' | 'significado' | 'mas vendido' | 'mas resenados';
 
 /**
  * Un resultado de busqueda: el RESUMEN que guarda el indice de Elasticsearch

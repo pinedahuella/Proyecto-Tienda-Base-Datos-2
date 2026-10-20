@@ -179,7 +179,9 @@ export class MasVendidosSyncService implements OnApplicationBootstrap {
   }
 
   /**
-   * Agrega `compra_producto` de los ultimos `cantidad` `unidad` hacia atras.
+   * Agrega `compra_producto` de los ultimos `cantidad` `unidad` hacia atras,
+   * sin los pedidos cancelados (los que tienen fila en `devolucion_producto`,
+   * 2026-10-20), como `CombosSyncService`.
    * `unidad` nunca sale del cliente -- son las dos constantes literales que
    * llama `recalcular()` -- asi que interpolarla en el `INTERVAL` es segura,
    * mismo criterio que `direccion` en `AdminTendenciasService.consultarRanking`.
@@ -193,6 +195,7 @@ export class MasVendidosSyncService implements OnApplicationBootstrap {
                 FROM compra_producto
                WHERE fecha >= now() - INTERVAL {cantidad:UInt32} ${unidad}
                  AND lote = 'real'
+                 AND id_pedido NOT IN (SELECT id_pedido FROM devolucion_producto)
                GROUP BY id_producto
                ORDER BY total DESC
                LIMIT {tope:UInt32}`,

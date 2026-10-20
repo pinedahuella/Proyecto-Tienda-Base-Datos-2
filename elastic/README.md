@@ -140,14 +140,18 @@ Sin Elasticsearch, el backend hace la misma busqueda con los mismos filtros y
 las mismas facetas sobre la copia del catalogo en PostgreSQL
 (`backend/src/helpers/buscador-respaldo.ts`, migracion 048). Y si una busqueda
 no encuentra nada, la respuesta trae `sugeridos` aparte, para que la pagina
-nunca quede vacia (ver `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`).
+nunca quede vacia. Los elige Elasticsearch con una segunda consulta mas
+tolerante, que ordena por parecido y, si nada se parece, por resenas, nota y
+existencias (`consultaSugeridos` en `backend/src/services/buscador/sugeridos.service.ts`).
+Sin Elasticsearch salen de los vectores en PostgreSQL o de lo mas vendido (ver
+`docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`).
 
 El autocompletado usa `nombre.escribiendo` con `bool_prefix`. La busqueda de
 hoy no lo usa, y con "lap" trae 507 productos de cualquier tipo. Con
 `autocompletar()` trae los que empiezan por "lap".
 
 ```bash
-python elastic/pruebas/facetas.py      # solo Elasticsearch arriba, 24 OK
+python elastic/pruebas/facetas.py      # solo Elasticsearch arriba, 26 OK
 ```
 
 Cada comprobacion tiene su control, y se probo rompiendo la consulta a

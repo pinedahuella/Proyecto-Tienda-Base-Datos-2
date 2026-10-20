@@ -281,12 +281,27 @@ $pidioLoteMongo = $PSBoundParameters.ContainsKey('ProductosMongo')
 $pidioVistas    = $PSBoundParameters.ContainsKey('Vistas')
 $pidioAlgunLote = $pidioLote -or $pidioLoteMongo -or $pidioVistas
 
-if ($pidioSemilla -and -not $pidioAlgunLote) {
+# Con -Borrar, -Semilla dice de que lote borrar (el panel de comandos lo
+# ofrece). Hasta el 2026-10-20 esta guardia lo rechazaba y no se podia.
+if ($pidioSemilla -and -not $pidioAlgunLote -and -not $PSBoundParameters.ContainsKey('Borrar')) {
     Error1 "-Semilla no dice nada sola, porque cuantos generar no se adivina."
     Error1 "Va con la bandera que dice cuantos, y son tres:"
     Error1 "   .\arrancar.ps1 -Productos 300 -Semilla $Semilla"
     Error1 "   .\arrancar.ps1 -ProductosMongo 200 -Semilla $Semilla"
     Error1 "   .\arrancar.ps1 -Vistas 5000 -Semilla $Semilla"
+    Error1 "   .\arrancar.ps1 -Borrar todos -Semilla $Semilla"
+    exit 1
+}
+
+# En el modo remoto (remoto\activar.ps1, las bases en la PC de Jose David) esto
+# corre igual que alla: el docker falso de remoto\bin hace los docker exec aqui
+# contra las bases de alla, y compose up no hace nada porque ya estan arriba.
+# Lo unico que no se puede es borrar sus volumenes, que es lo que hacen
+# -Reiniciar y -ReiniciarMongo. Se para aqui y no a la mitad, con la base ya
+# sin borrar y la semilla encima (2026-10-20).
+if ($env:MESH_REMOTO -and ($Reiniciar -or $ReiniciarMongo)) {
+    Error1 "Las bases estan en otra PC ($env:MESH_REMOTO). -Reiniciar y -ReiniciarMongo borran los volumenes de Docker, y eso se hace alla."
+    Aviso  "   En esa PC:  .\arrancar.ps1 -Reiniciar   (o -ReiniciarMongo)"
     exit 1
 }
 
@@ -2530,9 +2545,11 @@ if ($BorrarPedido -ne '') {
     }
 
     # cuantos = 0 quiere decir "todos" para el SQL. semilla = -1 quiere decir
-    # "de cualquier lote".
+    # "de cualquier lote". Se mira si se paso -Semilla y no su valor: vale 0 sin
+    # pasarla, y con 0 el borrado buscaba solo el lote L0 y no borraba nada
+    # (2026-10-20).
     $cuantosArg = if ($BorrarTodos) { 0 } else { $BorrarCuantos }
-    $semillaArg = if ($SemillaPedida -eq $null -or $SemillaPedida -eq '') { -1 } else { $SemillaPedida }
+    $semillaArg = if ($pidioSemilla) { $SemillaPedida } else { -1 }
 
     $salidaBorrado = docker exec mesh-postgres psql `
         -U $env_["DB_USER"] -d $env_["DB_NAME"] `
@@ -2565,10 +2582,15 @@ if ($BorrarPedido -ne '') {
         }
 
         # La segunda mitad: MongoDB.
+        # La lista se escribe con WriteAllText y no con ">": en PowerShell 5.1 ">"
+        # guarda en UTF-16, el fs.readFileSync(..., 'utf8') de abajo leia basura,
+        # ningun id coincidia y se quitaban de Mongo TODOS los productos de lote
+        # (903 el 2026-10-20). El paso del catalogo los volvia a cargar desde
+        # PostgreSQL, y por eso no se notaba.
         $listaHost = Join-Path $env:TEMP "mesh-vivos.txt"
-        docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX `
-            -c "SELECT id_producto FROM productos WHERE nombre ~ ' L[0-9]+-[0-9]{4}$'" `
-            > $listaHost 2>$null
+        $vivosPg = docker exec mesh-postgres psql -U $env_["DB_USER"] -d $env_["DB_NAME"] -qtAX `
+            -c "SELECT id_producto FROM productos WHERE nombre ~ ' L[0-9]+-[0-9]{4}$'" 2>$null | Out-String
+        [System.IO.File]::WriteAllText($listaHost, $vivosPg, (New-Object System.Text.UTF8Encoding($false)))
 
         if ($LASTEXITCODE -ne 0) {
             Error1 "No se pudo leer de PostgreSQL que productos generados quedan vivos."
@@ -2580,7 +2602,14 @@ if ($BorrarPedido -ne '') {
 
         $js = @'
 const texto = fs.readFileSync('/tmp/mesh-vivos.txt', 'utf8');
-const vivos = texto.split('\n').map(s => s.trim()).filter(s => s.length > 0).map(Number);
+const lineas = texto.split('\n').map(s => s.trim()).filter(s => s.length > 0);
+// Una lista que no se lee bien (otra codificacion, un error de psql) no puede
+// decidir que borrar: con ella todo parece sobrar.
+if (lineas.some(s => !/^[0-9]+$/.test(s))) {
+    print('mongo_lista_ilegible=' + JSON.stringify(lineas.slice(0, 3)));
+    quit(3);
+}
+const vivos = lineas.map(Number);
 const marcador = / L[0-9]+-[0-9]{4}$/;
 const sobran = db.productos.find({ nombre: marcador }, { _id: 1 })
                  .toArray().map(d => d._id)

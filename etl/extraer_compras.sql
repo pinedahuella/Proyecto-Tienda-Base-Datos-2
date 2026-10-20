@@ -85,4 +85,10 @@ JOIN pedido p             ON p.id_pedido = sm.id_pedido
 WHERE mm.motivo_nombre = :'motivo'
   AND sm.id_pedido IS NOT NULL
   AND (sm.id_pedido::text || ':' || sm.id_oferta::text) <> ALL (string_to_array(:'ya', ','))
+  -- Las ventas del vendedor de la demo de concurrencia no son ventas: las hace
+  -- pruebas/demo_concurrencia.mjs, que las cancela y las borra de ClickHouse al
+  -- terminar. Sin esto, el siguiente arranque las volvia a copiar como 'real' y
+  -- movian lo mas devuelto (2026-10-20). Solo ese vendedor: vendcarga lo usan
+  -- otras pruebas, y sus ventas si se copian.
+  AND o.id_usuario NOT IN (SELECT id_usuario FROM usuarios WHERE correo_electronico = 'vendconcurrencia@mesh.com')
 ORDER BY sm.id_stock_movimiento;
