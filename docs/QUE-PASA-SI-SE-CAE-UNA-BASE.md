@@ -88,6 +88,11 @@ Que se midio.
   llevaron contestaron 503 despues de 3 segundos.
 - El buscador, el carrito, lo mas vendido, lo mas visto, se compran juntos, el
   reporte de ventas y los casos de fraude contestaron bien.
+- La compra se cancelo con MongoDB todavia apagada, y el stock volvio a 6.
+- Al volver MongoDB, los cambios de productos que esperaban en su cola de
+  PostgreSQL llegaron solos en 20 segundos. Las entradas que habian quedado sin
+  pasar al buscador cuando Elasticsearch estaba apagada tambien se pasaron
+  solas, y no quedo ninguna pendiente.
 
 Que se pierde. El registro de seguridad de las entradas que se hicieron en ese
 rato. La persona entra igual, pero su entrada no queda anotada, y por eso los
@@ -272,3 +277,6 @@ Como verlo.
   con cada ronda de bases apagadas, anotando la respuesta, el tiempo y si traia
   datos, y haciendo en cada ronda una compra de una unidad que despues se
   cancelo. Las pantallas se fotografiaron con las bases apagadas.
+- Al final, con las seis prendidas otra vez, se llamo a las mismas 18 funciones
+  y todas contestaron bien. En ningun momento hubo que reiniciar el backend, se
+  reconecto solo a cada base.
