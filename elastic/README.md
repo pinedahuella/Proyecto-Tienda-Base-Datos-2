@@ -150,6 +150,14 @@ El autocompletado usa `nombre.escribiendo` con `bool_prefix`. La busqueda de
 hoy no lo usa, y con "lap" trae 507 productos de cualquier tipo. Con
 `autocompletar()` trae los que empiezan por "lap".
 
+Desde el 2026-10-20 la lista del buscador de la cabecera usa las dos juntas
+(`GET /buscador/productos?escribiendo=1`): el `bool_prefix` con peso 20 y la
+difusa de siempre, y un resultado por producto (sin sus copias de lote). Antes
+iba solo con la difusa y "lap" daba ocho veces "El camino de las nubes" (lo
+tomaba por "las") y "lapt" no daba nada. Sin Elasticsearch la copia de
+PostgreSQL hace lo mismo con la opcion `prefijo` de `buscarEnCopia`. La pagina
+/buscar no cambia. `node pruebas/buscador_escribiendo.mjs` da 20 OK.
+
 ```bash
 python elastic/pruebas/facetas.py      # solo Elasticsearch arriba, 26 OK
 ```

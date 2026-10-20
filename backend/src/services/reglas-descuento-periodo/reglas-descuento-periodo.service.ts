@@ -21,6 +21,7 @@ import {
   validarAnio,
   validarCascada,
   validarDia,
+  validarFechasPosibles,
   validarMes,
 } from '../../helpers/validaciones-regla-descuento-periodo';
 import { CrearReglaDescuentoPeriodoPeticion } from '../../dto/crear-regla-descuento-periodo';
@@ -166,6 +167,16 @@ export class ReglasDescuentoPeriodoService {
       datos.mes_fin != null ? validarMes(datos.mes_fin, 'mes_fin') : null;
     const anio = datos.anio != null ? validarAnio(datos.anio) : null;
     validarCascada({ mes_inicio: mesInicio, mes_fin: mesFin, anio });
+    validarFechasPosibles(
+      {
+        dia_inicio: diaInicio,
+        dia_fin: diaFin,
+        mes_inicio: mesInicio,
+        mes_fin: mesFin,
+        anio,
+      },
+      true,
+    );
     const esVentaRelampago = validarEsVentaRelampago(datos.es_venta_relampago);
     const porcentaje = validarPorcentajeDescuento(datos.porcentaje_descuento);
 
@@ -421,6 +432,26 @@ export class ReglasDescuentoPeriodoService {
         mes_fin: mesFinFinal,
         anio: anioFinal,
       });
+      // La pantalla manda todas las fechas al guardar, cambien o no: se
+      // compara con la fila para no frenar a quien solo pausa una regla vieja.
+      const cambianFechas =
+        diaInicioFinal !== filaActual.dia_inicio ||
+        diaFinFinal !== filaActual.dia_fin ||
+        mesInicioFinal !== filaActual.mes_inicio ||
+        mesFinFinal !== filaActual.mes_fin ||
+        anioFinal !== filaActual.anio;
+      if (cambianFechas) {
+        validarFechasPosibles(
+          {
+            dia_inicio: diaInicioFinal,
+            dia_fin: diaFinFinal,
+            mes_inicio: mesInicioFinal,
+            mes_fin: mesFinFinal,
+            anio: anioFinal,
+          },
+          true,
+        );
+      }
 
       if (datos.es_venta_relampago != null) {
         agregar(

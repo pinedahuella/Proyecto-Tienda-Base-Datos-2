@@ -583,11 +583,11 @@ Arriba el pedido abierto; abajo los anteriores, que se despliegan de a uno y
 solo entonces piden su detalle (`GET /comprador/pedidos/:id`). Lo ya cargado se
 cachea.
 
-**"Como se veia al comprarlo"** reconstruye el producto a la fecha del pedido
-con `GET /productos/:id/historial?fecha=`. Esa ruta, a diferencia del catalogo,
-NO oculta los productos inactivos o en borrador: un pedido tiene que poder
-ensenar su producto aunque hoy ya no se venda. Es el criterio de mas peso de la
-Entrega 1 puesto donde se ve.
+Cada linea ya no trae "Ver el detalle de ese dia": Meme lo quito el 2026-10-20.
+El historial del producto se sigue viendo en el panel del vendedor (boton
+Historial, `GET /vendedor/productos/:id/historial?fecha=`). La ruta del
+comprador, `GET /productos/:id/historial?fecha=`, sigue en el backend sin
+pantalla.
 
 Ojo con un dato que se lee mal: `metodo_pago`, `estado_pago` y
 `fecha_cancelacion` vienen `null` mientras el pedido sigue `pendiente`. No es un
@@ -664,27 +664,10 @@ verdad sale una sola. Antes de perseguir un doble disparo, recarga entera.
 
 ## El historial dentro de un pedido
 
-En `/pedidos`, cada linea trae un "Ver como se veia": reconstruye el producto
-tal como estaba **el dia de la compra**, con
-`GET /productos/:id/historial?fecha=`. Es la evidencia de funcionamiento que
-pide la entrega, vista desde el lado del comprador.
-
-Ensena nombre, descripcion, **categoria de ese dia** y **caracteristicas de ese
-dia**. Lo de la categoria no es adorno: es el caso que justifica
-`productos_historial.id_categoria` -- el balon nacio en Fitness y se movio a
-Futbol, asi que reconstruirlo al 1 de mayo tiene que decir Fitness.
-
-**El precio que se ensena NO es el de ese dia: es el que se pago.** Sale
-congelado por `pedido_producto.id_precio_historial`, y para un comprobante es
-lo correcto. Si alguna vez se quisiera "a como estaba la oferta ese dia" -- que
-es otra pregunta -- la ruta es `GET /productos/ofertas/:id/historial?fecha=`,
-la misma que usa el panel del catalogo.
-
-**El dia se calcula en hora de Guatemala**, no recortando el texto ISO. Con el
-recorte, un pedido de las 8:52 p. m. caia en el dia UTC siguiente y la pantalla
-se contradecia sola: la cabecera decia "25 ago" y dos renglones mas abajo "Asi
-se veia el 2026-08-26". El resultado no era incorrecto (el backend cuenta hasta
-el final del dia), pero se leia como un error.
+Quitado el 2026-10-20 a pedido de Meme, con su ventana, sus dos peticiones
+(`traerProductoEnFecha` y `traerOfertaEnFecha` de `lib/pedido.ts`) y sus
+estilos. Ver la seccion de Mis pedidos, arriba. El historial del producto sigue
+en el panel del vendedor.
 
 ## El buscador de la cabecera
 

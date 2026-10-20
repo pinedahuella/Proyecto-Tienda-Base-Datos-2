@@ -3,9 +3,65 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-20, 09:45**.
+Ultima actualizacion: **2026-10-20, 11:00**.
 
-**EMPIEZA AQUI (20-10, de 08:30 a 09:45). Dashboard general del admin, demos de pais en remoto, Revisar va al caso.**
+**EMPIEZA AQUI (20-10, de 09:45 a 11:00). El Word de la Entrega 3 con lo nuevo, y /buscar sin resultados a lo ancho.**
+SIN commitear (Meme no lo pidio).
+
+Al empezar, las seis bases de 100.64.42.11 arriba (MongoDB en el 27018, el 27017 alla no se publica) y el
+cortacircuitos sin ninguna caida. Jose David no subio nada despues de 3d3459f.
+
+El Word de la Entrega 3 (Meme lo pidio): 26 paginas, dos pasadas, el validador pasa.
+- 1.1 con 343 commits (contando el de hoy) y un parrafo que apunta a lo nuevo; 1.2 y 1.3 con la demo y el dashboard (220, 118, 5).
+- 4.4 nueva, Muchos compradores a la vez, con la tabla de demo_concurrencia.mjs MEDIDA hoy: todo arriba navegar
+  mediana 2.1 s, 10 de 40 ganan (4.2 s), 10 pagan con 201 (4.3 s), stock 10 a 0; con -Caida redis 1.8, 3.6 y 1.8 s,
+  lo mismo de stock. Las dos corridas limpiaron solas (pedidos cancelados, ClickHouse sin la demo).
+- 7.3 con arrancar.ps1 en remoto (no se volvio a sembrar hoy, es lo probado esta manana en remoto/README.md).
+- 7.4 nueva, el dashboard, con docs/captura-dashboard.png (Ventas, Este anio) y dashboard.mjs 35 OK de hoy.
+- 8.1 con una frase de la concurrencia.
+
+/buscar sin resultados (Meme: horizontal, responsive, aprovechar el espacio): la caja va a todo el ancho con el
+texto a la izquierda y Hasta Q, Avisame y Ver todo el catalogo a la derecha (este ultimo con borde, sin relleno).
+Los sugeridos en tarjetas, 3 por fila, 2 por debajo de 900 px y en telefono se deslizan de lado. Solo
+routes/buscar/+page.svelte (clases sin-nada y .sugeridos), svelte-check 0. Visto en Edge a 1536x730 (todo entra
+sin bajar), 800 y 390 (la pagina no se mueve de lado), y con el aviso de iniciar sesion.
+
+El buscador de la cabecera (Meme mando captura: "lap" daba ocho veces El camino de las nubes). Medido: la
+cabecera usaba solo la difusa, que toma "lap" por "las" y con "lapt" da 0, y las copias de lote llenaban la lista.
+- GET /buscador/productos?escribiendo=1 (solo la cabecera): bool_prefix sobre nombre.escribiendo con peso 20 (el
+  prefijo puntua fijo; con 3 la difusa de "las", 8.2, le ganaba) mas la difusa, empate por resenas_total, pide
+  hasta 15 veces el tope y deja uno por producto (helpers/copias-de-lote.ts, MARCA_DE_LOTE sale de ahi tambien
+  para sugeridos.service.ts). Sin Elasticsearch, buscarEnCopia con prefijo (la ultima palabra vale como principio,
+  1.2 contra 0.8 de una letra distinta). Sin el parametro, todo igual que antes (/buscar no cambia).
+- La fila marcada ya no lleva barra en el canto: fondo y borde fino alrededor.
+- pruebas/buscador_escribiendo.mjs (en correr_todas): 20 OK. busqueda.sh 14 OK en remoto. tsc, eslint y
+  svelte-check limpios, dist compilado y backend reiniciado. Visto en Edge claro y oscuro.
+- elastic/README.md y el Word (2.3) lo cuentan; el Word sigue en 26 paginas.
+- Visto de paso: las ofertas 4 y 7 de Laptop Ambar Campus 14 con 80 % y venta relampago desde las 10:21, y los
+  pedidos 1412 y 1413 del admin. Los hizo Meme probando, no es un error.
+
+Mis pedidos sin "Ver el detalle de ese dia" (Meme lo pidio): fuera el boton, su ventana, su estado, sus estilos y
+traerProductoEnFecha / traerOfertaEnFecha con sus tipos de lib/pedido.ts. El backend no se toco: la ruta
+/productos/:id/historial queda sin pantalla, y el vendedor sigue viendo el historial por la suya. docs/frontend.md
+al dia. svelte-check 0 y 0, visto en Edge a 1536 y 390.
+
+Reglas por fecha del vendedor (Meme: si hay un mes el otro no puede ser cada mes, el anio en lista, fechas
+correctas):
+- Backend validarFechasPosibles (helpers/validaciones-regla-descuento-periodo.ts), en crear y en editar si cambia
+  una fecha: el dia existe en su mes (febrero 29 sin anio), con anio no pasa al anio siguiente ni termino antes de
+  hoy en Guatemala. reglas_periodo.sh 68 OK (7 nuevos).
+- ReglasPeriodo.svelte: elegir un mes con el otro en cada mes le pone el mismo, volver uno a cada mes vuelve los dos
+  y quita el anio; el anio es un select (este y los cuatro siguientes, mas el de la regla si es viejo); el maximo
+  del dia sigue al mes. Las mismas reglas antes de mandar. Visto en Edge a 1536 y 390.
+- En la base habia una sola regla, la 39 (oferta 396 de tienda@mesh.com), del 1 al 10 de enero de 2026, que Meme
+  creo antes del arreglo. Nunca se aplico (la oferta sin descuento). Meme pidio borrarla: pausada y borrada por la
+  API como tienda@mesh.com. Quedan 0 reglas por fecha.
+- Nota para David: backend/cambio_propuestas/2026-10-20_1100-buscador-escribiendo-y-fechas-de-reglas.md.
+
+Como quedo la maquina: backend directo (interruptor quitado despues de la demo con Redis), frontend, panel y
+Ollama arriba.
+
+**ANTES (20-10, de 08:30 a 09:45). Dashboard general del admin, demos de pais en remoto, Revisar va al caso.**
 
 Dashboard general (pestana Dashboard del admin, la primera; el enlace Admin de la cabecera abre ahi):
 - Backend en carpetas dashboards: controllers/dashboards/dashboard-general.controller.ts, services/dashboards/

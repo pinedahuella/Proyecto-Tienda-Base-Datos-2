@@ -104,7 +104,7 @@
 		const mia = ++ultimaConsulta;
 		cargando = true;
 
-		const salida = await buscarProductos(consulta, MAXIMO_EN_LISTA, todo);
+		const salida = await buscarProductos(consulta, MAXIMO_EN_LISTA, todo, true);
 
 		// Llego una vieja: se tira. Ver ultimaConsulta.
 		if (mia !== ultimaConsulta) return;
@@ -585,21 +585,13 @@
 	/* Una sola clase para el raton y para el teclado: si el hover pintara por
 	   su cuenta, mover el raton sin querer dejaria dos filas marcadas y
 	   ninguna de las dos seria la que abre el Enter. */
+	/* Con solo el fondo, en tema oscuro el --indigo-cl es muy cercano al panel
+	   y desde lejos no se sabia cual iba a abrir el Enter. Un borde fino
+	   alrededor, no una barra en el canto (Meme no las quiere, 20-10). */
 	.fila.marcada {
 		background: var(--indigo-cl);
-	}
-
-	/* Una barra en el canto izquierdo de la marcada. Con solo el fondo, en
-	   tema oscuro el --indigo-cl es muy cercano al panel y desde lejos no se
-	   sabia cual iba a abrir el Enter. */
-	.fila.marcada::before {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 0;
-		bottom: 0;
-		width: 3px;
-		background: var(--indigo);
+		box-shadow: inset 0 0 0 1px var(--indigo);
+		border-radius: var(--r);
 	}
 
 	.texto {

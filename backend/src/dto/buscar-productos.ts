@@ -11,6 +11,13 @@ export interface BuscarProductosQuery {
    * evento (nunca bloquea ni rechaza la busqueda).
    */
   sesion?: string;
+  /**
+   * `1` para la lista del buscador de la cabecera, que busca con cada letra:
+   * la ultima palabra vale tambien a medias y queda un resultado por producto
+   * (ver `BuscadorProductosService.ejecutar`). Sin esto, la busqueda de
+   * siempre.
+   */
+  escribiendo?: string;
 }
 
 /** La respuesta de GET /buscador/productos (la ruta publica). */

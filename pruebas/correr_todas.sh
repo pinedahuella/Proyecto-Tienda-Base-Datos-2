@@ -62,6 +62,7 @@ else
         neo4j/correr_patrones.sh
         clickhouse/correr_consultas.sh
         pruebas/dashboard.mjs
+        pruebas/buscador_escribiendo.mjs
         pruebas/caidas.mjs
         pruebas/falla_checkout.sh
     )

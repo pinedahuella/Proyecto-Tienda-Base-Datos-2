@@ -32,7 +32,7 @@ export class BuscadorProductosController {
     private readonly eventosService: EventosService,
   ) {}
 
-  // GET /buscador/productos?nombre=...&limite=...&sesion=...
+  // GET /buscador/productos?nombre=...&limite=...&sesion=...&escribiendo=1
   @Get()
   async buscar(
     @Query() query: BuscarProductosQuery,
@@ -42,6 +42,7 @@ export class BuscadorProductosController {
       const respuesta = await this.buscadorProductosService.buscar(
         query.nombre,
         query.limite,
+        query.escribiendo === '1',
       );
 
       // Evento de analitica en ClickHouse, SIN ruta propia -- el backend ya
@@ -76,6 +77,7 @@ export class BuscadorProductosController {
       const resultados = await this.buscadorProductosService.buscarAdmin(
         query.nombre,
         query.limite,
+        query.escribiendo === '1',
       );
       return exito(resultados, 'Busqueda completada');
     } catch (error) {

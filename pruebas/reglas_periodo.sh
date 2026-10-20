@@ -23,6 +23,9 @@
 #   2. Quien puede. Sin sesion 401, un comprador 403.
 #   3. Las validaciones. Dia 0 y 32, mes 13, un mes sin el otro, anio sin mes,
 #      anio 1999, 95 %, un numero como texto y un campo que falta dan 400.
+#      Tambien el 31 de febrero, el 29 de un febrero no bisiesto, el 31 de
+#      abril, una regla con anio que pasa al anio siguiente y una que ya paso.
+#      El 29 de febrero sin anio si entra.
 #   4. Crear y el solape. A (1 al 5 de enero de 2099) da 201. B (3 al 10, se
 #      pisa con A) da 409. C (10 al 15) da 201, conviven. Editar C para que
 #      empiece el 4 da 409 y la fila no cambia. D, igual que A pero de 2098,
@@ -197,7 +200,20 @@ pedir POST "$RUTA" "$C_VEND" "{\"id_oferta\":$OFERTA,\"dia_inicio\":\"1\",\"dia_
 igual "dia como texto" "$CODIGO" "400"
 pedir POST "$RUTA" "$C_VEND" "{\"id_oferta\":$OFERTA,\"dia_inicio\":1,\"dia_fin\":5,\"porcentaje_descuento\":20}"
 igual "falta es_venta_relampago" "$CODIGO" "400"
+# Fechas que no existen o que nunca pasarian (validarFechasPosibles, 2026-10-20).
+pedir POST "$RUTA" "$C_VEND" "$(cuerpo "$OFERTA" 1 31 2 2 2099 false 20)";   igual "31 de febrero" "$CODIGO" "400"
+pedir POST "$RUTA" "$C_VEND" "$(cuerpo "$OFERTA" 1 29 2 2 2099 false 20)";   igual "29 de febrero de 2099, que no es bisiesto" "$CODIGO" "400"
+pedir POST "$RUTA" "$C_VEND" "$(cuerpo "$OFERTA" 1 31 4 4 '' false 20)";     igual "31 de abril, cada anio" "$CODIGO" "400"
+pedir POST "$RUTA" "$C_VEND" "$(cuerpo "$OFERTA" 20 5 12 1 2099 false 20)";  igual "con anio, de diciembre a enero" "$CODIGO" "400"
+pedir POST "$RUTA" "$C_VEND" "$(cuerpo "$OFERTA" 10 5 3 3 2099 false 20)";   igual "con anio, del 10 al 5 del mismo mes" "$CODIGO" "400"
+pedir POST "$RUTA" "$C_VEND" "$(cuerpo "$OFERTA" 1 10 1 1 2026 false 20)";   igual "enero de 2026, que ya paso" "$CODIGO" "400"
 igual "ninguna de esas dejo fila" "$(sql "SELECT count(*) FROM regla_descuento_periodo WHERE id_oferta=$OFERTA")" "0"
+# Lo que si vale: el 29 de febrero sin anio (algun anio es bisiesto). Se borra
+# en el momento para que no cuente en las secciones de abajo.
+pedir POST "$RUTA" "$C_VEND" "$(cuerpo "$OFERTA" 25 29 2 2 '' false 20)"
+igual "del 25 al 29 de febrero, cada anio" "$CODIGO" "201"
+ID_FEB=$(de_cuerpo payload.id_regla_descuento_periodo); anotar "$ID_FEB"
+[ -n "$ID_FEB" ] && sql "DELETE FROM regla_descuento_periodo WHERE id_regla_descuento_periodo = $ID_FEB" >/dev/null
 
 # ------------------------------------------------------------------ 4
 titulo "4. Crear y el solape"

@@ -14,11 +14,19 @@ import {
   RespuestaBusquedaProductos,
   ResultadoBusquedaProducto,
 } from '../../dto/buscar-productos';
+import { unoPorProducto } from '../../helpers/copias-de-lote';
 import { SugeridosBusquedaService } from './sugeridos.service';
 
 const INDICE = process.env.ELASTIC_INDICE ?? 'mesh_productos';
 const LIMITE_DEFECTO = 20;
 const LIMITE_MAXIMO = 50;
+/**
+ * El `bool_prefix` puntua fijo (su peso), y la difusa de "lap" contra "las"
+ * llega a 8.2: con 20 el principio de palabra queda siempre arriba. Medido el
+ * 2026-10-20 con los 1000 productos de la PC de Jose David (con 3, "lap"
+ * seguia dando El camino de las nubes primero).
+ */
+const PESO_PREFIJO = 20;
 
 /** La forma del documento del indice de busqueda. Ver etl/extraer_busqueda.js. */
 interface DocumentoIndice {
@@ -76,8 +84,9 @@ export class BuscadorProductosService {
   async buscar(
     nombre: string | undefined,
     limite: string | undefined,
+    escribiendo = false,
   ): Promise<RespuestaBusquedaProductos> {
-    const respuesta = await this.ejecutar(nombre, limite, true);
+    const respuesta = await this.ejecutar(nombre, limite, true, escribiendo);
     const { productos: sugeridos, desde: sugeridos_desde } =
       respuesta.resultados.length === 0
         ? await this.sugeridos.sugerir((nombre ?? '').trim())
@@ -93,19 +102,34 @@ export class BuscadorProductosService {
   async buscarAdmin(
     nombre: string | undefined,
     limite: string | undefined,
+    escribiendo = false,
   ): Promise<ResultadoBusquedaProducto[]> {
-    const { resultados } = await this.ejecutar(nombre, limite, false);
+    const { resultados } = await this.ejecutar(
+      nombre,
+      limite,
+      false,
+      escribiendo,
+    );
     return resultados;
   }
 
   /**
    * `quisiste_decir` solo se calcula en la ruta publica: la de admin sigue
    * devolviendo la lista sola.
+   *
+   * `escribiendo` es la lista que cuelga del buscador de la cabecera, que
+   * busca con cada letra. La difusa sola piensa que la palabra ya esta
+   * entera: "lap" era "las" mal escrito (El camino de las nubes) y "lapt" no
+   * daba nada. Asi se suma el principio de palabra del autocompletado
+   * (`bool_prefix` sobre `nombre.escribiendo`, como `BuscadorSugerenciasService`)
+   * con peso PESO_PREFIJO, sin quitar la difusa, que es la que encuentra
+   * "labtop". Y queda un resultado por producto (`unoPorProducto`).
    */
   private async ejecutar(
     nombre: string | undefined,
     limite: string | undefined,
     soloActivos: boolean,
+    escribiendo: boolean,
   ): Promise<
     Omit<RespuestaBusquedaProductos, 'sugeridos' | 'sugeridos_desde'>
   > {
@@ -114,15 +138,41 @@ export class BuscadorProductosService {
       throw new ErrorValidacion('Escribe el nombre del producto que buscas');
     }
 
-    const textoQuery = {
+    const difusa = {
       multi_match: {
         query: texto,
         fields: ['nombre^3', 'descripcion', 'variantes'],
         fuzziness: 'AUTO',
       },
     };
+    const textoQuery = escribiendo
+      ? {
+          bool: {
+            should: [
+              {
+                multi_match: {
+                  query: texto,
+                  type: 'bool_prefix' as const,
+                  fields: [
+                    'nombre.escribiendo',
+                    'nombre.escribiendo._2gram',
+                    'nombre.escribiendo._3gram',
+                  ],
+                  boost: PESO_PREFIJO,
+                },
+              },
+              difusa,
+            ],
+            minimum_should_match: 1,
+          },
+        }
+      : difusa;
 
     const tope = this.aLimite(limite);
+    // Escribiendo se piden muchos mas: unas 10 copias de lote por original.
+    const pedidos = escribiendo ? Math.min(tope * 15, 200) : tope;
+    const final = (resultados: ResultadoBusquedaProducto[]) =>
+      escribiendo ? unoPorProducto(resultados, tope) : resultados;
     try {
       // Sin Elasticsearch, de la copia del catalogo en PostgreSQL
       // (buscador-respaldo.ts), sin el "quisiste decir".
@@ -131,7 +181,7 @@ export class BuscadorProductosService {
           const respuesta = await elasticClient.search<DocumentoIndice>(
             {
               index: INDICE,
-              size: tope,
+              size: pedidos,
               suggest: soloActivos ? pedirCorreccion(texto) : undefined,
               query: soloActivos
                 ? {
@@ -141,12 +191,23 @@ export class BuscadorProductosService {
                     },
                   }
                 : textoQuery,
+              // El principio de palabra puntua igual a todos: en el empate
+              // va primero el que tiene mas resenas, y el original antes que
+              // sus copias, que no tienen.
+              sort: escribiendo
+                ? [
+                    { _score: { order: 'desc' as const } },
+                    { resenas_total: { order: 'desc' as const } },
+                  ]
+                : undefined,
             },
             OPCIONES_BUSQUEDA,
           );
 
           return {
-            resultados: respuesta.hits.hits.map((hit) => this.aResultado(hit)),
+            resultados: final(
+              respuesta.hits.hits.map((hit) => this.aResultado(hit)),
+            ),
             quisiste_decir: textoCorregido(
               texto,
               respuesta.suggest as Parameters<typeof textoCorregido>[1],
@@ -154,9 +215,16 @@ export class BuscadorProductosService {
           };
         },
         async () => ({
-          resultados: (
-            await buscarEnCopia({ texto, limite: tope, soloActivos })
-          ).resultados,
+          resultados: final(
+            (
+              await buscarEnCopia({
+                texto,
+                limite: pedidos,
+                soloActivos,
+                prefijo: escribiendo,
+              })
+            ).resultados,
+          ),
           quisiste_decir: null,
         }),
       );

@@ -102,7 +102,8 @@ export const MINIMO_LETRAS = 2;
 export async function buscarProductos(
 	texto: string,
 	limite = 20,
-	verTodo = false
+	verTodo = false,
+	escribiendo = false
 ): Promise<Busqueda> {
 	const consulta = texto.trim();
 	if (consulta.length < MINIMO_LETRAS) {
@@ -111,6 +112,9 @@ export async function buscarProductos(
 
 	const base = verTodo ? '/buscador/productos/admin' : '/buscador/productos';
 	let ruta = `${base}?nombre=${encodeURIComponent(consulta)}&limite=${limite}`;
+	// La lista de la cabecera busca con cada letra: "lap" tiene que dar
+	// laptops y no "las", y una sola vez cada producto (no sus copias de lote).
+	if (escribiendo) ruta += '&escribiendo=1';
 
 	// El evento `busqueda_realizada` en ClickHouse lo dispara el backend SOLO,
 	// enganchado a esta misma peticion -- nunca a la de admin (ver

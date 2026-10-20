@@ -414,12 +414,16 @@
 		<!-- La busqueda por nombre no encontro nada pero la de intencion si:
 		     se ensena solo esta, sin el aviso de "no hay productos". -->
 	{:else if resultados.length === 0 && !hayElegidos}
-		<div class="malo suave">
-			<p>No hay productos que se parezcan a {consulta}.</p>
-			<p class="letra-chica">
-				El buscador tolera errores de tecleo y no distingue tildes, asi que si
-				esto sale es que ese producto no esta en el catalogo.
-			</p>
+		<!-- Texto a la izquierda y acciones a la derecha, a todo el ancho: en una
+		     columna de 34rem quedaba media pagina vacia (Meme, 20-10). -->
+		<div class="malo suave sin-nada">
+			<div class="sin-nada-texto">
+				<p>No hay productos que se parezcan a {consulta}.</p>
+				<p class="letra-chica">
+					El buscador tolera errores de tecleo y no distingue tildes, asi que si
+					esto sale es que ese producto no esta en el catalogo.
+				</p>
+			</div>
 			<!-- "Avisame cuando llegue" (seguimientos de ofertas, 2026-10-17): se
 			     guarda la busqueda y avisa UNA vez cuando llegue una oferta que
 			     tenga todas sus palabras. -->
@@ -438,8 +442,8 @@
 						{guardandoAviso ? 'Guardando...' : 'Avisame cuando llegue'}
 					</button>
 				{/if}
+				<a class="boton otro" href="/">Ver todo el catalogo</a>
 			</div>
-			<a class="boton" href="/">Ver todo el catalogo</a>
 		</div>
 		{#if sugeridos.length > 0}
 			<!-- Los sugeridos no llevan ?origen=buscador ni registran el clic: no son
@@ -1042,5 +1046,103 @@
 
 	.seguir .bien {
 		color: var(--indigo);
+	}
+
+	.sin-nada {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 1rem 2rem;
+		max-width: none;
+		padding: 1.25rem 1.5rem;
+	}
+
+	.sin-nada-texto p:last-child {
+		margin-bottom: 0;
+	}
+
+	.sin-nada .seguir {
+		justify-content: flex-end;
+		margin: 0;
+	}
+
+	.sin-nada .seguir .boton {
+		margin-top: 0;
+	}
+
+	.boton.otro {
+		color: var(--indigo);
+		background: none;
+		border: 1px solid var(--indigo);
+	}
+
+	.boton.otro:hover {
+		background: var(--indigo-cl);
+	}
+
+	/* Los sugeridos en tarjetas, tres por fila: en filas de lado a lado el
+	   precio quedaba lejos del nombre. */
+	.sugeridos .lista {
+		display: grid;
+		grid-template-columns: repeat(3, minmax(0, 1fr));
+		gap: 0.75rem;
+		border: none;
+		border-radius: 0;
+		overflow: visible;
+	}
+
+	.sugeridos .lista li + li {
+		border-top: none;
+	}
+
+	.sugeridos .fila {
+		flex-direction: column;
+		align-items: stretch;
+		justify-content: flex-start;
+		gap: var(--e2);
+		height: 100%;
+		box-sizing: border-box;
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+	}
+
+	.sugeridos .cifras {
+		align-items: flex-start;
+		margin-top: auto;
+		text-align: left;
+	}
+
+	@media (max-width: 900px) {
+		.sin-nada {
+			grid-template-columns: minmax(0, 1fr);
+		}
+
+		.sin-nada .seguir {
+			justify-content: flex-start;
+		}
+
+		.sugeridos .lista {
+			grid-template-columns: repeat(2, minmax(0, 1fr));
+		}
+	}
+
+	/* En telefono los sugeridos se deslizan de lado. */
+	@media (max-width: 620px) {
+		.sin-nada {
+			padding: 1.1rem;
+		}
+
+		.sugeridos .lista {
+			display: flex;
+			overflow-x: auto;
+			scroll-snap-type: x mandatory;
+			padding-bottom: 0.25rem;
+		}
+
+		.sugeridos .lista li {
+			flex: none;
+			width: 78%;
+			scroll-snap-align: start;
+		}
 	}
 </style>

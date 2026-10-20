@@ -12,10 +12,13 @@
             "p": "La Entrega 3 agrega dos cosas. Un motor de búsqueda que tolera errores de escritura, ordena por relevancia y calcula filtros facetados con sus propias agregaciones, y una estrategia de consistencia para el checkout, que en este punto ya toca varias bases a la vez y puede fallar a medias. Hicimos además la evaluación opcional de un motor NewSQL para los pagos."
           },
           {
-            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 340 commits sobre `main` entre el 15 de agosto y el 20 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre y la segunda del 8 de octubre."
+            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 343 commits sobre `main` entre el 15 de agosto y el 20 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre y la segunda del 8 de octubre."
           },
           {
             "p": "Esta versión, del 20 de octubre, suma lo que se pidió al revisar la entrega. Que la tienda siga respondiendo cuando se apaga cualquiera de las seis bases, y que eso se pueda ver en vivo. Que los filtros del buscador se apliquen dentro de la consulta. Y que una búsqueda sin sentido, como asdffff, no deje la página vacía. Está en las secciones 2.4, 2.6, 2.7 y 5."
+          },
+          {
+            "p": "El mismo día sumamos tres cosas que ayudan a mostrar lo anterior. Una demostración con cuarenta compradores a la vez sobre una venta relámpago de diez unidades, en la sección 4.4. La siembra de productos desde esta computadora hacia las bases de la otra, en la 7.3. Y un dashboard para el administrador con lo que pasa en la tienda, en la 7.4."
           }
         ]
       },
@@ -47,13 +50,13 @@
                   "Evidencia de la prueba de falla simulada y su manejo",
                   "4",
                   "4 y 5",
-                  "Prueba de falla del checkout con 32 comprobaciones en verde, que desde el 17 de octubre compra sin Redis y sin MongoDB, y prueba de caídas con 47, con cada una de las seis bases apagada y congelada"
+                  "Prueba de falla del checkout con 32 comprobaciones en verde, que desde el 17 de octubre compra sin Redis y sin MongoDB, y prueba de caídas con 47, con cada una de las seis bases apagada y congelada, y la demostración de concurrencia, cuarenta compradores sobre diez unidades sin vender de más, con Redis y sin Redis"
                 ],
                 [
                   "Calidad del informe y del repositorio",
                   "1",
                   "7",
-                  "Diagrama de arquitectura, diagrama entidad relación generado desde la base y arranque en un solo comando"
+                  "Diagrama de arquitectura, diagrama entidad relación generado desde la base, arranque en un solo comando y dashboard del administrador con su prueba"
                 ],
                 [
                   "Evaluación NewSQL para pagos, opcional",
@@ -144,6 +147,11 @@
                   "Respaldo de cada base en las otras, cortacircuitos, interruptor para apagarlas en vivo, prueba de caídas, buscador sin Elasticsearch y productos sugeridos"
                 ],
                 [
+                  "Concurrencia y dashboard",
+                  "",
+                  "Demostración de concurrencia, siembra de productos en las bases de la otra computadora y dashboard del administrador, con sus rutas, la exportación a Excel, PDF y correo, y su prueba"
+                ],
+                [
                   "NewSQL y arquitectura",
                   "",
                   "Registro ADR-8, diagrama de arquitectura y diagrama entidad relación"
@@ -168,7 +176,7 @@
                 [
                   "José Manuel González Corado",
                   "José Manuel González Corado",
-                  "217"
+                  "220"
                 ],
                 [
                   "José David Navichoque Pineda",
@@ -183,7 +191,7 @@
                 [
                   "Total",
                   "",
-                  "340"
+                  "343"
                 ]
               ],
               "leyenda": "Commits por integrante en el historial de git al 20 de octubre de 2026.",
@@ -294,7 +302,7 @@
             "leyenda": "Salida de la prueba del buscador, bash pruebas/busqueda.sh."
           },
           {
-            "p": "Para el autocompletado el mapeo ya trae `nombre.escribiendo`, del tipo `search_as_you_type`. Probamos la consulta con `bool_prefix` sobre ese campo y con lap sugiere solo productos cuyo nombre empieza así, mientras que la búsqueda difusa con el mismo texto trae 169 productos de cualquier tipo. La consulta está en `elastic/pruebas/facetas.py`, en la función `autocompletar()`."
+            "p": "Para el autocompletado el mapeo ya trae `nombre.escribiendo`, del tipo `search_as_you_type`. Probamos la consulta con `bool_prefix` sobre ese campo y con lap sugiere solo productos cuyo nombre empieza así, mientras que la búsqueda difusa con el mismo texto trae 169 productos de cualquier tipo. La consulta está en `elastic/pruebas/facetas.py`, en la función `autocompletar()`. Desde el 20 de octubre la lista que se abre bajo el buscador de la cabecera usa las dos consultas juntas. El principio de palabra pesa más, así que con lap salen primero las laptops, y la difusa sigue encontrando labtop. Cada producto sale una sola vez, sin sus copias de lote. La prueba `pruebas/buscador_escribiendo.mjs` da 20 comprobaciones bien."
           },
           {
             "p": "Cuando lo escrito no existe en el catálogo, la misma consulta pide una corrección con el `term` suggester sobre el nombre, solo para las palabras que no aparecen en el índice y de tres letras o más. La página de resultados la muestra como tal vez quisiste decir. Con frases de tres palabras o más la corrección sale poco útil, así que ahí no se muestra."
@@ -711,6 +719,54 @@
             "p": "Esta prueba mira el momento de pagar. La sección 5 hace lo mismo con toda la tienda y con las seis bases."
           }
         ]
+      },
+      {
+        "titulo": "4.4. Muchos compradores a la vez",
+        "bloques": [
+          {
+            "p": "La prueba de falla compra de una en una. Para ver el checkout con gente a la vez armamos `demo-concurrencia.ps1`, que trabaja por la API con cuentas de verdad. Cuarenta compradores navegan juntos por el catálogo, la búsqueda y la ficha. Después los cuarenta piden en el mismo instante una unidad de una venta relámpago que tiene diez, y los que ganaron pagan todos a la vez. Quién gana lo decide el script atómico de Redis, y si Redis no está, PostgreSQL con `FOR UPDATE`. La aplicación no lleva candados propios."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Paso",
+                "Con todo arriba",
+                "Con Redis apagado"
+              ],
+              "filas": [
+                [
+                  "Navegar, 120 páginas",
+                  "120 bien, mediana 2.1 s",
+                  "120 bien, mediana 1.8 s"
+                ],
+                [
+                  "Cuarenta piden una de diez",
+                  "10 la consiguen y 30 reciben que ya no hay, mediana 4.2 s",
+                  "10 la consiguen y 30 reciben que ya no hay, mediana 3.6 s"
+                ],
+                [
+                  "Los diez pagan a la vez",
+                  "10 compras con 201, mediana 4.3 s",
+                  "10 compras con 201, mediana 1.8 s"
+                ],
+                [
+                  "Stock en PostgreSQL",
+                  "De 10 a 0, con 10 pedidos pagados y 10 movimientos de stock",
+                  "De 10 a 0, con 10 pedidos pagados y 10 movimientos de stock"
+                ]
+              ],
+              "anchos": [
+                1.8,
+                2.35,
+                2.35
+              ],
+              "leyenda": "Demostración de concurrencia del 20 de octubre, con el backend en esta computadora y las bases en la de José David."
+            }
+          },
+          {
+            "p": "En las dos corridas se vendieron exactamente las diez unidades y el stock quedó en cero, nunca negativo. Los tiempos incluyen el viaje por la red hasta la otra computadora, con las cuarenta peticiones llegando juntas. Al terminar, la demostración cancela sus pedidos, devuelve el stock y borra de ClickHouse lo que movió, para que no cambien lo más vendido ni las tendencias. Usa un vendedor propio que el ETL de compras no copia, así el siguiente arranque no deshace esa limpieza."
+          }
+        ]
       }
     ]
   },
@@ -973,6 +1029,31 @@
           },
           {
             "p": "Las bases también pueden vivir en otra computadora. Con `usar-bases-remotas.ps1` el backend apunta a ellas, y con `source remoto/activar.sh` las pruebas corren contra esa computadora como si las bases estuvieran aquí. Así se midió todo lo de la sección 5."
+          },
+          {
+            "p": "Desde el 20 de octubre `arrancar.ps1` también corre entero contra las bases de la otra computadora. Así se siembran y se borran productos desde aquí, en PostgreSQL, MongoDB y el buscador a la vez, y el panel de comandos del proyecto lo hace con un botón. Lo que borra volúmenes de Docker, como rehacer MongoDB o borrar todo, se niega en ese modo y se hace en la computadora que tiene las bases."
+          }
+        ]
+      },
+      {
+        "titulo": "7.4. El dashboard del administrador",
+        "bloques": [
+          {
+            "p": "El panel del administrador abre en un dashboard con lo que pasa en la tienda en el periodo que se elija, comparado con el periodo anterior del mismo largo. Tiene seis vistas que se ven de una en una, ventas, clientes, vendedores y productos, búsquedas, cancelaciones y pedidos."
+          },
+          {
+            "figura": {
+              "archivo": "captura-dashboard.png",
+              "leyenda": "La vista de ventas del dashboard en lo que va del año, el 20 de octubre de 2026.",
+              "ancho": 6.3,
+              "horizontal": false
+            }
+          },
+          {
+            "p": "Cada cifra sale de la base que la tiene. Lo cobrado, los pedidos, las categorías, los departamentos, las cancelaciones y el mapa de calor por día y hora salen de PostgreSQL, con la misma regla que la pestaña de reportes. Una venta es un pedido comprado, enviado o entregado, y lo cobrado es un pago pagado. El embudo de compra y las búsquedas salen de ClickHouse, y el embudo tiene vistas registradas desde el 7 de octubre de 2026. Los días y las horas van en hora de Guatemala."
+          },
+          {
+            "p": "Lo que se ve se puede bajar en Excel o en PDF, o mandar por correo a una o varias direcciones, con las secciones que se elijan. La prueba `pruebas/dashboard.mjs` da 35 comprobaciones bien y ninguna mal. Revisa que todas las vistas sumen lo mismo, que cuadren con la pestaña de reportes y con PostgreSQL contado aparte, que el Excel y el PDF traigan esos números y que el correo rechace lo inválido sin mandar nada."
           }
         ]
       }
@@ -988,7 +1069,7 @@
             "p": "El motor de búsqueda resolvió algo que ninguna de las bases anteriores hacía bien, encontrar un producto aunque se escriba mal su nombre, y además calcula los filtros de la página de resultados con sus propias agregaciones. El mapeo se hizo campo por campo y el analizador se eligió mirando nuestros nombres de producto."
           },
           {
-            "p": "En el checkout aprendimos que la consistencia se decide punto por punto. El dinero y el stock quedaron en una sola transacción y todo lo demás tiene un mecanismo declarado. La prueba de falla confirmó que ninguna caída cobra a medias, encontró una dependencia con MongoDB que no teníamos escrita, y después de quitarla midió que hoy se compra solo con PostgreSQL."
+            "p": "En el checkout aprendimos que la consistencia se decide punto por punto. El dinero y el stock quedaron en una sola transacción y todo lo demás tiene un mecanismo declarado. La prueba de falla confirmó que ninguna caída cobra a medias, encontró una dependencia con MongoDB que no teníamos escrita, y después de quitarla midió que hoy se compra solo con PostgreSQL. Con cuarenta compradores a la vez sobre diez unidades se vendieron exactamente diez, con Redis y sin él."
           },
           {
             "p": "Lo que más nos enseñó la revisión fue apagar las bases de verdad. Que cada copia tuviera de dónde rehacerse ya estaba en el diseño, pero hasta probarlo la tienda se quedaba esperando a una base caída hasta 30 segundos y varias pantallas quedaban vacías. Con un respaldo por base y un cortacircuitos, hoy la tienda sigue con cualquiera de las seis apagada o congelada, solo la primera petición espera y la base vuelve a usarse sola a los 15 segundos de prenderla. Además, comparar cada pantalla con y sin su base encontró un error que estaba ahí con todo arriba, la copia de las ofertas destacadas que no bajaba con las compras."

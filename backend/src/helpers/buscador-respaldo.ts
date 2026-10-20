@@ -116,6 +116,14 @@ export interface OpcionesBusquedaCopia {
    * una, como el `multi_match` del buscador de siempre.
    */
   exigirMayoria?: boolean;
+  /**
+   * Para la lista del buscador de la cabecera, que busca con cada letra: la
+   * ultima palabra escrita tambien vale como principio de una palabra del
+   * nombre ("lap" encuentra "Laptop"), y pesa mas que un parecido de una
+   * letra ("lap" contra "las"). Como el `bool_prefix` de la ruta con
+   * Elasticsearch.
+   */
+  prefijo?: boolean;
 }
 
 export interface ResultadoCopia {
@@ -185,6 +193,13 @@ export async function buscarEnCopia(
                   ELSE ceil(0.7 * (SELECT count(*) FROM palabras)) END`
     : '';
 
+  // La palabra solo trae letras y numeros (se parte por lo demas), asi que
+  // puede ir dentro de la expresion regular sin escaparla.
+  const principio = opciones.prefijo
+    ? `CASE WHEN pa.w = (SELECT w FROM ultima)
+                       AND d.n_nombre ~ ('(^|[^[:alnum:]])' || pa.w) THEN 1.2 ELSE 0 END`
+    : '0';
+
   const conteosPrecio = RANGOS_PRECIO.map(
     (r) =>
       `'${r.key}', count(*) FILTER (WHERE ${condicionRango('precio_desde', r)})`,
@@ -219,9 +234,12 @@ export async function buscarEnCopia(
           WHERE pc.estado IS NOT NULL
             AND (NOT $3::boolean OR pc.estado = 'activo')
        ),
+       ultima AS (
+         SELECT substring(mesh_normalizar($2) FROM '([[:alnum:]]+)[^[:alnum:]]*$') AS w
+       ),
        cruce AS (
          SELECT d.id, pa.w,
-                3 * mesh_coincide(pa.w, d.n_nombre)
+                3 * GREATEST(mesh_coincide(pa.w, d.n_nombre), ${principio})
                   + mesh_coincide(pa.w, d.n_variantes)
                   + 0.5 * mesh_coincide(pa.w, d.n_descripcion) AS valor
            FROM docs d CROSS JOIN palabras pa

@@ -9,6 +9,7 @@ import {
   DocumentoCopia,
   documentosDesdeCopia,
 } from '../../helpers/buscador-respaldo';
+import { MARCA_DE_LOTE } from '../../helpers/copias-de-lote';
 import { pedirVectores } from '../../helpers/vectores-ollama';
 import { aVectorPg, buscarCercanos } from '../../helpers/vectores-pgvector';
 import { MasVendidosService } from '../productos/mas-vendidos.service';
@@ -235,13 +236,6 @@ export class SugeridosBusquedaService {
     return [...porNombre.values()];
   }
 }
-
-/**
- * Las marcas que ponen los dos generadores de lotes al final del nombre: " L1-0880"
- * (migrations/lote, nace en PostgreSQL) y " M7-0002" (mongo/lote, solo en Mongo).
- * Un clon de un clon lleva las dos: "... L1-0493 M77-0002".
- */
-const MARCA_DE_LOTE = /(\s+[LM]\d+-\d{4})+$/;
 
 /**
  * La consulta de los sugeridos en Elasticsearch, sobre los productos activos.

@@ -176,19 +176,84 @@
 		return b.anio != null && String(b.anio).trim() !== '';
 	}
 
+	/** Hoy en Guatemala, AAAA-MM-DD. */
+	const HOY = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Guatemala' });
+	const ANIO_ACTUAL = Number(HOY.slice(0, 4));
+
 	/**
-	 * Lo que el backend rechazaria por la cascada, dicho antes de la vuelta.
-	 * El que manda es el de alla (`validarCascada`).
+	 * Los anios que se pueden elegir: este y los cuatro siguientes. Una regla
+	 * de un anio que ya paso no se aplicaria nunca. Al editar una regla vieja
+	 * su anio tambien sale, para que la lista no lo cambie sin querer.
 	 */
-	function problemaCascada(b: Borrador): string {
+	function aniosPara(b: Borrador): string[] {
+		const lista = Array.from({ length: 5 }, (_, i) => String(ANIO_ACTUAL + i));
+		if (tieneAnio(b) && !lista.includes(b.anio)) lista.unshift(b.anio);
+		return lista;
+	}
+
+	/** Igual que `diasDelMes` del backend. Febrero sin anio tiene 29. */
+	function diasDelMes(mes: number, anio: number | null): number {
+		if (mes === 2) {
+			if (anio == null) return 29;
+			return (anio % 4 === 0 && anio % 100 !== 0) || anio % 400 === 0 ? 29 : 28;
+		}
+		return [4, 6, 9, 11].includes(mes) ? 30 : 31;
+	}
+
+	function topeDia(b: Borrador, mes: string): number {
+		return mes === '' ? 31 : diasDelMes(Number(mes), tieneAnio(b) ? Number(b.anio) : null);
+	}
+
+	/**
+	 * Los dos meses van juntos (Meme, 2026-10-20). Elegir un mes con el otro
+	 * en cada mes le pone el mismo, y volver uno a cada mes vuelve los dos y
+	 * quita el anio, que sin meses no se puede fijar.
+	 */
+	function elegirMes(b: Borrador, campo: 'mesInicio' | 'mesFin', valor: string) {
+		const otro = campo === 'mesInicio' ? 'mesFin' : 'mesInicio';
+		b[campo] = valor;
+		if (valor === '') {
+			b[otro] = '';
+			b.anio = '';
+		} else if (b[otro] === '') {
+			b[otro] = valor;
+		}
+	}
+
+	/**
+	 * Lo que el backend rechazaria, dicho antes de la vuelta. Los que mandan
+	 * son los de alla (`validarCascada` y `validarFechasPosibles`).
+	 */
+	function problemaCascada(b: Borrador, revisarFechas = true): string {
 		if ((b.mesInicio === '') !== (b.mesFin === '')) {
 			return 'Elige los dos meses, o ninguno para que se repita cada mes.';
 		}
-		if (tieneAnio(b) && !/^\d{4}$/.test(String(b.anio).trim())) {
-			return 'Escribe el anio con sus cuatro cifras, o dejalo vacio.';
-		}
 		if (tieneAnio(b) && b.mesInicio === '') {
 			return 'Para fijar el anio elige tambien los meses.';
+		}
+		const di = Number(b.diaInicio);
+		const df = Number(b.diaFin);
+		if (revisarFechas && b.mesInicio !== '') {
+			const anio = tieneAnio(b) ? Number(b.anio) : null;
+			for (const [dia, mes] of [
+				[di, Number(b.mesInicio)],
+				[df, Number(b.mesFin)]
+			]) {
+				const tope = diasDelMes(mes, anio);
+				if (dia > tope) {
+					const nombre = MESES[mes - 1];
+					return `${nombre[0].toUpperCase()}${nombre.slice(1)}${anio ? ` de ${anio}` : ''} tiene ${tope} dias, el ${dia} no existe.`;
+				}
+			}
+			if (anio != null) {
+				const mi = Number(b.mesInicio);
+				const mf = Number(b.mesFin);
+				if (mf < mi || (mf === mi && df < di)) {
+					return 'Con un anio fijo la regla no puede pasar al anio siguiente. Para que cruce el fin de anio, dejala para todos los anios.';
+				}
+				const fin = `${anio}-${String(mf).padStart(2, '0')}-${String(df).padStart(2, '0')}`;
+				if (fin < HOY) return `Esas fechas de ${anio} ya pasaron.`;
+			}
 		}
 		return '';
 	}
@@ -268,7 +333,16 @@
 			};
 			return;
 		}
-		const problema = problemaCascada(edicion);
+		// Como el backend, las fechas solo se revisan si cambiaron: una regla
+		// vieja se puede guardar con otro porcentaje sin moverle los dias.
+		const cuerpo = aCuerpo(edicion);
+		const cambianFechas =
+			cuerpo.dia_inicio !== regla.dia_inicio ||
+			cuerpo.dia_fin !== regla.dia_fin ||
+			(cuerpo.mes_inicio ?? null) !== regla.mes_inicio ||
+			(cuerpo.mes_fin ?? null) !== regla.mes_fin ||
+			(cuerpo.anio ?? null) !== regla.anio;
+		const problema = problemaCascada(edicion, cambianFechas);
 		if (problema) {
 			errorFila = { ...errorFila, [id]: problema };
 			return;
@@ -439,15 +513,15 @@
 {#snippet camposBorrador(b: Borrador, clave: string)}
 	<label>
 		Desde el dia
-		<input type="number" min="1" max="31" step="1" bind:value={b.diaInicio} required />
+		<input type="number" min="1" max={topeDia(b, b.mesInicio)} step="1" bind:value={b.diaInicio} required />
 	</label>
 	<label>
 		Hasta el dia
-		<input type="number" min="1" max="31" step="1" bind:value={b.diaFin} required />
+		<input type="number" min="1" max={topeDia(b, b.mesFin)} step="1" bind:value={b.diaFin} required />
 	</label>
 	<label>
 		Mes de inicio
-		<select bind:value={b.mesInicio}>
+		<select value={b.mesInicio} onchange={(e) => elegirMes(b, 'mesInicio', e.currentTarget.value)}>
 			<option value="">Cada mes</option>
 			{#each MESES as m, i (m)}
 				<option value={String(i + 1)}>{m}</option>
@@ -456,7 +530,7 @@
 	</label>
 	<label>
 		Mes de fin
-		<select bind:value={b.mesFin}>
+		<select value={b.mesFin} onchange={(e) => elegirMes(b, 'mesFin', e.currentTarget.value)}>
 			<option value="">Cada mes</option>
 			{#each MESES as m, i (m)}
 				<option value={String(i + 1)}>{m}</option>
@@ -465,16 +539,14 @@
 	</label>
 	<label>
 		Anio
-		<!-- Texto y no number: un number vacio se guarda como null y el
-		     "sin anio" tiene que seguir siendo un texto vacio. -->
-		<input
-			type="text"
-			inputmode="numeric"
-			maxlength="4"
-			placeholder="Todos"
-			bind:value={b.anio}
-			disabled={b.mesInicio === '' && !tieneAnio(b)}
-		/>
+		<!-- Sin meses no se puede fijar el anio: la regla de cada mes se
+		     repite todos. -->
+		<select bind:value={b.anio} disabled={b.mesInicio === ''}>
+			<option value="">Todos los anios</option>
+			{#each aniosPara(b) as a (a)}
+				<option value={a}>{a}</option>
+			{/each}
+		</select>
 	</label>
 	<label>
 		Descuento %
