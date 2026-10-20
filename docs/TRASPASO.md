@@ -50,6 +50,16 @@ resenas_repetidas, compras_en_rafaga, devoluciones_seriales (por cuenta), notas_
 Sillin Vertebra SR-2 (p71) y resenas_parecidas_producto en los Guantes Zarpa 300 (p66). Su proximo
 `.\arrancar.ps1` dira que ya estaban y no tocara nada.
 
+**Las bases apagadas en vivo, la misma noche.** La PC de Jose David apago por rondas Neo4j y ClickHouse, Redis y
+Elasticsearch, y MongoDB, y se midio cada funcion de la tienda, una compra por ronda (1063, 1064 y 1065,
+canceladas) y la vuelta. Todo en `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` (77e9a31, 3d02c35), con lo que se ve en
+cada pantalla y como mirarlo en el registro del backend y en las colas. De ahi salieron dos arreglos:
+- f25b608: ningun error nombra una base en la pagina (`pedir()` de `frontend/src/lib/api.ts` cambia el mensaje
+  si trae el nombre de una pieza interna y lo deja en la consola). Pedido de Meme.
+- 341d985: el panel de comandos corre las demos en modo remoto, mira el estado de las bases en la otra PC y niega
+  lo que arranca o rehace bases; redis-cli de remoto/ lee REDISCLI_AUTH. Se creo `desarrollador1@mesh.com`
+  (Desarrollo123!, vendedor) en la base de Jose David por la API: no existia alla y Meme no podia entrar.
+
 Sin hacer, a proposito:
 
 - Lo de "luego" de Meme: los 3 puntos del profesor (backend) y las resenas del clasificador que no hablan de su
