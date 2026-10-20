@@ -489,14 +489,11 @@ function validarCampo(campo, crudo) {
 // no sirve. Los comandos corren con el modo remoto puesto (remoto/activar.ps1, que
 // levanta el tunel y pone el docker falso) y se quita al terminar. Asi corren
 // tambien arrancar.ps1 y lo que siembra o rehace productos y el grafo (desde el
-// 2026-10-20, el docker falso hace sus docker exec contra las bases de alla). Se
-// niegan solo los que borran volumenes de Docker (rehacer MongoDB, borrar todo) y
-// las demos que usan los contenedores de Tor: eso se hace en la PC que tiene las bases.
-const SOLO_CON_BASES_AQUI = new Set([
-  'reiniciar-mongo', 'reiniciar-todo',
-  'entrar-pais', 'entrar-paises', 'entrar-pais-estado', 'entrar-pais-cerrar',
-  'demo-pais-precalentar', 'demo-pais', 'demo-pais-limpiar',
-]);
+// 2026-10-20, el docker falso hace sus docker exec contra las bases de alla), y las
+// demos de otro pais: el docker falso le pasa sus Tor al Docker de esta PC. Se
+// niegan solo los que borran volumenes de Docker (rehacer MongoDB, borrar todo):
+// eso se hace en la PC que tiene las bases.
+const SOLO_CON_BASES_AQUI = new Set(['reiniciar-mongo', 'reiniciar-todo']);
 // Los que no tocan ninguna base: corren igual que siempre.
 const SIN_BASES = new Set(['estado', 'backend', 'frontend', 'parar-backend', 'parar-frontend', 'publicar', 'despublicar',
   // Los de caidas hablan con remoto/interruptor.cjs, aqui, y no con las bases.

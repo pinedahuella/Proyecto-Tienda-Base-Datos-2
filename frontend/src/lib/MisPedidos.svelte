@@ -1379,7 +1379,7 @@
 		padding: 0.8rem 1rem;
 		margin-bottom: 0.9rem;
 		background: var(--panel);
-		border-left: 3px solid var(--indigo);
+		border: 1px solid var(--linea);
 		border-radius: var(--r2);
 	}
 

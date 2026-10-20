@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
+	import { onMount, tick } from 'svelte';
+	import { page } from '$app/state';
 	import { conJson, mensajeUtil, pedir } from './api';
 	import BloquearCuenta from './BloquearCuenta.svelte';
 
@@ -92,8 +93,46 @@
 	onMount(() => {
 		void cargarConciliacion();
 		void cargarAlertas(1);
-		void cargarAnillosPersistidos(1);
+		// Con ?anillo= la lista la carga irAlAnillo, en la pagina de ese caso.
+		if (!page.url.searchParams.get('anillo')) void cargarAnillosPersistidos(1);
 	});
+
+	/**
+	 * `?anillo=<id>` (el Revisar de los avisos del admin): abre la pestana de
+	 * los anillos en la pagina donde esta ese caso, baja hasta el y lo deja
+	 * marcado. Se mira la direccion y no solo al montar: con el panel ya
+	 * abierto, otro Revisar cambia la direccion sin volver a montarlo.
+	 */
+	let anilloBuscado = '';
+	let anilloSenalado = $state<string | null>(null);
+	$effect(() => {
+		const id = page.url.searchParams.get('anillo') ?? '';
+		if (id === '' || id === anilloBuscado) return;
+		anilloBuscado = id;
+		void irAlAnillo(id);
+	});
+
+	async function irAlAnillo(id: string) {
+		pestanaFraude = 'resenas';
+		anilloSenalado = id;
+		const esta = () => anillosPersistidos.some((a) => a.id_anillo_fraude === id);
+		// Primero con los filtros que hay (pendientes), pagina por pagina. Si ya
+		// lo revisaron y no esta entre los pendientes, en todas.
+		for (const estado of [filtroEstadoAnillosP, 'todas'] as FiltroAlerta[]) {
+			filtroEstadoAnillosP = estado;
+			filtroTipoAnillosP = 'todos';
+			let pagina = 1;
+			do {
+				await cargarAnillosPersistidos(pagina);
+				if (esta()) break;
+				pagina++;
+			} while (pagina <= totalPaginasAnillosP && pagina <= 20);
+			if (esta()) break;
+		}
+		if (!esta()) return;
+		await tick();
+		document.getElementById(`anillo-${id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+	}
 
 	/**
 	 * Si el grafo que alimenta a `AnillosDetectorService` esta al dia con
@@ -2285,7 +2324,11 @@
 			{#each anillosPersistidos as a (a.id_anillo_fraude)}
 				{@const detalle = detalleAnilloP[a.id_anillo_fraude]}
 				{@const desplegado = abiertoAnilloP === a.id_anillo_fraude}
-				<li class="alerta">
+				<li
+					class="alerta"
+					class:senalado={anilloSenalado === a.id_anillo_fraude}
+					id="anillo-{a.id_anillo_fraude}"
+				>
 					<div class="alerta-cabeza">
 						<span class="tipo tipo-{a.tipo}">{NOMBRE_TIPO_ANILLO[a.tipo]}</span>
 						<span class="estado estado-{a.estado}">{NOMBRE_ESTADO[a.estado] ?? a.estado}</span>
@@ -2701,6 +2744,14 @@
 		padding: 14px 18px;
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
+	}
+
+	/* El caso al que llevo el Revisar de los avisos: todo el borde, no una barra. */
+	.alerta.senalado {
+		border-color: var(--indigo);
+		box-shadow: 0 0 0 1px var(--indigo);
+		background: var(--indigo-cl);
+		scroll-margin-top: 90px;
 	}
 
 	.alerta-cabeza {

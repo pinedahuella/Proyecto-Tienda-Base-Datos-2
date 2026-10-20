@@ -623,19 +623,11 @@
 		flex-direction: column;
 		gap: 6px;
 		min-width: 0;
-		padding: 16px 18px 16px 20px;
+		padding: 16px 18px;
 		background: var(--panel);
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
 		overflow: hidden;
-	}
-
-	.destacado::before {
-		content: '';
-		position: absolute;
-		inset: 0 auto 0 0;
-		width: 4px;
-		background: var(--color);
 	}
 
 	.rotulo {
@@ -694,14 +686,6 @@
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
 		overflow: hidden;
-	}
-
-	.tarjeta::before {
-		content: '';
-		position: absolute;
-		inset: 0 0 auto 0;
-		height: 3px;
-		background: var(--color);
 	}
 
 	.tarjeta.destacada {
@@ -812,7 +796,7 @@
 		padding: 6px 10px;
 		color: var(--tinta);
 		background: var(--panel);
-		border-left: 3px solid var(--rojo);
+		border: 1px solid var(--linea);
 		border-radius: var(--r);
 	}
 

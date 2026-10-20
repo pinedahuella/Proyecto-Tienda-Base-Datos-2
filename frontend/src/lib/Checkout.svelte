@@ -1709,7 +1709,6 @@
 		padding: 0.9rem 1rem;
 		background: var(--panel);
 		border: 1px solid var(--linea);
-		border-left: 3px solid var(--indigo);
 		border-radius: var(--r2);
 	}
 

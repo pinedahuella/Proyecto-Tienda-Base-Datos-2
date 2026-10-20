@@ -1,8 +1,9 @@
 <script lang="ts">
 	/**
 	 * Una cifra grande con su nombre, para la franja de arriba de un reporte.
-	 * `tono` pinta el borde de color: `bien` en verde, `ojo` en rojo. Con
-	 * `parte` (de 0 a 1) lleva debajo una barrita de cuanto es del total.
+	 * Con `parte` (de 0 a 1) lleva debajo una barrita de cuanto es del total,
+	 * y `tono` la pinta: `bien` en verde, `ojo` en rojo. La caja no lleva
+	 * linea de color arriba (Meme, 2026-10-20).
 	 */
 	let {
 		rotulo,
@@ -39,23 +40,6 @@
 		border: 1px solid var(--linea);
 		border-radius: var(--r2);
 		overflow: hidden;
-	}
-
-	/* La linea de color arriba dice de que lado esta la cifra sin otro texto. */
-	.cifra::before {
-		content: '';
-		position: absolute;
-		inset: 0 0 auto 0;
-		height: 3px;
-		background: var(--g1);
-	}
-
-	.cifra.bien::before {
-		background: var(--g3);
-	}
-
-	.cifra.ojo::before {
-		background: var(--g4);
 	}
 
 	.rotulo {

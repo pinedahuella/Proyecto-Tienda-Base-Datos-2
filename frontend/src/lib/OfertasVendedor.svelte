@@ -3888,22 +3888,11 @@
 		background: var(--off);
 	}
 
-	/* La abierta se marca con fondo y con una barra en el canto, no con el
-	   borde: dentro de una lista continua ya no hay borde propio que tenir, y
-	   una barra se encuentra de un vistazo aunque la fila este a media
-	   pantalla. */
+	/* La abierta se marca con fondo, no con el borde: dentro de una lista
+	   continua ya no hay borde propio que tenir. Sin barra en el canto
+	   (Meme, 2026-10-20). */
 	.producto.abierto {
 		background: var(--indigo-cl);
-	}
-
-	.producto.abierto::before {
-		content: '';
-		position: absolute;
-		left: 0;
-		top: 0;
-		bottom: 0;
-		width: 3px;
-		background: var(--indigo);
 	}
 
 	/* La cabecera es un boton de ancho completo, no una caja con un boton

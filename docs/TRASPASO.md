@@ -3,9 +3,38 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-20, 08:30**.
+Ultima actualizacion: **2026-10-20, 09:45**.
 
-**EMPIEZA AQUI (20-10, de 06:00 a 08:30). Los 6 hallazgos arreglados, sugeridos desde Elasticsearch, demo de concurrencia y semilla remota.**
+**EMPIEZA AQUI (20-10, de 08:30 a 09:45). Dashboard general del admin, demos de pais en remoto, Revisar va al caso.**
+
+Dashboard general (pestana Dashboard del admin, la primera; el enlace Admin de la cabecera abre ahi):
+- Backend en carpetas dashboards: controllers/dashboards/dashboard-general.controller.ts, services/dashboards/
+  (dashboard-general.service.ts las consultas, dashboard-periodo.ts el periodo, dashboard-exportar.service.ts
+  Excel con ExcelJS y PDF con PDFKit, dashboard-correo.service.ts Nodemailer), dto/dashboards/dashboard-general.ts.
+- Rutas GET /admin/dashboard/{resumen,ventas,embudo,categorias,pagos,mapa,vendedores,productos,departamentos,
+  busquedas,cancelaciones,pedidos}?desde=AAAA-MM-DD&hasta=AAAA-MM-DD, solo admin. Exportar: GET exportar/excel,
+  GET exportar/pdf (?secciones=a,b), POST exportar/correo {correos, formato pdf|excel, desde, hasta, secciones}.
+- Cifras contra el periodo anterior del mismo largo. Una venta es comprado, enviado o entregado; lo cobrado sale de
+  pago pagado, igual que Reportes. Embudo y busquedas salen de ClickHouse (lote real), lo demas de PostgreSQL. Dias y
+  horas en hora de Guatemala.
+- Frontend: lib/PanelDashboard.svelte, un dashboard a la vez (Ventas, Clientes, Vendedores y productos, Busquedas,
+  Cancelaciones, Pedidos), periodo en un solo boton, exportar en un dialogo. Graficas nuevas en lib/graficas:
+  Linea, MapaCalor (5 escalones como la aerolinea), Apiladas, Embudo (barra con borde, Meme lo pidio).
+- pruebas/dashboard.mjs (en correr_todas): 35 OK, todas las secciones suman lo mismo, igual que Reportes y que
+  PostgreSQL contado aparte, el Excel y el PDF traen esos numeros, el correo rechaza lo invalido sin mandar nada.
+- Correo: SMTP_* en backend/.env (no se sube), con la cuenta de LEDKID (LEDKID-SIMULADOR/backend/.env), Meme lo
+  autorizo. Probado con un sumidero local y con un correo real a Meme (PDF de octubre, 3.4 s).
+
+Demos de otro pais en remoto: el docker falso le pasa al Docker de esta PC todo lo que no es una de las seis bases
+(los mesh-tor-*), y abre Docker Desktop si hace falta. docker.ps1 manda los argumentos en base64 por el ambiente:
+Git Bash se comia las comillas simples ('ip') y las llaves ({sg} llegaba a Tor como sg y Tor no salia por el pais).
+Probado desde el panel: Singapur, Alemania y Japon, estado, cerrar y limpiar. arrancar.ps1 entero otra vez bien.
+
+Arreglos de pantalla: el carrito de la cabecera es un icono; sin barras de color a la izquierda ni arriba en las
+tarjetas (Checkout, Mis pedidos, Reportes, Tendencias, Ofertas, Cifra); Revisar en los avisos del admin abre la
+pagina del caso, baja hasta el y lo marca (?anillo=id); en el telefono las pestanas del panel se deslizan.
+
+**ANTES (20-10, de 06:00 a 08:30). Los 6 hallazgos arreglados, sugeridos desde Elasticsearch, demo de concurrencia y semilla remota.**
 Meme dio el visto bueno a los arreglos de la seccion de abajo y pidio ademas tres cosas. Todo probado contra
 la PC de Jose David (100.64.42.11) y commiteado.
 

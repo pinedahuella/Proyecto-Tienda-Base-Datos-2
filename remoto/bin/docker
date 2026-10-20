@@ -8,7 +8,7 @@
 # MONGO_INITDB_ROOT_USERNAME...). Los clientes de remoto/bin van a localhost,
 # y remoto/tunel.cjs lleva localhost a la otra PC.
 #
-# Lo que entiende:
+# Lo que entiende, con las seis bases:
 #   docker exec [-i] [-t] [-e K=V] [-u x] [-w x] <contenedor> <comando> [args]
 #   docker cp <origen> <destino>       uno de los dos "contenedor:/ruta"
 #   docker ps / docker inspect         como si los seis estuvieran arriba
@@ -17,14 +17,68 @@
 #                                      arrancar.ps1 no intente abrir Docker
 #                                      Desktop aqui (2026-10-20)
 # Lo que no: parar, arrancar o reiniciar un contenedor de la otra PC, ni borrar
-# sus volumenes (compose down/rm/stop, volume rm, rm, run). Sale con 1 y lo
-# dice; las pruebas que lo hacen (la caida de una base) son de la base local, y
-# rehacer una base desde cero se hace en la PC que la tiene.
+# sus volumenes (compose down/rm/stop, volume rm, rm). Sale con 1 y lo dice; las
+# pruebas que lo hacen (la caida de una base) son de la base local, y rehacer
+# una base desde cero se hace en la PC que la tiene.
+#
+# Todo lo demas va al Docker DE VERDAD de esta PC (2026-10-20): los Tor de las
+# demos de otro pais (docker build, run, rm -f mesh-tor-sg, ps --filter
+# name=^mesh-tor-, exec mesh-tor-sg curl ...) viven aqui y no en la otra PC. Si
+# Docker Desktop esta cerrado, se abre y se espera. Los contenedores de Mesh de
+# esta PC no se arrancan: estan parados, y el tunel tiene sus puertos.
+
+# Desde PowerShell (docker.ps1) los argumentos llegan en base64 por el ambiente,
+# cada uno con una "x" delante, para que Git Bash no les quite las comillas ni
+# les expanda las llaves. El "." del final guarda los saltos de linea del final.
+if [ -n "${MESH_DOCKER_ARGS_B64+x}" ]; then
+    _args=()
+    for _a in $MESH_DOCKER_ARGS_B64; do
+        _v="$(printf '%s' "$_a" | base64 -d; printf .)"
+        _v="${_v%.}"
+        _args+=("${_v#x}")
+    done
+    unset MESH_DOCKER_ARGS_B64 _a _v
+    set -- "${_args[@]}"
+    unset _args
+fi
 
 source "$(dirname "$0")/../comun.sh"
 BIN="$REMOTO/bin"
 
 CONTENEDORES=(mesh-postgres mesh-mongo mesh-redis mesh-neo4j mesh-clickhouse mesh-elastic)
+
+es_base() {
+    local c
+    for c in "${CONTENEDORES[@]}"; do [ "$1" = "$c" ] && return 0; done
+    return 1
+}
+
+# El docker.exe de verdad, sin pasar por este.
+REAL="/c/Program Files/Docker/Docker/resources/bin/docker.exe"
+if [ ! -x "$REAL" ]; then
+    REAL="$(PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -vxF "$BIN" | paste -sd: -)" command -v docker.exe 2>/dev/null)"
+fi
+
+# Docker Desktop arriba, abriendolo si hace falta (hasta 150 s).
+real_listo() {
+    [ -n "$REAL" ] || { echo "docker falso: no encuentro el docker.exe de verdad" >&2; return 1; }
+    "$REAL" info >/dev/null 2>&1 && return 0
+    echo "docker falso: abriendo Docker Desktop de esta PC para los contenedores que no son bases..." >&2
+    powershell.exe -NoProfile -Command "Start-Process -FilePath (Join-Path \$env:ProgramFiles 'Docker\Docker\Docker Desktop.exe') -ArgumentList '-Autostart'" >/dev/null 2>&1
+    local i
+    for i in $(seq 1 30); do
+        sleep 5
+        "$REAL" info >/dev/null 2>&1 && return 0
+    done
+    echo "docker falso: Docker Desktop no arranco en 150 s" >&2
+    return 1
+}
+
+# Pasa el comando entero, tal cual, al Docker de verdad.
+real() {
+    real_listo || exit 1
+    MSYS_NO_PATHCONV=1 exec "$REAL" "$@"
+}
 
 # El ambiente de cada contenedor, el mismo del docker-compose.yml.
 ambiente_de() {
@@ -40,12 +94,16 @@ ambiente_de() {
         mesh-clickhouse)
             export CLICKHOUSE_DB CLICKHOUSE_USER CLICKHOUSE_PASSWORD ;;
         mesh-elastic) ;;
-        *)
-            echo "docker falso: no conozco el contenedor \"$1\" (son ${CONTENEDORES[*]})" >&2
-            exit 1 ;;
     esac
 }
 
+# Los argumentos que no son opciones (los nombres de contenedor de rm, stop...).
+sin_opciones() {
+    local a
+    for a in "$@"; do [[ "$a" == -* ]] || printf '%s\n' "$a"; done
+}
+
+ORIGINAL=("$@")
 cmd="$1"; shift || true
 case "$cmd" in
     exec)
@@ -61,6 +119,7 @@ case "$cmd" in
             esac
         done
         contenedor="$1"; shift
+        es_base "$contenedor" || real "${ORIGINAL[@]}"
         ambiente_de "$contenedor"
         export PATH="$BIN:$PATH"
         programa="$1"; shift
@@ -88,6 +147,7 @@ case "$cmd" in
     cp)
         origen="$1"; destino="$2"
         if [[ "$destino" == *:* && "$destino" != [A-Za-z]:* ]]; then
+            es_base "${destino%%:*}" || real "${ORIGINAL[@]}"
             local_destino="$(ruta_local "${destino#*:}")"
             mkdir -p "$(dirname "$local_destino")"
             # El /tmp de los contenedores es el de Git Bash, que es el %TEMP% de
@@ -95,6 +155,7 @@ case "$cmd" in
             [ "$origen" -ef "$local_destino" ] && exit 0
             cp -r "$origen" "$local_destino"
         elif [[ "$origen" == *:* && "$origen" != [A-Za-z]:* ]]; then
+            es_base "${origen%%:*}" || real "${ORIGINAL[@]}"
             cp -r "$(ruta_local "${origen#*:}")" "$destino"
         else
             echo "docker falso: docker cp necesita un lado contenedor:/ruta" >&2
@@ -103,34 +164,48 @@ case "$cmd" in
         ;;
 
     ps)
-        filtro=""
+        filtro=""; formato=""; otro_filtro=0
         while [ $# -gt 0 ]; do
             case "$1" in
-                --filter|-f) [[ "$2" == name=* ]] && filtro="${2#name=}"; shift 2 ;;
+                --filter|-f)
+                    if [[ "$2" == name=* ]]; then filtro="${2#name=}"; else otro_filtro=1; fi
+                    shift 2 ;;
                 --format) formato="$2"; shift 2 ;;
                 *) shift ;;
             esac
         done
         # name=^mesh-redis$ (las demos lo piden asi) es el nombre exacto.
-        exacto=0
-        if [[ "$filtro" == ^* && "$filtro" == *'$' ]]; then
-            filtro="${filtro#^}"; filtro="${filtro%?}"; exacto=1
+        exacto=0; buscado="$filtro"
+        if [[ "$buscado" == ^* && "$buscado" == *'$' ]]; then
+            buscado="${buscado#^}"; buscado="${buscado%?}"; exacto=1
         fi
+        buscado="${buscado#^}"
+        salen=()
         for c in "${CONTENEDORES[@]}"; do
-            [[ -n "$filtro" && "$exacto" = 1 && "$c" != "$filtro" ]] && continue
-            [[ -n "$filtro" && "$c" != *"$filtro"* ]] && continue
+            [[ -n "$buscado" && "$exacto" = 1 && "$c" != "$buscado" ]] && continue
+            [[ -n "$buscado" && "$c" != *"$buscado"* ]] && continue
+            salen+=("$c")
+        done
+        # Un filtro que no es de las bases (name=^mesh-tor-, label=...) pregunta
+        # por los contenedores de esta PC.
+        if [ "$otro_filtro" = 1 ] || { [ -n "$filtro" ] && [ "${#salen[@]}" -eq 0 ]; }; then
+            real "${ORIGINAL[@]}"
+        fi
+        for c in "${salen[@]}"; do
             if [[ -n "$formato" && "$formato" != *Names* ]]; then echo "Up (remoto)"; else echo "$c"; fi
         done
         ;;
 
     inspect)
-        formato=""
+        formato=""; objetivo=""
         while [ $# -gt 0 ]; do
             case "$1" in
                 -f|--format) formato="$2"; shift 2 ;;
-                *) shift ;;
+                -*) shift ;;
+                *) [ -z "$objetivo" ] && objetivo="$1"; shift ;;
             esac
         done
+        if [ -n "$objetivo" ] && ! es_base "$objetivo"; then real "${ORIGINAL[@]}"; fi
         case "$formato" in
             *Health*) echo healthy ;;
             *Status*) echo running ;;
@@ -164,17 +239,25 @@ case "$cmd" in
         ;;
 
     logs)
-        echo "docker falso: el registro de los contenedores esta en la otra PC (${MESH_REMOTO:-}), docker logs se mira alla" >&2
+        objetivo="$(sin_opciones "$@" | tail -1)"
+        es_base "$objetivo" || real "${ORIGINAL[@]}"
+        echo "docker falso: el registro de $objetivo esta en la otra PC (${MESH_REMOTO:-}), docker logs se mira alla" >&2
         exit 1
         ;;
 
-    start|stop|restart|kill|pause|unpause)
-        echo "docker falso: no se puede hacer \"docker $cmd\" con las bases de la otra PC; esa parte de la prueba es de la base local" >&2
-        exit 1
+    start|stop|restart|kill|pause|unpause|rm)
+        while read -r c; do
+            [ -z "$c" ] && continue
+            if es_base "$c"; then
+                echo "docker falso: no se puede hacer \"docker $cmd $c\" con las bases de la otra PC; esa parte es de la base local" >&2
+                exit 1
+            fi
+        done < <(sin_opciones "$@")
+        real "${ORIGINAL[@]}"
         ;;
 
     *)
-        echo "docker falso: \"docker $cmd\" no esta en el modo remoto (remoto/README.md)" >&2
-        exit 1
+        # run, build, images, pull, network...: lo de esta PC.
+        real "${ORIGINAL[@]}"
         ;;
 esac

@@ -517,7 +517,7 @@
 		gap: 2px;
 		padding: 10px 14px;
 		background: var(--panel);
-		border-left: 3px solid var(--color);
+		border: 1px solid var(--linea);
 		border-radius: var(--r);
 	}
 

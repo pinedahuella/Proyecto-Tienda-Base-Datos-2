@@ -18,6 +18,7 @@
 	import DemoFraude from '$lib/DemoFraude.svelte';
 	import PanelComandos from '$lib/PanelComandos.svelte';
 	import PanelReportes from '$lib/PanelReportes.svelte';
+	import PanelDashboard from '$lib/PanelDashboard.svelte';
 	import {
 		cerrarSesion,
 		CORREO_TIENDA,
@@ -134,6 +135,9 @@
 
 		if (esAdmin) {
 			return [
+				// El de todo en uno, con graficas y para exportar (2026-10-20). Reportes
+				// sigue igual, con el cobrado y las reservaciones de la Entrega 2.
+				{ id: 'dashboard', nombre: 'Dashboard', pie: 'Como va la tienda en el periodo que elijas, contra el anterior' },
 				{ id: 'reportes', nombre: 'Reportes', pie: 'Como van las ventas y los pedidos' },
 				{ id: 'ofertas', nombre: 'Ofertas', pie: 'Precio, existencias y estado de lo que vende la tienda' },
 				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos, por ventas rapidas o por fecha' },
@@ -818,6 +822,12 @@
 			     con `oculta`, asi que volver a ella no vuelve a pedir nada ni
 			     pierde lo que hubiera escrito a medias. -->
 			{#if esAdmin}
+				<div class="hoja" class:oculta={seccionViva !== 'dashboard'}>
+					{#if visitadas.has('dashboard')}
+						<PanelDashboard alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
 				<div class="hoja" class:oculta={seccionViva !== 'reportes'}>
 					<!-- Los dos reportes de admin: ventas y reservaciones. Van
 					     PRIMEROS porque son de lectura y de un vistazo: se abre el
@@ -1326,6 +1336,14 @@
 	}
 
 	@media (max-width: 620px) {
+		/* En el telefono la barra de secciones va en una sola fila que se desliza
+		   de lado, y no pegada: en tres filas fijas tapaba media pantalla. */
+		.mapa {
+			position: static;
+			flex-wrap: nowrap;
+			overflow-x: auto;
+			scrollbar-width: none;
+		}
 		main {
 			padding-top: 32px;
 		}

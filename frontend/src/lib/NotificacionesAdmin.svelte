@@ -166,7 +166,14 @@
 								{n.cuentas.map((c) => c.usuario).join(', ')} · {fechaCorta(n.fecha_creacion)}
 							</span>
 						</div>
-						<a class="revisar" href="/panel?s=fraude&t=resenas" onclick={() => cerrar()}>Revisar</a>
+						<!-- Con el id, el panel abre la pagina donde esta ese caso, baja hasta
+						     el y lo deja marcado (Meme, 2026-10-20: abria el panel arriba y no
+						     se sabia cual era). -->
+						<a
+							class="revisar"
+							href="/panel?s=fraude&t=resenas&anillo={n.id_anillo_fraude}"
+							onclick={() => cerrar()}>Revisar</a
+						>
 					</li>
 				{/each}
 			</ul>

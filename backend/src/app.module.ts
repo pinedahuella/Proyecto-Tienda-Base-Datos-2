@@ -61,7 +61,11 @@ import { ChequeoTextoInmediatoService } from './services/fraude/chequeo-texto-in
 import { AnilloDeTextoDetectorService } from './services/fraude/anillo-de-texto-detector.service';
 import { HallazgosEventoFraudeDetectorService } from './services/fraude/hallazgos-evento-fraude-detector.service';
 import { AdminReportesController } from './controllers/admin/admin-reportes.controller';
+import { DashboardGeneralController } from './controllers/dashboards/dashboard-general.controller';
 import { AdminReportesService } from './services/admin/admin-reportes.service';
+import { DashboardCorreoService } from './services/dashboards/dashboard-correo.service';
+import { DashboardExportarService } from './services/dashboards/dashboard-exportar.service';
+import { DashboardGeneralService } from './services/dashboards/dashboard-general.service';
 import { InventarioLimitadoService } from './services/inventario-limitado/inventario-limitado.service';
 import { GrafoController } from './controllers/grafo/grafo.controller';
 import { GrafoSyncService } from './services/grafo/grafo-sync.service';
@@ -178,6 +182,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     CarritoController,
     FraudeController,
     AdminReportesController,
+    DashboardGeneralController,
     GrafoController,
     BaseDatosBuscadorController,
     BaseDatosVectoresController,
@@ -246,6 +251,9 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     AnilloDeTextoDetectorService,
     HallazgosEventoFraudeDetectorService,
     AdminReportesService,
+    DashboardGeneralService,
+    DashboardExportarService,
+    DashboardCorreoService,
     InventarioLimitadoService,
     GrafoSyncService,
     GrafoComprasSyncService,

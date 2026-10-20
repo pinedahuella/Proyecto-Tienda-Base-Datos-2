@@ -256,13 +256,24 @@
 			{#if correo}
 				<!-- El carrito se abre desde cualquier pagina: el panel es uno solo
 				     y vive en el layout, aqui solo esta el boton que lo llama. -->
+				<!-- Un icono y no la palabra, del tamano de la campanita de al lado
+				     (Meme, 2026-10-20). El nombre va en aria-label y en title. -->
 				<button
 					type="button"
-					class="salir carro"
+					class="carro"
 					onclick={() => carrito.alternar()}
-					aria-label="Ver mi carrito"
+					aria-label={carrito.cuenta > 0 ? `Ver mi carrito, ${carrito.cuenta} productos` : 'Ver mi carrito'}
+					title="Carrito"
 				>
-					Carrito
+					<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true">
+						<path
+							d="M3 4h2.2l2.1 10.2a1.5 1.5 0 0 0 1.5 1.2h8.4a1.5 1.5 0 0 0 1.5-1.1L20.5 8H6.1"
+							stroke-linecap="round"
+							stroke-linejoin="round"
+						/>
+						<circle cx="9.5" cy="19.5" r="1.3" />
+						<circle cx="17" cy="19.5" r="1.3" />
+					</svg>
 					{#if carrito.cuenta > 0}
 						<span class="burbuja">{carrito.cuenta}</span>
 					{/if}
@@ -303,7 +314,7 @@
 					     cuentas, fraude, tendencias) y solo sale en cuentas de admin. Mi
 					     perfil lleva a lo personal, que es igual para todos los roles. -->
 					{#if soyAdmin}
-						<a class="navegar admin" href="/panel?s=reportes">Admin</a>
+						<a class="navegar admin" href="/panel?s=dashboard">Admin</a>
 					{/if}
 					{#if soyVendedor}
 						<a class="navegar admin" href="/panel?s=ofertas">Vendedor</a>
@@ -349,7 +360,7 @@
 							Avisos{#if avisos.noLeidos > 0}<span class="contador">{avisos.noLeidos}</span>{/if}
 						</a>
 						{#if soyAdmin}
-							<a class="opcion" href="/panel?s=reportes" onclick={() => cerrarMenu()}>Admin</a>
+							<a class="opcion" href="/panel?s=dashboard" onclick={() => cerrarMenu()}>Admin</a>
 						{/if}
 						{#if soyVendedor}
 							<a class="opcion" href="/panel?s=ofertas" onclick={() => cerrarMenu()}>Vendedor</a>
@@ -484,8 +495,33 @@
 
 	/* El boton del carrito lleva la burbuja pegada arriba a la derecha, asi
 	   que necesita ser el contexto de posicion de esa burbuja. */
+	/* Mismo boton que la campanita (.campana en NotificacionesFraude). */
 	.carro {
 		position: relative;
+		width: 38px;
+		height: 38px;
+		padding: 0;
+		display: grid;
+		place-items: center;
+		background: none;
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
+		color: var(--tinta);
+		cursor: pointer;
+		transition:
+			border-color var(--t),
+			color var(--t);
+	}
+
+	.carro:hover,
+	.carro:focus-visible {
+		border-color: var(--indigo);
+		color: var(--indigo);
+	}
+
+	.carro svg {
+		width: 20px;
+		height: 20px;
 	}
 
 	/* El numero de avisos sin leer, junto al texto del enlace. No es .burbuja:
