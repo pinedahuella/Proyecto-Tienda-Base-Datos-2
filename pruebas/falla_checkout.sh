@@ -473,6 +473,13 @@ mostrar_foto() {
 }
 
 
+# Toda esta prueba es tumbar bases a proposito. Con SIN_CAIDA=1 (lo pone el modo
+# remoto, remoto/README.md: las bases son de otra PC) no hay nada que medir.
+if [ "${SIN_CAIDA:-0}" = "1" ]; then
+    echo "  SIN MEDIR con SIN_CAIDA=1 no se tumba ninguna base, y esta prueba no es otra cosa"
+    exit 0
+fi
+
 # ============================================================
 # 0. TODO ARRIBA Y CON QUE SE VA A TRABAJAR
 # ============================================================

@@ -194,8 +194,12 @@ python -c "import sys; sys.exit(0 if float('$act_desp') > float('$act_antes') el
 
 titulo "4. Lo que no se puede comprar se MARCA, no se esconde"
 
+# Otra oferta que la de la parte 1: si fuera la misma (en una base donde la
+# primera con stock >= 5 tiene 8 o menos, como la de la PC de Jose David), el
+# PUT de aqui le pondria stock+3 y la parte 5 veria esa cantidad y no la suya.
 POCA=$(sql "SELECT o.id_oferta FROM oferta o JOIN estado_oferta eo USING(id_estado_oferta)
             WHERE eo.estado_oferta_nombre='activa' AND o.stock BETWEEN 1 AND 8 AND NOT o.es_inventario_limitado
+              AND o.id_oferta <> $OFERTA
             ORDER BY o.id_oferta LIMIT 1;")
 ST=$(sql "SELECT stock FROM oferta WHERE id_oferta=$POCA;")
 curl -s -X PUT "$API/carrito/lineas/$POCA" -H "Content-Type: application/json" -H "Cookie: $C" -d "{\"cantidad\":$((ST+3))}" >/dev/null

@@ -1,0 +1,90 @@
+#!/usr/bin/env bash
+# remoto/bin/psql -- el psql de "dentro de mesh-postgres", en el modo remoto.
+# Corre el psql de verdad de esta maquina (el de PostgreSQL 18 para Windows),
+# contra localhost:5432, que remoto/tunel.cjs lleva a la otra PC. Asi los
+# \if, \gset, \copy, las variables -v y los NOTICE salen igual que adentro del
+# contenedor, sin imitar nada.
+#
+# Lo que cambia respecto del de adentro:
+#   - Las rutas del contenedor (/tmp, /migrations) se traducen a esta maquina.
+#   - Windows escribe los fines de linea con \r: se quitan, de la salida y de
+#     los errores, para que los "grep" y los "[ x = y ]" de las pruebas vean lo
+#     mismo que con Docker.
+#   - La contrasena va en PGPASSWORD (adentro entra sin ella, por el socket).
+source "$(dirname "$0")/../comun.sh"
+
+PSQL_EXE="${PSQL_EXE:-}"
+if [ -z "$PSQL_EXE" ]; then
+    for candidato in "/c/Program Files/PostgreSQL"/*/bin/psql.exe; do
+        [ -x "$candidato" ] && PSQL_EXE="$candidato"
+    done
+fi
+if [ -z "$PSQL_EXE" ]; then
+    echo "remoto/bin/psql: no encuentro psql.exe (C:\\Program Files\\PostgreSQL\\<version>\\bin). Instala el cliente de PostgreSQL o pon PSQL_EXE" >&2
+    exit 127
+fi
+
+export PGHOST=localhost PGPORT=5432 PGPASSWORD="$DB_PASSWORD" PGCLIENTENCODING=UTF8
+traducir_args "$@"
+
+# Un -c con acentos no llega entero: Windows le pasa los argumentos a psql.exe
+# en la pagina de codigos ANSI (la "o" con tilde como el byte f3) y PostgreSQL,
+# que espera UTF-8, lo rechaza. Ese -c va por un archivo en UTF-8 (-f). Medido
+# contra el psql del contenedor.
+# El -c puede venir solo o al final de un grupo de banderas (-tAc, -qtAc).
+NUEVOS=()
+archivo=""
+i=0
+while [ $i -lt ${#ARGS[@]} ]; do
+    a="${ARGS[$i]}"
+    if [[ "$a" =~ ^-[a-zA-Z]*c$ ]] && [ $((i + 1)) -lt ${#ARGS[@]} ] &&
+       printf '%s' "${ARGS[$((i + 1))]}" | LC_ALL=C grep -q '[^[:print:][:space:]]'; then
+        archivo="$(mktemp "${TMPDIR:-/tmp}/psql-c.XXXXXX")"
+        printf '%s\n' "${ARGS[$((i + 1))]}" > "$archivo"
+        [ "$a" != "-c" ] && NUEVOS+=("${a%c}")
+        NUEVOS+=("-f" "$(cygpath -w "$archivo")")
+        i=$((i + 2))
+        continue
+    fi
+    NUEVOS+=("$a")
+    i=$((i + 1))
+done
+ARGS=("${NUEVOS[@]}")
+[ -n "$archivo" ] && trap 'rm -f "$archivo"' EXIT
+
+# Un guion que llega por stdin (-f -, o sin -c ni -f) puede traer un \o con
+# una ruta del contenedor: neo4j/correr_patrones.sh calla una parte con
+# \o /dev/null y escribe otra en /tmp para leerla despues con docker exec cat.
+# El psql de Windows no conoce /dev/null, y un /tmp suyo seria C:\tmp y no el
+# /tmp de Git Bash. Se cambian por NUL y por el /tmp de aqui (C:/...).
+lee_stdin=1
+i=0
+while [ $i -lt ${#ARGS[@]} ]; do
+    a="${ARGS[$i]}"
+    if [[ "$a" =~ ^-[a-zA-Z]*f$ ]] && [ "${ARGS[$((i + 1))]:-}" = "-" ]; then
+        lee_stdin=1; break
+    fi
+    if [[ "$a" =~ ^-[a-zA-Z]*[cf]$ || "$a" == --command* || "$a" == --file* ]]; then
+        lee_stdin=0
+    fi
+    i=$((i + 1))
+done
+
+correr() {
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$PSQL_EXE" "${ARGS[@]}" 2> >(tr -d '\r' >&2) | tr -d '\r'
+    return ${PIPESTATUS[0]}
+}
+if [ "$lee_stdin" = 1 ]; then
+    TMP_WIN="$(cygpath -m /tmp)"
+    awk -v tmp="$TMP_WIN" '
+        /^[ \t]*\\o[ \t]+\/dev\/null[ \t]*$/ { print "\\o NUL"; next }
+        /^[ \t]*\\o[ \t]+\/tmp\// { sub(/\/tmp\//, tmp "/"); print; next }
+        { print }
+    ' | correr
+    estado=$?
+else
+    correr
+    estado=$?
+fi
+wait
+exit $estado

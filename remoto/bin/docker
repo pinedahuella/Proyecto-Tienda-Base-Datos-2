@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+# remoto/bin/docker -- el docker falso del modo remoto (remoto/README.md).
+#
+# Las pruebas y las demos hablan con las bases por "docker exec mesh-<base>
+# <cliente>". Con las bases en otra PC (la de Jose David, por Tailscale) no
+# hay contenedores aqui: este docker hace como que si, y corre el cliente EN
+# ESTA MAQUINA con el ambiente que tendria dentro del contenedor (POSTGRES_USER,
+# MONGO_INITDB_ROOT_USERNAME...). Los clientes de remoto/bin van a localhost,
+# y remoto/tunel.cjs lleva localhost a la otra PC.
+#
+# Lo que entiende:
+#   docker exec [-i] [-t] [-e K=V] [-u x] [-w x] <contenedor> <comando> [args]
+#   docker cp <origen> <destino>       uno de los dos "contenedor:/ruta"
+#   docker ps / docker inspect         como si los seis estuvieran arriba
+#   docker compose ... up -d ...       no hace nada: alla ya estan arriba
+# Lo que no: parar, arrancar o reiniciar un contenedor de la otra PC. Sale con
+# 1 y lo dice; las pruebas que lo hacen (la caida de una base) son de la base
+# local.
+
+source "$(dirname "$0")/../comun.sh"
+BIN="$REMOTO/bin"
+
+CONTENEDORES=(mesh-postgres mesh-mongo mesh-redis mesh-neo4j mesh-clickhouse mesh-elastic)
+
+# El ambiente de cada contenedor, el mismo del docker-compose.yml.
+ambiente_de() {
+    case "$1" in
+        mesh-postgres)
+            export POSTGRES_USER="$DB_USER" POSTGRES_PASSWORD="$DB_PASSWORD" POSTGRES_DB="$DB_NAME" ;;
+        mesh-mongo)
+            export MONGO_INITDB_ROOT_USERNAME="$MONGO_USER" MONGO_INITDB_ROOT_PASSWORD="$MONGO_PASSWORD" MONGO_INITDB_DATABASE="$MONGO_DB" ;;
+        mesh-redis)
+            export REDIS_PASSWORD ;;
+        mesh-neo4j)
+            export NEO4J_AUTH="neo4j/$NEO4J_PASSWORD" MESH_NEO4J_PASSWORD="$NEO4J_PASSWORD" ;;
+        mesh-clickhouse)
+            export CLICKHOUSE_DB CLICKHOUSE_USER CLICKHOUSE_PASSWORD ;;
+        mesh-elastic) ;;
+        *)
+            echo "docker falso: no conozco el contenedor \"$1\" (son ${CONTENEDORES[*]})" >&2
+            exit 1 ;;
+    esac
+}
+
+cmd="$1"; shift || true
+case "$cmd" in
+    exec)
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -i|-t|-it|-ti|--interactive|--tty) shift ;;
+                -e) export "$2"; shift 2 ;;
+                -e*) export "${1#-e}"; shift ;;
+                --env=*) export "${1#--env=}"; shift ;;
+                -u|-w|--user|--workdir) shift 2 ;;
+                -*) shift ;;
+                *) break ;;
+            esac
+        done
+        contenedor="$1"; shift
+        ambiente_de "$contenedor"
+        export PATH="$BIN:$PATH"
+        programa="$1"; shift
+        case "$programa" in
+            sh|bash|/bin/sh|/bin/bash)
+                exec bash "$@" ;;
+            *)
+                if [ -x "$BIN/$(basename "$programa")" ]; then
+                    exec "$BIN/$(basename "$programa")" "$@"
+                fi
+                # Lo que trae cualquier contenedor (docker exec x true para ver
+                # si esta, cat y rm de un /tmp): aqui mismo, con las carpetas
+                # montadas traducidas. El /tmp es el mismo.
+                case "$(basename "$programa")" in
+                    true|false|cat|rm|ls|mkdir|echo|test|head|tail|wc|cp|mv|touch)
+                        traducidos=()
+                        for a in "$@"; do traducidos+=("$(ruta_local "$a")"); done
+                        exec "$(basename "$programa")" "${traducidos[@]}" ;;
+                esac
+                echo "docker falso: \"$programa\" no se puede correr fuera del contenedor $contenedor" >&2
+                exit 127 ;;
+        esac
+        ;;
+
+    cp)
+        origen="$1"; destino="$2"
+        if [[ "$destino" == *:* && "$destino" != [A-Za-z]:* ]]; then
+            local_destino="$(ruta_local "${destino#*:}")"
+            mkdir -p "$(dirname "$local_destino")"
+            cp -r "$origen" "$local_destino"
+        elif [[ "$origen" == *:* && "$origen" != [A-Za-z]:* ]]; then
+            cp -r "$(ruta_local "${origen#*:}")" "$destino"
+        else
+            echo "docker falso: docker cp necesita un lado contenedor:/ruta" >&2
+            exit 1
+        fi
+        ;;
+
+    ps)
+        filtro=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                --filter|-f) [[ "$2" == name=* ]] && filtro="${2#name=}"; shift 2 ;;
+                --format) formato="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        # name=^mesh-redis$ (las demos lo piden asi) es el nombre exacto.
+        exacto=0
+        if [[ "$filtro" == ^* && "$filtro" == *'$' ]]; then
+            filtro="${filtro#^}"; filtro="${filtro%?}"; exacto=1
+        fi
+        for c in "${CONTENEDORES[@]}"; do
+            [[ -n "$filtro" && "$exacto" = 1 && "$c" != "$filtro" ]] && continue
+            [[ -n "$filtro" && "$c" != *"$filtro"* ]] && continue
+            if [[ -n "$formato" && "$formato" != *Names* ]]; then echo "Up (remoto)"; else echo "$c"; fi
+        done
+        ;;
+
+    inspect)
+        formato=""
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -f|--format) formato="$2"; shift 2 ;;
+                *) shift ;;
+            esac
+        done
+        case "$formato" in
+            *Health*) echo healthy ;;
+            *Status*) echo running ;;
+            *) echo true ;;
+        esac
+        ;;
+
+    compose)
+        # Alla ya estan arriba; up, ps o lo que sea no hace nada aqui.
+        exit 0
+        ;;
+
+    start|stop|restart|kill|pause|unpause)
+        echo "docker falso: no se puede hacer \"docker $cmd\" con las bases de la otra PC; esa parte de la prueba es de la base local" >&2
+        exit 1
+        ;;
+
+    *)
+        echo "docker falso: \"docker $cmd\" no esta en el modo remoto (remoto/README.md)" >&2
+        exit 1
+        ;;
+esac

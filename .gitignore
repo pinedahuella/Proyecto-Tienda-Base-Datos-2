@@ -85,3 +85,8 @@ desktop.ini
 .mesh-*
 
 __pycache__/
+
+# El modo remoto (remoto/README.md): los clientes de Mongo que baja
+# remoto/instalar.sh (unos 180 MB) y el pid del tunel.
+remoto/herramientas/
+remoto/.tunel.pid

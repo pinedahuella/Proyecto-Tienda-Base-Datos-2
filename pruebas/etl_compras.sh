@@ -160,17 +160,27 @@ c_borradas=$(ch "SELECT count() FROM compra_producto WHERE lote = 'real' AND id_
 d_borradas=$(ch "SELECT count() FROM devolucion_producto WHERE lote = 'real' AND id_pedido = $PEDIDO_DEVOLUCION")
 echo "  (se van a borrar $c_borradas compra(s) y $d_borradas devolucion(es))"
 
-if [ "$c_borradas" -eq 0 ] || [ "$d_borradas" -eq 0 ]; then
+if [ "$c_borradas" -eq 0 ]; then
     FALLA "no hay filas de los pedidos elegidos para borrar: esta parte no mediria nada"
 else
+    # Una base donde todas las devoluciones las escribio el backend con su IP (la
+    # de la PC de Jose David) no tiene ninguna que haya copiado el ETL, y esas la
+    # parte 6 no deja borrarlas. Las compras se miden igual.
+    if [ "$d_borradas" -eq 0 ]; then
+        echo "  SIN MEDIR las devoluciones: ninguna la copio el ETL (todas traen la IP del backend)"
+    fi
     ch "ALTER TABLE compra_producto DELETE WHERE lote = 'real' AND id_pedido IN ($PEDIDOS_BORRADOS) SETTINGS mutations_sync = 2" >/dev/null
-    ch "ALTER TABLE devolucion_producto DELETE WHERE lote = 'real' AND id_pedido = $PEDIDO_DEVOLUCION SETTINGS mutations_sync = 2" >/dev/null
+    if [ "$d_borradas" -gt 0 ]; then
+        ch "ALTER TABLE devolucion_producto DELETE WHERE lote = 'real' AND id_pedido = $PEDIDO_DEVOLUCION SETTINGS mutations_sync = 2" >/dev/null
+    fi
     igual "tras borrar, faltan las compras" $((c_antes - c_borradas)) "$(ch "SELECT count() FROM compra_producto WHERE lote = 'real'")"
 
     salida=$(bash "$RAIZ/etl/cargar_compras.sh" 2>&1)
     echo "$salida" | sed 's/^/  | /'
     igual "el ETL trae de vuelta exactamente las compras borradas" "$c_antes" "$(ch "SELECT count() FROM compra_producto WHERE lote = 'real'")"
-    igual "y exactamente las devoluciones borradas" "$d_antes" "$(ch "SELECT count() FROM devolucion_producto WHERE lote = 'real'")"
+    if [ "$d_borradas" -gt 0 ]; then
+        igual "y exactamente las devoluciones borradas" "$d_antes" "$(ch "SELECT count() FROM devolucion_producto WHERE lote = 'real'")"
+    fi
     igual "copio solo las compras que faltaban" 1 "$(echo "$salida" | grep -c "ventas: $c_borradas nueva(s)")"
 fi
 

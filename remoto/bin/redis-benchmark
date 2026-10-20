@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# remoto/bin/redis-benchmark -- el redis-benchmark de "dentro de mesh-redis",
+# en el modo remoto: remoto/clientes/redis-benchmark.cjs contra localhost:6379,
+# que remoto/tunel.cjs lleva a la otra PC.
+source "$(dirname "$0")/../comun.sh"
+MSYS_NO_PATHCONV=1 exec node "$NODE_REMOTO/redis-benchmark.cjs" "$@"

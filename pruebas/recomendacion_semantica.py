@@ -52,6 +52,22 @@ ENV = leer_env()
 BACKEND = os.environ.get('BACKEND', 'http://localhost:3000')
 
 
+def comando_docker():
+    """En el modo remoto (remoto/README.md) docker es un script de Git Bash, que
+    Python no puede correr directo en Windows: se le pasa al bash de Git, con la
+    ruta entera, porque un bash suelto puede ser el de WSL (System32)."""
+    if not os.environ.get('MESH_REMOTO'):
+        return ['docker']
+    for base in (os.environ.get('ProgramFiles', ''), os.environ.get('ProgramFiles(x86)', '')):
+        bash = os.path.join(base, 'Git', 'bin', 'bash.exe')
+        if os.path.isfile(bash):
+            return [bash, os.path.join(RAIZ, 'remoto', 'bin', 'docker')]
+    raise RuntimeError('el modo remoto necesita Git Bash (C:/Program Files/Git)')
+
+
+DOCKER = comando_docker()
+
+
 def pedir(url, cuerpo=None):
     datos = json.dumps(cuerpo).encode('utf-8') if cuerpo is not None else None
     req = urllib.request.Request(url, data=datos, headers={'Content-Type': 'application/json'})
@@ -67,7 +83,7 @@ def documentos():
     sql = ("SELECT pc.id_producto_mongo || '|' || coalesce(v.grupo, '') || '|' || coalesce(v.modelo, '') || '|' || "
            "coalesce(vector_dims(v.vector)::text, '0') FROM producto_catalogo pc "
            "LEFT JOIN vector_producto v USING (id_producto_mongo);")
-    r = subprocess.run(['docker', 'exec', 'mesh-postgres', 'psql', '-U', ENV['DB_USER'], '-d', ENV['DB_NAME'],
+    r = subprocess.run(DOCKER + ['exec', 'mesh-postgres', 'psql', '-U', ENV['DB_USER'], '-d', ENV['DB_NAME'],
                         '-qtAX', '-c', sql], capture_output=True, text=True, encoding='utf-8')
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip())
@@ -84,7 +100,7 @@ def mongo_categorias():
           " print(JSON.stringify({ id: d._id, cat: (d.categoria && d.categoria.nombre) || '', activo: d.estado === 'activo' })); });")
     cmd = ('mongosh --quiet -u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" '
            '--authenticationDatabase admin "$MONGO_INITDB_DATABASE" --eval ' + json.dumps(js))
-    r = subprocess.run(['docker', 'exec', 'mesh-mongo', 'sh', '-c', cmd], capture_output=True, text=True, encoding='utf-8')
+    r = subprocess.run(DOCKER + ['exec', 'mesh-mongo', 'sh', '-c', cmd], capture_output=True, text=True, encoding='utf-8')
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip())
     out = {}

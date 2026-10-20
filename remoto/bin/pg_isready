@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# remoto/bin/pg_isready -- el pg_isready de "dentro de mesh-postgres", en el
+# modo remoto: el de PostgreSQL para Windows (junto al psql.exe que usa
+# remoto/bin/psql), contra localhost:5432, que remoto/tunel.cjs lleva a la otra
+# PC. pruebas/falla_checkout.sh lo usa para ver si la base contesta.
+source "$(dirname "$0")/../comun.sh"
+EXE=""
+for candidato in "/c/Program Files/PostgreSQL"/*/bin/pg_isready.exe; do
+    [ -x "$candidato" ] && EXE="$candidato"
+done
+if [ -z "$EXE" ]; then
+    echo "remoto/bin/pg_isready: no encuentro pg_isready.exe (C:/Program Files/PostgreSQL/<version>/bin)" >&2
+    exit 127
+fi
+export PGHOST=localhost PGPORT=5432
+MSYS_NO_PATHCONV=1 "$EXE" "$@" | tr -d '\r'
+exit ${PIPESTATUS[0]}

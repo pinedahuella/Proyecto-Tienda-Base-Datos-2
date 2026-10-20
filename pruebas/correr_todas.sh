@@ -13,6 +13,9 @@
 # contra las bases de otra PC. Tarda unos 25 minutos.
 cd "$(dirname "$0")/.." || exit 1
 DIR="${SALIDA:-${TMPDIR:-/tmp}/mesh-pruebas}"
+# Que no le llegue a las pruebas: pruebas/eventos.sh usa SALIDA como el archivo
+# donde guarda lo que dice el ETL, y con una carpeta ahi se cae entera.
+unset SALIDA
 mkdir -p "$DIR"
 RES="$DIR/RESUMEN.txt"
 rm -f "$RES"

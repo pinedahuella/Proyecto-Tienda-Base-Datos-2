@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# remoto/bin/mongosh (y mongodump, mongorestore, que son el mismo archivo) --
+# los de "dentro de mesh-mongo", en el modo remoto: los oficiales para Windows
+# que baja remoto/instalar.sh, contra localhost:27017, que remoto/tunel.cjs
+# lleva al 27018 de la otra PC (el 27017 es el de dentro del contenedor). Las
+# rutas del contenedor (/tmp, /mongo) se traducen. A la salida de mongosh se
+# le quitan los \r; a la de mongodump no, que puede ser un --archive binario.
+source "$(dirname "$0")/../comun.sh"
+programa="$(basename "$0")"
+EXE="$REMOTO/herramientas/bin/$programa.exe"
+if [ ! -x "$EXE" ]; then
+    echo "remoto/bin/$programa: falta $programa.exe. Corre una vez: bash remoto/instalar.sh" >&2
+    exit 127
+fi
+traducir_args "$@"
+if [ "$programa" != mongosh ]; then
+    MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' exec "$EXE" "${ARGS[@]}"
+fi
+
+# Un guion de mongosh puede leer por su cuenta una ruta fija del contenedor:
+# etl/cargar.js abre '/tmp/mesh-productos.json'. Para el mongosh de Windows ese
+# /tmp es C:\tmp, y no el /tmp de Git Bash donde lo dejo docker exec cat. Se
+# cambia cada '/tmp/ entre comillas por el /tmp de aqui (C:/...), en una copia
+# del guion de --file y en el texto de --eval. El original no se toca.
+TMP_M="$(cygpath -m /tmp)"
+copias=()
+traducir_tmp() {
+    sed -e "s#'/tmp/#'$TMP_M/#g" -e "s#\"/tmp/#\"$TMP_M/#g" -e "s#\`/tmp/#\`$TMP_M/#g"
+}
+i=0
+while [ $i -lt ${#ARGS[@]} ]; do
+    a="${ARGS[$i]}"
+    siguiente="${ARGS[$((i + 1))]:-}"
+    if [[ "$a" == --file || "$a" == -f ]] && [ -n "$siguiente" ]; then
+        original="$(cygpath -u "$siguiente")"
+        if [ -f "$original" ] && grep -q "['\"\`]/tmp/" "$original"; then
+            copia="$(mktemp "${TMPDIR:-/tmp}/mongosh-guion.XXXXXX.js")"
+            traducir_tmp < "$original" > "$copia"
+            copias+=("$copia")
+            ARGS[$((i + 1))]="$(cygpath -w "$copia")"
+        fi
+        i=$((i + 2))
+        continue
+    fi
+    if [ "$a" = --eval ] && [ -n "$siguiente" ]; then
+        ARGS[$((i + 1))]="$(printf '%s' "$siguiente" | traducir_tmp)"
+        i=$((i + 2))
+        continue
+    fi
+    i=$((i + 1))
+done
+[ ${#copias[@]} -gt 0 ] && trap 'rm -f "${copias[@]}"' EXIT
+
+MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL='*' "$EXE" "${ARGS[@]}" 2> >(tr -d '\r' >&2) | tr -d '\r'
+estado=${PIPESTATUS[0]}
+wait
+exit $estado
