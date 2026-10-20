@@ -192,21 +192,30 @@ tiene 'B.6|-262--261|3' \
 tiene 'B.7|expres0@patrones.prueba|2' \
       "B.7 el vendedor que recibio dos notas de cuentas con minutos de vida"
 
+# Un id sembrado es NEGATIVO, y en la salida las cuentas de una cadena van
+# unidas con '-': la cadena sembrada sale como -204--203--202--201. Por eso un
+# id sembrado se reconoce por lo que tiene alrededor: antes un '|' o un '-'
+# (el separador) y despues otro de los dos. Con un '.*-206' a secas, una cadena
+# REAL de cuentas 203 a 206 ("203-204-205-206", la dejan pruebas/anillos.sh y
+# anillos_familia_b.sh en la base de la otra PC) tambien coincidia, y la prueba
+# daba FALLA por una cadena de verdad que no tiene nada de sembrado (2026-10-20).
+sembrado() { printf '[|-]-%s[-|]' "$1"; }
+
 echo
 echo "  Y cada control NO sale:"
 no_tiene '^B\.1|.*-203--202--201|3'  "B.1 no lista los tramos de la cadena por separado"
-no_tiene '^B\.1|.*-206'              "B.1 la cadena con un 3 en medio"
-no_tiene '^B\.1|.*-209'              "B.1 la cadena de 60 dias"
-no_tiene '^B\.1|.*-232'              "B.1 el cliente fiel no arma cadenas con nadie"
-no_tiene '^B\.2|.*-225'              "B.2 la cuenta nueva que tambien califico a otro vendedor"
-no_tiene '^B\.2|.*-226'              "B.2 el vendedor con solo dos satelites"
+no_tiene "^B\.1.*$(sembrado 206)"   "B.1 la cadena con un 3 en medio"
+no_tiene "^B\.1.*$(sembrado 209)"   "B.1 la cadena de 60 dias"
+no_tiene "^B\.1.*$(sembrado 232)"   "B.1 el cliente fiel no arma cadenas con nadie"
+no_tiene "^B\.2.*$(sembrado 225)"   "B.2 la cuenta nueva que tambien califico a otro vendedor"
+no_tiene "^B\.2.*$(sembrado 226)"   "B.2 el vendedor con solo dos satelites"
 no_tiene '^B\.3|fiel@'               "B.3 el cliente fiel (exclusividad 0.4)"
 no_tiene '^B\.3|coord'               "B.3 las coordinadas, que caben en 20 dias"
 no_tiene '^B\.5|-254--253'           "B.5 el intercambio con diez dias de espera"
-no_tiene '^B\.6|.*-263'              "B.6 la cuenta que califica lo mismo una semana despues"
+no_tiene "^B\.6.*$(sembrado 263)"   "B.6 la cuenta que califica lo mismo una semana despues"
 no_tiene '^B\.7|coord0@'             "B.7 la cuenta nueva que califica a una tienda vieja"
 no_tiene '^B\.7|granja0@'            "B.7 los satelites de tres dias no son expres"
-no_tiene '^B\.2|.*-274'              "B.2 la resena anterior al alta de su autor no hace satelite"
+no_tiene "^B\.2.*$(sembrado 274)"   "B.2 la resena anterior al alta de su autor no hace satelite"
 
 echo
 echo "  Y lo real sigue ahi con la siembra puesta (sembrar no tapa nada):"

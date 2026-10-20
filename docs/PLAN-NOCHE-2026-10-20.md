@@ -79,7 +79,10 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
         vendidos, mas resenados), total sigue 0 para ClickHouse; frontend: /buscar "Te pueden
         interesar" y la cabecera, sin registrar el clic.
 - [ ] 9. Frontend: avisos sin nombrar bases, sugeridos, carrito y login sin PostgreSQL.
-- [ ] 10. Las 2 pruebas que fallaban: neo4j/correr_patrones.sh B.1 y pruebas/notas.sh (producto solo en Mongo).
+- [x] 10. Las 2 pruebas que fallaban, las dos eran de la herramienta y no de los datos:
+        notas.sh 10 OK (remoto/bin/mongosh no traducia el /tmp de un guion pasado suelto; SI habia
+        productos solo en Mongo, 1103 y 1104). correr_patrones.sh "Todo bien" (el control '-206'
+        coincidia con la cadena REAL 203-204-205-206; ahora sembrado() exige el signo negativo).
 - [ ] 11. Prueba nueva de caidas con los interruptores + correr_todas en remoto en verde.
 - [ ] 12. Edge 1536x730 de cada caida, abrir cada captura.
 - [ ] 13. Docs: QUE-PASA-SI-SE-CAE-UNA-BASE.md, cambio_propuestas, TRASPASO, memoria. Commit y push.
@@ -100,6 +103,8 @@ lo dijo Meme). No hay SSH a la PC de David: las caidas se simulan con interrupto
 - No editar el producto 21 por la API (etl_mongo.sh).
 
 ## Bitacora
+
+- 01:35 paso 10 hecho; commit. Sigue el 9 (frontend) y el 11 (prueba de caidas + correr_todas).
 
 - 01:20 paso 6 hecho y medido; commit. Sigue el 9 (revisar frontend) y el 10 (las 2 pruebas).
 

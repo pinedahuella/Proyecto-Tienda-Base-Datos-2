@@ -21,25 +21,37 @@ fi
 # etl/cargar.js abre '/tmp/mesh-productos.json'. Para el mongosh de Windows ese
 # /tmp es C:\tmp, y no el /tmp de Git Bash donde lo dejo docker exec cat. Se
 # cambia cada '/tmp/ entre comillas por el /tmp de aqui (C:/...), en una copia
-# del guion de --file y en el texto de --eval. El original no se toca.
+# del guion de --file o del que va suelto al final (mongosh base guion.js,
+# como pruebas/notas.sh) y en el texto de --eval. El original no se toca.
 TMP_M="$(cygpath -m /tmp)"
 copias=()
 traducir_tmp() {
     sed -e "s#'/tmp/#'$TMP_M/#g" -e "s#\"/tmp/#\"$TMP_M/#g" -e "s#\`/tmp/#\`$TMP_M/#g"
+}
+# Si el guion de la posicion $1 de ARGS lee algo de /tmp, la cambia por una copia traducida.
+traducir_guion() {
+    local original
+    original="$(cygpath -u "${ARGS[$1]}")"
+    if [ -f "$original" ] && grep -q "['\"\`]/tmp/" "$original"; then
+        local copia
+        copia="$(mktemp "${TMPDIR:-/tmp}/mongosh-guion.XXXXXX.js")"
+        traducir_tmp < "$original" > "$copia"
+        copias+=("$copia")
+        ARGS[$1]="$(cygpath -w "$copia")"
+    fi
 }
 i=0
 while [ $i -lt ${#ARGS[@]} ]; do
     a="${ARGS[$i]}"
     siguiente="${ARGS[$((i + 1))]:-}"
     if [[ "$a" == --file || "$a" == -f ]] && [ -n "$siguiente" ]; then
-        original="$(cygpath -u "$siguiente")"
-        if [ -f "$original" ] && grep -q "['\"\`]/tmp/" "$original"; then
-            copia="$(mktemp "${TMPDIR:-/tmp}/mongosh-guion.XXXXXX.js")"
-            traducir_tmp < "$original" > "$copia"
-            copias+=("$copia")
-            ARGS[$((i + 1))]="$(cygpath -w "$copia")"
-        fi
+        traducir_guion $((i + 1))
         i=$((i + 2))
+        continue
+    fi
+    if [[ "$a" == *.js && "$a" != -* ]]; then
+        traducir_guion $i
+        i=$((i + 1))
         continue
     fi
     if [ "$a" = --eval ] && [ -n "$siguiente" ]; then
