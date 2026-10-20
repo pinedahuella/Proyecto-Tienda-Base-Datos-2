@@ -3,7 +3,44 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-19, noche (2)**.
+Ultima actualizacion: **2026-10-19, noche (3)**.
+
+**EMPIEZA AQUI (19-10, noche 3). Respaldo del catalogo: la tienda se ve sin MongoDB (4d63929).**
+El punto 1 del profesor ("apagan una base y la aplicacion sigue, con las que quedan"). Jose David dio permiso
+para tocar `backend/` esta vez. Detalle completo en `backend/cambio_propuestas/2026-10-19_2230-respaldo-catalogo-sin-mongo.md`
+y lo que pasa con cada base en `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`.
+
+```
+047             producto_catalogo suma estado, id_categoria, descripcion y fecha_creacion. APLICADA y llenada en la
+                base de Jose David (1000 activos y 1 rechazado; el paso 7e lo hace solo en un arranque)
+escrituras      sincronizarCatalogo copia los campos nuevos; editar() sincroniza tambien con solo estado, descripcion
+                o categoria; revisar y reenviar una propuesta actualizan el estado en su transaccion
+respaldo        backend/src/helpers/catalogo-respaldo.ts: catalogo con todos los filtros fijos, ficha, categorias,
+                para ti, tambien compraron, parecidos, vistos recientemente y las dos tendencias salen de PostgreSQL
+                si Mongo no responde. Cortacircuitos de 15 s. Filtrar por caracteristica da 503 a proposito
+Topology closed si el backend arrancaba con Mongo caido, el driver 7 cerraba el cliente para siempre (500).
+                esCaidaDeMongo lo reconoce y el respaldo llama a mongoClient.connect() al volver a probar Mongo
+frontend        la ficha con desde_respaldo dice que algunos detalles no se pueden mostrar
+```
+
+Medido contra la PC de Jose David, sin tocar su Mongo (el backend apuntado a un puerto cerrado, y un reenviador en
+27999 para prender y apagar Mongo en vivo):
+
+- 71 llamadas con y sin Mongo comparadas campo por campo: 362 iguales y 1 distinta (la del filtro por caracteristica).
+- Mongo se cae con el backend corriendo: la primera ficha 3.2 s, las siguientes 70 ms; vuelve y a los 15 s sale de
+  Mongo sin reiniciar. Arrancar con Mongo caido y que vuelva: se reconecta solo, workers incluidos.
+- Las 9 escrituras dejan la copia igual a Mongo. Queda el producto 1104 de la prueba, inactivo (no se ve).
+- Edge 1536x730 sin Mongo: catalogo y ficha completos, 0 errores de JavaScript.
+- Las 38 pruebas del repo con el backend nuevo: todas bien salvo notas.sh (sin producto solo en Mongo alla, de
+  siempre) y neo4j/correr_patrones.sh. etl_mongo.sh dio 1 FALLA porque la prueba de escrituras habia editado su
+  producto 21; se borraron esos 4 eventos y volvio a 21 OK. redis/prueba_acceso.sh 31 OK con las contrasenas de
+  inspeccion y operador de Jose David pasadas por el ambiente (no estan en el repo).
+- **Sin resolver:** neo4j/correr_patrones.sh da 2 FALLA en B.1 (cadenas de los usuarios 203 a 209, que crearon hoy
+  pruebas/anillos.sh y anillos_familia_b.sh en la base de Jose David y se quedan). No toca el catalogo. Revisar si la
+  prueba debe ignorar cuentas de otras pruebas o si esas pruebas deben limpiar.
+
+Como quedo la maquina: todo apagado (backend, frontend, Ollama, panel de comandos), Docker y WSL apagados,
+`backend/.env` en 100.64.42.11. La cuenta desarrollador1@mesh.com existe en la base de Jose David.
 
 **EMPIEZA AQUI (19-10, noche 2). El modo remoto medido contra la PC de Jose David, y el documento de fraude.**
 No se toco `backend/`. Pusheado en main: 94335e0 (modo remoto) y becbbba (documento).
