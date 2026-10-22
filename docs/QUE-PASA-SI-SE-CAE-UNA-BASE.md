@@ -77,7 +77,7 @@ node pruebas/caidas.mjs                 las seis, apagadas
 node pruebas/caidas.mjs --congeladas    las seis, congeladas
 ```
 
-El 20 de octubre dio 47 comprobaciones bien y ninguna mal en las dos formas,
+El 20 de octubre dio 51 comprobaciones bien y ninguna mal en las dos formas,
 con las bases en la computadora de Jose David.
 
 ## Como se mira cada cosa
@@ -463,5 +463,5 @@ tienda no tiene.
   haciendo en cada ronda una compra de una unidad que despues se cancelo.
 - El 20 de octubre, con el interruptor, cada base apagada y congelada una por
   una, comparando cada respuesta con la que da la tienda con todo arriba, y con
-  pruebas/caidas.mjs, que dio 47 comprobaciones bien y ninguna mal en las dos
+  pruebas/caidas.mjs, que dio 51 comprobaciones bien y ninguna mal en las dos
   formas.

@@ -12,7 +12,7 @@
             "p": "La Entrega 3 agrega dos cosas. Un motor de búsqueda que tolera errores de escritura, ordena por relevancia y calcula filtros facetados con sus propias agregaciones, y una estrategia de consistencia para el checkout, que en este punto ya toca varias bases a la vez y puede fallar a medias. Hicimos además la evaluación opcional de un motor NewSQL para los pagos."
           },
           {
-            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 346 commits sobre `main` entre el 15 de agosto y el 20 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre y la segunda del 8 de octubre."
+            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 347 commits sobre `main` entre el 15 de agosto y el 21 de octubre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre y la segunda del 8 de octubre."
           },
           {
             "p": "Esta versión, del 20 de octubre, suma lo que se pidió al revisar la entrega. Que la tienda siga respondiendo cuando se apaga cualquiera de las seis bases, y que eso se pueda ver en vivo. Que los filtros del buscador se apliquen dentro de la consulta. Y que una búsqueda sin sentido, como asdffff, no deje la página vacía. Está en las secciones 2.4, 2.6, 2.7 y 5."
@@ -43,8 +43,8 @@
                 [
                   "Documento de estrategia de consistencia para el checkout distribuido",
                   "5",
-                  "3",
-                  "`docs/CONSISTENCIA-CHECKOUT.md`, catorce puntos de falla con su mecanismo"
+                  "3 y 5",
+                  "`docs/CONSISTENCIA-CHECKOUT.md`, catorce puntos de falla con su mecanismo, y el mapa de qué base cubre a cuál con sus colas"
                 ],
                 [
                   "Evidencia de la prueba de falla simulada y su manejo",
@@ -176,7 +176,7 @@
                 [
                   "José Manuel González Corado",
                   "José Manuel González Corado",
-                  "223"
+                  "224"
                 ],
                 [
                   "José David Navichoque Pineda",
@@ -191,10 +191,10 @@
                 [
                   "Total",
                   "",
-                  "346"
+                  "347"
                 ]
               ],
-              "leyenda": "Commits por integrante en el historial de git al 20 de octubre de 2026.",
+              "leyenda": "Commits por integrante en el historial de git al 21 de octubre de 2026.",
               "anchos": [
                 2.4,
                 2.4,
@@ -849,7 +849,303 @@
         ]
       },
       {
-        "titulo": "5.3. El cortacircuitos",
+        "titulo": "5.3. Qué base cubre a cuál",
+        "bloques": [
+          {
+            "p": "La tabla anterior se lee base por base. La figura siguiente lo junta en un solo dibujo. Cada flecha va de la base que cubre a la base caída, y en la caja punteada están las cuatro cosas que no tienen respaldo, que se explican en 5.9."
+          },
+          {
+            "figura": {
+              "archivo": "diagrama-respaldos.png",
+              "leyenda": "Qué base cubre a cuál cuando una se cae, generado con docs/generar-respaldos.py.",
+              "ancho": 6.3,
+              "horizontal": false
+            }
+          },
+          {
+            "p": "PostgreSQL es la que más cubre, cuatro de las seis flechas salen de ella. Es lógico, porque las otras bases guardan copias de datos que nacen ahí. La única que cubre a PostgreSQL es Redis, y solo en lo que hace falta para que quien ya entró siga mirando su carrito. Redis y ClickHouse se cubren entre sí, porque los rankings se calculan en ClickHouse y se guardan en Redis."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Base caída",
+                "La cubre",
+                "Con qué",
+                "Cómo se nota en el registro"
+              ],
+              "filas": [
+                [
+                  "PostgreSQL",
+                  "Redis, y el token firmado de la sesión",
+                  "La copia del perfil y del carrito que se guarda al entrar",
+                  "Una línea de `SesionGuard` como mucho por minuto"
+                ],
+                [
+                  "MongoDB",
+                  "PostgreSQL",
+                  "`producto_catalogo` y `variante_catalogo`, que el backend escribe en la misma operación que MongoDB",
+                  "`CatalogoRespaldo` al entrar y al salir"
+                ],
+                [
+                  "Redis",
+                  "PostgreSQL y ClickHouse",
+                  "La tabla de ofertas, el pedido pendiente de cada cuenta y la misma consulta del worker de rankings",
+                  "`Cortacircuitos` dice que Redis no responde y que volvió"
+                ],
+                [
+                  "Elasticsearch",
+                  "PostgreSQL",
+                  "La copia del catálogo con `mesh_normalizar()` y `mesh_coincide()` de la migración 048",
+                  "`BuscadorRespaldo` al entrar y al salir"
+                ],
+                [
+                  "Neo4j",
+                  "PostgreSQL",
+                  "Las líneas de los pedidos comprados, enviados o entregados, que son lo mismo que los nodos de compra del grafo",
+                  "`RecomendacionesRespaldo` al entrar y al salir"
+                ],
+                [
+                  "ClickHouse",
+                  "Redis, en parte",
+                  "Los rankings que ya estaban guardados",
+                  "`Cortacircuitos` y las líneas de `EventosService` que no pudieron registrar la vista"
+                ]
+              ],
+              "anchos": [
+                1.1,
+                1.4,
+                2.4,
+                1.6
+              ],
+              "leyenda": "Qué base cubre a cada una, con qué datos y cómo se ve en el registro del backend."
+            }
+          }
+        ]
+      },
+      {
+        "titulo": "5.4. Función por función",
+        "bloques": [
+          {
+            "p": "Lo mismo visto desde la tienda. Cada fila es algo que la persona usa, la base que lo da con todo arriba, lo que pasa si esa base cae y lo que pasa si también cae la que la cubre."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Función",
+                "La da",
+                "Si esa base cae",
+                "Si cae también la que cubre"
+              ],
+              "filas": [
+                [
+                  "Pagar",
+                  "PostgreSQL",
+                  "No se cobra. Aviso común y el carrito queda guardado",
+                  "No tiene respaldo"
+                ],
+                [
+                  "Iniciar sesión",
+                  "PostgreSQL",
+                  "Aviso, y se puede mirar la tienda sin cuenta",
+                  "No tiene respaldo"
+                ],
+                [
+                  "Ver el carrito",
+                  "PostgreSQL, con copia en Redis",
+                  "Sin Redis sale de PostgreSQL. Sin PostgreSQL sale de Redis y no se puede cambiar",
+                  "Aviso"
+                ],
+                [
+                  "Catálogo, categorías y ficha",
+                  "MongoDB",
+                  "Sale de la copia en PostgreSQL, sin la pestaña de detalles",
+                  "Aviso"
+                ],
+                [
+                  "Vendedores y precios en la ficha",
+                  "PostgreSQL",
+                  "La ficha dice que ahora no se puede mostrar quién lo vende ni comprarlo",
+                  "No tiene respaldo"
+                ],
+                [
+                  "Buscador y filtros",
+                  "Elasticsearch",
+                  "Sale de la copia en PostgreSQL, sin el tal vez quisiste decir",
+                  "Aviso"
+                ],
+                [
+                  "Sugeridos de una búsqueda vacía",
+                  "Elasticsearch",
+                  "Los más cercanos por vectores en PostgreSQL, después lo más vendido y después los de más reseñas",
+                  "La página dice que no encontró nada, sin sugeridos"
+                ],
+                [
+                  "Para ti y también compraron",
+                  "Neo4j",
+                  "Salen de los pedidos en PostgreSQL, iguales",
+                  "Aviso"
+                ],
+                [
+                  "Parecidos a este",
+                  "PostgreSQL con pgvector, y la tarjeta de MongoDB",
+                  "Sin MongoDB la tarjeta sale de la copia. Sin PostgreSQL no salen",
+                  "Aviso"
+                ],
+                [
+                  "Lo más vendido, lo más visto y se compran juntos",
+                  "Redis",
+                  "Se calculan en el momento en ClickHouse",
+                  "Aviso"
+                ],
+                [
+                  "Ofertas destacadas y venta relámpago de la portada",
+                  "Redis",
+                  "Salen de la tabla de ofertas en PostgreSQL",
+                  "Aviso"
+                ],
+                [
+                  "Viste hace poco y tendencias del administrador",
+                  "ClickHouse",
+                  "Avisan",
+                  "No tiene respaldo"
+                ],
+                [
+                  "Avísame cuando llegue",
+                  "Elasticsearch",
+                  "No se puede crear uno nuevo",
+                  "No tiene respaldo"
+                ],
+                [
+                  "Crear o cambiar un producto y ver su historial",
+                  "MongoDB",
+                  "No se puede hasta que vuelva",
+                  "No tiene respaldo"
+                ],
+                [
+                  "Ofertas en el panel del vendedor y del administrador",
+                  "PostgreSQL",
+                  "Sin MongoDB se ven y se cambian igual, con el nombre de la copia",
+                  "Aviso"
+                ],
+                [
+                  "Registro de cada entrada a la tienda",
+                  "MongoDB",
+                  "Se entra igual y la entrada de ese rato no queda anotada",
+                  "No tiene respaldo"
+                ],
+                [
+                  "Contadores de entradas sospechosas",
+                  "Redis",
+                  "Se entra igual y esos intentos no cuentan para el fraude",
+                  "No tiene respaldo"
+                ]
+              ],
+              "anchos": [
+                1.6,
+                1.2,
+                2.5,
+                1.2
+              ],
+              "leyenda": "Cada función de la tienda con la base que la da y lo que pasa con una o dos bases caídas."
+            }
+          }
+        ]
+      },
+      {
+        "titulo": "5.5. Las colas que guardan lo pendiente",
+        "bloques": [
+          {
+            "p": "Lo que tiene que llegar a otra base y no puede perderse se anota primero en una cola, dentro de la misma transacción que el cambio. Casi todas viven en PostgreSQL, y la del buscador de productos es una marca en el mismo documento de MongoDB. Un worker del backend lo lleva a la otra base y marca la fila como procesada. Si la otra base está caída la fila se queda esperando, y cuando vuelve la cola baja sola. Por eso en la tabla de 5.2 Elasticsearch y Neo4j no pierden nada."
+          },
+          {
+            "tabla": {
+              "cabecera": [
+                "Cola",
+                "Qué lleva",
+                "A qué base",
+                "Cada cuánto"
+              ],
+              "filas": [
+                [
+                  "`evento_producto`",
+                  "Precio, stock, ofertas y nota de cada producto",
+                  "MongoDB",
+                  "5 s"
+                ],
+                [
+                  "`evento_grafo`",
+                  "Las reseñas",
+                  "Neo4j",
+                  "10 s"
+                ],
+                [
+                  "`evento_grafo_compra`",
+                  "Las compras",
+                  "Neo4j",
+                  "10 s"
+                ],
+                [
+                  "`evento_oferta`",
+                  "Las ofertas, y después se comparan con los avísame",
+                  "Elasticsearch",
+                  "5 s"
+                ],
+                [
+                  "Marca `pendiente_busqueda` en MongoDB",
+                  "Los productos que cambiaron",
+                  "Elasticsearch",
+                  "10 s"
+                ],
+                [
+                  "`etl/cargar_compras.sh`",
+                  "La copia de las compras y devoluciones",
+                  "ClickHouse",
+                  "En cada arranque"
+                ]
+              ],
+              "anchos": [
+                1.9,
+                2.3,
+                1.2,
+                1.0
+              ],
+              "leyenda": "Las colas que mantienen al día las otras bases."
+            }
+          },
+          {
+            "p": "Para ver una cola esperando basta contar las filas sin procesar. Con Neo4j apagada el 19 de octubre se hizo una compra, quedó en la cola y al volver bajó a cero en 15 segundos. Con Elasticsearch apagada la cola de ofertas bajó a cero en un minuto."
+          },
+          {
+            "codigo": "SELECT count(*) FROM evento_grafo_compra WHERE procesado_en IS NULL;\nSELECT count(*) FROM evento_oferta WHERE procesado_en IS NULL;\nSELECT count(*) FROM evento_producto WHERE procesado_en IS NULL;",
+            "leyenda": "Las consultas para ver cuántos cambios esperan a cada base."
+          },
+          {
+            "p": "Las vistas, las búsquedas y los agregados al carrito que van a ClickHouse no pasan por cola, a propósito. Se mandan sin esperar respuesta para que quien compra no espere por un dato que solo sirve para analizar. Si ClickHouse no está, los de ese rato se pierden."
+          }
+        ]
+      },
+      {
+        "titulo": "5.6. Si se caen dos a la vez",
+        "bloques": [
+          {
+            "p": "Cada copia tiene un solo respaldo. Si caen dos bases que no se cubren entre sí, cada una sigue con el suyo. Lo comprobamos con la demostración de concurrencia con Elasticsearch, MongoDB y Redis apagadas al mismo tiempo. Cuatro compradores pidieron dos unidades de una venta relámpago, ganaron dos, pagaron en 0.7 segundos y el stock no bajó de cero."
+          },
+          {
+            "p": "Si cae una base junto con la que la cubre, esa función avisa y la tienda sigue con lo demás. Estos casos no los medimos uno por uno, salen de cómo está hecho cada respaldo en el backend."
+          },
+          {
+            "vin": [
+              "MongoDB y PostgreSQL. El catálogo y la ficha no tienen de dónde salir y avisan.",
+              "Elasticsearch y PostgreSQL. El buscador avisa.",
+              "Neo4j y PostgreSQL. Para ti y también compraron avisan.",
+              "Redis y ClickHouse. Los rankings de la portada avisan, porque Redis guarda la copia y ClickHouse es de donde sale.",
+              "Con PostgreSQL en cualquiera de las parejas no se puede pagar, igual que sola."
+            ]
+          }
+        ]
+      },
+      {
+        "titulo": "5.7. El cortacircuitos",
         "bloques": [
           {
             "p": "Una base caída no siempre dice que no está. Si la red se corta a mitad de camino, la conexión se queda esperando, y antes de este cambio cada petición esperaba entre 10 y 30 segundos su límite antes de rendirse. Ahora cada base tiene un cortacircuitos. La primera petición después de una caída espera lo que tarda la base en no contestar, y durante los 15 segundos siguientes el backend ni le pregunta y va directo al respaldo. Pasado ese rato la vuelve a probar, y si contesta la usa otra vez sola, sin reiniciar nada."
@@ -866,7 +1162,7 @@
         ]
       },
       {
-        "titulo": "5.4. Cómo se midió",
+        "titulo": "5.8. Cómo se midió",
         "bloques": [
           {
             "p": "Para apagar una base sin tocar la computadora donde vive pusimos un interruptor entre el backend y cada base, `remoto/interruptor.cjs`. Cada base se puede dejar apagada, que rechaza la conexión al instante como un `docker stop`, o congelada, que acepta la conexión y no contesta, como una red cortada. La segunda es la difícil, porque el backend tiene que darse cuenta solo."
@@ -940,7 +1236,7 @@
         ]
       },
       {
-        "titulo": "5.5. Lo que no tiene respaldo, a propósito",
+        "titulo": "5.9. Lo que no tiene respaldo, a propósito",
         "bloques": [
           {
             "vin": [
@@ -953,7 +1249,7 @@
         ]
       },
       {
-        "titulo": "5.6. Cómo se muestra en vivo",
+        "titulo": "5.10. Cómo se muestra en vivo",
         "bloques": [
           {
             "p": "El panel de comandos del proyecto tiene un grupo, Caída de una base, con un botón para preparar la demostración, que reinicia el backend a través del interruptor, y botones para apagar, congelar y prender cada base. Lo mismo se hace desde una terminal con `remoto/caidas.ps1`. Al final de `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` hay un guion de unos diez minutos que recorre las seis bases con la tienda abierta, empezando por Redis y terminando con PostgreSQL, que es la que manda."
