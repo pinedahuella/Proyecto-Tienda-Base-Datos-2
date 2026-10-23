@@ -67,7 +67,7 @@ T_TABLA = Pt(10)
 T_FIJA = Pt(9)
 GRIS = RGBColor(0x44, 0x44, 0x44)
 
-FECHA = "Guatemala, viernes 23 de octubre del 2026"
+FECHA = "Guatemala, lunes 2 de noviembre del 2026"
 
 d = None
 MARGENES = None
