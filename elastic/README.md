@@ -4,7 +4,7 @@ Elasticsearch, la QUINTA base. Entra en la Entrega 3 y es lo que contesta
 cuando alguien escribe mal el nombre de un producto.
 
 ```
-localhost:9200    la API, sin contrasena y solo en local
+localhost:9200    la API, con usuario y contrasena desde el 2026-10-23 (ver abajo)
 indices           mesh_productos               el buscador del catalogo       001_indice.json
                   mesh_eventos_autenticacion   el log de logins (ver al final) 002_eventos_autenticacion.json
                   mesh_ofertas                 el buscador de ofertas         004_ofertas.json
@@ -14,6 +14,30 @@ indices           mesh_productos               el buscador del catalogo       00
 El `003_comentarios.json` (`mesh_comentarios`, las resenas con su vector) ya no
 existe: desde el 2026-10-16 los vectores viven en PostgreSQL (ver "Los vectores
 volvieron a PostgreSQL", abajo).
+
+## Con seguridad, desde el 2026-10-23
+
+Hasta ese dia corria con `xpack.security.enabled: false` y un comentario que
+decia que solo escuchaba en localhost. No era cierto: el 9200 se publica a la
+red porque el modo remoto lo usa por Tailscale. Ahora pide usuario:
+
+```
+elastic         superusuario, ELASTIC_PASSWORD     arrancar.ps1, el ETL y las pruebas
+kibana_system   KIBANA_PASSWORD                    Kibana hablando con Elasticsearch
+mesh_backend    ELASTIC_BACKEND_PASSWORD           el backend, leer y escribir documentos de mesh_*
+mesh_lectura    ELASTIC_LECTURA_PASSWORD           entrar a Kibana a mirar
+```
+
+Los crea el contenedor de un solo uso `elastic-usuarios` con
+`seguridad/elastic.sh`. A mano con curl hay que pasar el usuario:
+
+```bash
+curl -u "elastic:$ELASTIC_PASSWORD" localhost:9200/_cat/indices
+```
+
+Los scripts de bash lo hacen solos con `seguridad/url_elastic.sh`, y
+`elastic/pruebas/facetas.py` lee la contrasena del `.env`. El detalle esta en
+`docs/SEGURIDAD.md`.
 
 ## Por que hace falta, si ya hay cuatro bases
 

@@ -552,6 +552,10 @@ de nacimiento; cuando no quede ninguna en NULL se puede cerrar con un
 
 ## Registro de decisiones arquitectonicas
 
+Estos son los ADR-1 a ADR-5 del registro unico del semestre, que esta en
+`docs/DECISIONES.md` con los 23 y donde esta escrito cada uno. Los numeros de
+aqui no cambiaron. Los que chocaban eran los del informe de la Entrega 2.
+
 Las cuatro decisiones de modelado y tecnologia de la Entrega 1, en el formato que pide el
 enunciado (seccion 5.3): contexto, alternativas consideradas, decision,
 justificacion con criterios tecnicos, y consecuencias. Abajo, en las secciones
@@ -1503,8 +1507,8 @@ coseno. Tablas aparte y no columnas: los triggers de `comentario` encolan cada
 cambio del texto, y si el worker escribiera el vector en la misma fila se
 encolaria solo. `vector_comentario` lleva tambien la valoracion del clasificador
 (`valoracion_texto`, `prob_mala`, `valoracion_modelo`), que se borra cuando el
-vector cambia. El porque de la vuelta a PostgreSQL esta en el ADR-10 de
-`docs/ARQUITECTURA.md`.
+vector cambia. El porque de la vuelta a PostgreSQL esta en el ADR-13 del
+registro unico (`docs/DECISIONES.md`), en el informe de la Entrega final.
 
 ### Las compras en el grafo (041)
 

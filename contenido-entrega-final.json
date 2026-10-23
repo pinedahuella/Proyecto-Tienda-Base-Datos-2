@@ -9,10 +9,10 @@
       "p": "Mesh es nuestra implementación de TiendaYa, una tienda en línea en la que varios vendedores comparten un mismo catálogo. Al llegar a esta entrega el sistema ya reparte sus datos entre seis motores. PostgreSQL es la fuente de verdad del dinero y del stock, MongoDB guarda el catálogo y su historial, Redis el carrito y la oferta limitada, Neo4j las relaciones entre cuentas y reseñas, ClickHouse los eventos en el tiempo y Elasticsearch el índice de búsqueda."
      },
      {
-      "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso en Redis, con un usuario por servicio y permisos acotados. El informe incluye además el diagrama de arquitectura final, lo que se sumó después con esos mismos vectores y la retrospectiva sobre las decisiones de todo el semestre."
+      "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 346 commits sobre `main` entre el 15 de agosto y el 20 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre y la segunda del 8 de octubre. Esta versión, del 20 de octubre, la pone al día con lo que cambió después, sobre todo la vuelta de los vectores a pgvector."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 348 commits sobre `main` entre el 15 de agosto y el 23 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 23 decisiones del semestre."
      }
     ]
    },
@@ -38,25 +38,25 @@
          "Control de acceso configurado en un componente NoSQL",
          "4",
          "3",
-         "Tres usuarios de ACL en Redis y prueba con 31 comprobaciones en verde, cada negativa con su control"
+         "Un usuario por servicio en Redis, MongoDB, ClickHouse, Elasticsearch y PostgreSQL. La prueba de las cinco bases dio 50 comprobaciones en verde y la de Redis 43, cada negativa con su control"
         ],
         [
          "Diagrama de arquitectura final, completo y correcto",
          "3",
          "4",
-         "Diagrama generado con `docs/generar-arquitectura.py` con los seis motores, los vectores en PostgreSQL, Ollama y los usuarios de Redis"
+         "Diagrama generado con `docs/generar-arquitectura.py` con los seis motores, Ollama, el usuario con que entra cada servicio y las bases en otra PC"
         ],
         [
          "Documento de retrospectiva",
          "4",
-         "5",
-         "Siete decisiones que sostendríamos y siete que replantearíamos, cada una con lo que pasó de verdad"
+         "7",
+         "Siete decisiones que sostendríamos y ocho que replantearíamos, cada una con lo que pasó de verdad y su registro"
         ],
         [
          "Presentación del proyecto",
          "4",
          "fuera del informe",
-         "Demos en el panel de comandos y el archivo `PREGUNTAS-SUSTENTACION.md`"
+         "Las diapositivas en `presentacion-final/index.html`, las demos del panel de comandos y `PREGUNTAS-SUSTENTACION.md`"
         ]
        ],
        "anchos": [
@@ -77,7 +77,7 @@
        "filas": [
         [
          "5.1 Distribución de responsabilidades",
-         "Sección 1.3, respaldada por el historial de git"
+         "Sección 1.3"
         ],
         [
          "5.2 Componentes de referencia",
@@ -85,11 +85,11 @@
         ],
         [
          "5.3 Registro de decisiones arquitectónicas",
-         "ADR-10 en 2.1, sus dos revisiones en 2.2 y ADR-11 en 3.1"
+         "Sección 5, un solo registro de ADR-1 a ADR-23 con los cinco campos. ADR-13 en 2.1 y sus dos revisiones en 2.2, y ADR-14 en 3.1"
         ],
         [
          "5.4 Documentación para levantar el sistema",
-         "Sección 4.3, un solo comando que también calcula los vectores"
+         "Sección 4.3 y `docs/instalacion.md`, un solo comando que también crea los usuarios de cada base y calcula los vectores"
         ]
        ],
        "anchos": [
@@ -105,51 +105,59 @@
     "titulo": "1.3. Distribución de responsabilidades",
     "bloques": [
      {
-      "p": "Mantuvimos el reparto de todo el semestre. José David Navichoque Pineda se encargó del backend y José Manuel González Corado del frontend, las migraciones, los ETL, los scripts de cada base, las pruebas, la documentación y el arranque. Lo que una parte necesitaba de la otra quedaba escrito en `docs/BACKEND-PENDIENTE.md`, con la consulta ya probada."
+      "p": "Mantuvimos el reparto de todo el semestre. José David Navichoque Pineda se encargó del backend, José Manuel González Corado del frontend, las migraciones, los ETL, los scripts de cada base, las pruebas, la documentación y el arranque, y Juan Pablo Torres García de los módulos de ClickHouse y Neo4j. Lo que una parte necesitaba de la otra quedaba escrito en `docs/BACKEND-PENDIENTE.md`, con la consulta ya probada."
      },
      {
       "tabla": {
        "cabecera": [
         "Componente",
         "José David Navichoque, backend",
-        "José Manuel González, el resto"
+        "José Manuel González, datos y frontend",
+        "Juan Pablo Torres, ClickHouse y Neo4j"
        ],
        "filas": [
         [
          "Recomendación semántica",
          "La ruta de parecidos, el worker de vectores y las dos mudanzas del vector",
-         "Carga de vectores con Ollama, migraciones 024, 027, 036 y 040, prueba y estante de la ficha"
+         "Carga de vectores con Ollama, migraciones 024, 027, 036 y 040, prueba y estante de la ficha",
+         ""
         ],
         [
          "Control de acceso",
-         "Revisión de los comandos de Redis que usa el backend",
-         "Usuarios de ACL en `docker-compose.yml`, contraseñas automáticas en el arranque y prueba de acceso"
+         "Revisión de los comandos que el backend usa en cada base",
+         "Usuarios por servicio en las cinco bases, contraseñas automáticas, Elasticsearch con seguridad y prueba de acceso",
+         "Los usuarios de ClickHouse y la revisión de roles en Neo4j"
         ],
         [
-         "Búsqueda híbrida y por intención",
-         "Las rutas híbrida, de intención y de sugerencias al proponer",
-         "La página de resultados, el índice de reseñas y lo que se muestra según la similitud"
+         "Eventos y tendencias",
+         "Las rutas de tendencias y los rankings",
+         "El ETL de compras y la carga de eventos",
+         "Los módulos de eventos, tendencias y combos en ClickHouse"
+        ],
+        [
+         "Grafo",
+         "Las rutas de recomendaciones y de anillos",
+         "Los ETL y las colas del grafo",
+         "Los módulos de anillos de reseñas y de compras en Neo4j"
         ],
         [
          "Fraude en reseñas",
          "Los detectores de reseñas repetidas, parecidas, con nota que no cuadra y canceladas",
-         "Migraciones 031 a 039, panel de Fraude y demos"
-        ],
-        [
-         "Clasificador de reseñas",
-         "Lo usa para las notas que no cuadran",
-         "Las 480 reseñas escritas, los dos modelos y su verificación"
+         "Migraciones 031 a 039, panel de Fraude y demos",
+         ""
         ],
         [
          "Arquitectura y retrospectiva",
          "",
-         "Diagrama de arquitectura, diagrama entidad relación, retrospectiva e informe"
+         "Diagramas, registro de decisiones, retrospectiva, informe y presentación",
+         ""
         ]
        ],
        "anchos": [
-        1.4,
-        2.5,
-        2.6
+        1.3,
+        1.7,
+        1.8,
+        1.5
        ],
        "leyenda": "Quién hizo cada parte de la Entrega final."
       }
@@ -165,7 +173,7 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "223"
+         "225"
         ],
         [
          "José David Navichoque Pineda",
@@ -180,7 +188,7 @@
         [
          "Total",
          "",
-         "346"
+         "348"
         ]
        ],
        "anchos": [
@@ -188,7 +196,7 @@
         2.4,
         1.2
        ],
-       "leyenda": "Commits por integrante en el historial de git al 20 de octubre de 2026."
+       "leyenda": "Commits por integrante en el historial de git al 23 de octubre de 2026."
       }
      }
     ]
@@ -206,7 +214,7 @@
      },
      {
       "adr": {
-       "id": "ADR-10",
+       "id": "ADR-13",
        "titulo": "Dónde guardar y consultar los vectores de los productos",
        "contexto": "Cada producto necesita un vector que represente el significado de su texto y una consulta que encuentre los más cercanos a uno dado. El catálogo tenía entonces 3105 productos activos y la consulta se hace una vez por cada ficha que se abre.",
        "alternativas": "No introducir cambios y recomendar por categoría y precio parecido, que ya se podía con MongoDB y ClickHouse. Un componente vectorial dedicado, como Qdrant o Milvus. El tipo `dense_vector` de Elasticsearch, que ya corre en el sistema. La extensión pgvector sobre el PostgreSQL existente.",
@@ -225,7 +233,7 @@
     "bloques": [
      {
       "adr": {
-       "id": "ADR-10, primera revisión",
+       "id": "ADR-13, primera revisión",
        "titulo": "Dónde guardar y consultar los vectores, primera revisión",
        "contexto": "Con pgvector, buscar parecidos que estuvieran activos y no fueran copias pedía una tabla aparte con su propia copia de los identificadores y del estado. El buscador de texto vivía en otro motor, y la búsqueda híbrida necesitaba el vector junto al texto y las facetas. Las reseñas también iban a tener vector, para buscar por intención y para detectar textos casi iguales.",
        "alternativas": "Dejar pgvector como fuente y copiar el vector a Elasticsearch solo para la búsqueda. Mudar el vector a Elasticsearch. No cambiar nada y no hacer la búsqueda híbrida.",
@@ -239,7 +247,7 @@
      },
      {
       "adr": {
-       "id": "ADR-10, segunda revisión",
+       "id": "ADR-13, segunda revisión",
        "titulo": "Los vectores vuelven a PostgreSQL con pgvector",
        "contexto": "Las consultas por vectores tenían que hacerse con pgvector. Antes de mudar se midió la precisión de cada motor. En 1001 productos, los parecidos de Elasticsearch coincidían con el coseno exacto en 317, porque su índice `int8_hnsw` guarda los vectores comprimidos y se equivoca hasta en 0,016.",
        "alternativas": "Dejar el vector en Elasticsearch y copiarlo a PostgreSQL solo para las consultas. Devolver el vector a PostgreSQL y dejar en Elasticsearch solo el texto. No cambiar nada.",
@@ -350,26 +358,42 @@
   ]
  },
  {
-  "titulo": "CONTROL DE ACCESO EN REDIS",
+  "titulo": "CONTROL DE ACCESO",
   "subsecciones": [
    {
-    "titulo": "3.1. Por qué en Redis y su registro de decisión",
+    "titulo": "3.1. Un usuario por servicio y su registro de decisión",
     "bloques": [
      {
+      "p": "El enunciado pide control de acceso en al menos un componente NoSQL. Lo hicimos primero en Redis, el 25 de septiembre, y el 23 de octubre lo llevamos a todas las bases que tienen roles, porque revisando la seguridad encontramos que el backend entraba a MongoDB como root y que Elasticsearch no pedía contraseña aunque su puerto se abre a la red para el modo remoto."
+     },
+     {
       "adr": {
-       "id": "ADR-11",
-       "titulo": "Control de acceso en un componente NoSQL",
-       "contexto": "Hasta esta entrega Redis tenía una sola contraseña. El backend, las pruebas y RedisInsight entraban con ella y podían hacer lo mismo, incluido vaciar la base con FLUSHALL. RedisInsight solo se usa para mirar claves y su tiempo de vida, y aun así podía borrar el carrito de cualquier cliente o el contador de una venta relámpago en curso.",
-       "alternativas": "Dejar la contraseña única. Usuarios de ACL en Redis. Roles en MongoDB. La seguridad de Elasticsearch con usuarios y roles.",
-       "decision": "Usuarios de ACL en Redis, tres, declarados en `docker-compose.yml`.",
-       "justificacion": "Redis es la base que más servicios tocan a la vez y la que guarda lo que no se puede reconstruir, los carritos abiertos y el stock de una venta relámpago. Las ACL vienen en Redis desde la versión 6 y se declaran en el mismo archivo que levanta el contenedor, así que quedan versionadas y valen desde el primer arranque. MongoDB lo usan sobre todo el backend y el ETL, y sus roles protegerían menos. Activar la seguridad de Elasticsearch obligaba a cambiar cómo se conectan Kibana, el backend y el ETL, un costo alto para una base que no guarda nada propio.",
-       "consecuencias": "Cada servicio entra con lo justo y un error del backend ya no puede vaciar Redis. Aceptamos que el usuario del backend sigue siendo amplio, porque cambiarle el usuario obligaba a tocar su código y se prefirió recortarle los comandos. Las otras bases NoSQL siguen con un solo usuario de arranque. Las contraseñas nuevas viven en el `.env` y el arranque las genera solo si faltan."
+       "id": "ADR-14",
+       "titulo": "Control de acceso por servicio en cada base",
+       "contexto": "Hasta el 25 de septiembre Redis tenía una sola contraseña, y hasta el 23 de octubre las demás bases entraban con su usuario de arranque. El backend entraba a PostgreSQL y a ClickHouse como dueño, a MongoDB como root y a Elasticsearch sin contraseña. DbGate, la ventana de MongoDB, no pide login y entraba como root. Las bases corren en otra PC y se usan por Tailscale, así que sus puertos están abiertos a la red.",
+       "alternativas": [
+        "1. Dejar un usuario de arranque por base.",
+        "2. Control de acceso solo en Redis, lo mínimo del enunciado.",
+        "3. Un usuario por servicio en cada base que tenga roles.",
+        "4. Un proxy delante de las bases que filtre lo que se puede hacer."
+       ],
+       "decision": "Un usuario por servicio. En Redis cuatro usuarios de ACL desde el 25 de septiembre, con el del backend limitado a las claves `mesh:*` desde el 23 de octubre. En PostgreSQL, MongoDB, ClickHouse y Elasticsearch un usuario `mesh_backend` que solo lee y escribe datos y un `mesh_lectura` que solo mira, desde el 23 de octubre. Elasticsearch con la seguridad encendida. Neo4j queda con un usuario porque la edición community no trae roles.",
+       "justificacion": [
+        "**Patrón de consulta.** El backend solo lee y escribe datos. Antes de recortar se revisó su código y ninguna ruta crea tablas, colecciones o índices, así que su usuario puede quedarse sin esos permisos sin perder nada.",
+        "**Consistencia.** Los permisos están escritos en el repositorio, en `seguridad/` y en `docker-compose.yml`, y el arranque los vuelve a aplicar cada vez. Una base que alguien cambió a mano vuelve a quedar igual.",
+        "**Costo operativo.** Las contraseñas nuevas las genera el arranque si faltan y las pone en el `.env` del backend, nadie las teclea. El modo remoto toma las de la otra PC y, si esa PC todavía no tiene los usuarios nuevos, usa el de antes para no dejar al backend sin arrancar.",
+        "**Escalabilidad.** Agregar un servicio es agregar un usuario en un archivo. El proxy de la alternativa 4 resolvía lo mismo con un componente más y sin los roles que cada base ya trae."
+       ],
+       "consecuencias": "Un error o una inyección en el backend ya no puede borrar tablas, colecciones ni índices, ni leer bases que no son suyas, y Elasticsearch ya no se puede leer ni borrar sin contraseña. Aceptamos más contraseñas en el `.env`, que la PC remota corra el arranque nuevo antes de usar los usuarios del backend y que Neo4j siga con un solo usuario. El dueño de cada base queda para las migraciones, el ETL y las pruebas."
       }
+     },
+     {
+      "p": "La primera versión de este registro decidía solo Redis y lo justificaba con que Redis guardaba lo que no se puede reconstruir, los carritos abiertos y el stock de una venta relámpago. Desde el 17 de octubre eso ya no es cierto. La verdad del carrito y de las reservas está en PostgreSQL y Redis guarda una copia rápida (ADR-21), y por eso esa justificación salió del registro."
      }
     ]
    },
    {
-    "titulo": "3.2. Los tres usuarios",
+    "titulo": "3.2. Los usuarios de Redis",
     "bloques": [
      {
       "tabla": {
@@ -381,10 +405,16 @@
        ],
        "filas": [
         [
+         "`backend`",
+         "El backend",
+         "Leer y escribir las claves `mesh:*`, poner vencimientos, correr scripts Lua sobre ellas y pedir INFO",
+         "Tocar claves fuera de `mesh:*` y todo lo de la categoría peligrosa, como FLUSHALL, CONFIG, KEYS, ACL y SHUTDOWN"
+        ],
+        [
          "`default`",
-         "El backend y los scripts",
-         "Leer, escribir, poner vencimientos, correr scripts Lua, recorrer claves con SCAN, pedir INFO",
-         "Todo lo de la categoría peligrosa, como FLUSHALL, CONFIG, KEYS, ACL, SHUTDOWN y DEBUG"
+         "Los scripts y las pruebas",
+         "Lo mismo que `backend` sobre cualquier clave",
+         "Todo lo de la categoría peligrosa"
         ],
         [
          "`inspeccion`",
@@ -401,15 +431,15 @@
        ],
        "anchos": [
         1.0,
-        1.3,
-        2.2,
+        1.2,
+        2.3,
         2.0
        ],
-       "leyenda": "Los tres usuarios de ACL de Redis y sus permisos."
+       "leyenda": "Los cuatro usuarios de ACL de Redis y sus permisos."
       }
      },
      {
-      "p": "A la categoría peligrosa se le devolvió solo INFO, porque la biblioteca del backend lo pide al conectarse y lo usa para revisar la salud de Redis. Antes de cerrar la lista se revisó que el backend no usara ningún otro comando de esa categoría."
+      "p": "Todas las claves de la tienda empiezan con `mesh:`, así que al usuario del backend se le dio solo ese prefijo. Un script Lua tampoco puede salir de él, porque Redis revisa los permisos de cada comando dentro del script. A la categoría peligrosa se le devolvió solo INFO, porque la biblioteca del backend lo pide al conectarse."
      },
      {
       "p": "El comando de Redis va escrito como lista en `docker-compose.yml`. Escrito en una sola línea, Compose cortaba la contraseña en el signo que la precede y Redis arrancaba con una contraseña distinta a la del `.env`."
@@ -417,47 +447,130 @@
     ]
    },
    {
-    "titulo": "3.3. Evidencia",
+    "titulo": "3.3. Los usuarios de las demás bases",
     "bloques": [
      {
-      "p": "La prueba es `bash redis/prueba_acceso.sh` y dio 31 comprobaciones en verde. Cada negativa tiene su control. Que `inspeccion` no pueda escribir una clave solo cuenta si `default` sí pudo escribirla, y que `default` no pueda leer la configuración solo cuenta si `operador` sí la lee. Sin esos controles, un Redis caído haría pasar todas las negativas."
+      "tabla": {
+       "cabecera": [
+        "Base",
+        "mesh_backend, el backend",
+        "mesh_lectura, para mirar",
+        "Dónde está"
+       ],
+       "filas": [
+        [
+         "PostgreSQL",
+         "Lee, agrega, cambia y borra filas, usa las secuencias y las funciones. No crea, cambia ni vacía tablas ni crea usuarios",
+         "Solo SELECT, y su sesión es de solo lectura",
+         "`seguridad/postgres.sql`"
+        ],
+        [
+         "MongoDB",
+         "Un rol hecho a medida, `mesh_backend_rol`, que busca, inserta, cambia y borra documentos de la base de la tienda. No crea ni borra colecciones ni índices",
+         "El rol `read` sobre la base de la tienda. Es el usuario de DbGate",
+         "`seguridad/mongo.js`"
+        ],
+        [
+         "ClickHouse",
+         "`mesh_backend_rol`, lee y agrega eventos. No borra, no cambia tablas y no ve los usuarios",
+         "`mesh_lectura_rol`, solo lee",
+         "`seguridad/clickhouse.sql`"
+        ],
+        [
+         "Elasticsearch",
+         "`mesh_backend_rol`, lee y escribe documentos en los índices `mesh_*` y mira la salud. No crea ni borra índices ni administra usuarios",
+         "`mesh_lectura_rol`, lee `mesh_*` y en Kibana solo mira",
+         "`seguridad/elastic.sh`"
+        ],
+        [
+         "Neo4j",
+         "El único usuario, `neo4j`",
+         "No existe",
+         "`docker-compose.yml`"
+        ]
+       ],
+       "anchos": [
+        1.0,
+        2.5,
+        1.7,
+        1.3
+       ],
+       "leyenda": "Los usuarios de PostgreSQL, MongoDB, ClickHouse, Elasticsearch y Neo4j."
+      }
      },
      {
-      "p": "Los comandos que destruyen algo, como FLUSHALL o SHUTDOWN, no se intentan a ciegas. Primero se le pregunta a Redis con ACL DRYRUN, que contesta sin ejecutar, y solo si dice que lo negaría se intenta de verdad para ver el rechazo. Si la configuración estuviera mal, la prueba no vaciaría la base."
+      "p": "En MongoDB no se usó el rol de fábrica `readWrite`, porque también deja borrar colecciones y crear índices, y el backend nunca lo hace. En Elasticsearch los índices los crea el arranque con el superusuario `elastic`, y Kibana habla con Elasticsearch con su propio usuario de sistema, `kibana_system`. Las contraseñas las crea el contenedor `elastic-usuarios`, que corre una vez en cada arranque igual que el de las vistas de Kibana."
+     },
+     {
+      "p": "Neo4j es la única base sin un usuario por servicio. En la edición community no existen los roles, y crear uno, darle permisos o negárselos son órdenes de la edición enterprise, que es de pago. Lo comprobamos en vivo y la prueba de acceso guarda lo que contesta Neo4j al intentarlo. Lo que sí se hizo fue lo que queda a mano, contraseña obligatoria, el navegador del puerto 7474 solo en la misma PC y el puerto de bolt como única puerta."
+     }
+    ]
+   },
+   {
+    "titulo": "3.4. Puertos, herramientas e imágenes",
+    "bloques": [
+     {
+      "p": "Al revisar la seguridad encontramos tres cosas más que corregimos el mismo día. Elasticsearch tenía la seguridad apagada con un comentario que decía que solo escuchaba en la misma PC, y no era cierto, su puerto se abría a toda la red. Las herramientas de inspección, pgAdmin, DbGate, RedisInsight y el navegador de Neo4j, también se abrían a la red, y DbGate entraba a MongoDB como root sin pedir login. Y cuatro imágenes usaban la etiqueta `latest`, así que dos PC del equipo podían correr versiones distintas sin saberlo."
+     },
+     {
+      "vin": [
+       "Las bases siguen escuchando hacia la red porque el modo remoto las usa desde otra PC por Tailscale, que va cifrado, y las seis piden usuario y contraseña.",
+       "Las herramientas y el puerto nativo de ClickHouse solo escuchan en `127.0.0.1`, se abren desde la misma PC y nadie de la red las alcanza.",
+       "Todas las imágenes llevan versión fija, pgAdmin 9.17, DbGate 7.2.5, RedisInsight 3.8.0 y Ollama 0.40.5, además de las que ya la tenían."
+      ]
+     }
+    ]
+   },
+   {
+    "titulo": "3.5. Evidencia",
+    "bloques": [
+     {
+      "p": "La prueba de las cinco bases es `bash seguridad/prueba_acceso.sh` y dio 50 comprobaciones en verde, más las 43 de `redis/prueba_acceso.sh`, que corre al final. Cada negativa tiene su control. Que `mesh_lectura` no pueda escribir solo cuenta si `mesh_backend` sí pudo, y que `mesh_backend` no pueda crear una tabla solo cuenta si el dueño sí pudo. Sin esos controles, una base caída haría pasar todas las negativas."
+     },
+     {
+      "p": "Nada de lo que la prueba intenta puede dañar la tienda si la configuración estuviera mal. Lo que borraría algo se intenta dentro de una transacción que se deshace, sobre un objeto que no existe, o se le pregunta antes a la base si lo dejaría pasar, con `ACL DRYRUN` en Redis y con la consulta de privilegios en Elasticsearch."
      },
      {
       "tabla": {
        "cabecera": [
-        "Grupo",
+        "Base",
         "Qué se comprueba"
        ],
        "filas": [
         [
-         "Los usuarios",
-         "Existen los tres, cada uno entra con su contraseña, nadie entra con la de otro y sin contraseña no se entra"
+         "PostgreSQL",
+         "Cada usuario entra con su contraseña y no con otra. `mesh_backend` no es superusuario, lee y cambia filas, y no crea, borra ni vacía tablas ni crea usuarios. `mesh_lectura` lee y no cambia nada"
         ],
         [
-         "`default`",
-         "Escribe, lee, pone vencimientos, corre Lua y SCAN, y no puede vaciar, leer ni cambiar la configuración, listar con KEYS, tocar usuarios ni apagar el servidor"
+         "MongoDB",
+         "`mesh_backend` cuenta y cambia productos, y no crea índices, no borra colecciones, no lee los usuarios ni crea otros. `mesh_lectura` lee y no cambia"
         ],
         [
-         "`inspeccion`",
-         "Lee y ve el tiempo de vida, y no puede escribir, borrar, cambiar el vencimiento, correr scripts ni vaciar. Al final la clave sigue intacta"
+         "ClickHouse",
+         "`mesh_backend` lee y agrega eventos, y no ve los usuarios, no borra eventos ni crea o borra tablas. `mesh_lectura` lee y no agrega. El usuario de fábrica no entra sin contraseña"
         ],
         [
-         "`operador`",
-         "Lee la configuración, ve las reglas de cada usuario y borra la clave de la prueba"
+         "Elasticsearch",
+         "Sin usuario o con otra contraseña no se entra. `mesh_backend` busca y escribe en `mesh_productos`, y no crea ni borra índices, no lee los de Kibana ni administra usuarios. `mesh_lectura` busca y no escribe"
+        ],
+        [
+         "Neo4j",
+         "Entra con su contraseña, no con otra, y se niega a crear un rol por ser la edición community"
+        ],
+        [
+         "Redis",
+         "Los cuatro usuarios, con `backend` encerrado en `mesh:*`"
         ]
        ],
        "anchos": [
-        1.3,
-        5.2
+        1.2,
+        5.3
        ],
-       "leyenda": "Las 31 comprobaciones de redis/prueba_acceso.sh agrupadas por usuario."
+       "leyenda": "Lo que comprueban seguridad/prueba_acceso.sh y redis/prueba_acceso.sh."
       }
      },
      {
-      "p": "En clase se enseña con `.\\demo-entrega-final.ps1 -Parte acceso`, que pone a los tres usuarios a intentar lo mismo y muestra lo que contesta Redis a cada uno."
+      "p": "En clase se enseña con `.\\demo-entrega-final.ps1 -Parte acceso`, que pone a cada usuario a intentar lo mismo en Redis y muestra lo que contesta la base."
      }
     ]
    }
@@ -470,12 +583,12 @@
     "titulo": "4.1. El diagrama de arquitectura",
     "bloques": [
      {
-      "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. En esta entrega entra el flujo 11, que lleva el texto de cada producto de MongoDB a Ollama y guarda su vector en PostgreSQL. Las reseñas no llevan flecha, porque su vector va de la cola `evento_comentario` a `vector_comentario` dentro de la misma base. Los tres usuarios de Redis están en su caja. El diagrama está al 20 de octubre y trae también lo que cambió después, como las compras en el grafo, el buscador de ofertas con sus avisos y la verdad del carrito en PostgreSQL."
+      "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. El flujo 11 lleva el texto de cada producto de MongoDB a Ollama, que tiene su propia caja, y guarda su vector en PostgreSQL. Las reseñas no llevan flecha, porque su vector va de la cola `evento_comentario` a `vector_comentario` dentro de la misma base. Cada caja dice con qué usuario entra el backend, y el recuadro de las bases dice que pueden correr en otra PC y usarse por Tailscale. El diagrama está al 23 de octubre."
      },
      {
       "figura": {
        "archivo": "diagrama-arquitectura.png",
-       "leyenda": "Arquitectura final de Mesh al 20 de octubre de 2026, generada con docs/generar-arquitectura.py.",
+       "leyenda": "Arquitectura final de Mesh al 23 de octubre de 2026, generada con docs/generar-arquitectura.py.",
        "ancho": 9.0,
        "horizontal": true
       }
@@ -526,7 +639,7 @@
         ],
         [
          "Elasticsearch",
-         "Índice de búsqueda de productos, buscador de ofertas, consultas guardadas de los avisos y copia del registro de inicios de sesión",
+         "Índice de búsqueda de productos con la foto de cada uno, buscador de ofertas, consultas guardadas de los avisos y copia del registro de inicios de sesión",
          "Entrega 3",
          "Tolerancia a errores, relevancia y facetas en una sola consulta"
         ],
@@ -555,7 +668,392 @@
     "titulo": "4.3. Cómo se levanta el sistema completo",
     "bloques": [
      {
-      "p": "Todo se levanta con `.\\arrancar.ps1`. El script prende los contenedores, corre las migraciones, carga los datos, reconstruye el catálogo en MongoDB, el índice de búsqueda y el grafo, pone al día la copia del catálogo en PostgreSQL, calcula los vectores que falten y al final cuenta lo que quedó en cada base contra PostgreSQL en lugar de suponer que salió bien. Las contraseñas nuevas de Redis se agregan solas al `.env`. El backend y el frontend se arrancan después con `npm run start:dev` y `npm run dev`. La guía completa está en `docs/instalacion.md`."
+      "p": "Todo se levanta con `.\\arrancar.ps1`. El script prende los contenedores, corre las migraciones, carga los datos, reconstruye el catálogo en MongoDB, el índice de búsqueda y el grafo, pone al día la copia del catálogo en PostgreSQL, calcula los vectores que falten, crea los usuarios de cada base y al final cuenta lo que quedó en cada base contra PostgreSQL en lugar de suponer que salió bien. Las contraseñas que falten se agregan solas al `.env`, y si el backend usa las bases de esa PC, sus usuarios quedan escritos en `backend\\.env`."
+     },
+     {
+      "p": "El backend, el frontend y el panel de comandos se prenden con `.\\panel-comandos\\servicios.ps1`, sin abrir ventanas. Como una laptop de 16 GB no aguanta las seis bases y el resto a la vez, el equipo trabajó casi todo octubre con las bases en otra PC. Esa PC se prepara una vez con `.\\preparar-pc-bases.ps1`, que instala lo necesario, abre los puertos solo para Tailscale y corre el arranque, y la PC de trabajo apunta a ella con `.\\usar-bases-remotas.ps1`, que cambia direcciones, usuarios y contraseñas del backend, y vuelve con `-Local`. La guía completa está en `docs/instalacion.md` y el modo remoto en `remoto/README.md`."
+     }
+    ]
+   }
+  ]
+ },
+ {
+  "titulo": "REGISTRO DE DECISIONES DEL SEMESTRE",
+  "subsecciones": [
+   {
+    "titulo": "5.1. Un solo registro",
+    "bloques": [
+     {
+      "p": "Cada entrega escribió sus decisiones con su propia numeración, y los números terminaron chocando. En `docs/base-de-datos.md` el ADR-3 es el de las imágenes, en el informe de la Entrega 2 el ADR-3 es grafos contra columnar, y la retrospectiva de las versiones anteriores de este informe citaba el segundo. Además, varias decisiones de octubre se implementaron sin escribir su registro, que es lo que el profesor señaló el 28 de septiembre cuando dijo que las decisiones eran genéricas."
+     },
+     {
+      "p": "Desde esta versión hay un solo registro, numerado del 1 al 23 en el orden en que se tomaron. La última columna dice cómo se citó cada uno antes, para que se pueda seguir en los informes anteriores. Los registros 15 a 23 son las decisiones que faltaban y se escriben completos en esta sección, con el flujo que tocan, las bases que leen y escriben y qué pasa si cada una se cae."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Id",
+        "Decisión",
+        "Cuándo",
+        "Estado hoy",
+        "Antes se citó como"
+       ],
+       "filas": [
+        [
+         "ADR-1",
+         "El catálogo de productos en MongoDB",
+         "Entrega 1",
+         "Vigente",
+         "ADR-1 en `docs/base-de-datos.md`"
+        ],
+        [
+         "ADR-2",
+         "Las ofertas, el stock y el dinero se quedan en PostgreSQL",
+         "Entrega 1",
+         "Vigente",
+         "ADR-2 en `docs/base-de-datos.md`"
+        ],
+        [
+         "ADR-3",
+         "Las imágenes, embebidas en su variante",
+         "Entrega 1",
+         "Vigente",
+         "ADR-3 en `docs/base-de-datos.md`"
+        ],
+        [
+         "ADR-4",
+         "Quién propuso un producto se guarda en PostgreSQL",
+         "Entrega 1",
+         "Vigente",
+         "ADR-4 en `docs/base-de-datos.md`"
+        ],
+        [
+         "ADR-5",
+         "Reseñas, comentarios y likes se quedan en PostgreSQL",
+         "Entrega 2",
+         "Vigente",
+         "ADR-5 en `docs/base-de-datos.md`"
+        ],
+        [
+         "ADR-6",
+         "El carrito en Redis con vencimiento",
+         "Entrega 2",
+         "Revisada por ADR-21",
+         "ADR-4 en el informe de la Entrega 2"
+        ],
+        [
+         "ADR-7",
+         "La oferta limitada con un script Lua en Redis",
+         "Entrega 2",
+         "Vigente, la reserva también queda en PostgreSQL desde ADR-21",
+         "ADR-5 en el informe de la Entrega 2"
+        ],
+        [
+         "ADR-8",
+         "Grafos contra columnar, decisión del 3 de septiembre",
+         "Entrega 2",
+         "Reemplazada por ADR-10 el 6 de septiembre",
+         "ADR-3 en el informe de la Entrega 2"
+        ],
+        [
+         "ADR-9",
+         "Neo4j para los anillos de reseñas",
+         "Entrega 2",
+         "Vigente, ampliada por ADR-19",
+         "ADR-7 en el informe de la Entrega 2"
+        ],
+        [
+         "ADR-10",
+         "ClickHouse para eventos y tendencias",
+         "Entrega 2",
+         "Vigente",
+         "ADR-6 en el informe de la Entrega 2"
+        ],
+        [
+         "ADR-11",
+         "Elasticsearch para la búsqueda del catálogo",
+         "Entrega 3",
+         "Vigente, ampliada por ADR-20 y ADR-23",
+         "ADR-9 en el informe de la Entrega 3"
+        ],
+        [
+         "ADR-12",
+         "Los pagos se quedan en PostgreSQL y no van a NewSQL",
+         "Entrega 3",
+         "Vigente",
+         "ADR-8 en el informe de la Entrega 3"
+        ],
+        [
+         "ADR-13",
+         "Los vectores en pgvector",
+         "Entrega final",
+         "Vigente desde el 16 de octubre, tras dos revisiones",
+         "ADR-10 en las versiones anteriores de este informe"
+        ],
+        [
+         "ADR-14",
+         "Control de acceso por servicio en cada base",
+         "Entrega final",
+         "Ampliada el 23 de octubre",
+         "ADR-11 en las versiones anteriores de este informe"
+        ],
+        [
+         "ADR-15",
+         "El registro de inicios de sesión en MongoDB con copia en Elasticsearch",
+         "10 de septiembre",
+         "Vigente",
+         "No se había registrado"
+        ],
+        [
+         "ADR-16",
+         "El vencimiento de los descuentos en PostgreSQL",
+         "26 de septiembre",
+         "Vigente",
+         "No se había registrado"
+        ],
+        [
+         "ADR-17",
+         "Un solo modelo de señales de fraude",
+         "30 de septiembre",
+         "Vigente",
+         "Propuesta ADR-14 en `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`"
+        ],
+        [
+         "ADR-18",
+         "Comprar sin MongoDB",
+         "1 de octubre",
+         "Vigente",
+         "Propuesta ADR-12 en el mismo documento"
+        ],
+        [
+         "ADR-19",
+         "Las compras en el grafo de Neo4j",
+         "16 de octubre",
+         "Vigente",
+         "No se había registrado"
+        ],
+        [
+         "ADR-20",
+         "El buscador de ofertas y los avisos con percolator",
+         "17 de octubre",
+         "Vigente",
+         "No se había registrado"
+        ],
+        [
+         "ADR-21",
+         "La verdad del carrito y de las reservas en PostgreSQL",
+         "17 de octubre",
+         "Vigente",
+         "Propuesta ADR-13 en el mismo documento"
+        ],
+        [
+         "ADR-22",
+         "Un respaldo por base, con cortacircuitos",
+         "20 de octubre",
+         "Vigente",
+         "No se había registrado"
+        ],
+        [
+         "ADR-23",
+         "La tarjeta del buscador sale entera de Elasticsearch",
+         "23 de octubre",
+         "Vigente",
+         "No se había registrado"
+        ]
+       ],
+       "anchos": [
+        0.65,
+        2.15,
+        0.95,
+        1.45,
+        1.6
+       ],
+       "leyenda": "El registro único de decisiones del semestre."
+      }
+     },
+     {
+      "p": "De las seis decisiones que propusimos después de la revisión del 28 de septiembre, tres se hicieron tal cual, ADR-17, ADR-18 y ADR-21. Las detecciones como serie de tiempo en ClickHouse y el grafo de identidad para armar los casos no se implementaron, y la búsqueda híbrida terminó con el vector solo en pgvector, como cuenta ADR-13."
+     }
+    ]
+   },
+   {
+    "titulo": "5.2. Las decisiones de septiembre que faltaban",
+    "bloques": [
+     {
+      "adr": {
+       "id": "ADR-15",
+       "titulo": "El registro de inicios de sesión en MongoDB con copia en Elasticsearch",
+       "contexto": "Cada intento de entrar, bueno o malo, tiene que quedar registrado para detectar fuerza bruta y tomas de cuenta. Hasta el 10 de septiembre solo se guardaban los inicios buenos, en `log_login` de PostgreSQL, con una copia en ClickHouse. Un ataque de fuerza bruta son cientos de intentos por minuto y cada uno trae datos del cliente que cambian de un navegador a otro.",
+       "alternativas": [
+        "1. Seguir en PostgreSQL y agregar los fallos.",
+        "2. Escribirlos directo en ClickHouse.",
+        "3. Una colección de MongoDB con una copia en Elasticsearch para buscarlos."
+       ],
+       "decision": "La colección `eventos_autenticacion` de MongoDB, escrita por el backend sin esperar, y un worker que copia cada evento al índice `mesh_eventos_autenticacion` de Elasticsearch. Tres contadores de Redis vigilan los intentos de la última ventana y dejan la señal en PostgreSQL.",
+       "justificacion": [
+        "**Patrón de consulta.** El administrador busca por cuenta, por IP o por lo que se tecleó, que es búsqueda de texto y filtros, y para eso está Elasticsearch y Kibana. ClickHouse agrega bien pero no edita filas, y la copia necesita marcar cada evento como copiado.",
+        "**Escalabilidad.** Es la colección que más se escribe del proyecto, un documento por intento, y MongoDB acepta los campos del cliente sin cambiar un esquema.",
+        "**Consistencia.** El inicio de sesión no espera a MongoDB. Si MongoDB está caído, la persona entra igual y ese evento se pierde, porque esto es un registro y no una fuente de verdad. Lo que sí importa, la señal de fraude, queda en PostgreSQL."
+       ],
+       "consecuencias": "El inicio de sesión solo depende de PostgreSQL. Aceptamos perder los eventos del rato en que MongoDB está caído, que `log_login` y su copia a ClickHouse quedaran congeladas y una base más en el camino de la detección de fraude."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-16",
+       "titulo": "El vencimiento de los descuentos y de las ventas relámpago en PostgreSQL",
+       "contexto": "Un descuento o una venta relámpago pueden vencer solos a una hora. Hasta el 26 de septiembre ese vencimiento era una clave con tiempo de vida en Redis, y el worker que apaga descuentos daba por vencido todo descuento cuya clave no existiera. Redis no distingue una clave que venció de una que se perdió, y los 13 descuentos de la semilla se borraban en su primer minuto.",
+       "alternativas": [
+        "1. Seguir con la clave en Redis.",
+        "2. Una persistencia de Redis más estricta.",
+        "3. Dos columnas de fecha en `oferta` de PostgreSQL."
+       ],
+       "decision": "Las columnas `fecha_vencimiento_descuento` y `fecha_vencimiento_venta_limitada` en `oferta`, migración 028, donde vacío quiere decir permanente. El worker lee PostgreSQL cada minuto.",
+       "justificacion": [
+        "**Consistencia.** El descuento cambia el precio que se cobra, así que es dinero y vive donde vive el dinero, en la misma transacción que la oferta.",
+        "**Costo operativo.** Dos columnas y una migración. La persistencia más estricta de Redis no arreglaba un Redis vaciado a mano ni un volumen borrado."
+       ],
+       "consecuencias": "Un Redis vaciado ya no borra descuentos. Aceptamos que el worker consulte PostgreSQL cada minuto. Si Redis se vaciaba a media venta relámpago, el contador quedaba en pausa hasta que la venta venciera, y eso se resolvió el 17 de octubre con las reservas en PostgreSQL (ADR-21)."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-17",
+       "titulo": "Un solo modelo de señales de fraude",
+       "contexto": "Cada familia de detección guardaba su resultado a su manera, el inicio de sesión en `alerta_fraude`, Neo4j en `anillo_fraude` y ClickHouse en `hallazgo_evento_fraude`. En la revisión de la Entrega 3 el profesor señaló que así un caso no podía juntar la evidencia de varias fuentes.",
+       "alternativas": [
+        "1. Mantener una tabla por familia y unirlas en una vista.",
+        "2. Un documento por caso en MongoDB.",
+        "3. Una tabla `senal_fraude` en PostgreSQL con tipo, fuente y evidencia."
+       ],
+       "decision": "La tabla `senal_fraude`, migraciones 031 a 033, con un catálogo de tipos y de fuentes. Las señales se agrupan en casos que el administrador confirma o descarta, y los avisos al usuario cuelgan de la señal.",
+       "justificacion": [
+        "**Consistencia.** Casos, evidencias y avisos apuntan a la señal con llave foránea, y las migraciones copiaron las tablas viejas una sola vez.",
+        "**Patrón de consulta.** El administrador revisa por caso y por cuenta, que en una sola tabla es un JOIN. La vista de la alternativa 1 tenía que repetir la forma de cada familia.",
+        "**Escalabilidad.** Las señales por el texto de las reseñas de octubre entraron como tipos nuevos, sin tabla nueva."
+       ],
+       "consecuencias": "Neo4j, ClickHouse, Elasticsearch, PostgreSQL y los contadores del inicio de sesión escriben lo mismo. Aceptamos que todos dependen de PostgreSQL para dejar su resultado y que las tres tablas viejas quedaron sin escrituras."
+      }
+     }
+    ]
+   },
+   {
+    "titulo": "5.3. Comprar sin MongoDB",
+    "bloques": [
+     {
+      "adr": {
+       "id": "ADR-18",
+       "titulo": "Comprar sin MongoDB",
+       "contexto": "La prueba de falla del checkout encontró que con MongoDB caído no se podía comprar. El checkout leía de MongoDB el nombre del producto y el nombre y el estado de la variante, aunque MongoDB no está en la transacción, y después de cobrar esperaba a recalcular el catálogo en MongoDB.",
+       "alternativas": [
+        "1. No cambiar y avisar que no se puede comprar.",
+        "2. Copiar el nombre en columnas de `oferta`.",
+        "3. Dos tablas de copia del catálogo en PostgreSQL y una cola para recalcular MongoDB."
+       ],
+       "decision": "La alternativa 3, del diseño de José David. `producto_catalogo` y `variante_catalogo` guardan lo que la compra lee, migración 029, y la cola `evento_producto`, migración 030, lleva cada cambio a un worker que recalcula MongoDB cada 5 segundos. La migración 047 sumó lo que hace falta para mostrar la ficha y el catálogo sin MongoDB.",
+       "justificacion": [
+        "**Consistencia.** Comprar ahora lee y escribe solo PostgreSQL, y Redis como copia rápida. Lo que se cobra y lo que se lee para cobrar están en la misma base.",
+        "**Patrón de consulta.** El nombre es de la variante y no de la oferta. Con la alternativa 2 se repetía en cada oferta y un cambio de nombre tocaba muchas filas.",
+        "**Escalabilidad.** La cola guarda una fila pendiente por producto, así que 50 cambios seguidos se resuelven con un solo recálculo."
+       ],
+       "consecuencias": "Se compra con MongoDB caído, medido con `bash pruebas/falla_checkout.sh`, que lo apaga y da 32 en verde. Aceptamos una copia que el backend y el arranque mantienen al día, que la tarjeta del catálogo tarde hasta 5 segundos en reflejar un cambio de precio y que las características del producto solo existan en MongoDB."
+      }
+     }
+    ]
+   },
+   {
+    "titulo": "5.4. Las decisiones de octubre",
+    "bloques": [
+     {
+      "adr": {
+       "id": "ADR-19",
+       "titulo": "Las compras en el grafo de Neo4j",
+       "contexto": "Las recomendaciones para ti y quienes lo compraron también llevaron se calculaban con un worker que guardaba listas ya hechas, y en la revisión del 16 de octubre se pidió leerlas del grafo. El grafo ya tenía cuentas, reseñas y productos.",
+       "alternativas": [
+        "1. Seguir con SQL sobre los pedidos y listas calculadas.",
+        "2. Llevar las compras al grafo y leer las recomendaciones en vivo."
+       ],
+       "decision": "Un nodo `Compra` por línea de pedido, con aristas a la cuenta, al producto y al vendedor, migración 041. Una cola por cuenta, `evento_grafo_compra`, que un worker vacía cada 10 segundos. Las dos rutas leen del grafo en vivo y el worker de listas se borró.",
+       "justificacion": [
+        "**Patrón de consulta.** Quienes compraron esto también compraron aquello es un recorrido de dos o tres saltos, que en Cypher es una línea.",
+        "**Consistencia.** El pedido se confirma sin esperar a Neo4j, la cola va en la misma transacción que el pedido, y el worker relee todas las compras de la cuenta, así que el grafo queda igual a PostgreSQL.",
+        "**Costo operativo.** Es la misma cola y el mismo worker que ya llevaban las reseñas al grafo."
+       ],
+       "consecuencias": "Las compras y los anillos de reseñas están en el mismo grafo y se pueden cruzar. Si Neo4j se cae, las dos recomendaciones salen de los pedidos en PostgreSQL (ADR-22). Aceptamos que el grafo vaya hasta 10 segundos atrás."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-20",
+       "titulo": "El buscador de ofertas y los avisos con percolator",
+       "contexto": "El vendedor necesitaba buscar entre sus ofertas por texto, estado y precio, y el comprador quería un aviso cuando llegara algo que buscó sin encontrar o cuando bajara un precio. En PostgreSQL eso es comparar cada oferta nueva contra todos los avisos pendientes.",
+       "alternativas": [
+        "1. Consultas en PostgreSQL y un worker que compare cada oferta contra todos los avisos.",
+        "2. Un índice de ofertas en Elasticsearch y los avisos como consultas guardadas en un percolator."
+       ],
+       "decision": "El índice `mesh_ofertas`, alimentado por la cola `evento_oferta`, migración 043, y el percolator `mesh_seguimientos`, migración 044. Cada oferta que entra al índice pasa por el percolator y el primer aviso que coincide se cumple una sola vez.",
+       "justificacion": [
+        "**Patrón de consulta.** El percolator invierte la búsqueda, guarda las consultas y pregunta cuáles coinciden con un documento nuevo, que es justo lo que pide un aviso.",
+        "**Consistencia.** El aviso vive en PostgreSQL y en Elasticsearch solo su consulta. Si el índice se rehace, el arranque vuelve a cargar las consultas de los avisos vivos."
+       ],
+       "consecuencias": "Si Elasticsearch se cae, la cola espera y los avisos llegan cuando vuelve. Aceptamos dos índices más que el arranque prepara y una cola más que vigilar."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-21",
+       "titulo": "La verdad del carrito y de las reservas en PostgreSQL",
+       "contexto": "El profesor pidió que Redis nunca fuera la fuente de verdad. Hasta el 17 de octubre el carrito vivía solo en Redis (ADR-6) y la reserva de una venta relámpago solo en el contador de Redis, así que un Redis vaciado se llevaba carritos y reservas sin dejar rastro.",
+       "alternativas": [
+        "1. Seguir en Redis con la persistencia activada.",
+        "2. Volver a PostgreSQL y sacar a Redis del carrito.",
+        "3. Escribir primero en Redis y después en PostgreSQL, que manda."
+       ],
+       "decision": "La alternativa 3, del diseño de José David, migración 045. El carrito es el pedido `pendiente` de la cuenta, uno por cuenta, con su versión y su última actividad, y cada reserva de venta relámpago queda en `reserva_venta_relampago`. Redis decide rápido con su script y PostgreSQL guarda.",
+       "justificacion": [
+        "**Consistencia.** Lo que no se puede reconstruir vive en la base con transacciones. La versión del pedido dice si Redis se quedó atrás, y las reservas en PostgreSQL rehacen el contador de Redis si se pierde.",
+        "**Patrón de consulta.** Las lecturas del carrito siguen saliendo de Redis, que es lo que se pide en cada página.",
+        "**Costo operativo.** La alternativa 2 era más simple, pero sumaba una escritura transaccional a cada clic del carrito y perdía el contador atómico de la venta relámpago."
+       ],
+       "consecuencias": "Un Redis vaciado ya no pierde carritos ni reservas, y si Redis se cae el carrito sale de PostgreSQL. Aceptamos escribir dos veces y un momento en que Redis va adelante de PostgreSQL. Esta decisión revisa ADR-6 y deja falsa la justificación original de ADR-14, que se corrigió."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-22",
+       "titulo": "Un respaldo por base, con cortacircuitos",
+       "contexto": "El profesor pidió que si se apaga una base la tienda siga respondiendo con las que quedan, y que se vea en vivo. Al medirlo, con MongoDB caído el catálogo daba error, con Elasticsearch caído el buscador también, y con Redis congelado cada sección de la portada esperaba 10 segundos.",
+       "alternativas": [
+        "1. Avisar con un error por sección.",
+        "2. Réplicas de cada base.",
+        "3. Un respaldo por base en las otras, con un cortacircuitos que tras una caída deja de preguntarle 15 segundos."
+       ],
+       "decision": "La alternativa 3, migraciones 047 y 048. Cada base tiene de dónde sacar lo que daba, casi siempre de PostgreSQL, y cada cliente del backend tiene su cortacircuitos.",
+       "justificacion": [
+        "**Consistencia.** PostgreSQL ya tenía la verdad o la copia de casi todo, así que el respaldo lee datos que ya existen.",
+        "**Costo operativo.** Las réplicas doblaban los contenedores en una laptop de 16 GB que ya no aguantaba las seis bases.",
+        "**Escalabilidad.** El cortacircuitos evita que cada petición espere el tiempo límite de una base caída, que eran 3 segundos en MongoDB y 8 en Elasticsearch."
+       ],
+       "consecuencias": "La tienda sigue mostrando lo mismo con cualquier base caída menos PostgreSQL, a veces con menos detalle, medido con `node pruebas/caidas.mjs` en 51 comprobaciones con las bases apagadas y otras 51 congeladas. Aceptamos perder los eventos de ClickHouse y los contadores de Redis de ese rato y mantener dos caminos de código por cada fuente."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-23",
+       "titulo": "La tarjeta del buscador sale entera de Elasticsearch",
+       "contexto": "El profesor pidió que el resultado de una búsqueda traiga la foto del producto y salga todo de una vez desde Elasticsearch. Hasta el 23 de octubre la tarjeta del buscador no tenía foto, y conseguirla obligaba a una segunda consulta por resultado.",
+       "alternativas": [
+        "1. Dejar la tarjeta sin foto.",
+        "2. Pedir la foto a PostgreSQL después de buscar.",
+        "3. Guardar el enlace de la foto en el documento del índice, sin indexarlo."
+       ],
+       "decision": "La alternativa 3. El campo `imagen` del índice `mesh_productos` guarda el enlace de la primera foto de la primera variante y no se indexa. Lo llenan el ETL y el worker del buscador, lo devuelven las seis formas de buscar, y el respaldo de PostgreSQL lo saca de `variante_catalogo`.",
+       "justificacion": [
+        "**Patrón de consulta.** Una sola consulta pinta la tarjeta completa, como ya pasaba con el precio y el stock, que viajan en el mismo documento.",
+        "**Costo operativo.** Un campo que no se indexa no agrega trabajo a la búsqueda ni memoria a las agregaciones, solo el enlace guardado."
+       ],
+       "consecuencias": "El buscador enseña la foto sin preguntarle a otra base, y con Elasticsearch caído la saca de la copia en PostgreSQL. Aceptamos un índice un poco más grande y que el arranque lo rehaga si le falta el campo."
+      }
      }
     ]
    }
@@ -565,10 +1063,10 @@
   "titulo": "FRAUDE EN RESEÑAS Y CLASIFICADOR",
   "subsecciones": [
    {
-    "titulo": "5.1. Un solo modelo de señales",
+    "titulo": "6.1. Un solo modelo de señales",
     "bloques": [
      {
-      "p": "En la revisión de la Entrega 3 el profesor señaló que cada familia de detección guardaba su resultado a su manera. Desde el 30 de septiembre todas guardan lo mismo, una señal en `senal_fraude` con su tipo, su fuente, su evidencia y cuántas veces se volvió a detectar. Las señales se agrupan en casos que el administrador revisa, confirma o descarta. Las migraciones 031 a 033 copiaron las tablas anteriores una sola vez."
+      "p": "En la revisión de la Entrega 3 el profesor señaló que cada familia de detección guardaba su resultado a su manera. Desde el 30 de septiembre todas guardan lo mismo, una señal en `senal_fraude` con su tipo, su fuente, su evidencia y cuántas veces se volvió a detectar. Las señales se agrupan en casos que el administrador revisa, confirma o descarta. Las migraciones 031 a 033 copiaron las tablas anteriores una sola vez, y su registro es ADR-17."
      },
      {
       "p": "Con un vector por reseña salieron señales que antes no se podían calcular. Desde el 16 de octubre los pares de reseñas casi iguales los encuentra PostgreSQL con pgvector, sin sacar los vectores de la base, y las notas que no cuadran son una agregación en SQL."
@@ -634,7 +1132,7 @@
     ]
    },
    {
-    "titulo": "5.2. El clasificador de reseñas",
+    "titulo": "6.2. El clasificador de reseñas",
     "bloques": [
      {
       "p": "La señal de nota incoherente necesita saber si el texto de una reseña es bueno o malo sin mirar las estrellas. Para eso entrenamos dos modelos sobre el mismo vector de 768 números, una regresión logística y una red neuronal pequeña de 768 entradas, 32 neuronas y una salida. Los dos están escritos a mano con numpy, y la regresión da lo mismo que la de scikit-learn."
@@ -682,7 +1180,7 @@
   "titulo": "RETROSPECTIVA",
   "subsecciones": [
    {
-    "titulo": "6.1. Cómo la hicimos",
+    "titulo": "7.1. Cómo la hicimos",
     "bloques": [
      {
       "p": "Para cada decisión miramos qué prometía su registro y qué pasó después, con lo medido en las pruebas y lo que tuvimos que arreglar. Una decisión se sostiene si lo que prometió se cumplió y lo que aceptó como costo no nos cobró más de la cuenta. Se replantea si tuvimos que rodearla o si hoy la tomaríamos distinto con lo que sabemos."
@@ -693,7 +1191,7 @@
     ]
    },
    {
-    "titulo": "6.2. Lo que sostendríamos",
+    "titulo": "7.2. Lo que sostendríamos",
     "bloques": [
      {
       "tabla": {
@@ -704,12 +1202,12 @@
        ],
        "filas": [
         [
-         "El dinero y el stock en PostgreSQL, sin migrar las ofertas ni los pagos (ADR-2 y ADR-8)",
+         "El dinero y el stock en PostgreSQL, sin migrar las ofertas ni los pagos (ADR-2 y ADR-12)",
          "Es la única pieza donde un error cuesta dinero, y una transacción local es fácil de probar",
          "Cero sobreventas y cero descuadres sobre 555 ofertas. La prueba de falla del checkout dio 32 en verde y ninguna caída cobra a medias"
         ],
         [
-         "La oferta limitada con un script Lua en Redis",
+         "La oferta limitada con un script Lua en Redis (ADR-7)",
          "Decide quién gana cada unidad sin bloqueos en la aplicación",
          "Cero sobreventas con 5000 solicitudes y 200 clientes simultáneos"
         ],
@@ -719,17 +1217,17 @@
          "El llenado promedio de atributos es 59 por ciento, y se filtra por atributo sin tocar el esquema"
         ],
         [
-         "Neo4j para los anillos de reseñas, alimentado con una cola transaccional",
+         "Neo4j para los anillos de reseñas, alimentado con una cola transaccional (ADR-9)",
          "La consulta de varios saltos se escribe una vez y se lee sin esfuerzo",
          "Desde la migración 015 el grafo se mantiene solo y una ruta de conciliación compara sus conteos con PostgreSQL"
         ],
         [
-         "Elasticsearch como copia reconstruible del catálogo (ADR-9)",
+         "Elasticsearch como copia reconstruible del catálogo (ADR-11)",
          "No guarda nada propio, así que perderlo no pierde datos",
          "Se reconstruye entero en el arranque y la prueba de facetas dio 26 en verde"
         ],
         [
-         "Calcular los vectores con Ollama en la misma máquina",
+         "Calcular los vectores con Ollama en la misma máquina (ADR-13)",
          "Ningún texto sale a un servicio externo y no hay costo por consulta",
          "1003 vectores, 1000 de productos activos, y el worker del backend da el mismo vector que el ETL, con distancia cero"
         ],
@@ -753,7 +1251,7 @@
     ]
    },
    {
-    "titulo": "6.3. Lo que replantearíamos",
+    "titulo": "7.3. Lo que replantearíamos",
     "bloques": [
      {
       "tabla": {
@@ -769,32 +1267,37 @@
          "Un solo dueño del identificador desde la Entrega 1, la secuencia de PostgreSQL, y MongoDB recibiéndolo"
         ],
         [
-         "El vencimiento de un descuento guardado solo como clave con tiempo de vida en Redis",
+         "El vencimiento de un descuento guardado solo como clave con tiempo de vida en Redis (corregido en ADR-16)",
          "El proceso que quita descuentos vencidos no distingue una clave que venció de una que nunca existió. Los 13 descuentos de la semilla se borraban en su primer minuto y un Redis vaciado borraría todos. El 26 de septiembre el vencimiento pasó a una columna de PostgreSQL",
          "El vencimiento en PostgreSQL desde el principio y Redis solo como acelerador. En Redis va lo que se puede perder"
         ],
         [
-         "Aplazar la base columnar en la Entrega 2 (ADR-3)",
+         "El carrito y las reservas de la venta relámpago solo en Redis (ADR-6, corregido en ADR-21)",
+         "Un Redis vaciado se llevaba los carritos abiertos y las reservas sin dejar rastro. El 17 de octubre, por pedido del profesor, la verdad pasó al pedido pendiente y a una tabla de reservas en PostgreSQL, y Redis quedó como copia rápida",
+         "Redis como acelerador desde el principio. Lo que no se puede reconstruir va en la base con transacciones, aunque eso cueste una escritura más por clic"
+        ],
+        [
+         "Aplazar la base columnar en la Entrega 2 (ADR-8)",
          "La aplazamos el 3 de septiembre y la metimos el 6. Decidimos con las consultas que ya teníamos, y el fraude consiste en hacer preguntas que no sabíamos que íbamos a hacer",
          "Decidir por el tipo de preguntas que vienen y no solo por las que ya existen"
         ],
         [
-         "Escribir los eventos a ClickHouse sin respaldo (ADR-6)",
+         "Escribir los eventos a ClickHouse sin respaldo (ADR-10)",
          "Si ClickHouse está caído, los eventos de ese rato se pierden y los rankings quedan cortos sin avisar",
          "Una cola en PostgreSQL, igual que la del grafo, que se vacía cuando ClickHouse vuelve"
         ],
         [
-         "El registro de inicios de sesión primero en ClickHouse",
+         "El registro de inicios de sesión primero en ClickHouse (corregido en ADR-15)",
          "Terminó en MongoDB con copia en Elasticsearch, y la copia a ClickHouse quedó congelada",
          "Elegir el destino por quién lo va a consultar antes de escribir el primer evento"
         ],
         [
-         "El checkout leyendo de MongoDB sin que MongoDB esté en la transacción",
+         "El checkout leyendo de MongoDB sin que MongoDB esté en la transacción (corregido en ADR-18)",
          "La prueba de falla encontró que con MongoDB caído no se podía comprar. El 1 de octubre copiamos a PostgreSQL lo que el checkout lee y hoy se compra con MongoDB caído",
          "Que desde la Entrega 1 todo lo que el checkout lee viva en PostgreSQL y MongoDB sea solo para pintar"
         ],
         [
-         "Mudar el vector a Elasticsearch por lo cómodo de la consulta (primera revisión de ADR-10)",
+         "Mudar el vector a Elasticsearch por lo cómodo de la consulta (primera revisión de ADR-13)",
          "Ganamos una sola consulta para la búsqueda híbrida, pero su índice comprimido solo coincidía con el coseno exacto en 317 de 1001 productos. El 16 de octubre el vector volvió a pgvector, que coincide en 1000",
          "Medir la precisión de cada opción contra el cálculo exacto antes de mudar un dato, y no solo lo cómoda que queda la consulta"
         ]
@@ -808,19 +1311,20 @@
       }
      },
      {
-      "p": "Las siete tienen algo en común. En casi todas una copia terminó comportándose como si fuera la verdad. El identificador de MongoDB, la clave de Redis, el evento que solo existía en ClickHouse. Cuando la copia se pierde o se adelanta, algo que debía reconstruirse se rompe. La mudanza del vector enseñó otra cosa, que una decisión cómoda también hay que medirla. La regla que sacamos es que cada dato tenga un solo dueño escrito, y que todo lo demás se pueda borrar y volver a calcular sin perder nada."
+      "p": "Las ocho tienen algo en común. En casi todas una copia terminó comportándose como si fuera la verdad. El identificador de MongoDB, la clave de Redis, el carrito que solo existía en Redis, el evento que solo existía en ClickHouse. Cuando la copia se pierde o se adelanta, algo que debía reconstruirse se rompe. La mudanza del vector enseñó otra cosa, que una decisión cómoda también hay que medirla. La regla que sacamos es que cada dato tenga un solo dueño escrito, y que todo lo demás se pueda borrar y volver a calcular sin perder nada."
      }
     ]
    },
    {
-    "titulo": "6.4. Lo que aprendimos sobre la forma de trabajar",
+    "titulo": "7.4. Lo que aprendimos sobre la forma de trabajar",
     "bloques": [
      {
       "vin": [
        "Sostendríamos el contrato escrito entre el backend y el resto. Cada pedido llevaba la consulta probada y la forma exacta de la respuesta, y eso permitió trabajar en paralelo sin pisarnos.",
        "Replantearíamos crear tablas a mano en una base local. Una tabla de reglas de descuento llegó al repositorio sin su migración, solo existía en la base de quien la creó, y hubo que escribirla después a partir del modelo del backend. La migración tiene que viajar en el mismo cambio que el código que la usa.",
        "Sostendríamos que cada prueba tenga su control. Una negativa sin control sale en verde también con la base caída, y el control es lo que separa un rechazo de verdad de un servicio que no contesta.",
-       "Replantearíamos dejar el control de acceso para el final. Durante casi todo el semestre cualquier servicio pudo vaciar Redis, y configurarlo desde la Entrega 2 habría costado lo mismo."
+       "Replantearíamos dejar el control de acceso para el final. Durante casi todo el semestre cualquier servicio pudo vaciar Redis, el backend entró a MongoDB como root y Elasticsearch no pidió contraseña aunque su puerto estaba abierto a la red. Configurarlo desde la Entrega 2 habría costado lo mismo.",
+       "Replantearíamos numerar las decisiones por entrega. Los números chocaron entre los informes y varias decisiones de octubre se implementaron sin su registro. Un solo registro desde el primer día, con el registro escrito en el mismo cambio que el código, lo habría evitado."
       ]
      }
     ]
@@ -831,13 +1335,13 @@
   "titulo": "CONCLUSIONES",
   "subsecciones": [
    {
-    "titulo": "7.1. Conclusiones",
+    "titulo": "8.1. Conclusiones",
     "bloques": [
      {
       "p": "La recomendación semántica empezó en pgvector, pasó por Elasticsearch para tener el vector junto al texto y volvió a pgvector, donde coincide con el cálculo exacto. En el camino abrió la búsqueda híbrida, la búsqueda por intención y las señales de fraude por el texto de las reseñas, todas con el mismo modelo local."
      },
      {
-      "p": "El control de acceso en Redis cerró un riesgo que tuvimos todo el semestre sin notarlo. Hoy cada servicio entra con lo justo y la prueba demuestra cada negativa con su control."
+      "p": "El control de acceso cerró un riesgo que tuvimos todo el semestre sin notarlo. Hoy el backend entra a cada base con un usuario que solo puede leer y escribir datos, las herramientas de inspección solo miran o solo se abren en la misma PC, Elasticsearch pide contraseña, y la prueba demuestra cada negativa con su control. Neo4j es la excepción, porque su edición gratuita no trae roles."
      },
      {
       "p": "Mirando el semestre completo, lo que mejor funcionó fue decidir por el patrón de consulta y dejar el dinero en una sola transacción. Lo que peor funcionó fueron las copias sin dueño claro. Si empezáramos de nuevo, escribiríamos quién es el dueño de cada dato antes de elegir dónde guardarlo."

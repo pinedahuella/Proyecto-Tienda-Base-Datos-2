@@ -358,10 +358,17 @@ const CATALOGO = [
   // --- Demos de la Entrega final ------------------------------------------
   {
     id: 'final-acceso', grupo: 'Demos de la Entrega final', titulo: 'Quien puede que en Redis',
-    explica: 'Los tres usuarios de Redis intentan lo mismo y se ve que contesta Redis. El del backend escribe pero no puede vaciar ni configurar, el de RedisInsight solo mira, y el de mantenimiento puede todo. Lo que borraria algo no se ejecuta, se le pregunta a Redis si lo dejaria.',
+    explica: 'Los usuarios de Redis intentan lo mismo y se ve que contesta Redis. El del backend solo toca las claves mesh:* y no puede vaciar ni configurar, el de los scripts tampoco administra, el de RedisInsight solo mira, y el de mantenimiento puede todo. Lo que borraria algo no se ejecuta, se le pregunta a Redis si lo dejaria.',
     script: 'demo-entrega-final.ps1', confirmar: null,
     campos: [],
     construir: () => ['-Parte', 'acceso'],
+  },
+  {
+    id: 'final-bases', grupo: 'Demos de la Entrega final', titulo: 'Quien puede que en las seis bases',
+    explica: 'Corre la prueba del control de acceso de todas las bases. En PostgreSQL, MongoDB, ClickHouse y Elasticsearch el usuario del backend lee y escribe pero no puede crear ni borrar tablas, colecciones, indices ni usuarios, y el de solo lectura solo mira. Neo4j contesta que su edicion no tiene roles. Al final la de Redis. Tarda unos dos minutos y no cambia nada de la tienda.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Parte', 'bases'],
   },
   {
     id: 'final-semantica', grupo: 'Demos de la Entrega final', titulo: 'Productos parecidos por su descripcion',

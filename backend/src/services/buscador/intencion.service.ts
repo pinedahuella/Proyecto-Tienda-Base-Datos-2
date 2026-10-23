@@ -62,6 +62,8 @@ interface DocumentoProducto {
   stock_total: number;
   resenas_promedio: number;
   resenas_total: number;
+  /** El enlace de la foto de la tarjeta, o null. Guardado sin indexar. */
+  imagen: string | null;
 }
 
 /** Lo que se sabe de un producto despues de mirar las resenas. */
@@ -328,6 +330,7 @@ export class BuscadorIntencionService {
         stock_total: doc.stock_total ?? 0,
         resenas_promedio: doc.resenas_promedio ?? 0,
         resenas_total: doc.resenas_total ?? 0,
+        imagen: doc.imagen ?? null,
         puntaje: Math.max(similitudResenas ?? 0, similitudProducto ?? 0),
         origen,
         motivo: deResenas?.mejor ?? null,

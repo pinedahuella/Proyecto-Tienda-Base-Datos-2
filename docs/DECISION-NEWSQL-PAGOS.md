@@ -1,4 +1,7 @@
-# ADR-8 -- Pagos en un motor NewSQL, evaluado y descartado por ahora
+# ADR-12 -- Pagos en un motor NewSQL, evaluado y descartado por ahora
+
+En el registro unico (`docs/DECISIONES.md`) es el ADR-12. En el informe de la
+Entrega 3 se cito como ADR-8.
 
 Fecha 2026-09-25. Estado decidido, se queda PostgreSQL.
 
@@ -58,7 +61,7 @@ PostgreSQL.
 
 Mesh corre en una sola maquina con un solo PostgreSQL. Los pedidos y pagos se
 cuentan en decenas o pocos cientos, igual que las ventas que se midieron para el
-ADR-3. El cuello de botella que si existe es otro, la venta relampago, donde
+ADR-8. El cuello de botella que si existe es otro, la venta relampago, donde
 muchas compras pelean por la misma fila de `oferta` en el mismo segundo. Ese
 caso ya lo resolvio la Entrega 2 con un contador atomico en Redis delante de
 PostgreSQL (`migrations/014_inventario_limitado.sql` y el ticket de reserva),
@@ -126,7 +129,7 @@ hoy el backend no maneja.
 
 Escalabilidad. Escalar escrituras en horizontal resuelve un problema que no
 tenemos. A este volumen un solo PostgreSQL tiene margen de sobra, igual que se
-concluyo para grafos y columnar en el ADR-3.
+concluyo para grafos y columnar en el ADR-8.
 
 Costo operativo. Un cluster con tolerancia a fallos pide al menos tres nodos.
 En la maquina del equipo, que ya levanta seis bases, eso es memoria que no hay.

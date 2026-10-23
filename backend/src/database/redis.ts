@@ -33,10 +33,18 @@ const logger = new Logger('Redis');
 const host = process.env.REDIS_HOST ?? 'localhost';
 const port = Number(process.env.REDIS_PORT ?? 6379);
 const contrasena = obligatoria('REDIS_PASSWORD');
+/**
+ * El usuario de ACL. `backend` desde el 2026-10-23: solo las claves `mesh:*`
+ * (ver el bloque de Redis en docker-compose.yml). Sin REDIS_USER entra como
+ * `default`, que es lo que habia antes y lo que tiene una PC que todavia no
+ * corrio arrancar.ps1 con esta version.
+ */
+const usuario = process.env.REDIS_USER || undefined;
 
 export const redis = new Redis({
   host,
   port,
+  username: usuario,
   password: contrasena,
   connectTimeout: 10000,
   commandTimeout: 3000,
@@ -135,8 +143,17 @@ redis.sendCommand = ((comando: ComandoRedis, stream?: StreamRedis) => {
  */
 redis.on('error', (error: Error) => {
   logger.warn(`Fallo hablando con Redis: ${error.message}`);
+  // La conexion misma fallo (Redis apagado, la red cortada). Se marca la caida
+  // aqui y no solo cuando falla un comando: con Redis apagado el cliente no
+  // esta `ready`, quien llama ve `esRedisInalcanzable()` y se va a su respaldo
+  // sin mandar nada, y el cortacircuitos nunca se enteraba. Asi lo de
+  // GET /db/cortacircuitos dice la verdad aunque nadie le hable a Redis.
+  if (esFalloDeConexionRedis(error)) {
+    cortacircuitosRedis.registrarCaida(error);
+  }
 });
 
 redis.on('ready', () => {
   logger.log(`Conectado a Redis en ${host}:${port}`);
+  cortacircuitosRedis.registrarRespuesta();
 });

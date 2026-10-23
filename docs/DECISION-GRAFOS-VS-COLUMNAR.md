@@ -1,4 +1,8 @@
-# ADR-3 -- Grafos contra columnar, para los dos analisis de la Entrega 2
+# ADR-8 -- Grafos contra columnar, para los dos analisis de la Entrega 2
+
+En el registro unico (`docs/DECISIONES.md`) es el ADR-8. En el informe de la
+Entrega 2 se cito como ADR-3, que en `docs/base-de-datos.md` es otra decision.
+Fue reemplazada el 6 de septiembre por el ADR-10, ClickHouse para eventos.
 
 **Fecha:** 2026-09-03. **Estado:** decidido y ya implementado.
 **Sigue la estructura de registro de decision que pide el enunciado**

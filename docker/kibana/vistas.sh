@@ -26,10 +26,13 @@
 K="${KIBANA_URL:-http://kibana:5601}"
 E="${ELASTIC_URL:-http://elasticsearch:9200}"
 H="kbn-xsrf: true"
+# Con la seguridad de Elasticsearch encendida, Kibana y Elasticsearch piden
+# usuario. Este script crea vistas, asi que entra como elastic.
+U="elastic:${ELASTIC_PASSWORD}"
 
 echo "kibana-vistas, esperando a Kibana"
 for i in $(seq 1 120); do
-  if curl -s "$K/api/status" | grep -q '"overall":{"level":"available"'; then
+  if curl -s -u "$U" "$K/api/status" | grep -q '"overall":{"level":"available"'; then
     listo=1
     break
   fi
@@ -47,7 +50,7 @@ crear() {
   nombre="$2"
   campo="$3"
 
-  if curl -s "$K/api/data_views" -H "$H" | grep -q "\"title\":\"$titulo\""; then
+  if curl -s -u "$U" "$K/api/data_views" -H "$H" | grep -q "\"title\":\"$titulo\""; then
     echo "kibana-vistas, $nombre ya estaba"
     return
   fi
@@ -55,7 +58,7 @@ crear() {
   # Hasta 15 minutos a que el indice exista. Una vista sin indice queda sin
   # campos y hay que rehacerla.
   for i in $(seq 1 90); do
-    if curl -sf -o /dev/null -I "$E/$titulo"; then
+    if curl -sf -u "$U" -o /dev/null -I "$E/$titulo"; then
       existe=1
       break
     fi
@@ -73,7 +76,7 @@ crear() {
   fi
   cuerpo="$cuerpo}}"
 
-  if curl -sf -o /dev/null -X POST "$K/api/data_views/data_view" \
+  if curl -sf -u "$U" -o /dev/null -X POST "$K/api/data_views/data_view" \
        -H "$H" -H "Content-Type: application/json" -d "$cuerpo"; then
     echo "kibana-vistas, $nombre creada"
   else
@@ -84,7 +87,7 @@ crear() {
 crear "mesh_eventos_autenticacion" "Eventos de autenticacion" "fecha"
 crear "mesh_productos" "Productos" ""
 
-if curl -sf -o /dev/null -X POST "$K/api/kibana/settings" \
+if curl -sf -u "$U" -o /dev/null -X POST "$K/api/kibana/settings" \
      -H "$H" -H "Content-Type: application/json" \
      -d '{"changes":{"timepicker:timeDefaults":"{\"from\":\"now-60d\",\"to\":\"now\"}"}}'; then
   echo "kibana-vistas, rango por defecto de Discover en 60 dias"

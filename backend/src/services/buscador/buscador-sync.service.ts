@@ -100,15 +100,9 @@ export class BuscadorSyncService {
  * Arma el documento del indice a partir del producto de Mongo, con la MISMA
  * forma que `etl/extraer_busqueda.js` -- mismos nombres de campo, mismo
  * tratamiento de `Decimal128` y de las variantes. Si esa forma cambia algun
- * dia, hay que cambiar las dos a la par.
- *
- * `hay_descuento` (agregado 2026-09-27) todavia NO esta en
- * `etl/extraer_busqueda.js` (fuera de `backend/`, no se toca desde aca) --
- * hasta que se agregue ahi tambien, una corrida completa del ETL
- * (`etl/cargar_busqueda.sh`, la que reconstruye el indice entero) va a
- * dejar ese campo afuera para TODOS los productos, y solo este worker
- * incremental (los que tengan `pendiente_busqueda: true`) lo va a ir
- * rellenando de a poco.
+ * dia, hay que cambiar las dos a la par. Las dos llevan `hay_descuento`
+ * (desde el 2026-09-27) e `imagen`, la foto de la tarjeta (desde el
+ * 2026-10-23).
  */
 function aDocumentoIndice(producto: Producto): Record<string, unknown> {
   const variantes = (producto.variantes ?? [])
@@ -130,7 +124,24 @@ function aDocumentoIndice(producto: Producto): Record<string, unknown> {
     resenas_promedio: producto.resenas_promedio ?? 0,
     resenas_total: producto.resenas_total ?? 0,
     variantes,
+    imagen: primeraImagen(producto),
   };
+}
+
+/**
+ * La foto de la tarjeta: la primera imagen de la primera variante que tenga
+ * alguna, igual que `etl/extraer_busqueda.js`.
+ */
+function primeraImagen(producto: Producto): string | null {
+  for (const v of producto.variantes ?? []) {
+    const imagen = (v.imagenes ?? []).find(
+      (i) => typeof i === 'string' && i.trim().length > 0,
+    );
+    if (imagen) {
+      return imagen;
+    }
+  }
+  return null;
 }
 
 /**

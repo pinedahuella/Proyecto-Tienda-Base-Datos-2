@@ -49,6 +49,11 @@ export interface ResultadoBusqueda {
 	 * (2026-09-26); un indice armado antes no lo trae, por eso es opcional.
 	 */
 	hay_descuento?: boolean;
+	/**
+	 * El enlace de la foto, que llega en el mismo documento de Elasticsearch
+	 * desde el 2026-10-23. Opcional por la misma razon que hay_descuento.
+	 */
+	imagen?: string | null;
 }
 
 /**

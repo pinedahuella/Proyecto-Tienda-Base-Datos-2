@@ -43,6 +43,8 @@ interface DocumentoIndice {
   stock_total: number;
   resenas_promedio: number;
   resenas_total: number;
+  /** El enlace de la foto de la tarjeta, o null. Guardado sin indexar. */
+  imagen: string | null;
 }
 
 interface BucketTerms {
@@ -324,6 +326,7 @@ export class BuscadorFacetadoService {
       stock_total: fuente?.stock_total ?? 0,
       resenas_promedio: fuente?.resenas_promedio ?? 0,
       resenas_total: fuente?.resenas_total ?? 0,
+      imagen: fuente?.imagen ?? null,
     };
   }
 }

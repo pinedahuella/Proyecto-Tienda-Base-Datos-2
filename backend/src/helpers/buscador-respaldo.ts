@@ -146,6 +146,7 @@ interface FilaResultado {
   stock_total: string | number;
   promedio: string | null;
   total_resenas: string | number;
+  imagen: string | null;
 }
 
 /**
@@ -279,7 +280,10 @@ export async function buscarEnCopia(
        (SELECT count(*)::int FROM filtrados) AS total,
        COALESCE((SELECT json_agg(r) FROM (
                   SELECT id, nombre, estado, categoria, precio_desde, precio_tienda,
-                         hay_descuento, stock_total, promedio, total_resenas
+                         hay_descuento, stock_total, promedio, total_resenas,
+                         (SELECT vc.imagen FROM variante_catalogo vc
+                           WHERE vc.id_producto_mongo = filtrados.id AND vc.imagen IS NOT NULL
+                           ORDER BY vc.id_producto_variante_mongo LIMIT 1) AS imagen
                     FROM filtrados
                    ORDER BY puntaje DESC, length(nombre), id
                    LIMIT $4) r), '[]') AS resultados,
@@ -331,6 +335,8 @@ export interface DocumentoCopia {
   stock_total: number;
   resenas_promedio: number;
   resenas_total: number;
+  /** El enlace de la foto de la tarjeta, o null. Guardado sin indexar. */
+  imagen: string | null;
 }
 
 /**
@@ -352,7 +358,10 @@ export async function documentosDesdeCopia(
      SELECT pc.id_producto_mongo AS id, pc.nombre, pc.descripcion, pc.estado,
             cat.nombre AS categoria, pp.precio_desde, pp.precio_tienda, pp.hay_descuento,
             COALESCE(pp.stock_total, 0) AS stock_total,
-            COALESCE(n.promedio, 0) AS promedio, COALESCE(n.total, 0) AS total_resenas
+            COALESCE(n.promedio, 0) AS promedio, COALESCE(n.total, 0) AS total_resenas,
+            (SELECT vc.imagen FROM variante_catalogo vc
+             WHERE vc.id_producto_mongo = pc.id_producto_mongo AND vc.imagen IS NOT NULL
+             ORDER BY vc.id_producto_variante_mongo LIMIT 1) AS imagen
        FROM producto_catalogo pc
        LEFT JOIN pp ON pp.id = pc.id_producto_mongo
        LEFT JOIN n ON n.id = pc.id_producto_mongo
@@ -374,6 +383,7 @@ export async function documentosDesdeCopia(
       stock_total: r.stock_total,
       resenas_promedio: r.resenas_promedio,
       resenas_total: r.resenas_total,
+      imagen: r.imagen,
     });
   }
   return docs;
@@ -429,6 +439,7 @@ function aResultado(fila: FilaResultado): ResultadoBusquedaProducto {
     stock_total: Number(fila.stock_total),
     resenas_promedio: Number(fila.promedio ?? 0),
     resenas_total: Number(fila.total_resenas),
+    imagen: fila.imagen ?? null,
   };
 }
 

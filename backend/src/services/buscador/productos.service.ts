@@ -40,6 +40,8 @@ interface DocumentoIndice {
   stock_total: number;
   resenas_promedio: number;
   resenas_total: number;
+  /** El enlace de la foto de la tarjeta, o null. Guardado sin indexar. */
+  imagen: string | null;
 }
 
 /**
@@ -51,10 +53,12 @@ interface DocumentoIndice {
  * del ETL, igual que el grafo de Neo4j.
  *
  * Devuelve un RESUMEN por producto (lo que hace falta para pintar una
- * tarjeta de resultados: nombre, categoria, precio, stock, nota), no el
- * producto completo. El documento indexado tampoco trae imagenes ni
- * caracteristicas -- para el detalle entero esta GET /productos/:id contra
- * MongoDB, que sigue siendo la fuente de verdad del catalogo.
+ * tarjeta de resultados: nombre, categoria, precio, stock, nota y foto), no
+ * el producto completo. La foto va en el documento desde el 2026-10-23, a
+ * pedido del profesor, para que la tarjeta salga entera de Elasticsearch: se
+ * guarda solo el enlace y sin indexar (no se busca por el). Las
+ * caracteristicas no estan -- para el detalle entero esta GET /productos/:id
+ * contra MongoDB, que sigue siendo la fuente de verdad del catalogo.
  *
  * La busqueda es difusa (tolera errores de tecleo, `fuzziness: AUTO`) y sin
  * tildes (el indice usa el analizador `espanol_llano`, que hace
@@ -258,6 +262,7 @@ export class BuscadorProductosService {
       stock_total: fuente?.stock_total ?? 0,
       resenas_promedio: fuente?.resenas_promedio ?? 0,
       resenas_total: fuente?.resenas_total ?? 0,
+      imagen: fuente?.imagen ?? null,
     };
   }
 }

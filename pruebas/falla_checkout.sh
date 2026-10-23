@@ -824,9 +824,20 @@ titulo "5. CON TODO ARRIBA OTRA VEZ, LA TIENDA VUELVE A VENDER"
 # que se recupera de ella. Son cosas distintas y la segunda es la que importa
 # al dia siguiente: un candado pegado, un pool de conexiones que no reconecta o
 # un carrito corrupto solo se ven aqui.
-PRECIO=$(preparar_carrito)
+# Desde el 2026-10-20 el backend tiene un cortacircuitos por base: despues de
+# una caida de PostgreSQL deja de preguntarle 15 s y responde 503 al momento.
+# Recuperarse es volver solo despues de esa pausa, sin reiniciar nada, asi que
+# se reintenta hasta 45 s y se dice cuanto tardo.
+PRECIO=""
+_t0=$(date +%s)
+for _ in $(seq 1 15); do
+    PRECIO=$(preparar_carrito)
+    [ -n "$PRECIO" ] && break
+    sleep 3
+done
+[ -n "$PRECIO" ] && echo "  la tienda volvio a aceptar el carrito a los $(( $(date +%s) - _t0 )) s"
 if [ -z "$PRECIO" ]; then
-    FALLA "tras las tres caidas ya no se puede ni dejar el carrito listo"
+    FALLA "tras las tres caidas ya no se puede ni dejar el carrito listo, ni esperando 45 s"
 else
     echo "  carrito listo otra vez con la oferta $OFERTA a $PRECIO"
     foto

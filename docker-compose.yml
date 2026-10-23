@@ -1,6 +1,16 @@
 # Las credenciales salen del archivo .env, que no se sube al repositorio.
 # Si falta una variable, Compose se detiene con el mensaje que va despues del "?"
 # en vez de arrancar con valores en blanco.
+#
+# PUERTOS. Las bases publican su puerto hacia la red porque el modo remoto
+# (remoto/README.md) las usa desde otra PC por Tailscale, y las seis piden
+# usuario y contrasena. Las herramientas de inspeccion (pgAdmin, DbGate,
+# RedisInsight, el navegador de Neo4j, Kibana) y el puerto nativo de ClickHouse
+# solo escuchan en 127.0.0.1: se abren desde la misma PC y nadie de la red las
+# alcanza. Lo cuenta docs/SEGURIDAD.md.
+#
+# IMAGENES. Todas con version fija. Con :latest dos PC del equipo podian
+# correr versiones distintas sin saberlo.
 
 services:
 
@@ -26,7 +36,8 @@ services:
       retries: 5
 
   pgadmin:
-    image: dpage/pgadmin4:latest
+    # La 9.17 fijada tambien por su digest: el mismo build en todas las PC.
+    image: dpage/pgadmin4:9.17@sha256:2f4ce946ddf8360680d7eff4eaba1d91859eb6b4003e6623bad5c63a322c2f4d
     container_name: mesh-pgadmin
     restart: unless-stopped
     environment:
@@ -38,7 +49,10 @@ services:
       # Los dos archivos los genera arrancar.ps1 a partir del .env.
       PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
     ports:
-      - "5050:80"
+      # pgAdmin entra con el dueno de la base porque es la herramienta de
+      # administracion del equipo. Lo protegen su propio login y que solo
+      # escucha en esta PC.
+      - "127.0.0.1:5050:80"
     volumes:
       - pgadmin-data:/var/lib/pgadmin
       - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
@@ -86,7 +100,7 @@ services:
   # colecciones a la izquierda, panel para escribir consultas, y se pueden
   # crear bases y colecciones desde ahi.
   dbgate:
-    image: dbgate/dbgate:latest
+    image: dbgate/dbgate:7.2.5
     container_name: mesh-dbgate
     restart: unless-stopped
     environment:
@@ -96,9 +110,14 @@ services:
       # por localhost ni por el 27018: dbgate esta en la misma red de Docker.
       LABEL_mongo: Mesh MongoDB
       ENGINE_mongo: mongo@dbgate-plugin-mongo
-      URL_mongo: mongodb://${MONGO_USER:?falta MONGO_USER en .env}:${MONGO_PASSWORD:?falta MONGO_PASSWORD en .env}@mongo:27017/?authSource=admin
+      #
+      # Entra con mesh_lectura, que solo puede leer la base de la tienda.
+      # DbGate no pide login, asi que con el usuario root cualquiera que
+      # abriera la pagina era root de MongoDB. El usuario lo crea arrancar.ps1
+      # (seguridad/mongo.js).
+      URL_mongo: mongodb://mesh_lectura:${MONGO_LECTURA_PASSWORD:?falta MONGO_LECTURA_PASSWORD en .env}@mongo:27017/${MONGO_DB:?falta MONGO_DB en .env}?authSource=admin
     ports:
-      - "3001:3000"
+      - "127.0.0.1:3001:3000"
     volumes:
       # Guarda las consultas que uno deja escritas
       - dbgate-data:/root/.dbgate
@@ -120,11 +139,15 @@ services:
   # CONTROL DE ACCESO (Entrega final, desde el 2026-09-25). Tres usuarios de
   # ACL, uno por servicio, en vez de una sola contrasena para todo:
   #
-  #   default     el backend y los scripts del equipo. Lee y escribe datos,
-  #               corre los scripts Lua, y NO puede nada de @dangerous
-  #               (FLUSHALL, CONFIG, KEYS, ACL, SHUTDOWN, DEBUG, MONITOR...).
-  #               Se le devuelve solo INFO, que ioredis usa al conectar y el
-  #               backend en su revision de salud.
+  #   backend     el backend (desde el 2026-10-23). Solo las claves y
+  #               canales que empiezan con mesh:, que son todas las de la
+  #               tienda. Lee, escribe y corre los scripts Lua, y NO puede nada
+  #               de @dangerous (FLUSHALL, CONFIG, KEYS, ACL, SHUTDOWN, DEBUG,
+  #               MONITOR...). Se le devuelve solo INFO, que ioredis usa al
+  #               conectar y el backend en su revision de salud.
+  #   default     los scripts y pruebas del equipo. Lo mismo que backend pero
+  #               sobre cualquier clave, porque las pruebas escriben claves con
+  #               su propio prefijo (prueba:...).
   #   inspeccion  RedisInsight. Solo lectura, +@read, sin escribir ni borrar.
   #   operador    mantenimiento. Todo, con su propia contrasena.
   #
@@ -151,6 +174,16 @@ services:
       - ">${REDIS_PASSWORD:?falta REDIS_PASSWORD en .env}"
       - "~*"
       - "&*"
+      - "+@all"
+      - "-@dangerous"
+      - "+info"
+      - --user
+      - backend
+      - reset
+      - "on"
+      - ">${REDIS_BACKEND_PASSWORD:?falta REDIS_BACKEND_PASSWORD en .env}"
+      - "~mesh:*"
+      - "&mesh:*"
       - "+@all"
       - "-@dangerous"
       - "+info"
@@ -199,7 +232,7 @@ services:
   # Las variables RI_* dejan la conexion ya cargada, sin tener que agregarla a
   # mano, igual que servers.json en pgAdmin.
   redisinsight:
-    image: redis/redisinsight:latest
+    image: redis/redisinsight:3.8.0
     container_name: mesh-redisinsight
     restart: unless-stopped
     environment:
@@ -218,7 +251,7 @@ services:
       # pedirle otra variable a nadie.
       RI_ENCRYPTION_KEY: ${REDIS_INSPECCION_PASSWORD:?falta REDIS_INSPECCION_PASSWORD en .env}
     ports:
-      - "5540:5540"
+      - "127.0.0.1:5540:5540"
     volumes:
       - redisinsight-data:/data
     depends_on:
@@ -238,6 +271,13 @@ services:
   # El usuario tiene que llamarse `neo4j` en la edicion community: no se puede
   # cambiar. Por eso el .env solo pide la contrasena, y Neo4j la rechaza si
   # tiene menos de 8 caracteres.
+  #
+  # Es la UNICA base sin un usuario por servicio. La edicion community no trae
+  # roles: CREATE ROLE, GRANT y DENY son de la edicion enterprise, que es de
+  # pago, y en community todo usuario puede todo. Lo que Neo4j contesta al
+  # intentarlo esta en seguridad/prueba_acceso.sh, y el porque en
+  # docs/SEGURIDAD.md. Lo que si se hizo es lo que queda a mano: contrasena,
+  # el navegador del 7474 solo en esta PC y bolt (7687) como unica puerta.
   neo4j:
     image: neo4j:5-community
     container_name: mesh-neo4j
@@ -258,7 +298,7 @@ services:
       # El contenedor se reinicia para siempre y el error no menciona Docker.
       MESH_NEO4J_PASSWORD: ${NEO4J_PASSWORD:?falta NEO4J_PASSWORD en .env}
     ports:
-      - "7474:7474"
+      - "127.0.0.1:7474:7474"
       - "7687:7687"
     volumes:
       - neo4j-data:/data
@@ -295,15 +335,21 @@ services:
       # queda sin elegir maestro, en amarillo, para siempre.
       discovery.type: single-node
 
-      # Seguridad apagada, y es una decision de ENTORNO DE CLASE, no un olvido.
-      # Con la 8.x la seguridad viene encendida y el contenedor genera
-      # certificados y una contrasena al vuelo: cada `-Reiniciar` daria
-      # credenciales nuevas y habria que ir a leerlas al log. Esta base no
-      # guarda nada que no este ya en PostgreSQL y solo escucha en localhost.
+      # SEGURIDAD ENCENDIDA desde el 2026-10-23. Hasta ese dia estaba apagada
+      # con el argumento de que solo escuchaba en localhost, y no era cierto:
+      # el 9200 se publica hacia la red, porque el modo remoto lo usa desde
+      # otra PC por Tailscale, y sin seguridad cualquiera que llegara al
+      # puerto podia leer y borrar los indices.
       #
-      # Si esto algun dia sale de una maquina de desarrollo, esta linea es la
-      # primera que hay que quitar.
-      xpack.security.enabled: "false"
+      # La contrasena de `elastic` sale del .env y no se genera al vuelo, asi
+      # que no hay que ir a buscarla al log. Sin TLS a proposito: un solo nodo
+      # no necesita el transporte cifrado, y entre PC el HTTP viaja dentro de
+      # Tailscale, que ya va cifrado. Los usuarios de cada servicio los crea el
+      # contenedor elastic-usuarios, aqui abajo.
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      xpack.security.transport.ssl.enabled: "false"
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?falta ELASTIC_PASSWORD en .env}
 
       # EL HEAP SE FIJA A MANO, y aqui esta la razon de verdad.
       #
@@ -325,8 +371,8 @@ services:
       # ponerlo en true y que el contenedor no arranque con un error de ulimit.
       bootstrap.memory_lock: "false"
     ports:
-      # 9200 la API, 9300 el transporte entre nodos. El 9300 se publica solo
-      # para poder mirarlo si algo raro pasa; con un nodo no se usa.
+      # 9200, la API. El 9300 (transporte entre nodos) no se publica: con un
+      # solo nodo no se usa.
       - "9200:9200"
     volumes:
       - elastic-data:/usr/share/elasticsearch/data
@@ -342,12 +388,43 @@ services:
       test:
         [
           "CMD-SHELL",
-          "curl -sf 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null || exit 1"
+          "curl -sf -u \"elastic:$$ELASTIC_PASSWORD\" 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' > /dev/null || exit 1"
         ]
       interval: 15s
       timeout: 10s
       retries: 10
       start_period: 60s
+
+  # ------------------------------------------------------------------
+  # elastic-usuarios -- los usuarios de cada servicio en Elasticsearch
+  # ------------------------------------------------------------------
+  # No es un servicio: corre seguridad/elastic.sh y termina, igual que
+  # kibana-vistas. Espera a Elasticsearch y deja, en cada arranque:
+  #   kibana_system   la contrasena con que Kibana habla con Elasticsearch
+  #   mesh_backend    el backend. Lee y escribe solo en los indices mesh_*
+  #   mesh_lectura    para entrar a Kibana. Solo lee los indices mesh_*
+  # `elastic` (todo) queda para arrancar.ps1, el ETL y las pruebas.
+  #
+  # Va en el compose y no solo en arrancar.ps1 porque Kibana no arranca sin la
+  # contrasena de kibana_system, y un `docker compose up` a secas tambien tiene
+  # que dejarlo funcionando. Se puede repetir: vuelve a poner las mismas
+  # contrasenas y los mismos roles.
+  elastic-usuarios:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.15.3
+    container_name: mesh-elastic-usuarios
+    restart: "no"
+    depends_on:
+      elasticsearch:
+        condition: service_started
+    entrypoint: ["bash", "-c", "tr -d '\\r' < /seguridad/elastic.sh | bash"]
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?falta ELASTIC_PASSWORD en .env}
+      KIBANA_PASSWORD: ${KIBANA_PASSWORD:?falta KIBANA_PASSWORD en .env}
+      ELASTIC_BACKEND_PASSWORD: ${ELASTIC_BACKEND_PASSWORD:?falta ELASTIC_BACKEND_PASSWORD en .env}
+      ELASTIC_LECTURA_PASSWORD: ${ELASTIC_LECTURA_PASSWORD:?falta ELASTIC_LECTURA_PASSWORD en .env}
+    volumes:
+      - ./seguridad:/seguridad:ro
+    mem_limit: 128m
 
   # ------------------------------------------------------------------
   # Kibana -- la ventana de Elasticsearch
@@ -376,6 +453,13 @@ services:
       # es el propio Kibana.
       ELASTICSEARCH_HOSTS: "http://elasticsearch:9200"
 
+      # Con la seguridad encendida, Kibana entra con su usuario de sistema.
+      # Kibana 8 se niega a usar `elastic`. La contrasena la pone
+      # elastic-usuarios, y hasta entonces Kibana reintenta solo. Las personas
+      # entran a Kibana con mesh_lectura (solo mira) o con elastic.
+      ELASTICSEARCH_USERNAME: kibana_system
+      ELASTICSEARCH_PASSWORD: ${KIBANA_PASSWORD:?falta KIBANA_PASSWORD en .env}
+
       # El tope de memoria de Node. Sin el, Kibana toma casi 1.4 GB de heap y
       # esta maquina ya se quedo sin memoria varias veces (ver el heap de
       # Elasticsearch, aqui arriba). 640 MB alcanza para mirar dos indices.
@@ -385,9 +469,7 @@ services:
       TELEMETRY_OPTIN: "false"
       TELEMETRY_ALLOWCHANGINGOPTINSTATUS: "false"
     ports:
-      # Solo localhost: Elasticsearch esta con la seguridad apagada (ver su
-      # bloque), asi que Kibana, que puede leer y borrar sus indices, no debe
-      # quedar abierto a la red.
+      # Solo esta PC, como las demas herramientas de inspeccion.
       - "127.0.0.1:5601:5601"
     mem_limit: 1g
 
@@ -414,6 +496,8 @@ services:
       kibana:
         condition: service_started
     entrypoint: ["bash", "-c", "tr -d '\\r' < /init/vistas.sh | bash"]
+    environment:
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?falta ELASTIC_PASSWORD en .env}
     volumes:
       - ./docker/kibana:/init:ro
     mem_limit: 64m
@@ -455,8 +539,9 @@ services:
       # El usuario que se crea arriba nace pudiendo repartir permisos. Se deja
       # encendido A PROPOSITO y no por comodidad: la Entrega final pide control
       # de acceso configurado explicitamente sobre al menos un componente NoSQL,
-      # con roles acotados segun el servicio. Sin esto no se puede ni empezar a
-      # crear esos roles desde adentro.
+      # con roles acotados segun el servicio. Con el, arrancar.ps1 crea los
+      # roles mesh_backend_rol y mesh_lectura_rol y sus usuarios
+      # (seguridad/clickhouse.sql). Este usuario queda para el ETL y las pruebas.
       CLICKHOUSE_DEFAULT_ACCESS_MANAGEMENT: "1"
 
       # LA ZONA HORARIA NO ES UN DETALLE AQUI, y esto se midio antes de que
@@ -483,7 +568,7 @@ services:
       # 9010 por fuera por la misma razon por la que Mongo salio al 27018: el
       # 9000 es de los puertos mas peleados de Windows -- Portainer, MinIO,
       # php-fpm -- y aqui no hace falta ganar esa pelea.
-      - "9010:9000"
+      - "127.0.0.1:9010:9000"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - clickhouse-logs:/var/log/clickhouse-server
@@ -548,15 +633,15 @@ services:
   # modelo pesa unos 560 MB: rehacer las bases no tiene que volver a bajarlo.
   # cargar_vectores.ps1 lo crea con "docker volume create" si no existe.
   #
-  # Sin GPU: corre en la CPU en cualquier PC. Los 3105 vectores tardan mas que
+  # Sin GPU: corre en la CPU en cualquier PC. Los vectores tardan mas que
   # con la tarjeta, pero se calculan una sola vez y despues solo lo que cambia.
   ollama:
-    image: ollama/ollama:latest
+    image: ollama/ollama:0.40.5
     container_name: mesh-ollama
     profiles: ["ollama"]
     restart: "no"
     ports:
-      - "11435:11434"
+      - "127.0.0.1:11435:11434"
     volumes:
       - ollama-modelos:/root/.ollama
 

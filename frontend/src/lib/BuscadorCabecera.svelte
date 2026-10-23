@@ -11,6 +11,7 @@
 		type ResultadoBusqueda
 	} from './buscador';
 	import { registrarClicBusqueda } from './eventos';
+	import FotoBusqueda from './FotoBusqueda.svelte';
 
 	/**
 	 * Buscar tambien lo que no esta activo. Solo tiene sentido para un admin:
@@ -340,6 +341,7 @@
 				<p class="aviso">No encontramos eso. Quizas te interesen estos</p>
 				{#each sugeridos as r (r.id_producto)}
 					<button type="button" class="fila" onclick={() => abrirSugerido(r)}>
+						<FotoBusqueda src={r.imagen} tam={40} />
 						<span class="texto">
 							<span class="nombre">{r.nombre}</span>
 							<span class="bajo">
@@ -367,6 +369,7 @@
 						onmouseenter={() => (resaltada = i)}
 						onclick={() => abrir(r, i + 1)}
 					>
+						<FotoBusqueda src={r.imagen} tam={40} />
 						<span class="texto">
 							<span class="nombre">{r.nombre}</span>
 							<span class="bajo">
@@ -595,6 +598,7 @@
 	}
 
 	.texto {
+		flex: 1;
 		display: flex;
 		flex-direction: column;
 		gap: var(--e1);

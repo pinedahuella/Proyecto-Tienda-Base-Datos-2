@@ -35,6 +35,8 @@ set -u
 
 API="${API:-http://localhost:3000}"
 ES="${ES:-http://localhost:9200}"
+# Con la seguridad de Elasticsearch encendida: mete el usuario en $ES (ver ahi).
+. "$(dirname "$0")/../seguridad/url_elastic.sh"
 PG="${PG:-mesh-postgres}"
 ELASTIC="${ELASTIC:-mesh-elastic}"
 PG_USUARIO="${PG_USUARIO:-meme}"

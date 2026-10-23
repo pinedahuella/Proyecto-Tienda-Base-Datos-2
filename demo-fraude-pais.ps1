@@ -90,7 +90,9 @@ if ($Limpiar) {
     $nMongo = docker exec mesh-mongo mongosh --quiet -u $MU -p $MP --authenticationDatabase admin $MD --eval $js 2>$null
     $nEs = '?'
     try {
-        $r = Invoke-RestMethod -Method Post -ContentType 'application/json' `
+        $cabecera = @{ Authorization = 'Basic ' + [Convert]::ToBase64String(
+                [Text.Encoding]::ASCII.GetBytes("elastic:$($env_['ELASTIC_PASSWORD'])")) }
+        $r = Invoke-RestMethod -Method Post -ContentType 'application/json' -Headers $cabecera `
             -Uri 'http://localhost:9200/mesh_eventos_autenticacion/_delete_by_query?refresh=true&conflicts=proceed' `
             -Body "{`"query`":{`"term`":{`"user_agent`":`"$marca`"}}}"
         $nEs = $r.deleted

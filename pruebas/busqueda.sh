@@ -24,6 +24,8 @@
 set -u
 
 ES="${ES:-http://localhost:9200}"
+# Con la seguridad de Elasticsearch encendida: mete el usuario en $ES (ver ahi).
+. "$(dirname "$0")/../seguridad/url_elastic.sh"
 INDICE="${INDICE:-mesh_productos}"
 MONGO="${MONGO:-mesh-mongo}"
 
@@ -175,7 +177,7 @@ iniciar_sesion_admin() {
 titulo "0. EL INDICE ESTA"
 
 if ! curl -sf --max-time 10 "$ES" > /dev/null; then
-    echo "  Elasticsearch no contesta en $ES"
+    echo "  Elasticsearch no contesta en $ES_VER"
     echo "  Levantalo con:  docker compose up -d elasticsearch"
     exit 1
 fi

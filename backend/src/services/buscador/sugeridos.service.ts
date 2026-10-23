@@ -131,6 +131,7 @@ export class SugeridosBusquedaService {
           'stock_total',
           'resenas_promedio',
           'resenas_total',
+          'imagen',
         ],
         query: consultaSugeridos(texto),
       },
@@ -231,6 +232,7 @@ export class SugeridosBusquedaService {
         stock_total: doc.stock_total,
         resenas_promedio: doc.resenas_promedio,
         resenas_total: doc.resenas_total,
+        imagen: doc.imagen ?? null,
       });
     }
     return [...porNombre.values()];

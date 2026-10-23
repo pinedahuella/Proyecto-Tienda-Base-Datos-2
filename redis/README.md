@@ -954,28 +954,36 @@ Redis porque es la base que mas servicios tocan a la vez (el backend, las
 pruebas, RedisInsight) y porque antes todos entraban con la misma contrasena y
 podian hacer lo mismo, incluido `FLUSHALL`.
 
-Tres usuarios, definidos en `docker-compose.yml` con `--user`, asi que valen
+Cuatro usuarios, definidos en `docker-compose.yml` con `--user`, asi que valen
 desde que el contenedor arranca y sobreviven a un reinicio.
 
 ```
 usuario     quien lo usa            puede                         no puede
-default     backend y scripts       leer, escribir, vencer,       todo @dangerous, o sea
+backend     el backend              leer, escribir, vencer, Lua,  claves fuera de mesh:*
+                                    INFO, solo en claves mesh:*   y todo @dangerous
+default     scripts y pruebas       leer, escribir, vencer,       todo @dangerous, o sea
                                     Lua, SCAN, INFO               FLUSHALL, CONFIG, KEYS,
                                                                   ACL, SHUTDOWN, DEBUG
 inspeccion  RedisInsight            leer, TTL, SCAN, INFO         escribir, borrar, Lua
 operador    mantenimiento a mano    todo
 ```
 
-`default` sigue siendo el usuario del backend a proposito. El backend se conecta
-solo con `REDIS_PASSWORD` y cambiarle el usuario seria tocar su codigo. Lo que
-cambia es lo que ese usuario puede hacer. A `-@dangerous` se le devuelve `INFO`
+Hasta el 2026-10-23 el backend entraba como `default`. Desde ese dia tiene su
+usuario, `backend` (`REDIS_USER` y `REDIS_PASSWORD` de `backend/.env`, que pone
+`arrancar.ps1`), encerrado en las claves `mesh:*`, que son todas las de la
+tienda. Un script Lua tampoco sale de ese prefijo, porque Redis revisa cada
+comando que corre adentro. `default` queda para los scripts, que escriben claves
+con su propio prefijo (`prueba:...`). A `-@dangerous` se le devuelve `INFO`
 porque ioredis lo pide al conectar y el backend lo usa en su revision de salud,
 y se comprobo antes de cerrar la lista que el backend no usa ningun otro
 comando de esa categoria.
 
-Las contrasenas de `inspeccion` y `operador` estan en el `.env`
-(`REDIS_INSPECCION_PASSWORD` y `REDIS_OPERADOR_PASSWORD`). Si faltan,
-`arrancar.ps1` las agrega sola con un valor al azar.
+Las contrasenas de `backend`, `inspeccion` y `operador` estan en el `.env`
+(`REDIS_BACKEND_PASSWORD`, `REDIS_INSPECCION_PASSWORD` y
+`REDIS_OPERADOR_PASSWORD`). Si faltan, `arrancar.ps1` las agrega sola con un
+valor al azar. El control de acceso de las otras bases esta en
+`docs/SEGURIDAD.md` y se prueba con `bash seguridad/prueba_acceso.sh`, que al
+final corre tambien esta prueba.
 
 La evidencia es `bash redis/prueba_acceso.sh`. Cada negativa tiene su control,
 por ejemplo que `inspeccion` no pueda escribir una clave que `default` si pudo

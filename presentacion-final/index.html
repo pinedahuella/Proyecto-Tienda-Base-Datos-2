@@ -1,0 +1,516 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mesh Entrega final</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Lexend:wght@300;400;500;600;700&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+/* Escenario de 1920x1080 escalado a la ventana, como las de LECTORTIE e ITIL.
+   Los colores de cada base son los mismos del diagrama de arquitectura. */
+:root {
+  --fondo: #070b1d;
+  --fondo-2: #0e1636;
+  --tinta: #eef1ff;
+  --suave: #a9b3d9;
+  --linea: rgba(169, 179, 217, .18);
+  --acento: #7c8cff;
+  --acento-2: #4fe3c1;
+  --pg: #6c8ebf;   --pg-cl: #dae8fc;
+  --mongo: #82b366; --mongo-cl: #d5e8d4;
+  --redis: #d0605b; --redis-cl: #f8cecc;
+  --neo: #9673a6;  --neo-cl: #e1d5e7;
+  --ch: #d79b00;   --ch-cl: #ffe6cc;
+  --es: #d6b656;   --es-cl: #fff2cc;
+  --titulo: "Space Grotesk", "Segoe UI", sans-serif;
+  --texto: "Lexend", "Segoe UI", Arial, sans-serif;
+  --mono: "JetBrains Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #03050f; overflow: hidden; }
+body { font-family: var(--texto); color: var(--tinta); -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+
+.marco { position: fixed; inset: 0; }
+.escenario { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden;
+  background: radial-gradient(110% 90% at 15% 0%, #16205a 0%, var(--fondo) 55%, #04060f 100%); }
+#malla { position: absolute; inset: 0; width: 1920px; height: 1080px; }
+.lamina { position: absolute; inset: 0; padding: 90px 120px; visibility: hidden; opacity: 0; transition: opacity .5s ease;
+  display: flex; flex-direction: column; justify-content: center; }
+.lamina.activa { visibility: visible; opacity: 1; }
+
+h1, h2, h3, p { margin: 0; text-wrap: balance; }
+.etiqueta { font: 600 26px/1 var(--titulo); letter-spacing: 6px; text-transform: uppercase; color: var(--acento-2); }
+.titulo { font: 700 82px/1.02 var(--titulo); letter-spacing: -1.5px; }
+.sub { font: 300 38px/1.35 var(--texto); color: var(--suave); }
+.grande { font: 700 120px/1 var(--titulo); letter-spacing: -2px; }
+b { font-weight: 600; color: #fff; }
+.mono { font-family: var(--mono); font-size: .86em; color: var(--acento-2); }
+
+.cabeza { display: flex; flex-direction: column; gap: 18px; margin-bottom: 54px; }
+.fila { display: flex; gap: 34px; }
+.col { flex: 1; min-width: 0; }
+
+/* tarjetas */
+.tarjeta { background: rgba(255,255,255,.045); border: 1px solid var(--linea); border-radius: 22px; padding: 34px 36px; backdrop-filter: blur(6px); }
+.tarjeta h3 { font: 700 38px/1.1 var(--titulo); margin-bottom: 14px; }
+.tarjeta p { font: 300 29px/1.42 var(--texto); color: var(--suave); }
+.tarjeta p b { color: var(--tinta); }
+
+/* las seis bases */
+.bases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
+.base { border-radius: 22px; padding: 30px 32px 32px; position: relative; overflow: hidden; background: rgba(255,255,255,.05); border: 1px solid var(--linea); }
+.base::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--c); }
+.base .n { font: 700 40px/1 var(--titulo); color: var(--c); }
+.base .r { font: 600 22px/1 var(--titulo); letter-spacing: 3px; text-transform: uppercase; color: var(--suave); margin: 10px 0 16px; }
+.base p { font: 300 27px/1.4 var(--texto); color: #d8ddf5; }
+
+/* pasos */
+.pasos { display: flex; align-items: stretch; gap: 0; }
+.paso { flex: 1; background: rgba(255,255,255,.05); border: 1px solid var(--linea); border-radius: 22px; padding: 30px; display: flex; flex-direction: column; gap: 12px; }
+.paso .k { font: 700 30px/1 var(--titulo); color: var(--c, var(--acento-2)); }
+.paso h4 { margin: 0; font: 700 34px/1.1 var(--titulo); }
+.paso p { font: 300 26px/1.4 var(--texto); color: var(--suave); }
+.unir { width: 70px; display: grid; place-items: center; font: 300 54px/1 var(--texto); color: var(--acento); }
+
+/* cifras */
+.cifras { display: flex; gap: 28px; }
+.cifra { flex: 1; border-radius: 22px; padding: 30px 32px; background: linear-gradient(160deg, rgba(124,140,255,.22), rgba(79,227,193,.08)); border: 1px solid var(--linea); }
+.cifra .v { font: 700 92px/1 var(--titulo); color: #fff; font-variant-numeric: tabular-nums; letter-spacing: -2px; }
+.cifra .t { font: 300 26px/1.3 var(--texto); color: var(--suave); margin-top: 10px; }
+
+/* tabla */
+.tabla { width: 100%; border-collapse: separate; border-spacing: 0 12px; font: 300 27px/1.3 var(--texto); }
+.tabla th { text-align: left; font: 600 22px/1 var(--titulo); letter-spacing: 3px; text-transform: uppercase; color: var(--suave); padding: 0 22px 6px; }
+.tabla td { background: rgba(255,255,255,.05); padding: 20px 22px; color: #dfe3fa; }
+.tabla td:first-child { border-radius: 16px 0 0 16px; font: 700 30px/1 var(--titulo); color: var(--c); border-left: 8px solid var(--c); }
+.tabla td:last-child { border-radius: 0 16px 16px 0; }
+
+.captura { display: block; width: 100%; border-radius: 18px; border: 1px solid var(--linea); box-shadow: 0 30px 80px rgba(0,0,0,.55); }
+.pie { font: 300 24px/1.35 var(--texto); color: var(--suave); margin-top: 16px; }
+
+/* linea del tiempo */
+.tiempo { position: relative; display: flex; justify-content: space-between; margin-top: 30px; }
+.tiempo::before { content: ""; position: absolute; left: 40px; right: 40px; top: 46px; height: 4px; background: linear-gradient(90deg, var(--pg), var(--es), var(--pg)); border-radius: 4px; }
+.hito { width: 31%; display: flex; flex-direction: column; align-items: center; gap: 18px; text-align: center; position: relative; }
+.hito .punto { width: 96px; height: 96px; border-radius: 50%; display: grid; place-items: center; font: 700 26px/1 var(--titulo); color: #0b1030; background: var(--c); box-shadow: 0 0 0 10px rgba(255,255,255,.06); }
+.hito h4 { margin: 0; font: 700 38px/1.1 var(--titulo); }
+.hito p { font: 300 27px/1.4 var(--texto); color: var(--suave); }
+
+/* chips del registro */
+.registro { display: grid; grid-template-columns: repeat(6, 1fr); gap: 16px; }
+.adr { border-radius: 16px; padding: 18px 20px; background: rgba(255,255,255,.05); border: 1px solid var(--linea); border-top: 6px solid var(--c); min-height: 132px; }
+.adr .i { font: 700 26px/1 var(--titulo); color: var(--c); }
+.adr p { font: 300 21px/1.3 var(--texto); color: #d8ddf5; margin-top: 8px; }
+.adr.nuevo { background: rgba(79,227,193,.09); }
+
+/* equipo */
+.equipo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; }
+.persona { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 22px; padding: 40px 30px; }
+.foto { width: 230px; height: 230px; border-radius: 50%; overflow: hidden; border: 6px solid var(--c); background: #1a2350; position: relative; display: grid; place-items: center; }
+.foto::after { content: attr(data-ini); font: 700 76px/1 var(--titulo); color: #fff; }
+.foto img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+.persona .nombre { font: 700 40px/1.1 var(--titulo); }
+.persona .rol { font: 500 27px/1.3 var(--texto); color: var(--c); }
+.persona .hizo { font: 300 25px/1.42 var(--texto); color: var(--suave); }
+
+.cita { font: 700 76px/1.08 var(--titulo); letter-spacing: -1.5px; text-align: center; }
+.cita em { font-style: normal; background: linear-gradient(90deg, var(--acento), var(--acento-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.centro { position: absolute; inset: 90px 140px; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 40px; text-align: center; }
+
+.ok { color: var(--acento-2); }
+.puntos { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+.puntos li { font: 300 29px/1.32 var(--texto); color: #d8ddf5; padding-left: 30px; position: relative; }
+.puntos li::before { content: ""; position: absolute; left: 0; top: 14px; width: 12px; height: 12px; border-radius: 50%; background: var(--c); }
+.no { color: #ff8a80; }
+
+/* entrada de los elementos */
+.lamina [data-in] { transform: translateY(28px); opacity: 0; transition: transform .7s cubic-bezier(.2,.7,.2,1), opacity .7s ease; }
+.lamina.activa [data-in] { transform: none; opacity: 1; }
+.lamina.activa [data-in="1"] { transition-delay: .05s; }
+.lamina.activa [data-in="2"] { transition-delay: .17s; }
+.lamina.activa [data-in="3"] { transition-delay: .29s; }
+.lamina.activa [data-in="4"] { transition-delay: .41s; }
+.lamina.activa [data-in="5"] { transition-delay: .53s; }
+.lamina.activa [data-in="6"] { transition-delay: .65s; }
+.lamina.activa [data-in="7"] { transition-delay: .77s; }
+@media (prefers-reduced-motion: reduce) { .lamina, .lamina [data-in] { transition: none !important; } }
+
+.progreso { position: fixed; left: 0; bottom: 0; height: 5px; background: linear-gradient(90deg, var(--acento), var(--acento-2)); width: 0; transition: width .35s ease; z-index: 5; }
+.contador { position: fixed; right: 18px; bottom: 14px; font: 500 14px/1 var(--texto); color: rgba(169,179,217,.7); z-index: 5; }
+
+@page { size: 1920px 1080px; margin: 0; }
+@media print {
+  html, body { overflow: visible; height: auto; background: none; }
+  .marco { position: static; }
+  .escenario { position: static; transform: none !important; height: auto; overflow: visible; background: none; }
+  #malla, .progreso, .contador { display: none; }
+  .lamina { position: relative; height: 1080px; visibility: visible; opacity: 1; break-after: page; page-break-after: always; transition: none;
+    background: radial-gradient(110% 90% at 15% 0%, #16205a 0%, var(--fondo) 55%, #04060f 100%); }
+  .lamina [data-in] { transform: none; opacity: 1; transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="marco"><div class="escenario" id="escenario">
+<canvas id="malla" width="1920" height="1080" aria-hidden="true"></canvas>
+
+<!-- 1 Portada -->
+<section class="lamina">
+  <div class="centro" style="gap:30px">
+    <p class="etiqueta" data-in="1">Bases de Datos 2 · Entrega final</p>
+    <h1 data-in="2" style="font:700 260px/.9 var(--titulo);letter-spacing:-8px">Mesh</h1>
+    <p class="sub" data-in="3" style="font-size:46px;color:#dfe3fa">TiendaYa con seis bases de datos, cada una por la pregunta que contesta</p>
+    <p class="sub" data-in="4" style="font-size:30px;margin-top:30px">José Manuel González Corado · José David Navichoque Pineda · Juan Pablo Torres García</p>
+  </div>
+  <img src="img/logo-unis.png" alt="Universidad del Istmo" style="position:absolute;left:70px;bottom:60px;height:110px" data-in="5">
+</section>
+
+<!-- 2 Equipo -->
+<section class="lamina">
+  <div class="cabeza" data-in="1"><p class="etiqueta">El equipo</p><h2 class="titulo">Quién hizo qué</h2></div>
+  <div class="equipo">
+    <div class="persona tarjeta" data-in="2" style="--c:var(--pg)">
+      <div class="foto" data-ini="JD"><img src="img/foto-jose-david.jpg" alt="" onerror="this.remove()"></div>
+      <p class="nombre">José David<br>Navichoque</p>
+      <p class="rol">Backend</p>
+      <p class="hizo">Las rutas, los workers y las colas, la recomendación y las dos mudanzas del vector, el carrito en PostgreSQL</p>
+    </div>
+    <div class="persona tarjeta" data-in="3" style="--c:var(--acento-2)">
+      <div class="foto" data-ini="JM"><img src="img/foto-jose-manuel.jpg" alt="" onerror="this.remove()"></div>
+      <p class="nombre">José Manuel<br>González</p>
+      <p class="rol">Datos, frontend y arranque</p>
+      <p class="hizo">Migraciones, ETL, el frontend, las pruebas, el control de acceso de cada base, los informes y el diagrama</p>
+    </div>
+    <div class="persona tarjeta" data-in="4" style="--c:var(--ch)">
+      <div class="foto" data-ini="JP"><img src="img/foto-juan-pablo.jpg" alt="" onerror="this.remove()"></div>
+      <p class="nombre">Juan Pablo<br>Torres</p>
+      <p class="rol">ClickHouse y Neo4j</p>
+      <p class="hizo">Los módulos de eventos, tendencias y combos en ClickHouse, y los de anillos y compras en Neo4j</p>
+    </div>
+  </div>
+</section>
+
+<!-- 3 El reto -->
+<section class="lamina">
+  <div class="cabeza" data-in="1"><p class="etiqueta">El reto</p><h2 class="titulo">Muchos vendedores,<br>un solo catálogo</h2></div>
+  <p class="sub" data-in="2" style="max-width:1500px;margin-bottom:60px">Un producto describe una cosa del mundo y no es de nadie. Quién lo vende, a qué precio y con cuántas unidades es una oferta. Y cada parte de la tienda hace preguntas muy distintas.</p>
+  <div class="cifras">
+    <div class="cifra" data-in="3"><div class="v" data-contar="6">6</div><div class="t">bases de datos, cada una por la forma de su pregunta</div></div>
+    <div class="cifra" data-in="4"><div class="v" data-contar="86">86</div><div class="t">tablas en PostgreSQL, de 48 migraciones</div></div>
+    <div class="cifra" data-in="5"><div class="v" data-contar="23">23</div><div class="t">decisiones con su registro, del 1 al 23</div></div>
+    <div class="cifra" data-in="6"><div class="v" data-contar="93">93</div><div class="t">comprobaciones del control de acceso, ninguna mal</div></div>
+  </div>
+</section>
+
+<!-- 4 Las seis bases -->
+<section class="lamina">
+  <div class="cabeza" data-in="1" style="margin-bottom:40px"><p class="etiqueta">La arquitectura</p><h2 class="titulo">Cada base, por la pregunta que contesta</h2></div>
+  <div class="bases">
+    <div class="base" data-in="2" style="--c:var(--pg)"><div class="n">PostgreSQL</div><div class="r">Fuente de verdad</div><p>Dinero, stock, pedidos y el carrito en una transacción. Y los vectores con pgvector</p></div>
+    <div class="base" data-in="3" style="--c:var(--mongo)"><div class="n">MongoDB</div><div class="r">Catálogo</div><p>Atributos distintos por categoría, la ficha entera en un documento y su historial</p></div>
+    <div class="base" data-in="4" style="--c:var(--redis)"><div class="n">Redis</div><div class="r">Rápido y atómico</div><p>La copia rápida del carrito y la venta relámpago con un script Lua, sin sobreventas</p></div>
+    <div class="base" data-in="5" style="--c:var(--neo)"><div class="n">Neo4j</div><div class="r">Relaciones</div><p>Anillos de cuentas que se califican entre sí y quienes compraron esto también llevaron</p></div>
+    <div class="base" data-in="6" style="--c:var(--ch)"><div class="n">ClickHouse</div><div class="r">Eventos en el tiempo</div><p>Vistas, búsquedas y compras, para tendencias y preguntas que no sabíamos que íbamos a hacer</p></div>
+    <div class="base" data-in="7" style="--c:var(--es)"><div class="n">Elasticsearch</div><div class="r">Búsqueda</div><p>Tolera errores de tecleo, facetas, la foto en el resultado y los avisos con percolator</p></div>
+  </div>
+</section>
+
+<!-- 5 La regla -->
+<section class="lamina">
+  <div class="centro">
+    <p class="etiqueta" data-in="1">La idea que lo explica todo</p>
+    <p class="cita" data-in="2">PostgreSQL es la <em>verdad</em>.<br>Lo demás se puede <em>rehacer</em>.</p>
+    <p class="sub" data-in="3" style="max-width:1400px">El dinero, el stock, los pedidos y el carrito solo se escriben ahí, en una transacción. Cada copia en otra base tiene de dónde reconstruirse, y si se cae una, la tienda sigue con las que quedan.</p>
+  </div>
+</section>
+
+<!-- 6 Diagrama -->
+<section class="lamina" style="padding:50px 70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:22px;flex-direction:row;align-items:baseline;gap:30px"><p class="etiqueta">Diagrama final</p><p class="sub" style="font-size:30px">continuas, lo que hace el backend · punteadas, datos entre bases</p></div>
+  <img class="captura" data-in="2" src="img/arquitectura.png" alt="Diagrama de arquitectura de Mesh" style="height:880px;width:auto;margin:0 auto;background:#fff">
+</section>
+
+<!-- 7 Recomendacion semantica -->
+<section class="lamina">
+  <div class="cabeza" data-in="1"><p class="etiqueta">Recomendación semántica · 5 puntos</p><h2 class="titulo">Parecidos por lo que significan</h2></div>
+  <div class="pasos" style="margin-bottom:50px">
+    <div class="paso" data-in="2" style="--c:var(--mongo)"><span class="k">1</span><h4>El texto</h4><p>Nombre, categoría y descripción de cada producto, leídos de MongoDB</p></div>
+    <div class="unir" data-in="2">›</div>
+    <div class="paso" data-in="3" style="--c:#cfd5f5"><span class="k">2</span><h4>Ollama</h4><p>Lo vuelve 768 números con paraphrase-multilingual, en la misma PC y sin costo</p></div>
+    <div class="unir" data-in="3">›</div>
+    <div class="paso" data-in="4" style="--c:var(--pg)"><span class="k">3</span><h4>pgvector</h4><p>Guarda el vector con un índice HNSW por coseno, junto a ofertas y pedidos</p></div>
+    <div class="unir" data-in="4">›</div>
+    <div class="paso" data-in="5" style="--c:var(--acento-2)"><span class="k">4</span><h4>La ficha</h4><p>Los seis más cercanos, activos y sin copias, en el estante Parecidos a este</p></div>
+  </div>
+  <div class="cifras">
+    <div class="cifra" data-in="6"><div class="v">1000<span style="font-size:52px;color:var(--suave)"> de 1001</span></div><div class="t">coinciden con el coseno exacto, contra 317 en Elasticsearch</div></div>
+    <div class="cifra" data-in="6"><div class="v">3,8 ms</div><div class="t">por producto con el índice, antes 32 ms comparando contra todos</div></div>
+    <div class="cifra" data-in="7"><div class="v">66 %</div><div class="t">de los parecidos comparten categoría, contra 6 % al azar</div></div>
+  </div>
+</section>
+
+<!-- 8 En la tienda -->
+<section class="lamina">
+  <div class="cabeza" data-in="1" style="margin-bottom:34px"><p class="etiqueta">En la tienda</p><h2 class="titulo" style="font-size:70px">Una frase encuentra lo que nombra</h2></div>
+  <div class="fila">
+    <div class="col" data-in="2"><img class="captura" src="img/buscar-frase.png" alt="Busqueda por una frase"><p class="pie">Algo para escuchar música sin cables. Ninguna palabra coincide con audífonos, y los encuentra por las reseñas de otros compradores.</p></div>
+    <div class="col" data-in="3"><img class="captura" src="img/ficha-parecidos.png" alt="Parecidos a este en la ficha"><p class="pie">La ficha de una laptop y sus seis parecidos, que salen de pgvector.</p></div>
+  </div>
+</section>
+
+<!-- 9 La historia del vector -->
+<section class="lamina">
+  <div class="cabeza" data-in="1"><p class="etiqueta">Una decisión que cambiamos dos veces</p><h2 class="titulo">El viaje del vector</h2></div>
+  <div class="tiempo">
+    <div class="hito" data-in="2" style="--c:var(--pg)"><div class="punto">25 sep</div><h4>pgvector</h4><p>Ya venía en la imagen de PostgreSQL. Sin contenedor nuevo</p></div>
+    <div class="hito" data-in="3" style="--c:var(--es)"><div class="punto">4 oct</div><h4>Elasticsearch</h4><p>El vector junto al texto para la búsqueda híbrida. Cómodo, pero sin medir</p></div>
+    <div class="hito" data-in="4" style="--c:var(--pg)"><div class="punto">16 oct</div><h4>De vuelta a pgvector</h4><p>Medido, 1000 de 1001 contra 317. Y lo pidió el profesor</p></div>
+  </div>
+  <p class="cita" data-in="5" style="font-size:52px;margin-top:90px">Una decisión cómoda <em>también hay que medirla</em></p>
+</section>
+
+<!-- 10 Control de acceso -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:24px"><p class="etiqueta">Control de acceso · 4 puntos</p><h2 class="titulo" style="font-size:70px">Cada servicio entra con lo justo</h2></div>
+  <table class="tabla" data-in="2">
+    <tr><th>Base</th><th>El backend entra como</th><th>No puede</th><th>Para mirar</th></tr>
+    <tr style="--c:var(--redis)"><td>Redis</td><td><span class="mono">backend</span></td><td>tocar claves fuera de mesh, FLUSHALL, CONFIG, KEYS</td><td><span class="mono">inspeccion</span></td></tr>
+    <tr style="--c:var(--mongo)"><td>MongoDB</td><td><span class="mono">mesh_backend</span></td><td>crear o borrar colecciones e índices, ver usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
+    <tr style="--c:var(--es)"><td>Elasticsearch</td><td><span class="mono">mesh_backend</span></td><td>crear o borrar índices, administrar usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
+    <tr style="--c:var(--ch)"><td>ClickHouse</td><td><span class="mono">mesh_backend</span></td><td>borrar eventos, crear o borrar tablas</td><td><span class="mono">mesh_lectura</span></td></tr>
+    <tr style="--c:var(--pg)"><td>PostgreSQL</td><td><span class="mono">mesh_backend</span></td><td>crear, borrar o vaciar tablas, crear usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
+    <tr style="--c:var(--neo)"><td>Neo4j</td><td><span class="mono">neo4j</span></td><td>la edición community no trae roles</td><td>no existe</td></tr>
+  </table>
+</section>
+
+<!-- 11 Lo que encontramos -->
+<section class="lamina">
+  <div class="cabeza" data-in="1"><p class="etiqueta">Revisando la seguridad</p><h2 class="titulo">Lo que encontramos y arreglamos</h2></div>
+  <div class="fila">
+    <div class="col tarjeta" data-in="2" style="border-top:6px solid var(--es)"><h3>Elasticsearch abierto</h3><p>Tenía la seguridad apagada con un comentario que decía <b>solo escucha en la misma PC</b>. No era cierto, el puerto se abría a la red para el modo remoto. Hoy pide usuario, y Kibana y el ETL entran con el suyo.</p></div>
+    <div class="col tarjeta" data-in="3" style="border-top:6px solid var(--mongo)"><h3>DbGate como root</h3><p>La ventana de MongoDB no pide login y entraba como <b>root</b>. Hoy entra como <span class="mono">mesh_lectura</span> y, como todas las herramientas, solo se abre desde la misma PC.</p></div>
+    <div class="col tarjeta" data-in="4" style="border-top:6px solid var(--neo)"><h3>Neo4j sin roles</h3><p>Le pedimos crear un rol y contestó <span class="mono">Unsupported administration command</span>. Los roles son de la edición de pago. Queda con contraseña y una sola puerta.</p></div>
+  </div>
+</section>
+
+<!-- 12 Evidencia -->
+<section class="lamina">
+  <div class="centro" style="gap:34px">
+    <p class="etiqueta" data-in="1">La prueba</p>
+    <p data-in="2" style="font:700 230px/1 var(--titulo);letter-spacing:-6px"><span class="ok" data-contar="93">93</span><span style="font-size:90px;color:var(--suave)"> OK</span> <span style="font-size:90px" class="no">0 mal</span></p>
+    <p class="mono" data-in="3" style="font-size:40px">bash seguridad/prueba_acceso.sh</p>
+    <p class="sub" data-in="4" style="max-width:1450px">Cada negativa tiene su control. Que <b>mesh_lectura</b> no pueda escribir solo cuenta si <b>mesh_backend</b> sí pudo. Lo que borraría algo se intenta en una transacción que se deshace, sobre algo que no existe, o se le pregunta antes a la base.</p>
+  </div>
+</section>
+
+<!-- 13 Si se cae una base -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:22px"><p class="etiqueta">Un respaldo por base</p><h2 class="titulo" style="font-size:70px">Si se cae una, la tienda sigue</h2></div>
+  <table class="tabla" data-in="2">
+    <tr><th>Se cae</th><th>Lo que daba sale de</th><th>Se compra</th></tr>
+    <tr style="--c:var(--mongo)"><td>MongoDB</td><td>la copia del catálogo en PostgreSQL</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--redis)"><td>Redis</td><td>el carrito de PostgreSQL y los rankings de ClickHouse</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--es)"><td>Elasticsearch</td><td>el buscador sobre la copia en PostgreSQL, con foto y filtros</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--neo)"><td>Neo4j</td><td>las recomendaciones salen de los pedidos</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--ch)"><td>ClickHouse</td><td>los rankings ya calculados en Redis</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--pg)"><td>PostgreSQL</td><td>avisa y no cobra nada a medias</td><td class="no">no</td></tr>
+  </table>
+  <p class="pie" data-in="3">node pruebas/caidas.mjs, 51 comprobaciones con cada base apagada y otras 51 congelada</p>
+</section>
+
+<!-- 14 Buscador con foto -->
+<section class="lamina">
+  <div class="cabeza" data-in="1" style="margin-bottom:34px"><p class="etiqueta">Lo que pidió el profesor</p><h2 class="titulo" style="font-size:70px">La tarjeta sale entera de Elasticsearch</h2></div>
+  <div class="fila" style="align-items:flex-start">
+    <div style="flex:2.2" data-in="2"><img class="captura" src="img/buscar-laptop.png" alt="Resultados con foto"></div>
+    <div style="flex:1;display:flex;flex-direction:column;gap:26px" data-in="3">
+      <img class="captura" src="img/buscar-telefono.png" alt="En el telefono" style="height:520px;width:auto;align-self:center">
+      <p class="sub" style="font-size:28px">La foto viaja en el mismo documento que el nombre y el precio, guardada <b>sin indexar</b>. Una sola consulta pinta la tarjeta.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 15 Registro unico -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:28px"><p class="etiqueta">Registro único de decisiones</p><h2 class="titulo" style="font-size:66px">23 decisiones, un solo número cada una</h2></div>
+  <div class="registro" data-in="2">
+    <div class="adr" style="--c:var(--mongo)"><div class="i">ADR-1</div><p>Catálogo en MongoDB</p></div>
+    <div class="adr" style="--c:var(--pg)"><div class="i">ADR-2</div><p>Dinero y stock en PostgreSQL</p></div>
+    <div class="adr" style="--c:var(--mongo)"><div class="i">ADR-3</div><p>Imágenes en su variante</p></div>
+    <div class="adr" style="--c:var(--pg)"><div class="i">ADR-4</div><p>Quién propuso, en PostgreSQL</p></div>
+    <div class="adr" style="--c:var(--pg)"><div class="i">ADR-5</div><p>Reseñas en PostgreSQL</p></div>
+    <div class="adr" style="--c:var(--redis)"><div class="i">ADR-6</div><p>Carrito en Redis, revisada</p></div>
+    <div class="adr" style="--c:var(--redis)"><div class="i">ADR-7</div><p>Venta relámpago con Lua</p></div>
+    <div class="adr" style="--c:var(--neo)"><div class="i">ADR-8</div><p>Grafos contra columnar</p></div>
+    <div class="adr" style="--c:var(--neo)"><div class="i">ADR-9</div><p>Neo4j para anillos</p></div>
+    <div class="adr" style="--c:var(--ch)"><div class="i">ADR-10</div><p>ClickHouse para eventos</p></div>
+    <div class="adr" style="--c:var(--es)"><div class="i">ADR-11</div><p>Elasticsearch para buscar</p></div>
+    <div class="adr" style="--c:var(--pg)"><div class="i">ADR-12</div><p>Pagos sin NewSQL</p></div>
+    <div class="adr" style="--c:var(--pg)"><div class="i">ADR-13</div><p>Vectores en pgvector</p></div>
+    <div class="adr" style="--c:var(--redis)"><div class="i">ADR-14</div><p>Un usuario por servicio</p></div>
+    <div class="adr nuevo" style="--c:var(--mongo)"><div class="i">ADR-15</div><p>Login en MongoDB</p></div>
+    <div class="adr nuevo" style="--c:var(--pg)"><div class="i">ADR-16</div><p>Vencimientos en PostgreSQL</p></div>
+    <div class="adr nuevo" style="--c:var(--pg)"><div class="i">ADR-17</div><p>Un modelo de señales</p></div>
+    <div class="adr nuevo" style="--c:var(--pg)"><div class="i">ADR-18</div><p>Comprar sin MongoDB</p></div>
+    <div class="adr nuevo" style="--c:var(--neo)"><div class="i">ADR-19</div><p>Compras en el grafo</p></div>
+    <div class="adr nuevo" style="--c:var(--es)"><div class="i">ADR-20</div><p>Avisos con percolator</p></div>
+    <div class="adr nuevo" style="--c:var(--pg)"><div class="i">ADR-21</div><p>El carrito, verdad en PostgreSQL</p></div>
+    <div class="adr nuevo" style="--c:var(--acento-2)"><div class="i">ADR-22</div><p>Un respaldo por base</p></div>
+    <div class="adr nuevo" style="--c:var(--es)"><div class="i">ADR-23</div><p>La foto en el buscador</p></div>
+  </div>
+  <p class="pie" data-in="3">Las que tienen fondo verde se habían hecho sin su registro y ahora lo tienen, con el flujo que tocan y qué pasa si cada base se cae.</p>
+</section>
+
+<!-- 16 Retrospectiva -->
+<section class="lamina">
+  <div class="cabeza" data-in="1"><p class="etiqueta">Retrospectiva · 4 puntos</p><h2 class="titulo">Lo que sostendríamos y lo que no</h2></div>
+  <div class="fila">
+    <div class="col tarjeta" data-in="2" style="border-top:6px solid var(--acento-2);--c:var(--acento-2)"><h3 class="ok">Sostendríamos, 7</h3>
+      <ul class="puntos"><li>El dinero en PostgreSQL, cero sobreventas en 555 ofertas</li><li>La venta relámpago con Lua, 5000 solicitudes sin sobreventa</li><li>El catálogo en MongoDB, atributos distintos por categoría</li><li>Elasticsearch como copia que se rehace entera</li><li>Ollama en la misma máquina, sin costo por consulta</li><li>Un solo comando que cuenta lo que quedó</li></ul></div>
+    <div class="col tarjeta" data-in="3" style="border-top:6px solid #ff8a80;--c:#ff8a80"><h3 class="no">Replantearíamos, 8</h3>
+      <ul class="puntos"><li>El carrito solo en Redis, hoy su verdad está en PostgreSQL</li><li>El checkout leyendo de MongoDB, hoy compra sin él</li><li>Mudar el vector sin medir su precisión</li><li>Dos dueños del id de producto</li><li>Eventos a ClickHouse sin cola de respaldo</li><li>Dejar el control de acceso para el final</li></ul></div>
+  </div>
+</section>
+
+<!-- 17 Lo aprendido -->
+<section class="lamina">
+  <div class="centro">
+    <p class="etiqueta" data-in="1">Lo que aprendimos</p>
+    <p class="cita" data-in="2">Cada dato con <em>un solo dueño</em> escrito.</p>
+    <p class="sub" data-in="3" style="max-width:1450px">En casi todo lo que replantearíamos, una copia terminó portándose como la verdad. La regla es que todo lo que no es el dueño se pueda borrar y volver a calcular sin perder nada.</p>
+  </div>
+</section>
+
+<!-- 18 Demo -->
+<section class="lamina">
+  <div class="centro" style="gap:46px">
+    <p data-in="1" style="font:700 220px/1 var(--titulo);letter-spacing:-6px">DEMO</p>
+    <div class="fila" data-in="2" style="gap:24px;flex-wrap:wrap;justify-content:center;max-width:1600px">
+      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Buscar con errores y por frase</span>
+      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Parecidos a este</span>
+      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Quién puede qué en cada base</span>
+      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Apagar una base en vivo</span>
+    </div>
+  </div>
+</section>
+
+<!-- 19 Gracias -->
+<section class="lamina">
+  <div class="centro" style="gap:30px">
+    <p class="cita" data-in="1" style="font-size:150px">Gracias</p>
+    <p class="sub" data-in="2">¿Preguntas?</p>
+    <p class="mono" data-in="3" style="font-size:28px;margin-top:40px">github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2</p>
+  </div>
+  <img src="img/logo-unis.png" alt="Universidad del Istmo" style="position:absolute;left:70px;bottom:60px;height:100px" data-in="4">
+</section>
+
+</div></div>
+<div class="progreso" id="progreso"></div>
+<div class="contador" id="contador"></div>
+
+<script>
+(function () {
+  var esc = document.getElementById('escenario');
+  var laminas = Array.prototype.slice.call(document.querySelectorAll('.lamina'));
+  var i = 0;
+
+  function ajustar() {
+    var s = Math.min(window.innerWidth / 1920, window.innerHeight / 1080);
+    var x = (window.innerWidth - 1920 * s) / 2, y = (window.innerHeight - 1080 * s) / 2;
+    esc.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + s + ')';
+  }
+
+  // Los numeros grandes cuentan desde cero al llegar a la lamina.
+  function contar(lamina) {
+    lamina.querySelectorAll('[data-contar]').forEach(function (el) {
+      var fin = parseInt(el.getAttribute('data-contar'), 10), t0 = null;
+      function paso(t) {
+        if (t0 === null) t0 = t;
+        var k = Math.min(1, (t - t0) / 1100);
+        el.textContent = Math.round(fin * (1 - Math.pow(1 - k, 3)));
+        if (k < 1) requestAnimationFrame(paso);
+      }
+      el.textContent = '0';
+      requestAnimationFrame(paso);
+    });
+  }
+
+  function ir(n) {
+    i = Math.max(0, Math.min(laminas.length - 1, n));
+    laminas.forEach(function (l, k) { l.classList.toggle('activa', k === i); });
+    contar(laminas[i]);
+    document.getElementById('progreso').style.width = ((i + 1) / laminas.length * 100) + '%';
+    document.getElementById('contador').textContent = (i + 1) + ' / ' + laminas.length;
+    try { history.replaceState(null, '', '#' + (i + 1)); } catch (e) {}
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { ir(i + 1); e.preventDefault(); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { ir(i - 1); e.preventDefault(); }
+    else if (e.key === 'Home') ir(0);
+    else if (e.key === 'End') ir(laminas.length - 1);
+    else if (e.key === 'f' || e.key === 'F') {
+      var p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+      if (p && p.catch) p.catch(function () {});
+    }
+  });
+  document.addEventListener('click', function (e) { ir(e.clientX < window.innerWidth / 4 ? i - 1 : i + 1); });
+
+  // En el telefono se desliza para pasar de lamina.
+  var x0 = null;
+  document.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, { passive: true });
+  document.addEventListener('touchend', function (e) {
+    if (x0 === null) return;
+    var dx = e.changedTouches[0].clientX - x0;
+    if (Math.abs(dx) > 50) ir(dx < 0 ? i + 1 : i - 1);
+    x0 = null;
+  });
+
+  window.addEventListener('resize', ajustar);
+  ajustar();
+  var h = parseInt((location.hash || '').slice(1), 10);
+  ir(h > 0 ? h - 1 : 0);
+
+  // La malla del fondo, nodos de los seis colores de las bases que se unen
+  // cuando quedan cerca. Se detiene con la pestana oculta.
+  var lienzo = document.getElementById('malla');
+  var cx = lienzo.getContext('2d');
+  var colores = ['#6c8ebf', '#82b366', '#d0605b', '#9673a6', '#d79b00', '#d6b656'];
+  var quieto = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  var nodos = [];
+  for (var n = 0; n < 70; n++) {
+    nodos.push({ x: Math.random() * 1920, y: Math.random() * 1080, vx: (Math.random() - .5) * .35, vy: (Math.random() - .5) * .35,
+                 r: 2 + Math.random() * 2.5, c: colores[n % 6] });
+  }
+  function dibujar() {
+    cx.clearRect(0, 0, 1920, 1080);
+    for (var a = 0; a < nodos.length; a++) {
+      var p = nodos[a];
+      if (!quieto) { p.x += p.vx; p.y += p.vy; }
+      if (p.x < 0 || p.x > 1920) p.vx *= -1;
+      if (p.y < 0 || p.y > 1080) p.vy *= -1;
+      for (var b = a + 1; b < nodos.length; b++) {
+        var q = nodos[b], dx = p.x - q.x, dy = p.y - q.y, d = dx * dx + dy * dy;
+        if (d < 46000) {
+          cx.strokeStyle = 'rgba(140,155,230,' + (0.16 * (1 - d / 46000)) + ')';
+          cx.lineWidth = 1.2;
+          cx.beginPath(); cx.moveTo(p.x, p.y); cx.lineTo(q.x, q.y); cx.stroke();
+        }
+      }
+    }
+    for (var c = 0; c < nodos.length; c++) {
+      cx.globalAlpha = .55;
+      cx.fillStyle = nodos[c].c;
+      cx.beginPath(); cx.arc(nodos[c].x, nodos[c].y, nodos[c].r, 0, 6.2832); cx.fill();
+    }
+    cx.globalAlpha = 1;
+    if (!quieto) requestAnimationFrame(dibujar);
+  }
+  dibujar();
+})();
+</script>
+</body>
+</html>

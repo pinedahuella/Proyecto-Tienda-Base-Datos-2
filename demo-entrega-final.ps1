@@ -4,7 +4,8 @@
 # que usa la app (desde ced29f5 de Jose David, 2026-09-26). Si el backend no
 # esta corriendo, ese ultimo paso solo avisa y lo de la base igual se ve.
 #
-#   .\demo-entrega-final.ps1 -Parte acceso                      los tres usuarios de Redis
+#   .\demo-entrega-final.ps1 -Parte acceso                      los usuarios de Redis
+#   .\demo-entrega-final.ps1 -Parte bases                       el control de acceso de las seis bases
 #   .\demo-entrega-final.ps1 -Parte semantica -Producto laptop  los parecidos de un producto
 #   .\demo-entrega-final.ps1 -Parte facetas -Texto laptop       filtros facetados y tolerancia
 #   .\demo-entrega-final.ps1 -Parte vectores                    quien mantiene los vectores al dia
@@ -20,6 +21,11 @@
 #              Lo destructivo (FLUSHALL, SHUTDOWN) no se ejecuta, se le pregunta
 #              a Redis con ACL DRYRUN si lo dejaria pasar. Escribe una sola clave
 #              bajo mesh:demo:acceso y la borra al final
+#   bases      Corre bash seguridad/prueba_acceso.sh: en PostgreSQL, MongoDB,
+#              ClickHouse y Elasticsearch, que mesh_backend hace lo suyo y no
+#              puede crear ni borrar tablas, colecciones, indices o usuarios, y
+#              que mesh_lectura solo mira. En Neo4j, que no tiene roles. Al final
+#              la de Redis. No cambia nada de la tienda
 #   semantica  Busca un producto por nombre y pide sus parecidos a
 #              PostgreSQL con la misma consulta que SimilaresService (pgvector,
 #              tabla vector_producto desde la migracion 040), con la similitud
@@ -49,7 +55,7 @@
 # va a Mongo o a PostgreSQL viaja como archivo con docker cp.
 
 param(
-    [ValidateSet('acceso', 'semantica', 'facetas', 'vectores', 'rastro', 'intencion', 'clasificador', 'hibrida', 'sugerencias')]
+    [ValidateSet('acceso', 'bases', 'semantica', 'facetas', 'vectores', 'rastro', 'intencion', 'clasificador', 'hibrida', 'sugerencias')]
     [string]$Parte = 'acceso',
     [string]$Producto = 'laptop',
     [string]$Texto = 'laptop',
@@ -106,13 +112,16 @@ function ClickHouse([string]$sql) {
 }
 
 $ES_URL = 'http://localhost:9200'
+# Con la seguridad de Elasticsearch encendida (2026-10-23), como elastic.
+$ES_CABECERA = @{ Authorization = 'Basic ' + [Convert]::ToBase64String(
+    [Text.Encoding]::ASCII.GetBytes("elastic:$($env_['ELASTIC_PASSWORD'])")) }
 $ES_INDICE = 'mesh_productos'
 
 # Un POST a Elasticsearch leido como UTF-8. Invoke-RestMethod de PowerShell 5.1
 # no siempre respeta el charset de la respuesta y las tildes del texto de una
 # resena salian rotas ("venA-a" por "venia").
 function Es-Post([string]$ruta, [string]$cuerpo) {
-    $r = Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$ES_URL$ruta" -ContentType 'application/json' -Body $cuerpo -TimeoutSec 30
+    $r = Invoke-WebRequest -UseBasicParsing -Method Post -Headers $ES_CABECERA -Uri "$ES_URL$ruta" -ContentType 'application/json' -Body $cuerpo -TimeoutSec 30
     $bytes = $r.RawContentStream.ToArray()
     return ([Text.Encoding]::UTF8.GetString($bytes) | ConvertFrom-Json)
 }
@@ -139,6 +148,7 @@ function Mongo([string]$js) {
 if ($Parte -eq 'acceso') {
     Contenedor 'mesh-redis'
     $pass = @{
+        backend    = $env_['REDIS_BACKEND_PASSWORD']
         default    = $env_['REDIS_PASSWORD']
         inspeccion = $env_['REDIS_INSPECCION_PASSWORD']
         operador   = $env_['REDIS_OPERADOR_PASSWORD']
@@ -165,11 +175,19 @@ if ($Parte -eq 'acceso') {
     $clave = 'mesh:demo:acceso'
 
     Paso "Quien existe"
-    Write-Host "   $(Como operador $pass.operador ACL USERS)"
+    # Sin Como, que corta en dos lineas: son cuatro usuarios.
+    Write-Host "   $((docker exec mesh-redis redis-cli --no-auth-warning --user operador --pass $pass.operador ACL USERS 2>&1) -join ' ')"
     Linea 'sin usuario' 'PING sin contrasena' ((docker exec mesh-redis redis-cli PING 2>&1) -join ' ')
     Linea 'inspeccion' 'entrar con la contrasena del backend' (Como inspeccion $pass.default PING)
 
-    Paso "default, el que usa el backend. Trabaja con datos y no administra"
+    Paso "backend, el del backend. Solo las claves de la tienda, mesh:*"
+    Linea 'backend' "SET $clave" (Como backend $pass.backend SET $clave hola EX 300)
+    Linea 'backend' 'EVAL, el Lua de la venta relampago' (Como backend $pass.backend EVAL "return redis.call('GET', KEYS[1])" 1 $clave)
+    Linea 'backend' 'GET otra:clave, fuera de mesh:' (Como backend $pass.backend GET 'otra:clave')
+    Linea 'backend' 'CONFIG GET maxmemory' (Como backend $pass.backend CONFIG GET maxmemory)
+    Linea 'backend' 'FLUSHALL, preguntado con DRYRUN' (Dryrun backend FLUSHALL)
+
+    Paso "default, el de los scripts. Trabaja con datos y no administra"
     Linea 'default' "SET $clave" (Como default $pass.default SET $clave hola EX 300)
     Linea 'default' "GET $clave" (Como default $pass.default GET $clave)
     Linea 'default' 'EVAL, el Lua de la venta relampago' (Como default $pass.default EVAL "return redis.call('GET', KEYS[1])" 1 $clave)
@@ -199,6 +217,31 @@ if ($Parte -eq 'acceso') {
     Write-Host ""
     Ok "Los usuarios estan en docker-compose.yml y la prueba completa es  bash redis/prueba_acceso.sh"
     exit 0
+}
+
+
+# ============================================================
+# bases
+# ============================================================
+if ($Parte -eq 'bases') {
+    $bash = $null
+    $git = (Get-Command git -ErrorAction SilentlyContinue).Source
+    if ($git) { $c = Join-Path (Split-Path (Split-Path $git)) 'bin\bash.exe'; if (Test-Path $c) { $bash = $c } }
+    if (-not $bash -and (Test-Path 'C:\Program Files\Git\bin\bash.exe')) { $bash = 'C:\Program Files\Git\bin\bash.exe' }
+    if (-not $bash) { Mal "No encontre bash (viene con Git para Windows)"; exit 1 }
+
+    Paso "Cada base con su usuario, seguridad/prueba_acceso.sh"
+    $global:LASTEXITCODE = 0
+    & $bash (Join-Path $PSScriptRoot 'seguridad/prueba_acceso.sh') 2>&1 | ForEach-Object {
+        $l = "$_"
+        if ($l -match '^\s*OK\b') { Write-Host $l -ForegroundColor Green }
+        elseif ($l -match 'FALLA') { Write-Host $l -ForegroundColor Red }
+        elseif ($l -match '^\d+\.|RESULTADO') { Write-Host $l -ForegroundColor Cyan }
+        else { Write-Host $l }
+    }
+    Write-Host ""
+    Ok "Los usuarios y el porque de cada uno estan en docs/SEGURIDAD.md"
+    exit $LASTEXITCODE
 }
 
 

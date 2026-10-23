@@ -12,7 +12,8 @@ Como dejar Mesh corriendo en una PC nueva.
 
 Nada mas. Ninguna de las seis bases se instala -- ni PostgreSQL, ni MongoDB, ni
 Redis, ni Neo4j, ni Elasticsearch, ni ClickHouse -- y tampoco sus ventanas: los
-once contenedores estan en el `docker-compose.yml` y Docker los baja solos.
+contenedores estan en el `docker-compose.yml`, con version fija, y Docker los
+baja solos.
 
 Tampoco hace falta instalar Ollama, que calcula los vectores de la
 recomendacion semantica ("Parecidos a este" en la ficha). `arrancar.ps1` (paso
@@ -26,7 +27,8 @@ recomendacion semantica ("Parecidos a este" en la ficha). `arrancar.ps1` (paso
 
 En los tres casos, si falta el modelo `paraphrase-multilingual` (unos 560 MB) lo
 baja solo. La primera vez en una PC sin nada baja tambien la imagen de Ollama y
-calcula los 3105 vectores en la CPU: son varios minutos, una sola vez. Despues
+calcula el vector de cada producto en la CPU (unos 400 segundos con 3105
+productos): son varios minutos, una sola vez. Despues
 solo se calcula lo que cambio. El modelo del contenedor vive en el volumen
 externo `mesh-ollama-modelos`, que `-Reiniciar` no borra.
 
@@ -82,12 +84,15 @@ En Windows, un solo comando deja las bases listas:
 .\arrancar.ps1
 ```
 
-El script arranca Docker si esta apagado, levanta los once contenedores, espera
+El script arranca Docker si esta apagado, levanta los contenedores, espera
 a que **los seis motores** respondan -- PostgreSQL, MongoDB, ClickHouse,
 Elasticsearch, Redis y Neo4j --,
-corre las migraciones pendientes y carga lo que les falte a las dos bases
-derivadas: el catalogo de MongoDB y el grafo de Neo4j. Se puede correr las veces
-que quieras.
+corre las migraciones pendientes, carga lo que les falte a las bases derivadas
+(el catalogo de MongoDB, el grafo de Neo4j, los indices de Elasticsearch y los
+vectores) y, en su paso 9f, crea el usuario de cada servicio en cada base y se
+los pone al backend en `backend\.env` (ver [SEGURIDAD.md](SEGURIDAD.md)). Las
+contrasenas que falten en el `.env` las agrega solo, con un valor al azar. Se
+puede correr las veces que quieras.
 
 Las banderas:
 
@@ -105,12 +110,17 @@ la teclea sabe que cambio algo en PostgreSQL, pero no si ese dato viaja a Mongo,
 a Neo4j o a los dos. Los dos ETL son idempotentes, asi que correr de mas es
 gratis y correr de menos es el fallo de verdad.
 
-Despues, en dos terminales mas:
+Despues, el backend y el frontend, sin abrir ventanas (compilan y sirven el
+build):
 
-```bash
-cd backend && npm run start:dev   # http://localhost:3000
-cd frontend && npm run dev        # http://localhost:5173
+```powershell
+.\panel-comandos\servicios.ps1 -Accion backend    # http://localhost:3000
+.\panel-comandos\servicios.ps1 -Accion frontend   # http://localhost:5173
+.\panel-comandos\servicios.ps1 -Accion estado
 ```
+
+O en modo desarrollo, en dos terminales, `cd backend; npm run start:dev` y
+`cd frontend; npm run dev`.
 
 A mano, sin el script:
 
@@ -167,23 +177,29 @@ entra una vez".
 
 ## Contenedores
 
-Son **once**: seis motores, cuatro ventanas para mirarlos y un contenedor de un
-solo uso. Diez se quedan corriendo; `mesh-kibana-vistas` termina en `Exited (0)`,
-que es lo esperado.
+Son **doce**: seis motores, cuatro ventanas para mirarlos y dos contenedores de
+un solo uso. Diez se quedan corriendo; `mesh-kibana-vistas` y
+`mesh-elastic-usuarios` terminan en `Exited (0)`, que es lo esperado. Ollama va
+aparte, en un perfil, y solo se levanta si la PC no lo tiene.
+
+Las ventanas solo escuchan en `127.0.0.1`: se abren desde la misma PC y nadie de
+la red las alcanza. Las bases si escuchan hacia la red, porque el modo remoto las
+usa por Tailscale, y todas piden usuario y contrasena.
 
 | Servicio | Contenedor | Imagen | Puerto | Para que |
 |---|---|---|---|---|
 | PostgreSQL | mesh-postgres | pgvector/pgvector:pg18 | 5432 | la base relacional: cuentas, ofertas, pedidos y la parte social |
-| pgAdmin | mesh-pgadmin | dpage/pgadmin4 | 5050 | la ventana de PostgreSQL |
+| pgAdmin | mesh-pgadmin | dpage/pgadmin4:9.17 | 5050, solo en `127.0.0.1` | la ventana de PostgreSQL |
 | MongoDB | mesh-mongo | mongo:8 | 27018 | el catalogo de productos |
-| DbGate | mesh-dbgate | dbgate/dbgate:latest | 3001 | la ventana de MongoDB |
+| DbGate | mesh-dbgate | dbgate/dbgate:7.2.5 | 3001, solo en `127.0.0.1` | la ventana de MongoDB, entra como `mesh_lectura` |
 | Redis | mesh-redis | redis:8-alpine | 6379 | Entrega 2: el carrito con expiracion y la oferta de inventario limitado |
-| RedisInsight | mesh-redisinsight | redis/redisinsight:latest | 5540 | la ventana de Redis, con el TTL contando hacia atras |
-| Neo4j | mesh-neo4j | neo4j:5-community | 7474 y 7687 | Entrega 2: el grafo de cuentas, resenas y productos |
-| Elasticsearch | mesh-elastic | elasticsearch:8.15.3 | 9200 | Entrega 3: el indice del buscador y el de eventos de autenticacion |
+| RedisInsight | mesh-redisinsight | redis/redisinsight:3.8.0 | 5540, solo en `127.0.0.1` | la ventana de Redis, con el TTL contando hacia atras |
+| Neo4j | mesh-neo4j | neo4j:5-community | 7687, y 7474 solo en `127.0.0.1` | Entrega 2: el grafo de cuentas, resenas y productos |
+| Elasticsearch | mesh-elastic | elasticsearch:8.15.3 | 9200, con seguridad | Entrega 3: los indices del buscador, de ofertas, de avisos y de eventos de autenticacion |
+| Usuarios de Elasticsearch | mesh-elastic-usuarios | elasticsearch:8.15.3 | -- | de un solo uso: crea los usuarios y roles de Elasticsearch y termina |
 | Kibana | mesh-kibana | kibana:8.15.3 | 5601, solo en `127.0.0.1` | la ventana de Elasticsearch |
 | Vistas de Kibana | mesh-kibana-vistas | kibana:8.15.3 | -- | de un solo uso: crea las vistas de datos de Kibana y termina |
-| ClickHouse | mesh-clickhouse | clickhouse/clickhouse-server:25.3 | 8123 y 9010 | los eventos en el tiempo, con su consola en `/play` |
+| ClickHouse | mesh-clickhouse | clickhouse/clickhouse-server:25.3 | 8123, y 9010 solo en `127.0.0.1` | los eventos en el tiempo, con su consola en `/play` |
 
 Las filas de Redis y Neo4j son de la Entrega 2 y estan explicadas mas abajo, cada
 una en su seccion. Las imagenes de Elasticsearch y Kibana son
@@ -268,17 +284,19 @@ efimeras a proposito:
 contrasena acepta a cualquiera que alcance el puerto, y el 6379 es de los mas
 barridos que hay.
 
-Desde el 2026-09-25 no es una contrasena sola sino **tres usuarios de ACL**,
-declarados en el `command` de Redis en `docker-compose.yml`:
+Desde el 2026-09-25 no es una contrasena sola sino **usuarios de ACL**,
+declarados en el `command` de Redis en `docker-compose.yml`. Son cuatro desde el
+2026-10-23, cuando el backend paso a tener el suyo:
 
 | Usuario | Quien lo usa | Contrasena en el `.env` | Puede |
 |---|---|---|---|
-| `default` | el backend y los arneses | `REDIS_PASSWORD` | todo menos los comandos peligrosos (`FLUSHALL`, `CONFIG`, `ACL`, `SHUTDOWN`, `DEBUG`) |
+| `backend` | el backend | `REDIS_BACKEND_PASSWORD` | solo las claves `mesh:*`, sin los comandos peligrosos |
+| `default` | los arneses y scripts | `REDIS_PASSWORD` | todo menos los comandos peligrosos (`FLUSHALL`, `CONFIG`, `ACL`, `SHUTDOWN`, `DEBUG`) |
 | `inspeccion` | RedisInsight | `REDIS_INSPECCION_PASSWORD` | solo leer: claves, TTL, `SCAN`, `INFO` |
 | `operador` | mantenimiento a mano | `REDIS_OPERADOR_PASSWORD` | todo |
 
 Como `default` sigue siendo el usuario por defecto, todo lo que antes entraba
-con `-a $REDIS_PASSWORD` entra igual. Si faltan las otras dos contrasenas en el
+con `-a $REDIS_PASSWORD` entra igual. Si faltan las otras contrasenas en el
 `.env`, `arrancar.ps1` las agrega solo con un valor al azar. El `command` va
 escrito como LISTA a proposito: en una sola linea, Compose corta la contrasena
 en el `>` que la precede. La prueba es `bash redis/prueba_acceso.sh` y el detalle
@@ -410,14 +428,17 @@ El detalle esta en [neo4j/README.md](../neo4j/README.md) y en
 ## Kibana: la ventana de Elasticsearch
 
 No es una base, es el visor de Elasticsearch, igual que pgAdmin lo es de PostgreSQL:
-http://localhost:5601, sin usuario ni contrasena. Sirve para mirar `mesh_productos`
+http://localhost:5601. Pide usuario: `mesh_lectura` (solo mira) o `elastic`, con
+`ELASTIC_LECTURA_PASSWORD` o `ELASTIC_PASSWORD` del `.env`. Sirve para mirar `mesh_productos`
 y `mesh_eventos_autenticacion` con el buscador (Discover), los campos y las
 agregaciones, sin escribir `curl`. Mesh funciona igual sin el.
 
 - **Misma version que Elasticsearch, 8.15.3.** Kibana se niega a hablar con un
   Elasticsearch de otra version mayor.
-- **Solo en local.** El puerto es `127.0.0.1:5601`: Elasticsearch corre con la
-  seguridad apagada y Kibana puede leer y borrar sus indices.
+- **Solo en local.** El puerto es `127.0.0.1:5601`, como el de las demas ventanas.
+- **Habla con Elasticsearch como `kibana_system`**, cuya contrasena
+  (`KIBANA_PASSWORD`) le pone el contenedor `mesh-elastic-usuarios`. Hasta
+  entonces Kibana reintenta solo.
 - **Memoria acotada.** `NODE_OPTIONS` con tope de 640 MB y `mem_limit` de 1 GB. Gasta
   cerca de 0.7 GB reales.
 
@@ -438,17 +459,21 @@ solas.
 
 | Servicio | Donde entra | Usuario | Contrasena |
 |---|---|---|---|
-| PostgreSQL | `localhost:5432`, base `mesh` | `DB_USER` del .env | `DB_PASSWORD` del .env |
+| PostgreSQL | `localhost:5432`, base `mesh` | `DB_USER` del .env (dueno), `mesh_backend` o `mesh_lectura` | `DB_PASSWORD`, `PG_BACKEND_PASSWORD` o `PG_LECTURA_PASSWORD` del .env |
 | pgAdmin | http://localhost:5050 | `PGADMIN_EMAIL` del .env | `PGADMIN_PASSWORD` del .env |
-| MongoDB | `localhost:27018`, base `mesh` | `MONGO_USER` del .env | `MONGO_PASSWORD` del .env |
-| DbGate | http://localhost:3001 | sin usuario ni contrasena | |
-| Redis | `localhost:6379` | `default` (se puede omitir), `inspeccion` u `operador` | `REDIS_PASSWORD`, `REDIS_INSPECCION_PASSWORD` o `REDIS_OPERADOR_PASSWORD` del .env |
+| MongoDB | `localhost:27018`, base `mesh` | `MONGO_USER` del .env (root), `mesh_backend` o `mesh_lectura`, con `authSource=admin` | `MONGO_PASSWORD`, `MONGO_BACKEND_PASSWORD` o `MONGO_LECTURA_PASSWORD` del .env |
+| DbGate | http://localhost:3001 | la pagina no pide nada; entra a MongoDB como `mesh_lectura`, solo lectura | |
+| Redis | `localhost:6379` | `default` (se puede omitir), `backend`, `inspeccion` u `operador` | `REDIS_PASSWORD`, `REDIS_BACKEND_PASSWORD`, `REDIS_INSPECCION_PASSWORD` o `REDIS_OPERADOR_PASSWORD` del .env |
 | RedisInsight | http://localhost:5540 | la pagina no pide nada; entra a Redis como `inspeccion` | |
 | Ollama | `localhost:11434` el de la PC, o `localhost:11435` el contenedor `mesh-ollama` | sin usuario ni contrasena | |
 | Neo4j | http://localhost:7474 y bolt `localhost:7687` | `neo4j`, fijo | `NEO4J_PASSWORD` del .env |
-| Elasticsearch | `localhost:9200` | sin usuario ni contrasena, solo en local | |
-| Kibana | http://localhost:5601 | sin usuario ni contrasena, solo desde esta maquina | |
-| ClickHouse | `localhost:8123`, consola en `/play` | `CLICKHOUSE_USER` del .env | `CLICKHOUSE_PASSWORD` del .env |
+| Elasticsearch | `localhost:9200` | `elastic`, `mesh_backend` o `mesh_lectura` | `ELASTIC_PASSWORD`, `ELASTIC_BACKEND_PASSWORD` o `ELASTIC_LECTURA_PASSWORD` del .env |
+| Kibana | http://localhost:5601, solo desde esta maquina | `mesh_lectura` o `elastic` | `ELASTIC_LECTURA_PASSWORD` o `ELASTIC_PASSWORD` del .env |
+| ClickHouse | `localhost:8123`, consola en `/play` | `CLICKHOUSE_USER` del .env, `mesh_backend` o `mesh_lectura` | `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_BACKEND_PASSWORD` o `CLICKHOUSE_LECTURA_PASSWORD` del .env |
+
+El backend entra a cada base con su usuario `mesh_backend` (en Redis `backend`),
+que solo lee y escribe datos. Que puede y que no cada usuario, y la prueba, en
+[SEGURIDAD.md](SEGURIDAD.md).
 
 Las dos variables que agrego la Entrega 2 al `.env` son **`REDIS_PASSWORD`** y
 **`NEO4J_PASSWORD`**. Ya estan en `.env.example`: quien tenga un `.env` de antes
@@ -543,9 +568,14 @@ Los scripts con nombre propio siempre llevan `run`. `npm start:dev` no existe.
 Para cuando una laptop no aguanta las seis bases. Una PC corre `arrancar.ps1` y
 nada mas; la otra corre solo el backend y el frontend, y llega a las bases por
 Tailscale, una red privada entre las dos que funciona desde cualquier lugar
-(casa, la U, datos del celular) sin abrir nada a internet. Elasticsearch no
-tiene contrasena, asi que abrir los puertos al internet o a la red local no es
-opcion.
+(casa, la U, datos del celular) sin abrir nada a internet. Aunque las seis bases
+piden usuario y contrasena, abrir sus puertos al internet o a la red local no es
+opcion: el firewall solo los abre para Tailscale.
+
+Cada PC genera sus contrasenas al correr `arrancar.ps1`. Las de la otra PC van en
+`remoto\.env.remoto`, y `usar-bases-remotas.ps1` las pone en `backend\.env`
+junto con la direccion. Que lineas copiar esta en [SEGURIDAD.md](SEGURIDAD.md),
+seccion Modo remoto.
 
 Probado el 2026-10-07: bases en la PC de David, backend y frontend en la de
 Meme, los dos en la red de la UNIS. Tailscale conecto directo, sin servidor de

@@ -302,3 +302,8 @@ Decisiones nuevas que saldrian de este documento.
 | ADR-15 | Las detecciones como serie de tiempo en ClickHouse |
 | ADR-16 | Grafo de identidad en Neo4j para armar los casos |
 | ADR-17 | Busqueda hibrida en Elasticsearch con pgvector como fuente del vector |
+
+Lo que paso con cada una, en el registro unico de `docs/DECISIONES.md` (23 de
+octubre): la 12 es el ADR-18, la 13 el ADR-21 y la 14 el ADR-17. La 15 y la 16 no
+se implementaron, y la 17 termino distinta, con el vector solo en pgvector
+(ADR-13). Los numeros de esta tabla eran una propuesta y ya no se usan.

@@ -59,6 +59,12 @@
       "variantes": {
         "type": "text",
         "analyzer": "espanol_llano"
+      },
+
+      "imagen": {
+        "type": "keyword",
+        "index": false,
+        "doc_values": false
       }
     }
   }

@@ -219,7 +219,10 @@ else
     sleep 12
     [ "$(sql "SELECT count(*) || '|' || coalesce(max(intentos),0) FROM evento_grafo_compra WHERE id_usuario=$ID_c AND procesado_en IS NULL;")" = "1|0" ] \
         && OK "su cuenta espera en la cola, sin gastar intentos" || FALLA "cola de ${PREF}c: $(sql "SELECT count(*) || '|' || coalesce(max(intentos),0) FROM evento_grafo_compra WHERE id_usuario=$ID_c AND procesado_en IS NULL;")"
-    [ "$(curl -s -o /dev/null -w '%{http_code}' -m 60 "$API/productos/para-ti" -H "Cookie: $COOKIE_a")" = "503" ] && OK "para ti sin Neo4j, 503" || FALLA "para ti sin Neo4j no dio 503"
+    # Desde el 2026-10-20 (ADR-22) para ti sale de los pedidos en PostgreSQL
+    # cuando Neo4j no responde. Antes daba 503.
+    COD_PT=$(curl -s -o /dev/null -w '%{http_code}' -m 60 "$API/productos/para-ti" -H "Cookie: $COOKIE_a")
+    [ "$COD_PT" = "200" ] && OK "para ti sin Neo4j sale del respaldo en PostgreSQL, 200" || FALLA "para ti sin Neo4j dio $COD_PT y no 200"
     docker start "$NEO" >/dev/null 2>&1
     for _ in $(seq 1 90); do [ -n "$(cypher "RETURN 1;")" ] && break; sleep 2; done
     esperar_compras "$ID_c" 1 90 && OK "Neo4j volvio y la compra de ${PREF}c se proyecto sola" || FALLA "${PREF}c tiene $(compras_en_grafo "$ID_c") :Compra"

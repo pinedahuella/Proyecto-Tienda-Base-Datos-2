@@ -43,10 +43,12 @@ RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 export MSYS_NO_PATHCONV=1
 
 ES="${ES:-http://localhost:9200}"
+# Con la seguridad de Elasticsearch encendida: mete el usuario en $ES (ver ahi).
+. "$(dirname "$0")/../seguridad/url_elastic.sh"
 INDICE="${INDICE:-mesh_productos}"
 MONGO="${MONGO:-mesh-mongo}"
 
-echo "==> reconstruyendo el indice $INDICE en $ES"
+echo "==> reconstruyendo el indice $INDICE en $ES_VER"
 
 # ------------------------------------------------------------------
 # 0. Que Elasticsearch este de verdad ahi
@@ -55,7 +57,7 @@ echo "==> reconstruyendo el indice $INDICE en $ES"
 # borrado el indice, la maquina se quedaria sin buscador y con el indice viejo
 # perdido, que es peor que no haber empezado.
 if ! curl -sf --max-time 10 "$ES" > /dev/null; then
-    echo "Elasticsearch no contesta en $ES" >&2
+    echo "Elasticsearch no contesta en $ES_VER" >&2
     echo "Levantalo con:  docker compose up -d elasticsearch" >&2
     exit 1
 fi

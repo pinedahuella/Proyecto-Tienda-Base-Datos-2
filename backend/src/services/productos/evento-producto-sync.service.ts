@@ -1,7 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Interval } from '@nestjs/schedule';
-import { MongoNetworkError, MongoServerSelectionError } from 'mongodb';
+import { mongoClient } from '../../database/mongo';
 import { pool } from '../../database/postgres';
+import { esCaidaDeMongo } from '../../helpers/manejar-error-mongo';
 import { ProductosService } from './productos.service';
 
 /** Una fila pendiente de `evento_producto`. `fecha` va como texto para no perder microsegundos. */
@@ -43,6 +44,14 @@ export class EventoProductoSyncService {
 
   private procesando = false;
 
+  /**
+   * La corrida anterior se corto porque Mongo no respondia. Si el driver dejo
+   * el cliente cerrado ("Topology is closed"), ninguna consulta vuelve a
+   * funcionar hasta que alguien llame a `connect()`, y este worker no puede
+   * esperar a que lo haga el respaldo del catalogo.
+   */
+  private mongoCaido = false;
+
   constructor(private readonly productosService: ProductosService) {}
 
   @Interval('evento-producto', EventoProductoSyncService.INTERVALO_MS)
@@ -65,6 +74,22 @@ export class EventoProductoSyncService {
         ],
       );
 
+      if (rows.length === 0) {
+        return;
+      }
+      if (this.mongoCaido) {
+        try {
+          await mongoClient.connect();
+        } catch (error) {
+          if (esCaidaDeMongo(error)) {
+            return;
+          }
+          throw error;
+        }
+        this.mongoCaido = false;
+        this.logger.log('worker de productos: Mongo volvio');
+      }
+
       let recalculados = 0;
       for (const evento of rows) {
         try {
@@ -82,9 +107,13 @@ export class EventoProductoSyncService {
           );
           recalculados++;
         } catch (error) {
-          if (this.esCaidaDeMongo(error)) {
+          if (esCaidaDeMongo(error)) {
             // Con Mongo caido todos los demas fallarian igual (3 s cada uno):
-            // se corta la corrida y no se cuenta como intento fallido.
+            // se corta la corrida y no se cuenta como intento fallido. Antes
+            // este worker tenia su propia lista de errores, sin los dos de un
+            // cliente cerrado, y con Mongo apagado apartaba productos con el
+            // stock viejo como si fueran fallos de verdad.
+            this.mongoCaido = true;
             this.logger.warn(
               'worker de productos: Mongo no responde, se reintenta en la proxima corrida',
             );
@@ -116,12 +145,6 @@ export class EventoProductoSyncService {
     }
   }
 
-  private esCaidaDeMongo(error: unknown): boolean {
-    return (
-      error instanceof MongoServerSelectionError ||
-      error instanceof MongoNetworkError
-    );
-  }
 }
 
 function mensajeCorto(error: unknown): string {

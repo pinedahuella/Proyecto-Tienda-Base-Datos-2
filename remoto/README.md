@@ -156,7 +156,10 @@ y `run`.
   `pruebas/falla_checkout.sh`, que no es otra cosa, dice SIN MEDIR y sale con 0.
   Esas partes son de la base local.
 - **Las contrasenas que alla son otras.** El arranque de la otra PC genero sus
-  propias contrasenas de los usuarios `inspeccion` y `operador` de Redis, y
+  propias contrasenas de los usuarios de cada servicio (desde el 2026-10-23,
+  tambien los `mesh_backend` de cada base y la de `elastic`, ver
+  `docs/SEGURIDAD.md`, seccion Modo remoto), y de los usuarios `inspeccion` y
+  `operador` de Redis, y
   `redis/prueba_acceso.sh` da FALLA en todo lo de esos dos usuarios. Van en
   `remoto/.env.remoto` (mismo formato que el `.env`, no se sube): `activar.sh`
   lo carga y pisa al `.env` de la raiz, y `desactivar.sh` lo quita. Sin ese

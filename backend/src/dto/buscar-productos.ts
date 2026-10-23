@@ -48,8 +48,10 @@ export type FuenteSugeridos =
 
 /**
  * Un resultado de busqueda: el RESUMEN que guarda el indice de Elasticsearch
- * para encontrar y ordenar, no el producto completo (sin imagenes, sin
- * caracteristicas, sin el detalle de cada variante). Para eso esta
+ * para encontrar, ordenar y pintar la tarjeta, no el producto completo (sin
+ * caracteristicas ni el detalle de cada variante). Desde el 2026-10-23 trae
+ * tambien la foto, a pedido del profesor: la tarjeta sale entera de
+ * Elasticsearch, de una sola consulta. Para el detalle esta
  * GET /productos/:id_producto contra MongoDB, que sigue siendo la fuente de
  * verdad del catalogo.
  */
@@ -74,4 +76,10 @@ export interface ResultadoBusquedaProducto {
   stock_total: number;
   resenas_promedio: number;
   resenas_total: number;
+  /**
+   * La foto de la tarjeta: la primera imagen de la primera variante, la misma
+   * que eligen las demas tarjetas de la tienda (tarjetas-producto.ts). `null`
+   * si el producto no tiene ninguna.
+   */
+  imagen: string | null;
 }

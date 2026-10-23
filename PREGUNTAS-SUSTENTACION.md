@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 148 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 152 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las líneas son las del código en main al 20 de septiembre de 2026, salvo las preguntas 32 a 34 y la 119, que están al 23 de septiembre. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
 
@@ -26,6 +26,7 @@ Las líneas son las del código en main al 20 de septiembre de 2026, salvo las p
 - [Parte 8. Entrega final, lo que hoy hay en el repositorio](#parte-8-entrega-final-lo-que-hoy-hay-en-el-repositorio), preguntas 116 a 131
 - [Parte 9. Lo que cambió el 16 y 17 de octubre](#parte-9-lo-que-cambió-el-16-y-17-de-octubre), preguntas 132 a 141
 - [Parte 10. Lo que cambió el 19 y 20 de octubre](#parte-10-lo-que-cambió-el-19-y-20-de-octubre), preguntas 142 a 148
+- [Parte 11. Lo que cambió el 23 de octubre](#parte-11-lo-que-cambió-el-23-de-octubre), preguntas 149 a 152
 
 ---
 
@@ -669,18 +670,18 @@ Es una plantilla para todo índice llamado mesh_eventos_autenticacion. Con dynam
 - Por qué así. Es una plantilla porque el worker autocrea el índice al escribir, y con mapeo dinámico la ip saldría como texto y dejaría de servir para rangos.
 
 ### 81. ¿Cómo está configurado Elasticsearch en el docker-compose?
-Usa la imagen 8.15.3 en un solo nodo. El heap se fija en 512 megas con mínimo y máximo iguales para no competir por memoria con Neo4j. La seguridad está apagada porque es un entorno de clase que solo escucha en local. Expone el puerto 9200, guarda datos en un volumen y tiene un healthcheck que acepta estado yellow.
+Usa la imagen 8.15.3 en un solo nodo. El heap se fija en 512 megas con mínimo y máximo iguales para no competir por memoria con Neo4j. Desde el 23 de octubre tiene la seguridad encendida, con la contraseña de `elastic` saliendo del `.env` y sin TLS, porque es un nodo y entre PC el tráfico va por Tailscale. Expone el puerto 9200, guarda datos en un volumen y tiene un healthcheck que entra con usuario y acepta estado yellow.
 
-- Dónde se ve. `docker-compose.yml` líneas 231 a 232 la imagen, línea 238 el nodo único, línea 248 la seguridad apagada, línea 262 el heap y líneas 275 a 288 el healthcheck.
+- Dónde se ve. El bloque `elasticsearch` de `docker-compose.yml`, con `xpack.security.enabled`, `ES_JAVA_OPTS` y el healthcheck, y el bloque `elastic-usuarios`, que crea los usuarios. `docs/SEGURIDAD.md`.
 - Lo que pide el profesor. Entrega 3, componente de búsqueda en la arquitectura, con Elasticsearch como opción de referencia. El enunciado pide documentar las decisiones (sección 5.3).
-- Por qué así. Con la 8.x la seguridad viene encendida y genera credenciales nuevas en cada reinicio. Apagarla es una decisión de desarrollo escrita en el propio archivo, y ahí mismo dice que es la primera línea a quitar fuera de desarrollo.
+- Por qué así. Hasta el 22 de octubre estuvo apagada, con un comentario que decía que solo escuchaba en local. No era cierto, el puerto se publicaba a la red para el modo remoto, y por eso se encendió (ADR-14).
 
 ### 82. ¿Cómo se inspecciona el índice de Elasticsearch desde una interfaz gráfica?
 Con Kibana, en la misma versión que Elasticsearch, la 8.15.3. Es un servicio más del docker compose, abre en el puerto 5601 solo en localhost y se conecta a Elasticsearch por su nombre de servicio. Un contenedor de un solo uso crea solo las vistas de datos de Productos y de Eventos de autenticación, así que en Discover ya se ven los documentos, con un rango de tiempo por defecto de 60 días.
 
 - Dónde se ve. `docker-compose.yml` lineas 295 a 334, el servicio kibana con su tope de memoria. `docker-compose.yml` lineas 336 a 361, el contenedor que crea las vistas. `docker/kibana/vistas.sh` lineas 1 a 24, qué hace y por qué existe. `arrancar.ps1` lineas 3371 a 3398, el paso que espera y cuenta el resultado.
 - Lo que pide el profesor. El enunciado no pide una interfaz gráfica. Sirve para enseñar en vivo el mapping construido a propósito y los documentos del índice, que es lo que la Entrega 3 pide justificar en el buscador (5 pts).
-- Por qué así. Kibana lleva un tope de memoria de 640 MB porque la máquina va justa, y solo escucha en localhost porque Elasticsearch corre con la seguridad apagada.
+- Por qué así. Kibana lleva un tope de memoria de 640 MB porque la máquina va justa, y solo escucha en localhost como las demás ventanas. Pide usuario, `mesh_lectura` para mirar, y habla con Elasticsearch como `kibana_system`.
 
 
 ---
@@ -862,11 +863,11 @@ Porque ninguna base sola cubre bien todos los patrones de acceso. PostgreSQL se 
 - Por qué así. El descuento de stock no puede vender dos veces la última unidad, y eso lo garantiza una transacción relacional.
 
 ### 104. ¿Qué autenticación hay configurada en cada base NoSQL?
-Cuatro de las cinco piden usuario y contraseña. MongoDB crea su usuario root al arrancar, Redis usa requirepass, Neo4j usa NEO4J_AUTH y ClickHouse crea un usuario propio. Elasticsearch tiene la seguridad apagada a propósito, porque solo escucha en localhost y no guarda nada que no esté en PostgreSQL. Todas las contraseñas salen del `.env`.
+Todas piden usuario y contraseña, y desde el 23 de octubre cada servicio entra con su propio usuario. MongoDB tiene `mesh_backend` (un rol a medida que solo busca, inserta, cambia y borra documentos) y `mesh_lectura` (DbGate, solo lee). Redis tiene cuatro usuarios de ACL, `backend` encerrado en las claves `mesh:*`, `default` para los scripts, `inspeccion` para RedisInsight y `operador`. ClickHouse tiene `mesh_backend` (leer y agregar eventos) y `mesh_lectura`. Elasticsearch tiene la seguridad encendida, con `elastic`, `kibana_system`, `mesh_backend` y `mesh_lectura`. Neo4j tiene un solo usuario, porque la edición community no trae roles. PostgreSQL, que no es NoSQL, tiene lo mismo, `mesh_backend` y `mesh_lectura`. Todas las contraseñas salen del `.env` y el arranque genera las que falten.
 
-- Dónde se ve. `docker-compose.yml` lineas 59 a 63 (MongoDB), 123 a 126 (Redis), 188 (Neo4j), 324 a 326 (ClickHouse) y 240 a 248 (Elasticsearch sin seguridad). El backend entra con esas credenciales en `backend/src/database/mongo.ts` linea 16, `backend/src/database/redis.ts` lineas 31 a 36, `backend/src/database/neo4j.ts` lineas 29 a 34 y `backend/src/database/clickhouse.ts` lineas 25 a 32.
+- Dónde se ve. `docs/SEGURIDAD.md`, la tabla completa. Los usuarios en `seguridad/postgres.sql`, `seguridad/mongo.js`, `seguridad/clickhouse.sql`, `seguridad/elastic.sh` y el bloque de Redis de `docker-compose.yml`. Los crea el paso 9f de `arrancar.ps1`. La prueba es `bash seguridad/prueba_acceso.sh`, 93 OK.
 - Lo que pide el profesor. Entrega final, autenticación y autorización configuradas explícitamente en al menos un componente NoSQL (4 pts).
-- Por qué así. Un Redis sin contraseña acepta a cualquiera que alcance el puerto 6379, y en la red de la universidad eso es un riesgo real. El comentario está en `docker-compose.yml` lineas 110 a 114.
+- Ojo si preguntan por Elasticsearch. Hasta el 22 de octubre tenía la seguridad apagada con un comentario que decía que solo escuchaba en localhost, y no era cierto, el 9200 se publicaba a la red porque el modo remoto lo usa por Tailscale. Se encendió el 23.
 
 ### 105. ¿Cómo funciona el inicio de sesión, la contraseña y la expiración de 2 horas?
 Al iniciar sesión el backend compara la contraseña contra su hash y firma un JWT con el id y el rol. El token viaja en la cookie mesh_token, httpOnly y sameSite lax, y vence a las 2 horas. La contraseña se guarda con scrypt de Node y un salt al azar por usuario. Un comentario de usuario.service dice bcrypt pero el código usa scrypt.
@@ -890,17 +891,17 @@ El panel es una sola pantalla con pestañas para el admin y cada pestaña llama 
 - Por qué así. Cada pestaña usa la base que mejor contesta su pregunta, y el navegador nunca sabe de cuál sale el dato porque toda respuesta trae ok, mensaje y payload.
 
 ### 108. ¿Dónde está el diagrama de arquitectura final y cómo se generó?
-Está en docs/diagrama-arquitectura.drawio con su PNG, al 20 de octubre. Dibuja los seis motores, lo que hace el backend con cada uno y doce rutas de datos entre motores, con su mecanismo en la leyenda. Lo genera `docs/generar-arquitectura.py`, que al final comprueba que cada flecha nombre cajas que existen. La ruta 11 lleva el texto de cada producto de MongoDB a Ollama y guarda su vector en `vector_producto` de PostgreSQL. Las reseñas no tienen flecha, porque su vector va de la cola `evento_comentario` a `vector_comentario` dentro de PostgreSQL. Del 4 al 16 de octubre los vectores estuvieron en Elasticsearch y el diagrama los dibujaba ahí.
+Está en `docs/diagrama-arquitectura.drawio` con su PNG, al 23 de octubre. Dibuja los seis motores, Ollama en su propia caja, lo que hace el backend con cada motor, el usuario con que entra a cada uno, el recuadro que dice que las bases pueden correr en otra PC por Tailscale, y doce rutas de datos entre motores con su mecanismo en la leyenda. Las rutas que saltan cajas van anidadas para que ninguna cruce a otra. Lo genera `docs/generar-arquitectura.py`, que al final comprueba que cada flecha nombre cajas que existen.
 
-- Dónde se ve. `docs/generar-arquitectura.py` lineas 1 a 18. `docs/ARQUITECTURA.md` lineas 3 a 14. El diagrama entidad relación es otro archivo, `docs/diagrama-general.drawio`, que dibuja `docs/generar-er.py` leyendo la base viva, lineas 1 a 19.
-- Lo que pide el profesor. Entrega final, diagrama de arquitectura completo y correcto (3 pts). Las entregas 2 y 3 también piden actualizarlo.
+- Dónde se ve. `docs/generar-arquitectura.py`, las tablas CAJAS, FLUJOS, USUARIO y DEBAJO. El diagrama entidad relación es otro archivo, `docs/diagrama-general.drawio`, que dibuja `docs/generar-er.py` leyendo la base viva.
+- Lo que pide el profesor. Entrega final, diagrama de arquitectura completo y correcto (3 pts).
 - Por qué así. El ER se genera de la base porque el dibujado a mano se quedó en 42 cajas cuando ya había 50 tablas.
 
 ### 109. ¿Dónde está el registro de decisiones arquitectónicas y qué estructura tiene?
-Está repartido en docs. base-de-datos.md trae cinco ADR sobre catálogo, ofertas, imágenes, proponente y lo social. DECISION-GRAFOS-VS-COLUMNAR.md sigue los campos que pide el enunciado y además dice cuándo estaría justificada la alternativa no elegida. La consistencia del checkout tiene su propio documento. DECISION-NEWSQL-PAGOS.md es el ADR-8, no migrar los pagos a una NewSQL. Los de la Entrega final están en el informe, el ADR-10 de los vectores en la sección 2.1 y el ADR-11 del control de acceso en Redis en la 3.1. El ADR-10 se replanteó dos veces, el 4 de octubre de pgvector a Elasticsearch y el 16 de vuelta a pgvector, y el informe final cuenta las dos en la sección 2.2.
+Hay un solo registro, de ADR-1 a ADR-23, en `docs/DECISIONES.md` y en la sección 5 del informe de la Entrega final. Antes cada entrega numeraba sus decisiones por su cuenta y los números chocaban (el ADR-3 de `docs/base-de-datos.md` son las imágenes y el ADR-3 del informe de la Entrega 2 era grafos contra columnar). El registro único dice cómo se citó cada uno antes. Cada ADR tiene los cinco campos del enunciado, contexto, alternativas con la de no cambiar, decisión, justificación y consecuencias. Del 15 al 23 son las decisiones de septiembre y octubre que se habían implementado sin registro, como comprar sin MongoDB, la verdad del carrito en PostgreSQL o el respaldo por base.
 
-- Dónde se ve. `docs/base-de-datos.md` lineas 561, 571, 581, 591 y 990, encabezados de ADR-1 a ADR-5. `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 14 (contexto), 66 (alternativas) y 256 (consecuencias). `docs/CONSISTENCIA-CHECKOUT.md` linea 122, los puntos de falla.
-- Lo que pide el profesor. Sección 5.3, un registro breve con contexto, alternativas (al menos dos, incluida no cambiar), decisión, justificación y consecuencias.
+- Dónde se ve. `docs/DECISIONES.md`, la tabla con dónde está escrito cada uno. `docs/base-de-datos.md`, ADR-1 a ADR-5. `docs/DECISION-GRAFOS-VS-COLUMNAR.md` (ADR-8) y `docs/DECISION-NEWSQL-PAGOS.md` (ADR-12).
+- Lo que pide el profesor. Sección 5.3, un registro breve con contexto, alternativas (al menos dos, incluida no cambiar), decisión, justificación y consecuencias. El 28 de septiembre dijo que las decisiones eran genéricas, por eso las nuevas dicen el flujo que tocan, las bases que leen y escriben y qué pasa si cada una se cae.
 - Por qué así. El enunciado califica la calidad del análisis y no la cantidad de tecnologías, por eso hay ADR de decisiones de no migrar.
 
 ### 110. ¿Cómo está estructurado el backend en NestJS?
@@ -932,19 +933,18 @@ Hay arneses en shell que prueban contra el sistema vivo. Se corren con bash y la
 - Por qué así. El código puede estar bien escrito y sobrevender igual, y solo lanzarle más gente de la que cabe lo demuestra.
 
 ### 114. ¿Cómo se arranca todo el sistema y qué es el panel de comandos?
-Desde la raíz se corre .\arrancar.ps1, que levanta los diez contenedores, más uno de un solo uso que prepara las vistas de Kibana, corre las migraciones que faltan y comprueba los ETL. Después se arrancan el backend en el puerto 3000 y el frontend en el 5173. Con .\panel-comandos.ps1 se abre una página de botones en el puerto 5199 que ejecuta esos mismos comandos. Ese panel solo escucha en 127.0.0.1, solo corre una lista fija de comandos y exige un token, y borrar todo pide escribir BORRAR TODO.
+Desde la raíz se corre `.\arrancar.ps1`, que levanta los diez contenedores, más dos de un solo uso (las vistas de Kibana y los usuarios de Elasticsearch), corre las migraciones que faltan, comprueba los ETL, crea los usuarios de cada base y al final cuenta lo que quedó. Después `.\panel-comandos\servicios.ps1 -Accion backend` y `-Accion frontend` compilan y prenden el backend en el 3000 y el frontend en el 5173 sin abrir ventanas. Con `.\panel-comandos.ps1` se abre una página de botones en el puerto 5199 que ejecuta esos mismos comandos. Ese panel solo escucha en 127.0.0.1, solo corre una lista fija de comandos y exige un token.
 
-- Dónde se ve. `ARRANCAR.txt` lineas 8 a 35 y 64 a 70. `arrancar.ps1` lineas 1 a 9, las opciones. `comandos.txt` lineas 4 a 21 (el panel) y 84 a 88 (seguridad). `panel-comandos/servidor.mjs` lineas 12 a 23, por qué es seguro, y linea 620, donde escucha solo en 127.0.0.1.
+- Dónde se ve. `docs/instalacion.md`, la guía completa. `arrancar.ps1`, las opciones al principio. `panel-comandos/servidor.mjs`, por qué es seguro.
+- Si las bases están en otra PC. Esa PC se prepara con `.\preparar-pc-bases.ps1` y la de trabajo apunta a ella con `.\usar-bases-remotas.ps1 -Ip ...`, que cambia direcciones, usuarios y contraseñas del backend. Está en `remoto/README.md`.
 - Lo que pide el profesor. Sección 5.4, archivo de documentación con las instrucciones para poner en funcionamiento el sistema completo.
-- Por qué así. Los botones de arrancar hacen falta justo cuando el backend y el frontend están apagados, por eso el panel vive aparte de la aplicación. Está explicado en `panel-comandos/servidor.mjs` lineas 8 a 10.
 
 ### 115. ¿Cómo se organizó el equipo y cómo se trabajó con el backend?
-El equipo es de tres y cada uno tiene su área. Uno lleva el frontend, los datos y las migraciones, otro lleva el backend y el tercero apoya en lo que haga falta. Lo que el resto necesita del backend se escribe en un archivo de pendientes. Cada cambio ya construido deja una nota fechada en backend/cambio_propuestas con su contexto y sus pruebas, que solo se agrega y no se reescribe.
+El equipo es de tres. José David llevó el backend, José Manuel el frontend, los datos, las migraciones, los ETL, las pruebas y el arranque, y Juan Pablo los módulos de ClickHouse y Neo4j. Lo que el resto necesita del backend se escribe en un archivo de pendientes con la consulta ya probada. Cada cambio ya construido deja una nota fechada en `backend/cambio_propuestas` con su contexto y sus pruebas.
 
-- Dónde se ve. `docs/TRASPASO.md` lineas 406 a 407 (el equipo) y 302 a 305 (las reglas de trabajo). `docs/BACKEND-PENDIENTE.md` lineas 1 a 4. `backend/elementos Generales/README.md` lineas 29 a 31, qué es cambio_propuestas. `backend/cambio_propuestas/2026-09-18_0015-anillos-fraude-persistencia.md` lineas 1 a 12, un ejemplo del formato.
+- Dónde se ve. Sección 1.3 del informe de la Entrega final. `docs/BACKEND-PENDIENTE.md`. `backend/elementos Generales/README.md`, qué es cambio_propuestas.
 - Lo que pide el profesor. Sección 5.1, equipos de dos a tres integrantes con la distribución de responsabilidades. Sección 5.4, repositorio único con historial del progreso.
 - Por qué así. Una sola persona toca el backend para no pisarse, y todo va a la rama main sin ramas paralelas.
-
 
 ---
 
@@ -955,11 +955,11 @@ El equipo es de tres y cada uno tiene su área. Uno lleva el frontend, los datos
 Estas preguntas piden cosas de la entrega final. Cada respuesta dice con claridad qué existe hoy y dónde. Puestas al día el 26 de septiembre.
 
 ### 116. ¿Hay roles y permisos acotados por servicio en algún componente NoSQL, y hay evidencia de que un usuario sin permisos sea rechazado?
-Sí, en Redis. Hay tres usuarios de ACL, cada uno con lo justo. `default` es el del backend, trabaja con datos y corre el Lua de la venta relámpago, pero no puede vaciar, configurar ni listar con KEYS. `inspeccion` es el de RedisInsight y solo lee. `operador` es para mantenimiento a mano y puede todo. La evidencia es una prueba que intenta lo prohibido con cada usuario y ve el NOPERM. Lo que borraría algo no se ejecuta, se le pregunta antes a Redis con ACL DRYRUN.
+Sí, en todos los que tienen roles. En Redis cuatro usuarios de ACL, con el del backend encerrado en las claves `mesh:*`. En MongoDB, ClickHouse y Elasticsearch un `mesh_backend` que lee y escribe datos y no puede crear ni borrar colecciones, tablas o índices ni administrar usuarios, y un `mesh_lectura` que solo mira. En PostgreSQL lo mismo. La evidencia es una prueba que intenta lo prohibido con cada usuario y ve el rechazo, y cada negativa tiene su control (que el que sí tiene permiso pueda). Lo que borraría algo nunca se ejecuta a ciegas, se intenta en una transacción que se deshace, sobre algo que no existe, o se le pregunta antes a la base.
 
-- Dónde se ve. `docker-compose.yml` lineas 121 a 170, los tres usuarios con sus reglas, y 213, RedisInsight entrando como inspeccion. `redis/prueba_acceso.sh`, 31 OK, con el ACL DRYRUN en las lineas 53 a 63. En vivo, `.\demo-entrega-final.ps1 -Parte acceso` o el botón Quien puede que en Redis del panel de comandos. El ADR-11 está en el informe, sección 3.1.
+- Dónde se ve. `bash seguridad/prueba_acceso.sh`, 93 OK (50 de las cinco bases y 43 de Redis). `docs/SEGURIDAD.md`. En vivo, `.\demo-entrega-final.ps1 -Parte acceso` para Redis. El ADR-14 está en el informe, sección 3.1.
 - Lo que pide el profesor. Entrega final, roles y permisos acotados según el servicio, con evidencia de que quien no tiene permiso no puede operar fuera de su alcance (4 pts).
-- Por qué así. Redis es el que guarda lo más delicado en caliente, el carrito, los contadores de fraude y las ventas relámpago, y un FLUSHALL por error se lleva todo eso. Además sigue la autorización por rol en la API, con 401 y 403, en `backend/src/guards/sesion.guard.ts` lineas 41 a 98.
+- Ojo si preguntan por Neo4j. Es la única sin roles, porque la edición community no los tiene. La prueba le pide crear un rol y guarda lo que contesta, `Unsupported administration command`.
 
 ### 117. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
 Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector, tabla `vector_producto`, con un índice HNSW de coseno. `SimilaresService` pide los 200 vecinos más cercanos que estén activos y no sean el propio producto ni sus copias, y se queda con uno por grupo. Después pide a MongoDB cómo se ven. Los 3105 productos tienen vector. Las reseñas tienen el suyo en `vector_comentario`.
@@ -967,15 +967,15 @@ Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este
 - Dónde se ve. `migrations/040_vectores_en_postgres.sql`, las dos tablas. `etl/cargar_vectores.ps1`, paso 7d de arrancar. `backend/src/services/productos/similares.service.ts` y `helpers/vectores-pgvector.ts` (`buscarCercanos()`, que sube `hnsw.ef_search` y activa `iterative_scan` para que el filtro no deje la lista corta). `vectores-sync.service.ts` recalcula cada 10 segundos los productos editados. `pruebas/recomendacion_semantica.py`, 15 OK. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`, que compara el índice HNSW con la búsqueda exacta: 1,6 ms contra 7,4 ms, los mismos seis.
 - Lo que pide el profesor. Entrega final, recomendación por similitud semántica de la descripción con representaciones vectoriales (5 pts). La sección 5.2 da como referencia una extensión vectorial sobre PostgreSQL, y el 16 de octubre pidió explícitamente pgvector.
 - Por qué así. Es más exacto. Medido por Jose David con el mismo catálogo, pgvector da el coseno exacto en 1000 de 1001 productos y el índice `int8_hnsw` de Elasticsearch en 317, porque cuantiza los vectores. Y las comparaciones de todas las reseñas contra todas las hace PostgreSQL sin sacar los vectores de la base.
-- Ojo si preguntan por la historia. Estuvo en pgvector del 25 de septiembre al 2 de octubre, en Elasticsearch del 2 al 16 de octubre, y volvió. Al volver, arrancar copió los 3105 vectores de Elasticsearch a PostgreSQL sin llamar a Ollama (mismo hash, mismo modelo). El ADR-10 de `docs/ARQUITECTURA.md` lo cuenta con números.
+- Ojo si preguntan por la historia. Estuvo en pgvector del 25 de septiembre al 2 de octubre, en Elasticsearch del 2 al 16 de octubre, y volvió. Al volver, arrancar copió los 3105 vectores de Elasticsearch a PostgreSQL sin llamar a Ollama (mismo hash, mismo modelo). El ADR-13 del informe de la Entrega final, secciones 2.1 y 2.2, lo cuenta con números.
 
 ### 118. ¿Qué decisiones de arquitectura se sostendrían y cuáles se replantearían? (retrospectiva)
-Está en el capítulo 6 del informe de la Entrega final. Son siete decisiones que sostendríamos, entre ellas el dinero y el stock en PostgreSQL sin migrar a NewSQL, el catálogo en MongoDB y Elasticsearch como copia reconstruible. Y siete que replantearíamos, cada una con lo que pasó y lo que haríamos distinto. Un ejemplo que sirve para contarlo es la base columnar, que se rechazó el 3 de septiembre con dos números medidos y entró el 6 como ClickHouse porque el dato cambió.
+Está en el capítulo 7 del informe de la Entrega final. Son siete decisiones que sostendríamos, entre ellas el dinero y el stock en PostgreSQL sin migrar a NewSQL, el catálogo en MongoDB y Elasticsearch como copia reconstruible. Y ocho que replantearíamos, cada una con lo que pasó, lo que haríamos distinto y su registro. La más clara es el carrito, que vivía solo en Redis (ADR-6) y el 17 de octubre pasó a tener su verdad en PostgreSQL (ADR-21), porque un Redis vaciado se llevaba los carritos sin dejar rastro.
 
-- Dónde se ve. `Reporte Entrega Final - DABD2 - Mesh.docx`, capítulo 6, que sale de `contenido-entrega-final.json`. `docs/ARQUITECTURA.md` lineas 143 a 156 (la columnar y el cambio) y 219 a 234 (lo que el diagrama no esconde). `docs/DECISION-GRAFOS-VS-COLUMNAR.md` linea 256, consecuencias.
+- Dónde se ve. `Reporte Entrega Final - DABD2 - Mesh.docx`, capítulo 7, que sale de `contenido-entrega-final.json`. `docs/DECISIONES.md`, el estado de cada decisión.
 - Lo que pide el profesor. Entrega final, documento de retrospectiva con las decisiones que se sostendrían y las que se replantearían, justificadas en ambos casos (4 pts).
-- Por qué así. El cambio de la columnar muestra el criterio, la decisión se sostuvo con números y se revisó cuando el volumen de eventos cambió.
-- Ojo, la de los vectores se replanteó dos veces. El 4 de octubre se mudaron a Elasticsearch, cuando aparecieron las reseñas con vector y la búsqueda por intención, y el 16 volvieron a pgvector a pedido del profesor y porque se midió que era más exacto (1000 de 1001 contra 317). El informe la pone entre las que se replantean, con la lección de medir la precisión antes de mudar un dato.
+- Ojo, la de los vectores se replanteó dos veces. El 4 de octubre se mudaron a Elasticsearch y el 16 volvieron a pgvector a pedido del profesor y porque se midió que era más exacto (1000 de 1001 contra 317).
+- La regla que sale de las ocho. Cada dato tiene un solo dueño escrito, y todo lo demás se puede borrar y volver a calcular sin perder nada.
 
 ### 119. ¿Cómo funciona el descuento de una oferta y por qué una venta relámpago lo exige?
 La oferta guarda su precio de lista y aparte un porcentaje de descuento que puede ser nulo. El precio final no se guarda en ninguna columna, se calcula en cada consulta con `ROUND(precio * (1 - COALESCE(porcentaje_descuento, 0) / 100), 2)`. El trigger del historial escucha el precio y el porcentaje, así que cambiar solo el descuento deja una fila nueva en `precio_historial`, y la compra cobra el precio final. Una venta relámpago no se puede abrir sin descuento (409), y el descuento no se puede quitar con la venta abierta (409).
@@ -1178,3 +1178,32 @@ Cero resultados y, aparte, productos sugeridos. Primero los más cercanos por si
 Con dos líneas por base, una al caer y otra al volver, y con la ruta `GET /db/cortacircuitos`, que dice qué base ve caída y desde cuándo.
 
 - Dónde se ve. `[Cortacircuitos] Redis no responde (Command timed out): pausa de 15 s` y `[Cortacircuitos] Redis volvio`. Cada respaldo deja además la suya, `[CatalogoRespaldo]`, `[BuscadorRespaldo]`, `[RecomendacionesRespaldo]` y `[SesionGuard]`.
+
+---
+
+## Parte 11. Lo que cambió el 23 de octubre
+
+El control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y el registro único de decisiones. Las preguntas 104, 108, 109, 114 a 116 y 118 se pusieron al día el mismo día.
+
+### 149. ¿Por qué Neo4j es la única base sin un usuario por servicio?
+Porque la edición community de Neo4j, la gratuita, no tiene control de acceso por roles. Crear un rol, darle permisos o negárselos son órdenes de la edición enterprise, que es de pago, y en community todo usuario puede todo, así que un segundo usuario no limitaría nada. Lo que sí tiene es contraseña obligatoria, el navegador del 7474 solo en la misma PC y bolt (7687) como única puerta.
+
+- Dónde se ve. `bash seguridad/prueba_acceso.sh`, parte 5, que intenta `CREATE ROLE` y guarda la respuesta, `Unsupported administration command`. `docs/SEGURIDAD.md`, sección Por qué Neo4j no. El comentario del bloque de Neo4j en `docker-compose.yml`.
+- Ojo si preguntan qué haríamos. El grafo es una proyección de PostgreSQL que se rehace entera, así que hoy el riesgo es bajo. Si guardara algo propio, la salida sería la edición enterprise o que solo el backend le hable.
+
+### 150. ¿Cómo se encendió la seguridad de Elasticsearch sin romper Kibana ni el ETL?
+Con `xpack.security.enabled` en verdadero y la contraseña de `elastic` saliendo del `.env`, no generada al vuelo. Un contenedor de un solo uso, `elastic-usuarios`, corre `seguridad/elastic.sh` en cada arranque y le pone su contraseña a `kibana_system` (con la que Kibana habla con Elasticsearch), crea los roles y los usuarios `mesh_backend` y `mesh_lectura`. El arranque, el ETL y las pruebas entran como `elastic`, con una cabecera en PowerShell y con el usuario dentro de la URL en los scripts de bash (`seguridad/url_elastic.sh`).
+
+- Dónde se ve. El bloque de Elasticsearch y el de `elastic-usuarios` en `docker-compose.yml`. `backend/src/database/elastic.ts`, que entra como `mesh_backend`. La prueba, parte 4 de `seguridad/prueba_acceso.sh`, sin usuario da 401 y `mesh_backend` no puede borrar ni crear índices (403).
+- Por qué sin TLS. Un solo nodo no necesita cifrar el transporte entre nodos, y entre PC el tráfico va dentro de Tailscale, que ya va cifrado.
+
+### 151. ¿Por qué el resultado de una búsqueda trae la foto y de dónde sale?
+Lo pidió el profesor, que la tarjeta del buscador salga entera de Elasticsearch, de una sola consulta. Desde el 23 de octubre cada documento de `mesh_productos` guarda el enlace de la primera foto de la primera variante en el campo `imagen`, que no se indexa porque nadie busca por un enlace. Lo llenan el ETL del buscador y el worker que lo mantiene al día, y lo devuelven las seis formas de buscar. Si Elasticsearch está caído, el respaldo de PostgreSQL saca la foto de `variante_catalogo`.
+
+- Dónde se ve. `elastic/001_indice.json` (el campo con `"index": false`), `etl/extraer_busqueda.js`, `backend/src/services/buscador/buscador-sync.service.ts` (`primeraImagen`) y la página `/buscar`. Es el ADR-23.
+- Ojo. El arranque rehace el índice si le falta el campo, así una PC que ya tenía el índice se pone al día sola.
+
+### 152. ¿Por qué hay un registro único de ADR y qué cambió de número?
+Porque los números chocaban entre entregas. Desde el 23 de octubre las decisiones van del 1 al 23 en el orden en que se tomaron. Las de la Entrega 1 conservan su número (1 a 5). Las de la Entrega 2 pasaron a 6 a 10 (el carrito era ADR-4 y es ADR-6, la oferta Lua era ADR-5 y es ADR-7, grafos contra columnar era ADR-3 y es ADR-8, Neo4j era ADR-7 y es ADR-9, ClickHouse era ADR-6 y es ADR-10). Elasticsearch es ADR-11, NewSQL ADR-12, los vectores ADR-13 y el control de acceso ADR-14. Del 15 al 23 son las decisiones que se habían hecho sin registro.
+
+- Dónde se ve. `docs/DECISIONES.md`, con la columna Antes. Sección 5.1 del informe de la Entrega final.

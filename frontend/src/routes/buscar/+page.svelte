@@ -3,6 +3,7 @@
 	import { goto } from '$app/navigation';
 	import Cabecera from '$lib/Cabecera.svelte';
 	import Pie from '$lib/Pie.svelte';
+	import FotoBusqueda from '$lib/FotoBusqueda.svelte';
 	import {
 		buscarProductos,
 		buscarFacetado,
@@ -327,6 +328,8 @@
 
 						<a class="tarjeta" href="/producto/{r.id_producto}">
 
+							<FotoBusqueda src={r.imagen} tipo="ancha" />
+
 							<span class="nombre">{r.nombre}</span>
 
 							{#if r.categoria}<span class="cat">{r.categoria}</span>{/if}
@@ -454,6 +457,7 @@
 					{#each sugeridos as r (r.id_producto)}
 						<li>
 							<a class="fila" href="/producto/{r.id_producto}">
+								<FotoBusqueda src={r.imagen} />
 								<span class="texto">
 									<span class="nombre">{r.nombre}</span>
 									<span class="bajo">
@@ -576,6 +580,7 @@
 										if (!verTodo) registrarClicBusqueda(consulta, r.id_producto, i + 1, facetasDelClic());
 									}}
 								>
+									<FotoBusqueda src={r.imagen} />
 									<span class="texto">
 										<span class="nombre">{r.nombre}</span>
 										<span class="bajo">
@@ -898,6 +903,7 @@
 	}
 
 	.texto {
+		flex: 1;
 		display: flex;
 		flex-direction: column;
 		gap: var(--e1);
@@ -987,14 +993,17 @@
 		}
 
 		/* En telefono el precio se va debajo del nombre: en una sola fila, un
-		   nombre de producto de verdad deja el precio en dos digitos por linea. */
+		   nombre de producto de verdad deja el precio en dos digitos por linea.
+		   La foto se queda a la izquierda de los dos. */
 		.fila {
-			flex-direction: column;
-			align-items: flex-start;
-			gap: var(--e2);
+			display: grid;
+			grid-template-columns: auto minmax(0, 1fr);
+			align-items: start;
+			gap: var(--e2) var(--e3);
 		}
 
 		.cifras {
+			grid-column: 2;
 			align-items: flex-start;
 			text-align: left;
 		}

@@ -1,0 +1,99 @@
+# Guion de la presentacion final
+
+Unos 15 minutos, mas la demo y las preguntas. Cada uno presenta lo que hizo. El
+texto es una guia para decirlo con las propias palabras, no para leerlo.
+
+| Laminas | Quien | Tiempo |
+|---|---|---|
+| 1 a 6, la tienda y la arquitectura | Jose Manuel | 4 min |
+| 7 a 9, la recomendacion semantica | Jose David | 3 min |
+| 10 a 12, el control de acceso | Jose Manuel | 3 min |
+| 13, si se cae una base | Juan Pablo | 1 min |
+| 14 y 15, el buscador y las decisiones | Jose David | 2 min |
+| 16 y 17, la retrospectiva | Juan Pablo | 2 min |
+| 18, la demo | los tres | 5 min |
+
+## 1. Portada (Jose Manuel)
+Somos Mesh. Hicimos TiendaYa con seis bases de datos, y cada una entro por la
+forma de la pregunta que contesta, no por tener muchas.
+
+## 2. El equipo (Jose Manuel)
+Jose David llevo el backend, yo los datos, el frontend y el arranque, y Juan
+Pablo los modulos de ClickHouse y Neo4j.
+
+## 3. El reto (Jose Manuel)
+Muchos vendedores comparten un catalogo. El producto no es de nadie y la oferta
+si. Las cifras, seis bases, 86 tablas de 48 migraciones, 23 decisiones con su
+registro y 93 comprobaciones del control de acceso, ninguna mal.
+
+## 4. Cada base por su pregunta (Jose Manuel)
+Recorrer las seis tarjetas de izquierda a derecha. PostgreSQL es el dinero,
+MongoDB el catalogo, Redis lo rapido y atomico, Neo4j las relaciones, ClickHouse
+los eventos y Elasticsearch la busqueda.
+
+## 5. La regla (Jose Manuel)
+PostgreSQL es la verdad y lo demas se puede rehacer. Si preguntan por que no todo
+en PostgreSQL, cada base contesta mejor su pregunta, pero solo una guarda la
+verdad.
+
+## 6. El diagrama (Jose Manuel)
+Flechas continuas, lo que hace el backend. Punteadas y numeradas, datos que
+viajan entre bases. Ollama tiene su caja y cada base dice con que usuario entra
+el backend. Sale de `docs/generar-arquitectura.py`.
+
+## 7. Recomendacion semantica (Jose David)
+Los cuatro pasos. El texto sale de MongoDB, Ollama lo vuelve 768 numeros, se
+guarda en pgvector con un indice HNSW y la ficha pide los seis mas cercanos.
+Las cifras, 1000 de 1001 contra el coseno exacto, 3,8 ms, y 66 por ciento en la
+misma categoria contra 6 al azar.
+
+## 8. En la tienda (Jose David)
+Una frase sin ninguna palabra en comun encuentra audifonos por lo que dicen las
+resenas. Y la ficha con sus parecidos.
+
+## 9. El viaje del vector (Jose David)
+pgvector, despues Elasticsearch por comodidad, y de vuelta a pgvector cuando se
+midio la precision. La leccion, una decision comoda tambien hay que medirla.
+
+## 10. Control de acceso (Jose Manuel)
+Cada servicio entra con lo justo. El backend lee y escribe datos y no puede
+crear ni borrar tablas, colecciones o indices. Las herramientas solo miran.
+
+## 11. Lo que encontramos (Jose Manuel)
+Ser honestos. Elasticsearch estaba abierto con un comentario que decia lo
+contrario, DbGate entraba como root, y Neo4j no puede porque su edicion gratuita
+no trae roles. Los tres estan corregidos o explicados.
+
+## 12. La prueba (Jose Manuel)
+93 bien y 0 mal. Cada negativa tiene su control, y lo peligroso nunca se intenta
+a ciegas.
+
+## 13. Si se cae una base (Juan Pablo)
+Cada base tiene su respaldo. Con cualquiera caida menos PostgreSQL se sigue
+comprando. Con PostgreSQL caido no se cobra nada a medias.
+
+## 14. La foto en el buscador (Jose David)
+Lo pidio el profesor. La foto viaja en el mismo documento de Elasticsearch,
+guardada sin indexar, y la tarjeta sale de una sola consulta.
+
+## 15. Las 23 decisiones (Jose David)
+Los numeros chocaban entre entregas y ahora hay un solo registro. Las verdes son
+las que faltaban, como comprar sin MongoDB o el carrito en PostgreSQL.
+
+## 16. Retrospectiva (Juan Pablo)
+Siete que sostendriamos y ocho que no. La mas clara, el carrito solo en Redis,
+que el 17 de octubre paso a tener su verdad en PostgreSQL.
+
+## 17. Lo aprendido (Juan Pablo)
+Cada dato con un solo dueno escrito.
+
+## 18. Demo (los tres)
+En el panel de comandos (`.\panel-comandos.ps1`), en este orden.
+1. Buscar `labtop` y luego una frase, en la tienda. Se ven las fotos.
+2. Abrir una laptop y bajar a Parecidos a este.
+3. `.\demo-entrega-final.ps1 -Parte acceso`, y si hay tiempo
+   `bash seguridad/prueba_acceso.sh`.
+4. Caida de una base, apagar Redis o MongoDB y recargar la tienda.
+
+## 19. Gracias
+Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`, 152.

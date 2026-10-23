@@ -32,7 +32,7 @@ SALIDA = os.path.join(BASE, "diagrama-arquitectura.drawio")
 ANCHO_DB = 250
 HUECO_DB = 78
 Y_DB = 390
-ALTO_DB = 250
+ALTO_DB = 290
 
 # orden de izquierda a derecha pensado para que casi todos los flujos sean
 # entre vecinos. clave, titulo, rol, lineas, relleno, borde
@@ -88,7 +88,7 @@ CAJAS = [
         "venta relámpago con script Lua",
         "candado de checkout",
         "contadores de fraude del login",
-        "tres usuarios de ACL por servicio",
+        "cuatro usuarios de ACL por servicio",
         "más vendidos, más vistos, combos",
         "y también vieron, ya calculados",
     ], "#F8CECC", "#B85450"),
@@ -109,6 +109,26 @@ FLUJOS = [
     (11, "mongo", "pg", "MongoDB a PostgreSQL, el nombre, estado y portada de cada producto y variante se copian a producto_catalogo y variante_catalogo para comprar y ver la tienda sin MongoDB, y cada 10 segundos el texto de cada producto que cambió pasa por Ollama y su vector queda en vector_producto"),
     (12, "pg", "es", "PostgreSQL a Elasticsearch, cada oferta tocada entra en la cola evento_oferta, un worker la indexa en mesh_ofertas cada 5 segundos y la percola contra mesh_seguimientos, y el aviso queda en PostgreSQL"),
 ]
+
+# con que usuario entra el backend a cada motor (control de acceso, ADR-14)
+USUARIO = {
+    "neo4j": "el backend entra como neo4j,<br>community no trae roles",
+    "pg": "el backend entra como mesh_backend,<br>filas sí, tablas no",
+    "mongo": "el backend entra como mesh_backend,<br>documentos sí, colecciones no",
+    "es": "con seguridad, el backend entra como<br>mesh_backend, solo índices mesh_*",
+    "ch": "el backend entra como mesh_backend,<br>leer y agregar eventos",
+    "redis": "el backend entra como backend,<br>solo las claves mesh:*",
+}
+
+# Las flechas que saltan cajas van por debajo, todas desde o hacia PostgreSQL.
+# Van anidadas para que ninguna cruce a otra. La que va mas lejos sale mas a la
+# izquierda de PostgreSQL, baja mas y llega mas a la derecha del destino.
+# numero de flujo, fraccion en PostgreSQL, fraccion en el otro motor, nivel
+DEBAJO = {
+    5: (0.92, 0.10, 0), 12: (0.82, 0.22, 1),
+    9: (0.70, 0.10, 2), 7: (0.58, 0.22, 3),
+    6: (0.46, 0.10, 4), 10: (0.34, 0.22, 5),
+}
 
 # lo que el backend hace con cada motor, escrito sobre su flecha
 USO = {
@@ -262,7 +282,7 @@ def construir():
     x0 = 40
 
     L.texto(x0, 14, 1500, 30, "Mesh, arquitectura políglota con seis motores de persistencia", 20, negrita=True)
-    L.texto(x0, 48, 1700, 24, "Estado al 20 de octubre de 2026. Las flechas continuas son lo que hace el backend, "
+    L.texto(x0, 48, 1700, 24, "Estado al 23 de octubre de 2026. Las flechas continuas son lo que hace el backend, "
             "las punteadas y numeradas son datos que viajan de un motor a otro, y su mecanismo está en la leyenda.",
             11, gris=True)
 
@@ -270,7 +290,8 @@ def construir():
     # flecha a cada motor baje derecha, sin cruzar otras cajas.
     ancho_be = ancho_total
     L.rect("cliente", x0, 90, 300, 62, "<b>Frontend</b><br>SvelteKit, puerto 5173", "#E6E6F5", "#3D3D99")
-    L.rect("workers", x0 + 400, 80, 1380, 104,
+    x_ollama = x0 + (len(CAJAS) - 1) * (ANCHO_DB + HUECO_DB)
+    L.rect("workers", x0 + 400, 80, x_ollama - x0 - 430, 104,
            "<b>Workers del backend</b><br>grafo de reseñas y de compras 10 s, buscador 10 s, catálogo a MongoDB 5 s, "
            "ofertas a Elasticsearch 5 s, login a Elasticsearch 5 s, vectores de productos y de reseñas 10 s, clasificador de reseñas 30 s, "
            "reservas de venta relámpago 10 s, ventas relámpago y descuentos vencidos 1 min, reglas automáticas 60 s, reglas por fecha 15 min, "
@@ -283,20 +304,34 @@ def construir():
            "#E6E6F5", "#3D3D99")
     L.flecha("cliente", "backend", (0.08, 1.0), (0.08 * 300.0 / ancho_be, 0.0), "HTTP con cookie de sesión")
 
+    # Ollama, en la misma PC que el backend. Convierte el texto en vectores
+    # para pgvector (flujo 11) y la frase de quien busca en la híbrida.
+    L.rect("ollama", x_ollama, 80, ANCHO_DB, 104,
+           "<b>Ollama</b><br>paraphrase-multilingual<br>texto a 768 números, en la<br>misma PC, sin servicio externo",
+           "#F5F5F5", "#666666", sizes=11)
+    fo = (x_ollama + ANCHO_DB / 2.0 - x0) / float(ancho_be)
+    L.flecha("backend", "ollama", (fo, 0.0), (0.5, 1.0), "", color="#222222", grosor=1.8)
+
+    # Las seis bases pueden correr en otra PC (modo remoto, remoto/README.md).
+    # El rotulo va abajo, bajo MongoDB, donde no pasa ninguna flecha.
+    L.rect("remoto", x0 - 14, Y_DB - 30, ancho_total + 28, ALTO_DB + 58, "", "#FFFFFF", "#999999",
+           redondo=False, dash=True)
+    x_mongo = x0 + 2 * (ANCHO_DB + HUECO_DB)
+    L.texto(x_mongo - 20, Y_DB + ALTO_DB + 4, ANCHO_DB + 60, 20,
+            "Las seis bases, en esta PC o en otra por Tailscale", 11, gris=True)
+
     # motores
     xs = {}
     for i, (k, titulo, rol, lineas, relleno, borde) in enumerate(CAJAS):
         x = x0 + i * (ANCHO_DB + HUECO_DB)
         xs[k] = x
-        html = "<b>%s</b><br><b>%s</b><br><br>%s" % (titulo, rol, "<br>".join(lineas))
+        html = "<b>%s</b><br><b>%s</b><br><br>%s<br><br><i>%s</i>" % (titulo, rol, "<br>".join(lineas), USUARIO[k])
         L.rect(k, x, Y_DB, ANCHO_DB, ALTO_DB, html, relleno, borde, sizes=12)
         fx = (x + ANCHO_DB / 2.0 - x0) / float(ancho_be)
         L.flecha("backend", k, (fx, 1.0), (0.5, 0.0), USO[k], color="#222222", grosor=1.8)
 
     # flujos numerados. Adyacentes van por el hueco, los saltados por debajo.
     orden = [k for k, *_ in CAJAS]
-    y_bajo = {5: Y_DB + ALTO_DB + 34, 6: Y_DB + ALTO_DB + 62, 7: Y_DB + ALTO_DB + 90,
-              9: Y_DB + ALTO_DB + 118, 10: Y_DB + ALTO_DB + 146, 12: Y_DB + ALTO_DB + 174}
     for n, a, b, _ in FLUJOS:
         ia, ib = orden.index(a), orden.index(b)
         etiqueta = str(n)
@@ -307,14 +342,15 @@ def construir():
             base = 0.30 if (a, b) in ((("pg", "neo4j")), ("mongo", "es"), ("pg", "mongo"), ("ch", "redis")) else 0.72
             L.flecha(a, b, (lado_a[0], base), (lado_b[0], base), etiqueta, punteada=True, color=col)
         else:
-            y = y_bajo[n]
-            xa = xs[a] + ANCHO_DB * (0.30 if ib < ia else 0.70) if False else xs[a] + int(ANCHO_DB * (0.32 + 0.12 * (n % 3)))
-            xb = xs[b] + int(ANCHO_DB * (0.32 + 0.12 * (n % 3)))
-            L.flecha(a, b, ((xa - xs[a]) / float(ANCHO_DB), 1.0), ((xb - xs[b]) / float(ANCHO_DB), 1.0), etiqueta,
-                     puntos=[(xa, y), (xb, y)], punteada=True, color=col)
+            en_pg, en_otro, nivel = DEBAJO[n]
+            fa, fb = (en_pg, en_otro) if a == "pg" else (en_otro, en_pg)
+            y = Y_DB + ALTO_DB + 48 + nivel * 28
+            xa = xs[a] + int(ANCHO_DB * fa)
+            xb = xs[b] + int(ANCHO_DB * fb)
+            L.flecha(a, b, (fa, 1.0), (fb, 1.0), etiqueta, puntos=[(xa, y), (xb, y)], punteada=True, color=col)
 
     # leyenda
-    y_ley = Y_DB + ALTO_DB + 224
+    y_ley = Y_DB + ALTO_DB + 236
     L.texto(x0, y_ley, 800, 24, "Leyenda de las flechas punteadas", 13, negrita=True)
     y = y_ley + 30
     for n, a, b, texto in FLUJOS:
@@ -322,16 +358,17 @@ def construir():
         y += 22
     y += 14
     L.texto(x0, y, 1800, 22,
-            "Herramientas de inspección que no son parte del sistema, pgAdmin 5050, DbGate 3001, RedisInsight 5540, "
-            "Kibana 5601, Neo4j Browser 7474 y ClickHouse play 8123.", 11, gris=True)
+            "Herramientas de inspección que no son parte del sistema, solo en 127.0.0.1, pgAdmin 5050, DbGate 3001 como "
+            "mesh_lectura, RedisInsight 5540 como inspeccion, Kibana 5601, Neo4j Browser 7474 y ClickHouse play 8123. "
+            "Las seis bases piden usuario y contraseña.", 11, gris=True)
     y += 24
     L.texto(x0, y, 1800, 22,
-            "Todo corre en diez contenedores de un mismo Docker, más uno de un solo uso que prepara las vistas de Kibana y el de "
-            "Ollama, que solo se levanta si la PC no lo tiene. Cada motor guarda lo que le corresponde por la forma de la pregunta que va a recibir.", 11, gris=True)
+            "Todo corre en diez contenedores de un mismo Docker, más dos de un solo uso que preparan las vistas de Kibana y los usuarios "
+            "de Elasticsearch, y el de Ollama, que solo se levanta si la PC no lo tiene. Cada motor guarda lo que le corresponde por la forma de la pregunta que va a recibir.", 11, gris=True)
     return L
 
 
-def comprobar(L):
+def comprobar(L, extra=0):
     ids = set()
     aristas = []
     for c in L.celdas:
@@ -341,7 +378,7 @@ def comprobar(L):
     fallos = ["la flecha %s a %s nombra una caja que no existe" % (s, t)
               for s, t in aristas if s not in ids or t not in ids]
     n_flujos = sum(1 for s, t in aristas)
-    esperadas = 1 + len(CAJAS) + len(FLUJOS)
+    esperadas = 1 + len(CAJAS) + len(FLUJOS) + extra
     if n_flujos != esperadas:
         fallos.append("hay %d flechas y se esperaban %d" % (n_flujos, esperadas))
     return fallos
@@ -379,7 +416,8 @@ def main():
         exportar_png(salida)
         return 0
     L = construir_informe() if informe else construir()
-    fallos = comprobar(L)
+    # la version completa lleva ademas la flecha del backend a Ollama
+    fallos = comprobar(L, 0 if informe else 1)
     with io.open(salida, "w", encoding="utf-8") as f:
         f.write(L.xml())
     print("  %d elementos -> %s" % (len(L.celdas), salida))

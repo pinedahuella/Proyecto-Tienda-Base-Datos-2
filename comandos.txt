@@ -370,7 +370,9 @@ cuentas y los pedidos en PostgreSQL. Es el grupo Demo de descuentos del panel.
 
 Las Demos de la Entrega final:
 
-  .\demo-entrega-final.ps1 -Parte acceso                      los tres usuarios de Redis
+  .\demo-entrega-final.ps1 -Parte acceso                      los usuarios de Redis
+  .\demo-entrega-final.ps1 -Parte bases                       el control de acceso de las seis bases
+  bash seguridad/prueba_acceso.sh                             lo mismo, la prueba completa (93 OK)
   .\demo-entrega-final.ps1 -Parte semantica -Producto laptop  los parecidos, en la base y por /similares
   .\demo-entrega-final.ps1 -Parte facetas -Texto laptop       facetas, palabra mal escrita y sugerencias
   .\demo-entrega-final.ps1 -Parte vectores                    vectores, pendientes del worker y Ollama

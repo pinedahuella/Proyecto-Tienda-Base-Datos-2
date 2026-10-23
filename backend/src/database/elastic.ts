@@ -1,6 +1,7 @@
 import { Logger } from '@nestjs/common';
 import { Client, errors } from '@elastic/elasticsearch';
 import { Cortacircuitos } from '../helpers/cortacircuitos';
+import { obligatoria } from '../helpers/entorno';
 
 const logger = new Logger('Elasticsearch');
 
@@ -13,20 +14,26 @@ const logger = new Logger('Elasticsearch');
  * `etl/cargar_busqueda.sh` desde el catalogo de MongoDB, y el backend solo la
  * CONSULTA. No guarda nada que no este ya en las otras bases.
  *
- * Sin autenticacion, a proposito: `docker-compose.yml` trae
- * `xpack.security.enabled: false` porque esta base no guarda nada que no
- * este ya en PostgreSQL/Mongo y solo escucha en localhost. Por eso, a
- * diferencia de mongo.ts/redis.ts/neo4j.ts, aca no hace falta `obligatoria()`
- * para ningun usuario ni contrasena.
+ * Con usuario y contrasena desde el 2026-10-23, cuando se encendio la
+ * seguridad de Elasticsearch (`docker-compose.yml`). El backend entra como
+ * `mesh_backend`, que solo lee y escribe documentos en los indices `mesh_*`;
+ * los indices los crea arrancar.ps1 como `elastic` (seguridad/elastic.sh).
+ * Sin ELASTIC_USER el cliente va sin autenticacion, que es lo que pide un
+ * Elasticsearch que todavia no tiene la seguridad encendida (la PC remota
+ * antes de correr arrancar.ps1 con esta version).
  *
  * El cliente no abre ninguna conexion al construirse (es HTTP, no un socket
  * persistente): cada llamada abre su propia peticion.
  */
 const host = process.env.ELASTIC_HOST ?? 'localhost';
 const port = Number(process.env.ELASTIC_PORT ?? 9200);
+const usuario = process.env.ELASTIC_USER;
 
 const cliente = new Client({
   node: `http://${host}:${port}`,
+  ...(usuario
+    ? { auth: { username: usuario, password: obligatoria('ELASTIC_PASSWORD') } }
+    : {}),
   // Sin esto, una caida de Elasticsearch reintenta varias veces antes de
   // fallar y la peticion HTTP se queda colgada mucho mas de lo razonable.
   requestTimeout: 8000,

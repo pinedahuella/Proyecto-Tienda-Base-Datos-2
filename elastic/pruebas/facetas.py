@@ -25,11 +25,36 @@ Cada comprobacion tiene su control. Sale con 1 si algo falla.
 """
 import re
 import json
+import base64
 import os
 import sys
 import urllib.request
 
 ES = os.environ.get('ES_URL', 'http://localhost:9200')
+
+
+def _clave_elastic():
+    """La contrasena de elastic: del ambiente o del .env de la raiz.
+
+    Elasticsearch tiene la seguridad encendida desde el 2026-10-23.
+    """
+    if os.environ.get('ELASTIC_PASSWORD'):
+        return os.environ['ELASTIC_PASSWORD']
+    ruta = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '.env')
+    try:
+        with open(ruta, encoding='utf-8') as f:
+            for linea in f:
+                if linea.startswith('ELASTIC_PASSWORD='):
+                    return linea.split('=', 1)[1].strip()
+    except OSError:
+        pass
+    return ''
+
+
+_CLAVE = _clave_elastic()
+CABECERAS = {'Content-Type': 'application/json'}
+if _CLAVE:
+    CABECERAS['Authorization'] = 'Basic ' + base64.b64encode(('elastic:' + _CLAVE).encode()).decode()
 INDICE = 'mesh_productos'
 FALLAS = 0
 OKS = 0
@@ -107,7 +132,7 @@ def autocompletar(prefijo, tamano=8):
 
 def buscar(cuerpo):
     req = urllib.request.Request(ES + '/' + INDICE + '/_search', data=json.dumps(cuerpo).encode('utf-8'),
-                                 headers={'Content-Type': 'application/json'})
+                                 headers=CABECERAS)
     with urllib.request.urlopen(req) as r:
         return json.load(r)
 

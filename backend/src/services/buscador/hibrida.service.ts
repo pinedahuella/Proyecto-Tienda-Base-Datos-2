@@ -52,6 +52,8 @@ interface DocumentoIndice {
   stock_total: number;
   resenas_promedio: number;
   resenas_total: number;
+  /** El enlace de la foto de la tarjeta, o null. Guardado sin indexar. */
+  imagen: string | null;
 }
 
 const CAMPOS_DEVUELTOS = [
@@ -64,6 +66,7 @@ const CAMPOS_DEVUELTOS = [
   'stock_total',
   'resenas_promedio',
   'resenas_total',
+  'imagen',
 ];
 
 /** Un producto cercano a la frase, de `vector_producto`. */
@@ -385,6 +388,7 @@ export class BuscadorHibridoService {
         stock_total: doc.stock_total ?? 0,
         resenas_promedio: doc.resenas_promedio ?? 0,
         resenas_total: doc.resenas_total ?? 0,
+        imagen: doc.imagen ?? null,
         puntaje: redondear(suma / maximo),
         origen,
         posicion_texto: texto?.posicion ?? null,
@@ -410,5 +414,6 @@ function deResultado(r: ResultadoBusquedaProducto): DocumentoIndice {
     stock_total: r.stock_total,
     resenas_promedio: r.resenas_promedio,
     resenas_total: r.resenas_total,
+    imagen: r.imagen,
   };
 }

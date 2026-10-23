@@ -81,8 +81,23 @@ const cursor = db.productos.find(FILTRO, {
   hay_descuento: 1,
   resenas_promedio: 1,
   resenas_total: 1,
-  'variantes.nombre_variante': 1
+  'variantes.nombre_variante': 1,
+  'variantes.imagenes': 1
 });
+
+/**
+ * La foto de la tarjeta: la primera imagen de la primera variante que tenga
+ * alguna. Va en el documento desde el 2026-10-23 para que la tarjeta del
+ * buscador salga entera de Elasticsearch. El mapeo la guarda sin indexar.
+ * Igual que primeraImagen() del worker del backend (buscador-sync.service.ts).
+ */
+function primeraImagen(p) {
+  for (const v of p.variantes || []) {
+    const imagen = (v.imagenes || []).find((i) => typeof i === 'string' && i.trim().length > 0);
+    if (imagen) return imagen;
+  }
+  return null;
+}
 
 const fs = require('fs');
 const lineas = [];
@@ -120,7 +135,9 @@ cursor.forEach(function (p) {
     resenas_promedio: p.resenas_promedio ?? 0,
     resenas_total: p.resenas_total ?? 0,
 
-    variantes: variantes
+    variantes: variantes,
+
+    imagen: primeraImagen(p)
   };
 
   lineas.push(JSON.stringify({ index: { _id: p._id } }));

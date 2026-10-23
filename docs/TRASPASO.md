@@ -3,7 +3,40 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-20, 17:00**.
+Ultima actualizacion: **2026-10-23, madrugada**.
+
+**EMPIEZA AQUI (22 al 23-10, noche). Control de acceso en todas las bases, foto en el buscador, registro unico de
+decisiones, Word final, diagrama, docs y presentacion.** Con permiso de David para tocar todo. Probado con las bases
+de la PC de Meme (local).
+
+- **Usuarios por servicio** (`docs/SEGURIDAD.md`, ADR-14). `mesh_backend` y `mesh_lectura` en PostgreSQL, MongoDB
+  (rol a medida), ClickHouse y Elasticsearch, que ahora tiene la seguridad encendida (contenedor de un solo uso
+  `elastic-usuarios`). Redis suma el usuario `backend`, solo `mesh:*`. Neo4j community no tiene roles. Los crea el
+  paso 9f de `arrancar.ps1`, que tambien genera las contrasenas nuevas y escribe `backend\.env` si es local.
+  `bash seguridad/prueba_acceso.sh` da 93 OK (50 + 43 de Redis). Demo en el panel, Quien puede que en las seis bases.
+- **Herramientas solo en 127.0.0.1** y todas las imagenes con version fija.
+- **Modo remoto.** `usar-bases-remotas.ps1` cambia tambien usuario y contrasena. Para David, despues de correr
+  `arrancar.ps1` alla, copiar de su `.env` a `remoto\.env.remoto` las lineas que dice `docs/SEGURIDAD.md`, seccion
+  Modo remoto. Hasta entonces el backend entra a su PC con el dueno de cada base, como antes.
+- **Foto en el buscador** (ADR-23). Campo `imagen` sin indexar en `mesh_productos`; arrancar rehace el indice si le
+  falta. Las seis rutas del buscador y el respaldo de PostgreSQL la devuelven.
+- **Worker de productos**: usaba su propia lista de errores de Mongo, sin los del cliente cerrado; ahora usa la comun
+  y reconecta solo.
+- **Registro unico ADR-1 a ADR-23** en `docs/DECISIONES.md`; el Word final tiene la seccion 5 con los nueve que
+  faltaban. Word final a 32 paginas, 348 commits (contando el de esta noche), retrospectiva con el carrito.
+- **Diagrama** con la caja de Ollama, el usuario de cada base, el recuadro del modo remoto y las flechas de abajo
+  anidadas, sin cruces.
+- README, instalacion, PREGUNTAS-SUSTENTACION (152), README de redis, elastic y remoto al dia.
+- `presentacion-final/` con 19 laminas y su GUION.md.
+- `pruebas/grafo_compras.sh` esperaba 503 en para ti sin Neo4j; desde el respaldo del 20-10 es 200.
+- `pruebas/falla_checkout.sh` no esperaba la pausa de 15 s del cortacircuitos despues de la caida de PostgreSQL;
+  ahora reintenta hasta 45 s (volvio a los 12 s, 32 OK).
+- **Redis y su cortacircuitos**: con Redis apagado nadie le mandaba comandos (todos ven que no esta lista y se van al
+  respaldo) y el cortacircuitos nunca la daba por caida. `redis.ts` ahora marca la caida con el error de conexion y
+  la vuelta con `ready`. `node pruebas/caidas.mjs` 51 OK apagadas y 51 congeladas.
+- Bateria entera (sin dashboard.mjs) en verde. `neo4j/correr_patrones.sh` falla si el worker del grafo todavia
+  proyecta lo que dejaron las pruebas anteriores (sube VIVE_EN); con la cola vacia da Todo bien.
+- Kibana con seguridad: `mesh_lectura` entra, ve las dos vistas y no puede crear otras.
 
 **EMPIEZA AQUI (20-10, tarde). Revision entera antes de la presentacion, datos de prueba limpiados e informes al dia.**
 Commiteado (e366d91, 00c376a y el de los informes) y pusheado, Meme lo pidio.
@@ -1453,7 +1486,7 @@ viene en el pull: copia de `.env.example` las que falten. Y ojo, **son DOS
 | MongoDB | **27018** | dbgate en **3001** |
 | Redis | 6379 | RedisInsight en **5540** |
 | Neo4j | 7687 (bolt) | Browser en **7474** |
-| Elasticsearch | **9200** | sin contrasena, solo en local |
+| Elasticsearch | **9200** | con usuario desde el 2026-10-23 (`elastic`, ver docs/SEGURIDAD.md) |
 | backend / frontend | 3000 / 5173 | |
 
 Mongo es 27018 por fuera a proposito: Windows puede tener un MongoDB de servicio

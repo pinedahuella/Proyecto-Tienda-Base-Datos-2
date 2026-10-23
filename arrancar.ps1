@@ -801,11 +801,18 @@ foreach ($linea in Get-Content "$PSScriptRoot\.env") {
 #
 # La regla: agregar un servicio al compose con una variable obligatoria incluye
 # agregarla AQUI y a .env.example, en la misma pasada.
-# Las dos contrasenas de los usuarios nuevos de Redis (control de acceso, desde
-# el 2026-09-25) se llenan solas si faltan. Nadie las escribe a mano ni las
-# necesita saber para trabajar, asi que pedirselas a cada uno del equipo
-# despues de un pull seria justo el fallo que cuenta el comentario de abajo.
-foreach ($nueva in @("REDIS_INSPECCION_PASSWORD", "REDIS_OPERADOR_PASSWORD")) {
+# Las contrasenas de los usuarios de cada servicio se llenan solas si faltan:
+# las dos de Redis desde el 2026-09-25 y las demas desde el 2026-10-23, cuando
+# cada base paso a tener un usuario para el backend y otro de solo lectura
+# (paso 9f, docs/SEGURIDAD.md). Nadie las escribe a mano ni las necesita saber
+# para trabajar, asi que pedirselas a cada uno del equipo despues de un pull
+# seria justo el fallo que cuenta el comentario de abajo.
+$generadas = @("REDIS_INSPECCION_PASSWORD", "REDIS_OPERADOR_PASSWORD", "REDIS_BACKEND_PASSWORD",
+               "PG_BACKEND_PASSWORD", "PG_LECTURA_PASSWORD",
+               "MONGO_BACKEND_PASSWORD", "MONGO_LECTURA_PASSWORD",
+               "CLICKHOUSE_BACKEND_PASSWORD", "CLICKHOUSE_LECTURA_PASSWORD",
+               "ELASTIC_PASSWORD", "KIBANA_PASSWORD", "ELASTIC_BACKEND_PASSWORD", "ELASTIC_LECTURA_PASSWORD")
+foreach ($nueva in $generadas) {
     if (-not $env_[$nueva] -or $env_[$nueva] -eq "cambiame") {
         $azar = -join ((48..57) + (97..122) | Get-Random -Count 24 | ForEach-Object { [char]$_ })
         $lineas = @(Get-Content "$PSScriptRoot\.env" | Where-Object { $_ -notmatch "^\s*$nueva\s*=" })
@@ -817,7 +824,8 @@ foreach ($nueva in @("REDIS_INSPECCION_PASSWORD", "REDIS_OPERADOR_PASSWORD")) {
 }
 
 $faltantes = @()
-# Son las QUINCE que docker-compose.yml marca con ":?". Se comprueba con:
+# Son las VEINTIUNA que docker-compose.yml marca con ":?", mas las que solo usa
+# el paso 9f. Se comprueba con:
 #   las de   grep -o '\${[A-Z0-9_]*:?' docker-compose.yml
 #   tienen que estar todas en esta lista.
 # PGADMIN_EMAIL y PGADMIN_PASSWORD llevaban aqui desde siempre y faltaban: el
@@ -827,7 +835,7 @@ foreach ($obligatoria in @("DB_USER", "DB_PASSWORD", "DB_NAME",
                           "PGADMIN_EMAIL", "PGADMIN_PASSWORD",
                           "REDIS_PASSWORD", "REDIS_INSPECCION_PASSWORD", "REDIS_OPERADOR_PASSWORD",
                           "NEO4J_PASSWORD",
-                          "CLICKHOUSE_DB", "CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD")) {
+                          "CLICKHOUSE_DB", "CLICKHOUSE_USER", "CLICKHOUSE_PASSWORD") + $generadas) {
     if (-not $env_[$obligatoria] -or $env_[$obligatoria] -eq "cambiame") {
         $faltantes += $obligatoria
     }
@@ -1173,6 +1181,12 @@ function Correr-Etl {
 # que etl/cargar_busqueda.sh y pruebas/busqueda.sh; si un dia cambian, cambian
 # en los tres.
 $ES_URL    = 'http://localhost:9200'
+# Desde el 2026-10-23 Elasticsearch tiene la seguridad encendida y cada llamada
+# de este script va como elastic, que es quien crea y rehace los indices. Va
+# como cabecera y no dentro de la URL (http://usuario:clave@...) porque
+# Invoke-RestMethod de PowerShell 5.1 no usa el usuario de una URL.
+$ES_CABECERA = @{ Authorization = 'Basic ' + [Convert]::ToBase64String(
+    [Text.Encoding]::ASCII.GetBytes("elastic:$($env_['ELASTIC_PASSWORD'])")) }
 $ES_INDICE = 'mesh_productos'
 
 # Los indices que dejaron de usarse el 2026-10-16, cuando los vectores volvieron
@@ -1209,7 +1223,7 @@ function Psql-Corto($sql) {
 
 function Existe-Indice($nombre) {
     try {
-        Invoke-RestMethod -Method Head -Uri "$ES_URL/$nombre" -TimeoutSec 20 | Out-Null
+        Invoke-RestMethod -Method Head -Headers $ES_CABECERA -Uri "$ES_URL/$nombre" -TimeoutSec 20 | Out-Null
         return $true
     } catch {
         return $false
@@ -1264,7 +1278,7 @@ function Retirar-IndicesDeVectores {
     foreach ($nombre in @($ES_INDICE_COMENTARIOS, $ES_INDICE_VECTORES_PREVIOS)) {
         if (Existe-Indice $nombre) {
             try {
-                Invoke-RestMethod -Method Delete -Uri "$ES_URL/$nombre" -TimeoutSec 30 | Out-Null
+                Invoke-RestMethod -Method Delete -Headers $ES_CABECERA -Uri "$ES_URL/$nombre" -TimeoutSec 30 | Out-Null
                 Ok "$nombre borrado: los vectores viven en PostgreSQL desde la 040"
             } catch {
                 Aviso "No se pudo borrar $nombre ($($_.Exception.Message)). No estorba"
@@ -1294,21 +1308,21 @@ function Preparar-IndiceOfertas {
     if (Existe-Indice $ES_INDICE_OFERTAS) {
         $dinamico = $null
         try {
-            $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_OFERTAS/_mapping" -TimeoutSec 20
+            $m = Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_OFERTAS/_mapping" -TimeoutSec 20
             $dinamico = [string]@($m.PSObject.Properties)[0].Value.mappings.dynamic
         } catch { }
         if ($dinamico -eq 'strict') {
-            $n = (Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_OFERTAS/_count" -TimeoutSec 20).count
+            $n = (Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_OFERTAS/_count" -TimeoutSec 20).count
             $pend = Psql-Corto "SELECT count(*) FROM evento_oferta WHERE procesado_en IS NULL;"
             Ok "Ya existe ($n ofertas, $pend en la cola). Lo mantiene el worker del backend"
             return $true
         }
         Aviso "El indice de ofertas existia con dynamic '$dinamico' y no 'strict'. Se rehace"
-        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_OFERTAS" -TimeoutSec 30 | Out-Null } catch { }
+        try { Invoke-RestMethod -Method Delete -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_OFERTAS" -TimeoutSec 30 | Out-Null } catch { }
     }
 
     try {
-        Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_OFERTAS" -ContentType 'application/json' `
+        Invoke-RestMethod -Method Put -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_OFERTAS" -ContentType 'application/json' `
             -InFile "$PSScriptRoot\elastic\004_ofertas.json" -TimeoutSec 60 | Out-Null
     } catch {
         Aviso "No se pudo crear el indice de ofertas: $($_.Exception.Message)"
@@ -1347,11 +1361,11 @@ function Preparar-IndiceSeguimientos {
     if (Existe-Indice $ES_INDICE_SEGUIMIENTOS) {
         $tipo = $null
         try {
-            $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_mapping/field/consulta" -TimeoutSec 20
+            $m = Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_mapping/field/consulta" -TimeoutSec 20
             $tipo = @($m.PSObject.Properties)[0].Value.mappings.consulta.mapping.consulta.type
         } catch { }
         $n = -1
-        try { $n = [int](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_count" -TimeoutSec 20).count } catch { }
+        try { $n = [int](Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_count" -TimeoutSec 20).count } catch { }
         $vivos = Psql-Corto "SELECT count(*) FROM seguimiento_oferta WHERE fecha_cumplido IS NULL;"
         if ($tipo -eq 'percolator' -and $vivos -match '^\d+$' -and [int]$vivos -eq $n) {
             Ok "Ya existe ($n consultas guardadas, una por seguimiento esperando)"
@@ -1365,11 +1379,11 @@ function Preparar-IndiceSeguimientos {
         } else {
             Aviso "El percolator tiene $n consultas y PostgreSQL $vivos seguimientos esperando. Se rehace"
         }
-        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS" -TimeoutSec 30 | Out-Null } catch { }
+        try { Invoke-RestMethod -Method Delete -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS" -TimeoutSec 30 | Out-Null } catch { }
     }
 
     try {
-        Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS" -ContentType 'application/json' `
+        Invoke-RestMethod -Method Put -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS" -ContentType 'application/json' `
             -InFile "$PSScriptRoot\elastic\005_seguimientos.json" -TimeoutSec 60 | Out-Null
     } catch {
         Aviso "No se pudo crear el indice de seguimientos: $($_.Exception.Message)"
@@ -1442,7 +1456,7 @@ SELECT jsonb_build_object('index', jsonb_build_object('_id', a.id_seguimiento::t
             return $true
         }
         try {
-            $r = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_bulk?refresh=true" `
+            $r = Invoke-RestMethod -Method Post -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_SEGUIMIENTOS/_bulk?refresh=true" `
                 -ContentType 'application/x-ndjson' -InFile $ndjson -TimeoutSec 120
         } catch {
             Aviso "El bulk del percolator fallo: $($_.Exception.Message)"
@@ -1532,10 +1546,10 @@ function Correr-EtlBusqueda {
         # el indice se tira sin perder nada.
 
         # El 404 del DELETE se traga a proposito: la primera vez no existe.
-        try { Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE" -TimeoutSec 30 | Out-Null } catch { }
+        try { Invoke-RestMethod -Method Delete -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE" -TimeoutSec 30 | Out-Null } catch { }
 
         try {
-            Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE" `
+            Invoke-RestMethod -Method Put -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE" `
                 -ContentType 'application/json' `
                 -InFile "$PSScriptRoot\elastic\001_indice.json" -TimeoutSec 60 | Out-Null
         } catch {
@@ -1552,7 +1566,7 @@ function Correr-EtlBusqueda {
         # y para que el conteo de aqui abajo no cuente cero sobre un indice
         # que si tiene datos.
         try {
-            $r = Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE/_bulk?refresh=true" `
+            $r = Invoke-RestMethod -Method Post -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE/_bulk?refresh=true" `
                 -ContentType 'application/x-ndjson' -InFile $ndjson -TimeoutSec 300
         } catch {
             Aviso "El bulk fallo: $($_.Exception.Message)"
@@ -1566,7 +1580,7 @@ function Correr-EtlBusqueda {
             return $false
         }
 
-        $cuenta = (Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_count" -TimeoutSec 30).count
+        $cuenta = (Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE/_count" -TimeoutSec 30).count
         Ok "documentos en el indice: $cuenta"
         return $true
     }
@@ -1624,7 +1638,7 @@ function Correr-EtlBusqueda {
 function Leer-TipoIpEventos {
     # El nombre del indice va como clave de la respuesta; se toma la primera
     # propiedad en vez de escribirlo, para que un alias no la deje vacia.
-    $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/ip" -TimeoutSec 20
+    $m = Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/ip" -TimeoutSec 20
     $primero = @($m.PSObject.Properties)[0]
     if ($null -eq $primero) { return $null }
     return $primero.Value.mappings.ip.mapping.ip.type
@@ -1633,7 +1647,7 @@ function Leer-TipoIpEventos {
 # Mismo mecanismo que Leer-TipoIpEventos, para el campo geo_punto. $null si el
 # campo no esta mapeado del todo (indice de antes de que geo_punto existiera).
 function Leer-TipoGeoPuntoEventos {
-    $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/geo_punto" -TimeoutSec 20
+    $m = Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/geo_punto" -TimeoutSec 20
     $primero = @($m.PSObject.Properties)[0]
     if ($null -eq $primero) { return $null }
     if (-not $primero.Value.mappings.geo_punto) { return $null }
@@ -1649,7 +1663,7 @@ function Leer-TipoGeoPuntoEventos {
 # indice y 2 con el subcampo. Se mira id_usuario.keyword como marca de la version.
 # $true si el subcampo existe en el indice.
 function Leer-SubcampoKeywordEventos {
-    $m = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/id_usuario.keyword" -TimeoutSec 20
+    $m = Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_EVENTOS/_mapping/field/id_usuario.keyword" -TimeoutSec 20
     $primero = @($m.PSObject.Properties)[0]
     if ($null -eq $primero) { return $false }
     return [bool]$primero.Value.mappings.'id_usuario.keyword'
@@ -1670,7 +1684,7 @@ function Preparar-IndiceEventos {
         # a) La plantilla. PUT sobre el mismo nombre la reemplaza, asi que es
         #    idempotente y ademas lleva al motor cualquier cambio del .json.
         #    -InFile y no -Body, por lo mismo que el bulk del buscador: sin BOM.
-        Invoke-RestMethod -Method Put -Uri "$ES_URL/_index_template/$ES_INDICE_EVENTOS" `
+        Invoke-RestMethod -Method Put -Headers $ES_CABECERA -Uri "$ES_URL/_index_template/$ES_INDICE_EVENTOS" `
             -ContentType 'application/json' `
             -InFile "$PSScriptRoot\elastic\002_eventos_autenticacion.json" -TimeoutSec 30 | Out-Null
         Ok "plantilla puesta (elastic/002_eventos_autenticacion.json)"
@@ -1701,7 +1715,7 @@ function Preparar-IndiceEventos {
             $vistoKw = if ($tieneKeyword) { 'si' } else { 'no' }
             Aviso "$ES_INDICE_EVENTOS no nacio de la plantilla actual (ip es '$vistoIp', geo_punto es '$vistoGeo', tiene .keyword: $vistoKw)."
             Aviso "   Se borra y se rehace; los eventos se vuelven a copiar desde Mongo."
-            Invoke-RestMethod -Method Delete -Uri "$ES_URL/$ES_INDICE_EVENTOS" -TimeoutSec 30 | Out-Null
+            Invoke-RestMethod -Method Delete -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_EVENTOS" -TimeoutSec 30 | Out-Null
             $existe  = $false
             $rehecho = $true
         }
@@ -1712,7 +1726,7 @@ function Preparar-IndiceEventos {
             # la plantilla y este PUT choca con resource_already_exists. Eso
             # no es un fallo, es el mismo resultado por otro camino.
             try {
-                Invoke-RestMethod -Method Put -Uri "$ES_URL/$ES_INDICE_EVENTOS" -TimeoutSec 30 | Out-Null
+                Invoke-RestMethod -Method Put -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_EVENTOS" -TimeoutSec 30 | Out-Null
                 Ok "$ES_INDICE_EVENTOS creado con el mapeo de la plantilla"
             } catch {
                 if ("$($_.ErrorDetails.Message)" -notmatch 'resource_already_exists_exception') { throw }
@@ -1786,9 +1800,9 @@ function Preparar-IndiceEventos {
         $enMongo    = Numero-Mongo 'db.eventos_autenticacion.countDocuments()'
         $pendientes = Numero-Mongo 'db.eventos_autenticacion.countDocuments({pendiente_elastic: true})'
         try {
-            Invoke-RestMethod -Method Post -Uri "$ES_URL/$ES_INDICE_EVENTOS/_refresh" -TimeoutSec 20 | Out-Null
+            Invoke-RestMethod -Method Post -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_EVENTOS/_refresh" -TimeoutSec 20 | Out-Null
         } catch { }
-        $enIndice   = [long](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE_EVENTOS/_count" -TimeoutSec 20).count
+        $enIndice   = [long](Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE_EVENTOS/_count" -TimeoutSec 20).count
         $conteos    = "eventos en Mongo: $enMongo   en el indice: $enIndice   pendientes de copiar: $pendientes"
 
         # Sin los dos numeros de Mongo no hay nada que comparar, y un $null en
@@ -3825,7 +3839,7 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
 
     $enIndice = '-1'
     try {
-        $enIndice = [string](Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_count" -TimeoutSec 20).count
+        $enIndice = [string](Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE/_count" -TimeoutSec 20).count
     } catch {
         # 404 la primera vez, que no es un fallo: es que todavia no existe.
         $enIndice = '0'
@@ -3838,7 +3852,7 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
     # rehace tambien el catalogo de Mongo).
     $conVectorViejo = $false
     try {
-        $mv = Invoke-RestMethod -Uri "$ES_URL/$ES_INDICE/_mapping/field/vector" -TimeoutSec 20
+        $mv = Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE/_mapping/field/vector" -TimeoutSec 20
         $pv = @($mv.PSObject.Properties)[0]
         if ($pv -and $pv.Value.mappings.vector) { $conVectorViejo = $true }
     } catch { }
@@ -3846,7 +3860,22 @@ if (-not (Esperar-Contenedor "mesh-elastic" 120)) {
         Aviso "El indice todavia tiene el campo vector (mapeo del 2026-10-02 al 10-16). Se rehace sin el"
     }
 
-    if ($Etl -or ($enMongo -notmatch '^\d+$') -or ($enIndice -ne $enMongo) -or $conVectorViejo) {
+    # Y si le falta la foto de la tarjeta, que entra en el mapeo el 2026-10-23
+    # (el buscador pinta la tarjeta entera desde Elasticsearch). Un indice de
+    # antes tiene los mismos productos y no se rehacia por la cuenta.
+    $sinImagen = $false
+    if ($enIndice -ne '0') {
+        try {
+            $mi = Invoke-RestMethod -Headers $ES_CABECERA -Uri "$ES_URL/$ES_INDICE/_mapping/field/imagen" -TimeoutSec 20
+            $pi = @($mi.PSObject.Properties)[0]
+            if (-not ($pi -and $pi.Value.mappings.imagen)) { $sinImagen = $true }
+        } catch { }
+    }
+    if ($sinImagen) {
+        Aviso "El indice no tiene el campo imagen (mapeo de antes del 2026-10-23). Se rehace con el"
+    }
+
+    if ($Etl -or ($enMongo -notmatch '^\d+$') -or ($enIndice -ne $enMongo) -or $conVectorViejo -or $sinImagen) {
         if (-not (Correr-EtlBusqueda)) {
             Aviso "El indice del buscador no se pudo rehacer. El resto sigue."
             Aviso "   A mano:  bash etl/cargar_busqueda.sh"
@@ -4148,19 +4177,177 @@ if ((docker ps -a --filter "name=mesh-kibana-vistas" --format "{{.Names}}") -eq 
 
 
 # ------------------------------------------------------------
+# 9f. Usuarios por servicio
+# ------------------------------------------------------------
+# El control de acceso de la Entrega final, en todas las bases donde se puede
+# (docs/SEGURIDAD.md). Cada base tiene un usuario para el backend, que solo puede
+# lo que la tienda necesita, y otro de solo lectura para mirar:
+#
+#   PostgreSQL     mesh_backend (filas, no tablas) y mesh_lectura   seguridad/postgres.sql
+#   MongoDB        mesh_backend (rol a medida) y mesh_lectura       seguridad/mongo.js
+#   Redis          backend (solo claves mesh:*), inspeccion, operador   docker-compose.yml
+#   ClickHouse     mesh_backend (leer y agregar) y mesh_lectura     seguridad/clickhouse.sql
+#   Elasticsearch  mesh_backend (documentos de mesh_*), mesh_lectura y kibana_system
+#                  los crea el contenedor elastic-usuarios          seguridad/elastic.sh
+#   Neo4j          un solo usuario: la edicion community no tiene roles
+#
+# Va al final porque necesita todas las bases arriba y las tablas creadas. Se
+# corre en cada arranque: crea lo que falta y vuelve a poner contrasenas y
+# permisos, asi que tambien arregla una base a la que alguien le cambio algo a
+# mano. Las contrasenas viajan en un archivo que se copia al contenedor y se
+# borra enseguida, nunca en la linea de comandos.
+#
+# Despues, si el backend de esta PC usa estas bases, se le ponen sus usuarios en
+# backend\.env. Si apunta a otra PC (modo remoto) no se toca: las contrasenas de
+# alla las pone usar-bases-remotas.ps1.
+Paso "Usuarios por servicio"
+$tmpSeguridad = Join-Path $env:TEMP "mesh-seguridad"
+New-Item -ItemType Directory -Force -Path $tmpSeguridad | Out-Null
+$sinBom = New-Object System.Text.UTF8Encoding($false)
+$usuariosListos = @{}
+
+# Copia un texto a un archivo del contenedor, sin que la contrasena toque la
+# linea de comandos ni la tuberia (la tuberia le pega un BOM, ver mas arriba).
+function Copiar-AlContenedor($contenedor, $texto, $destino) {
+    $local = Join-Path $tmpSeguridad ([IO.Path]::GetFileName($destino))
+    [IO.File]::WriteAllText($local, $texto, $sinBom)
+    docker cp $local "${contenedor}:$destino" 2>&1 | Out-Null
+    $copiado = ($LASTEXITCODE -eq 0)
+    Remove-Item $local -Force -ErrorAction SilentlyContinue
+    return $copiado
+}
+
+# PostgreSQL
+$sqlPg = "\set base '$($env_['DB_NAME'])'`n" +
+         "\set dueno '$($env_['DB_USER'])'`n" +
+         "\set clave_backend '$($env_['PG_BACKEND_PASSWORD'])'`n" +
+         "\set clave_lectura '$($env_['PG_LECTURA_PASSWORD'])'`n" +
+         [IO.File]::ReadAllText("$PSScriptRoot\seguridad\postgres.sql")
+if (Copiar-AlContenedor "mesh-postgres" $sqlPg "/tmp/mesh-seguridad.sql") {
+    $salida = docker exec mesh-postgres sh -c 'psql -q -U $POSTGRES_USER -d $POSTGRES_DB -f /tmp/mesh-seguridad.sql; r=$?; rm -f /tmp/mesh-seguridad.sql; exit $r' 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) {
+        $usuariosListos['postgres'] = $true
+        Ok "PostgreSQL   mesh_backend y mesh_lectura"
+        foreach ($l in ($salida -split "`n")) { if ($l -match 'mesh_') { Ok "   $($l.Trim())" } }
+    } else {
+        Aviso "PostgreSQL   no se pudieron poner los usuarios:"
+        Write-Host $salida -ForegroundColor Yellow
+    }
+}
+
+# MongoDB
+$jsMongo = "process.env.MONGO_DB = '$($env_['MONGO_DB'])';`n" +
+           "process.env.CLAVE_BACKEND = '$($env_['MONGO_BACKEND_PASSWORD'])';`n" +
+           "process.env.CLAVE_LECTURA = '$($env_['MONGO_LECTURA_PASSWORD'])';`n" +
+           [IO.File]::ReadAllText("$PSScriptRoot\seguridad\mongo.js")
+if (Copiar-AlContenedor "mesh-mongo" $jsMongo "/tmp/mesh-seguridad.js") {
+    $salida = docker exec mesh-mongo sh -c ((Comando-Mongo "/tmp/mesh-seguridad.js") + '; r=$?; rm -f /tmp/mesh-seguridad.js; exit $r') 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) {
+        $usuariosListos['mongo'] = $true
+        foreach ($l in ($salida -split "`n")) { if ($l.Trim()) { Ok "MongoDB      $($l.Trim())" } }
+    } else {
+        Aviso "MongoDB      no se pudieron poner los usuarios:"
+        Write-Host $salida -ForegroundColor Yellow
+    }
+}
+
+# ClickHouse
+$sqlCh = [IO.File]::ReadAllText("$PSScriptRoot\seguridad\clickhouse.sql").
+    Replace('__BASE__', $env_['CLICKHOUSE_DB']).
+    Replace('__CLAVE_BACKEND__', $env_['CLICKHOUSE_BACKEND_PASSWORD']).
+    Replace('__CLAVE_LECTURA__', $env_['CLICKHOUSE_LECTURA_PASSWORD'])
+if (Copiar-AlContenedor "mesh-clickhouse" $sqlCh "/tmp/mesh-seguridad.sql") {
+    $salida = docker exec mesh-clickhouse sh -c 'clickhouse-client --user $CLICKHOUSE_USER --password $CLICKHOUSE_PASSWORD --multiquery --queries-file /tmp/mesh-seguridad.sql; r=$?; rm -f /tmp/mesh-seguridad.sql; exit $r' 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) {
+        $usuariosListos['clickhouse'] = $true
+        foreach ($l in ($salida -split "`n")) { if ($l -match '^GRANT') { Ok "ClickHouse   $($l.Trim())" } }
+    } else {
+        Aviso "ClickHouse   no se pudieron poner los usuarios:"
+        Write-Host $salida -ForegroundColor Yellow
+    }
+}
+
+# Elasticsearch: lo hace el contenedor elastic-usuarios, aqui se espera y se
+# cuenta. Si no termino en 3 minutos se sigue, y el contenedor acaba solo.
+$finEs = (Get-Date).AddSeconds(180)
+$estadoEs = ""
+while ((Get-Date) -lt $finEs) {
+    $estadoEs = (docker inspect -f "{{.State.Status}}" mesh-elastic-usuarios 2>$null)
+    if ($estadoEs -ne "running") { break }
+    Start-Sleep -Seconds 3
+}
+$codigoEs = (docker inspect -f "{{.State.ExitCode}}" mesh-elastic-usuarios 2>$null)
+docker logs --tail 8 mesh-elastic-usuarios 2>&1 | Where-Object { $_ -match 'elastic-usuarios' } |
+    ForEach-Object { if ($_ -match 'FALLO') { Aviso "$_" } else { Ok "$_" } }
+if ($estadoEs -eq "exited" -and "$codigoEs" -eq "0") {
+    $usuariosListos['elastic'] = $true
+} else {
+    Aviso "Elasticsearch   el contenedor elastic-usuarios no termino bien ($estadoEs, codigo $codigoEs)"
+}
+
+# Redis: los usuarios viven en el compose. Aqui solo se mira que esten los cuatro.
+$aclRedis = docker exec mesh-redis redis-cli --no-auth-warning --user operador --pass $env_['REDIS_OPERADOR_PASSWORD'] ACL USERS 2>&1 | Out-String
+if ($aclRedis -match 'backend' -and $aclRedis -match 'inspeccion' -and $aclRedis -match 'operador') {
+    $usuariosListos['redis'] = $true
+    Ok "Redis        backend, default, inspeccion y operador"
+} else {
+    Aviso "Redis        no aparece el usuario backend. Recrea el contenedor:  docker compose up -d redis"
+}
+
+Ok "Neo4j        un solo usuario, la edicion community no tiene roles (docs/SEGURIDAD.md)"
+
+# backend\.env
+$envBackend = "$PSScriptRoot\backend\.env"
+if (-not (Test-Path $envBackend)) {
+    Aviso "No hay backend\.env. Copialo de backend\.env.example y vuelve a correr esto."
+} else {
+    $lineasBack = [Collections.Generic.List[string]](Get-Content $envBackend)
+    $hostBack = ($lineasBack | Where-Object { $_ -match '^DB_HOST=' } | Select-Object -First 1) -replace '^DB_HOST=', ''
+    if ($hostBack -and $hostBack -notmatch '^(localhost|127\.0\.0\.1)$') {
+        Aviso "backend\.env apunta a $hostBack (modo remoto): no se toca"
+    } else {
+        $porBase = [ordered]@{
+            postgres   = @{ DB_USER = 'mesh_backend'; DB_PASSWORD = $env_['PG_BACKEND_PASSWORD'] }
+            mongo      = @{ MONGO_USER = 'mesh_backend'; MONGO_PASSWORD = $env_['MONGO_BACKEND_PASSWORD'] }
+            redis      = @{ REDIS_USER = 'backend'; REDIS_PASSWORD = $env_['REDIS_BACKEND_PASSWORD'] }
+            clickhouse = @{ CLICKHOUSE_USER = 'mesh_backend'; CLICKHOUSE_PASSWORD = $env_['CLICKHOUSE_BACKEND_PASSWORD'] }
+            elastic    = @{ ELASTIC_USER = 'mesh_backend'; ELASTIC_PASSWORD = $env_['ELASTIC_BACKEND_PASSWORD'] }
+        }
+        $puestas = @()
+        foreach ($base in $porBase.Keys) {
+            # Solo las bases donde el usuario quedo de verdad. Poner en el .env
+            # un usuario que no existe dejaria al backend sin arrancar.
+            if (-not $usuariosListos[$base]) { continue }
+            foreach ($k in $porBase[$base].Keys) {
+                $i = -1
+                for ($n = 0; $n -lt $lineasBack.Count; $n++) { if ($lineasBack[$n] -match "^$k=") { $i = $n; break } }
+                if ($i -ge 0) { $lineasBack[$i] = "$k=$($porBase[$base][$k])" } else { $lineasBack.Add("$k=$($porBase[$base][$k])") }
+            }
+            $puestas += $base
+        }
+        # Sin BOM: dotenv lee el BOM como parte del primer nombre de variable.
+        [IO.File]::WriteAllLines($envBackend, $lineasBack, $sinBom)
+        Ok "backend\.env con los usuarios del backend en: $($puestas -join ', ')"
+        Ok "   si el backend ya estaba corriendo, reinicialo para que los use"
+    }
+}
+
+
+# ------------------------------------------------------------
 # 10. Resumen
 # ------------------------------------------------------------
 Paso "Listo"
 docker ps --format "   {{.Names}}  {{.Status}}"
 
 Write-Host ""
+Write-Host "   Las ventanas solo se abren desde esta PC (127.0.0.1)." -ForegroundColor DarkGray
 Write-Host "   pgAdmin        http://localhost:5050    ventana de PostgreSQL" -ForegroundColor White
-Write-Host "   DbGate         http://localhost:3001    ventana de MongoDB" -ForegroundColor White
+Write-Host "   DbGate         http://localhost:3001    ventana de MongoDB, solo lectura (mesh_lectura)" -ForegroundColor White
 Write-Host "   RedisInsight   http://localhost:5540    ventana de Redis, con el TTL contando" -ForegroundColor White
 # Kibana tarda cerca de un minuto en abrir despues de que Elasticsearch responde,
 # y por eso este resumen no lo espera: la direccion ya esta, solo hay que darle tiempo.
 # Sus vistas de datos las crea solo el contenedor kibana-vistas del compose.
-Write-Host "   Kibana         http://localhost:5601    ventana de Elasticsearch, los indices y sus campos" -ForegroundColor White
+Write-Host "   Kibana         http://localhost:5601    ventana de Elasticsearch, entra con mesh_lectura o elastic" -ForegroundColor White
 # El navegador de Neo4j no es un visor mas: DIBUJA el grafo, y un anillo de
 # cuentas que se califican entre si solo se ve dibujado. En una tabla de filas
 # es una lista de pares que no dice nada.
@@ -4171,10 +4358,12 @@ Write-Host "   ClickHouse     http://localhost:8123/play   consola de los evento
 Write-Host ""
 Write-Host "   PostgreSQL     localhost:5432   base $($env_['DB_NAME'])   usuario $($env_['DB_USER'])" -ForegroundColor White
 Write-Host "   MongoDB        localhost:27018  base $($env_['MONGO_DB'])   usuario $($env_['MONGO_USER'])" -ForegroundColor White
-Write-Host "   Redis          localhost:6379   con contrasena (requirepass)" -ForegroundColor White
+Write-Host "   Redis          localhost:6379   usuarios de ACL backend, default, inspeccion y operador" -ForegroundColor White
 Write-Host "   Neo4j          localhost:7687   bolt   usuario neo4j" -ForegroundColor White
-Write-Host "   Elasticsearch  localhost:9200   sin contrasena, solo en local" -ForegroundColor White
+Write-Host "   Elasticsearch  localhost:9200   usuario elastic" -ForegroundColor White
 Write-Host "   ClickHouse     localhost:8123   base $($env_['CLICKHOUSE_DB'])   usuario $($env_['CLICKHOUSE_USER'])" -ForegroundColor White
+Write-Host "   El backend entra a cada base con su propio usuario, mesh_backend (Redis backend)." -ForegroundColor White
+Write-Host "   Las contrasenas estan en el .env. Prueba del control de acceso:  bash seguridad/prueba_acceso.sh" -ForegroundColor White
 Write-Host ""
 Write-Host "   Falta arrancar a mano:" -ForegroundColor DarkGray
 Write-Host "     cd backend  ; npm run start:dev" -ForegroundColor DarkGray

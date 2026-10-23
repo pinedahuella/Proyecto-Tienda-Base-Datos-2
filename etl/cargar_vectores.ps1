@@ -67,6 +67,10 @@ $modelo = if ($env_['OLLAMA_MODELO_VECTORES']) { $env_['OLLAMA_MODELO_VECTORES']
 # Los mismos valores que arrancar.ps1 ($ES_URL, $ES_INDICE). Solo se leen, para
 # la copia de una base que tenia los vectores alli.
 $es = 'http://localhost:9200'
+# Elasticsearch con la seguridad encendida (2026-10-23): como elastic, igual que
+# arrancar.ps1.
+$esCabecera = @{ Authorization = 'Basic ' + [Convert]::ToBase64String(
+    [Text.Encoding]::ASCII.GetBytes("elastic:$($env_['ELASTIC_PASSWORD'])")) }
 $indice = 'mesh_productos'
 $previos = 'mesh_productos_vectores_previos'
 $lote = 32
@@ -310,7 +314,7 @@ function Leer-VectoresDe($nombreIndice) {
     $r = @{}
     $cuerpo = '{"size":500,"_source":["vector","vector_hash","vector_modelo"],"query":{"exists":{"field":"vector"}},"sort":["_doc"]}'
     try {
-        $crudo = (Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$es/$nombreIndice/_search?scroll=1m" `
+        $crudo = (Invoke-WebRequest -UseBasicParsing -Method Post -Headers $esCabecera -Uri "$es/$nombreIndice/_search?scroll=1m" `
             -ContentType 'application/json' -Body $cuerpo -TimeoutSec 60).Content
     } catch { return $r }
     while ($true) {
@@ -327,10 +331,10 @@ function Leer-VectoresDe($nombreIndice) {
         }
         $id = [regex]::Match($crudo, '"_scroll_id":"([^"]+)"').Groups[1].Value
         if ($n -eq 0 -or -not $id) { break }
-        $crudo = (Invoke-WebRequest -UseBasicParsing -Method Post -Uri "$es/_search/scroll" -ContentType 'application/json' `
+        $crudo = (Invoke-WebRequest -UseBasicParsing -Method Post -Headers $esCabecera -Uri "$es/_search/scroll" -ContentType 'application/json' `
             -Body ('{"scroll":"1m","scroll_id":"' + $id + '"}') -TimeoutSec 60).Content
     }
-    if ($id) { try { Invoke-RestMethod -Method Delete -Uri "$es/_search/scroll/$id" -TimeoutSec 10 | Out-Null } catch { } }
+    if ($id) { try { Invoke-RestMethod -Method Delete -Headers $esCabecera -Uri "$es/_search/scroll/$id" -TimeoutSec 10 | Out-Null } catch { } }
     return $r
 }
 

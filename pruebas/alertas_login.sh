@@ -84,6 +84,8 @@ set -u
 RAIZ="$(cd "$(dirname "$0")/.." && pwd)"
 API="${API:-http://localhost:3000}"
 ES="${ES:-http://localhost:9200}"
+# Con la seguridad de Elasticsearch encendida: mete el usuario en $ES (ver ahi).
+. "$(dirname "$0")/../seguridad/url_elastic.sh"
 INDICE_EVENTOS="${INDICE_EVENTOS:-mesh_eventos_autenticacion}"
 PLANTILLA_EVENTOS="${PLANTILLA_EVENTOS:-mesh_eventos_autenticacion}"
 PG="${PG:-mesh-postgres}"
