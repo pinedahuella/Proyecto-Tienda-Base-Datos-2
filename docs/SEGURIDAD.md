@@ -87,14 +87,21 @@ de la otra PC de `remoto\.env.remoto` (no se sube a git). Si ese archivo todavia
 no trae las de los usuarios nuevos (la otra PC no corrio el arranque nuevo), usa
 el dueno de cada base, como antes, para que el backend arranque igual. Cuando la
 otra PC corra `arrancar.ps1`, hay que copiar de su `.env` a `remoto\.env.remoto`
-estas lineas:
+todas las contrasenas. Nadie las sabe de memoria porque las genero el arranque,
+asi que en la otra PC, en la carpeta del proyecto, se copian todas de una vez:
 
-```
-PG_BACKEND_PASSWORD  MONGO_BACKEND_PASSWORD  REDIS_BACKEND_PASSWORD
-CLICKHOUSE_BACKEND_PASSWORD  ELASTIC_PASSWORD  ELASTIC_BACKEND_PASSWORD
+```powershell
+Select-String -Path .env -Pattern '_PASSWORD=' | ForEach-Object Line | Set-Clipboard
 ```
 
-y volver a correr `usar-bases-remotas.ps1 -Ip ...`.
+El backend necesita las seis `*_BACKEND_PASSWORD` y `ELASTIC_PASSWORD`. Las de
+`mesh_lectura`, `KIBANA_PASSWORD` y las de `inspeccion` y `operador` de Redis las
+usan la prueba de acceso y las demos. Despues se vuelve a correr
+`usar-bases-remotas.ps1 -Ip ...`.
+
+Medido el 23 de octubre contra la PC de Jose David: el backend entra con
+`mesh_backend` (y `backend` en Redis) en las cinco bases, y `seguridad/prueba_acceso.sh`
+en modo remoto da 93 OK, 0 FALLA.
 
 ## Puertos
 

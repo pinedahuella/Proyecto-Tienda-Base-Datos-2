@@ -665,8 +665,10 @@
 			color var(--t);
 	}
 
-	.acciones button:hover,
-	.quitar:hover,
+	.acciones button:hover:not(:disabled),
+	.quitar:hover:not(:disabled) {
+		border-color: var(--indigo);
+	}
 
 	button:disabled {
 		opacity: 0.5;

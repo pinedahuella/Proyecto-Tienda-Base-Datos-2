@@ -506,7 +506,10 @@
 		color: var(--tinta);
 	}
 
-	.campos input[type='number'],
+	.campos input[type='number'] {
+		width: 100%;
+		min-width: 0;
+	}
 
 	.principal {
 		color: #fff;

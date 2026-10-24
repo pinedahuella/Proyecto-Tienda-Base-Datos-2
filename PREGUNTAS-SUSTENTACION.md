@@ -4,7 +4,7 @@ Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
 Este archivo reúne 152 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
-Las líneas son las del código en main al 20 de septiembre de 2026, salvo las preguntas 32 a 34 y la 119, que están al 23 de septiembre. Si el código cambia después, los números se pueden correr unas líneas, pero el nombre del archivo sigue sirviendo para encontrar el sitio.
+Las respuestas están revisadas contra el código al 23 de octubre de 2026. Los números de línea de las primeras partes se tomaron el 20 de septiembre y el código creció desde entonces, así que pueden correrse unas líneas. El nombre del archivo y de la función siguen sirviendo para encontrar el sitio.
 
 ## Lo que pide el profesor, en corto
 
@@ -52,11 +52,11 @@ El esquema se reparte en 19 archivos numerados, uno por tema, y el número marca
 - Por qué así. Un dato derivado guardado se puede desincronizar y nadie se entera. Calcularlo cuando se necesita evita esa segunda verdad.
 
 ### 2. ¿Por qué la compra es una transacción atómica y dónde están el BEGIN, el COMMIT y el ROLLBACK?
-La compra corre dentro de una sola función de PostgreSQL, `comprar_carrito()`. Esa función crea el pedido, mete las líneas, descuenta el stock, escribe el kardex y registra el pago. Si algo falla al final, se deshace todo lo anterior y no queda ni un pedido a medias. El cuerpo de una función ya es una transacción, por eso no lleva BEGIN escrito. En el camino de un pedido ya armado, el backend sí abre BEGIN, hace COMMIT y en el error hace ROLLBACK.
+La compra es una sola transacción de PostgreSQL. Desde el 17 de octubre el carrito es el pedido `pendiente` de la cuenta, y el checkout abre BEGIN, bloquea ese pedido con FOR UPDATE, revisa precios y reservas y llama a `comprar_pedido()`, que descuenta el stock, escribe el kardex, registra el pago y pasa el pedido a comprado. Después hace COMMIT. Si algo falla en el camino hace ROLLBACK y no queda nada a medias. Hasta el 17 de octubre lo hacía la función `comprar_carrito()`, que armaba el pedido desde el carrito de Redis en una sola llamada.
 
-- Dónde se ve. `migrations/012_comprar_carrito.sql` lineas 84 a 139 es la función y lineas 24 a 33 explican la atomicidad. `backend/src/services/carrito/carrito.service.ts` lineas 562 a 573 la llaman con un solo `SELECT`. `backend/src/services/compradores/pedidos.service.ts` lineas 636 a 656 tienen BEGIN y COMMIT, y lineas 668 a 679 el ROLLBACK y el `release` de la conexión.
+- Dónde se ve. `backend/src/services/carrito/carrito.service.ts`, el método `ejecutarCompraCarrito`, con el BEGIN, la llamada `SELECT comprar_pedido($1, $2)`, el COMMIT y el ROLLBACK en cada salida de error. `migrations/007_flujo_pedido.sql`, la función `comprar_pedido()`. `migrations/012_comprar_carrito.sql`, la función de antes.
 - Lo que pide el profesor. Fase inicial, flujo de compra como transacción atómica que registra pedido, líneas, pago y descuento de inventario. Entrega 3, documento de estrategia de consistencia del checkout, 5 pts.
-- Por qué así. Meter todo en la base evita que una ruta nueva se olvide de abrir la transacción. `comprar_carrito()` reutiliza `crear_pedido`, `agregar_linea` y `comprar_pedido` en vez de copiarlas, para que no existan dos versiones de las reglas.
+- Por qué así. Las reglas de la compra viven en una sola función de la base, `comprar_pedido()`, y el backend solo decide cuándo empieza y termina la transacción. Así no existen dos versiones de las reglas.
 
 ### 3. ¿Cómo se descuenta el inventario y cómo se evita vender dos veces la última unidad?
 `comprar_pedido()` recorre las líneas ordenadas por oferta y bloquea cada fila de `oferta` con `FOR UPDATE`. Si hay stock, escribe un movimiento en el kardex y resta la cantidad. La segunda compra de la misma oferta espera y lee el saldo ya descontado. Además el stock tiene un `CHECK` que impide números negativos.
@@ -83,7 +83,7 @@ Son cinco, `pendiente`, `comprado`, `enviado`, `entregado` y `cancelado`. Un ped
 Porque el dinero y el stock necesitan una transacción atómica con bloqueo de filas, y eso lo da PostgreSQL. En una base documental habría que sostener copias en dos sitios y no habría una transacción que abarque todo. La postura del proyecto es que el dinero y el stock son transaccionales y lo demás puede ser eventual.
 
 - Dónde se ve. `docs/base-de-datos.md` lineas 571 a 579 es el ADR-2, la decisión de no migrar las ofertas, con el mismo criterio de consistencia. `docs/CONSISTENCIA-CHECKOUT.md` lineas 29 a 31 dicen la postura. `docs/ARQUITECTURA.md` linea 136 lista qué vive en PostgreSQL.
-- Lo que pide el profesor. Sección 5.5, mantener un componente relacional se evalúa con la misma exigencia que migrarlo. Entrega 3 menciona de forma opcional evaluar un motor NewSQL para pagos. Ese análisis NewSQL no está escrito en el repositorio todavía.
+- Lo que pide el profesor. Sección 5.5, mantener un componente relacional se evalúa con la misma exigencia que migrarlo. Entrega 3 menciona de forma opcional evaluar un motor NewSQL para pagos. Ese análisis está en `docs/DECISION-NEWSQL-PAGOS.md`, el ADR-12, y concluye no migrar.
 - Por qué así. Consistencia manda sobre lo demás. Mongo reescribe el documento entero en cada cambio, y comprar una camisa reescribiría todo su catálogo.
 
 ### 7. ¿Qué es el outbox hacia el grafo y cómo funciona su worker?
@@ -150,7 +150,7 @@ El esquema se puede correr en cada arranque. Desde la 007 en adelante son `CREAT
 - Por qué así. Cualquier otro error corta el arranque con salida 1, para que una migración rota no quede disfrazada de ya aplicada. Los datos no tienen guardia en 17 de sus inserts, y eso aún no se arregló.
 
 ### 16. ¿Cómo se generó el diagrama entidad-relación y por qué no está dibujado a mano?
-Lo genera el script `docs/generar-er.py`, que lee la base viva. Consulta `information_schema` y `pg_constraint` dentro del contenedor y dibuja una caja por tabla y una línea por llave foránea. Hoy tiene las 50 tablas. Al final comprueba que ninguna tabla ni llave quede sin dibujo, y si algo no cuadra sale con error.
+Lo genera el script `docs/generar-er.py`, que lee la base viva. Consulta `information_schema` y `pg_constraint` dentro del contenedor y dibuja una caja por tabla y una línea por llave foránea. Hoy tiene las 86 tablas y las 107 llaves foráneas. Al final comprueba que ninguna tabla ni llave quede sin dibujo, y si algo no cuadra sale con error.
 
 - Dónde se ve. `docs/generar-er.py` lineas 2 a 19 explican el método, lineas 55 a 77 hacen las consultas y lineas 372 a 405 la comprobación final. El resultado editable es `docs/diagrama-general.drawio`. `docs/base-de-datos.md` lineas 38 a 46 lo cuentan.
 - Lo que pide el profesor. Fase inicial, diagrama entidad-relación con la justificación de normalización. Cada entrega que agrega componentes pide actualizar el diagrama de arquitectura, que es otro dibujo aparte.
@@ -250,11 +250,11 @@ La tabla pedido_producto guarda id_producto_mongo e id_producto_variante_mongo, 
 - Por qué así. La integridad la sostiene la aplicación y no la base. Además el controlador de productos del vendedor no tiene ruta de borrado, solo se pone el producto inactivo, así que el id no queda colgado. Decisión completa en `docs/base-de-datos.md` lineas 632 a 640.
 
 ### 28. ¿Qué pasa si se cae MongoDB en mitad de un checkout?
-La compra responde 503 con el mensaje de que no se pudo conectar con MongoDB y no queda nada a medias. Mongo no participa del COMMIT, pero las dos rutas de compra lo leen antes para traer el nombre del producto y el estado de la variante. Falla en unos 5 segundos porque se bajó el timeout del driver de 30 a 3 segundos. Cómo manejar esa dependencia de disponibilidad sigue por decidir con el profesor.
+Se compra igual. Desde el 1 de octubre lo que el checkout lee del producto, el nombre y el nombre y estado de la variante, tiene copia en PostgreSQL, en `producto_catalogo` y `variante_catalogo`, y el recálculo de MongoDB después de cobrar va por la cola `evento_producto`. Con MongoDB caído el pedido se cobra en PostgreSQL y la cola espera a que MongoDB vuelva. Antes de ese cambio la compra respondía 503, y fue la prueba de falla la que lo encontró.
 
-- Dónde se ve. `backend/elementos Generales/prueba-falla-mongo-checkout.md` lineas 14 a 34 la dependencia, lineas 69 a 84 el resultado con el ajuste, lineas 103 a 124 lo pendiente. `backend/src/database/mongo.ts` lineas 30 a 33. `backend/src/services/carrito/carrito.service.ts` lineas 975 a 998, la lectura a Mongo. `backend/src/helpers/manejar-error-mongo.ts` lineas 11 a 25, lo convierte en 503. `pruebas/falla_checkout.sh` lineas 746 a 750, el escenario de Mongo parado. `docs/CONSISTENCIA-CHECKOUT.md` lineas 298 a 339.
+- Dónde se ve. `migrations/029_catalogo_en_postgres.sql` y `migrations/030_evento_producto.sql`, la copia y la cola. `pruebas/falla_checkout.sh`, el escenario de MongoDB parado, que compra. `docs/CONSISTENCIA-CHECKOUT.md` y el ADR-18 del informe de la Entrega final, sección 5.3.
 - Lo que pide el profesor. Entrega 3, evidencia de la prueba de falla simulada y su manejo, 4 pts, y el documento de estrategia de consistencia del checkout, 5 pts.
-- Por qué así. Es una dependencia de disponibilidad y no de consistencia. La venta sigue siendo atómica en Postgres y pedido, pago y stock quedan iguales antes y después.
+- Por qué así. Era una dependencia de disponibilidad y no de consistencia, la venta siempre fue atómica en PostgreSQL. Con la copia, lo que se cobra y lo que se lee para cobrar están en la misma base.
 
 ### 29. ¿Las ofertas están en Mongo? ¿Qué es ofertas_mongo.sql?
 No, las ofertas viven solo en la tabla oferta de Postgres. El archivo `ofertas_mongo.sql` se llama así porque da precio y stock a los productos que nacieron solo en Mongo, generados por `mongo/lote/generar_lote_mongo.js`. Las ofertas de un vendedor se crean con un INSERT en Postgres, después de comprobar en Mongo que el producto y la variante existen.
@@ -372,9 +372,9 @@ Con la operación redimensionar, que suelta la reserva vieja y toma la nueva en 
 - Por qué así. Es lo que necesita `PUT /carrito/lineas/:idOferta`, que fija la cantidad absoluta y no suma uno.
 
 ### 43. ¿Cómo se sincronizan el stock de Redis y el de PostgreSQL al comprar?
-Primero se paga en PostgreSQL con `comprar_carrito`, que descuenta el stock con FOR UPDATE. Después se confirma la reserva en Redis y se vacía el carrito. Si el pago falla se devuelven las reservas al contador. Son dos contadores del mismo stock, y la confirmación en Redis es de mejor esfuerzo. PostgreSQL es el libro contable que manda.
+Primero se paga en PostgreSQL, con `comprar_pedido()` dentro de la transacción del checkout, que descuenta el stock con FOR UPDATE y en el mismo COMMIT pasa las reservas de `reserva_venta_relampago` a confirmada. Después se confirman los tickets en Redis y se borra la copia del carrito. Si la compra falla, la transacción se deshace y las reservas siguen activas para el siguiente intento. Son dos contadores del mismo stock, y la confirmación en Redis es de mejor esfuerzo. PostgreSQL es el libro contable que manda, y si Redis pierde el contador lo rehace desde las reservas.
 
-- Dónde se ve. `backend/src/services/carrito/carrito.service.ts` lineas 562 a 592, pagar y luego confirmar y vaciar. Lineas 574 a 579, devolver reservas si falla. Lineas 823 a 855, `confirmarReservas`. `docs/CONSISTENCIA-CHECKOUT.md` lineas 208 a 236, la decisión documentada. `migrations/007_flujo_pedido.sql` lineas 469 a 474, el FOR UPDATE.
+- Dónde se ve. `backend/src/services/carrito/carrito.service.ts`, el método `ejecutarCompraCarrito` y después `despuesDeComprar`. `docs/CONSISTENCIA-CHECKOUT.md`, secciones 0 bis y 1. `migrations/045_carrito_en_postgres.sql`, la tabla de reservas. `migrations/007_flujo_pedido.sql`, el FOR UPDATE de `comprar_pedido()`.
 - Lo que pide el profesor. Entrega 2, sin sobreventa. Es la base de la Entrega 3, fallos parciales en el checkout.
 - Por qué así. Si Redis falla después del pago no se deshace la venta. A lo sumo el contador queda bajo y se dejan de vender unidades, pero nunca se sobrevende.
 
@@ -386,18 +386,18 @@ Con dos rutas del controlador de ventas limitadas, POST y DELETE sobre la venta 
 - Por qué así. La ventana de tiempo es el EXPIRE de la clave de la oferta. Al vencer, las claves desaparecen solas y una revisión cada minuto apaga la marca en PostgreSQL.
 
 ### 45. ¿Qué pasa si Redis se cae?
-Nada se cuelga. El cliente tiene límite de 10 segundos por comando y 3 reintentos, y cualquier fallo de Redis se convierte en un 503 con el mensaje de que no se pudo conectar con Redis. En la prueba de fallas, con Redis parado no se compra, PostgreSQL queda intacto y el carrito sigue entero. Si cae después del pago, la venta queda cerrada.
+Se sigue comprando. Desde el 17 de octubre la verdad del carrito es el pedido `pendiente` de PostgreSQL, así que con Redis caído el backend lee el carrito y lo compra ahí, y el FOR UPDATE del pedido hace el trabajo del candado. Los rankings se calculan en ClickHouse en el momento. El cortacircuitos de Redis deja de preguntarle durante 15 segundos después de la caída, así ninguna página espera el tiempo límite en cada petición. Si cae después del pago, la venta queda cerrada.
 
-- Dónde se ve. `backend/src/database/redis.ts` lineas 17 a 40, timeouts y reintentos. `backend/src/helpers/manejar-error-redis.ts` lineas 11 a 14, el paso a error de conexión. `pruebas/falla_checkout.sh` lineas 722 a 732, el escenario de Redis parado. `docs/CONSISTENCIA-CHECKOUT.md` lineas 404 a 417, el resultado.
+- Dónde se ve. `backend/src/database/redis.ts`, los tiempos límite y el cortacircuitos. `backend/src/services/carrito/carrito-postgres.service.ts`, el carrito en PostgreSQL. `pruebas/falla_checkout.sh`, el escenario de Redis parado, que compra. `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`, la sección de Redis. Ver también la pregunta 132.
 - Lo que pide el profesor. Entrega 3, manejo explícito de fallos parciales en el checkout con una falla simulada.
-- Por qué así. Sin Redis no hay carrito ni candado de checkout, y cobrar sin poder leer el carrito sería peor que rechazar.
+- Por qué así. Redis es la copia rápida y PostgreSQL la verdad. Si la copia se cae, se usa la verdad, más lenta pero completa.
 
 ### 46. ¿Cómo está configurado Redis en Docker? ¿Tiene persistencia, contraseña o ACL?
-El servicio usa la imagen de Redis 8 con contraseña obligatoria y persistencia AOF sobre un volumen. La contraseña sale del `.env`. No hay usuarios ACL, el backend se conecta solo con contraseña. Tampoco hay maxmemory configurado, se queda el valor por defecto, que es rechazar escrituras al llenarse en vez de borrar claves.
+El servicio usa la imagen de Redis 8 con persistencia AOF sobre un volumen y cuatro usuarios de ACL, desde el 25 de septiembre. `backend` es el del backend y solo toca las claves `mesh:*`, sin la categoría peligrosa salvo INFO. `default` es el de los scripts y las pruebas. `inspeccion` es el de RedisInsight y solo lee. `operador` es para mantenimiento a mano. Cada contraseña sale del `.env`, y el arranque genera las que falten. No hay maxmemory configurado, se queda el valor por defecto, que es rechazar escrituras al llenarse en vez de borrar claves.
 
-- Dónde se ve. `docker-compose.yml` lineas 119 a 137, el servicio, `--requirepass` en la línea 125, `--appendonly yes` en la línea 126, el volumen y el healthcheck. `backend/src/database/redis.ts` lineas 13 a 16 y 31 a 36, la conexión con contraseña. `redis/README.md` lineas 809 a 823, la razón de cada ajuste.
-- Lo que pide el profesor. Entrega final, control de acceso. En Redis lo cubre requirepass. Un usuario ACL por rol no está en el código.
-- Por qué así. Con AOF un reinicio no borra carritos ni contadores de ventas limitadas. La contraseña es necesaria porque el puerto 6379 es de los más barridos en redes.
+- Dónde se ve. El bloque `redis` de `docker-compose.yml`, con el comando escrito como lista y los cuatro `--user`. `backend/src/database/redis.ts`, la conexión con `REDIS_USER` y su contraseña. `redis/README.md`, sección 4b. La prueba es `bash redis/prueba_acceso.sh`, 43 OK, que usa `ACL DRYRUN` antes de cada comando que borraría algo.
+- Lo que pide el profesor. Entrega final, control de acceso con roles y permisos acotados según el servicio (4 pts). Es el ADR-14, sección 3 del informe de la Entrega final.
+- Por qué así. Con AOF un reinicio no borra lo que Redis tiene en ese momento. El comando va como lista porque escrito en una sola línea Compose cortaba la contraseña en el signo que la precede y Redis arrancaba con otra.
 
 ### 47. ¿Cómo se muestra el TTL de Redis en vivo, con llaves que vencen y llaves que no?
 Con un comando del panel de comandos, la demostración de Redis. Deja tres llaves bajo `mesh:demo`. Dos no llevan TTL, un texto con el valor 42 y un hash de configuración, y Redis las reporta con TTL -1, que RedisInsight muestra como No limit. La tercera es un hash con la forma del carrito y un TTL de 600 segundos que baja hasta que Redis la borra sola. Otro botón lista todas las llaves de Mesh con su TTL y otro quita solo las de la demostración.
@@ -528,9 +528,9 @@ Cada tabla de eventos se ordena por su pregunta, por ejemplo vista_producto por 
 - Por qué así. En ClickHouse el ORDER BY es el orden físico en disco y decide cuánto se lee. La columna lote evita que un panel muestre como tendencia lo que sembró un script.
 
 ### 63. ¿Cuál es la consulta que compara un periodo contra el anterior para hallar productos en ascenso?
-Hay dos formas. En ClickHouse está escrita con countMergeIf sobre el resumen diario, cuenta vistas de los últimos 7 días contra los anteriores y calcula cuántas veces creció. Esa consulta hoy se corre a mano en la consola de ClickHouse y todavía no es una ruta del backend. Lo que sí funciona en el panel es Compras en ascenso, que pide la ventana de N días y la de 2N y resta para sacar el periodo anterior.
+Hay dos formas. La de vistas usa countMergeIf sobre el resumen diario `vistas_por_producto_dia`, cuenta las vistas de los últimos días contra las de antes y calcula cuántas veces creció. Es la ruta `GET /admin/eventos/tendencias` del backend y sale en el panel de Tendencias. La de compras, Compras en ascenso, pide la ventana de N días y la de 2N y resta para sacar el periodo anterior.
 
-- Dónde se ve. `clickhouse/README.md` lineas 131 a 140, la consulta con countMergeIf. `frontend/src/lib/TendenciasAuto.svelte` lineas 210 a 265, la comparación de compras contra el periodo anterior. `docs/BACKEND-PENDIENTE.md` lineas 1858 a 1866, donde se documentó que falta la ruta.
+- Dónde se ve. `backend/src/services/admin/admin-tendencias-avanzadas.service.ts`, la consulta con countMergeIf. `clickhouse/consultas/T1_en_ascenso.sql` y `clickhouse/README.md`, la misma consulta explicada. `frontend/src/lib/TendenciasAuto.svelte`, la comparación de compras contra el periodo anterior.
 - Lo que pide el profesor. Entrega 2, al menos una consulta que identifique variaciones de demanda entre periodos. Es el reto específico de los 3 pts si se elige la columnar.
 - Por qué así. Restar 2N menos N solo es exacto cuando el total suma, como compras y devoluciones. Las vistas cuentan sesiones distintas y no se pueden restar, por eso hace falta la consulta sobre el resumen.
 
@@ -579,10 +579,10 @@ Usa una consulta multi_match con fuzziness AUTO, que acepta una o dos letras equ
 - Por qué así. El $text de Mongo no tiene búsqueda difusa, y por eso se trajo el motor dedicado (`elastic/README.md` lineas 17 a 18).
 
 ### 68. ¿Cómo funciona el autocompletado?
-El mapping tiene un subcampo search_as_you_type llamado nombre.escribiendo, pensado para contestar con la palabra a medias. El arnés lo prueba con la palabra lap. La ruta del backend hoy no consulta ese subcampo. La caja de la cabecera reutiliza la búsqueda difusa mientras se escribe, con espera de 250 milisegundos y mínimo de dos letras.
+El mapping tiene un subcampo search_as_you_type llamado nombre.escribiendo, pensado para contestar con la palabra a medias. La ruta `GET /buscador/productos/sugerencias` lo consulta con bool_prefix, así "lap" encuentra Laptop aunque la palabra no esté completa. La caja de la cabecera la llama mientras se escribe, con espera de 250 milisegundos y mínimo de dos letras.
 
-- Dónde se ve. `elastic/001_indice.json` lineas 22 a 25, el subcampo. `pruebas/busqueda.sh` lineas 365 a 373, la prueba con bool_prefix. `frontend/src/lib/BuscadorCabecera.svelte` lineas 85 a 86 y 117 a 135, la espera y el disparo. `frontend/src/lib/buscador.ts` línea 65, el mínimo de letras.
-- Lo que pide el profesor. Entrega 3, al menos una función de autocompletado o de corrección ortográfica. La corrección con fuzziness ya cubre el requisito.
+- Dónde se ve. `elastic/001_indice.json`, el subcampo. `backend/src/controllers/buscador/sugerencias.controller.ts` y `backend/src/services/buscador/sugerencias.service.ts`, la consulta con bool_prefix. `pruebas/buscador_escribiendo.mjs` y `pruebas/busqueda.sh`, la prueba con la palabra a medias. `frontend/src/lib/BuscadorCabecera.svelte`, la espera y el disparo.
+- Lo que pide el profesor. Entrega 3, al menos una función de autocompletado o de corrección ortográfica. Están las dos, el autocompletado y la corrección con fuzziness.
 - Por qué así. Con una sola letra la búsqueda difusa trae medio catálogo, por eso se exigen dos letras (`frontend/src/lib/buscador.ts` lineas 74 a 76).
 
 ### 69. ¿Cómo se ordenan los resultados por relevancia y qué son los boosts?
@@ -593,9 +593,9 @@ No hay un sort escrito, así que Elasticsearch ordena por su puntaje de relevanc
 - Por qué así. Quien busca casi siempre escribe el nombre, así que una coincidencia ahí debe valer más que una en la descripción.
 
 ### 70. ¿Cómo se calculan los filtros facetados con agregaciones?
-Honestamente, en el código del backend todavía no hay una agregación sobre el catálogo. La consulta del buscador devuelve solo hits. El mapping ya dejó listos los campos que una faceta necesita, categoría como keyword y precio como double. Las agregaciones sí existen en el índice de eventos de login, que es otro índice.
+Con agregaciones en la misma consulta que busca. La ruta `GET /buscador/productos/facetado` pide los resultados y, junto, una agregación terms por categoría, rangos de precio, rangos de calificación y disponibilidad. Cada número del panel de `/buscar` es cuántos resultados quedan con esa opción. Los filtros elegidos van en el filter de la consulta, así las agregaciones cuentan solo lo que quedó (pregunta 146).
 
-- Dónde se ve. `docs/PENDIENTES.md` lineas 211 a 225, el punto 10 que lo declara abierto. `elastic/001_indice.json` lineas 41 a 50, los campos listos. Un ejemplo real de agregación terms está en `backend/src/services/fraude-login/toma-cuenta.service.ts` lineas 69 a 82.
+- Dónde se ve. `backend/src/services/buscador/facetado.service.ts`, el bloque `aggs`. `elastic/001_indice.json`, los campos keyword y numéricos que las facetas usan. `elastic/pruebas/facetas.py`, la prueba. En vivo, `.\demo-entrega-final.ps1 -Parte facetas`.
 - Lo que pide el profesor. Entrega 3, filtros facetados calculados con las capacidades de agregación del motor, y al menos una agregación empleada para ellos. Está dentro de los 5 puntos del buscador.
 - Por qué así. Una faceta cuenta cuántos resultados hay por categoría o rango de precio, y eso solo lo hace bien el motor con una agregación terms sobre un campo keyword.
 
@@ -621,16 +621,16 @@ El arnés pruebas/busqueda.sh comprueba la difusa, las tildes, la palabra a medi
 - Por qué así. Sin esa prueba el fallo sería silencioso, un producto que se vende y que el buscador jura que no existe.
 
 ### 74. ¿Qué componentes intervienen en el checkout y cuáles participan de la transacción?
-El checkout toca diez componentes. Solo tres están dentro del COMMIT de PostgreSQL, que son la oferta, la función comprar_carrito y la cola evento_grafo. Redis, MongoDB, Neo4j y Elasticsearch quedan fuera. Por eso comprar se reduce a una transacción de PostgreSQL rodeada de escrituras en otras bases.
+El checkout toca trece componentes. Todo lo de PostgreSQL está dentro del COMMIT, el pedido pendiente que es el carrito, la oferta, la copia del catálogo, las reservas, `comprar_pedido()` y las colas hacia las otras bases. Redis, MongoDB, Neo4j, Elasticsearch y ClickHouse quedan fuera y reciben lo suyo por una cola o sin esperar. Por eso comprar se reduce a una transacción de PostgreSQL, y ninguna otra base puede deshacerla.
 
-- Dónde se ve. `docs/CONSISTENCIA-CHECKOUT.md` lineas 35 a 53, la lista de componentes. `backend/src/services/carrito/carrito.service.ts` lineas 474 a 485 y 562 a 572, el flujo y la llamada a comprar_carrito. `migrations/012_comprar_carrito.sql` lineas 111 a 127, las tres funciones en una sola llamada.
+- Dónde se ve. `docs/CONSISTENCIA-CHECKOUT.md`, sección 1, la tabla de componentes y el orden de las llamadas, con cómo era antes del 17 de octubre. `backend/src/services/carrito/carrito.service.ts`, el método `ejecutarCompraCarrito`.
 - Lo que pide el profesor. Entrega 3, documento de estrategia de consistencia que identifique cada componente involucrado. Vale 5 puntos.
 - Por qué así. Un COMMIT de PostgreSQL no puede deshacer una escritura de Redis. Por eso el dinero y el stock son transaccionales y lo demás se acepta como eventual.
 
 ### 75. ¿Cuáles son los puntos de falla del checkout y qué mitigación tiene cada uno?
-El documento lista once. Doble clic se cubre con un candado en Redis. Stock agotado y compras simultáneas se cubren con la transacción y FOR UPDATE. La falla con reservas tomadas se compensa devolviéndolas. Redis al confirmar, carrito sin vaciar, agregados de Mongo y el índice se aceptan como ventana eventual. Mongo caído da 503 sin escribir nada. Ojo con la fila 10, dice que el índice solo se reconstruye con el ETL, pero el recálculo tras la compra también marca el producto para el worker, que lo refresca en unos 10 segundos.
+El documento lista catorce. Doble clic se cubre con un candado en Redis y, si Redis no está, con el FOR UPDATE del pedido. Stock agotado y compras simultáneas se cubren con la transacción y FOR UPDATE. Redis al confirmar los tickets, los agregados de MongoDB y los índices se aceptan como ventana eventual y llegan por sus colas. MongoDB caído ya no impide comprar, porque lo que se lee para cobrar tiene copia en PostgreSQL. Desde el 17 de octubre se suman tres, Redis caído durante el checkout (se compra contra PostgreSQL), Redis que pierde el carrito o la venta (se rehace desde PostgreSQL) y la copia de Redis a PostgreSQL que falla (el carrito queda desincronizado y no se cobra hasta sincronizar).
 
-- Dónde se ve. `docs/CONSISTENCIA-CHECKOUT.md` lineas 127 a 139, la tabla de puntos de falla. `backend/src/services/productos/productos.service.ts` línea 679, la marca pendiente_busqueda que pone el recálculo. `backend/src/services/carrito/carrito.service.ts` línea 611, donde el checkout lo llama.
+- Dónde se ve. `docs/CONSISTENCIA-CHECKOUT.md`, la tabla de puntos de falla de la sección 3 y las filas 12 a 14 de la sección 0 bis.
 - Lo que pide el profesor. Entrega 3, identificar los puntos de falla y el mecanismo de mitigación, sea reintento idempotente, compensación o ventana de consistencia eventual documentada. Vale 5 puntos.
 - Por qué así. Cada punto se clasifica en una de esas tres categorías para que se vea que ninguna falla queda sin decisión.
 
@@ -649,18 +649,18 @@ Está en las reservas de la venta relámpago. Si la compra falla, se llama devol
 - Por qué así. La venta ya está pagada en PostgreSQL, que manda. Deshacerla por un fallo del contador auxiliar dejaría sin compra a quien pagó, solo para arreglar un número.
 
 ### 78. ¿Qué prueba de falla simulada hicieron y qué resultado dio?
-El arnés falla_checkout.sh compra con todo vivo como línea base. Luego para Redis, Mongo y PostgreSQL con docker stop, uno por vez, y pide la compra. Después compara pedidos, pagos, kardex y stock antes y después. El resultado fue 31 OK y 0 FALLA. Ninguna caída cobró a medias, y el hallazgo fue que Mongo caído también impide comprar.
+El arnés falla_checkout.sh compra con todo vivo como línea base. Luego para Redis, MongoDB y PostgreSQL con docker stop, uno por vez, y pide la compra. Después compara pedidos, pagos, kardex y stock antes y después. Hoy da 32 OK y 0 FALLA. Con Redis parado compra, con MongoDB parado compra, con PostgreSQL parado no, y en los tres nada queda a medias. La primera corrida, el 11 de septiembre, encontró que con MongoDB caído no se podía comprar, y eso llevó al ADR-18.
 
-- Dónde se ve. `pruebas/falla_checkout.sh` lineas 604 a 622 el stop, la compra y su clasificación, lineas 679 a 686 la comprobación de que PostgreSQL quedó intacto, y lineas 728 a 732, 746 a 750 y 761 a 765 los tres escenarios. El trap que levanta los contenedores está en la línea 511. La evidencia está en `docs/CONSISTENCIA-CHECKOUT.md` lineas 389 a 448.
+- Dónde se ve. `pruebas/falla_checkout.sh`, los tres escenarios y la comprobación de que PostgreSQL quedó intacto. El trap que levanta los contenedores al final. La evidencia y el hallazgo están en `docs/CONSISTENCIA-CHECKOUT.md`, sección 4 bis.
 - Lo que pide el profesor. Entrega 3, evidencia de al menos una prueba de falla simulada sobre el checkout y el comportamiento resultante. Vale 4 puntos.
 - Por qué así. La línea base evita que un escenario sin compra parezca prueba. Es una parada ordenada y no un corte de luz, y el documento lo dice.
 
 ### 79. ¿Qué ve el usuario cuando el checkout falla?
-Si una base no responde, el backend contesta 503 con el nombre de la base, por ejemplo No se pudo conectar con MongoDB. El pedido, el pago y el stock quedan como estaban, el candado queda suelto y el carrito sigue entero, así que puede reintentar de inmediato. Con Mongo caído tarda unos 5 segundos en fallar, porque el tiempo de espera del driver se bajó a 3 segundos.
+Hoy solo puede fallar por PostgreSQL, porque con las demás bases caídas se compra igual. Si PostgreSQL no responde, el backend contesta 503 y la pantalla dice un texto común, sin nombrar ninguna base. El pedido, el pago y el stock quedan como estaban y el carrito sigue entero, así que puede reintentar en cuanto PostgreSQL vuelva. Si la falla es de negocio, como un producto sin stock o un precio que cambió, contesta 409 con la lista de líneas y la pantalla las enseña una por una.
 
-- Dónde se ve. `backend/src/helpers/manejar-error-http.ts` lineas 37 a 42, el 503. `frontend/src/lib/Checkout.svelte` lineas 1126 a 1139, cómo se muestra el mensaje. `backend/src/database/mongo.ts` lineas 31 a 32, los 3 segundos. Lo medido está en `backend/elementos Generales/prueba-falla-mongo-checkout.md` lineas 69 a 84.
+- Dónde se ve. `backend/src/helpers/manejar-error-http.ts`, el 503. `frontend/src/lib/api.ts`, donde el mensaje que nombra una base se cambia por un texto común. `frontend/src/lib/Checkout.svelte`, cómo se muestran el error y los avisos.
 - Lo que pide el profesor. Entrega 3, manejo explícito de fallos parciales con un comportamiento definido y comunicado al usuario, al menos en un escenario simulado. Vale 4 puntos.
-- Por qué así. Mongo no escribe nada del pedido, pero se lee antes del COMMIT, así que es una dependencia de disponibilidad. Cómo manejarla queda por decidir con el profesor, y el documento propone tres salidas en las líneas 341 a 351 de `docs/CONSISTENCIA-CHECKOUT.md`.
+- Por qué así. La persona no tiene por qué saber qué base se cayó, solo si puede seguir y qué hacer. Por eso desde el 19 de octubre ningún error de la página nombra una base.
 
 ### 80. ¿Cómo se mapea el índice de eventos de autenticación y para qué sirven los subcampos keyword?
 Es una plantilla para todo índice llamado mesh_eventos_autenticacion. Con dynamic en false, cada campo tiene un tipo elegido, y ip es de tipo ip y fecha es date. Los campos de texto exacto como tipo, resultado e id_usuario son keyword y además tienen un subcampo keyword. Las consultas de fraude piden esos subcampos, por ejemplo ip.keyword, y sin ellos daban cero resultados sin error.
@@ -962,7 +962,7 @@ Sí, en todos los que tienen roles. En Redis cuatro usuarios de ACL, con el del 
 - Ojo si preguntan por Neo4j. Es la única sin roles, porque la edición community no los tiene. La prueba le pide crear un rol y guarda lo que contesta, `Unsupported administration command`.
 
 ### 117. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
-Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector, tabla `vector_producto`, con un índice HNSW de coseno. `SimilaresService` pide los 200 vecinos más cercanos que estén activos y no sean el propio producto ni sus copias, y se queda con uno por grupo. Después pide a MongoDB cómo se ven. Los 3105 productos tienen vector. Las reseñas tienen el suyo en `vector_comentario`.
+Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector, tabla `vector_producto`, con un índice HNSW de coseno. `SimilaresService` pide los 200 vecinos más cercanos que estén activos y no sean el propio producto ni sus copias, y se queda con uno por grupo. Después pide a MongoDB cómo se ven. Cada producto del catálogo tiene su vector, 1003 en la base de hoy, 1000 de ellos activos. Las reseñas tienen el suyo en `vector_comentario`.
 
 - Dónde se ve. `migrations/040_vectores_en_postgres.sql`, las dos tablas. `etl/cargar_vectores.ps1`, paso 7d de arrancar. `backend/src/services/productos/similares.service.ts` y `helpers/vectores-pgvector.ts` (`buscarCercanos()`, que sube `hnsw.ef_search` y activa `iterative_scan` para que el filtro no deje la lista corta). `vectores-sync.service.ts` recalcula cada 10 segundos los productos editados. `pruebas/recomendacion_semantica.py`, 15 OK. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`, que compara el índice HNSW con la búsqueda exacta: 1,6 ms contra 7,4 ms, los mismos seis.
 - Lo que pide el profesor. Entrega final, recomendación por similitud semántica de la descripción con representaciones vectoriales (5 pts). La sección 5.2 da como referencia una extensión vectorial sobre PostgreSQL, y el 16 de octubre pidió explícitamente pgvector.
@@ -987,15 +987,15 @@ La oferta guarda su precio de lista y aparte un porcentaje de descuento que pued
 ### 120. ¿Cómo se juntan las alertas de fraude en casos y cómo se decide quién es el núcleo?
 Las cuatro familias de detección (anillos y patrones de reseñas en Neo4j, compras y navegación en ClickHouse, y el login en Elasticsearch) dejan hallazgos, cada uno con las cuentas que toca. El agrupador une en un mismo grupo los hallazgos que comparten cuentas, pero el login nunca une por sí solo, porque compartir una IP es un indicio y no una prueba. Una cuenta es núcleo si aparece en dos o más hallazgos del grupo o en uno fuerte (ciclo, reiterado, satélites, coordinados), y el resto es periferia, que se lista pero ninguna acción automática toca. El puntaje suma los puntos por tipo, los multiplica por la diversidad de fuentes y los reduce si la evidencia es vieja. El agrupador corre al arrancar el backend y después cada 15 minutos.
 
-- Dónde se ve. `backend/src/services/fraude/agrupador-fraude.service.ts` linea 60 (agrupar) y 156 (las cuentas concentradoras). `puntaje-fraude.service.ts` linea 65. `agrupador-fraude-worker.service.ts` linea 68, la corrida al arrancar. `migrations/026_casos_fraude.sql` lineas 48, 102 y 152, el caso, su evidencia y sus cuentas. En la app, el panel de Fraude, pestaña Casos. Pruebas `node pruebas/casos_fraude_fusion.cjs` y `node pruebas/casos_fraude_granja.cjs`.
+- Dónde se ve. `backend/src/services/fraude/agrupador-fraude.service.ts` linea 60 (agrupar) y 156 (las cuentas concentradoras). `backend/src/services/fraude/puntaje-fraude.service.ts` linea 65. `backend/src/services/fraude/agrupador-fraude-worker.service.ts` linea 68, la corrida al arrancar. `migrations/026_casos_fraude.sql` lineas 48, 102 y 152, el caso, su evidencia y sus cuentas. En la app, el panel de Fraude, pestaña Casos. Pruebas `node pruebas/casos_fraude_fusion.cjs` y `node pruebas/casos_fraude_granja.cjs`.
 - Ojo si preguntan por el vendedor de una granja. Una cuenta con más de 10 contrapartes en reseñas es concentradora y nunca es núcleo. Antes contaban también las reseñas del propio fraude, así que el vendedor que armaba una granja de 11 cuentas quedaba fuera del núcleo de su caso. Ahora esas reseñas no cuentan para el umbral, y la prueba de la granja lo demuestra (saboteada falla).
-- Desde el refactor de fraude. El agrupador ya no tiene tres adaptadores, lee una sola tabla, `senal_fraude` (`hallazgo-fraude-adaptador.service.ts` línea 79). La evidencia del caso apunta a la señal, y la recencia sale de `ultima_deteccion`, que solo mueve el detector, así que revisar algo viejo ya no lo rejuvenece (era el C4).
+- Desde el refactor de fraude. El agrupador ya no tiene tres adaptadores, lee una sola tabla, `senal_fraude` (`backend/src/services/fraude/hallazgo-fraude-adaptador.service.ts` línea 79). La evidencia del caso apunta a la señal, y la recencia sale de `ultima_deteccion`, que solo mueve el detector, así que revisar algo viejo ya no lo rejuvenece (era el C4).
 - Cerrado el 17 de octubre. Una IP compartida ya no une casos, tampoco al guardar (era el C1): la evidencia es única por caso y señal, y una señal de login puede estar en varios casos con las cuentas de cada uno (`migrations/042_limpieza_fraude.sql`).
 
 ### 121. ¿Dónde vive el vencimiento de un descuento y qué pasa si se vacía Redis?
 En PostgreSQL. La oferta guarda `fecha_vencimiento_descuento` y `fecha_vencimiento_venta_limitada`, y nulo quiere decir que no vence. Un worker del backend revisa cada minuto las que ya pasaron su fecha y las apaga. Hasta el 26 de septiembre el vencimiento era una clave de Redis con TTL, y un Redis vaciado se llevaba los descuentos. Ahora Redis solo lleva el contador de la venta relámpago. El panel del vendedor muestra hasta cuándo dura cada uno, y si la venta relámpago vence sola se lleva también el descuento, así que la etiqueta muestra la fecha que llega primero.
 
-- Dónde se ve. `migrations/028_vencimiento_oferta.sql` lineas 44 y 45. `backend/src/services/vendedores/ventas-limitadas.service.ts` lineas 364 y 422. `frontend/src/lib/descuento.ts` linea 76 y `OfertasVendedor.svelte` linea 571. En vivo, `.\demo-descuentos-solos.ps1 -Parte manual`, que muestra la fecha en PostgreSQL, por la ruta del vendedor y el worker quitándolo.
+- Dónde se ve. `migrations/028_vencimiento_oferta.sql` lineas 44 y 45. `backend/src/services/vendedores/ventas-limitadas.service.ts` lineas 364 y 422. `frontend/src/lib/descuento.ts` linea 76 y `frontend/src/lib/OfertasVendedor.svelte` linea 571. En vivo, `.\demo-descuentos-solos.ps1 -Parte manual`, que muestra la fecha en PostgreSQL, por la ruta del vendedor y el worker quitándolo.
 - Por qué así. Una fecha en la base de verdad no se pierde con un FLUSHALL, y el worker puede saber qué venció sin preguntarle a Redis.
 
 ### 122. ¿Por qué todo el fraude se guarda en una sola tabla de señales?
@@ -1142,7 +1142,7 @@ La tienda sigue con las que quedan. Cada base tiene un cortacircuitos en el back
 
 - Dónde se ve. `backend/src/helpers/cortacircuitos.ts` y los respaldos `catalogo-respaldo.ts`, `buscador-respaldo.ts`, `recomendaciones-respaldo.ts` y `tarjetas-producto.ts`. `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`, base por base, con lo medido.
 - Cómo se muestra en vivo. En el panel de comandos, grupo Caída de una base, o `.\remoto\caidas.ps1 -Accion apagar -Base redis`. Un interruptor se pone entre el backend y cada base, así se puede apagar una sin tocar la máquina que la tiene. Con las bases en la misma máquina, también vale `docker stop mesh-redis`.
-- Cómo se comprueba. `node pruebas/caidas.mjs` apaga las seis una por una, revisa cada cosa del documento y las prende otra vez. 46 OK, apagadas y congeladas.
+- Cómo se comprueba. `node pruebas/caidas.mjs` apaga las seis una por una, revisa cada cosa del documento y las prende otra vez. 51 OK con las bases apagadas y otros 51 congeladas.
 
 ### 143. ¿Por qué con Redis caído los rankings salen iguales?
 Porque Redis nunca fue el que los calcula. Un worker hace la consulta en ClickHouse cada 10 minutos y deja el resultado en Redis para contestar rápido. Sin Redis, el backend hace esa misma consulta en el momento y la recuerda un minuto. Se compararon las ocho vitrinas con y sin Redis y salieron idénticas, en el mismo orden (los empates se ordenan como los ordena Redis).
@@ -1165,7 +1165,7 @@ En la copia del catálogo en PostgreSQL, con la misma regla de texto que el índ
 ### 146. ¿Por qué los filtros van en la consulta y no en un post_filter?
 Porque si el filtro ya se sabe, se filtra antes de agregar. Hasta el 20 de octubre los filtros iban en `post_filter`, que corre después de las agregaciones, y cada faceta se contaba con los filtros de las otras. Ahora van en el `filter` de la consulta junto con el de activo, y las agregaciones cuentan solo lo que quedó, así cada número del panel es cuántos resultados hay de verdad con esa opción sumada. Dentro de una faceta las opciones siguen sumándose, entre facetas se cruzan.
 
-- Dónde se ve. `backend/src/services/buscador/facetado.service.ts` y `elastic/pruebas/facetas.py`, 24 OK, que comprueba que la consulta no lleva `post_filter` y que la faceta de categoría se recorta con lo elegido.
+- Dónde se ve. `backend/src/services/buscador/facetado.service.ts` y `elastic/pruebas/facetas.py`, 26 OK, que comprueba que la consulta no lleva `post_filter` y que la faceta de categoría se recorta con lo elegido.
 - Lo que pide el profesor. Lo dijo en la revisión del 19 de octubre, que los filtros no se pongan después en los agregados.
 
 ### 147. ¿Qué devuelve una búsqueda como asdffff?

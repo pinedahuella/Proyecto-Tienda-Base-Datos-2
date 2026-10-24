@@ -207,7 +207,7 @@ Del 2026-10-02 al 10-16 el vector de cada producto iba en su documento de
 `vector_modelo`) y el de cada resena en un tercer indice, `mesh_comentarios`
 (`003_comentarios.json`). A pedido del profesor (25f0fe0 de Jose David,
 migracion 040) volvieron a PostgreSQL, a las tablas `vector_producto` y
-`vector_comentario` con pgvector. El porque, medido, esta en el ADR-10 de
+`vector_comentario` con pgvector. El porque, medido, esta en el ADR-13 de
 `docs/ARQUITECTURA.md`: con el mismo catalogo pgvector da el coseno exacto en
 1000 de 1001 productos y el `int8_hnsw` de Elasticsearch en 317.
 

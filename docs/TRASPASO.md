@@ -3,7 +3,40 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-23, madrugada**.
+Ultima actualizacion: **2026-10-23, noche**.
+
+**EMPIEZA AQUI (23-10, noche). Revision final entera contra la PC de Jose David.** Jose David corrio el
+`arrancar.ps1` nuevo a las 18:14 y sus seis bases tienen los usuarios por servicio. Todas sus contrasenas van en
+`remoto\.env.remoto` (como sacarlas, `docs/SEGURIDAD.md`, Modo remoto), y el backend de esta PC entra alla con
+`mesh_backend` en las cinco bases.
+
+Medido alla: la bateria entera en verde (`etl_mongo` fallo por un cambio de red entre las 19:41 y las 20:04 y
+repetida dio 21 OK; `correr_patrones` es la carrera de siempre y repetida sale bien), `seguridad/prueba_acceso.sh`
+93 OK, las nueve partes de `demo-entrega-final.ps1` y todas las pantallas en Edge, como compradora, tienda y admin,
+a 1536x730 y a 390.
+
+Arreglado:
+- `remoto/bin/psql` respeta la contrasena de `docker exec -e PGPASSWORD` y traduce `-h postgres` a localhost.
+  Sin eso la prueba de acceso daba 11 FALLA en modo remoto.
+- `pruebas/buscador_escribiendo.mjs` carga `backend/.env` con override: en modo remoto entraba como
+  `mesh_backend` con la contrasena de `elastic`.
+- Frontend: los campos numericos de Reglas salian con el estilo del boton principal (un selector suelto desde
+  df28b4a) y los botones del carrito se ponian transparentes al pasar el mouse (desde 27d4ecc).
+- Backend: `helpers/vectores-ollama.ts` le pide a Ollama que no suelte el modelo. Recargarlo hacia que la primera
+  busqueda despues de 5 minutos sin uso tardara 8 s en vez de 1.
+- PREGUNTAS-SUSTENTACION, 17 respuestas que seguian en septiembre (Redis sin ACL, sin facetas, sin NewSQL, no se
+  podia comprar sin MongoDB ni sin Redis). `docs/CONSISTENCIA-CHECKOUT.md` seccion 1 con el checkout de hoy.
+- Presentacion: capturas nuevas de las laminas 8 y 14 desde la PC de Jose David, lamina 16 con 7 y 8, zoom del
+  diagrama en la 6 y la lista Antes de presentar en `GUION.md`.
+- Datos alla: retiradas 7 ofertas a Q15 de las cuentas `famb*` y `anit*` y borradas 14 busquedas de teclazos en
+  ClickHouse. Respaldo previo en `respaldos/david_antes_bateria_20261023_1859.dump`.
+
+- Word de la Entrega final regenerado el 24-10, 31 paginas, con el conteo de commits al dia y sin nombres fuera
+  de la portada y la 1.3.
+
+Queda: quitar los descuentos que se pusieron a mano el 21-10 en las ofertas 4, 7, 36, 103 y 106 (Meme lo pidio,
+la PC de Jose David se desconecto antes), probar `remoto\caidas.ps1` y que Jose David haga publico el repo o
+agregue al profesor.
 
 **EMPIEZA AQUI (22 al 23-10, noche). Control de acceso en todas las bases, foto en el buscador, registro unico de
 decisiones, Word final, diagrama, docs y presentacion.** Con permiso de David para tocar todo. Probado con las bases

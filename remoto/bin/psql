@@ -11,6 +11,10 @@
 #     los errores, para que los "grep" y los "[ x = y ]" de las pruebas vean lo
 #     mismo que con Docker.
 #   - La contrasena va en PGPASSWORD (adentro entra sin ella, por el socket).
+#     Si llego una con docker exec -e PGPASSWORD=..., se usa esa: es la de otro
+#     usuario (seguridad/prueba_acceso.sh entra como mesh_backend y mesh_lectura).
+#   - -h postgres es el nombre del servicio en la red de Docker. Aqui esa base
+#     es localhost, que el tunel lleva a la otra PC.
 source "$(dirname "$0")/../comun.sh"
 
 PSQL_EXE="${PSQL_EXE:-}"
@@ -24,8 +28,19 @@ if [ -z "$PSQL_EXE" ]; then
     exit 127
 fi
 
-export PGHOST=localhost PGPORT=5432 PGPASSWORD="$DB_PASSWORD" PGCLIENTENCODING=UTF8
+export PGHOST=localhost PGPORT=5432 PGPASSWORD="${PGPASSWORD:-$DB_PASSWORD}" PGCLIENTENCODING=UTF8
 traducir_args "$@"
+
+i=0
+while [ $i -lt ${#ARGS[@]} ]; do
+    case "${ARGS[$i]}" in
+        -h|--host)
+            [ "${ARGS[$((i + 1))]:-}" = "postgres" ] && ARGS[$((i + 1))]=localhost ;;
+        -hpostgres) ARGS[$i]=-hlocalhost ;;
+        --host=postgres) ARGS[$i]=--host=localhost ;;
+    esac
+    i=$((i + 1))
+done
 
 # Un -c con acentos no llega entero: Windows le pasa los argumentos a psql.exe
 # en la pagina de codigos ANSI (la "o" con tilde como el byte f3) y PostgreSQL,

@@ -13,6 +13,11 @@ export const DIMENSIONES_VECTOR = 768;
 
 const LIMITE_MS_OLLAMA_DEFECTO = 30000;
 
+/** Que Ollama deje el modelo cargado y no lo suelte a los 5 minutos, como hace
+ * por defecto. Pesa 174 MB, y recargarlo hacia que la primera busqueda despues
+ * de un rato sin uso tardara 8 s en vez de 1 (medido el 2026-10-23). */
+const MANTENER_MODELO = -1;
+
 interface RespuestaEmbed {
   embeddings: number[][];
 }
@@ -33,7 +38,7 @@ export async function pedirVectores(
     fetch(`${OLLAMA_URL}/api/embed`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODELO, input: textos }),
+      body: JSON.stringify({ model: OLLAMA_MODELO, input: textos, keep_alive: MANTENER_MODELO }),
     }),
     limiteMs,
     'Ollama',

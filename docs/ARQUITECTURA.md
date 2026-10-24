@@ -146,7 +146,7 @@ en `etl/README.md`, y que hacer con ella se decide con el profesor.
 
 | Motor | Que guarda | Por que ahi |
 |---|---|---|
-| **PostgreSQL** | usuarios, direcciones, categorias, **ofertas**, `precio_historial`, pedidos (el `pendiente` de cada cuenta es su carrito), lineas, pagos, kardex, reservas de venta relampago, resenas, las senales de fraude y los vectores (pgvector) | Es lo que necesita transaccion. La compra entera es atomica y el descuento de stock va con `SELECT ... FOR UPDATE`. Entrega 1: cero sobreventas sobre 555 ofertas. Los vectores van aqui desde el 2026-10-16 (ADR-10, abajo) |
+| **PostgreSQL** | usuarios, direcciones, categorias, **ofertas**, `precio_historial`, pedidos (el `pendiente` de cada cuenta es su carrito), lineas, pagos, kardex, reservas de venta relampago, resenas, las senales de fraude y los vectores (pgvector) | Es lo que necesita transaccion. La compra entera es atomica y el descuento de stock va con `SELECT ... FOR UPDATE`. Entrega 1: cero sobreventas sobre 555 ofertas. Los vectores van aqui desde el 2026-10-16 (ADR-13, abajo) |
 | **MongoDB** | el catalogo, su historial de eventos, y desde el 2026-09-10 el log de autenticacion | Los atributos varian por categoria: lo que describe una laptop no describe una camisa. Un esquema fijo serian columnas casi todas nulas. El historial es append de eventos, y se reconstruye el estado a una fecha |
 | **Redis** | la copia rapida del carrito, la venta relampago, el candado de checkout y los contadores de fraude del login | Lo que tiene que contestar al instante y lo que tiene que ser atomico sin bloquear (`inventario_limitado.lua`). Desde el 2026-10-17 **nunca es la fuente de verdad** (pedido del profesor): el carrito y las reservas se copian a PostgreSQL, y si Redis se cae se compra contra PostgreSQL |
 | **Neo4j** | el grafo de calificaciones, domicilios y, desde el 2026-10-16, compras | Preguntas de varios saltos y de largo variable: los anillos de fraude, "para ti" (lo que compraron quienes compraron lo mismo que tu) y "tambien compraron". El porque, con la comparativa contra columnar, en `docs/DECISION-GRAFOS-VS-COLUMNAR.md` |
@@ -242,9 +242,10 @@ en PostgreSQL, el maximo `_id` de Mongo que usa el panel del vendedor, y la
 secuencia estaba en 1126 con el maximo en 1105, un hueco de 21. Esta entero en
 el pendiente 5 de `docs/PENDIENTES.md`.
 
-**Todo corre en una sola maquina**, en once contenedores del mismo Docker: diez que se quedan corriendo (seis
-motores y cuatro ventanas, pgAdmin, DbGate, RedisInsight y Kibana) y uno de un
-solo uso, `mesh-kibana-vistas`, que termina en `Exited (0)`. Eso
+**Todo corre en una sola maquina**, en doce contenedores del mismo Docker: diez que se quedan corriendo (seis
+motores y cuatro ventanas, pgAdmin, DbGate, RedisInsight y Kibana) y dos de un
+solo uso, `mesh-kibana-vistas` y `mesh-elastic-usuarios`, que terminan en `Exited (0)`.
+`mesh-ollama` es uno mas, opcional, que solo sube si la PC no tiene Ollama. Eso
 importa para cualquier discusion sobre escalar: una base distribuida en un solo
 nodo se queda con todos sus costes y ninguna de sus ventajas.
 
@@ -302,7 +303,7 @@ hubo que cambiar de imagen, la migracion 024 solo crea la extension. Del
 se quedo por eso: cambiarla toca el volumen de datos. Desde la 040 se vuelve a
 usar.
 
-**ADR-10, los vectores en PostgreSQL, segunda vez.** Paso por tres lugares:
+**ADR-13, los vectores en PostgreSQL, segunda vez.** Paso por tres lugares:
 
 | Desde | Donde | Por que |
 |---|---|---|

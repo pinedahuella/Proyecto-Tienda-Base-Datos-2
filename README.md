@@ -73,6 +73,10 @@ genera las que falten.
 .\panel-comandos.ps1                            # botones en http://127.0.0.1:5199
 ```
 
+En Docker Desktop, `mesh-elastic-usuarios` y `mesh-kibana-vistas` aparecen
+apagados. Es lo esperado: en cada arranque crean los usuarios de Elasticsearch y
+las vistas de Kibana y terminan con `Exited (0)`.
+
 Con las bases en otra PC: esa PC corre `.\preparar-pc-bases.ps1` y la de trabajo
 `.\usar-bases-remotas.ps1 -Ip 100.x.y.z` (y `-Local` para volver).
 

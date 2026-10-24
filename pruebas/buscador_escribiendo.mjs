@@ -21,7 +21,11 @@ import { fileURLToPath } from 'node:url';
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..');
 const requerir = createRequire(join(RAIZ, 'backend', 'package.json'));
-requerir('dotenv').config({ path: join(RAIZ, 'backend', '.env'), quiet: true });
+// override: los clientes de abajo son los del backend y tienen que entrar con
+// sus usuarios. En modo remoto activar.sh exporta las contrasenas del .env de
+// la raiz, donde ELASTIC_PASSWORD es la de `elastic`, y sin override quedaba
+// mesh_backend con esa contrasena y Elasticsearch contestaba 401.
+requerir('dotenv').config({ path: join(RAIZ, 'backend', '.env'), quiet: true, override: true });
 const { elasticClient } = requerir('./dist/database/elastic');
 const { buscarEnCopia } = requerir('./dist/helpers/buscador-respaldo');
 const { pool } = requerir('./dist/database/postgres');

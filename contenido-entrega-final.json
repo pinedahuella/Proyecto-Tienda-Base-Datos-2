@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 348 commits sobre `main` entre el 15 de agosto y el 23 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 23 decisiones del semestre."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 350 commits sobre `main` entre el 15 de agosto y el 24 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 23 decisiones del semestre."
      }
     ]
    },
@@ -173,7 +173,7 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "225"
+         "227"
         ],
         [
          "José David Navichoque Pineda",
@@ -188,7 +188,7 @@
         [
          "Total",
          "",
-         "348"
+         "350"
         ]
        ],
        "anchos": [
@@ -196,7 +196,7 @@
         2.4,
         1.2
        ],
-       "leyenda": "Commits por integrante en el historial de git al 23 de octubre de 2026."
+       "leyenda": "Commits por integrante en el historial de git al 24 de octubre de 2026."
       }
      }
     ]
@@ -950,7 +950,7 @@
         "2. Copiar el nombre en columnas de `oferta`.",
         "3. Dos tablas de copia del catálogo en PostgreSQL y una cola para recalcular MongoDB."
        ],
-       "decision": "La alternativa 3, del diseño de José David. `producto_catalogo` y `variante_catalogo` guardan lo que la compra lee, migración 029, y la cola `evento_producto`, migración 030, lleva cada cambio a un worker que recalcula MongoDB cada 5 segundos. La migración 047 sumó lo que hace falta para mostrar la ficha y el catálogo sin MongoDB.",
+       "decision": "La alternativa 3. `producto_catalogo` y `variante_catalogo` guardan lo que la compra lee, migración 029, y la cola `evento_producto`, migración 030, lleva cada cambio a un worker que recalcula MongoDB cada 5 segundos. La migración 047 sumó lo que hace falta para mostrar la ficha y el catálogo sin MongoDB.",
        "justificacion": [
         "**Consistencia.** Comprar ahora lee y escribe solo PostgreSQL, y Redis como copia rápida. Lo que se cobra y lo que se lee para cobrar están en la misma base.",
         "**Patrón de consulta.** El nombre es de la variante y no de la oferta. Con la alternativa 2 se repetía en cada oferta y un cambio de nombre tocaba muchas filas.",
@@ -1009,7 +1009,7 @@
         "2. Volver a PostgreSQL y sacar a Redis del carrito.",
         "3. Escribir primero en Redis y después en PostgreSQL, que manda."
        ],
-       "decision": "La alternativa 3, del diseño de José David, migración 045. El carrito es el pedido `pendiente` de la cuenta, uno por cuenta, con su versión y su última actividad, y cada reserva de venta relámpago queda en `reserva_venta_relampago`. Redis decide rápido con su script y PostgreSQL guarda.",
+       "decision": "La alternativa 3, migración 045. El carrito es el pedido `pendiente` de la cuenta, uno por cuenta, con su versión y su última actividad, y cada reserva de venta relámpago queda en `reserva_venta_relampago`. Redis decide rápido con su script y PostgreSQL guarda.",
        "justificacion": [
         "**Consistencia.** Lo que no se puede reconstruir vive en la base con transacciones. La versión del pedido dice si Redis se quedó atrás, y las reservas en PostgreSQL rehacen el contador de Redis si se pierde.",
         "**Patrón de consulta.** Las lecturas del carrito siguen saliendo de Redis, que es lo que se pide en cada página.",

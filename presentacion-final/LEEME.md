@@ -6,6 +6,9 @@ tecnica de las presentaciones de LECTORTIE e ITIL. 19 laminas.
 - Abrir `index.html` en Edge o Chrome. Flechas, espacio o clic avanzan, flecha
   izquierda o clic en el cuarto izquierdo retroceden, F pantalla completa,
   Inicio vuelve a la portada. En el telefono se desliza.
+- En la lamina del diagrama, un clic sobre el diagrama lo abre a tamano
+  completo para leer la leyenda (se recorre con la rueda del mouse). Otro clic
+  o Esc lo cierra, y mientras esta abierto no se cambia de lamina.
 - Las letras vienen de Google Fonts, asi que se ve mejor con internet.
 - Para imprimir o sacar un PDF, imprimir desde el navegador: sale una lamina por
   pagina.

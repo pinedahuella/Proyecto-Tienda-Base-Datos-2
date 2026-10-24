@@ -97,3 +97,18 @@ En el panel de comandos (`.\panel-comandos.ps1`), en este orden.
 
 ## 19. Gracias
 Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`, 152.
+
+## Antes de presentar
+- Las dos PC en la misma red y sin cambiarse de red durante la demo. El 23 de
+  octubre un cambio de red corto las bases de la PC de Jose David unos 20
+  minutos, y la tienda siguio con sus respaldos pero las demos que hablan con
+  las bases fallaron.
+- Con las bases en la PC de Jose David, Tailscale prendido en las dos y
+  `.\usar-bases-remotas.ps1 -Ip 100.64.42.11` antes de prender el backend.
+- `ollama serve` prendido en la PC del backend y una busqueda por frase de
+  prueba antes de empezar. El backend le pide a Ollama que deje el modelo
+  cargado, asi que despues de esa primera busqueda las demas tardan un segundo.
+- Para apagar una base en vivo con las bases en otra PC, correr
+  `.\remoto\caidas.ps1 -Accion levantar` unos minutos antes (tarda unos 3).
+- No correr la bateria de pruebas el mismo dia. Deja cuentas, ofertas a Q15 y
+  senales de fraude de prueba.

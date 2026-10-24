@@ -90,6 +90,10 @@ b { font-weight: 600; color: #fff; }
 
 .captura { display: block; width: 100%; border-radius: 18px; border: 1px solid var(--linea); box-shadow: 0 30px 80px rgba(0,0,0,.55); }
 .pie { font: 300 24px/1.35 var(--texto); color: var(--suave); margin-top: 16px; }
+[data-zoom] { cursor: zoom-in; }
+#zoom { position: fixed; inset: 0; z-index: 50; display: none; overflow: auto; background: #fff; cursor: zoom-out; }
+#zoom.abierto { display: block; }
+#zoom img { display: block; max-width: none; margin: 0 auto; }
 
 /* linea del tiempo */
 .tiempo { position: relative; display: flex; justify-content: space-between; margin-top: 30px; }
@@ -230,7 +234,7 @@ b { font-weight: 600; color: #fff; }
 <!-- 6 Diagrama -->
 <section class="lamina" style="padding:50px 70px">
   <div class="cabeza" data-in="1" style="margin-bottom:22px;flex-direction:row;align-items:baseline;gap:30px"><p class="etiqueta">Diagrama final</p><p class="sub" style="font-size:30px">continuas, lo que hace el backend · punteadas, datos entre bases</p></div>
-  <img class="captura" data-in="2" src="img/arquitectura.png" alt="Diagrama de arquitectura de Mesh" style="height:880px;width:auto;margin:0 auto;background:#fff">
+  <img class="captura" data-in="2" data-zoom src="img/arquitectura.png" alt="Diagrama de arquitectura de Mesh" style="height:880px;width:auto;margin:0 auto;background:#fff">
 </section>
 
 <!-- 7 Recomendacion semantica -->
@@ -369,9 +373,9 @@ b { font-weight: 600; color: #fff; }
   <div class="cabeza" data-in="1"><p class="etiqueta">Retrospectiva · 4 puntos</p><h2 class="titulo">Lo que sostendríamos y lo que no</h2></div>
   <div class="fila">
     <div class="col tarjeta" data-in="2" style="border-top:6px solid var(--acento-2);--c:var(--acento-2)"><h3 class="ok">Sostendríamos, 7</h3>
-      <ul class="puntos"><li>El dinero en PostgreSQL, cero sobreventas en 555 ofertas</li><li>La venta relámpago con Lua, 5000 solicitudes sin sobreventa</li><li>El catálogo en MongoDB, atributos distintos por categoría</li><li>Elasticsearch como copia que se rehace entera</li><li>Ollama en la misma máquina, sin costo por consulta</li><li>Un solo comando que cuenta lo que quedó</li></ul></div>
+      <ul class="puntos"><li>El dinero en PostgreSQL, cero sobreventas</li><li>La venta relámpago con Lua, sin bloqueos</li><li>El catálogo en MongoDB, atributos por categoría</li><li>Neo4j para los anillos, con su cola</li><li>Elasticsearch como copia que se rehace</li><li>Ollama en la misma máquina, sin costo</li><li>Un solo comando que cuenta lo que quedó</li></ul></div>
     <div class="col tarjeta" data-in="3" style="border-top:6px solid #ff8a80;--c:#ff8a80"><h3 class="no">Replantearíamos, 8</h3>
-      <ul class="puntos"><li>El carrito solo en Redis, hoy su verdad está en PostgreSQL</li><li>El checkout leyendo de MongoDB, hoy compra sin él</li><li>Mudar el vector sin medir su precisión</li><li>Dos dueños del id de producto</li><li>Eventos a ClickHouse sin cola de respaldo</li><li>Dejar el control de acceso para el final</li></ul></div>
+      <ul class="puntos"><li>El carrito solo en Redis</li><li>El checkout leyendo de MongoDB</li><li>El vencimiento del descuento en Redis</li><li>Mudar el vector sin medir su precisión</li><li>Dos dueños del id de producto</li><li>Eventos a ClickHouse sin cola de respaldo</li><li>El registro de login primero en ClickHouse</li><li>Aplazar la columnar por las preguntas de hoy</li></ul></div>
   </div>
 </section>
 
@@ -410,6 +414,7 @@ b { font-weight: 600; color: #fff; }
 </div></div>
 <div class="progreso" id="progreso"></div>
 <div class="contador" id="contador"></div>
+<div id="zoom" aria-hidden="true"><img src="img/arquitectura.png" alt="Diagrama de arquitectura de Mesh, a tamano completo"></div>
 
 <script>
 (function () {
@@ -447,7 +452,14 @@ b { font-weight: 600; color: #fff; }
     try { history.replaceState(null, '', '#' + (i + 1)); } catch (e) {}
   }
 
+  // El diagrama se abre a tamano completo con un clic, para leer la leyenda.
+  // Otro clic o Esc lo cierra, y mientras esta abierto no se cambia de lamina.
+  var zoom = document.getElementById('zoom');
+  function zoomAbierto() { return zoom.classList.contains('abierto'); }
+  function cerrarZoom() { zoom.classList.remove('abierto'); }
+
   document.addEventListener('keydown', function (e) {
+    if (zoomAbierto()) { if (e.key === 'Escape') cerrarZoom(); return; }
     if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') { ir(i + 1); e.preventDefault(); }
     else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { ir(i - 1); e.preventDefault(); }
     else if (e.key === 'Home') ir(0);
@@ -457,13 +469,17 @@ b { font-weight: 600; color: #fff; }
       if (p && p.catch) p.catch(function () {});
     }
   });
-  document.addEventListener('click', function (e) { ir(e.clientX < window.innerWidth / 4 ? i - 1 : i + 1); });
+  document.addEventListener('click', function (e) {
+    if (zoomAbierto()) { cerrarZoom(); return; }
+    if (e.target.closest && e.target.closest('[data-zoom]')) { zoom.classList.add('abierto'); zoom.scrollTop = 0; return; }
+    ir(e.clientX < window.innerWidth / 4 ? i - 1 : i + 1);
+  });
 
   // En el telefono se desliza para pasar de lamina.
   var x0 = null;
   document.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; }, { passive: true });
   document.addEventListener('touchend', function (e) {
-    if (x0 === null) return;
+    if (x0 === null || zoomAbierto()) { x0 = null; return; }
     var dx = e.changedTouches[0].clientX - x0;
     if (Math.abs(dx) > 50) ir(dx < 0 ? i + 1 : i - 1);
     x0 = null;

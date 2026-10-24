@@ -77,7 +77,49 @@ una ventana: el carrito que se compra ES el pedido, y el COMMIT lo pasa a
 
 ## 1. Los componentes que intervienen
 
-En orden de aparicion durante un `POST /carrito/comprar`.
+En orden de aparicion durante un `POST /carrito/comprar`, como es desde el
+2026-10-17 (ver 0 bis). Debajo queda como era antes, porque los puntos de falla
+de la seccion 3 se escribieron sobre ese flujo.
+
+| # | Componente | Que aporta | Participa del `COMMIT` |
+|---|---|---|---|
+| 1 | **Redis** -- candado de checkout | evita el doble cobro; si Redis no esta, lo hace el `FOR UPDATE` del pedido | no |
+| 2 | **Redis** -- hash del carrito | la copia rapida, que tiene que coincidir con PostgreSQL | no |
+| 3 | **Redis** -- contador de venta relampago | decide primero quien se lleva cada unidad | no |
+| 4 | **PostgreSQL** -- el pedido `pendiente` | el carrito de verdad, bloqueado con `FOR UPDATE` | **SI** |
+| 5 | **PostgreSQL** -- `oferta` | precio y stock de verdad | **SI** |
+| 6 | **PostgreSQL** -- `producto_catalogo` y `variante_catalogo` | el nombre y el estado de la variante, copia de MongoDB | **SI** |
+| 7 | **PostgreSQL** -- `reserva_venta_relampago` | las reservas, que pasan a `confirmada` | **SI** |
+| 8 | **PostgreSQL** -- `comprar_pedido()` | kardex, stock, pago y estado `comprado` | **SI** |
+| 9 | **PostgreSQL** -- `evento_grafo_compra`, `evento_producto` y `evento_oferta` | las colas hacia Neo4j, MongoDB y Elasticsearch, que llenan los triggers | **SI** |
+| 10 | **MongoDB** -- campos agregados | stock y ofertas por producto, por la cola | no |
+| 11 | **Neo4j** | las compras en el grafo, por la cola | no |
+| 12 | **Elasticsearch** | los indices de productos y de ofertas, por la cola | no |
+| 13 | **ClickHouse** | el evento de compra, sin esperar | no |
+
+Todo lo de PostgreSQL esta dentro de la transaccion. Lo de las otras bases va
+detras, por una cola que se llena en el mismo `COMMIT` o sin esperar, y ninguna
+de ellas puede deshacer la compra.
+
+### El orden real de las llamadas
+
+```
+1  candado         SET mesh:checkout:<usuario> 1 EX 30 NX   (sin Redis, se sigue)
+2  replica         espera la copia en curso de Redis a PostgreSQL
+3  BEGIN
+4  bloqueo         el pedido pendiente y sus ofertas, FOR UPDATE en orden de id
+5  coincide        si Redis esta, su carrito tiene que ser igual al de PostgreSQL;
+                   si no, ROLLBACK, 409 y el carrito queda desincronizado
+6  bloqueantes     oferta activa, variante activa y stock, en vivo
+7  reservas        cada linea de venta relampago con su reserva activa
+8  precio          si cambio y no vino confirmar_cambios, ROLLBACK y avisos
+9  COMPRA          cambiar_direccion_pedido() y comprar_pedido(), reservas a confirmada
+10 COMMIT
+11 despues         confirmar los tickets en Redis, borrar la copia del carrito
+                   y mandar el evento a ClickHouse; nada de esto deshace la compra
+```
+
+### Como era hasta el 2026-10-17
 
 | # | Componente | Que aporta | Participa del `COMMIT` |
 |---|---|---|---|
@@ -92,10 +134,7 @@ En orden de aparicion durante un `POST /carrito/comprar`.
 | 9 | **Neo4j** | el grafo de resenas y fraude | no |
 | 10 | **Elasticsearch** | el indice de busqueda | no |
 
-Solo tres de los diez estan dentro de la transaccion. Ese reparto es el
-documento entero.
-
-### El orden real de las llamadas
+Solo tres de los diez estaban dentro de la transaccion.
 
 ```
 1  candado         SET carrito:lock:<usuario> 1 EX 30 NX
@@ -110,10 +149,9 @@ documento entero.
 9  recalcular      los agregados de Mongo
 ```
 
-El paso 3 va antes del 6 **a proposito**, y no es un detalle de estilo: el paso
-8 borra el hash del carrito y con el los tickets. Leerlos despues seria leerlos
-cuando ya no existen, y entonces no habria forma de confirmarlos ni de
-devolverlos.
+El paso 3 iba antes del 6 **a proposito**: el paso 8 borraba el hash del
+carrito y con el los tickets. Leerlos despues era leerlos cuando ya no existian,
+y entonces no habia forma de confirmarlos ni de devolverlos.
 
 ---
 

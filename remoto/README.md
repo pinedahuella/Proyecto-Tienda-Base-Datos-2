@@ -159,11 +159,13 @@ y `run`.
   propias contrasenas de los usuarios de cada servicio (desde el 2026-10-23,
   tambien los `mesh_backend` de cada base y la de `elastic`, ver
   `docs/SEGURIDAD.md`, seccion Modo remoto), y de los usuarios `inspeccion` y
-  `operador` de Redis, y
-  `redis/prueba_acceso.sh` da FALLA en todo lo de esos dos usuarios. Van en
-  `remoto/.env.remoto` (mismo formato que el `.env`, no se sube): `activar.sh`
-  lo carga y pisa al `.env` de la raiz, y `desactivar.sh` lo quita. Sin ese
-  archivo se pueden pasar por el ambiente antes de activar:
+  `operador` de Redis. Sin ellas, `seguridad/prueba_acceso.sh` da FALLA en esos
+  usuarios. Van en `remoto/.env.remoto` (mismo formato que el `.env`, no se
+  sube): `activar.sh` lo carga y pisa al `.env` de la raiz, y `desactivar.sh` lo
+  quita. En la otra PC se copian todas de una vez con el `Select-String` de
+  `docs/SEGURIDAD.md`. Con todas puestas, el 23-10 la prueba de acceso dio 93 OK
+  contra la PC de Jose David. Sin ese archivo se pueden pasar por el ambiente
+  antes de activar:
 
   ```bash
   export REDIS_INSPECCION_PASSWORD=... REDIS_OPERADOR_PASSWORD=...
