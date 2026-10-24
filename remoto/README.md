@@ -204,9 +204,10 @@ Y una demo en PowerShell, `demo-evento-fraude.ps1 -Tipo multi_cuenta_ip_lenta`:
 `docker ps` anclado, `docker cp` a Mongo, el historial con mongosh, el intento en
 vivo y la senal confirmada en PostgreSQL.
 
-`neo4j/correr_patrones.sh` puede dar "el grafo no quedo igual" si corre justo
-detras de pruebas que crean cuentas: el backend las pasa al grafo en medio de la
-prueba. Sola, o a la segunda, sale en verde. Pasa igual con la base local.
+`neo4j/correr_patrones.sh` daba "el grafo no quedo igual" si corria justo
+detras de pruebas que crean cuentas, porque el backend las pasa al grafo en
+medio de la prueba. Desde el 2026-10-24 la limpieza comprueba que no quede nada
+de la siembra y que ningun conteo real baje, y lo que sube lo trae la tienda.
 
 Lo que se arreglo esa noche al medir: los clientes de Node no arrancaban (node
 recibia `/c/Proyectos/...` sin traducir y lo leia como `C:\c\Proyectos`; ahora

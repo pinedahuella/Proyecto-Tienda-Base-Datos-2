@@ -507,6 +507,20 @@ def main():
     if not fechado:
         print("  AVISO: no se encontro la linea de fecha de la portada.")
 
+    # El logo de la portada trae a la derecha del escudo unos puntos blancos
+    # semitransparentes, que el PDF ensena como rayas grises. Se borran.
+    from PIL import Image
+    for blip in d.element.body.iter(qn("a:blip")):
+        parte = d.part.related_parts[blip.get(qn("r:embed"))]
+        logo = Image.open(io.BytesIO(parte.blob)).convert("RGBA")
+        for x in range(int(logo.width * 0.93), logo.width):
+            for y in range(logo.height):
+                logo.putpixel((x, y), (255, 255, 255, 0))
+        limpio = io.BytesIO()
+        logo.save(limpio, format="PNG")
+        parte._blob = limpio.getvalue()
+        break
+
     global MARGENES
     s0 = d.sections[0]
     MARGENES = (s0.left_margin, s0.right_margin, s0.top_margin, s0.bottom_margin)

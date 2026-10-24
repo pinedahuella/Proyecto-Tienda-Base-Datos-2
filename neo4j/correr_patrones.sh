@@ -24,8 +24,9 @@
 #      comparan contra el SQL y se comprueba con aserciones que cada patron
 #      salio y cada control NO.
 #
-#   3. LIMPIEZA. Borra del grafo todo lo que tenga id negativo (la siembra) y
-#      compara los conteos de nodos y relaciones contra los de antes.
+#   3. LIMPIEZA. Borra del grafo todo lo que tenga id negativo (la siembra),
+#      comprueba que no quede nada de ella y que ningun conteo de nodos o
+#      relaciones haya bajado (subir si puede, con el backend proyectando).
 #
 # Sale con 1 si una comparacion o una asercion falla.
 #
@@ -230,10 +231,32 @@ echo " 3. LIMPIEZA"
 echo "============================================================"
 limpiar_grafo
 DESPUES="$(contar_grafo)"
-if [ "$ANTES" = "$DESPUES" ]; then
-    ok "el grafo quedo igual que antes: $DESPUES"
+# Con el backend corriendo, sus workers siguen proyectando al grafo lo que pasa
+# en la tienda mientras dura la prueba: el 2026-10-24 entraron 3 cuentas que
+# otras pruebas acababan de registrar, y comparar conteos exactos daba FALLA
+# sin que la siembra hubiera dejado nada. Por eso se prueban dos cosas aparte:
+# que de la siembra no quede nada, y que ningun conteo real haya bajado.
+QUEDAN="$(cypher <<'FIN' | tail -n +2 | tr -d '[:space:]'
+MATCH (n) WHERE ((n:Usuario OR n:Resena OR n:Producto) AND n.id < 0)
+   OR (n:Direccion AND n.ciudad = 'Prueba Patrones') RETURN count(n);
+FIN
+)"
+[ "$QUEDAN" = "0" ] && ok "de la siembra no quedo nada en el grafo" \
+                    || falla "quedaron $QUEDAN nodos de la siembra en el grafo"
+BAJARON="$("$PYTHON" -c '
+import re, sys
+leer = lambda s: {k: int(v) for k, v in re.findall(r"\"(\w+)\", (\d+)", s)}
+a, d = leer(sys.argv[1]), leer(sys.argv[2])
+print(" ".join("%s %d->%d" % (k, a[k], d.get(k, 0)) for k in a if d.get(k, 0) < a[k]))
+' "$ANTES" "$DESPUES")"
+if [ -z "$BAJARON" ]; then
+    if [ "$ANTES" = "$DESPUES" ]; then
+        ok "el grafo quedo igual que antes: $DESPUES"
+    else
+        ok "ningun conteo real bajo; lo que subio lo trajo la tienda en vivo. Antes: $ANTES  Despues: $DESPUES"
+    fi
 else
-    falla "el grafo no quedo igual. Antes: $ANTES  Despues: $DESPUES"
+    falla "la prueba se llevo datos reales: $BAJARON"
 fi
 
 echo

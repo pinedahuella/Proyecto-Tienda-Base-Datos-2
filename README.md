@@ -66,6 +66,20 @@ genera las que falten.
 
 ## Arranque rapido
 
+Hace falta Node.js 24, Docker Desktop y Git, nada mas: las bases, sus ventanas y
+Ollama llegan como contenedores
+([docs/instalacion.md](docs/instalacion.md)).
+
+La primera vez, despues de clonar:
+
+```powershell
+copy .env.example .env                          # contrasenas de las bases, cambialas si quieres
+copy backend\.env.example backend\.env
+cd backend; npm install; cd ..\frontend; npm install; cd ..
+```
+
+Y cada vez:
+
 ```powershell
 .\arrancar.ps1                                  # bases, migraciones, datos, usuarios
 .\panel-comandos\servicios.ps1 -Accion backend  # http://localhost:3000
@@ -95,6 +109,35 @@ resenas y semillas de descuentos, combos y fraude, escritos por
 `node migrations/datos/generador.js` con semilla fija. `.\arrancar.ps1
 -Productos N` agrega copias generadas para llegar a N productos (las pruebas de
 carga usaron 1000 y 3105).
+
+## Entregas
+
+| Entrega | Informe | Lo que sumo |
+|---|---|---|
+| Primera | `Reporte Primera Entrega - DABD2 - Mesh.docx` | El catalogo en MongoDB y su historial por fecha |
+| Segunda | `Reporte Segunda Entrega - DABD2 - Mesh.docx` | Carrito en Redis, venta relampago sin sobreventa, fraude en resenas con Neo4j y tendencias en ClickHouse |
+| Tercera | `Reporte Tercera Entrega - DABD2 - Mesh.docx` | Buscador en Elasticsearch, consistencia del checkout, la prueba de falla y por que los pagos no van a NewSQL |
+| Final | `Reporte Entrega Final - DABD2 - Mesh.docx` | Recomendacion semantica con pgvector, control de acceso en las bases, diagrama final y retrospectiva |
+
+Las diapositivas de la presentacion final se abren con
+`presentacion-final/index.html`, y su guion esta en
+[presentacion-final/GUION.md](presentacion-final/GUION.md).
+
+## Pruebas y demos
+
+```bash
+bash pruebas/correr_todas.sh        # las 41 pruebas de punta a punta, mas de media hora
+bash seguridad/prueba_acceso.sh     # el control de acceso de las seis bases
+```
+
+```powershell
+.\demo-entrega-final.ps1 -Parte semantica -Producto laptop   # los parecidos de un producto
+.\demo-entrega-final.ps1 -Parte bases                        # el control de acceso, en vivo
+.\remoto\caidas.ps1 -Accion levantar                         # para apagar una base en vivo
+```
+
+Necesitan las bases y el backend arriba. Cada demo dice al principio lo que
+ensena y lo que toca, y todas tienen su boton en `.\panel-comandos.ps1`.
 
 ## Documentacion
 

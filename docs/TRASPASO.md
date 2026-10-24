@@ -3,7 +3,32 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-23, noche**.
+Ultima actualizacion: **2026-10-24, tarde**.
+
+**EMPIEZA AQUI (24-10, tarde). Segunda revision entera contra la PC de Jose David, todo en verde.** Lo unico
+que falta de la entrega es que Jose David haga publico el repo o agregue al profesor.
+
+Medido alla, con el codigo de 3a7e082: las 41 pruebas de `pruebas/correr_todas.sh` en verde (la corrida se
+corto por memoria en `descuentos.sh` y se siguio desde ahi con las 35 restantes), `pruebas/caidas.mjs` 51 OK
+con las bases apagadas y 51 con las bases congeladas por el interruptor, las diez partes de
+`demo-entrega-final.ps1` (la de `bases` da 93 OK) y todas las pantallas en Edge, escritorio y telefono.
+`pruebas/falla_checkout.sh` no corre en modo remoto a proposito, porque apaga contenedores de verdad.
+
+Arreglado:
+- `neo4j/correr_patrones.sh` ya no falla cuando corre detras de pruebas que crean cuentas. Comparaba los
+  conteos exactos del grafo y el backend le metia en medio las cuentas nuevas. Ahora comprueba que de la
+  siembra no quede nada y que ningun conteo real baje.
+- README con lo que pide un clon nuevo (`.env`, `npm install`), las cuatro entregas y las pruebas y demos.
+  Probado con un clon limpio de GitHub, el backend y el frontend instalan y compilan.
+- La portada del Word final traia junto al logo unos puntos blancos semitransparentes que el PDF ensenaba
+  como rayas grises. El generador los borra. Word con 351 commits.
+- Datos alla: retiradas otra vez las 7 ofertas a Q15 que deja la bateria y borradas de ClickHouse 54
+  busquedas y 6 clics de prueba (depresion, mi ex, letras sueltas) que salian en Tendencias. Respaldo previo
+  en `respaldos/david_antes_bateria_20261024_1102.dump`.
+
+Se dejan a proposito: las cuentas y pedidos que crea la bateria (son trafico normal de la tienda) y los
+productos inactivos "ayuda" y "Termo de prueba del respaldo", que tienen pedidos cobrados.
+
 
 **EMPIEZA AQUI (23-10, noche). Revision final entera contra la PC de Jose David.** Jose David corrio el
 `arrancar.ps1` nuevo a las 18:14 y sus seis bases tienen los usuarios por servicio. Todas sus contrasenas van en
@@ -34,9 +59,15 @@ Arreglado:
 - Word de la Entrega final regenerado el 24-10, 31 paginas, con el conteo de commits al dia y sin nombres fuera
   de la portada y la 1.3.
 
-Queda: quitar los descuentos que se pusieron a mano el 21-10 en las ofertas 4, 7, 36, 103 y 106 (Meme lo pidio,
-la PC de Jose David se desconecto antes), probar `remoto\caidas.ps1` y que Jose David haga publico el repo o
-agregue al profesor.
+- 24-10, con la PC de Jose David otra vez en linea: quitados por la API, como tienda, los descuentos que se
+  pusieron a mano el 21-10 en las ofertas 4, 7, 36, 103 y 106, cerrando antes las ventas relampago de 7 y 36.
+  La ficha y el buscador ya dan el precio normal. Los demas descuentos del catalogo son de la semilla.
+- 24-10: `remoto\caidas.ps1` probado con las bases alla. Con cada una de las seis caida por separado, la ficha,
+  el buscador y lo mas vendido contestan 200. Un 503 del buscador salio una sola vez, al apagar PostgreSQL 13 s
+  despues de prender Elasticsearch: su cortacircuitos seguia en la pausa de 15 s y el buscador fue a la copia en
+  PostgreSQL, que estaba caida. Es una caida doble, no un fallo; repetido con solo PostgreSQL caido sale bien.
+
+Queda: que Jose David haga publico el repo o agregue al profesor.
 
 **EMPIEZA AQUI (22 al 23-10, noche). Control de acceso en todas las bases, foto en el buscador, registro unico de
 decisiones, Word final, diagrama, docs y presentacion.** Con permiso de David para tocar todo. Probado con las bases
