@@ -4365,9 +4365,9 @@ Write-Host "   ClickHouse     localhost:8123   base $($env_['CLICKHOUSE_DB'])   
 Write-Host "   El backend entra a cada base con su propio usuario, mesh_backend (Redis backend)." -ForegroundColor White
 Write-Host "   Las contrasenas estan en el .env. Prueba del control de acceso:  bash seguridad/prueba_acceso.sh" -ForegroundColor White
 Write-Host ""
-Write-Host "   Falta arrancar a mano:" -ForegroundColor DarkGray
-Write-Host "     cd backend  ; npm run start:dev" -ForegroundColor DarkGray
-Write-Host "     cd frontend ; npm run dev" -ForegroundColor DarkGray
+Write-Host "   Falta levantar el backend y el frontend:" -ForegroundColor DarkGray
+Write-Host "     .\panel-comandos\servicios.ps1 -Accion backend" -ForegroundColor DarkGray
+Write-Host "     .\panel-comandos\servicios.ps1 -Accion frontend" -ForegroundColor DarkGray
 Write-Host ""
 Write-Host "   Consola de MongoDB:  .\arrancar.ps1 -Mongo" -ForegroundColor DarkGray
 # Se imprime con "bash" delante y no con la redireccion que habia antes. La

@@ -2,6 +2,7 @@
 	import { onMount } from 'svelte';
 	import { pedir, conJson, mensajeUtil, type RespuestaApi } from './api';
 	import Autocompletar from './Autocompletar.svelte';
+	import CompartirOferta from './CompartirOferta.svelte';
 	import { textoConflictoDescuento, textoCuando, textoHasta, textoPorcentaje, tieneDescuento } from './descuento';
 
 	/**
@@ -565,6 +566,15 @@
 
 	/** El id de la oferta con el panel de descuento abierto, o null. */
 	let descuentoDe = $state<string | null>(null);
+
+	/**
+	 * La oferta con el panel de compartir abierto (el ACL de la aplicacion,
+	 * migracion 049). Uno a la vez, como el descuento y la venta relampago.
+	 */
+	let compartirDe = $state<string | null>(null);
+	function alternarCompartir(id: string) {
+		compartirDe = compartirDe === id ? null : id;
+	}
 	/**
 	 * El % escrito, como TEXTO. Un input number con bind:value guarda un
 	 * numero (o null si se borra), y .trim() sobre eso revienta; con texto y
@@ -2605,6 +2615,9 @@
 																{/if}
 															</button>
 														{/if}
+														<button type="button" onclick={() => alternarCompartir(mia.id_oferta)}>
+															{compartirDe === mia.id_oferta ? 'Cerrar el panel' : 'Compartir'}
+														</button>
 													</div>
 												{:else}
 													<div class="acciones">
@@ -2630,6 +2643,14 @@
 
 											{#if mia && descuentoDe === mia.id_oferta}
 												{@render panelDescuento(mia)}
+											{/if}
+
+											{#if mia && compartirDe === mia.id_oferta}
+												<CompartirOferta
+													idOferta={mia.id_oferta}
+													alExpirarSesion={() => alExpirarSesion?.()}
+													alCerrar={() => (compartirDe = null)}
+												/>
 											{/if}
 
 											{#if mia && errorFila && editando !== mia.id_oferta}
@@ -2942,6 +2963,9 @@
 										{/if}
 									</button>
 								{/if}
+								<button type="button" onclick={() => alternarCompartir(o.id_oferta)}>
+									{compartirDe === o.id_oferta ? 'Cerrar el panel' : 'Compartir'}
+								</button>
 								<button
 									type="button"
 									class="principal"
@@ -2982,6 +3006,14 @@
 
 							{#if descuentoDe === o.id_oferta}
 								{@render panelDescuento(o)}
+							{/if}
+
+							{#if compartirDe === o.id_oferta}
+								<CompartirOferta
+									idOferta={o.id_oferta}
+									alExpirarSesion={() => alExpirarSesion?.()}
+									alCerrar={() => (compartirDe = null)}
+								/>
 							{/if}
 
 							{#if editando === o.id_oferta}

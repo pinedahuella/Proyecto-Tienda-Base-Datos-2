@@ -8,6 +8,7 @@
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
+	import OfertasCompartidas from '$lib/OfertasCompartidas.svelte';
 	import ReglasDescuento from '$lib/ReglasDescuento.svelte';
 	import ReglasPeriodo from '$lib/ReglasPeriodo.svelte';
 	import PropuestasProducto from '$lib/PropuestasProducto.svelte';
@@ -140,6 +141,9 @@
 				{ id: 'dashboard', nombre: 'Dashboard', pie: 'Como va la tienda en el periodo que elijas, contra el anterior' },
 				{ id: 'reportes', nombre: 'Reportes', pie: 'Como van las ventas y los pedidos' },
 				{ id: 'ofertas', nombre: 'Ofertas', pie: 'Precio, existencias y estado de lo que vende la tienda' },
+				// El ACL de la aplicacion (migracion 049): lo de otras cuentas que me
+				// dejaron ver o cambiar. Lo propio sigue en Ofertas.
+				{ id: 'compartidas', nombre: 'Compartidas', pie: 'Ofertas de otras cuentas que te dejaron ver o cambiar' },
 				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos, por ventas rapidas o por fecha' },
 				{ id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' },
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Lo que otros vendedores quieren meter al catalogo' },
@@ -160,6 +164,7 @@
 		if (esVendedor) {
 			return [
 				{ id: 'ofertas', nombre: 'Ofertas', pie: 'A que precio vendes cada variante y cuantas te quedan' },
+				{ id: 'compartidas', nombre: 'Compartidas', pie: 'Ofertas de otras cuentas que te dejaron ver o cambiar' },
 				{ id: 'reglas', nombre: 'Reglas', pie: 'Descuentos que se activan solos, por ventas rapidas o por fecha' },
 				administraLaTienda
 					? { id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' }
@@ -845,6 +850,12 @@
 					{/if}
 				</div>
 
+				<div class="hoja" class:oculta={seccionViva !== 'compartidas'}>
+					{#if visitadas.has('compartidas')}
+						<OfertasCompartidas alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
 				<div class="hoja" class:oculta={seccionViva !== 'reglas'}>
 					<!-- Las reglas de descuento automatico (56ce5f8, migracion 021)
 					     y las de periodo (migracion 022). Mismo candado que las
@@ -915,6 +926,12 @@
 					     si es del vendedor. Es lo suyo, asi que va arriba. -->
 					{#if visitadas.has('ofertas')}
 						<OfertasVendedor alExpirarSesion={expiro} {administraLaTienda} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'compartidas'}>
+					{#if visitadas.has('compartidas')}
+						<OfertasCompartidas alExpirarSesion={expiro} />
 					{/if}
 				</div>
 

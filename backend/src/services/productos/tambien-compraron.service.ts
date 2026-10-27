@@ -25,6 +25,8 @@ export interface ProductoTambienComprado {
   id_producto: number;
   /** Cuantas cuentas que compraron el producto pedido tambien compraron este. */
   compradores: number;
+  /** Si es de la misma categoria que el producto pedido: esos van siempre primero. */
+  misma_categoria: boolean;
   producto: Producto;
 }
 
@@ -36,7 +38,12 @@ export interface ProductoTambienComprado {
  *
  *   el producto <-[:DE]- compra <-[:HIZO]- cuenta -[:HIZO]-> compra -[:DE]-> otro producto
  *
- * Ordenado por cuantas cuentas distintas compraron los dos. Es la hermana de
+ * Ordenado por grupos: primero SIEMPRE los de la misma categoria que el
+ * producto pedido, despues el resto, y dentro de cada grupo por cuantas
+ * cuentas distintas compraron los dos. Uno de la misma categoria con un solo
+ * comprador va antes que otro de otra categoria con veinte. La categoria vive
+ * en el propio `:Producto` (`id_categoria`, ver `GrafoCategoriasSyncService`),
+ * asi que el orden lo resuelve Neo4j en la misma consulta. Es la hermana de
  * "para ti" (`ParaTiService`), pero parte de un producto y no de una cuenta, asi
  * que es publica: no hace falta sesion. Solo productos `activo`, y nunca el
  * mismo producto. Un producto que nadie compro, o que nadie compro junto con
@@ -70,13 +77,14 @@ export class TambienCompraronService {
       .map((c) => ({
         id_producto: c.id,
         compradores: c.compradores,
+        misma_categoria: c.misma_categoria,
         producto: activos.get(c.id)!,
       }));
   }
 
   private async candidatos(
     idProducto: number,
-  ): Promise<{ id: number; compradores: number }[]> {
+  ): Promise<{ id: number; compradores: number; misma_categoria: boolean }[]> {
     try {
       // Sin Neo4j, la misma pregunta sobre los pedidos en PostgreSQL
       // (recomendaciones-respaldo.ts, 2026-10-20).
@@ -85,6 +93,7 @@ export class TambienCompraronService {
           const filas = await consultarGrafo<{
             id: unknown;
             compradores: unknown;
+            misma_categoria: unknown;
           }>(
             CYPHER_TAMBIEN_COMPRARON,
             {
@@ -96,6 +105,7 @@ export class TambienCompraronService {
           return filas.map((fila) => ({
             id: aNumero(fila.id),
             compradores: aNumero(fila.compradores),
+            misma_categoria: fila.misma_categoria === true,
           }));
         },
         () => tambienCompraronDesdePostgres(idProducto, CANDIDATOS),
@@ -110,15 +120,23 @@ export class TambienCompraronService {
 }
 
 /**
- * Las cuentas que compraron el producto, y lo demas que compraron. Empate: el
- * id mas bajo, para que la respuesta sea estable.
+ * Las cuentas que compraron el producto, y lo demas que compraron. El orden va
+ * por grupos: `grupo` 0 es la misma categoria que el producto pedido y 1 todo
+ * lo demas (tambien cuando alguno de los dos no tiene categoria en el grafo).
+ * Dentro del grupo, mas compradores primero; empate, el id mas bajo, para que
+ * la respuesta sea estable. El `LIMIT` corta despues de ordenar, asi que los
+ * candidatos ya llegan con su grupo delante.
  */
 const CYPHER_TAMBIEN_COMPRARON = `
 MATCH (base:Producto {id: $id})<-[:DE]-(:Compra)<-[:HIZO]-(cuenta:Usuario)
 MATCH (cuenta)-[:HIZO]->(:Compra)-[:DE]->(rec:Producto)
 WHERE rec <> base
-WITH rec, count(DISTINCT cuenta) AS compradores
-RETURN rec.id AS id, compradores
-ORDER BY compradores DESC, id
+WITH base, rec, count(DISTINCT cuenta) AS compradores
+WITH rec, compradores,
+     CASE WHEN base.id_categoria IS NOT NULL
+               AND rec.id_categoria = base.id_categoria
+          THEN 0 ELSE 1 END AS grupo
+RETURN rec.id AS id, compradores, grupo = 0 AS misma_categoria
+ORDER BY grupo, compradores DESC, id
 LIMIT $candidatos
 `;

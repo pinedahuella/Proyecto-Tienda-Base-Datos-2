@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Dibuja el diagrama entidad relacion de Mesh a partir del esquema VIVO.
 
-    python generar-er.py                  el diagrama completo, las 76 tablas
+    python generar-er.py                  el diagrama completo, las 89 tablas
     python generar-er.py --modulo fraude  solo un modulo, para el informe
 
 Escribe docs/diagrama-general.drawio (editable en diagrams.net) y, si encuentra
@@ -107,16 +107,31 @@ MODULOS = {
                  "motivo_movimiento", "propuesta_producto", "rechazo_producto", "rechazo_oferta",
                  "regla_descuento_automatico", "regla_descuento_periodo", "evento_producto",
                  # la copia del catalogo para comprar sin MongoDB (029)
-                 "producto_catalogo", "variante_catalogo"]),
+                 "producto_catalogo", "variante_catalogo",
+                 # los vectores de productos en pgvector (040)
+                 "vector_producto",
+                 # el buscador de ofertas y los avisame (043, 044)
+                 "evento_oferta", "seguimiento_oferta", "tipo_seguimiento_oferta",
+                 "aviso_seguimiento_oferta",
+                 # las reservas de la venta relampago en PostgreSQL (045)
+                 "reserva_venta_relampago", "estado_reserva_venta_relampago",
+                 # el ACL de la aplicacion, por oferta (049)
+                 "permiso_oferta", "tipo_permiso_oferta", "auditoria_permiso_oferta"]),
     "pedidos": ("Pedidos y pagos", "#FFF2CC", "#D6B656",
-                ["pedido", "estado_pedido", "pedido_producto", "pago", "estado_pago", "metodo_pago"]),
+                ["pedido", "estado_pedido", "pedido_producto", "pago", "estado_pago", "metodo_pago",
+                 # los pedidos que borran las semillas, para ClickHouse (046)
+                 "pedido_quitado"]),
     "resenas": ("Resenas", "#E1D5E7", "#9673A6",
                 # evento_comentario (034): la cola que lleva cada resena con su
                 # vector a mesh_comentarios de Elasticsearch
-                ["resena", "comentario", "likes", "evento_comentario"]),
+                ["resena", "comentario", "likes", "evento_comentario",
+                 # el vector de cada resena en pgvector (040)
+                 "vector_comentario"]),
     "fraude": ("Fraude y grafo", "#F8CECC", "#B85450",
                ["alerta_fraude", "tipo_alerta_fraude", "estado_alerta_fraude", "notificacion_fraude",
                 "anillo_fraude", "tipo_anillo_fraude", "anillo_fraude_resena", "evento_grafo",
+                # la cola de las compras al grafo (041)
+                "evento_grafo_compra",
                 "hallazgo_evento_fraude", "hallazgo_evento_fraude_cuenta", "tipo_hallazgo_evento",
                 "caso_fraude", "nivel_caso_fraude", "caso_fraude_regla", "regla_casi_confirmado",
                 "evidencia_caso_fraude", "evidencia_caso_fraude_cuenta",
@@ -132,15 +147,22 @@ DISPOSICION = [
     ["log_login", "log_registro", "direcciones", "direccion_historial"],
     ["rol_usuario", "usuarios", "estado_usuario"],
     ["propuesta_producto", "|", "precio_historial", "oferta", "stock_movimiento", "pedido", "|",
-     "resena", "comentario", "likes", "evento_comentario", "|", "alerta_fraude", "notificacion_fraude", "|",
+     "resena", "comentario", "likes", "evento_comentario", "vector_comentario", "|",
+     "alerta_fraude", "notificacion_fraude", "|",
      "hallazgo_evento_fraude_cuenta"],
     ["rechazo_producto", "|", "estado_oferta", "rechazo_oferta", "motivo_movimiento",
-     "regla_descuento_automatico", "regla_descuento_periodo", "evento_producto", "|",
-     "producto_catalogo", "variante_catalogo", "|",
+     "regla_descuento_automatico", "regla_descuento_periodo", "evento_producto", "evento_oferta", "|",
+     "producto_catalogo", "variante_catalogo", "vector_producto", "|",
      "estado_pedido", "pedido_producto", "pago", "|", "anillo_fraude_resena", "anillo_fraude",
      "|", "tipo_alerta_fraude", "estado_alerta_fraude", "tipo_anillo_fraude", "evento_grafo",
+     "evento_grafo_compra",
      "|", "hallazgo_evento_fraude", "tipo_hallazgo_evento"],
-    ["metodo_pago", "estado_pago", "|", "evidencia_caso_fraude", "evidencia_caso_fraude_cuenta"],
+    ["metodo_pago", "estado_pago", "pedido_quitado", "|",
+     # el ACL de la aplicacion (049), las reservas (045) y los avisame (044)
+     "permiso_oferta", "tipo_permiso_oferta", "auditoria_permiso_oferta", "|",
+     "reserva_venta_relampago", "estado_reserva_venta_relampago", "|",
+     "seguimiento_oferta", "tipo_seguimiento_oferta", "aviso_seguimiento_oferta", "|",
+     "evidencia_caso_fraude", "evidencia_caso_fraude_cuenta"],
     # los casos de fraude (026): juntan anillos, hallazgos de eventos y alertas
     ["caso_fraude", "nivel_caso_fraude", "|", "caso_fraude_regla", "regla_casi_confirmado"],
     # las senales (031 a 033): desde la 033 la evidencia y los avisos cuelgan de

@@ -8,9 +8,10 @@
 #
 # Por omision deja todo en $TMP/mesh-pruebas: RESUMEN.txt y un .log por prueba.
 # El resumen se borra al empezar, asi un FIN viejo no engana a quien espera.
-# Necesita las bases y el backend arriba (.\arrancar.ps1 y npm run start:dev),
-# o el modo remoto (source remoto/activar.sh), que corre las mismas pruebas
-# contra las bases de otra PC. Tarda unos 25 minutos.
+# Necesita las bases y el backend arriba (.\arrancar.ps1 y
+# .\panel-comandos\servicios.ps1 -Accion backend), o el modo remoto (source
+# remoto/activar.sh), que corre las mismas pruebas contra las bases de otra PC.
+# Tarda mas de media hora.
 cd "$(dirname "$0")/.." || exit 1
 DIR="${SALIDA:-${TMPDIR:-/tmp}/mesh-pruebas}"
 # Que no le llegue a las pruebas: pruebas/eventos.sh usa SALIDA como el archivo
@@ -26,6 +27,7 @@ else
     LISTA=(
         pruebas/etl_compras.sh
         pruebas/grafo_compras.sh
+        pruebas/tambien_compraron_categoria.sh
         pruebas/recomendaciones.sh
         pruebas/carrito.sh
         pruebas/carrito_vencimiento.sh
@@ -35,6 +37,8 @@ else
         pruebas/reglas_periodo.sh
         pruebas/ofertas_paginadas.sh
         pruebas/ofertas_y_seguimientos.sh
+        pruebas/acl_ofertas.sh
+        pruebas/acl_ofertas_azar.mjs
         pruebas/busquedas_sin_resultados.sh
         pruebas/busqueda.sh
         pruebas/alertas_login.sh

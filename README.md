@@ -21,7 +21,7 @@ modelo `paraphrase-multilingual`. El diagrama de todo esta en
 ```
 backend/            API en NestJS con Fastify
 frontend/           Interfaz en SvelteKit
-migrations/         Esquema SQL (001 a 048) y el generador de datos
+migrations/         Esquema SQL (001 a 049) y el generador de datos
 mongo/              Colecciones e indices de MongoDB
 etl/                Cargas entre bases (catalogo, grafo, buscador, eventos, vectores)
 redis/ neo4j/ clickhouse/ elastic/    Scripts y pruebas de cada base
@@ -43,7 +43,8 @@ simulada, ve sus pedidos tal como era el producto el dia de la compra, resena y
 pide un aviso cuando llegue algo o baje un precio.
 
 El vendedor publica ofertas, les pone descuento o venta relampago, busca entre
-las suyas y propone productos nuevos para el catalogo compartido. La tienda y el
+las suyas, comparte una oferta con otra cuenta (ver, editar o poner descuento,
+con vencimiento) y propone productos nuevos para el catalogo compartido. La tienda y el
 administrador revisan ofertas y propuestas, administran el catalogo con su
 historial por fecha, ven tendencias y el dashboard general, y revisan las
 senales y casos de fraude (anillos de resenas, textos repetidos, notas que no
@@ -60,6 +61,11 @@ usuarios que solo miran. Elasticsearch pide contrasena. Las herramientas solo se
 abren desde la misma PC. Neo4j es la excepcion, porque su edicion community no
 tiene roles. Todo esta en [docs/SEGURIDAD.md](docs/SEGURIDAD.md) y se prueba con
 `bash seguridad/prueba_acceso.sh` (93 comprobaciones).
+
+Dentro de la tienda, ademas de los roles, hay un ACL por oferta que vive en la
+aplicacion (ADR-24): el dueno le da a otra cuenta permiso para ver, editar o
+poner descuento, y lo que no esta en la lista se niega. Se prueba con
+`bash pruebas/acl_ofertas.sh` y `node pruebas/acl_ofertas_azar.mjs`.
 
 Las contrasenas viven en `.env` y `backend/.env`, que no se suben. `arrancar.ps1`
 genera las que falten.
@@ -126,7 +132,7 @@ Las diapositivas de la presentacion final se abren con
 ## Pruebas y demos
 
 ```bash
-bash pruebas/correr_todas.sh        # las 41 pruebas de punta a punta, mas de media hora
+bash pruebas/correr_todas.sh        # las 44 pruebas de punta a punta, mas de media hora
 bash seguridad/prueba_acceso.sh     # el control de acceso de las seis bases
 ```
 
@@ -145,7 +151,7 @@ ensena y lo que toca, y todas tienen su boton en `.\panel-comandos.ps1`.
 |---|---|
 | [docs/instalacion.md](docs/instalacion.md) | Que instalar, como levantar todo, errores comunes |
 | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | La arquitectura, flujo por flujo, y su historia |
-| [docs/DECISIONES.md](docs/DECISIONES.md) | El registro unico de decisiones, ADR-1 a ADR-23 |
+| [docs/DECISIONES.md](docs/DECISIONES.md) | El registro unico de decisiones, ADR-1 a ADR-25 |
 | [docs/SEGURIDAD.md](docs/SEGURIDAD.md) | Usuarios de cada base, puertos e imagenes |
 | [docs/base-de-datos.md](docs/base-de-datos.md) | El modelo relacional y documental, y ADR-1 a ADR-5 |
 | [docs/CONSISTENCIA-CHECKOUT.md](docs/CONSISTENCIA-CHECKOUT.md) | Que pasa en el pago si falla cada paso |
@@ -160,7 +166,7 @@ ensena y lo que toca, y todas tienen su boton en `.\panel-comandos.ps1`.
 | [migrations/README.md](migrations/README.md) | Como se nombran y se corren las migraciones |
 | [etl/README.md](etl/README.md) | Las cargas entre bases |
 | [comandos.txt](comandos.txt) | Todos los comandos, con lo que hace cada uno |
-| [PREGUNTAS-SUSTENTACION.md](PREGUNTAS-SUSTENTACION.md) | 152 preguntas para la sustentacion, con donde se ve cada cosa |
+| [PREGUNTAS-SUSTENTACION.md](PREGUNTAS-SUSTENTACION.md) | 161 preguntas para la sustentacion, con donde se ve cada cosa |
 
 Los informes de cada entrega estan en la raiz, en Word, y salen de los
 `contenido-*.json` con sus `generar-reporte-*.py`.

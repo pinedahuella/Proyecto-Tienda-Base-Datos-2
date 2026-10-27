@@ -11,6 +11,7 @@ import {
   manejarErrorGrafo,
 } from '../../helpers/manejar-error-grafo';
 import { ESTADOS_DE_COMPRA } from './grafo-compras-sync.service';
+import { idCategoriaParaGrafo } from './grafo-categorias-sync.service';
 import {
   ConciliacionGrafo,
   EstadoColaGrafo,
@@ -299,6 +300,8 @@ export class GrafoSyncService {
       vendedor_alta: f.vendedor_alta,
       producto_id: neo4j.int(f.producto_id),
       producto_nombre: f.producto_nombre,
+      producto_id_categoria: idCategoriaParaGrafo(f.producto_id_categoria),
+      producto_categoria: f.producto_categoria,
       direcciones: dirs.map((d) => ({
         clave: d.clave,
         pais: d.pais,
@@ -686,6 +689,9 @@ interface FilaResenaGrafo {
   vendedor_alta: string;
   producto_id: string;
   producto_nombre: string;
+  /** `producto_catalogo.id_categoria`; null si el producto no esta en la copia. */
+  producto_id_categoria: string | null;
+  producto_categoria: string | null;
 }
 
 /** Una fila de `SQL_DIRECCIONES`: un domicilio distinto de un usuario. */
@@ -729,12 +735,16 @@ const SQL_RESENA = `
     r.id_producto_mongo::text                           AS producto_id,
     COALESCE(p.nombre,
              'Producto ' || r.id_producto_mongo || ' (solo en MongoDB)')
-                                                        AS producto_nombre
+                                                        AS producto_nombre,
+    pc.id_categoria::text                               AS producto_id_categoria,
+    cat.nombre                                          AS producto_categoria
   FROM resena r
   JOIN comentario c ON c.id_comentario = r.id_comentario
   JOIN usuarios ua  ON ua.id_usuario   = r.id_usuario
   JOIN usuarios uv  ON uv.id_usuario   = r.id_usuario_vendedor
   LEFT JOIN productos p ON p.id_producto = r.id_producto_mongo
+  LEFT JOIN producto_catalogo pc ON pc.id_producto_mongo = r.id_producto_mongo
+  LEFT JOIN categorias cat ON cat.id_categoria = pc.id_categoria
   WHERE r.id_resena = $1
 `;
 
@@ -802,7 +812,9 @@ MERGE (v:Usuario {id: $vendedor_id})
       v.nombre = $vendedor_nombre, v.apellido = $vendedor_apellido,
       v.fecha_alta = datetime($vendedor_alta)
 MERGE (p:Producto {id: $producto_id})
-  SET p.nombre = $producto_nombre
+  SET p.nombre = $producto_nombre,
+      p.id_categoria = $producto_id_categoria,
+      p.categoria = $producto_categoria
 MERGE (r:Resena {id: $id_resena})
   SET r.calificacion = $calificacion, r.fecha = datetime($fecha), r.texto = $texto
 MERGE (a)-[:ESCRIBIO]->(r)

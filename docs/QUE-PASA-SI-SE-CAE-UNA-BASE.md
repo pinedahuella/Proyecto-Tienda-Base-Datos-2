@@ -320,6 +320,11 @@ Que se midio el 20 de octubre.
 - El 19 de octubre, con Neo4j apagada se compro, la compra quedo en una cola de
   PostgreSQL y al volver la cola bajo a 0 sola en 15 segundos. La revision del
   grafo dio que cuadra con PostgreSQL.
+- El 26 de octubre, desde que quienes lo compraron tambien llevaron pone
+  primero los de la misma categoria, los 100 productos comprados dieron la
+  misma lista, en el mismo orden y con los mismos grupos, con Neo4j, con Neo4j
+  apagada y con MongoDB apagada. El respaldo saca la categoria de la copia del
+  catalogo en PostgreSQL.
 
 Que se pierde. Nada, las compras y las resenas esperan en la cola.
 

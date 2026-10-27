@@ -256,18 +256,31 @@ UNION ALL
 -- codigo cargaba una cosa y la comprobacion esperaba otra, y el dia que
 -- apareciera una resena sobre un producto de vendedor el arranque quedaba en
 -- rojo para siempre haciendo el ETL exactamente lo que debia.
+--
+-- La categoria (id y nombre) sale de la copia del catalogo, igual que en los
+-- workers del backend (GrafoSyncService, GrafoComprasSyncService y
+-- GrafoCategoriasSyncService). La usa "quienes lo compraron tambien llevaron"
+-- para poner primero los productos de la misma categoria. Sin fila en la copia
+-- va null, y el SET deja el nodo sin categoria.
 SELECT 2 AS orden,
        'UNWIND [' || coalesce(string_agg(
-           format('{id:%s,nombre:%s}', p.id, to_json(p.nombre)::text),
+           format('{id:%s,nombre:%s,id_categoria:%s,categoria:%s}',
+                  p.id, to_json(p.nombre)::text,
+                  coalesce(p.id_categoria::text, 'null'),
+                  coalesce(to_json(p.categoria)::text, 'null')),
            ',' ORDER BY p.id), '') || '] AS f
 MERGE (p:Producto {id: f.id})
-SET p.nombre = f.nombre;' AS sentencia
+SET p.nombre = f.nombre, p.id_categoria = f.id_categoria, p.categoria = f.categoria;' AS sentencia
 FROM (
     SELECT DISTINCT r.id_producto_mongo AS id,
            coalesce(pr.nombre,
-                    'Producto ' || r.id_producto_mongo || ' (solo en MongoDB)') AS nombre
+                    'Producto ' || r.id_producto_mongo || ' (solo en MongoDB)') AS nombre,
+           pc.id_categoria,
+           cat.nombre AS categoria
     FROM resena r
     LEFT JOIN productos pr ON pr.id_producto = r.id_producto_mongo
+    LEFT JOIN producto_catalogo pc ON pc.id_producto_mongo = r.id_producto_mongo
+    LEFT JOIN categorias cat ON cat.id_categoria = pc.id_categoria
     -- El recorte del modo incremental. Con solo_cola=0 esto es siempre cierto y
     -- la consulta queda exactamente como estaba.
     WHERE :solo_cola = 0

@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 351 commits sobre `main` entre el 15 de agosto y el 24 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 23 decisiones del semestre."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 352 commits sobre `main` entre el 15 de agosto y el 27 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 25 decisiones del semestre. La última semana sumó un ACL por oferta que vive en la aplicación y el orden por categoría de quienes lo compraron también llevaron."
      }
     ]
    },
@@ -85,7 +85,7 @@
         ],
         [
          "5.3 Registro de decisiones arquitectónicas",
-         "Sección 5, un solo registro de ADR-1 a ADR-23 con los cinco campos. ADR-13 en 2.1 y sus dos revisiones en 2.2, y ADR-14 en 3.1"
+         "Sección 5, un solo registro de ADR-1 a ADR-25 con los cinco campos. ADR-13 en 2.1 y sus dos revisiones en 2.2, y ADR-14 en 3.1"
         ],
         [
          "5.4 Documentación para levantar el sistema",
@@ -173,7 +173,7 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "228"
+         "229"
         ],
         [
          "José David Navichoque Pineda",
@@ -188,7 +188,7 @@
         [
          "Total",
          "",
-         "351"
+         "352"
         ]
        ],
        "anchos": [
@@ -660,7 +660,7 @@
       }
      },
      {
-      "p": "El diagrama entidad relación se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones. Hoy son 86 tablas y 107 llaves foráneas, de las migraciones 001 a 048."
+      "p": "El diagrama entidad relación se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones. Hoy son 89 tablas y 111 llaves foráneas, de las migraciones 001 a 049."
      }
     ]
    },
@@ -687,7 +687,7 @@
       "p": "Cada entrega escribió sus decisiones con su propia numeración, y los números terminaron chocando. En `docs/base-de-datos.md` el ADR-3 es el de las imágenes, en el informe de la Entrega 2 el ADR-3 es grafos contra columnar, y la retrospectiva de las versiones anteriores de este informe citaba el segundo. Además, varias decisiones de octubre se implementaron sin escribir su registro, que es lo que el profesor señaló el 28 de septiembre cuando dijo que las decisiones eran genéricas."
      },
      {
-      "p": "Desde esta versión hay un solo registro, numerado del 1 al 23 en el orden en que se tomaron. La última columna dice cómo se citó cada uno antes, para que se pueda seguir en los informes anteriores. Los registros 15 a 23 son las decisiones que faltaban y se escriben completos en esta sección, con el flujo que tocan, las bases que leen y escriben y qué pasa si cada una se cae."
+      "p": "Desde esta versión hay un solo registro, numerado del 1 al 25 en el orden en que se tomaron. La última columna dice cómo se citó cada uno antes, para que se pueda seguir en los informes anteriores. Los registros 15 a 23 son las decisiones que faltaban y se escriben completos en esta sección, con el flujo que tocan, las bases que leen y escriben y qué pasa si cada una se cae."
      },
      {
       "tabla": {
@@ -859,6 +859,20 @@
          "23 de octubre",
          "Vigente",
          "No se había registrado"
+        ],
+        [
+         "ADR-24",
+         "Un ACL en la aplicación, por oferta",
+         "26 de octubre",
+         "Vigente",
+         "Nueva"
+        ],
+        [
+         "ADR-25",
+         "La categoría del producto también en el grafo",
+         "26 de octubre",
+         "Vigente",
+         "Nueva"
         ]
        ],
        "anchos": [
@@ -1053,6 +1067,44 @@
         "**Costo operativo.** Un campo que no se indexa no agrega trabajo a la búsqueda ni memoria a las agregaciones, solo el enlace guardado."
        ],
        "consecuencias": "El buscador enseña la foto sin preguntarle a otra base, y con Elasticsearch caído la saca de la copia en PostgreSQL. Aceptamos un índice un poco más grande y que el arranque lo rehaga si le falta el campo."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-24",
+       "titulo": "Un ACL en la aplicación, por oferta",
+       "contexto": "El control de acceso de las bases es por servicio. El backend entra como `mesh_backend` y ninguna base sabe qué persona está detrás de una petición. Dentro de la tienda la regla era fija y estaba escrita en el SQL, una oferta la toca solo su dueño, y no había forma de que la tienda dejara a un empleado cambiar un precio sin darle su contraseña. El profesor comentó que el ACL podía vivir en la aplicación.",
+       "alternativas": [
+        "1. No cambiar nada, con los roles y la regla del dueño.",
+        "2. Usuarios de base por persona y políticas por fila en PostgreSQL.",
+        "3. Reescribir cada condición del dueño como mío o compartido conmigo, unos veinte lugares.",
+        "4. Un ACL en tablas de PostgreSQL, revisado por un guard del backend, en rutas nuevas para lo compartido."
+       ],
+       "decision": "La alternativa 4, con la migración 049. `permiso_oferta` guarda la oferta, la cuenta, el permiso (ver, editar o descuento), quién lo dio y hasta cuándo, y `auditoria_permiso_oferta` guarda el registro. `PermisoOfertaGuard` revisa cada ruta de `/compartidas/ofertas` y sin una entrada vigente contesta 404. El dueño reparte en `/vendedor/ofertas/:id/permisos`.",
+       "justificacion": [
+        "**Consistencia.** Las rutas nuevas llaman al mismo servicio de ofertas a nombre del dueño, así que las reglas de precio, descuento y existencia no se copian, y las rutas de lo propio no cambian.",
+        "**Patrón de consulta.** Es un ACL clásico, una lista pegada a cada oferta que niega lo que no está, y vive donde se conoce a la persona."
+       ],
+       "consecuencias": "Cada permiso se revisa por separado, vence solo y se quita al instante, y cada cambio queda en el registro con quién lo hizo de verdad. Se prueba con `pruebas/acl_ofertas.sh`, 84 comprobaciones, y con miles de acciones al azar contra un modelo, ninguna mal. Aceptamos que el registro de una acción se escriba después de la acción y no en su misma transacción. No reemplaza el control de acceso de las bases que pide el enunciado, lo complementa con la capa de las personas."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-25",
+       "titulo": "La categoría del producto también en el grafo",
+       "contexto": "Quienes lo compraron también llevaron ordenaba solo por cuántas cuentas compraron los dos productos, y en la ficha de una laptop salía primero un teléfono con cuatro compradores que otra laptop con uno. Se pidió que los de la misma categoría vayan siempre primero. El nodo del producto en Neo4j solo tenía su id y su nombre.",
+       "alternativas": [
+        "1. No cambiar nada.",
+        "2. Reordenar en el backend después de la consulta.",
+        "3. Guardar en el grafo toda la ficha del producto.",
+        "4. Guardar solo la categoría en el nodo y ordenar en el Cypher."
+       ],
+       "decision": "La alternativa 4. Cada producto del grafo lleva su categoría, que sale de `producto_catalogo`. La ponen los workers de compras y de reseñas, el ETL y un worker que cada minuto la compara con PostgreSQL. El Cypher pone primero el grupo de la misma categoría, y el respaldo de PostgreSQL ordena igual.",
+       "justificacion": [
+        "**Patrón de consulta.** El orden se resuelve en la misma consulta de la recomendación, antes del límite.",
+        "**Costo operativo.** La categoría casi no cambia y copiarla cuesta poco. El precio y la existencia cambian a cada rato y no se copian."
+       ],
+       "consecuencias": "Con Neo4j y con MongoDB caídos, los 100 productos comprados dan la misma lista en el mismo orden. Un cambio de categoría llega al grafo en menos de un minuto, y mientras tanto el orden puede usar la categoría vieja."
       }
      }
     ]

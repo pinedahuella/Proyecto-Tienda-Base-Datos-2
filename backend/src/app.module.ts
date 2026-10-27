@@ -30,6 +30,9 @@ import { ProductosVendedorController } from './controllers/vendedores/productos.
 import { ProductosVendedorService } from './services/vendedores/productos.service';
 import { OfertasVendedorController } from './controllers/vendedores/ofertas.controller';
 import { OfertasVendedorService } from './services/vendedores/ofertas.service';
+import { PermisosOfertaController } from './controllers/vendedores/permisos-oferta.controller';
+import { OfertasCompartidasController } from './controllers/compartidas/ofertas-compartidas.controller';
+import { AclOfertasService } from './services/acl/acl-ofertas.service';
 import { BuscarOfertasController } from './controllers/vendedores/buscar-ofertas.controller';
 import { BuscarOfertasService } from './services/vendedores/buscar-ofertas.service';
 import { EventoOfertaSyncService } from './services/vendedores/evento-oferta-sync.service';
@@ -70,6 +73,7 @@ import { InventarioLimitadoService } from './services/inventario-limitado/invent
 import { GrafoController } from './controllers/grafo/grafo.controller';
 import { GrafoSyncService } from './services/grafo/grafo-sync.service';
 import { GrafoComprasSyncService } from './services/grafo/grafo-compras-sync.service';
+import { GrafoCategoriasSyncService } from './services/grafo/grafo-categorias-sync.service';
 import { BaseDatosBuscadorController } from './controllers/base-datos-buscador.controller';
 import { BaseDatosBuscadorService } from './services/base-datos-buscador.service';
 import { BaseDatosVectoresController } from './controllers/base-datos-vectores.controller';
@@ -174,6 +178,8 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     CategoriasController,
     ProductosVendedorController,
     OfertasVendedorController,
+    PermisosOfertaController,
+    OfertasCompartidasController,
     BuscarOfertasController,
     VentasLimitadasController,
     PedidosCompradorController,
@@ -227,6 +233,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     CategoriasService,
     ProductosVendedorService,
     OfertasVendedorService,
+    AclOfertasService,
     BuscarOfertasService,
     EventoOfertaSyncService,
     VentasLimitadasService,
@@ -257,6 +264,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     InventarioLimitadoService,
     GrafoSyncService,
     GrafoComprasSyncService,
+    GrafoCategoriasSyncService,
     BaseDatosBuscadorService,
     BaseDatosVectoresService,
     BuscadorProductosService,

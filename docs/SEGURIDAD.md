@@ -63,6 +63,40 @@ puerta. Si el grafo guardara algo que no se puede reconstruir, la salida seria
 la edicion enterprise o poner la consulta detras del backend; hoy es una
 proyeccion de PostgreSQL que se rehace entera.
 
+## El ACL de la aplicacion, por persona
+
+Lo de arriba es por SERVICIO, y lo hacen cumplir las bases. Ninguna base sabe
+que persona esta detras de una peticion: todas llegan como `mesh_backend`. Lo
+que puede hacer cada persona dentro de la tienda lo decide la aplicacion. Hasta
+el 26 de octubre eran roles (comprador, vendedor, admin, con `SesionGuard` y
+`@Roles`) y una regla fija de dueno escrita en el SQL. Desde ese dia hay ademas
+un ACL de verdad por oferta (ADR-24, migracion 049).
+
+- **La lista.** `permiso_oferta`: una fila por oferta, cuenta y permiso (`ver`,
+  `editar` o `descuento`), con quien lo dio y hasta cuando. Pegada al objeto,
+  como un ACL clasico. Lo que no esta se niega.
+- **Quien la revisa.** `PermisoOfertaGuard`, despues de `SesionGuard`, en cada
+  ruta de `/compartidas/ofertas`. Busca una entrada vigente de esa cuenta, esa
+  oferta y ese permiso. Sin ella contesta 404, el mismo de una oferta ajena, y
+  anota el intento. Tambien a un admin: negar por defecto no tiene excepciones.
+- **Cada permiso por separado.** Cualquier entrada deja ver; `editar` cambia
+  precio y existencia (no el estado); `descuento` pone y quita el descuento.
+- **Quien reparte.** Solo el dueno de la oferta, o un admin a nombre de la
+  tienda, en `/vendedor/ofertas/:id/permisos`. Nadie se da permisos a si mismo
+  (tambien es un CHECK de la tabla) y solo se comparte con cuentas de vendedor o
+  de admin.
+- **Lo propio no cambia.** `/vendedor/ofertas` sigue con su regla de dueno. Un
+  permiso compartido no la abre; lo compartido va solo por sus rutas.
+- **El registro.** `auditoria_permiso_oferta` guarda cada permiso dado o
+  quitado, cada cambio hecho por la via compartida (a nombre del dueno, con
+  quien lo hizo de verdad) y cada intento negado con su motivo. El dueno lo ve
+  en el panel de compartir.
+
+En la tienda: boton Compartir en cada oferta de Ofertas, y la seccion
+Compartidas para quien recibe. Pruebas: `bash pruebas/acl_ofertas.sh` (84
+comprobaciones, cada regla una vez) y `node pruebas/acl_ofertas_azar.mjs`
+(cientos de vueltas al azar contra un modelo de lo que deberia contestar).
+
 ## Como se crean
 
 Todo dentro de `.\arrancar.ps1`, paso 9f "Usuarios por servicio", en cada

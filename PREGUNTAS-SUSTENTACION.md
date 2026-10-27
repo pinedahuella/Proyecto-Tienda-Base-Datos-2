@@ -27,6 +27,7 @@ Las respuestas están revisadas contra el código al 23 de octubre de 2026. Los 
 - [Parte 9. Lo que cambió el 16 y 17 de octubre](#parte-9-lo-que-cambió-el-16-y-17-de-octubre), preguntas 132 a 141
 - [Parte 10. Lo que cambió el 19 y 20 de octubre](#parte-10-lo-que-cambió-el-19-y-20-de-octubre), preguntas 142 a 148
 - [Parte 11. Lo que cambió el 23 de octubre](#parte-11-lo-que-cambió-el-23-de-octubre), preguntas 149 a 152
+- [Parte 12. Lo que cambió el 26 de octubre](#parte-12-lo-que-cambió-el-26-de-octubre), preguntas 153 a 161
 
 ---
 
@@ -1207,3 +1208,60 @@ Lo pidió el profesor, que la tarjeta del buscador salga entera de Elasticsearch
 Porque los números chocaban entre entregas. Desde el 23 de octubre las decisiones van del 1 al 23 en el orden en que se tomaron. Las de la Entrega 1 conservan su número (1 a 5). Las de la Entrega 2 pasaron a 6 a 10 (el carrito era ADR-4 y es ADR-6, la oferta Lua era ADR-5 y es ADR-7, grafos contra columnar era ADR-3 y es ADR-8, Neo4j era ADR-7 y es ADR-9, ClickHouse era ADR-6 y es ADR-10). Elasticsearch es ADR-11, NewSQL ADR-12, los vectores ADR-13 y el control de acceso ADR-14. Del 15 al 23 son las decisiones que se habían hecho sin registro.
 
 - Dónde se ve. `docs/DECISIONES.md`, con la columna Antes. Sección 5.1 del informe de la Entrega final.
+
+---
+
+## Parte 12. Lo que cambió el 26 de octubre
+
+Un ACL por oferta en la aplicación (ADR-24) y quienes lo compraron también llevaron por grupos de categoría (ADR-25). La pregunta 152 sigue valiendo, el registro ahora llega al 25.
+
+### 153. ¿Qué es un ACL y en qué se diferencia de los roles que ya tenían?
+Un ACL es una lista pegada a cada objeto que dice qué sujeto puede hacer qué operación con él, y lo que no está en la lista se niega. Viene de la matriz de acceso, con los sujetos en las filas, los objetos en las columnas y los permisos en las casillas. Guardar esa matriz por columna, objeto por objeto, es un ACL. Guardarla por fila, sujeto por sujeto, son capacidades. Los roles agregan un paso en medio, el permiso se le da a un rol y la persona recibe el rol, así que todos los vendedores pueden lo mismo. Con el ACL de Mesh una cuenta puede editar la oferta 36 y ninguna otra.
+
+- Dónde se ve. `docs/SEGURIDAD.md`, sección El ACL de la aplicación, y el ADR-24 en `docs/DECISIONES.md`.
+- Ojo si preguntan si ya había ACL antes. Sí, en las bases. Redis tiene su ACL nativo, con claves, canales y comandos por usuario, y PostgreSQL guarda sus GRANT como ACL en `pg_class.relacl`. Pero esos son por servicio.
+
+### 154. ¿Dónde vive el ACL de Mesh y por qué en la aplicación y no en la base?
+En dos tablas de PostgreSQL de la migración 049, `permiso_oferta` (oferta, cuenta, permiso, quién lo dio y hasta cuándo) y `auditoria_permiso_oferta`. Lo hace cumplir el backend. Vive en la aplicación porque ninguna base sabe qué persona está detrás de una petición, todas llegan como `mesh_backend`. Pasarle a PostgreSQL quién es cada persona en cada petición y escribir políticas por fila para cada tabla habría filtrado también las rutas de siempre. El profesor comentó que el ACL podía vivir en la aplicación.
+
+- Dónde se ve. `migrations/049_acl_ofertas.sql` y `backend/src/services/acl/acl-ofertas.service.ts`.
+- Ojo. PostgreSQL no hace nada especial con estas tablas. Pone llaves foráneas, una entrada única por oferta, cuenta y permiso, y un CHECK para que nadie se dé permisos a sí mismo.
+
+### 155. ¿Cómo decide el backend si alguien puede editar una oferta compartida?
+Antes de entrar al controlador pasa por dos guards. `SesionGuard` comprueba la sesión y el rol. Después `PermisoOfertaGuard` lee el permiso que pide la ruta, marcado con `@PermisoOferta('editar')`, y busca en `permiso_oferta` una entrada vigente de esa cuenta, esa oferta y ese permiso. Si no la hay contesta 404, el mismo de una oferta ajena, y anota el intento como negado. Si la hay, deja la oferta y su dueño en la petición, y el controlador llama al mismo `OfertasVendedorService.editar` de siempre a nombre del dueño. Ver lo da cualquier entrada, y editar y descuento piden la suya.
+
+- Dónde se ve. `backend/src/guards/permiso-oferta.guard.ts`, `backend/src/decorators/permiso-oferta.decorator.ts` y `backend/src/controllers/compartidas/ofertas-compartidas.controller.ts`.
+- Ojo si preguntan por el admin. Sin una entrada, un admin tampoco pasa por las rutas compartidas. Negar por defecto no tiene excepciones.
+
+### 156. ¿Por qué rutas nuevas para lo compartido en vez de cambiar las de siempre?
+Porque la regla del dueño estaba escrita dentro del SQL, unas veinte veces entre ofertas, reglas de descuento, venta relámpago y el buscador de ofertas, y cambiar cada una por mío o compartido conmigo deja fácil un lugar sin revisar. Con rutas aparte, `/compartidas/ofertas`, las de `/vendedor/ofertas` quedan igual, lo ya probado sigue igual y las pruebas nuevas se concentran en lo nuevo. Tampoco se copia lógica, porque las rutas nuevas llaman a los mismos servicios a nombre del dueño.
+
+- Dónde se ve. La nota `backend/cambio_propuestas/2026-10-26_2300-categoria-en-el-grafo-y-acl-de-ofertas.md`, con la tabla de rutas.
+- Ojo. La prueba comprueba que un permiso compartido no abre `/vendedor/ofertas`. Con descuento compartido, la ruta propia sigue dando 404.
+
+### 157. ¿Qué queda en el registro y por qué no tiene llaves foráneas?
+Cada permiso dado o quitado, cada cambio hecho por la vía compartida y cada intento negado, con quién lo hizo, a nombre de quién y el detalle (el precio que puso, el porcentaje, el motivo de la negativa). Hace falta porque el historial de precios anota el cambio a nombre del dueño, que es quien tiene la oferta. No lleva llaves foráneas porque es un registro y tiene que sobrevivir a la oferta, al permiso y a las cuentas de las que habla, y porque un intento negado puede nombrar una oferta que no existe.
+
+- Dónde se ve. `auditoria_permiso_oferta` en la migración 049. El dueño lo ve en el panel, Ofertas, Compartir, Ver el registro, con los negados en rojo.
+- Ojo. Al dar o quitar un permiso, el registro va en la misma transacción. Al editar por la vía compartida se escribe después de que la edición salió bien, y si esa escritura fallara la edición queda hecha y el backend lo avisa en su log.
+
+### 158. ¿El ACL de la aplicación cuenta para el punto de control de acceso del enunciado?
+No lo reemplaza. El enunciado pide control de acceso en al menos un componente NoSQL, con permisos según el servicio que lo usa y la prueba de que alguien sin permiso no puede, y eso ya estaba con Redis y su ACL nativo, más MongoDB, ClickHouse y Elasticsearch con usuarios por servicio, 93 comprobaciones. El ACL de la aplicación es la otra capa, la de las personas, y se agregó porque el profesor comentó que podía vivir en la aplicación. Juntas dan defensa en profundidad.
+
+- Dónde se ve. `bash seguridad/prueba_acceso.sh` para las bases, `bash pruebas/acl_ofertas.sh` y `node pruebas/acl_ofertas_azar.mjs` para la aplicación.
+
+### 159. ¿Cómo ordena ahora quienes lo compraron también llevaron?
+Por grupos. Primero siempre los productos de la misma categoría que el de la ficha, después el resto, y dentro de cada grupo por cuántas cuentas los compraron. En la ficha de una laptop, otra laptop con un comprador sale antes que un teléfono con cuatro. Lo resuelve Neo4j en la misma consulta, porque cada `:Producto` lleva su `id_categoria`, y el Cypher pone grupo 0 a la misma categoría y 1 al resto antes del `LIMIT`. Sin Neo4j, el respaldo de PostgreSQL ordena igual.
+
+- Dónde se ve. `CYPHER_TAMBIEN_COMPRARON` en `backend/src/services/productos/tambien-compraron.service.ts`, `tambienCompraronDesdePostgres` en `backend/src/helpers/recomendaciones-respaldo.ts` y el ADR-25.
+- Por qué solo la categoría en el grafo y no toda la ficha. Porque casi no cambia. El precio, la existencia y la foto cambian a cada rato y quedarían viejos en el grafo, así que siguen saliendo del catálogo.
+
+### 160. ¿Qué pasa si cambian la categoría de un producto, o si se cae Neo4j o MongoDB?
+Un cambio de categoría por la API escribe MongoDB y la copia en PostgreSQL al instante, y `GrafoCategoriasSyncService`, que compara cada minuto todos los `:Producto` con PostgreSQL, lo lleva al grafo. Medido entre 14 y 59 segundos. Con Neo4j caído la misma pregunta sale de los pedidos en PostgreSQL, y con MongoDB caído las tarjetas salen de la copia del catálogo. En los 100 productos comprados, las tres formas dan exactamente la misma respuesta.
+
+- Dónde se ve. `backend/src/services/grafo/grafo-categorias-sync.service.ts` y `bash pruebas/tambien_compraron_categoria.sh`, partes 4 a 6.
+
+### 161. ¿Cómo saben que las pruebas del ACL y del orden sirven?
+Porque se rompió el código a propósito y fallaron. Quitando el orden por grupo, en el Cypher y en el respaldo, la prueba de categorías dio 8 fallas. Dejando que cualquier entrada permitiera todo, la del ACL dio 11 y la prueba al azar 9. Quitando el vencimiento, 3. Con el código bueno, 32, 84 y casi cinco mil comprobaciones al azar, ninguna mal. La prueba al azar da y quita permisos sin orden, intenta acciones con varias cuentas y compara cada respuesta con un modelo de lo que debería pasar.
+
+- Dónde se ve. `pruebas/tambien_compraron_categoria.sh`, `pruebas/acl_ofertas.sh` y `pruebas/acl_ofertas_azar.mjs`, las tres en `pruebas/correr_todas.sh`.

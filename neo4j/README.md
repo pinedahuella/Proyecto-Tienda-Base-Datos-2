@@ -74,6 +74,41 @@ compara las `:Compra` con las lineas compradas de PostgreSQL.
 Prueba: `bash pruebas/grafo_compras.sh` (30 OK el 2026-10-18), que compra de
 verdad, para Neo4j a mitad y cancela.
 
+## La categoria en el `:Producto`, desde el 2026-10-26
+
+"Tambien compraron" ordena por grupos: primero SIEMPRE los productos de la misma
+categoria que el de la ficha, despues el resto, y dentro de cada grupo por
+cuantas cuentas los compraron (ADR-25). Para que Neo4j lo resuelva en la misma
+consulta, cada `:Producto` lleva `id_categoria` (Integer) y `categoria` (el
+nombre), copiados de `producto_catalogo` y `categorias` de PostgreSQL.
+
+```
+MATCH (base:Producto {id: $id})<-[:DE]-(:Compra)<-[:HIZO]-(cuenta:Usuario)
+MATCH (cuenta)-[:HIZO]->(:Compra)-[:DE]->(rec:Producto)
+WHERE rec <> base
+WITH base, rec, count(DISTINCT cuenta) AS compradores
+WITH rec, compradores,
+     CASE WHEN base.id_categoria IS NOT NULL AND rec.id_categoria = base.id_categoria
+          THEN 0 ELSE 1 END AS grupo
+RETURN rec.id AS id, compradores, grupo = 0 AS misma_categoria
+ORDER BY grupo, compradores DESC, id
+```
+
+La escriben los workers de compras y de resenas al proyectar, el ETL
+(`etl/extraer_grafo.sql`) y `GrafoCategoriasSyncService`, que al arrancar y cada
+60 s compara todos los `:Producto` con PostgreSQL y corrige los que no
+coinciden. Ese ultimo es el que recoge un cambio de categoria hecho por la API
+(medido, de 14 a 59 s) y el que rellena un grafo cargado antes de la copia del
+catalogo. Nunca crea nodos: un producto entra al grafo cuando alguien lo compra
+o lo resena.
+
+Solo se copia la categoria. El precio, la existencia y la foto cambian a cada
+rato y siguen saliendo del catalogo, igual que antes.
+
+Prueba: `bash pruebas/tambien_compraron_categoria.sh`, que compra de verdad,
+cambia la categoria a mano en el grafo para ver que el worker la arregla, la
+cambia por la API, y apaga Neo4j y MongoDB para ver que el respaldo da lo mismo.
+
 ## Como entrar
 
 La ventana del navegador esta en <http://localhost:7474> (usuario `neo4j`, la

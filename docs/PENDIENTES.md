@@ -2,8 +2,27 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-09-28.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-10-26.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
+
+## Como esta al 2026-10-26
+
+Todo lo que pide el enunciado para las cuatro entregas esta hecho y probado
+(ultima revision entera el 2026-10-24 contra las bases de la PC de Jose David).
+Para la entrega final del lunes 2 de noviembre falta una sola cosa, y no es de
+codigo.
+
+| Que | De quien |
+|---|---|
+| El repo es privado. Hacerlo publico o agregar al profesor como colaborador | Jose David, es el dueno del repo |
+
+Lo que sigue abierto en la tabla de abajo no lo pide el enunciado y no cambia
+ninguna entrega: la 5 (dos repartidores de id, sin prioridad), la 13 (busqueda
+por texto en la lista del vendedor, no importa), la 15 (bordes del fraude del
+login), la 22 (`rechazo_oferta` sin generador), la 24 (mas vendidos tarda hasta
+10 minutos en ver un precio nuevo), la 29 (sugerencias sin pantalla) y la 31 (C1
+decidido como esta, C9 baja). Las secciones largas de mas abajo son la historia
+de cada punto, con la fecha en que se escribio.
 
 | # | Que | De quien | Cuanto | Urgencia |
 |---|---|---|---|---|
@@ -18,10 +37,10 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~9~~ | ~~Las tres rutas de la base columnar~~ | -- | -- | **CERRADO el 2026-09-18**, pero con otra forma: `POST /eventos/vista|carrito|busqueda-clic`, seis rankings `GET /admin/eventos/*` y `GET /productos/mas-vendidos`. El panel y el estante de la portada estan hechos, con `bash pruebas/tendencias.sh` (50 OK desde que solo cuentan `lote = 'real'`). David decidio el 2026-09-19 que las seis rutas cuentan solo lote real, sin parametro: no queda nada pendiente ahi |
 | ~~10~~ | ~~Los filtros facetados del buscador, con agregaciones~~ | -- | -- | **CERRADO el 2026-09-26 por Jose David (ced29f5)**: `GET /buscador/productos/facetado`, puerto a TypeScript de `facetas.py`, con la misma forma que espera `/buscar`. Tambien acepta `nombre` vacio para navegar solo por facetas. El clic de `/buscar` manda las facetas activas y el admin tiene tres rankings nuevos en Tendencias. Las columnas de ClickHouse quedaron en `clickhouse/001_esquema.sql`. Falta verlo en vivo |
 | ~~11~~ | ~~La prueba de falla simulada del checkout~~ | -- | -- | **CERRADO el 2026-09-06.** `bash pruebas/falla_checkout.sh`, 31 OK y 0 FALLA, con su evidencia en `CONSISTENCIA-CHECKOUT.md`. Vuelto a correr el 2026-09-11: 31 OK |
-| 12 | El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT | Entrega 3 | ver abajo | **resuelto el 2026-10-01** con el diseno de Jose David (6f89237): migraciones 029 (`producto_catalogo` y `variante_catalogo`) y 030 (outbox `evento_producto`), paso 7e de arrancar con `etl/extraer_catalogo_postgres.js`. El escenario B de `pruebas/falla_checkout.sh` exige que la compra salga con Mongo parado |
+| ~~12~~ | ~~El checkout no compra con MongoDB caido, y esa base no esta en el COMMIT~~ | Entrega 3 | ver abajo | **CERRADO el 2026-10-01** con el diseno de Jose David (6f89237): migraciones 029 (`producto_catalogo` y `variante_catalogo`) y 030 (outbox `evento_producto`), paso 7e de arrancar con `etl/extraer_catalogo_postgres.js`. El escenario B de `pruebas/falla_checkout.sh` exige que la compra salga con Mongo parado |
 | 13 | La lista de ofertas del vendedor viene entera, sin paginar | Jose David la ruta, yo la pantalla | ver `BACKEND-PENDIENTE.md` | **cerrado en lo que importa el 2026-09-19**: David agrego el filtro `estado` y el panel ya pagina con contadores exactos. El `q` de busqueda por texto **no importa (decidido el mismo dia)**; mientras, el buscador pide la lista completa |
 | ~~14~~ | ~~Elasticsearch se llena con cada login y ninguna ruta lo consulta~~ | -- | -- | **CERRADO el 2026-09-18 por Jose David (10b8fe5)**: `fraude-login-retrospectivo.service.ts` y `toma-cuenta.service.ts` hacen agregaciones `terms` y `cardinality` sobre el indice de login |
-| 15 | Los detectores que faltan del fraude del login, y los detalles de los tres que hay | Jose David | ver abajo | media: lo que hay funciona; lo que falta son senales y bordes |
+| 15 | Los detectores que faltan del fraude del login, y los detalles de los tres que hay | Jose David | ver abajo | **baja, en parte cerrado.** Ya estan la toma de cuenta y el login retrospectivo (2026-09-18), el viaje imposible y la granja de registros desde Elasticsearch (042, 2026-10-17). Los bordes de la seccion 15 de abajo no se volvieron a medir |
 | ~~16~~ | ~~La copia de logueos a ClickHouse lee `log_login`, que no recibe filas~~ | -- | -- | **CERRADO por decision (2026-09-19)**: ClickHouse ya no maneja registros de login, los lleva Elasticsearch. La copia queda congelada a proposito |
 | ~~17~~ | ~~Medir en vivo lo que se toco despues de la corrida del 2026-09-11~~ | -- | -- | **CERRADO el 2026-09-12.** Medido contra las bases y roto a proposito; los numeros estan en `docs/TRASPASO.md` |
 | ~~20~~ | ~~`comprarPedido` no anota la compra en ClickHouse~~ | -- | -- | **DESCARTADO el 2026-09-19 por Jose David**: es codigo viejo que ninguna pantalla usa (el checkout paga por el carrito). `etl/cargar_compras.sh` lo cubre si alguien lo llama a mano |
@@ -35,7 +54,7 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 | ~~26~~ | ~~El historial de precio de una oferta no trae el % de descuento~~ | -- | -- | **CERRADO el 2026-09-26** por David (37ad2e6); Mis pedidos y el historial del vendedor ya lo ensenan |
 | ~~27~~ | ~~"Parecidos a este" no pinta nada, falta `GET /productos/:id/similares`~~ | -- | -- | **CERRADO el 2026-09-26 por Jose David (ced29f5)**, con la misma forma que `tambien-vieron`. Suma `VectoresSyncService`, que cada 3 horas recalcula los productos marcados con `pendiente_vector` usando el mismo texto y hash que `cargar_vectores.ps1`. `cargar_vectores.ps1` le deja escrito en `backend/.env` el Ollama que eligio. Falta verlo en vivo |
 | 31 | Los casos de fraude: falta decidir si una IP compartida une casos (C1) | Jose David y el equipo | ver `BACKEND-PENDIENTE.md` | **media, Entrega 3.** C2, C3, C5 y C8 arreglados por David el 2026-09-26 (14e5084), C6 y C7 el mismo 26 (de5de2a), comprobados con `pruebas/casos_fraude_fusion.cjs` y `pruebas/casos_fraude_granja.cjs`, 0 FALLA. C4 lo cerro el refactor de fraude del 2026-09-30 (la recencia sale de `ultima_deteccion`). Queda C9 |
-| 32 | Revision del profesor: decisiones genericas, dependencias entre bases y fraude | el equipo | `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md` | **alta, para decidir antes de implementar (2026-09-28).** El modelo unico de senales YA ESTA (7453ffe de David, migraciones 031 a 033 el 2026-09-30, escrito sin probar en vivo); faltan las detecciones con historia en ClickHouse (su etapa 6, opcional) y decidir si se borran las tablas viejas. Lo demas sigue abierto: modelo unico de senales y detecciones con historia en ClickHouse, doce consultas nuevas en las cinco bases, nombre en `oferta` para comprar sin MongoDB (cierra la fila 12), carrito con la foto del cliente, Elasticsearch mas alla de las facetas, busqueda hibrida con el vector, y reescribir las decisiones del informe. La seccion 1.6 junta lo pendiente del panel de fraude |
+| ~~32~~ | ~~Revision del profesor: decisiones genericas, dependencias entre bases y fraude~~ | el equipo | `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md` | **CERRADO.** Se hicieron tal cual el modelo unico de senales (ADR-17, 2026-09-30), comprar sin MongoDB (ADR-18, 2026-10-01) y la verdad del carrito en PostgreSQL (ADR-21, 2026-10-17). La busqueda hibrida quedo con el vector solo en pgvector (ADR-13). Las detecciones como serie de tiempo en ClickHouse y el grafo de identidad para los casos no se implementaron. Las decisiones se reescribieron en un solo registro, ADR-1 a ADR-23, en `docs/DECISIONES.md` (2026-10-23) |
 | ~~30~~ | ~~En el facetado, ClickHouse guarda en `resultados` los que se mostraron y no el total~~ | -- | -- | **CERRADO el 2026-09-26** por David (37ad2e6) |
 | 29 | `GET /buscador/productos/sugerencias` existe y ninguna pantalla la usa | mia, si se quiere | -- | baja: era opcional. La cabecera sigue con la busqueda difusa, que ya ensena precio y nota. Se ve con `.\demo-entrega-final.ps1 -Parte facetas` |
 | ~~28~~ | ~~El worker de descuentos borra los que nunca tuvieron clave en Redis~~ | -- | -- | **CERRADO el 2026-09-26** por David (37ad2e6): el vencimiento vive en PostgreSQL, migracion 028. Probado con `pruebas/descuentos.sh` 98 OK y la demo de descuentos |
@@ -57,7 +76,10 @@ porque desde la 010 esas nacen pendientes.
 
 ---
 
-# 14. Elasticsearch se llena y ninguna ruta lo consulta
+# 14. Elasticsearch se llena y ninguna ruta lo consulta -- CERRADO el 2026-09-18
+
+Jose David hizo las rutas de agregacion en 10b8fe5 (`fraude-login-retrospectivo.service.ts`
+y `toma-cuenta.service.ts`). Lo de abajo es como estaba antes.
 
 **Medido el 2026-09-11 leyendo el backend.** El worker copia cada evento de
 `eventos_autenticacion` al indice `mesh_eventos_autenticacion`, y ahi se queda.
@@ -100,7 +122,11 @@ comandos, y falta el `PATCH` para marcar una alerta revisada o descartada.
 
 ---
 
-# 16. La copia de logueos a ClickHouse esta congelada
+# 16. La copia de logueos a ClickHouse esta congelada -- CERRADO por decision el 2026-09-19
+
+Se eligio la salida 2: ClickHouse deja los logueos y el fraude por IP vive en
+Elasticsearch. La copia queda congelada a proposito. Lo de abajo es como estaba
+antes de decidirlo.
 
 Desde el 2026-09-10 el backend escribe los logueos en `eventos_autenticacion`
 de MongoDB y no en `log_login`. Pero `etl/extraer_eventos.sql` y
@@ -130,7 +156,7 @@ que se quedaron en el 2026-09-10.
 
 ---
 
-# 13. La respuesta de ofertas viene entera, sin paginar
+# 13. La respuesta de ofertas viene entera, sin paginar -- cerrado en lo que importa el 2026-09-19
 
 ## AL DIA 2026-09-11: la ruta paginada existe, y la pantalla no la puede usar todavia
 
@@ -208,7 +234,7 @@ hecho.
 
 ---
 
-# 10. Los filtros facetados del buscador -- ABIERTO, y es de la Entrega 3
+# 10. Los filtros facetados del buscador -- CERRADO el 2026-09-26 (ced29f5 de Jose David)
 
 El enunciado lo pide DOS veces, y con estas palabras:
 
@@ -236,7 +262,7 @@ filtros con su numero al lado, que es mia.
 
 ---
 
-# 12. El checkout no compra con MongoDB caido
+# 12. El checkout no compra con MongoDB caido -- CERRADO el 2026-10-01 (6f89237, migraciones 029 y 030)
 
 Lo encontro la prueba de falla del 2026-09-06 y lo confirmo Jose David el
 2026-09-07 con su propia prueba: las dos rutas de compra LEEN Mongo antes del
@@ -487,7 +513,7 @@ toco una resena.
 
 ---
 
-# 8. Editar el stock durante una venta relampago desincroniza las dos bases
+# 8. Editar el stock durante una venta relampago desincroniza las dos bases -- CERRADO el 2026-09-04
 
 **Medido el 2026-09-03 leyendo el codigo, y visto en la base el 2026-09-04.**
 
@@ -533,7 +559,7 @@ reponga y la vuelva a abrir. Tres lineas.
 
 ---
 
-# 7. Una venta relampago que vence sola deja la columna marcada
+# 7. Una venta relampago que vence sola deja la columna marcada -- CERRADO el 2026-09-04
 
 **Encontrado el 2026-09-03 midiendo, y no estaba escrito en ningun sitio.**
 
@@ -607,7 +633,7 @@ pantalla es `frontend/src/lib/PanelReportes.svelte`, hecha el 2026-08-30.
 
 ---
 
-# 1. El precio se congela al PAGAR, no al agregar
+# 1. El precio se congela al PAGAR, no al agregar -- resuelto de otra forma el 2026-09-23 (ver la tabla)
 
 ## AL DIA 2026-09-03: el dano ya esta cubierto, por un camino distinto
 
@@ -865,7 +891,7 @@ por nombre cuesta un minuto y aqui evito romper cinco archivos.
 
 ---
 
-# 4. El grafo se queda viejo y el ETL relee todo
+# 4. El grafo se queda viejo y el ETL relee todo -- CERRADO el 2026-09-04
 
 ## AL DIA 2026-09-03, noche: la mitad de abajo ya esta
 

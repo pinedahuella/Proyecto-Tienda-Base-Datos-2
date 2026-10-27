@@ -5,6 +5,7 @@ import neo4j from 'neo4j-driver';
 import { pool } from '../../database/postgres';
 import { ejecutarGrafo } from '../../database/neo4j';
 import { esFalloDeConexionGrafo } from '../../helpers/manejar-error-grafo';
+import { idCategoriaParaGrafo } from './grafo-categorias-sync.service';
 
 /** Los estados de pedido que cuentan como compra. `pendiente` todavia no lo
  * es y `cancelado` ya no. Lo usan tambien la conciliacion y la siembra. */
@@ -26,6 +27,9 @@ interface FilaCompra {
   id_pedido: string;
   producto_id: string;
   producto_nombre: string;
+  /** `producto_catalogo.id_categoria`; null si el producto no esta en la copia. */
+  producto_id_categoria: string | null;
+  producto_categoria: string | null;
   vendedor_id: string;
   variante_id: string;
   variante_nombre: string;
@@ -230,6 +234,8 @@ export class GrafoComprasSyncService {
         id_pedido: neo4j.int(c.id_pedido),
         producto_id: neo4j.int(c.producto_id),
         producto_nombre: c.producto_nombre,
+        producto_id_categoria: idCategoriaParaGrafo(c.producto_id_categoria),
+        producto_categoria: c.producto_categoria,
         vendedor_id: neo4j.int(c.vendedor_id),
         variante_id: neo4j.int(c.variante_id),
         variante_nombre: c.variante_nombre,
@@ -290,6 +296,8 @@ const SQL_COMPRAS = `
          COALESCE(p.nombre,
                   'Producto ' || pp.id_producto_mongo || ' (solo en MongoDB)')
                                                            AS producto_nombre,
+         pc.id_categoria::text                             AS producto_id_categoria,
+         cat.nombre                                        AS producto_categoria,
          o.id_usuario::text                                AS vendedor_id,
          pp.id_producto_variante_mongo::text               AS variante_id,
          pp.nombre_variante                                AS variante_nombre,
@@ -303,6 +311,8 @@ const SQL_COMPRAS = `
     JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
     JOIN oferta o ON o.id_oferta = ph.id_oferta
     LEFT JOIN productos p ON p.id_producto = pp.id_producto_mongo
+    LEFT JOIN producto_catalogo pc ON pc.id_producto_mongo = pp.id_producto_mongo
+    LEFT JOIN categorias cat ON cat.id_categoria = pc.id_categoria
    WHERE pe.id_usuario = $1
      AND e.estado_pedido_nombre = ANY($2::text[])
 `;
@@ -326,7 +336,9 @@ DETACH DELETE sobra
 WITH DISTINCT u
 UNWIND $compras AS c
   MERGE (p:Producto {id: c.producto_id})
-    SET p.nombre = c.producto_nombre
+    SET p.nombre = c.producto_nombre,
+        p.id_categoria = c.producto_id_categoria,
+        p.categoria = c.producto_categoria
   MERGE (v:Usuario {id: c.vendedor_id})
   MERGE (k:Compra {id: c.id})
     SET k.id_pedido = c.id_pedido, k.id_variante = c.variante_id,

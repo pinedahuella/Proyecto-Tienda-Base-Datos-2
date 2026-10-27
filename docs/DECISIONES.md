@@ -36,6 +36,8 @@ poder seguirla.
 | ADR-21 | La verdad del carrito y de las reservas en PostgreSQL | 2026-10-17 | Vigente | propuesta ADR-13 | Informe de la Entrega final, 5.4 |
 | ADR-22 | Un respaldo por base, con cortacircuitos | 2026-10-20 | Vigente | sin registro | Informe de la Entrega final, 5.4, y `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` |
 | ADR-23 | La tarjeta del buscador sale entera de Elasticsearch, con su foto | 2026-10-23 | Vigente | sin registro | Informe de la Entrega final, 5.4 |
+| ADR-24 | Un ACL en la aplicacion, por oferta | 2026-10-26 | Vigente | sin registro | Aqui abajo, y `docs/SEGURIDAD.md` |
+| ADR-25 | La categoria del producto vive tambien en el grafo, para ordenar por grupos | 2026-10-26 | Vigente | sin registro | Aqui abajo |
 
 De las seis decisiones propuestas el 28 de septiembre en
 `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`, tres se hicieron tal cual (ADR-17,
@@ -45,3 +47,90 @@ termino con el vector solo en pgvector (ADR-13).
 
 La regla desde ahora: una decision nueva entra a esta tabla con el siguiente
 numero, en el mismo cambio que el codigo que la implementa.
+
+Las dos ultimas son posteriores al informe de la Entrega final y estan
+escritas completas aqui.
+
+## ADR-24. Un ACL en la aplicacion, por oferta
+
+**Contexto.** El control de acceso de las bases (ADR-14) es por servicio. El
+backend entra como `mesh_backend`, las herramientas con usuarios que solo
+miran, y Redis tiene su ACL nativo. Pero ninguna base sabe que persona esta
+detras de una peticion, porque todas llegan con el mismo usuario. Dentro de la
+tienda la regla era fija y estaba escrita en el SQL, una oferta la toca solo
+su dueno (`WHERE o.id_usuario = $...`, siete veces en el servicio de ofertas).
+No habia forma de que la tienda dejara a un empleado cambiar el precio de una
+oferta sin darle su contrasena. El profesor comento que el ACL puede vivir en
+la aplicacion.
+
+**Alternativas.**
+1. No cambiar nada, con los roles (comprador, vendedor, admin) y la regla del
+   dueno.
+2. Usuarios de base por persona y Row Level Security en PostgreSQL. Habria que
+   pasarle a la base quien es la persona en cada peticion y escribir politicas
+   para cada tabla, y filtraria tambien las rutas de lo propio.
+3. Reescribir cada `WHERE` del dueno como mio o compartido conmigo. Toca unos
+   veinte lugares (ofertas, reglas, venta relampago, el buscador de ofertas) y
+   basta con olvidar uno.
+4. Un ACL en tablas de PostgreSQL, revisado por un guard del backend, en rutas
+   nuevas para lo compartido, sin tocar las de lo propio.
+
+**Decision.** La 4, con la migracion 049. `permiso_oferta` guarda la oferta, la
+cuenta, el permiso (`ver`, `editar` o `descuento`), quien lo dio y hasta
+cuando, y `auditoria_permiso_oferta` guarda el registro. `PermisoOfertaGuard`
+va despues de `SesionGuard` en `/compartidas/ofertas` y busca una entrada
+vigente de esa cuenta, esa oferta y ese permiso. Sin ella contesta 404. El
+dueno reparte en `/vendedor/ofertas/:id/permisos`.
+
+**Justificacion.** Es un ACL en el sentido clasico, la lista va pegada al
+objeto y lo que no esta se niega, y vive donde se conoce a la persona. Las
+rutas nuevas llaman al mismo `OfertasVendedorService` de siempre a nombre del
+dueno, asi que las reglas de precio, descuento, existencia y venta relampago no
+se copian. Como las rutas de lo propio no se tocan, lo que ya estaba probado
+sigue igual y la prueba se concentra en lo nuevo.
+
+**Consecuencias.** Cada permiso se revisa por separado (`ver` no deja editar),
+vence solo y se quita al instante. Cada accion por la via compartida queda en el
+registro con quien la hizo de verdad, porque el historial de precios la anota a
+nombre del dueno. Ese registro se escribe despues de que la accion salio bien y
+no en su misma transaccion, asi que si fallara la accion queda hecha y el
+backend lo avisa en su log. Un permiso compartido no abre `/vendedor/ofertas`.
+Pruebas, `bash pruebas/acl_ofertas.sh` y `node pruebas/acl_ofertas_azar.mjs`.
+El control de acceso de las bases sigue siendo el que pide el enunciado, y este
+lo complementa con la capa de las personas.
+
+## ADR-25. La categoria del producto vive tambien en el grafo
+
+**Contexto.** Quienes lo compraron tambien llevaron (Neo4j, ADR-19) ordenaba
+solo por cuantas cuentas compraron los dos productos. En la ficha de una laptop
+salia primero un telefono con cuatro compradores que otra laptop con uno. Se
+pidio que los de la misma categoria vayan siempre primero, como un grupo. El
+`:Producto` del grafo solo tenia `id` y `nombre`.
+
+**Alternativas.**
+1. No cambiar nada.
+2. Reordenar en el backend despues de la consulta, con la categoria que trae la
+   ficha de cada candidato.
+3. Guardar en el grafo toda la ficha (nombre, foto, precio, existencia) para no
+   depender de MongoDB.
+4. Guardar solo la categoria en el `:Producto` y ordenar en el Cypher.
+
+**Decision.** La 4. `:Producto` lleva `id_categoria` y `categoria`, que salen de
+`producto_catalogo`. Las escriben los workers de compras y de resenas y el ETL
+del grafo al crear o tocar un nodo, y `GrafoCategoriasSyncService` compara cada
+minuto todos los `:Producto` con PostgreSQL y corrige los que no coinciden. El
+Cypher pone `grupo` 0 a la misma categoria y 1 al resto y ordena por grupo,
+compradores e id. El respaldo de PostgreSQL ordena igual.
+
+**Justificacion.** La regla queda en la misma consulta que la recomendacion, y
+el `LIMIT` corta con el grupo ya puesto. La categoria casi no cambia, asi que la
+copia cuesta poco. El precio y la existencia si cambian a cada rato, y por eso
+no se copian, la 3 seria una cuarta copia del catalogo. Con MongoDB caido la
+recomendacion ya funcionaba, porque las tarjetas salen de la copia del catalogo
+en PostgreSQL.
+
+**Consecuencias.** Un cambio de categoria por la API llega al grafo en menos de
+un minuto (medido entre 14 y 59 s), y mientras tanto el orden puede usar la
+categoria vieja. Un producto que no esta en la copia del catalogo no tiene
+categoria y cae en el grupo del resto. Prueba,
+`bash pruebas/tambien_compraron_categoria.sh`.

@@ -14,6 +14,8 @@
 #   .\demo-entrega-final.ps1 -Parte clasificador                como leyo el clasificador cada resena
 #   .\demo-entrega-final.ps1 -Parte hibrida -Texto "labtop gamer"   palabras y significado en una lista
 #   .\demo-entrega-final.ps1 -Parte sugerencias -Texto "Laptop ligera para estudiantes"   al proponer un producto
+#   .\demo-entrega-final.ps1 -Parte compartir                   el ACL de la aplicacion, por oferta
+#   .\demo-entrega-final.ps1 -Parte categorias -Producto laptop  tambien compraron, primero la misma categoria
 #
 # QUE ENSENA CADA PARTE
 # ==================================================
@@ -50,12 +52,21 @@
 #   rastro     Hace UNA busqueda con filtros por el backend, ensena la fila que
 #              quedo en ClickHouse con sus facetas y la borra al final, para
 #              que no cuente en las tendencias
+#   compartir  El ACL de la aplicacion (migracion 049). ventas.norte le da a
+#              ventas.sur ver y editar sobre una oferta suya, ventas.sur ve,
+#              edita y no puede poner descuento, ventas.norte le quita editar y
+#              deja de poder al instante, y al final el registro. Deja la
+#              oferta como estaba (sin permisos, la misma existencia) y las
+#              filas del registro, que son historia
+#   categorias Tambien compraron de un producto, directo en Neo4j con el grupo
+#              de cada uno (0 la misma categoria, 1 el resto) y por la ruta de
+#              la ficha. Solo lee
 #
 # Nada de tuberias hacia docker exec. PowerShell 5.1 les mete un BOM. Lo que
 # va a Mongo o a PostgreSQL viaja como archivo con docker cp.
 
 param(
-    [ValidateSet('acceso', 'bases', 'semantica', 'facetas', 'vectores', 'rastro', 'intencion', 'clasificador', 'hibrida', 'sugerencias')]
+    [ValidateSet('acceso', 'bases', 'semantica', 'facetas', 'vectores', 'rastro', 'intencion', 'clasificador', 'hibrida', 'sugerencias', 'compartir', 'categorias')]
     [string]$Parte = 'acceso',
     [string]$Producto = 'laptop',
     [string]$Texto = 'laptop',
@@ -69,7 +80,7 @@ function Mal($t)  { Write-Host "   $t" -ForegroundColor Red }
 
 $env_ = @{}
 Get-Content (Join-Path $PSScriptRoot '.env') | ForEach-Object {
-    if ($_ -match '^\s*([A-Z_]+)\s*=\s*(.+)$') { $env_[$Matches[1]] = $Matches[2].Trim() }
+    if ($_ -match '^\s*([A-Z0-9_]+)\s*=\s*(.+)$') { $env_[$Matches[1]] = $Matches[2].Trim() }
 }
 $sinBom = New-Object System.Text.UTF8Encoding($false)
 $tmp = Join-Path ([IO.Path]::GetTempPath()) 'mesh-demo-final'
@@ -139,6 +150,151 @@ function Mongo([string]$js) {
     $salida = docker exec mesh-mongo sh -c $cmd 2>&1
     if ($LASTEXITCODE -ne 0) { Mal "MongoDB contesto con error. $salida"; exit 1 }
     return @($salida | ForEach-Object { "$_" } | Where-Object { $_.Trim().StartsWith('{') } | ForEach-Object { $_ | ConvertFrom-Json })
+}
+
+
+# ============================================================
+# compartir y categorias (2026-10-26)
+# ============================================================
+
+# Una sesion del backend por cuenta. Devuelve la sesion web o sale.
+function Entrar([string]$correo, [string]$clave) {
+    $cuerpo = @{ identificador = $correo; contrasena = $clave } | ConvertTo-Json
+    try {
+        Invoke-RestMethod -Uri "$Backend/usuario/login" -Method Post -ContentType 'application/json' -Body $cuerpo -SessionVariable s -TimeoutSec 20 | Out-Null
+        return $s
+    } catch {
+        Mal "No se pudo entrar como $correo. $($_.Exception.Message)"
+        exit 1
+    }
+}
+
+# Una peticion con sesion. Devuelve @{ codigo; datos } sin lanzar en un 4xx.
+# Content-Type solo con cuerpo: Fastify rechaza un DELETE que dice traer JSON
+# y no trae nada.
+function Llamar($sesion, [string]$metodo, [string]$ruta, $cuerpo = $null) {
+    $p = @{ Uri = "$Backend$ruta"; Method = $metodo; WebSession = $sesion; TimeoutSec = 20; UseBasicParsing = $true }
+    if ($null -ne $cuerpo) { $p.ContentType = 'application/json'; $p.Body = ($cuerpo | ConvertTo-Json -Compress) }
+    try {
+        $r = Invoke-WebRequest @p
+        $texto = [Text.Encoding]::UTF8.GetString($r.RawContentStream.ToArray())
+        return @{ codigo = [int]$r.StatusCode; datos = ($texto | ConvertFrom-Json) }
+    } catch {
+        $codigo = 0
+        if ($_.Exception.Response) { $codigo = [int]$_.Exception.Response.StatusCode }
+        return @{ codigo = $codigo; datos = $null }
+    }
+}
+
+function Esperado([int]$codigo, [int]$debe, [string]$que) {
+    if ($codigo -eq $debe) { Ok "$que ($codigo)" } else { Mal "$que dio $codigo, se esperaba $debe" }
+}
+
+if ($Parte -eq 'compartir') {
+    Contenedor 'mesh-postgres'
+    Paso 'El ACL de la aplicacion, por oferta (migracion 049, ADR-24)'
+    Write-Host '   ventas.norte es la duena, ventas.sur recibe permisos. Todo pasa por el backend.' -ForegroundColor DarkGray
+    $norte = Entrar 'ventas.norte@mesh.com' 'Vendedor123'
+    $sur = Entrar 'ventas.sur@mesh.com' 'Vendedor123'
+
+    # Una oferta de ventas.norte activa, sin descuento, sin venta relampago y
+    # sin nadie con permisos.
+    $fila = @(Psql @"
+SELECT o.id_oferta || '|' || coalesce(pc.nombre, 'Producto ' || o.id_producto_mongo) || '|' || o.stock
+  FROM oferta o
+  JOIN usuarios u USING (id_usuario)
+  JOIN estado_oferta e USING (id_estado_oferta)
+  LEFT JOIN producto_catalogo pc ON pc.id_producto_mongo = o.id_producto_mongo
+ WHERE u.correo_electronico = 'ventas.norte@mesh.com' AND e.estado_oferta_nombre = 'activa'
+   AND o.porcentaje_descuento IS NULL AND NOT o.es_inventario_limitado
+   AND NOT EXISTS (SELECT 1 FROM permiso_oferta p WHERE p.id_oferta = o.id_oferta)
+ ORDER BY o.id_oferta LIMIT 1;
+"@)[0]
+    if (-not $fila) { Mal 'No hay una oferta de ventas.norte para la demo.'; exit 1 }
+    $of, $nombre, $stock = $fila -split '\|'
+    Ok "Oferta $of, $nombre, $stock unidades"
+
+    Paso '1. Sin entrada en la lista, ventas.sur no ve nada'
+    Esperado (Llamar $sur 'GET' "/compartidas/ofertas/$of").codigo 404 'ventas.sur pide la oferta'
+    Write-Host '   El mismo 404 de una oferta ajena. No se le confirma que existe.' -ForegroundColor DarkGray
+
+    Paso '2. ventas.norte le da ver y editar por diez minutos'
+    $vence = (Get-Date).ToUniversalTime().AddMinutes(10).ToString('yyyy-MM-ddTHH:mm:ssZ')
+    Esperado (Llamar $norte 'POST' "/vendedor/ofertas/$of/permisos" @{ correo = 'ventas.sur@mesh.com'; permisos = @('ver', 'editar'); fecha_vencimiento = $vence }).codigo 201 'permisos dados'
+    $lista = @(Psql "SELECT t.tipo_permiso_oferta_nombre || ' hasta ' || to_char(p.fecha_vencimiento AT TIME ZONE 'America/Guatemala', 'HH24:MI') FROM permiso_oferta p JOIN tipo_permiso_oferta t USING (id_tipo_permiso_oferta) JOIN usuarios u ON u.id_usuario = p.id_usuario WHERE p.id_oferta = $of AND u.correo_electronico = 'ventas.sur@mesh.com' ORDER BY 1;")
+    Write-Host "   En permiso_oferta: $($lista -join ', ')" -ForegroundColor DarkGray
+
+    Paso '3. Cada permiso por separado'
+    $r = Llamar $sur 'GET' "/compartidas/ofertas/$of"
+    Esperado $r.codigo 200 "ventas.sur ve la oferta, de $($r.datos.payload.dueno.usuario)"
+    Esperado (Llamar $sur 'POST' "/compartidas/ofertas/$of/descuento" @{ porcentaje_descuento = 10 }).codigo 404 'pero no le puede poner descuento, no tiene ese permiso'
+    $r = Llamar $sur 'PATCH' "/compartidas/ofertas/$of" @{ ajuste_stock = 1 }
+    Esperado $r.codigo 200 "edita la existencia, ahora $($r.datos.payload.stock)"
+    Esperado (Llamar $sur 'PATCH' "/compartidas/ofertas/$of" @{ estado = 'pausada' }).codigo 400 'el estado no, eso sigue siendo de la duena'
+    Esperado (Llamar $sur 'PATCH' "/vendedor/ofertas/$of" @{ ajuste_stock = 1 }).codigo 404 'y la ruta propia de ventas.norte sigue cerrada para ventas.sur'
+    $r = Llamar $sur 'PATCH' "/compartidas/ofertas/$of" @{ ajuste_stock = -1 }
+    Esperado $r.codigo 200 "devuelve la existencia, otra vez $($r.datos.payload.stock)"
+
+    Paso '4. ventas.norte le quita editar, y vale al instante'
+    $ent = (Llamar $norte 'GET' "/vendedor/ofertas/$of/permisos").datos.payload.permisos | Where-Object { $_.permiso -eq 'editar' }
+    Esperado (Llamar $norte 'DELETE' "/vendedor/ofertas/$of/permisos/$($ent.id_permiso_oferta)").codigo 200 'editar quitado'
+    Esperado (Llamar $sur 'PATCH' "/compartidas/ofertas/$of" @{ ajuste_stock = 1 }).codigo 404 'ventas.sur intenta editar otra vez'
+    Esperado (Llamar $sur 'GET' "/compartidas/ofertas/$of").codigo 200 'ver le sigue'
+
+    Paso '5. El registro de la oferta, lo que ve la duena'
+    $reg = @((Llamar $norte 'GET' "/vendedor/ofertas/$of/permisos").datos.payload.registro | Select-Object -First 8)
+    [array]::Reverse($reg)
+    foreach ($x in $reg) {
+        $quien = if ($x.receptor) { " a $($x.receptor)" } else { '' }
+        $color = if ($x.accion -eq 'negado') { 'Red' } else { 'White' }
+        Write-Host ("   {0,-16} {1,-10} {2}{3}" -f $x.accion, $x.permiso, $x.actor, $quien) -ForegroundColor $color
+    }
+
+    Paso 'Limpieza'
+    foreach ($e in @((Llamar $norte 'GET' "/vendedor/ofertas/$of/permisos").datos.payload.permisos)) {
+        Llamar $norte 'DELETE' "/vendedor/ofertas/$of/permisos/$($e.id_permiso_oferta)" | Out-Null
+    }
+    $quedan = @(Psql "SELECT count(p.id_permiso_oferta) || ' permisos, ' || stock || ' unidades' FROM oferta o LEFT JOIN permiso_oferta p USING (id_oferta) WHERE o.id_oferta = $of GROUP BY stock;")[0]
+    Ok "La oferta $of queda con $quedan, como estaba. El registro se queda, es historia."
+    exit 0
+}
+
+if ($Parte -eq 'categorias') {
+    Contenedor 'mesh-postgres'
+    Contenedor 'mesh-neo4j'
+    $patron = $Producto -replace "'", ''
+    $fila = @(Psql @"
+SELECT pc.id_producto_mongo || '|' || pc.nombre || '|' || c.nombre
+  FROM producto_catalogo pc JOIN categorias c USING (id_categoria)
+ WHERE pc.nombre ILIKE '%$patron%' AND pc.estado = 'activo'
+   AND EXISTS (SELECT 1 FROM pedido_producto pp WHERE pp.id_producto_mongo = pc.id_producto_mongo)
+ ORDER BY pc.id_producto_mongo LIMIT 1;
+"@)[0]
+    if (-not $fila) { Mal "Ningun producto comprado con '$Producto' en el nombre."; exit 1 }
+    $id, $nombre, $categoria = $fila -split '\|'
+
+    Paso "Quienes compraron $nombre ($categoria) tambien llevaron, en Neo4j (ADR-25)"
+    $cypher = "MATCH (base:Producto {id: $id})<-[:DE]-(:Compra)<-[:HIZO]-(cuenta:Usuario) MATCH (cuenta)-[:HIZO]->(:Compra)-[:DE]->(rec:Producto) WHERE rec <> base WITH base, rec, count(DISTINCT cuenta) AS compradores WITH rec, compradores, CASE WHEN base.id_categoria IS NOT NULL AND rec.id_categoria = base.id_categoria THEN 0 ELSE 1 END AS grupo RETURN grupo, compradores, rec.categoria, rec.nombre ORDER BY grupo, compradores DESC, rec.id LIMIT 10;"
+    $salida = docker exec mesh-neo4j cypher-shell -u neo4j -p $env_['NEO4J_PASSWORD'] --format plain $cypher 2>&1
+    if ($LASTEXITCODE -ne 0) { Mal "Neo4j contesto con error. $salida"; exit 1 }
+    Write-Host '   grupo  compradores  categoria / producto' -ForegroundColor DarkGray
+    foreach ($l in @($salida | Select-Object -Skip 1)) {
+        $g, $n, $cat, $prod = ("$l" -replace '"', '') -split ', ', 4
+        $color = if ($g -eq '0') { 'Green' } else { 'White' }
+        Write-Host ("   {0,5}  {1,11}  {2} / {3}" -f $g, $n, $cat, $prod) -ForegroundColor $color
+    }
+    Write-Host '   Grupo 0 es la misma categoria, va siempre primero aunque tenga menos compradores.' -ForegroundColor DarkGray
+    Write-Host '   La categoria vive en cada :Producto (id_categoria), la pone al dia GrafoCategoriasSyncService.' -ForegroundColor DarkGray
+
+    Paso "Lo mismo por la ruta de la ficha, GET /productos/$id/tambien-compraron"
+    $lista = Api "/productos/$id/tambien-compraron"
+    if ($null -ne $lista) {
+        foreach ($x in @($lista)) {
+            $marca = if ($x.misma_categoria) { 'misma categoria' } else { 'otra' }
+            Write-Host ("   {0,-16} {1,3} compradores  {2}" -f $marca, $x.compradores, $x.producto.nombre) -ForegroundColor $(if ($x.misma_categoria) { 'Green' } else { 'White' })
+        }
+    }
+    exit 0
 }
 
 

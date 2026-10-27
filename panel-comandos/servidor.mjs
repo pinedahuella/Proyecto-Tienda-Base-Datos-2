@@ -404,6 +404,22 @@ const CATALOGO = [
     ],
     construir: (v) => ['-Parte', 'rastro', '-Texto', v.texto],
   },
+  {
+    id: 'final-compartir', grupo: 'Demos de la Entrega final', titulo: 'Compartir una oferta, el ACL de la aplicacion',
+    explica: 'ventas.norte le da a ventas.sur ver y editar sobre una oferta suya. Sin permiso ventas.sur recibe 404, con ver ve pero no pone descuento, con editar cambia la existencia, y cuando ventas.norte le quita editar deja de poder al instante. Al final el registro de la oferta con el intento negado. Deja la oferta como estaba. Necesita el backend.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Parte', 'compartir'],
+  },
+  {
+    id: 'final-categorias', grupo: 'Demos de la Entrega final', titulo: 'Tambien compraron, primero la misma categoria',
+    explica: 'Para un producto comprado, lo que contesta Neo4j con el grupo de cada recomendacion (0 la misma categoria, 1 el resto) y lo mismo por la ruta de la ficha. Los de la misma categoria van primero aunque tengan menos compradores. Solo lee.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [
+      { nombre: 'producto', etiqueta: 'Palabra del nombre', tipo: 'texto', patron: '^[A-Za-z0-9 ]{2,30}$', defecto: 'laptop' },
+    ],
+    construir: (v) => ['-Parte', 'categorias', '-Producto', v.producto],
+  },
 
   // --- Demos de resenas ---------------------------------------------------
   {

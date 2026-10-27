@@ -140,26 +140,40 @@ export async function paraTiDesdePostgres(
 
 /**
  * "Quienes lo compraron tambien llevaron" desde PostgreSQL. La misma pregunta
- * que `CYPHER_TAMBIEN_COMPRARON`: las cuentas que compraron `idProducto`, lo
- * demas que compraron, y por cuantas cuentas distintas.
+ * y el mismo orden que `CYPHER_TAMBIEN_COMPRARON`: las cuentas que compraron
+ * `idProducto`, lo demas que compraron, primero el grupo de la misma categoria
+ * que `idProducto` y despues el resto, y dentro de cada grupo por cuantas
+ * cuentas distintas. La categoria sale de la copia del catalogo
+ * (`producto_catalogo.id_categoria`), la misma que lleva el grafo.
  */
 export async function tambienCompraronDesdePostgres(
   idProducto: number,
   candidatos: number,
-): Promise<{ id: number; compradores: number }[]> {
-  const { rows } = await pool.query<{ id: string; compradores: number }>(
-    `WITH ${CTE_COMPRAS}
-     SELECT otra.p AS id, count(DISTINCT base.u)::int AS compradores
+): Promise<{ id: number; compradores: number; misma_categoria: boolean }[]> {
+  const { rows } = await pool.query<{
+    id: string;
+    compradores: number;
+    misma_categoria: boolean;
+  }>(
+    `WITH ${CTE_COMPRAS},
+     origen AS (
+       SELECT id_categoria FROM producto_catalogo WHERE id_producto_mongo = $2
+     )
+     SELECT otra.p AS id, count(DISTINCT base.u)::int AS compradores,
+            COALESCE(pc.id_categoria = (SELECT id_categoria FROM origen), false)
+              AS misma_categoria
        FROM compras base
        JOIN compras otra ON otra.u = base.u
+       LEFT JOIN producto_catalogo pc ON pc.id_producto_mongo = otra.p
       WHERE base.p = $2 AND otra.p <> $2
-      GROUP BY otra.p
-      ORDER BY compradores DESC, otra.p
+      GROUP BY otra.p, pc.id_categoria
+      ORDER BY misma_categoria DESC, compradores DESC, otra.p
       LIMIT $3`,
     [ESTADOS_DE_COMPRA, idProducto, candidatos],
   );
   return rows.map((fila) => ({
     id: Number(fila.id),
     compradores: fila.compradores,
+    misma_categoria: fila.misma_categoria,
   }));
 }

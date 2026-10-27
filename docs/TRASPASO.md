@@ -3,7 +3,44 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-24, tarde**.
+Ultima actualizacion: **2026-10-27, madrugada**.
+
+**EMPIEZA AQUI (26 al 27-10, noche). Dos cambios para la presentacion, probados con las bases de la PC de
+Meme (local). Commiteado y pusheado el 27-10, 352 commits.** Con permiso de David para tocar `backend/`; su nota esta en
+`backend/cambio_propuestas/2026-10-26_2300-categoria-en-el-grafo-y-acl-de-ofertas.md`.
+
+1. **Tambien compraron por grupos de categoria (ADR-25).** Primero SIEMPRE los productos de la misma categoria
+   que el de la ficha, despues el resto, y dentro de cada grupo por compradores. `:Producto` del grafo lleva
+   `id_categoria` y `categoria` (de `producto_catalogo`); las ponen los workers de compras y de resenas, el ETL
+   (`etl/extraer_grafo.sql`) y el worker nuevo `GrafoCategoriasSyncService` (al arrancar y cada 60 s compara
+   todos los nodos con PostgreSQL). El Cypher y el respaldo de PostgreSQL ordenan igual; la respuesta suma
+   `misma_categoria`. Medido: los 100 productos comprados dan exactamente lo mismo con Neo4j, sin Neo4j y sin
+   MongoDB; mover el producto 2 de categoria por la API llega al grafo en 14 a 59 s.
+   `pruebas/tambien_compraron_categoria.sh` 32 OK.
+2. **ACL de la aplicacion por oferta (ADR-24, migracion 049).** `permiso_oferta` (ver, editar, descuento, con
+   vencimiento) y `auditoria_permiso_oferta`; `PermisoOfertaGuard` en las rutas nuevas `/compartidas/ofertas`;
+   el dueno reparte en `/vendedor/ofertas/:id/permisos`. Las rutas de lo propio NO cambiaron. Frontend: boton
+   Compartir en Ofertas y seccion Compartidas. `pruebas/acl_ofertas.sh` 84 OK y
+   `pruebas/acl_ofertas_azar.mjs` (3 semillas x 400 vueltas, 4896 bien, 0 mal). El 27-10 a las 08:20 la bateria entera dio 44 de 44, prueba_acceso 93 y caidas 51 y 51. Visto en Edge a 1536x730 y a
+   390, sin errores de JavaScript ni desborde.
+
+Las tres pruebas se rompieron a proposito y fallaron (orden 8 FALLA, permisos 11 y 9, vencimiento 3). Se
+sumaron a `pruebas/correr_todas.sh` (44). Demos nuevas en el panel: `demo-entrega-final.ps1 -Parte compartir`
+y `-Parte categorias`. Docs: DECISIONES (ADR-24 y 25 completas), SEGURIDAD, ARQUITECTURA, api, frontend,
+neo4j/README, migrations/README, README, PREGUNTAS (Parte 12, 153 a 161) y el ER regenerado (89 tablas, 111
+llaves; ya le faltaban 10 tablas de octubre). Presentacion con 20 laminas: la 13 nueva del ACL, cifras al dia
+(89 tablas, 49 migraciones, 25 decisiones) y la demo de compartir en el GUION.
+
+El Word de la Entrega final se regenero el 27-10 con 352 commits, 89 tablas, migraciones 001 a 049 y
+ADR-24 y ADR-25 en la seccion 5.4. Un commit mas descuadra el conteo. `backend\.env` quedo en LOCAL; para volver a la PC de David,
+`.\usar-bases-remotas.ps1 -Ip 100.64.42.11`, y alla hace falta correr `arrancar.ps1` para que exista la 049.
+
+**26-10. Documentos al dia, sin tocar codigo ni bases.** `docs/ARQUITECTURA.md` decia que el control de
+acceso estaba solo en Redis, que ninguna ruta leia el indice de logins de Elasticsearch y que la copia de
+logueos a ClickHouse se decidia con el profesor; ahora dice lo de hoy y el Mermaid tiene la caja de Ollama.
+`docs/PENDIENTES.md` tiene arriba como esta al 26-10 y cierra la 12, la 14, la 16 y la 32. En este documento
+se reescribieron las secciones Pegale esto a la IA, Que es esto, Como se levanta, Que falta y Donde esta cada
+cosa, que seguian en septiembre. Lo que falta de la entrega sigue siendo solo el repo publico.
 
 **EMPIEZA AQUI (24-10, tarde). Segunda revision entera contra la PC de Jose David, todo en verde.** Lo unico
 que falta de la entrega es que Jose David haga publico el repo o agregue al profesor.
@@ -1448,74 +1485,64 @@ las nueve senales de hoy, pero el razonamiento de fondo no cambio).
 ## Pegale esto a la IA que vaya a trabajar
 
 > Proyecto Mesh, de Bases de Datos 2 (Universidad del Istmo). El repo esta en
-> `C:\Users\memit\OneDrive - Universidad del Istmo\BASE DE DATOS 2\Proyecto-Tienda-Base-Datos-2`.
+> `C:\Proyectos\Proyecto-Tienda-Base-Datos-2`. El enunciado es
+> `Proyecto_TiendaYa_BasesDeDatos2.docx`, en la raiz.
 >
 > **Antes de proponer nada, lee en este orden:**
-> 1. `docs/TRASPASO.md` -- que esta hecho y como se levanta (empieza aqui)
-> 2. `docs/PENDIENTES.md` -- lo que falta, con su urgencia
-> 3. `docs/BACKEND-PENDIENTE.md` -- lo que le toca a Jose David
-> 4. `docs/base-de-datos.md` -- por que el modelo es como es
-> 5. `migrations/README.md` -- las reglas de las migraciones
-> 6. `docs/CONSISTENCIA-CHECKOUT.md` -- que pasa si algo falla al cobrar
+> 1. `docs/TRASPASO.md`, desde el primer EMPIEZA AQUI -- como esta hoy
+> 2. `README.md` -- que es cada carpeta y como se levanta
+> 3. `docs/DECISIONES.md` -- el registro unico, ADR-1 a ADR-23
+> 4. `docs/ARQUITECTURA.md` y `docs/SEGURIDAD.md` -- las seis bases y quien entra a cada una
+> 5. `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` -- el respaldo de cada base
+> 6. `remoto/README.md` -- las bases en la PC de Jose David por Tailscale
+> 7. `migrations/README.md` -- las reglas de las migraciones
 >
 > **REGLAS QUE NO SE ROMPEN:**
-> - Yo (Meme) hago `frontend/`, `migrations/`, `etl/`, `mongo/`, `neo4j/`,
->   `redis/`, `pruebas/`, `docs/` y `arrancar.ps1`. Jose David hace `backend/`.
->   **NUNCA toques `backend/`, ni un comentario.** Leelo: es la fuente de verdad.
-> - Todo en `main`, sin ramas. No commitees ni pushees si yo no lo pido.
+> - `backend/` es de Jose David. Desde el 2026-10-20 dio permiso para tocarlo;
+>   cada cambio ahi lleva su nota en `backend/cambio_propuestas/`.
+> - Todo en `main`, sin ramas. No commitees ni pushees si Meme no lo pide.
+>   Un commit cambia el conteo que dicen los Word: si se hace, se regeneran.
 > - **NUNCA firmes un commit con `Co-Authored-By: Claude` ni menciones IA.**
 >   Mensajes de una linea, planos.
 > - `migrations/README.md` manda: una migracion ya corrida no se edita (se hace
 >   la siguiente), ningun id se escribe a mano (todo por nombre o correo), y el
 >   SQL va en ASCII puro.
-> - Ninguna contrasena real en un archivo que se suba. Salen del `.env`.
+> - Ninguna contrasena real en un archivo que se suba. Salen del `.env`, de
+>   `backend/.env` y, para la PC de Jose David, de `remoto/.env.remoto`.
+> - Toda preparacion nueva va dentro de `arrancar.ps1`, no en un script suelto.
+> - Las pruebas hacen sus acciones por las rutas del backend y a las bases solo
+>   las miran.
 >
-> **Antes de decir que algo funciona, MIDELO.** Este proyecto tiene DIECINUEVE arneses:
-> `bash pruebas/resenas.sh`, `bash pruebas/carrito.sh`, `bash pruebas/notas.sh`,
-> `bash pruebas/busqueda.sh`, `bash pruebas/eventos.sh`,
-> `bash pruebas/alertas_login.sh`, `bash pruebas/ofertas_paginadas.sh`,
-> `bash pruebas/tendencias.sh`, `bash pruebas/etl_mongo.sh`, `bash pruebas/etl_compras.sh`,
-> `bash pruebas/falla_checkout.sh`, `bash redis/prueba_carrito.sh`,
-> `bash redis/prueba_concurrencia.sh`, `bash neo4j/correr_fraude.sh`,
-> `.\mongo\demostracion_indices.ps1`, y los tres que PASAN POR EL BACKEND (20 de
-> septiembre), `bash pruebas/carrito_vencimiento.sh`, `bash pruebas/oferta_limitada.sh`
-> y `bash pruebas/anillos.sh`, y `bash pruebas/descuentos.sh` (23 de septiembre, tambien
-> por el backend, y deja un pedido real). `oferta_limitada.sh` ahora pone un descuento
-> antes de abrir la venta y lo quita despues de cerrarla.
+> **Antes de decir que algo funciona, MIDELO.** `bash pruebas/correr_todas.sh`
+> corre las 44 pruebas de punta a punta (mas de media hora),
+> `bash seguridad/prueba_acceso.sh` el control de acceso (93) y
+> `node pruebas/caidas.mjs` las caidas (51). Con las bases en otra PC, primero
+> `source remoto/activar.sh`.
 >
-> De los que prueban Redis y Neo4j, `redis/prueba_carrito.sh`,
-> `redis/prueba_concurrencia.sh` y `neo4j/correr_fraude.sh` NO pasan por el backend,
-> hablan directo con las bases, y cada uno lo dice en su cabecera con el que si pasa.
-> `oferta_limitada.sh` y `anillos.sh` crean cuentas y `anillos.sh` deja compras reales.
+> **`pruebas/falla_checkout.sh` PARA CONTENEDORES a proposito**, asi que no se
+> corre a la vez que ningun otro, y en modo remoto no corre. Y compra de verdad:
+> deja pedidos, pagos y movimientos de stock que no se deshacen.
 >
-> Los dos nuevos tambien van de uno en uno, y los dos lo dicen en su cabecera:
-> `alertas_login.sh` mide contadores por IP, y en local la IP es la misma para
-> todo; `ofertas_paginadas.sh` necesita que la lista no se mueva mientras la
-> recorre.
+> Y ojo con correr dos pruebas A LA VEZ. Paso el 2026-09-06 con dos sesiones
+> tocando `pruebas/eventos.sh`: dio 8 FALLA por pares y ninguno era del codigo.
+> Un rojo solo vale si era la unica corriendo. `redis/prueba_concurrencia.sh`
+> mide tiempos y en una maquina sin memoria da rojo sin que nada este roto.
+> Antes de creerle a una prueba, **rompe el codigo a proposito y comprueba que
+> falla**.
 >
-> **`falla_checkout.sh` PARA CONTENEDORES a proposito**, asi que no se corre a la
-> vez que ningun otro. Y compra de verdad: deja pedidos, pagos y movimientos de
-> stock que no se deshacen. Su cabecera lo dice y los imprime al terminar.
->
-> Y ojo con correr dos arneses A LA VEZ. Paso el 2026-09-06 sin querer, con dos
-> sesiones tocando `pruebas/eventos.sh` al mismo tiempo: dio 8 FALLA, todos por
-> pares (una fila donde se esperaba una, dos donde se esperaba una), y ninguno
-> era del codigo. Un rojo de un arnes solo vale si era el unico corriendo.
->
-> Y `prueba_concurrencia.sh` mide TIEMPOS con 50 clientes a la vez: en una
-> maquina ahogada de memoria da rojo sin que nada este roto. Si sale mal,
-> correlo solo antes de creerle.
-> Y antes de creerle a un arnes, **rompe el codigo a proposito y comprueba que
-> falla**: aqui ya aparecio un arnes que validaba copias pegadas de las
-> consultas en vez de las consultas de la entrega.
+> La bateria deja cuentas, ofertas a Q15 y senales de fraude de prueba. No se
+> corre el dia de presentar.
 
 ---
 
 ## Que es esto
 
 Tienda multi-vendedor con arquitectura poliglota. **Cuatro entregas
-acumulativas: 5 + 10 + 15 + 20 pts.** Equipo de tres: Meme (frontend, datos,
-migraciones), Jose David (`backend/`) y zapatoazul.
+acumulativas: 5 + 10 + 15 + 20 pts.** La final se entrega el lunes 2 de
+noviembre de 2026. Equipo de tres: Jose Manuel (Meme: frontend, migraciones,
+ETL, scripts de cada base, pruebas, documentacion y arranque), Jose David
+(`backend/`) y Juan Pablo (zapatoazul en git: los modulos de ClickHouse y
+Neo4j).
 
 **El modelo, en una linea:** un producto describe una cosa del mundo y **no es
 de nadie**; quien lo vende, a que precio y con cuanto stock es una fila de
@@ -1526,20 +1553,21 @@ de nadie**; quien lo vende, a que precio y con cuanto stock es una fila de
 ## Como se levanta
 
 ```powershell
-.\arrancar.ps1              # los 8 contenedores, migraciones, semilla y ETL
-.\arrancar.ps1 -Reiniciar   # desde cero (borra los volumenes)
+.\arrancar.ps1                                  # bases, migraciones, semilla, ETL, vectores y usuarios
+.\arrancar.ps1 -Reiniciar                       # desde cero (borra los volumenes)
+.\panel-comandos\servicios.ps1 -Accion backend  # compila y levanta :3000
+.\panel-comandos\servicios.ps1 -Accion frontend # compila y levanta :5173
+.\panel-comandos.ps1                            # botones en http://127.0.0.1:5199
 ```
 
-Despues, en dos terminales:
-
-```
-cd backend  ; npm run start:dev     # :3000
-cd frontend ; npm run dev           # :5173
-```
+Con las bases en la PC de Jose David: Tailscale prendido en las dos,
+`.\usar-bases-remotas.ps1 -Ip 100.64.42.11` y despues el backend.
+`.\usar-bases-remotas.ps1 -Local` vuelve a las de esta PC.
 
 **Si `arrancar.ps1` se queja de variables que faltan**, tu `.env` es tuyo y no
 viene en el pull: copia de `.env.example` las que falten. Y ojo, **son DOS
-`.env`**: el de la raiz (contenedores) y `backend/.env` (la aplicacion).
+`.env`**: el de la raiz (contenedores) y `backend/.env` (la aplicacion). Las
+contrasenas de los usuarios por servicio las genera `arrancar.ps1` en su paso 9f.
 
 ### Puertos
 
@@ -2621,104 +2649,51 @@ linea.
 
 ## Que falta
 
-En `docs/PENDIENTES.md`, con su urgencia.
+Para la entrega final, solo que Jose David haga publico el repo o agregue al
+profesor como colaborador. Lo demas que sigue abierto no lo pide el enunciado y
+esta en `docs/PENDIENTES.md`, con su urgencia.
 
-**Al 2026-09-06 la lista quedo revisada contra el codigo**, y de paso se cerraron
-dos puntos que llevaban dos dias hechos sin que nadie los tachara: el 409 del
-`PATCH` (punto 8) y el apagado de la venta relampago vencida (punto 7). El 409 lo
-decia este mismo documento como "lo mas urgente" cuando ya estaba resuelto.
-
-Lo que queda vivo, en orden de lo que mas duele (al 2026-09-11):
-
-| # | Que | De quien |
-|---|---|---|
-| 17 | Medir en vivo lo que se toco despues de la corrida del 2026-09-11 | mia |
-| 14 | Las rutas de agregacion sobre `mesh_eventos_autenticacion`: lo que pidio el profesor | Jose David |
-| ~~9~~ | ~~Las tres rutas de la base columnar~~ **HECHAS el 2026-09-18** (seis rankings, `POST /eventos/*` y mas vendidos). Queda pedir el filtro `lote` | Jose David |
-| 10 | Los filtros facetados del buscador, con agregaciones. Requisito de la Entrega 3 | los dos |
-| 16 | La copia de logueos a ClickHouse, congelada desde el 2026-09-10 | decidir con el profesor |
-| 15 | Los detectores que faltan y los detalles del servicio de fraude del login | Jose David |
-| 12 | El checkout no compra con MongoDB caido: las tres salidas, por decidir | con el profesor |
-| 13 | La lista del vendedor sigue entera: a la ruta paginada le faltan filtros | Jose David |
-| 18 | Las tres tablas de la 016 en el diagrama ER | mia |
-| 5 | Decidir quien reparte el id de producto | Jose David |
-| 1 | El precio se congela al pagar y no al agregar | cubierto a medias |
-
-La 11, la prueba de falla simulada del checkout, se cerro el 2026-09-06 y esta
-tabla la seguia dando por abierta.
-
-Del 9, lo urgente es `POST /eventos/vista`: **sin esa ruta la tabla que sostiene
-el panel de tendencias no se llena nunca**, y todo lo demas de la base columnar
-queda de adorno.
-
-Y lo mas grave de fondo sigue siendo el punto 1: ya no se cobra en silencio, pero
-tampoco se respeta el precio que se enseno.
-
-Lo unico que queda sin comprobar es la revision a ojo en el navegador, que pide
-entrar con una cuenta.
-
-**Los 2.5 puntos de la Entrega 2 que no dependian de nadie ya estan escritos**
-(2026-09-03):
-
-| Que | Donde |
-|---|---|
-| Comparativa grafos vs columnar, con las condiciones bajo las cuales SI habria que incorporar la columnar | `docs/DECISION-GRAFOS-VS-COLUMNAR.md` |
-| Diagrama de arquitectura, que no es el ER | `docs/ARQUITECTURA.md` y `docs/diagrama-arquitectura.drawio` |
-
-La comparativa **no descarta Cassandra, la aplaza**, y con cinco condiciones
-medibles contra este mismo sistema. Y dice de frente lo que hay que decir antes
-que nada: a 32 pedidos y 14 aristas de calificacion **ninguna de las dos familias
-hace falta por rendimiento**. Se midio el analisis de fraude escrito entero en
-SQL con `WITH RECURSIVE` y encuentra exactamente los mismos anillos que Neo4j, en
-28.7 ms. Lo que decide no es la velocidad, es que la version en SQL **sin la
-guardia de nodos repetidos convierte 2 anillos reales en 7**, y eso tambien esta
-medido.
+Antes de presentar, la lista de `presentacion-final/GUION.md` (Antes de
+presentar): las dos PC en la misma red, Tailscale prendido, `ollama serve` con
+una busqueda de prueba, `remoto\caidas.ps1 -Accion levantar` unos minutos antes
+y la bateria sin correr ese dia.
 
 ---
 
 ## Donde esta cada cosa
 
-```
-El informe de la Entrega 2 se genera, no se escribe a mano:
+Los informes de Word se generan, no se escriben a mano:
 
 ```
-contenido-entrega2.json        el TEXTO, separado del formato a proposito
-generar-reporte-entrega2.py    lo maqueta clonando la caratula de la Entrega 1
-medir-paginas-entrega2.ps1     abre el .docx con Word y apunta las paginas
+contenido-<entrega>.json         el TEXTO, separado del formato a proposito
+generar-reporte-<entrega>.py     lo maqueta y se niega a escribir si el texto trae
+                                 dos puntos, punto y coma, comillas o rayas largas
+medir-paginas-<entrega>.ps1      abre el .docx con Word y apunta las paginas
 ```
 
-**Son DOS pasadas y el orden importa.** `python-docx` no sabe paginar, asi que la
-primera pasada deja el indice con guiones, el `.ps1` mide con Word de verdad y la
-segunda pasada escribe los numeros. Medido el 2026-09-19: 68 paginas, 8 secciones, 38
-subsecciones, 7 figuras (cuatro son capturas de pantalla) y 16 tablas, y las dos mediciones dieron la misma paginacion,
-asi que el indice no se corre al rellenarse. El contenido ahora es una lista de bloques
-(parrafo, tabla, figura, codigo, registro de decision, ver la cabecera del generador) y
-el generador se NIEGA a escribir el Word si el texto lleva dos puntos, punto y coma,
-comillas angulares, rayas largas, puntos suspensivos o menciones de como se escribio.
-Ojo, el medidor solo cuenta como titulo de seccion una linea EN MAYUSCULAS: las
-alternativas numeradas de los registros de decision lo confundian.
-
-Es lo que le falta al informe de la Entrega 1, cuyo indice tiene los numeros casi
-todos vacios y los tres que hay no corresponden.
+**Son DOS pasadas y el orden importa.** `python-docx` no sabe paginar: la
+primera pasada deja el indice con guiones, el `.ps1` mide con Word de verdad y
+la segunda pasada escribe los numeros. La fecha de la portada es `FECHA` en
+cada generador.
 
 ```
-migrations/          el esquema (la 016 es la ultima, 017 sera la siguiente)
-                     y el generador de datos
-etl/                 las cuatro copias hacia las bases derivadas
-mongo/               los indices (catalogo, resenas y eventos_autenticacion),
-                     la demostracion de indices y el generador de lotes
-neo4j/               el modelo del grafo y las 5 consultas de fraude
-redis/               el carrito, el Lua del inventario limitado y sus arneses
-elastic/             el mapeo del buscador y la plantilla del indice de eventos
-clickhouse/          el esquema de eventos y el generador de lotes.
-                     La puerta es clickhouse/README.md
-pruebas/             los ocho arneses de rutas y de bases
-docs/                base-de-datos.md manda sobre el modelo;
-                     ARQUITECTURA.md es el diagrama de arquitectura (no el ER);
-                     DECISION-GRAFOS-VS-COLUMNAR.md es el ADR-3 de la Entrega 2;
-                     GUIA-PRESENTACION.txt es el guion para defenderlo
-backend/             de Jose David. NO SE TOCA. Su doc buena esta en
-                     "elementos Generales/endpoints-*.md"
+backend/             NestJS con Fastify, de Jose David. Sus notas en
+                     "elementos Generales/" y backend/cambio_propuestas/
+frontend/            SvelteKit
+migrations/          el esquema (001 a 048) y el generador de datos
+etl/                 las cargas entre bases (catalogo, grafo, buscador, eventos, vectores)
+mongo/ redis/ neo4j/ clickhouse/ elastic/
+                     scripts, consultas y pruebas de cada base (todas menos mongo/ con README)
+seguridad/           usuarios de cada base y prueba_acceso.sh
+pruebas/             las 44 pruebas de punta a punta y correr_todas.sh
+remoto/              las bases en otra PC por Tailscale
+panel-comandos/      la pagina de botones y servicios.ps1
+presentacion-final/  las 19 laminas y GUION.md
+respaldos/           dumps de PostgreSQL antes de cada cambio grande (no se suben)
+docs/                DECISIONES.md el registro unico; ARQUITECTURA.md el diagrama
+                     (no el ER); base-de-datos.md el modelo; SEGURIDAD.md,
+                     CONSISTENCIA-CHECKOUT.md, QUE-PASA-SI-SE-CAE-UNA-BASE.md
+PREGUNTAS-SUSTENTACION.md   161 preguntas para la sustentacion
 ```
 
 ---

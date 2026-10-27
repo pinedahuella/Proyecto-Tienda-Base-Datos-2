@@ -20,6 +20,28 @@
 > respuesta, como se manejan los errores y como esta organizado el codigo.
 > Duplicar alli la lista de rutas solo garantiza que una de las dos caduque.
 
+## Lo que llego el 2026-10-26: el ACL de ofertas y el orden de tambien compraron
+
+El ACL de la aplicacion (migracion 049, ADR-24, `docs/SEGURIDAD.md`). Todas con
+sesion y rol de vendedor o admin. Sin una entrada vigente, las de
+`/compartidas/ofertas` contestan 404, igual que una oferta ajena. La nota
+completa para el backend esta en
+`backend/cambio_propuestas/2026-10-26_2300-categoria-en-el-grafo-y-acl-de-ofertas.md`.
+
+| Ruta | Que es | Donde se ve |
+|---|---|---|
+| `GET /compartidas/ofertas` | las ofertas de otras cuentas con alguna entrada vigente para mi, con el dueno y mis permisos | panel, Compartidas |
+| `GET /compartidas/ofertas/:id` | una, con `ver` (cualquier entrada) | panel, Compartidas |
+| `PATCH /compartidas/ofertas/:id` | con `editar`: `precio` y `ajuste_stock`; `estado` da 400 | panel, Compartidas, Editar |
+| `POST` y `DELETE /compartidas/ofertas/:id/descuento` | con `descuento` | panel, Compartidas, Descuento |
+| `GET /vendedor/ofertas/:id/permisos` | las entradas de una oferta propia y su registro | panel, Ofertas, Compartir |
+| `POST /vendedor/ofertas/:id/permisos` | `{correo, permisos: ['ver','editar','descuento'], fecha_vencimiento?}` | panel, Ofertas, Compartir |
+| `DELETE /vendedor/ofertas/:id/permisos/:idPermiso` | quita una entrada | panel, Ofertas, Compartir |
+
+Y `GET /productos/:id/tambien-compraron` suma `misma_categoria` a cada
+recomendacion y las ordena por grupos: primero las de la misma categoria que el
+producto, despues el resto (ADR-25).
+
 ## Lo que llego el 2026-09-24 y 25, y donde lo usa el portal
 
 Solo el indice, para saber que pantalla mira cada ruta nueva. El contrato

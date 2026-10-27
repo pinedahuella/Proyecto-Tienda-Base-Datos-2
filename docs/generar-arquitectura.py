@@ -97,7 +97,7 @@ CAJAS = [
 # flechas de coordinacion entre motores, la leyenda las explica
 FLUJOS = [
     (1, "pg", "mongo", "PostgreSQL a MongoDB, etl/cargar.js por lotes, conserva lo que el vendedor edita desde la aplicación, y la cola evento_producto, que un worker vacía cada 5 segundos recalculando precio, stock y nota del producto que cambió"),
-    (2, "pg", "neo4j", "PostgreSQL a Neo4j, cada reseña tocada entra en la cola evento_grafo y cada compra en evento_grafo_compra, y un worker vacía cada una cada 10 segundos"),
+    (2, "pg", "neo4j", "PostgreSQL a Neo4j, cada reseña tocada entra en la cola evento_grafo y cada compra en evento_grafo_compra, y un worker vacía cada una cada 10 segundos. Cada 60 segundos la categoría de cada producto del grafo se compara con producto_catalogo, para que también compraron ponga primero los de la misma categoría"),
     (3, "neo4j", "pg", "Neo4j a PostgreSQL, los detectores de anillos y de la familia B corren cada 15 minutos, B también al llegar una reseña, y guardan lo que encuentran en senal_fraude"),
     (4, "mongo", "es", "MongoDB a Elasticsearch, la marca pendiente_busqueda cada 10 segundos y los intentos de login cada 5"),
     (5, "es", "pg", "Elasticsearch a PostgreSQL, el análisis retrospectivo del login y la granja de registros por IP corren cada 15 minutos y dejan señales en senal_fraude"),

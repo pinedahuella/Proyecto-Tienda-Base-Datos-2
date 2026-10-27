@@ -177,10 +177,28 @@ print(d[0]['id_direccion'] if d else '')")
 if [ -z "$DIRECCION" ]; then
     FALLA "la cuenta no tiene direccion, no se puede pedir el checkout"
 else
-    resp=$(curl -s -w '
-%{http_code}' -X POST "$API/carrito/comprar"         -H "Content-Type: application/json" -H "Cookie: $C"         -d "{\"id_direccion\":$DIRECCION,\"metodo_pago\":\"efectivo contra entrega\"}")
-    codigo=$(echo "$resp" | tail -1)
-    cuerpo=$(echo "$resp" | sed '$d')
+    # El barrido del backend (CarritoBarridoService, cada 10 minutos) borra
+    # tambien los carritos vencidos. Si pasa justo en los segundos entre el
+    # UPDATE de arriba y este checkout, gana el y el carrito ya no existe: el
+    # checkout contesta "El carrito esta vacio", que es correcto pero no mide
+    # el vencimiento pasivo. Paso el 2026-10-27 a las 07:39:50, 7 s antes del
+    # final de la prueba. En ese caso se arma y se vence el carrito una vez mas.
+    for intento in 1 2; do
+        resp=$(curl -s -w '
+%{http_code}' -X POST "$API/carrito/comprar"             -H "Content-Type: application/json" -H "Cookie: $C"             -d "{\"id_direccion\":$DIRECCION,\"metodo_pago\":\"efectivo contra entrega\"}")
+        codigo=$(echo "$resp" | tail -1)
+        cuerpo=$(echo "$resp" | sed '$d')
+        if [ "$intento" = "1" ] && echo "$cuerpo" | campo mensaje | grep -qi "vacio"; then
+            echo "        el barrido del backend borro el carrito vencido antes que el checkout; se repite una vez"
+            curl -s -X PUT "$API/carrito/lineas/$OFERTA" -H "Content-Type: application/json" -H "Cookie: $C" -d '{"cantidad":2}' >/dev/null
+            sql "UPDATE pedido SET fecha_ultima_actividad = now() - interval '25 hours'
+                  WHERE id_usuario=$ID_USUARIO AND id_estado_pedido=$PENDIENTE;" >/dev/null
+            R EXPIRE "$LLAVE" 2 >/dev/null
+            sleep 3
+            continue
+        fi
+        break
+    done
     [ "$codigo" = "409" ] && OK "POST /carrito/comprar con el carrito vencido contesta 409" || FALLA "contesto $codigo y no 409"
     echo "        mensaje del backend, $(echo "$cuerpo" | campo mensaje)"
     echo "$cuerpo" | campo mensaje | grep -qi "venci" && OK "y dice que vencio, no que hubo un error" || FALLA "el 409 no habla de vencimiento"

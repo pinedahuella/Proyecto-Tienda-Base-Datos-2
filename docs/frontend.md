@@ -111,6 +111,24 @@ es el backend, que responde 403 o 404.
 | `src/lib/sesion.ts` | guarda el correo del usuario |
 | `static/favicon.svg` | icono de la pestana |
 
+## Compartir una oferta (2026-10-26)
+
+El ACL de la aplicacion (ADR-24) visto desde el panel. Dos pantallas:
+
+- **Compartir**, un boton en cada oferta de Ofertas, en las dos vistas (la lista
+  del vendedor y el catalogo de la tienda). Abre `lib/CompartirOferta.svelte`
+  colgado de la fila, como el panel del descuento: correo de la cuenta, que
+  puede (ver, editar, descuento), hasta cuando (sin vencer, una hora, un dia,
+  una semana), quien tiene acceso hoy con un boton para quitar cada permiso, y
+  el registro de quien hizo que, con los intentos negados en rojo.
+- **Compartidas**, una seccion del panel (vendedor y admin), en
+  `lib/OfertasCompartidas.svelte`. Las ofertas de otras cuentas que me dejaron
+  ver o cambiar, con su dueno y mis permisos. Editar y Descuento salen solo si
+  tengo ese permiso, pero manda el backend: si contesta 404 porque el permiso se
+  quito o vencio con la pagina abierta, se dice y se recarga la lista.
+
+Las llamadas estan en `lib/compartidas.ts`.
+
 ## La paleta
 
 Todos los colores son variables en `+layout.svelte`. El tema oscuro solo cambia el
@@ -1128,7 +1146,9 @@ desde entonces otra vez pgvector (`vector_producto`, migracion 040).
   sin resultados (con precio maximo opcional), la pestana Avisos del perfil y el
   enlace Avisos con su numero en la cabecera.
 - **Ficha**: el estante Quienes lo compraron tambien llevaron
-  (`GET /productos/:id/tambien-compraron`, Neo4j).
+  (`GET /productos/:id/tambien-compraron`, Neo4j). Desde el 2026-10-26 llega
+  ordenado por grupos, primero la misma categoria (ADR-25); la pagina no
+  reordena nada, pinta en el orden en que llega.
 - **Portada**: Se compran juntos (`EstanteCombos.svelte`, `GET /productos/combos`).
 - **Panel del vendedor**: Buscar ofertas (`BuscarOfertas.svelte`,
   `GET /vendedor/ofertas/buscar`), con De todos los vendedores para la tienda y el admin.
