@@ -119,15 +119,16 @@ esperar_compras() { local i; for i in $(seq 1 "$3"); do [ "$(compras_en_grafo "$
 # Espera hasta S segundos a que tambien-compraron de P de exactamente E.
 esperar_orden() { local i; for i in $(seq 1 "$3"); do [ "$(tc "$1")" = "$2" ] && return 0; sleep 1; done; return 1; }
 
-# Una oferta de la tienda con existencia, fuera de venta relampago, de un
-# producto activo. CONDICION es SQL extra sobre o (oferta) y pc (producto).
+# Una oferta con existencia, fuera de venta relampago, de un producto activo.
+# CONDICION es SQL extra sobre o (oferta) y pc (producto); SOLO_TIENDA en 1 la
+# pide de la tienda, en 0 de cualquier vendedor.
 oferta_tienda() {
     sql "SELECT o.id_oferta || ' ' || o.id_producto_mongo
            FROM oferta o JOIN estado_oferta e USING (id_estado_oferta)
            JOIN producto_catalogo pc ON pc.id_producto_mongo = o.id_producto_mongo
            JOIN variante_catalogo v ON v.id_producto_mongo=o.id_producto_mongo AND v.id_producto_variante_mongo=o.id_producto_variante_mongo
           WHERE e.estado_oferta_nombre='activa' AND o.stock >= 5 AND NOT o.es_inventario_limitado
-            AND o.id_usuario=$TIENDA_ID AND v.estado='activa' AND pc.estado='activo' AND $1
+            AND ($2 = 0 OR o.id_usuario=$TIENDA_ID) AND v.estado='activa' AND pc.estado='activo' AND $1
           ORDER BY o.id_producto_mongo, o.id_oferta LIMIT 1;"
 }
 
@@ -180,9 +181,11 @@ titulo "3. Uno de la misma categoria con 1 comprador va antes que otro con 2"
 # K = Laptops (la del producto 2, que se usa en la parte 5), L = Telefonos.
 CAT_K=$(sql "SELECT id_categoria FROM producto_catalogo WHERE id_producto_mongo=2;")
 CAT_L=$(sql "SELECT id_categoria FROM categorias WHERE nombre='Telefonos';")
-read -r OF_X PX <<< "$(oferta_tienda "pc.id_categoria=$CAT_K AND o.id_producto_mongo <> 2 AND NOT EXISTS (SELECT 1 FROM pedido_producto pp WHERE pp.id_producto_mongo=o.id_producto_mongo)")"
-read -r OF_Z PZ <<< "$(oferta_tienda "o.id_producto_mongo = 2")"
-read -r OF_Y PY <<< "$(oferta_tienda "pc.id_categoria=$CAT_L")"
+read -r OF_X PX <<< "$(oferta_tienda "pc.id_categoria=$CAT_K AND o.id_producto_mongo <> 2 AND NOT EXISTS (SELECT 1 FROM pedido_producto pp WHERE pp.id_producto_mongo=o.id_producto_mongo)" 1)"
+# Z puede ser de cualquier vendedor: en la PC de Jose David la oferta de la
+# tienda del producto 2 tiene abierta la venta relampago del inicio.
+read -r OF_Z PZ <<< "$(oferta_tienda "o.id_producto_mongo = 2" 0)"
+read -r OF_Y PY <<< "$(oferta_tienda "pc.id_categoria=$CAT_L" 1)"
 [ -n "${PX:-}" ] && [ -n "${PZ:-}" ] && [ -n "${PY:-}" ] \
     && OK "X=$PX y Z=$PZ en la categoria $CAT_K, Y=$PY en la $CAT_L; X sin compras de nadie" \
     || { echo "  No hay productos para armar el caso (X='${PX:-}', Z='${PZ:-}', Y='${PY:-}')."; exit 1; }

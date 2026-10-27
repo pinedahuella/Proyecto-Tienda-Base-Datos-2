@@ -6,7 +6,7 @@ Son cinco minutos y te ahorra el dia.
 Ultima actualizacion: **2026-10-27, madrugada**.
 
 **EMPIEZA AQUI (26 al 27-10, noche). Dos cambios para la presentacion, probados con las bases de la PC de
-Meme (local). Commiteado y pusheado el 27-10, 352 commits.** Con permiso de David para tocar `backend/`; su nota esta en
+Meme (local). Commiteado y pusheado el 27-10, 352 commits (353 con los arreglos de las pruebas contra la PC de David).** Con permiso de David para tocar `backend/`; su nota esta en
 `backend/cambio_propuestas/2026-10-26_2300-categoria-en-el-grafo-y-acl-de-ofertas.md`.
 
 1. **Tambien compraron por grupos de categoria (ADR-25).** Primero SIEMPRE los productos de la misma categoria
@@ -31,9 +31,20 @@ neo4j/README, migrations/README, README, PREGUNTAS (Parte 12, 153 a 161) y el ER
 llaves; ya le faltaban 10 tablas de octubre). Presentacion con 20 laminas: la 13 nueva del ACL, cifras al dia
 (89 tablas, 49 migraciones, 25 decisiones) y la demo de compartir en el GUION.
 
-El Word de la Entrega final se regenero el 27-10 con 352 commits, 89 tablas, migraciones 001 a 049 y
+El Word de la Entrega final se regenero el 27-10 con 353 commits, 89 tablas, migraciones 001 a 049 y
 ADR-24 y ADR-25 en la seccion 5.4. Un commit mas descuadra el conteo. `backend\.env` quedo en LOCAL; para volver a la PC de David,
 `.\usar-bases-remotas.ps1 -Ip 100.64.42.11`, y alla hace falta correr `arrancar.ps1` para que exista la 049.
+
+**27-10, manana. La 049 en la PC de Jose David y las pruebas contra sus bases.** Respaldo previo en
+`respaldos/david_antes_049_20261027_0847.dump`; la 049 se corrio alla dos veces con psql (sin error, 89 tablas,
+`mesh_backend` lee y escribe pero no puede vaciar, `mesh_lectura` solo lee). El backend de esta PC, apuntado alla,
+puso la categoria a los 101 `:Producto` de su grafo al arrancar. En modo remoto: grafo_compras 25, recomendaciones
+29, resenas 15, carrito_vencimiento 25, prueba_acceso 93, y las tres nuevas despues de dos arreglos de datos:
+tambien_compraron_categoria 29, acl_ofertas 84 y acl_ofertas_azar 608, todas sin FALLA. Los arreglos: las pruebas
+del ACL se saltan las ofertas con reglas de descuento (alla la oferta 3 tiene una regla automatica y el descuento a
+mano da 409, con razon) y la de categorias acepta la oferta de cualquier vendedor del producto 2 (alla la de la
+tienda tiene abierta la venta relampago del inicio). Jose David no tiene que correr nada para la presentacion; su
+`arrancar.ps1` la dejaria igual. `backend\.env` quedo apuntando a su PC.
 
 **26-10. Documentos al dia, sin tocar codigo ni bases.** `docs/ARQUITECTURA.md` decia que el control de
 acceso estaba solo en Redis, que ninguna ruta leia el indice de logins de Elasticsearch y que la copia de

@@ -113,13 +113,17 @@ ID_SUR=$(sql "SELECT id_usuario FROM usuarios WHERE correo_electronico='ventas.s
 ID_ORIENTE=$(sql "SELECT id_usuario FROM usuarios WHERE correo_electronico='ventas.oriente@mesh.com';")
 ID_ADMIN=$(sql "SELECT id_usuario FROM usuarios WHERE correo_electronico='admin@mesh.com';")
 
-# Una oferta activa de ventas.norte, sin descuento, sin venta relampago y con
-# existencia, de un producto que este en la copia del catalogo.
+# Una oferta activa de ventas.norte, sin descuento, sin venta relampago, sin
+# reglas de descuento y con existencia, de un producto que este en la copia del
+# catalogo. Con una regla activa el descuento a mano da 409 (otro mecanismo), y
+# eso es correcto: en la PC de Jose David la oferta 3 tiene una.
 OF=$(sql "SELECT o.id_oferta FROM oferta o JOIN estado_oferta e USING (id_estado_oferta)
            JOIN producto_catalogo pc ON pc.id_producto_mongo = o.id_producto_mongo
           WHERE o.id_usuario=$ID_NORTE AND e.estado_oferta_nombre='activa'
             AND o.porcentaje_descuento IS NULL AND NOT o.es_inventario_limitado AND o.stock >= 5
             AND NOT EXISTS (SELECT 1 FROM permiso_oferta p WHERE p.id_oferta=o.id_oferta)
+            AND NOT EXISTS (SELECT 1 FROM regla_descuento_automatico r WHERE r.id_oferta=o.id_oferta)
+            AND NOT EXISTS (SELECT 1 FROM regla_descuento_periodo r WHERE r.id_oferta=o.id_oferta)
           ORDER BY o.id_oferta LIMIT 1;")
 OF_AJENA=$(sql "SELECT o.id_oferta FROM oferta o WHERE o.id_usuario=$ID_SUR ORDER BY o.id_oferta LIMIT 1;")
 OF_TIENDA=$(sql "SELECT o.id_oferta FROM oferta o JOIN usuarios u USING (id_usuario) WHERE u.correo_electronico='tienda@mesh.com' ORDER BY o.id_oferta LIMIT 1;")

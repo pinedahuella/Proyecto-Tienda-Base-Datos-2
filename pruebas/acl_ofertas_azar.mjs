@@ -86,9 +86,18 @@ const correos = Object.keys(cuentas);
 // La oferta: de ventas.norte, activa, sin descuento, sin venta relampago y sin
 // nadie mas con permisos.
 const propias = await pedir('GET', '/vendedor/ofertas', norte);
+// Sin reglas de descuento: con una regla activa el descuento a mano da 409
+// (otro mecanismo), y eso es correcto.
+const conRegla = new Set();
+for (const ruta of ['/vendedor/reglas-descuento', '/vendedor/reglas-descuento-periodos']) {
+  const r = await pedir('GET', ruta, norte);
+  const lista = Array.isArray(r.datos?.payload) ? r.datos.payload : (r.datos?.payload?.reglas ?? []);
+  for (const x of lista) conRegla.add(String(x.id_oferta));
+}
 let oferta = null;
 for (const o of propias.datos?.payload ?? []) {
   if (o.estado !== 'activa' || o.es_inventario_limitado) continue;
+  if (conRegla.has(String(o.id_oferta))) continue;
   if (o.porcentaje_descuento != null && Number(o.porcentaje_descuento) > 0) continue;
   const p = await pedir('GET', `/vendedor/ofertas/${o.id_oferta}/permisos`, norte);
   if ((p.datos?.payload?.permisos ?? []).length === 0) {
