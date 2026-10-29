@@ -20,7 +20,19 @@ documentado. La laptop se reinicio a las 07:37: backend, frontend, Ollama y Tail
   candado, `redimensionar-reserva.lua` (ya no se carga), la compensacion del checkout (77, ya no hay
   `devolverReservas`), el grafo con `:Compra` (52), la demo de fraude que ya cubre los diez tipos (99) y lineas
   que ya estaban mal antes de anoche (7, 25, 34, 72, 96, 98, 102 con el compose de Redis y ClickHouse, 119 y 120).
-- **Word final:** suma 354 commits al 29-10, las 26 decisiones, el rango 001 a 050 y el 403 de compartidas.
+- **Bateria entera otra vez contra David, despues del reinicio:** las 46 en verde. `oferta_limitada` dio 1 FALLA
+  la primera vez (30 de 60 compradores sin turno en el pool: las 60 sesiones esperaron mas de 3 s a la base de
+  David, la ola tardo 67 s); sola, con la maquina tranquila, 33 OK y la ola en 9 s. `caidas.mjs` 51 y 51.
+  `ofertas_paginadas` medida entera por primera vez contra David, 43 OK, con dos ofertas pendientes creadas para
+  eso y retiradas despues. Retiradas otra vez las 7 ofertas a Q15 de anit*/famb* que deja la bateria.
+- **Trampa de la manana:** Claude Code solto la bateria en un pico de RAM y con ella mato el tunel de
+  `remoto/activar.sh`; desde ahi cada prueba fallaba en falso ("Falta la 049"). El tunel se levanta aparte por WMI
+  y las pruebas van en grupos en primer plano. Y `source remoto/activar.sh` dentro de un script hereda `"$@"`:
+  toma el primer argumento como IP. Antes del source, `set -- 100.64.42.11`.
+- **Demos:** las 13 partes de `demo-entrega-final.ps1` corridas contra David, todas bien; `-Parte bases` 93 OK,
+  `-Parte permisos` deja la matriz en 76 y `-Parte compartir` la oferta 3 sin permisos. Las 21 laminas vistas en
+  Edge sin nada fuera; la 20 suma Permisos por rol y la 14 dice 85.
+- **Word final:** suma los commits al 29-10, las 26 decisiones, el rango 001 a 050 y el 403 de compartidas.
 - **Sin cambiar:** el Word de la Entrega 3, que es lo que se entrego el 20-21 de octubre.
 
 **Antes, del 28 al 29-10, noche. El ACL de funcionalidades, por rol (ADR-26, migracion 050), probado con las
