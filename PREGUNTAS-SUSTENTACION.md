@@ -1263,7 +1263,7 @@ Un cambio de categoría por la API escribe MongoDB y la copia en PostgreSQL al i
 - Dónde se ve. `backend/src/services/grafo/grafo-categorias-sync.service.ts` y `bash pruebas/tambien_compraron_categoria.sh`, partes 4 a 6.
 
 ### 161. ¿Cómo saben que las pruebas del ACL y del orden sirven?
-Porque se rompió el código a propósito y fallaron. Quitando el orden por grupo, en el Cypher y en el respaldo, la prueba de categorías dio 8 fallas. Dejando que cualquier entrada permitiera todo, la del ACL dio 11 y la prueba al azar 9. Quitando el vencimiento, 3. Con el código bueno, 32, 84 y casi cinco mil comprobaciones al azar, ninguna mal. La prueba al azar da y quita permisos sin orden, intenta acciones con varias cuentas y compara cada respuesta con un modelo de lo que debería pasar.
+Porque se rompió el código a propósito y fallaron. Quitando el orden por grupo, en el Cypher y en el respaldo, la prueba de categorías dio 8 fallas. Dejando que cualquier entrada permitiera todo, la del ACL dio 11 y la prueba al azar 9. Quitando el vencimiento, 3. Con el código bueno, 32, 85 y casi cinco mil comprobaciones al azar, ninguna mal. La prueba al azar da y quita permisos sin orden, intenta acciones con varias cuentas y compara cada respuesta con un modelo de lo que debería pasar.
 
 - Dónde se ve. `pruebas/tambien_compraron_categoria.sh`, `pruebas/acl_ofertas.sh` y `pruebas/acl_ofertas_azar.mjs`, las tres en `pruebas/correr_todas.sh`.
 

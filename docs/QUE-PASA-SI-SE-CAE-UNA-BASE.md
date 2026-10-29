@@ -116,6 +116,10 @@ Que se ve en la tienda.
   de preguntarle a la base si la cuenta sigue activa. Si PostgreSQL contesta que
   la cuenta esta suspendida, se corta como siempre. Solo se le cree cuando no se
   pudo preguntar.
+- Sigue pudiendo lo mismo que antes. Lo que puede hacer cada rol tambien vive en
+  PostgreSQL (`rol_permiso`, migracion 050), y sin la base el backend usa la
+  ultima matriz que leyo entera, que relee al arrancar y cada minuto. Un permiso
+  quitado justo antes de la caida puede seguir valiendo hasta que la base vuelva.
 - La cabecera lo sigue saludando, porque al entrar se guarda en Redis una copia
   del perfil (nombre y correo, sin la contrasena), que vence con el token.
 - Ve su carrito, que sale de la copia de Redis.
@@ -149,7 +153,10 @@ y una cuenta suspendida podria entrar con la copia vieja. Quien ya estaba dentro
 sigue, y quien no, puede mirar la tienda sin cuenta.
 
 Como verlo. En el registro sale una linea de [SesionGuard] que dice que las
-sesiones abiertas se aceptan por su token, como mucho una por minuto.
+sesiones abiertas se aceptan por su token, como mucho una por minuto, y otra de
+[PermisosService] que dice que los permisos salen de la ultima matriz leida. La
+noche del 28 al 29 de octubre, con el ACL por rol ya puesto, `pruebas/caidas.mjs`
+volvio a dar 51 y 51.
 
 ## MongoDB
 

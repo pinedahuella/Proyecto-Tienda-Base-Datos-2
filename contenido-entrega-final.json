@@ -1143,7 +1143,7 @@
         "**Consistencia.** Las rutas nuevas llaman al mismo servicio de ofertas a nombre del dueño, así que las reglas de precio, descuento y existencia no se copian, y las rutas de lo propio no cambian.",
         "**Patrón de consulta.** Es un ACL clásico, una lista pegada a cada oferta que niega lo que no está, y vive donde se conoce a la persona."
        ],
-       "consecuencias": "Cada permiso se revisa por separado, vence solo y se quita al instante, y cada cambio queda en el registro con quién lo hizo de verdad. Se prueba con `pruebas/acl_ofertas.sh`, 84 comprobaciones, y con miles de acciones al azar contra un modelo, ninguna mal. Aceptamos que el registro de una acción se escriba después de la acción y no en su misma transacción. No reemplaza el control de acceso de las bases que pide el enunciado, lo complementa con la capa de las personas."
+       "consecuencias": "Cada permiso se revisa por separado, vence solo y se quita al instante, y cada cambio queda en el registro con quién lo hizo de verdad. Se prueba con `pruebas/acl_ofertas.sh`, 85 comprobaciones, y con miles de acciones al azar contra un modelo, ninguna mal. Aceptamos que el registro de una acción se escriba después de la acción y no en su misma transacción. No reemplaza el control de acceso de las bases que pide el enunciado, lo complementa con la capa de las personas."
       }
      },
      {

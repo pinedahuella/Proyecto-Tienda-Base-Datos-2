@@ -92,7 +92,7 @@ entrada se niega con el mismo 404 de una oferta ajena; si la ve pero no puede
 editarla, 403. Si preguntan si es un
 ACL de verdad, si, es una lista pegada a cada objeto que niega por defecto. Si
 preguntan por que no en la base, porque la base no conoce a las personas de la
-tienda. 84 comprobaciones de cada regla y casi cinco mil al azar contra un
+tienda. 85 comprobaciones de cada regla y casi cinco mil al azar contra un
 modelo, ninguna mal.
 
 ## 15. Si se cae una base (Juan Pablo)

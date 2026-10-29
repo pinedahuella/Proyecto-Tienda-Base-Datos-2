@@ -147,7 +147,7 @@ tocar una oferta ajena lo dice un ACL de verdad por oferta (ADR-24, migracion
   en el panel de compartir.
 
 En la tienda: boton Compartir en cada oferta de Ofertas, y la seccion
-Compartidas para quien recibe. Pruebas: `bash pruebas/acl_ofertas.sh` (84
+Compartidas para quien recibe. Pruebas: `bash pruebas/acl_ofertas.sh` (85
 comprobaciones, cada regla una vez) y `node pruebas/acl_ofertas_azar.mjs`
 (cientos de vueltas al azar contra un modelo de lo que deberia contestar).
 

@@ -2,15 +2,16 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-10-28.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-10-29.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
-## Como esta al 2026-10-28
+## Como esta al 2026-10-29
 
 El 28 de octubre se sumo el ACL de funcionalidades por rol (migracion 050,
 ADR-26), que pidio el profesor: el control de acceso a nivel de base de datos y a
-nivel de funcionalidades. Esta hecho, aplicado en la PC de Jose David y probado.
-Lo de abajo sigue igual.
+nivel de funcionalidades. Esta hecho, aplicado en la PC de Jose David y probado,
+y el 29 quedo commiteado y pusheado. Lo de abajo sigue igual: el 29 de octubre
+el repo todavia era privado.
 
 ## Como esta al 2026-10-26
 
