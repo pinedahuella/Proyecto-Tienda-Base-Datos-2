@@ -11,8 +11,9 @@ exige un rol en particular.** A diferencia de `/vendedor/*` (solo
 `id_rol_usuario` 2) o `/admin/*` (solo 3), comprar no es un privilegio de
 un rol: cualquiera con sesión activa puede hacerlo, sea comprador (1),
 vendedor (2) o admin (3) — un vendedor también compra en la tienda, y un
-admin también podría probarla. Por eso ninguna ruta de aquí lleva
-`@Roles(...)`, solo `@UseGuards(SesionGuard)`.
+admin también podría probarla. Por eso las rutas de aquí llevan
+`@UseGuards(SesionGuard, PermisoGuard)` con permisos que los tres roles tienen en
+`rol_permiso` (`pedidos.ver`, `pedidos.cancelar` y `avisos.usar`, migracion 050).
 
 El flujo de pedido vive en PostgreSQL, en ocho funciones
 (`migrations/007_flujo_pedido.sql`, explicadas en `docs/base-de-datos.md`):
@@ -441,7 +442,8 @@ con la variante y el vendedor activos. Solo avisa cuando una oferta **cambia**
 (llega, cambia de precio, de stock o de estado): una que ya cumplía y no se
 mueve no dispara nada.
 
-Solo `SesionGuard`, sin `@Roles` (igual que `/comprador/pedidos`). Cada quien ve
+`SesionGuard` + `PermisoGuard` con `@Permiso('avisos.usar')`, que tienen los tres
+roles (igual que `/comprador/pedidos`). Cada quien ve
 y toca solo lo suyo: lo ajeno responde el mismo 404 que lo que no existe.
 
 ## POST /comprador/seguimientos

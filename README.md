@@ -172,7 +172,7 @@ ensena y lo que toca, y todas tienen su boton en `.\panel-comandos.ps1`.
 | [migrations/README.md](migrations/README.md) | Como se nombran y se corren las migraciones |
 | [etl/README.md](etl/README.md) | Las cargas entre bases |
 | [comandos.txt](comandos.txt) | Todos los comandos, con lo que hace cada uno |
-| [PREGUNTAS-SUSTENTACION.md](PREGUNTAS-SUSTENTACION.md) | 161 preguntas para la sustentacion, con donde se ve cada cosa |
+| [PREGUNTAS-SUSTENTACION.md](PREGUNTAS-SUSTENTACION.md) | 170 preguntas para la sustentacion, con donde se ve cada cosa |
 
 Los informes de cada entrega estan en la raiz, en Word, y salen de los
 `contenido-*.json` con sus `generar-reporte-*.py`.

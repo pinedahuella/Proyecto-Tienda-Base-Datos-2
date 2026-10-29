@@ -511,7 +511,8 @@ Código: `src/controllers/admin/admin-tendencias.controller.ts` +
 sin cambios; `validarOrdenEvento` se borro y se reemplazo por
 `validarDireccionEvento`).
 
-**Solo admin** (`SesionGuard` + `@Roles(ID_ROL_ADMIN)`, en la clase) -- no
+**Solo admin** (`SesionGuard` + `PermisoGuard` con `@Permiso('tendencias.ver')`, en
+la clase, y en `rol_permiso` ese permiso solo lo tiene el admin) -- no
 la tienda, mismo criterio que el resto de paneles.
 
 ## La metrica NO es la misma en las seis tablas

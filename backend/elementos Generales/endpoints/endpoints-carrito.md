@@ -93,7 +93,8 @@ relámpago, cuya reserva dura 15 min y vence mucho antes).
 
 ### De quién es
 
-Todas las rutas piden sesión (`SesionGuard`, sin `@Roles`). El `id_usuario`
+Todas las rutas piden sesión y su permiso (`SesionGuard` + `PermisoGuard`, con
+`carrito.usar` y `carrito.comprar` para pagar; los tres roles lo tienen en `rol_permiso`). El `id_usuario`
 sale del token: no hay id de carrito. Dos dispositivos de la misma cuenta
 comparten el carrito.
 

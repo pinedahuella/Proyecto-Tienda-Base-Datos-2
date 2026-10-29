@@ -1,7 +1,7 @@
 # Arquitectura de Mesh
 
-**Al 2026-10-26.** Es el diagrama de arquitectura que pide el enunciado, y **no
-es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 86 tablas de
+**Al 2026-10-28.** Es el diagrama de arquitectura que pide el enunciado, y **no
+es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 93 tablas de
 PostgreSQL y sus llaves y lo genera `python docs/generar-er.py` desde la base
 viva; este dibuja los **seis** motores de persistencia, quien escribe en cada
 uno y por donde viajan los datos entre ellos.

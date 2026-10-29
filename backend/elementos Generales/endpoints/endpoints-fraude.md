@@ -194,7 +194,8 @@ que `anillos`, ruta hermana) + `src/services/fraude-login/fraude-login.service.t
 (`toma_cuenta`) + `src/services/fraude-login/viaje-imposible.service.ts`
 (`viaje_imposible`) + `src/services/fraude-login/fraude-login-retrospectivo.service.ts`
 (las tres del worker). **Solo admin** (`SesionGuard` +
-`@Roles(ID_ROL_ADMIN)`, en la clase) — no la tienda, mismo criterio que el
+`PermisoGuard` con `fraude.ver`, y `fraude.resolver` para marcar una alerta,
+que en `rol_permiso` solo tiene el admin) — no la tienda, mismo criterio que el
 resto del panel.
 
 ## De dónde salen las alertas
@@ -779,8 +780,9 @@ acción". Detalle de diseño completo en
 afectado por alerta, y es falso para `multi_cuenta_ip`/`multi_cuenta_ip_lenta`).
 
 Dos rutas en `PerfilController` (mismo lugar que `PATCH /perfil/contrasena`)
-— "mis datos", protegidas solo por `SesionGuard` (cualquier usuario
-logueado, no `@Roles(ID_ROL_ADMIN)`), nunca reciben un id de cuenta por
+— "mis datos", protegidas por `SesionGuard` + `PermisoGuard` con `cuenta.ver` y
+`cuenta.editar`, que tienen los tres roles (cualquier usuario logueado, no
+solo el admin), nunca reciben un id de cuenta por
 parámetro: `id_usuario` siempre sale de la sesión. Leen/escriben la tabla
 `notificacion_fraude` (una fila por cada cuenta a la que le corresponde
 ver una alerta — no una columna en `alerta_fraude`), vía

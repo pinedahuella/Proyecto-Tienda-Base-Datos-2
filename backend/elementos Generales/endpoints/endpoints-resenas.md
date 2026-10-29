@@ -243,7 +243,8 @@ GET /productos/35/resenado
 
 ## POST /resenas
 
-**Pide sesión** (`SesionGuard`, sin `@Roles`: calificar no es de un rol,
+**Pide sesión** (`SesionGuard` + `PermisoGuard` con `resenas.escribir`, que tienen
+los tres roles: calificar no es de un rol,
 cualquiera con sesión puede — igual que comprar). Escribe una reseña: el
 comentario raíz con el texto y, apuntándolo, la fila de `resena`. Los dos
 `INSERT` van en **una sola sentencia** (un CTE), que PostgreSQL ejecuta de
@@ -369,7 +370,7 @@ arriba): no hay un pedido pagado de ese producto a ese vendedor.
 
 ## POST /resenas/:id/respuestas
 
-**Pide sesión** (sin `@Roles`). `:id` es el **`id_resena`**. Escribe un
+**Pide sesión** (`resenas.escribir`, los tres roles). `:id` es el **`id_resena`**. Escribe un
 `comentario` que cuelga del **comentario raíz** de esa reseña
 (`id_comentario_padre = resena.id_comentario`).
 
@@ -434,7 +435,7 @@ reseña y no inserta nada.
 
 ## PUT /comentarios/:id/voto
 
-**Pide sesión** (sin `@Roles`). `:id` es el **`id_comentario`** — sirve
+**Pide sesión** (`resenas.votar`, los tres roles). `:id` es el **`id_comentario`** — sirve
 igual para el comentario raíz de una reseña que para una respuesta. Pone o
 cambia el voto de la cuenta. Cambiar de opinión es el **mismo PUT** (un
 `UPSERT` sobre la llave `(id_usuario, id_comentario)` de `likes`), no una
@@ -494,7 +495,7 @@ Lo levanta la llave foránea `likes.id_comentario` (código `23503`).
 
 ## DELETE /comentarios/:id/voto
 
-**Pide sesión** (sin `@Roles`). Quita el voto de la cuenta sobre ese
+**Pide sesión** (`resenas.votar`, los tres roles). Quita el voto de la cuenta sobre ese
 comentario. Sin cuerpo. **Idempotente**: si la cuenta no había votado,
 responde 200 igual (con `mio: null`).
 

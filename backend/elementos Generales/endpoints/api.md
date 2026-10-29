@@ -175,9 +175,9 @@ guards en fila. `SesionGuard` dice QUIEN es (401 si nadie). `PermisoGuard` dice
 QUE PUEDE: cada ruta declara su accion con `@Permiso('modulo.accion')` y el guard
 le pregunta a la tabla `rol_permiso` si el rol de la cuenta la tiene (403 si
 no). Los `@Roles(...)` de antes ya no existen; la semilla de la 050 deja pasar a
-los mismos roles que ellos, ruta por ruta. Donde los demas `endpoints-*.md`
-dicen "`SesionGuard` + `@Roles(ID_ROL_ADMIN)`", hoy es `PermisoGuard` con un
-permiso que en `rol_permiso` solo tiene el admin: quien entra es lo mismo.
+los mismos roles que ellos, ruta por ruta. Los demas `endpoints-*.md` ya nombran
+el permiso de cada ruta (29-10). "Solo admin" quiere decir un permiso que en
+`rol_permiso` solo tiene el admin, y "pide sesion" uno que tienen los tres roles.
 
 | Archivo | Que es |
 |---|---|

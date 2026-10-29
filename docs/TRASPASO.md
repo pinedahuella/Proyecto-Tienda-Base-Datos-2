@@ -3,10 +3,28 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-29, madrugada**.
+Ultima actualizacion: **2026-10-29, manana**.
 
-**EMPIEZA AQUI (28 al 29-10, noche). El ACL de funcionalidades, por rol (ADR-26, migracion 050), probado con las
-bases de la PC de Jose David. SIN commitear (Meme no lo pidio).** El profesor pidio el control de acceso a nivel de
+**EMPIEZA AQUI (29-10, manana). Lo de la noche revisado, commiteado y pusheado (`bd6d47d`, 354 commits), y los
+documentos al dia.** Meme pidio revisar si la noche habia terminado, despues commit y push, y dejar todo probado y
+documentado. La laptop se reinicio a las 07:37: backend, frontend, Ollama y Tailscale se volvieron a prender.
+- **Revisado sin creerle al resumen:** tsc 0; las 169 rutas leidas del dist (136 privadas, todas con `PermisoGuard`
+  y un permiso que existe); quien entra a cada ruta es igual a `pruebas/permisos_matriz_antes_050.json` (0
+  distintas, solo suman las 4 de `/admin/permisos`); `permisos_cobertura.cjs` 12 OK contra David despues del reinicio.
+- **Documentos:** los `endpoints-*.md` y la guia de estudio del backend ya nombran el permiso de cada ruta en vez
+  de `@Roles`; README (170 preguntas), GUION (93 tablas, 50 migraciones, 26 decisiones), ARQUITECTURA (93 tablas),
+  comandos.txt y el mapa de este archivo con las cifras de hoy. **PREGUNTAS:** la 106 reescrita con los dos guards
+  (citaba `roles.decorator.ts`, borrado); unas 200 referencias de linea seguidas con `git blame` desde el commit en
+  que se escribieron hasta el codigo de hoy, y a mano las que caian en codigo cambiado. De paso se corrigio lo que
+  ya no era cierto: el carrito en Redis (preguntas 33 a 36, el codigo paso a `carrito-redis.service.ts`), el
+  candado, `redimensionar-reserva.lua` (ya no se carga), la compensacion del checkout (77, ya no hay
+  `devolverReservas`), el grafo con `:Compra` (52), la demo de fraude que ya cubre los diez tipos (99) y lineas
+  que ya estaban mal antes de anoche (7, 25, 34, 72, 96, 98, 102 con el compose de Redis y ClickHouse, 119 y 120).
+- **Word final:** suma 354 commits al 29-10, las 26 decisiones, el rango 001 a 050 y el 403 de compartidas.
+- **Sin cambiar:** el Word de la Entrega 3, que es lo que se entrego el 20-21 de octubre.
+
+**Antes, del 28 al 29-10, noche. El ACL de funcionalidades, por rol (ADR-26, migracion 050), probado con las
+bases de la PC de Jose David. Commiteado y pusheado el 29-10 en `bd6d47d`.** El profesor pidio el control de acceso a nivel de
 base de datos (ya estaba, ADR-14) y a nivel de funcionalidades, con una demo donde alguien sin permiso llama al
 backend directo y recibe un error. Los `@Roles` del codigo daban 403, pero la lista no era datos. La nota para David
 esta en `backend/cambio_propuestas/2026-10-28_2330-acl-de-funcionalidades-por-rol.md` y el relato de la noche en
@@ -2727,20 +2745,20 @@ cada generador.
 backend/             NestJS con Fastify, de Jose David. Sus notas en
                      "elementos Generales/" y backend/cambio_propuestas/
 frontend/            SvelteKit
-migrations/          el esquema (001 a 048) y el generador de datos
+migrations/          el esquema (001 a 050) y el generador de datos
 etl/                 las cargas entre bases (catalogo, grafo, buscador, eventos, vectores)
 mongo/ redis/ neo4j/ clickhouse/ elastic/
                      scripts, consultas y pruebas de cada base (todas menos mongo/ con README)
 seguridad/           usuarios de cada base y prueba_acceso.sh
-pruebas/             las 44 pruebas de punta a punta y correr_todas.sh
+pruebas/             las 46 pruebas de punta a punta y correr_todas.sh
 remoto/              las bases en otra PC por Tailscale
 panel-comandos/      la pagina de botones y servicios.ps1
-presentacion-final/  las 19 laminas y GUION.md
+presentacion-final/  las 21 laminas y GUION.md
 respaldos/           dumps de PostgreSQL antes de cada cambio grande (no se suben)
 docs/                DECISIONES.md el registro unico; ARQUITECTURA.md el diagrama
                      (no el ER); base-de-datos.md el modelo; SEGURIDAD.md,
                      CONSISTENCIA-CHECKOUT.md, QUE-PASA-SI-SE-CAE-UNA-BASE.md
-PREGUNTAS-SUSTENTACION.md   161 preguntas para la sustentacion
+PREGUNTAS-SUSTENTACION.md   170 preguntas para la sustentacion
 ```
 
 ---

@@ -23,7 +23,7 @@ Pablo los modulos de ClickHouse y Neo4j.
 
 ## 3. El reto (Jose Manuel)
 Muchos vendedores comparten un catalogo. El producto no es de nadie y la oferta
-si. Las cifras, seis bases, 89 tablas de 49 migraciones, 25 decisiones con su
+si. Las cifras, seis bases, 93 tablas de 50 migraciones, 26 decisiones con su
 registro y 93 comprobaciones del control de acceso, ninguna mal.
 
 ## 4. Cada base por su pregunta (Jose Manuel)

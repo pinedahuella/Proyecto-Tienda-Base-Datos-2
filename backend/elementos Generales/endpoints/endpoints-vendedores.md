@@ -9,8 +9,10 @@ sin exigir un rol en particular).
 Todas las rutas de aquí requieren la cookie `mesh_token`. Hay **tres niveles**
 de restricción, y no son lo mismo:
 
-1. **Por rol** (`id_rol_usuario`, lo revisa el guard `@Roles` antes de entrar
-   al controlador): un rol sin permiso recibe 403, igual que en `/admin/*`.
+1. **Por rol** (`id_rol_usuario`). Desde el 2026-10-28 lo revisa `PermisoGuard`
+   antes de entrar al controlador, contra la tabla `rol_permiso` (migracion 050):
+   cada ruta declara su `@Permiso('ofertas.publicar')` o el que toque, y un rol
+   sin ese permiso recibe 403, igual que en `/admin/*`.
    Desde el 25 de agosto de 2026, tanto `/vendedor/productos` como
    `/vendedor/ofertas` aceptan **vendedor (2) o admin (3)** — antes solo
    dejaban pasar vendedor.
@@ -1937,7 +1939,7 @@ ofertas.
 ### 400 / 401 / 403 / 503 / 500
 
 - **400**: cualquiera de las reglas de la tabla.
-- **401 / 403**: sin sesión, o con rol comprador (`SesionGuard` + `@Roles`).
+- **401 / 403**: sin sesión, o con rol comprador (`SesionGuard` + `PermisoGuard`).
 - **503**: Elasticsearch o PostgreSQL no responden.
 - **500**: un error inesperado (por ejemplo, que no exista el índice `mesh_ofertas`).
 

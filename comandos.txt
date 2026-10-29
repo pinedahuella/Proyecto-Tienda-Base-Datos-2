@@ -729,7 +729,7 @@ Desde la raiz del proyecto. El .png sale solo si draw.io esta instalado
 tiene que estar arriba.
 
   python docs/generar-er.py
-      el ER de las 50 tablas, en docs/diagrama-general.drawio y .png. Falla
+      el ER de las 93 tablas, en docs/diagrama-general.drawio y .png. Falla
       si una tabla no tiene caja, si una llave no tiene linea o si dos cajas
       se pisan
   python docs/generar-er.py --modulo fraude --salida docs/informe-entrega2/er-fraude.drawio

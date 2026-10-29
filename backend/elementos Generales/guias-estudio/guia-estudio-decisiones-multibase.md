@@ -55,7 +55,7 @@ El `id_usuario` sale del token de sesión, nunca de un id de carrito guardado ap
 ### Los archivos reales
 
 - **Modelo/tipos**: `backend/src/models/carrito.ts` — define `CarritoLinea`, `MotivoNoDisponible` (`oferta_no_disponible`, `variante_no_disponible`, `agotado`, `stock_insuficiente`, `oferta_no_existe`, `reserva_vencida`), `Carrito`, `ResumenCarrito`.
-- **Controller**: `backend/src/controllers/carrito/carrito.controller.ts` — `@Controller('carrito')` con `@UseGuards(SesionGuard)` a nivel de clase (sin `@Roles`: cualquiera con sesión tiene carrito). Cinco rutas:
+- **Controller**: `backend/src/controllers/carrito/carrito.controller.ts` — `@Controller('carrito')` con `@UseGuards(SesionGuard, PermisoGuard)` y `@Permiso('carrito.usar')` a nivel de clase (los tres roles tienen ese permiso en `rol_permiso`: cualquiera con sesión tiene carrito). Cinco rutas:
 
 ```
 GET    /carrito                    -> ver()          -> verCarrito()
@@ -1136,7 +1136,7 @@ Se registra desde dentro de `BuscadorProductosController.buscar()` (la ruta **p�
 
 ### `GET /admin/eventos/*` — el ranking de tendencias, controller y service reales
 
-`AdminTendenciasController` (`backend/src/controllers/admin/admin-tendencias.controller.ts`), protegido con `SesionGuard` + `@Roles(ID_ROL_ADMIN)` a nivel de clase — nunca la tienda, mismo criterio que el resto de paneles de admin. Seis rutas (`vista`, `carrito`, `compra`, `devolucion`, `busqueda`, `busqueda-clic`), mismos tres query params en las seis:
+`AdminTendenciasController` (`backend/src/controllers/admin/admin-tendencias.controller.ts`), protegido con `SesionGuard` + `PermisoGuard` y `@Permiso('tendencias.ver')` a nivel de clase, un permiso que en `rol_permiso` solo tiene el admin — nunca la tienda, mismo criterio que el resto de paneles de admin. Seis rutas (`vista`, `carrito`, `compra`, `devolucion`, `busqueda`, `busqueda-clic`), mismos tres query params en las seis:
 
 ```
 dias        cuantos dias hacia atras (defecto 7, tope 365)

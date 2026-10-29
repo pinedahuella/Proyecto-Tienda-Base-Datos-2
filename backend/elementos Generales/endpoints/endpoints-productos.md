@@ -894,8 +894,8 @@ en su último ciclo (cada 15 min).
 calculado, excluido por no tener suficientes sesiones en común posibles, o
 la clave ya venció) -> `[]`, nunca un error.
 
-**`GET /productos/para-ti`** -- **requiere sesión** (`SesionGuard`, sin
-`@Roles`: cualquier cuenta tiene sus propias recomendaciones, igual que el
+**`GET /productos/para-ti`** -- **requiere sesión** (`SesionGuard` + `PermisoGuard`
+con `productos.para_ti`, que tienen los tres roles: cualquier cuenta tiene sus propias recomendaciones, igual que el
 carrito) -- a diferencia de R1, R3 no tiene sentido sin una cuenta real.
 `id_usuario` sale del token, nunca de un parámetro. Lee
 `mesh:cuenta:<id_usuario>:para-ti`. Un arreglo vacío puede significar "sin
@@ -1385,7 +1385,8 @@ GET /productos/2/historial?fecha=2026-01-10T14:30
 
 ## GET /productos/ofertas/:id/historial
 
-**Protegida (`SesionGuard`), sin restricción de rol ni de dueño** — vive a
+**Protegida (`SesionGuard` + `PermisoGuard` con `productos.historial`, que tienen
+los tres roles), sin restricción de dueño** — vive a
 la par de `GET /productos/:id/historial` y exige lo mismo: cualquier
 cuenta logueada puede pedir el historial de precio/stock de **cualquier**
 oferta, no solo la propia. Pensada para completar la reconstrucción de un

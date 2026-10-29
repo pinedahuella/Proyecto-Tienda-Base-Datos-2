@@ -175,7 +175,8 @@ suma el campo `quisiste_decir`).
 
 ## GET /buscador/productos/admin
 
-**Solo admin** (`SesionGuard` + `@Roles(ID_ROL_ADMIN)`). Ni la tienda: es
+**Solo admin** (`SesionGuard` + `PermisoGuard` con `@Permiso('catalogo.buscar_todo')`,
+que en `rol_permiso` solo tiene el admin). Ni la tienda: es
 un vendedor mas, mismo criterio que ya usa `GET /admin/fraude/anillos`.
 
 Mismos query params que la ruta pública (`nombre`, `limite`), pero **sin
