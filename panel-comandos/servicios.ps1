@@ -81,7 +81,9 @@ function Iniciar-Backend {
         -RedirectStandardError (Join-Path $logs 'backend.err.log')
     # 180 y no 90: con la maquina cargada (ClickHouse y Neo4j recien arrancados) el
     # backend tardo mas de 90 s en contestar y se dio por muerto estando vivo.
-    if (-not (Esperar-Url 'http://localhost:3000/' 180)) {
+    # 300 y no 180: con las bases en la PC de Jose David tardo 200 s dos veces
+    # seguidas (2026-10-28) y salia el aviso de muerto con el backend arrancando.
+    if (-not (Esperar-Url 'http://localhost:3000/' 300)) {
         Mal "El backend no contesto en el 3000. Mira $logs\backend.err.log"; exit 1
     }
     Ok 'Backend listo en http://localhost:3000'

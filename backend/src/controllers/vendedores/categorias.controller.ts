@@ -1,9 +1,9 @@
 import { Controller, Get, Param, UseGuards } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
-import { ID_ROL_ADMIN, ID_ROL_VENDEDOR } from '../../models/rol-usuario';
 import { CategoriasService } from '../../services/vendedores/categorias.service';
 
 /**
@@ -14,8 +14,8 @@ import { CategoriasService } from '../../services/vendedores/categorias.service'
  * necesita esto.
  */
 @Controller('vendedor/categorias')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('catalogo.ver')
 export class CategoriasController {
   constructor(private readonly categoriasService: CategoriasService) {}
 

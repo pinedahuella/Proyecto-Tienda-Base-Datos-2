@@ -38,6 +38,7 @@ poder seguirla.
 | ADR-23 | La tarjeta del buscador sale entera de Elasticsearch, con su foto | 2026-10-23 | Vigente | sin registro | Informe de la Entrega final, 5.4 |
 | ADR-24 | Un ACL en la aplicacion, por oferta | 2026-10-26 | Vigente | sin registro | Aqui abajo, y `docs/SEGURIDAD.md` |
 | ADR-25 | La categoria del producto vive tambien en el grafo, para ordenar por grupos | 2026-10-26 | Vigente | sin registro | Aqui abajo |
+| ADR-26 | Un ACL de funcionalidades, por rol, en PostgreSQL | 2026-10-28 | Vigente | sin registro | Aqui abajo, y `docs/SEGURIDAD.md` |
 
 De las seis decisiones propuestas el 28 de septiembre en
 `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`, tres se hicieron tal cual (ADR-17,
@@ -48,7 +49,7 @@ termino con el vector solo en pgvector (ADR-13).
 La regla desde ahora: una decision nueva entra a esta tabla con el siguiente
 numero, en el mismo cambio que el codigo que la implementa.
 
-Las dos ultimas son posteriores al informe de la Entrega final y estan
+Las tres ultimas son posteriores al informe de la Entrega final y estan
 escritas completas aqui.
 
 ## ADR-24. Un ACL en la aplicacion, por oferta
@@ -79,8 +80,12 @@ la aplicacion.
 cuenta, el permiso (`ver`, `editar` o `descuento`), quien lo dio y hasta
 cuando, y `auditoria_permiso_oferta` guarda el registro. `PermisoOfertaGuard`
 va despues de `SesionGuard` en `/compartidas/ofertas` y busca una entrada
-vigente de esa cuenta, esa oferta y ese permiso. Sin ella contesta 404. El
-dueno reparte en `/vendedor/ofertas/:id/permisos`.
+vigente de esa cuenta, esa oferta y ese permiso. Sin ninguna entrada contesta
+404, para no confirmar que la oferta existe. Con alguna, pero no la que pide la
+ruta, contesta 403 con el permiso que falta (desde el 28 de octubre; antes era
+404 tambien, y quien ya veia la oferta leia "no existe"). El dueno reparte en
+`/vendedor/ofertas/:id/permisos`. Desde ADR-26 la ruta pasa antes por el permiso
+del rol (`ofertas.usar_compartidas`).
 
 **Justificacion.** Es un ACL en el sentido clasico, la lista va pegada al
 objeto y lo que no esta se niega, y vive donde se conoce a la persona. Las
@@ -134,3 +139,58 @@ un minuto (medido entre 14 y 59 s), y mientras tanto el orden puede usar la
 categoria vieja. Un producto que no esta en la copia del catalogo no tiene
 categoria y cae en el grupo del resto. Prueba,
 `bash pruebas/tambien_compraron_categoria.sh`.
+
+## ADR-26. Un ACL de funcionalidades, por rol, en PostgreSQL
+
+**Contexto.** El profesor pidio el control de acceso en dos niveles, el de las
+bases y el de las funcionalidades, y que se pueda ensenar llamando al backend
+directo, sin la pagina, con una cuenta que no tiene permiso y recibe un error.
+El de las bases ya estaba (ADR-14). El de las funciones existia como roles, con
+`@Roles(...)` en 38 lugares del codigo, revisados por `SesionGuard`. Funcionaba
+(403 al rol equivocado), pero la lista de que rol puede que vivia en el codigo,
+no se podia ensenar como datos y cambiarla obligaba a compilar. En sentido
+estricto eso es control por roles escrito a mano, no una lista de control de
+acceso. El ACL de ADR-24 si lo es, pero solo para las ofertas compartidas.
+
+**Alternativas.**
+1. No cambiar nada y explicar los `@Roles` como el control de las funciones.
+2. Una tabla de permisos por persona para cada funcion. Se pisaria con
+   `permiso_oferta` (dos lugares para darle algo a una cuenta) y con tres roles
+   no hace falta.
+3. Usuarios de PostgreSQL por persona con Row Level Security. Mismo problema que
+   en ADR-24: la base no sabe que persona esta detras de cada peticion.
+4. Las acciones y quien las tiene en tablas de PostgreSQL, por rol, revisadas en
+   cada peticion por un guard del backend.
+
+**Decision.** La 4, con la migracion 050, en tercera forma normal.
+`modulo_permiso` (17 modulos) y `permiso` (38 acciones, cada una dentro de su
+modulo; el codigo `ofertas.publicar` se arma con un JOIN y no se guarda)
+son los catalogos. `rol_permiso` es el ACL, una fila por rol y permiso con quien
+lo dio y cuando. `auditoria_permiso` guarda cada intento negado con su ruta y
+cada permiso dado o quitado. La vista `permisos_por_rol` la ensena como matriz.
+Cada una de las 136 rutas privadas declara su accion con `@Permiso(...)`, y
+`PermisoGuard`, despues de `SesionGuard`, pregunta a `rol_permiso` en ese momento
+si el rol de la cuenta la tiene. Sin ella, 403 con el codigo que falta. Los
+`@Roles` desaparecieron y `SesionGuard` solo autentica (401). El admin ve y
+cambia la matriz en el panel, seccion Permisos, por `/admin/permisos`.
+
+**Justificacion.** La lista ahora son datos: se lee con un SELECT, se cambia con
+una fila y vale en la peticion siguiente, sin compilar ni reiniciar. Negar por
+defecto es literal, una ruta privada sin `@Permiso` tambien se niega. La semilla
+reproduce exactamente los roles de antes, ruta por ruta, asi que el primer dia
+nada cambio para nadie; `pruebas/permisos_cobertura.cjs` lo comprueba contra la
+matriz guardada antes de la 050 (`pruebas/permisos_matriz_antes_050.json`). Los
+permisos por persona siguen siendo los de las ofertas (ADR-24), y una ruta de
+`/compartidas/ofertas` pasa por los dos: primero el rol, despues la oferta.
+
+**Consecuencias.** Son tres capas que no se pisan: las bases por servicio
+(ADR-14), las funciones por rol (esta) y cada oferta por persona (ADR-24). Cada
+peticion privada hace una consulta mas, por llave, con el mismo limite corto
+que la de la sesion. Si PostgreSQL no contesta, el guard usa la ultima matriz que
+leyo entera (al arrancar y cada minuto), igual que la sesion se cree a su token,
+y la tienda se sigue pudiendo mirar. El rol que cuenta es el del token, como con
+los `@Roles`: un cambio de rol de una cuenta vale cuando vuelve a entrar.
+`cuenta.ver` (la sesion no abriria sin el) y `permisos.*` del admin (nadie
+podria devolverlos) no se pueden quitar por la API; con SQL a mano si. Pruebas,
+`node pruebas/permisos_cobertura.cjs` y `bash pruebas/permisos_rol.sh`. Demo,
+`.\demo-entrega-final.ps1 -Parte permisos`.

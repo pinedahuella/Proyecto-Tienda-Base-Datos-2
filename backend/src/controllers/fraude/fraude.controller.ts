@@ -1,10 +1,10 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { PaginarAlertasFraudeQuery } from '../../dto/paginar-alertas-fraude';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { FraudeLoginService } from '../../services/fraude-login/fraude-login.service';
 
 /**
@@ -12,7 +12,7 @@ import { FraudeLoginService } from '../../services/fraude-login/fraude-login.ser
  * multi-cuenta que detecta `FraudeLoginService` con contadores de Redis en
  * el propio login (ver ese servicio).
  *
- * `@UseGuards(SesionGuard)` y `@Roles(ID_ROL_ADMIN)` van en la clase: SOLO
+ * `@UseGuards(SesionGuard, PermisoGuard)` y `@Permiso('fraude.ver')`: en `rol_permiso`, SOLO
  * ADMIN. No la tienda -- la tienda es un vendedor mas, y ensenarle quien la
  * esta calificando (o intentando entrar) de forma sospechosa le entrega
  * justo la lista que no deberia ver.
@@ -20,12 +20,12 @@ import { FraudeLoginService } from '../../services/fraude-login/fraude-login.ser
  * Detalle del payload: `elementos Generales/endpoints/endpoints-fraude.md`.
  */
 @Controller('admin/fraude')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
 export class FraudeController {
   constructor(private readonly fraudeLoginService: FraudeLoginService) {}
 
   // GET /admin/fraude/alertas-login
+  @Permiso('fraude.ver')
   @Get('alertas-login')
   async alertasLogin(@Query() query: PaginarAlertasFraudeQuery) {
     try {

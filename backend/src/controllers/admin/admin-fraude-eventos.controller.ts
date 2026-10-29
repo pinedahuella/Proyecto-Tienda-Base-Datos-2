@@ -7,13 +7,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { MarcarHallazgoEventoFraudeBody } from '../../dto/marcar-hallazgo-evento-fraude';
 import type { PaginarHallazgosEventoFraudeQuery } from '../../dto/paginar-hallazgos-evento-fraude';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { HallazgosEventoFraudePersistidosService } from '../../services/fraude/hallazgos-evento-fraude-persistidos.service';
 
 /**
@@ -29,12 +29,13 @@ import { HallazgosEventoFraudePersistidosService } from '../../services/fraude/h
  * `PATCH /admin/fraude/alertas-eventos/:id` -- marcar un hallazgo revisado
  * o descartado (solo si esta `pendiente`).
  *
- * `@UseGuards(SesionGuard)` y `@Roles(ID_ROL_ADMIN)` en la clase, mismo
- * criterio que el resto de `admin/fraude/*`: solo admin.
+ * `@UseGuards(SesionGuard, PermisoGuard)` y `@Permiso('fraude.ver')` en la clase
+ * (marcar pide `fraude.resolver`), mismo criterio que el resto de
+ * `admin/fraude/*`: en `rol_permiso`, solo el admin.
  */
 @Controller('admin/fraude')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('fraude.ver')
 export class AdminFraudeEventosController {
   constructor(
     private readonly hallazgosEventoFraudePersistidosService: HallazgosEventoFraudePersistidosService,
@@ -55,6 +56,7 @@ export class AdminFraudeEventosController {
   }
 
   // PATCH /admin/fraude/alertas-eventos/:id
+  @Permiso('fraude.resolver')
   @Patch('alertas-eventos/:id')
   async marcar(
     @Param('id') id: string,

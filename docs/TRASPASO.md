@@ -3,9 +3,45 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-27, madrugada**.
+Ultima actualizacion: **2026-10-29, madrugada**.
 
-**EMPIEZA AQUI (26 al 27-10, noche). Dos cambios para la presentacion, probados con las bases de la PC de
+**EMPIEZA AQUI (28 al 29-10, noche). El ACL de funcionalidades, por rol (ADR-26, migracion 050), probado con las
+bases de la PC de Jose David. SIN commitear (Meme no lo pidio).** El profesor pidio el control de acceso a nivel de
+base de datos (ya estaba, ADR-14) y a nivel de funcionalidades, con una demo donde alguien sin permiso llama al
+backend directo y recibe un error. Los `@Roles` del codigo daban 403, pero la lista no era datos. La nota para David
+esta en `backend/cambio_propuestas/2026-10-28_2330-acl-de-funcionalidades-por-rol.md` y el relato de la noche en
+`NOCHE-28-10-LEEME.txt` (fuera de git).
+
+- **Migracion 050**, en tercera forma normal: `modulo_permiso` (17), `permiso` (38), `rol_permiso` (el ACL, 76 filas)
+  y `auditoria_permiso`, mas la vista `permisos_por_rol`. La semilla reproduce los `@Roles` de antes y reparte solo
+  cuando el permiso se crea: quitado uno a mano y vuelta a correr la 050, sigue quitado (probado). Aplicada en la PC
+  de David (respaldo previo `respaldos/david_antes_050_20261028_2311.dump`). 93 tablas, 117 llaves.
+- **Backend:** `@Permiso('modulo.accion')` y `PermisoGuard` en las 136 rutas privadas; `@Roles` y su decorador
+  borrados; `SesionGuard` solo autentica (401). Sin el permiso, 403 "No tienes permiso para hacer esto (falta
+  ofertas.publicar)" y una fila en `auditoria_permiso`. `/admin/permisos` (matriz, registro, dar, quitar;
+  `cuenta.ver` y `permisos.*` del admin dan 409). `/usuario/yo` trae `permisos`. Sin PostgreSQL, el guard usa la
+  ultima matriz leida (al arrancar y cada minuto).
+- **ACL de ofertas (049):** con alguna entrada vigente pero no la que pide la ruta, ahora 403 (antes 404 "no
+  existe" a quien ya veia la oferta). Sin ninguna, sigue 404.
+- **Frontend:** seccion Permisos del admin (matriz con casillas y registro de negados). Visto en Edge a 1536x730 y a
+  390, una casilla quitada y devuelta con clics.
+- **Pruebas:** `node pruebas/permisos_cobertura.cjs` (cada ruta privada con guard y permiso, y los mismos roles que
+  antes en las 165 rutas, comparado con `pruebas/permisos_matriz_antes_050.json`; rota a proposito falla) y
+  `bash pruebas/permisos_rol.sh` (los 38 permisos con los 3 roles llamando directo, quitar y devolver por la API y
+  por SQL, 162 OK). En `correr_todas.sh`, ahora 46.
+- **Demo:** `.\demo-entrega-final.ps1 -Parte permisos` (boton en el panel). Presentacion con 21 laminas, la 13 nueva.
+  Word final regenerado (34 paginas, seccion 3.6 y ADR-26), con el conteo de commits de antes (353).
+- **Bateria entera contra David (29-10, 00:18 a 01:14):** las 46, en verde despues de repetir tres. Dos eran Ollama
+  caido (vectores_worker 5 y recomendacion_semantica 15 al prenderlo). La tercera, `neo4j/correr_patrones.sh` B.3,
+  era un fallo de la semilla que dependia del dia: resenas cada 30 dias desde `now()` caian en 4 meses el 29 de
+  octubre. Anclada al 15 del mes pasado (`neo4j/pruebas/siembra_patrones.sql`), Todo bien. `caidas.mjs` 51 y 51; con
+  PostgreSQL caido el guard usa la matriz en memoria (se ve en el log). Limpieza: 7 ofertas a Q15 de famb*/anit*
+  retiradas por la API. Respaldo previo `respaldos/david_antes_bateria_20261029_0017.dump`.
+- **Arreglos de paso:** `remoto/activar.sh` y `activar.ps1` reusan el tunel vivo; `remoto/caidas.ps1` espera 300 s; `desactivar.ps1` buscaba el tunel
+  por un pid que podia ser de MSYS y matar otro proceso, ahora por su linea de comando; `docs/generar-er.py` corre en
+  modo remoto; `servicios.ps1` espera 300 s al backend (en remoto tarda 200).
+
+**Antes, el 26 al 27-10, noche. Dos cambios para la presentacion, probados con las bases de la PC de
 Meme (local). Commiteado y pusheado el 27-10, 352 commits (353 con los arreglos de las pruebas contra la PC de David).** Con permiso de David para tocar `backend/`; su nota esta en
 `backend/cambio_propuestas/2026-10-26_2300-categoria-en-el-grafo-y-acl-de-ofertas.md`.
 

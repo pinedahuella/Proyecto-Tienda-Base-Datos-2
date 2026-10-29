@@ -19,7 +19,8 @@
 	 * Cada oferta ensena de quien es y que puedo hacer. Los botones salen solo
 	 * para lo que el dueno me dio, pero quien decide es el backend: si el
 	 * permiso se quito o vencio mientras la pagina estaba abierta, contesta 404
-	 * y aqui se dice y se recarga la lista.
+	 * (ya no queda ninguno) o 403 (queda otro, pero no ese), y aqui se dice y se
+	 * recarga la lista.
 	 */
 	let { alExpirarSesion }: { alExpirarSesion: () => void } = $props();
 
@@ -78,11 +79,11 @@
 		errorFila = '';
 	}
 
-	/** Lo comun de las tres acciones: el 401, el 404 de un permiso que ya no esta y el resto. */
+	/** Lo comun de las tres acciones: el 401, el 404 o 403 de un permiso que ya no esta y el resto. */
 	async function despues(r: { ok: boolean; estado: number; mensaje?: string }, exito: string) {
 		ocupado = false;
 		if (r.estado === 401) return alExpirarSesion();
-		if (r.estado === 404) {
+		if (r.estado === 404 || r.estado === 403) {
 			// Primero la lista y despues el aviso: cargar() limpia el error al empezar.
 			cerrar();
 			await cargar();

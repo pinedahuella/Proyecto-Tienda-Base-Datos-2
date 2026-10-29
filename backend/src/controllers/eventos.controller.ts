@@ -26,6 +26,8 @@ import {
   validarDisponibleEvento,
 } from '../helpers/validaciones-eventos';
 import { idUsuarioDeCookieOpcional } from '../helpers/sesion-opcional';
+import { Permiso } from '../decorators/permiso.decorator';
+import { PermisoGuard } from '../guards/permiso.guard';
 import { SesionGuard } from '../guards/sesion.guard';
 import { UsuarioActual } from '../decorators/usuario-actual.decorator';
 import type { RegistrarVistaPeticion } from '../dto/registrar-vista';
@@ -82,13 +84,14 @@ export class EventosController {
 
   /**
    * `POST /eventos/carrito` -- a diferencia de `vista`, SI exige sesion
-   * (`@UseGuards(SesionGuard)`): el carrito siempre requiere cuenta en este
+   * (`@UseGuards(SesionGuard, PermisoGuard)`): el carrito siempre requiere cuenta en este
    * proyecto (no hay carrito de invitado), asi que `id_usuario` sale de
    * `@UsuarioActual()`, nunca de una cookie opcional ni del cuerpo.
    */
   // POST /eventos/carrito
+  @Permiso('carrito.usar')
   @Post('carrito')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   @HttpCode(HttpStatus.ACCEPTED)
   carrito(
     @Body() cuerpo: RegistrarCarritoPeticion,

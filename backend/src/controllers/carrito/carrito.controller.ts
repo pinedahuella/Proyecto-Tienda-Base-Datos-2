@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -23,7 +25,8 @@ import { CarritoService } from '../../services/carrito/carrito.service';
  * Rutas de `/carrito` (Entrega 2). El carrito vive solo en Redis; ver
  * `CarritoService` para el modelo.
  *
- * Todas piden sesion (`SesionGuard` a nivel de clase, sin `@Roles`:
+ * Todas piden sesion y `carrito.usar` (`comprar`, `carrito.comprar`), que en la
+ * semilla tienen los tres roles:
  * cualquiera con sesion tiene carrito, igual que comprar). El `id_usuario`
  * sale del token -> la clave en Redis es `mesh:carrito:<id_usuario>`. No hay
  * id de carrito que pasar.
@@ -35,7 +38,8 @@ import { CarritoService } from '../../services/carrito/carrito.service';
  *   POST   /carrito/comprar             -> el checkout (comprar_carrito)
  */
 @Controller('carrito')
-@UseGuards(SesionGuard)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('carrito.usar')
 export class CarritoController {
   constructor(private readonly carritoService: CarritoService) {}
 
@@ -116,6 +120,7 @@ export class CarritoController {
   }
 
   // POST /carrito/comprar -- el checkout
+  @Permiso('carrito.comprar')
   @Post('comprar')
   async comprar(
     @Body() cuerpo: ComprarCarritoPeticion,

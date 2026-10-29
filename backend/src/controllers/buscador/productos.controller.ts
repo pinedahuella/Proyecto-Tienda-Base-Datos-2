@@ -1,12 +1,12 @@
 import { Controller, Get, Query, Req, UseGuards } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import { idUsuarioDeCookieOpcional } from '../../helpers/sesion-opcional';
 import type { BuscarProductosQuery } from '../../dto/buscar-productos';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { BuscadorProductosService } from '../../services/buscador/productos.service';
 import { EventosService } from '../../services/eventos/eventos.service';
 
@@ -69,9 +69,9 @@ export class BuscadorProductosController {
   // Va despues de la raiz para que Nest la registre como ruta estatica
   // aparte -- no hay ningun :id en este controller con el que pudiera
   // confundirse.
+  @Permiso('catalogo.buscar_todo')
   @Get('admin')
-  @UseGuards(SesionGuard)
-  @Roles(ID_ROL_ADMIN)
+  @UseGuards(SesionGuard, PermisoGuard)
   async buscarAdmin(@Query() query: BuscarProductosQuery) {
     try {
       const resultados = await this.buscadorProductosService.buscarAdmin(

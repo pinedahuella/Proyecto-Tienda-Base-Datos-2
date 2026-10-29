@@ -7,13 +7,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { MarcarAlertaFraudeBody } from '../../dto/marcar-alerta-fraude';
 import type { PaginarEventosAutenticacionQuery } from '../../dto/paginar-eventos-autenticacion';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { FraudeLoginExploracionService } from '../../services/fraude-login/fraude-login-exploracion.service';
 
 /**
@@ -29,12 +29,13 @@ import { FraudeLoginExploracionService } from '../../services/fraude-login/fraud
  * `PATCH /admin/fraude/alertas-login/:id` -- marcar una alerta ya existente
  * (de cualquiera de las 9 senales) como revisada o descartada.
  *
- * `@UseGuards(SesionGuard)` y `@Roles(ID_ROL_ADMIN)` en la clase, mismo
- * criterio que `FraudeController`: solo admin.
+ * `@UseGuards(SesionGuard, PermisoGuard)` y `@Permiso('fraude.ver')` en la clase
+ * (marcar pide `fraude.resolver`), mismo criterio que `FraudeController`: en
+ * `rol_permiso`, solo el admin.
  */
 @Controller('admin/fraude')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('fraude.ver')
 export class AdminFraudeLoginController {
   constructor(
     private readonly fraudeLoginExploracionService: FraudeLoginExploracionService,
@@ -56,6 +57,7 @@ export class AdminFraudeLoginController {
   }
 
   // PATCH /admin/fraude/alertas-login/:id
+  @Permiso('fraude.resolver')
   @Patch('alertas-login/:id')
   async marcarAlerta(
     @Param('id') id: string,

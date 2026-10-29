@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 353 commits sobre `main` entre el 15 de agosto y el 27 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 25 decisiones del semestre. La última semana sumó un ACL por oferta que vive en la aplicación y el orden por categoría de quienes lo compraron también llevaron."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 354 commits sobre `main` entre el 15 de agosto y el 29 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y el orden por categoría de quienes lo compraron también llevaron."
      }
     ]
    },
@@ -38,7 +38,7 @@
          "Control de acceso configurado en un componente NoSQL",
          "4",
          "3",
-         "Un usuario por servicio en Redis, MongoDB, ClickHouse, Elasticsearch y PostgreSQL. La prueba de las cinco bases dio 50 comprobaciones en verde y la de Redis 43, cada negativa con su control"
+         "Un usuario por servicio en Redis, MongoDB, ClickHouse, Elasticsearch y PostgreSQL. La prueba de las cinco bases dio 50 comprobaciones en verde y la de Redis 43, cada negativa con su control. Dentro de la tienda, un ACL de funcionalidades por rol y otro por oferta, en PostgreSQL, que contestan 403 aunque se llame a la ruta directo"
         ],
         [
          "Diagrama de arquitectura final, completo y correcto",
@@ -85,7 +85,7 @@
         ],
         [
          "5.3 Registro de decisiones arquitectónicas",
-         "Sección 5, un solo registro de ADR-1 a ADR-25 con los cinco campos. ADR-13 en 2.1 y sus dos revisiones en 2.2, y ADR-14 en 3.1"
+         "Sección 5, un solo registro de ADR-1 a ADR-26 con los cinco campos. ADR-13 en 2.1 y sus dos revisiones en 2.2, y ADR-14 en 3.1"
         ],
         [
          "5.4 Documentación para levantar el sistema",
@@ -573,6 +573,57 @@
       "p": "En clase se enseña con `.\\demo-entrega-final.ps1 -Parte acceso`, que pone a cada usuario a intentar lo mismo en Redis y muestra lo que contesta la base."
      }
     ]
+   },
+   {
+    "titulo": "3.6. Dentro de la tienda, por rol y por oferta",
+    "bloques": [
+     {
+      "p": "Lo de arriba es por servicio, y lo hacen cumplir las bases. Ninguna base sabe qué persona está detrás de una petición, porque todas llegan como `mesh_backend`, así que lo que puede hacer cada cuenta dentro de la tienda lo decide la aplicación. El profesor pidió que el control de acceso esté también a nivel de funcionalidades y que se vea llamando al backend directo, sin la página, con una cuenta que no tiene permiso. Por eso hay tres capas, y las dos de adentro son listas en PostgreSQL."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Capa",
+        "Qué pregunta",
+        "Dónde vive",
+        "Si no"
+       ],
+       "filas": [
+        [
+         "Las bases, por servicio",
+         "Qué puede hacer el backend o una herramienta en cada base",
+         "Usuarios y roles de cada base (ADR-14)",
+         "La base rechaza el comando"
+        ],
+        [
+         "Las funciones, por rol",
+         "Qué acciones de la tienda puede usar cada rol",
+         "`rol_permiso`, migración 050 (ADR-26)",
+         "403 con el permiso que falta"
+        ],
+        [
+         "Cada oferta, por persona",
+         "Qué cuenta puede ver, editar o descontar una oferta ajena",
+         "`permiso_oferta`, migración 049 (ADR-24)",
+         "404 sin ninguna entrada, 403 sin esa"
+        ]
+       ],
+       "anchos": [
+        1.5,
+        2.1,
+        1.9,
+        1.4
+       ],
+       "leyenda": "Las tres capas del control de acceso de Mesh."
+      }
+     },
+     {
+      "p": "Cada una de las 136 rutas privadas declara la acción que hace, por ejemplo `ofertas.publicar`, y un guard del backend le pregunta a `rol_permiso` en ese momento si el rol de la cuenta la tiene. Antes esa lista estaba escrita en el código. Ahora son datos, y quitar una fila vale en la petición siguiente, sin compilar ni reiniciar. Cada intento negado queda en `auditoria_permiso` con quién, su rol y la ruta que llamó, y el administrador ve y cambia la matriz en el panel."
+     },
+     {
+      "p": "Antes de cambiarlo se guardó qué roles entraban a cada una de las 165 rutas, leído del backend compilado, y `pruebas/permisos_cobertura.cjs` comprueba que con la tabla nueva entran exactamente los mismos. `pruebas/permisos_rol.sh` llama a las rutas directo con los tres roles y los 38 permisos, y quita y devuelve permisos en vivo. En clase se enseña con `.\\demo-entrega-final.ps1 -Parte permisos`."
+     }
+    ]
    }
   ]
  },
@@ -660,7 +711,7 @@
       }
      },
      {
-      "p": "El diagrama entidad relación se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones. Hoy son 89 tablas y 111 llaves foráneas, de las migraciones 001 a 049."
+      "p": "El diagrama entidad relación se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones. Hoy son 93 tablas y 117 llaves foráneas, de las migraciones 001 a 050."
      }
     ]
    },
@@ -687,7 +738,7 @@
       "p": "Cada entrega escribió sus decisiones con su propia numeración, y los números terminaron chocando. En `docs/base-de-datos.md` el ADR-3 es el de las imágenes, en el informe de la Entrega 2 el ADR-3 es grafos contra columnar, y la retrospectiva de las versiones anteriores de este informe citaba el segundo. Además, varias decisiones de octubre se implementaron sin escribir su registro, que es lo que el profesor señaló el 28 de septiembre cuando dijo que las decisiones eran genéricas."
      },
      {
-      "p": "Desde esta versión hay un solo registro, numerado del 1 al 25 en el orden en que se tomaron. La última columna dice cómo se citó cada uno antes, para que se pueda seguir en los informes anteriores. Los registros 15 a 23 son las decisiones que faltaban y se escriben completos en esta sección, con el flujo que tocan, las bases que leen y escriben y qué pasa si cada una se cae."
+      "p": "Desde esta versión hay un solo registro, numerado del 1 al 26 en el orden en que se tomaron. La última columna dice cómo se citó cada uno antes, para que se pueda seguir en los informes anteriores. Los registros 15 a 23 son las decisiones que faltaban y se escriben completos en esta sección, con el flujo que tocan, las bases que leen y escriben y qué pasa si cada una se cae."
      },
      {
       "tabla": {
@@ -871,6 +922,13 @@
          "ADR-25",
          "La categoría del producto también en el grafo",
          "26 de octubre",
+         "Vigente",
+         "Nueva"
+        ],
+        [
+         "ADR-26",
+         "Un ACL de funcionalidades, por rol, en PostgreSQL",
+         "28 de octubre",
          "Vigente",
          "Nueva"
         ]
@@ -1080,7 +1138,7 @@
         "3. Reescribir cada condición del dueño como mío o compartido conmigo, unos veinte lugares.",
         "4. Un ACL en tablas de PostgreSQL, revisado por un guard del backend, en rutas nuevas para lo compartido."
        ],
-       "decision": "La alternativa 4, con la migración 049. `permiso_oferta` guarda la oferta, la cuenta, el permiso (ver, editar o descuento), quién lo dio y hasta cuándo, y `auditoria_permiso_oferta` guarda el registro. `PermisoOfertaGuard` revisa cada ruta de `/compartidas/ofertas` y sin una entrada vigente contesta 404. El dueño reparte en `/vendedor/ofertas/:id/permisos`.",
+       "decision": "La alternativa 4, con la migración 049. `permiso_oferta` guarda la oferta, la cuenta, el permiso (ver, editar o descuento), quién lo dio y hasta cuándo, y `auditoria_permiso_oferta` guarda el registro. `PermisoOfertaGuard` revisa cada ruta de `/compartidas/ofertas`. Sin ninguna entrada vigente contesta 404, el mismo de una oferta ajena, y con alguna pero no la que pide la ruta contesta 403. El dueño reparte en `/vendedor/ofertas/:id/permisos`.",
        "justificacion": [
         "**Consistencia.** Las rutas nuevas llaman al mismo servicio de ofertas a nombre del dueño, así que las reglas de precio, descuento y existencia no se copian, y las rutas de lo propio no cambian.",
         "**Patrón de consulta.** Es un ACL clásico, una lista pegada a cada oferta que niega lo que no está, y vive donde se conoce a la persona."
@@ -1105,6 +1163,25 @@
         "**Costo operativo.** La categoría casi no cambia y copiarla cuesta poco. El precio y la existencia cambian a cada rato y no se copian."
        ],
        "consecuencias": "Con Neo4j y con MongoDB caídos, los 100 productos comprados dan la misma lista en el mismo orden. Un cambio de categoría llega al grafo en menos de un minuto, y mientras tanto el orden puede usar la categoría vieja."
+      }
+     },
+     {
+      "adr": {
+       "id": "ADR-26",
+       "titulo": "Un ACL de funcionalidades, por rol, en PostgreSQL",
+       "contexto": "El profesor pidió el control de acceso en dos niveles, el de las bases y el de las funcionalidades, y que se pueda enseñar llamando al backend directo con una cuenta sin permiso. El de las bases ya estaba (ADR-14). El de las funciones existía como roles escritos en 38 lugares del código, que daban 403 al rol equivocado, pero la lista no se podía enseñar como datos ni cambiar sin compilar.",
+       "alternativas": [
+        "1. No cambiar nada y explicar los roles del código como el control de las funciones.",
+        "2. Una tabla de permisos por persona para cada función.",
+        "3. Usuarios de PostgreSQL por persona con Row Level Security.",
+        "4. Las acciones y quién las tiene en tablas de PostgreSQL, por rol, revisadas en cada petición por un guard del backend."
+       ],
+       "decision": "La alternativa 4, con la migración 050, en tercera forma normal. `modulo_permiso` y `permiso` son los catálogos, 17 módulos y 38 acciones. `rol_permiso` es el ACL, una fila por rol y acción, y `auditoria_permiso` guarda cada intento negado y cada cambio. Cada ruta privada declara su acción y `PermisoGuard` pregunta a la tabla en cada petición. Sin el permiso, 403.",
+       "justificacion": [
+        "**Consistencia.** La semilla deja pasar exactamente a los mismos roles que antes, ruta por ruta, comprobado contra la matriz guardada antes del cambio.",
+        "**Costo operativo.** Cambiar lo que puede un rol es una fila, sin compilar ni reiniciar, y una ruta privada sin su acción declarada también se niega."
+       ],
+       "consecuencias": "Cada petición privada hace una consulta más, por llave. Si PostgreSQL no contesta, el guard usa la última matriz que leyó, igual que la sesión se cree a su token. Los permisos por persona siguen siendo los de las ofertas (ADR-24), y una ruta compartida pasa por los dos."
       }
      }
     ]
@@ -1393,7 +1470,7 @@
       "p": "La recomendación semántica empezó en pgvector, pasó por Elasticsearch para tener el vector junto al texto y volvió a pgvector, donde coincide con el cálculo exacto. En el camino abrió la búsqueda híbrida, la búsqueda por intención y las señales de fraude por el texto de las reseñas, todas con el mismo modelo local."
      },
      {
-      "p": "El control de acceso cerró un riesgo que tuvimos todo el semestre sin notarlo. Hoy el backend entra a cada base con un usuario que solo puede leer y escribir datos, las herramientas de inspección solo miran o solo se abren en la misma PC, Elasticsearch pide contraseña, y la prueba demuestra cada negativa con su control. Neo4j es la excepción, porque su edición gratuita no trae roles."
+      "p": "El control de acceso cerró un riesgo que tuvimos todo el semestre sin notarlo. Hoy el backend entra a cada base con un usuario que solo puede leer y escribir datos, las herramientas de inspección solo miran o solo se abren en la misma PC, Elasticsearch pide contraseña, y la prueba demuestra cada negativa con su control. Neo4j es la excepción, porque su edición gratuita no trae roles. Dentro de la tienda, lo que puede hacer cada rol y cada cuenta sobre una oferta ajena también son listas en PostgreSQL, y un rol sin permiso recibe 403 aunque llame a la ruta directo."
      },
      {
       "p": "Mirando el semestre completo, lo que mejor funcionó fue decidir por el patrón de consulta y dejar el dinero en una sola transacción. Lo que peor funcionó fueron las copias sin dueño claro. Si empezáramos de nuevo, escribiríamos quién es el dueño de cada dato antes de elegir dónde guardarlo."

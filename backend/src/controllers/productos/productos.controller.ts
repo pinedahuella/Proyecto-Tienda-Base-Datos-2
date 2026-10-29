@@ -1,6 +1,8 @@
 import { Controller, Get, Param, Query, UseGuards } from '@nestjs/common';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import type { ListarProductosQuery } from '../../dto/listar-productos';
 import type { PaginarProductosQuery } from '../../dto/paginar-productos';
@@ -51,8 +53,9 @@ export class ProductosController {
   // Protegida: a diferencia del resto del catalogo, esta si exige sesion
   // (ver endpoints-productos.md) -- sin rol ni dueno especifico, cualquier
   // cuenta logueada puede pedirla.
+  @Permiso('productos.historial')
   @Get(':id/historial')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async obtenerHistorial(
     @Param('id') id: string,
     @Query('fecha') fecha: string | undefined,
@@ -75,8 +78,9 @@ export class ProductosController {
   // no solo la propia. Pensada para completar la reconstruccion de un
   // pedido viejo: :id/historial da el producto tal como se veia, esta da
   // el precio y el stock de la oferta que se compro, tal como estaban.
+  @Permiso('productos.historial')
   @Get('ofertas/:id/historial')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async obtenerHistorialOferta(
     @Param('id') id: string,
     @Query('fecha') fecha: string | undefined,

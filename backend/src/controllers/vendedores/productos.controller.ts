@@ -8,8 +8,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -18,7 +19,6 @@ import type { EditarProductoPeticion } from '../../dto/editar-producto';
 import type { RevisarPropuestaPeticion } from '../../dto/revisar-propuesta';
 import type { PaginarProductosVendedorQuery } from '../../dto/paginar-productos-vendedor';
 import type { TokenUsuario } from '../../dto/token-usuario';
-import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { ProductosVendedorService } from '../../services/vendedores/productos.service';
 
 /**
@@ -34,8 +34,8 @@ import { ProductosVendedorService } from '../../services/vendedores/productos.se
  * catalogo (ver /vendedor/ofertas).
  */
 @Controller('vendedor/productos')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('catalogo.ver')
 export class ProductosVendedorController {
   constructor(
     private readonly productosVendedorService: ProductosVendedorService,
@@ -79,6 +79,7 @@ export class ProductosVendedorController {
   // GET /vendedor/productos/propuestas
   // Las propuestas del vendedor logueado (solo las suyas). Cualquier
   // vendedor o admin. Va antes de :id (segmento estatico).
+  @Permiso('catalogo.proponer')
   @Get('propuestas')
   async listarPropuestasMias(@UsuarioActual() usuarioActual: TokenUsuario) {
     try {
@@ -95,6 +96,7 @@ export class ProductosVendedorController {
   // GET /vendedor/productos/propuestas/sin-aprobar
   // Todas las propuestas sin aprobar (en_revision o rechazado). Solo tienda
   // o admin -- un vendedor cualquiera recibe el mismo 404 generico.
+  @Permiso('catalogo.revisar')
   @Get('propuestas/sin-aprobar')
   async listarPropuestasSinAprobar(
     @UsuarioActual() usuarioActual: TokenUsuario,
@@ -112,6 +114,7 @@ export class ProductosVendedorController {
 
   // GET /vendedor/productos/propuestas/todas
   // Todas las propuestas, en cualquier estado. Solo tienda o admin.
+  @Permiso('catalogo.revisar')
   @Get('propuestas/todas')
   async listarTodasLasPropuestas(@UsuarioActual() usuarioActual: TokenUsuario) {
     try {
@@ -128,6 +131,7 @@ export class ProductosVendedorController {
   // GET /vendedor/productos/propuestas/:id/rechazos
   // El historial de rechazos de una propuesta. La ve la tienda/un admin (de
   // cualquiera) o el vendedor que la propuso (solo la suya).
+  @Permiso('catalogo.proponer')
   @Get('propuestas/:id/rechazos')
   async listarRechazosPropuesta(
     @Param('id') id: string,
@@ -188,6 +192,7 @@ export class ProductosVendedorController {
   }
 
   // POST /vendedor/productos
+  @Permiso('catalogo.editar')
   @Post()
   async crear(
     @Body() cuerpo: CrearProductoPeticion,
@@ -209,6 +214,7 @@ export class ProductosVendedorController {
   // `en_revision` (no circula) y se registra la propuesta en PostgreSQL.
   // A diferencia de POST /vendedor/productos, no exige ser la tienda ni
   // admin -- el guard de la clase ya deja fuera a los compradores.
+  @Permiso('catalogo.proponer')
   @Post('propuestas')
   async proponer(
     @Body() cuerpo: CrearProductoPeticion,
@@ -228,6 +234,7 @@ export class ProductosVendedorController {
   // PATCH /vendedor/productos/:id/revision
   // La tienda o un admin aprueba o rechaza una propuesta en revision.
   // Segmento "revision" literal, va antes de :id.
+  @Permiso('catalogo.revisar')
   @Patch(':id/revision')
   async revisarPropuesta(
     @Param('id') id: string,
@@ -252,6 +259,7 @@ export class ProductosVendedorController {
 
   // PATCH /vendedor/productos/:id/reenviar
   // El vendedor re-envia su propia propuesta rechazada a revision.
+  @Permiso('catalogo.proponer')
   @Patch(':id/reenviar')
   async reenviarPropuesta(
     @Param('id') id: string,
@@ -269,6 +277,7 @@ export class ProductosVendedorController {
   }
 
   // PATCH /vendedor/productos/:id
+  @Permiso('catalogo.editar')
   @Patch(':id')
   async editar(
     @Param('id') id: string,

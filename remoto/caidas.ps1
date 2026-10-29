@@ -82,7 +82,9 @@ function Iniciar-Backend([hashtable]$variables) {
     $main = Join-Path $raiz 'backend\dist\main.js'
     $linea = "cmd.exe /c $prefijo" + "node --enable-source-maps `"$main`" > `"$logs\backend.out.log`" 2> `"$logs\backend.err.log`""
     Lanzar-Oculto $linea (Join-Path $raiz 'backend')
-    for ($i = 0; $i -lt 90; $i++) {
+    # 300 s y no 180: con las bases en la PC de Jose David el backend tardo 200 s
+    # en abrir el puerto (2026-10-28).
+    for ($i = 0; $i -lt 150; $i++) {
         Start-Sleep 2
         if (Puerto-Abierto 3000) { return $true }
     }

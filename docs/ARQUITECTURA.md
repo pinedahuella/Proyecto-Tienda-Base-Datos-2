@@ -268,11 +268,17 @@ community no tiene roles. Redis tiene ACL desde el 2026-09-25 y las demas desde
 el 2026-10-23. La prueba es `bash seguridad/prueba_acceso.sh`, 93 comprobaciones
 bien y ninguna mal.
 
-Eso es por SERVICIO. Por PERSONA, dentro de la tienda, desde el 2026-10-26 hay
-un ACL en la aplicacion (ADR-24): `permiso_oferta` en PostgreSQL dice que cuenta
-puede ver, editar o poner descuento en que oferta, y `PermisoOfertaGuard` lo
-revisa antes de cada ruta de `/compartidas/ofertas`. No es una flecha nueva del
-dibujo: son dos tablas del mismo PostgreSQL.
+Eso es por SERVICIO. Dentro de la tienda hay dos capas mas, las dos en tablas
+del mismo PostgreSQL, asi que no son flechas nuevas del dibujo:
+
+- Por ROL, desde el 2026-10-28, el ACL de funcionalidades (ADR-26, migracion
+  050): cada una de las 136 rutas privadas declara su accion (`@Permiso`) y
+  `PermisoGuard` le pregunta a `rol_permiso` si el rol de la cuenta la tiene. Sin
+  ella, 403, tambien llamando a la ruta directo. Antes era `@Roles` en el codigo.
+- Por PERSONA, desde el 2026-10-26, el ACL de ofertas (ADR-24): `permiso_oferta`
+  dice que cuenta puede ver, editar o poner descuento en que oferta, y
+  `PermisoOfertaGuard` lo revisa antes de cada ruta de `/compartidas/ofertas`,
+  despues del permiso del rol.
 
 ---
 
@@ -312,6 +318,7 @@ levantar el backend (`remoto/README.md`). El detalle esta en
 | **2026-10-20, tarde** | El `.drawio` y su PNG se ponen al dia con lo de octubre: vectores en PostgreSQL, compras en Neo4j, buscador de ofertas y avisame en Elasticsearch, combos en ClickHouse y Redis, reservas de venta relampago que rehacen el contador de Redis. Sale la flecha del descuento con TTL en Redis, que desde la migracion 028 (2026-09-26) es una columna de PostgreSQL. 86 tablas y 107 llaves foraneas |
 | **2026-10-23** | **Control de acceso en todas las bases** (ADR-14, `docs/SEGURIDAD.md`): un `mesh_backend` que solo lee y escribe datos y un `mesh_lectura` en **PostgreSQL**, **MongoDB**, **ClickHouse** y **Elasticsearch**, que enciende su seguridad; en **Redis** el backend pasa a su usuario `backend`, solo claves `mesh:*`. **Neo4j** community no tiene roles. Los crea el paso 9f de arrancar y los prueba `seguridad/prueba_acceso.sh` (93 OK). Herramientas solo en 127.0.0.1 e imagenes con version fija. El documento de **Elasticsearch** guarda la foto de la tarjeta (`imagen`, sin indexar, ADR-23). Registro unico de decisiones ADR-1 a ADR-23 en `docs/DECISIONES.md`. El diagrama suma la caja de Ollama, el usuario de cada base y el recuadro del modo remoto |
 | **2026-10-26** | **Neo4j** guarda la categoria en cada `:Producto` (`id_categoria` y `categoria`, de `producto_catalogo`), y quienes lo compraron tambien llevaron pone primero, como grupo, los de la misma categoria (ADR-25). La escriben los workers de compras y de resenas y el ETL, y un worker nuevo la compara con **PostgreSQL** cada minuto (flecha nueva, PG a N4). **PostgreSQL** suma el ACL de la aplicacion por oferta, `permiso_oferta` y su registro (migracion 049, ADR-24) |
+| **2026-10-28** | **PostgreSQL** suma el ACL de funcionalidades por rol (migracion 050, ADR-26): `modulo_permiso`, `permiso`, `rol_permiso` y `auditoria_permiso`, y la vista `permisos_por_rol`. `PermisoGuard` lo revisa en las 136 rutas privadas y reemplaza a los `@Roles` del codigo, con los mismos roles por ruta el primer dia. 93 tablas |
 
 El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el
 compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. Cuando toco no

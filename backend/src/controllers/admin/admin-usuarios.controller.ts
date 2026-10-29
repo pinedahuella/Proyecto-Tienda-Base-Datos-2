@@ -1,25 +1,25 @@
 import { Body, Controller, Get, Param, Patch, UseGuards } from '@nestjs/common';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import { exito } from '../../helpers/respuesta';
 import type { EditarUsuarioAdminPeticion } from '../../dto/editar-usuario-admin';
 import type { TokenUsuario } from '../../dto/token-usuario';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { AdminUsuariosService } from '../../services/admin/admin-usuarios.service';
 
 /**
  * Controlador de las rutas /admin/usuarios.
  *
- * @UseGuards(SesionGuard) y @Roles(ID_ROL_ADMIN) van en la clase, no en
+ * @UseGuards(SesionGuard, PermisoGuard) y @Permiso('usuarios.ver') van en la clase, no en
  * cada metodo: asi cualquier ruta que se agregue despues a este
  * controlador queda protegida por defecto, sin tener que acordarse de
  * ponerlo en cada una.
  */
 @Controller('admin/usuarios')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('usuarios.ver')
 export class AdminUsuariosController {
   constructor(private readonly adminUsuariosService: AdminUsuariosService) {}
 
@@ -39,6 +39,7 @@ export class AdminUsuariosController {
   // PATCH /admin/usuarios/:id
   // PATCH y no PUT: se cambia solo lo que venga, no se reemplaza el
   // usuario completo.
+  @Permiso('usuarios.editar')
   @Patch(':id')
   async actualizar(
     @Param('id') id: string,

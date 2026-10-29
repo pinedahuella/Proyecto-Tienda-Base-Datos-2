@@ -55,6 +55,14 @@ export class ErrorInicioSesion extends ErrorSesion {
 export class ErrorNoEncontrado extends Error {}
 
 /**
+ * La cuenta sabe que el recurso existe pero no tiene el permiso para esa
+ * accion. HTTP 403. La usa el ACL de ofertas (049) cuando la cuenta tiene
+ * alguna entrada vigente sobre la oferta pero no la que pide la ruta: a quien
+ * no tiene ninguna se le sigue contestando 404, para no confirmar que existe.
+ */
+export class ErrorPermiso extends Error {}
+
+/**
  * El pago no se pudo procesar (tarjeta rechazada, vencida, fondos
  * insuficientes, etc.). El controlador la traduce a HTTP 402 -- distinto de
  * ErrorValidacion (400): los datos de la peticion estaban bien formados, lo

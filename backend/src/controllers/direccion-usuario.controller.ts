@@ -9,6 +9,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UsuarioActual } from '../decorators/usuario-actual.decorator';
+import { Permiso } from '../decorators/permiso.decorator';
+import { PermisoGuard } from '../guards/permiso.guard';
 import { SesionGuard } from '../guards/sesion.guard';
 import { manejarErrorHttp } from '../helpers/manejar-error-http';
 import { exito } from '../helpers/respuesta';
@@ -24,7 +26,8 @@ import { DireccionUsuarioService } from '../services/direccion-usuario.service';
  * editar sus propias direcciones, no hace falta ser admin.
  */
 @Controller('direccion-usuario')
-@UseGuards(SesionGuard)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('direcciones.administrar')
 export class DireccionUsuarioController {
   constructor(
     private readonly direccionUsuarioService: DireccionUsuarioService,

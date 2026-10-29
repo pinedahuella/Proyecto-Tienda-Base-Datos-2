@@ -8,6 +8,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UsuarioActual } from '../decorators/usuario-actual.decorator';
+import { Permiso } from '../decorators/permiso.decorator';
+import { PermisoGuard } from '../guards/permiso.guard';
 import { SesionGuard } from '../guards/sesion.guard';
 import { manejarErrorHttp } from '../helpers/manejar-error-http';
 import { exito } from '../helpers/respuesta';
@@ -32,7 +34,8 @@ import { FraudeLoginService } from '../services/fraude-login/fraude-login.servic
  * `alerta_fraude` del lado de lectura), no en `PerfilService`.
  */
 @Controller('perfil')
-@UseGuards(SesionGuard)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('cuenta.ver')
 export class PerfilController {
   constructor(
     private readonly perfilService: PerfilService,
@@ -51,6 +54,7 @@ export class PerfilController {
   }
 
   // PATCH /perfil
+  @Permiso('cuenta.editar')
   @Patch()
   async actualizar(
     @Body() cuerpo: EditarPerfilPeticion,
@@ -68,6 +72,7 @@ export class PerfilController {
   }
 
   // PATCH /perfil/contrasena
+  @Permiso('cuenta.editar')
   @Patch('contrasena')
   async cambiarContrasena(
     @Body() cuerpo: CambiarContrasenaPeticion,
@@ -102,6 +107,7 @@ export class PerfilController {
   }
 
   // PATCH /perfil/alertas-fraude/:id
+  @Permiso('cuenta.editar')
   @Patch('alertas-fraude/:id')
   async marcarAlertaFraudeLeida(
     @Param('id') id: string,

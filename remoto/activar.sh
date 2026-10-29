@@ -28,22 +28,38 @@ _remoto_activar() {
         return 1
     fi
     local registro="${TMPDIR:-/tmp}/mesh-tunel.log"
-    node "$_remoto_dir/tunel.cjs" "$_remoto_ip" > "$registro" 2>&1 &
-    local pid=$!
-    local i
-    for i in $(seq 1 20); do
-        grep -q "tunel listo" "$registro" 2>/dev/null && break
-        kill -0 "$pid" 2>/dev/null || break
-        sleep 0.3
-    done
-    if ! grep -q "tunel listo" "$registro" 2>/dev/null; then
-        cat "$registro" >&2
-        kill "$pid" 2>/dev/null
-        echo "No se pudo levantar el tunel. Si dice ocupado: apaga el Docker local (docker stop o cerrar Docker Desktop)." >&2
-        return 1
+    local pid
+    # El tunel de otra consola (o de un source anterior) sigue vivo y va a la
+    # misma PC: se reusa. Levantar otro chocaba con sus puertos y se leia como
+    # "ocupado por el Docker local".
+    pid="$(cat "$_remoto_dir/.tunel.pid" 2>/dev/null)"
+    if ! { [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null \
+        && [ "$(cat "$_remoto_dir/.tunel.ip" 2>/dev/null || echo 100.64.42.11)" = "$_remoto_ip" ]; }; then
+        # El de una consola de PowerShell guarda el pid de Windows, que kill -0
+        # no ve: se busca el proceso por su linea de comando.
+        pid="$(powershell.exe -NoProfile -Command "(Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { \$_.CommandLine -like '*tunel.cjs*$_remoto_ip*' } | Select-Object -First 1).ProcessId" 2>/dev/null | tr -d '\r')"
     fi
-    disown "$pid" 2>/dev/null || true
-    echo "$pid" > "$_remoto_dir/.tunel.pid"
+    if [ -n "$pid" ]; then
+        echo "El tunel a $_remoto_ip ya estaba levantado (pid $pid), se reusa."
+    else
+        node "$_remoto_dir/tunel.cjs" "$_remoto_ip" > "$registro" 2>&1 &
+        pid=$!
+        local i
+        for i in $(seq 1 20); do
+            grep -q "tunel listo" "$registro" 2>/dev/null && break
+            kill -0 "$pid" 2>/dev/null || break
+            sleep 0.3
+        done
+        if ! grep -q "tunel listo" "$registro" 2>/dev/null; then
+            cat "$registro" >&2
+            kill "$pid" 2>/dev/null
+            echo "No se pudo levantar el tunel. Si dice ocupado: apaga el Docker local (docker stop o cerrar Docker Desktop)." >&2
+            return 1
+        fi
+        disown "$pid" 2>/dev/null || true
+        echo "$pid" > "$_remoto_dir/.tunel.pid"
+        echo "$_remoto_ip" > "$_remoto_dir/.tunel.ip"
+    fi
     export MESH_REMOTO="$_remoto_ip"
     export MESH_REMOTO_PATH_ANTES="$PATH"
     export PATH="$_remoto_dir/bin:$PATH"

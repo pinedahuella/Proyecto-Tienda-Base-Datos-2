@@ -203,8 +203,8 @@ b { font-weight: 600; color: #fff; }
   <p class="sub" data-in="2" style="max-width:1500px;margin-bottom:60px">Un producto describe una cosa del mundo y no es de nadie. Quién lo vende, a qué precio y con cuántas unidades es una oferta. Y cada parte de la tienda hace preguntas muy distintas.</p>
   <div class="cifras">
     <div class="cifra" data-in="3"><div class="v" data-contar="6">6</div><div class="t">bases de datos, cada una por la forma de su pregunta</div></div>
-    <div class="cifra" data-in="4"><div class="v" data-contar="89">89</div><div class="t">tablas en PostgreSQL, de 49 migraciones</div></div>
-    <div class="cifra" data-in="5"><div class="v" data-contar="25">25</div><div class="t">decisiones con su registro, del 1 al 25</div></div>
+    <div class="cifra" data-in="4"><div class="v" data-contar="93">93</div><div class="t">tablas en PostgreSQL, de 50 migraciones</div></div>
+    <div class="cifra" data-in="5"><div class="v" data-contar="26">26</div><div class="t">decisiones con su registro, del 1 al 26</div></div>
     <div class="cifra" data-in="6"><div class="v" data-contar="93">93</div><div class="t">comprobaciones del control de acceso, ninguna mal</div></div>
   </div>
 </section>
@@ -310,15 +310,36 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 13 El ACL de la aplicacion -->
+<!-- 13 El ACL de funcionalidades -->
 <section class="lamina" style="padding-top:70px">
-  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Control de acceso por persona</p><h2 class="titulo" style="font-size:66px">Y dentro de la tienda, un ACL por oferta</h2></div>
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Control de acceso por funcionalidad</p><h2 class="titulo" style="font-size:66px">Cada ruta pide un permiso, y la lista vive en la base</h2></div>
+  <div class="fila" style="align-items:flex-start">
+    <div style="flex:1" data-in="2">
+      <ul class="puntos" style="--c:var(--pg)">
+        <li>Cada acción tiene su código, como <span class="mono">ofertas.publicar</span>, y la tabla <span class="mono">rol_permiso</span> dice qué rol lo tiene</li>
+        <li>Un guard lo pregunta en cada petición. Sin el permiso la respuesta es <b>403</b>, también llamando a la ruta directo</li>
+        <li>Se quita una fila y vale en la petición siguiente, sin reiniciar nada</li>
+        <li>Cada intento negado queda anotado con quién, su rol y la ruta</li>
+      </ul>
+      <p class="mono" style="display:block;margin-top:30px;padding:18px 24px;background:rgba(0,0,0,.35);border-radius:14px;font-size:23px;line-height:1.55;color:#d8ddf5">POST /vendedor/ofertas, sesión de compradora<br><span class="no">403</span> No tienes permiso para hacer esto (falta ofertas.publicar)</p>
+      <div class="cifras" style="margin-top:30px">
+        <div class="cifra"><div class="v" style="font-size:72px">38</div><div class="t">permisos en 17 módulos</div></div>
+        <div class="cifra"><div class="v" style="font-size:72px">136</div><div class="t">rutas privadas, cada una con el suyo</div></div>
+      </div>
+    </div>
+    <div style="flex:1.05" data-in="3"><img class="captura" src="img/permisos-rol.png" alt="Permisos por rol en el panel del admin"><p class="pie">rol_permiso en PostgreSQL y PermisoGuard en el backend, ADR-26</p></div>
+  </div>
+</section>
+
+<!-- 14 El ACL de la aplicacion, por oferta -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Control de acceso por persona</p><h2 class="titulo" style="font-size:66px">Y cada oferta, con su propia lista</h2></div>
   <div class="fila" style="align-items:flex-start">
     <div style="flex:1" data-in="2">
       <ul class="puntos" style="--c:var(--pg)">
         <li>Las bases no saben qué persona pide, todo llega como <span class="mono">mesh_backend</span>. Por eso esta lista vive en la aplicación</li>
         <li>Cada oferta lleva su lista, quién puede ver, editar o poner descuento, y hasta cuándo</li>
-        <li>Lo que no está en la lista se niega, con el mismo 404 de una oferta ajena</li>
+        <li>Sin ninguna entrada, el mismo 404 de una oferta ajena. Si la ve pero no puede editarla, 403</li>
         <li>Cada permiso se revisa por separado y cada cambio queda con quién lo hizo</li>
       </ul>
       <div class="cifras" style="margin-top:40px">
@@ -330,7 +351,7 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 14 Si se cae una base -->
+<!-- 15 Si se cae una base -->
 <section class="lamina" style="padding-top:70px">
   <div class="cabeza" data-in="1" style="margin-bottom:22px"><p class="etiqueta">Un respaldo por base</p><h2 class="titulo" style="font-size:70px">Si se cae una, la tienda sigue</h2></div>
   <table class="tabla" data-in="2">
@@ -345,7 +366,7 @@ b { font-weight: 600; color: #fff; }
   <p class="pie" data-in="3">node pruebas/caidas.mjs, 51 comprobaciones con cada base apagada y otras 51 congelada</p>
 </section>
 
-<!-- 15 Buscador con foto -->
+<!-- 16 Buscador con foto -->
 <section class="lamina">
   <div class="cabeza" data-in="1" style="margin-bottom:34px"><p class="etiqueta">Lo que pidió el profesor</p><h2 class="titulo" style="font-size:70px">La tarjeta sale entera de Elasticsearch</h2></div>
   <div class="fila" style="align-items:flex-start">
@@ -357,9 +378,9 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 16 Registro unico -->
+<!-- 17 Registro unico -->
 <section class="lamina" style="padding-top:70px">
-  <div class="cabeza" data-in="1" style="margin-bottom:28px"><p class="etiqueta">Registro único de decisiones</p><h2 class="titulo" style="font-size:66px">25 decisiones, un solo número cada una</h2></div>
+  <div class="cabeza" data-in="1" style="margin-bottom:28px"><p class="etiqueta">Registro único de decisiones</p><h2 class="titulo" style="font-size:66px">26 decisiones, un solo número cada una</h2></div>
   <div class="registro" data-in="2" style="grid-template-columns:repeat(7, 1fr)">
     <div class="adr" style="--c:var(--mongo)"><div class="i">ADR-1</div><p>Catálogo en MongoDB</p></div>
     <div class="adr" style="--c:var(--pg)"><div class="i">ADR-2</div><p>Dinero y stock en PostgreSQL</p></div>
@@ -386,11 +407,12 @@ b { font-weight: 600; color: #fff; }
     <div class="adr nuevo" style="--c:var(--es)"><div class="i">ADR-23</div><p>La foto en el buscador</p></div>
     <div class="adr" style="--c:var(--pg)"><div class="i">ADR-24</div><p>Un ACL por oferta en la aplicación</p></div>
     <div class="adr" style="--c:var(--neo)"><div class="i">ADR-25</div><p>La categoría en el grafo</p></div>
+    <div class="adr" style="--c:var(--pg)"><div class="i">ADR-26</div><p>Permisos por rol en PostgreSQL</p></div>
   </div>
-  <p class="pie" data-in="3">Las que tienen fondo verde se habían hecho sin su registro y ahora lo tienen, con el flujo que tocan y qué pasa si cada base se cae. La 24 y la 25 son de la última semana y nacieron con el suyo.</p>
+  <p class="pie" data-in="3">Las que tienen fondo verde se habían hecho sin su registro y ahora lo tienen, con el flujo que tocan y qué pasa si cada base se cae. La 24, la 25 y la 26 son de las dos últimas semanas y nacieron con el suyo.</p>
 </section>
 
-<!-- 17 Retrospectiva -->
+<!-- 18 Retrospectiva -->
 <section class="lamina">
   <div class="cabeza" data-in="1"><p class="etiqueta">Retrospectiva · 4 puntos</p><h2 class="titulo">Lo que sostendríamos y lo que no</h2></div>
   <div class="fila">
@@ -401,7 +423,7 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 18 Lo aprendido -->
+<!-- 19 Lo aprendido -->
 <section class="lamina">
   <div class="centro">
     <p class="etiqueta" data-in="1">Lo que aprendimos</p>
@@ -410,7 +432,7 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 19 Demo -->
+<!-- 20 Demo -->
 <section class="lamina">
   <div class="centro" style="gap:46px">
     <p data-in="1" style="font:700 220px/1 var(--titulo);letter-spacing:-6px">DEMO</p>
@@ -424,7 +446,7 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 20 Gracias -->
+<!-- 21 Gracias -->
 <section class="lamina">
   <div class="centro" style="gap:30px">
     <p class="cita" data-in="1" style="font-size:150px">Gracias</p>

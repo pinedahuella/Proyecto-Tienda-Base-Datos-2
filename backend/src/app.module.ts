@@ -13,6 +13,7 @@ import { BaseDatosGrafoService } from './services/base-datos-grafo.service';
 import { UsuarioController } from './controllers/usuario.controller';
 import { UsuarioService } from './services/usuario.service';
 import { AdminUsuariosController } from './controllers/admin/admin-usuarios.controller';
+import { AdminPermisosController } from './controllers/admin/admin-permisos.controller';
 import { AdminUsuariosService } from './services/admin/admin-usuarios.service';
 import { AdminCatalogosController } from './controllers/admin/admin-catalogos.controller';
 import { AdminCatalogosService } from './services/admin/admin-catalogos.service';
@@ -33,6 +34,7 @@ import { OfertasVendedorService } from './services/vendedores/ofertas.service';
 import { PermisosOfertaController } from './controllers/vendedores/permisos-oferta.controller';
 import { OfertasCompartidasController } from './controllers/compartidas/ofertas-compartidas.controller';
 import { AclOfertasService } from './services/acl/acl-ofertas.service';
+import { PermisosService } from './services/acl/permisos.service';
 import { BuscarOfertasController } from './controllers/vendedores/buscar-ofertas.controller';
 import { BuscarOfertasService } from './services/vendedores/buscar-ofertas.service';
 import { EventoOfertaSyncService } from './services/vendedores/evento-oferta-sync.service';
@@ -170,6 +172,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BaseDatosGrafoController,
     UsuarioController,
     AdminUsuariosController,
+    AdminPermisosController,
     AdminCatalogosController,
     PerfilController,
     DireccionUsuarioController,
@@ -234,6 +237,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     ProductosVendedorService,
     OfertasVendedorService,
     AclOfertasService,
+    PermisosService,
     BuscarOfertasService,
     EventoOfertaSyncService,
     VentasLimitadasService,

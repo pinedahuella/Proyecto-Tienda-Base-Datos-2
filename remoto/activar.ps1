@@ -22,28 +22,40 @@ if (-not $c.ConnectAsync($Ip, 5432).Wait(4000)) {
 }
 $c.Close()
 
-$registro = Join-Path $env:TEMP 'mesh-tunel.log'
-Remove-Item $registro -ErrorAction SilentlyContinue
-$p = Start-Process node -ArgumentList "`"$remoto\tunel.cjs`" $Ip" -WindowStyle Hidden -PassThru `
-    -RedirectStandardOutput $registro -RedirectStandardError "$registro.err"
-for ($i = 0; $i -lt 20; $i++) {
-    Start-Sleep -Milliseconds 300
-    if ((Test-Path $registro) -and (Select-String -Path $registro -Pattern 'tunel listo' -Quiet)) { break }
-    if ($p.HasExited) { break }
+# El tunel de otra consola (esta u otra de Git Bash) sigue vivo y va a la misma
+# PC: se reusa. Levantar otro chocaba con sus puertos y se leia como "ocupado
+# por el Docker local" (2026-10-28).
+$vivo = Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
+    Where-Object { $_.CommandLine -like "*tunel.cjs*$Ip*" } | Select-Object -First 1
+if ($vivo) {
+    $pidTunel = $vivo.ProcessId
+    Write-Host "El tunel a $Ip ya estaba levantado (pid $pidTunel), se reusa."
+} else {
+    $registro = Join-Path $env:TEMP 'mesh-tunel.log'
+    Remove-Item $registro -ErrorAction SilentlyContinue
+    $p = Start-Process node -ArgumentList "`"$remoto\tunel.cjs`" $Ip" -WindowStyle Hidden -PassThru `
+        -RedirectStandardOutput $registro -RedirectStandardError "$registro.err"
+    for ($i = 0; $i -lt 20; $i++) {
+        Start-Sleep -Milliseconds 300
+        if ((Test-Path $registro) -and (Select-String -Path $registro -Pattern 'tunel listo' -Quiet)) { break }
+        if ($p.HasExited) { break }
+    }
+    if (-not ((Test-Path $registro) -and (Select-String -Path $registro -Pattern 'tunel listo' -Quiet))) {
+        Get-Content "$registro.err" -ErrorAction SilentlyContinue | Write-Host -ForegroundColor Red
+        if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+        Write-Host 'No se pudo levantar el tunel. Si dice ocupado: apaga el Docker local.' -ForegroundColor Red
+        return
+    }
+    $pidTunel = $p.Id
+    Set-Content -Path (Join-Path $remoto '.tunel.pid') -Value $p.Id
+    Set-Content -Path (Join-Path $remoto '.tunel.ip') -Value $Ip
 }
-if (-not ((Test-Path $registro) -and (Select-String -Path $registro -Pattern 'tunel listo' -Quiet))) {
-    Get-Content "$registro.err" -ErrorAction SilentlyContinue | Write-Host -ForegroundColor Red
-    if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force }
-    Write-Host 'No se pudo levantar el tunel. Si dice ocupado: apaga el Docker local.' -ForegroundColor Red
-    return
-}
-Set-Content -Path (Join-Path $remoto '.tunel.pid') -Value $p.Id
 $env:MESH_REMOTO = $Ip
 $env:MESH_REMOTO_PATH_ANTES = $env:PATH
 $env:PATH = "$remoto\bin;$env:PATH"
 # Las pruebas que tumban una base a proposito se saltan esa parte (activar.sh).
 $env:SIN_CAIDA = '1'
-Write-Host "Modo remoto: bases en $Ip, tunel en el pid $($p.Id), docker = remoto\bin\docker.ps1." -ForegroundColor Green
+Write-Host "Modo remoto: bases en $Ip, tunel en el pid $pidTunel, docker = remoto\bin\docker.ps1." -ForegroundColor Green
 if (-not (Test-Path (Join-Path $remoto 'herramientas\bin\mongosh.exe'))) {
     Write-Host 'Falta mongosh para lo de Mongo: bash remoto/instalar.sh (una vez).' -ForegroundColor Yellow
 }

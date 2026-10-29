@@ -373,6 +373,13 @@ Las Demos de la Entrega final:
   .\demo-entrega-final.ps1 -Parte acceso                      los usuarios de Redis
   .\demo-entrega-final.ps1 -Parte bases                       el control de acceso de las seis bases
   bash seguridad/prueba_acceso.sh                             lo mismo, la prueba completa (93 OK)
+  .\demo-entrega-final.ps1 -Parte permisos                    el ACL de funcionalidades: cada rol llama directo,
+                                                              401 sin sesion, 403 sin el permiso, y una linea de
+                                                              SQL le quita y le devuelve ofertas.publicar al vendedor
+  .\demo-entrega-final.ps1 -Parte compartir                   el ACL por oferta: compartir, quitar, el registro
+  node pruebas/permisos_cobertura.cjs                         cada ruta privada con su permiso, los mismos roles que antes
+  bash pruebas/permisos_rol.sh                                los 38 permisos con los tres roles, llamando directo
+  node pruebas/permisos_matriz.cjs --tabla                    cada ruta con su permiso, leido del backend compilado
   .\demo-entrega-final.ps1 -Parte semantica -Producto laptop  los parecidos, en la base y por /similares
   .\demo-entrega-final.ps1 -Parte facetas -Texto laptop       facetas, palabra mal escrita y sugerencias
   .\demo-entrega-final.ps1 -Parte vectores                    vectores, pendientes del worker y Ollama

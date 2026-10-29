@@ -10,6 +10,8 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -26,7 +28,8 @@ import { SeguimientosOfertaService } from '../../services/compradores/seguimient
  * Controlador de las rutas /comprador/seguimientos: "avisame cuando llegue" y
  * "avisame cuando baje", y sus avisos.
  *
- * Sin @Roles, igual que /comprador/pedidos: comprar no es privilegio de un
+ * `avisos.usar`, que en la semilla tienen los tres roles, igual que
+ * /comprador/pedidos: comprar no es privilegio de un
  * rol, y seguir una oferta tampoco. Cada quien solo ve y toca lo suyo (el
  * filtro por id_usuario esta en SeguimientosOfertaService).
  *
@@ -34,7 +37,8 @@ import { SeguimientosOfertaService } from '../../services/compradores/seguimient
  * chocar.
  */
 @Controller('comprador/seguimientos')
-@UseGuards(SesionGuard)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('avisos.usar')
 export class SeguimientosOfertaController {
   constructor(
     private readonly seguimientosOfertaService: SeguimientosOfertaService,

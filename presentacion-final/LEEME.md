@@ -1,7 +1,7 @@
 # Presentacion de la Entrega final
 
 Una sola pagina HTML de 1920x1080 que se escala a la pantalla, con la misma
-tecnica de las presentaciones de LECTORTIE e ITIL. 20 laminas.
+tecnica de las presentaciones de LECTORTIE e ITIL. 21 laminas.
 
 - Abrir `index.html` en Edge o Chrome. Flechas, espacio o clic avanzan, flecha
   izquierda o clic en el cuarto izquierdo retroceden, F pantalla completa,

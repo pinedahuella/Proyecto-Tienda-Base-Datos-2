@@ -9,12 +9,12 @@
 #
 # QUE COMPRUEBA
 # ============================================================
-#   1. Negar por defecto: sin entrada, ver, editar y descuento dan 404, la
+#   1. Negar por defecto: sin ninguna entrada, ver, editar y descuento dan 404, la
 #      oferta no sale en la lista y el intento queda en el registro.
 #   2. Repartir: correo que no existe, a si misma, permiso desconocido, lista
 #      vacia, vencimiento pasado, a un comprador, oferta ajena, quien no es
 #      dueno, sin sesion y un comprador en la ruta: todos rechazados.
-#   3. Con ver: se ve, pero editar y descuento siguen en 404 (cada permiso se
+#   3. Con ver: se ve, pero editar y descuento dan 403 (cada permiso se
 #      revisa por separado) y el motivo queda anotado.
 #   4. Con editar: el precio y la existencia cambian de verdad, el estado no se
 #      puede tocar por aqui, y el registro dice quien lo hizo y a nombre de quien.
@@ -172,8 +172,10 @@ esperar "$(echo "$r" | campo payload.id_oferta)" "$OF" "ventas.sur ve la oferta"
 esperar "$(echo "$r" | campo payload.dueno.correo)" "ventas.norte@mesh.com" "y sabe de quien es"
 esperar "$(echo "$r" | campo payload.permisos.0.permiso)" ver "y que solo puede ver"
 esperar "$(en_lista "$SUR")" si "sale en su lista de compartidas"
-esperar "$(codigo PATCH "/compartidas/ofertas/$OF" "$SUR" '{"precio":"1.00"}')" 404 "ver no deja editar"
-esperar "$(codigo POST "/compartidas/ofertas/$OF/descuento" "$SUR" '{"porcentaje_descuento":50}')" 404 "ni poner descuento"
+esperar "$(codigo PATCH "/compartidas/ofertas/$OF" "$SUR" '{"precio":"1.00"}')" 403 "ver no deja editar (403, ya ve la oferta)"
+r=$(curl -s -w '\n%{http_code}' -X POST "$API/compartidas/ofertas/$OF/descuento" -H "Content-Type: application/json" -H "Cookie: $SUR" -d '{"porcentaje_descuento":50}')
+esperar "$(echo "$r" | tail -1)" 403 "ni poner descuento"
+esperar "$(echo "$r" | head -1 | campo mensaje)" "No tienes el permiso descuento sobre esta oferta" "y el mensaje dice cual falta"
 esperar "$(sql "SELECT detalle->>'motivo' FROM auditoria_permiso_oferta WHERE id_oferta=$OF AND accion='negado' AND id_usuario_actor=$ID_SUR ORDER BY id_auditoria_permiso_oferta DESC LIMIT 1;")" "tiene ver, no descuento" "el registro dice por que se nego"
 
 
@@ -192,7 +194,7 @@ esperar "$(codigo PATCH "/compartidas/ofertas/$OF" "$SUR" '{"precio":"-5"}')" 40
 esperar "$(registro editar "$ID_SUR")" 3 "tres ediciones en el registro, con ventas.sur como quien lo hizo"
 esperar "$(sql "SELECT id_usuario_dueno FROM auditoria_permiso_oferta WHERE id_oferta=$OF AND accion='editar' ORDER BY id_auditoria_permiso_oferta DESC LIMIT 1;")" "$ID_NORTE" "y a nombre de ventas.norte"
 esperar "$(sql "SELECT detalle->>'precio' FROM auditoria_permiso_oferta WHERE id_oferta=$OF AND accion='editar' AND detalle ? 'precio' ORDER BY id_auditoria_permiso_oferta DESC LIMIT 1;")" "$NUEVO" "con el precio que puso"
-esperar "$(codigo POST "/compartidas/ofertas/$OF/descuento" "$SUR" '{"porcentaje_descuento":10}')" 404 "editar no deja poner descuento"
+esperar "$(codigo POST "/compartidas/ofertas/$OF/descuento" "$SUR" '{"porcentaje_descuento":10}')" 403 "editar no deja poner descuento"
 
 
 titulo "5. Con descuento"
@@ -216,7 +218,7 @@ ID_EDITAR=$(id_entrada "$ID_SUR" editar)
 r=$(llamar DELETE "/vendedor/ofertas/$OF/permisos/$ID_EDITAR" "$NORTE")
 esperar "$(echo "$r" | campo ok)" True "ventas.norte le quita editar"
 esperar "$(entradas "$ID_SUR")" "ver,descuento" "quedan ver y descuento"
-esperar "$(codigo PATCH "/compartidas/ofertas/$OF" "$SUR" '{"precio":"1.00"}')" 404 "editar ya no pasa, al instante"
+esperar "$(codigo PATCH "/compartidas/ofertas/$OF" "$SUR" '{"precio":"1.00"}')" 403 "editar ya no pasa, al instante (le quedan ver y descuento)"
 esperar "$(codigo GET "/compartidas/ofertas/$OF" "$SUR")" 200 "ver sigue"
 esperar "$(codigo DELETE "/vendedor/ofertas/$OF/permisos/$ID_EDITAR" "$NORTE")" 404 "quitar otra vez la misma, 404"
 esperar "$(codigo DELETE "/vendedor/ofertas/$OF/permisos/$(id_entrada "$ID_SUR" ver)" "$SUR")" 404 "ventas.sur no puede quitarse ni quitar nada"
@@ -227,7 +229,7 @@ VENCE=$(python -c "import datetime; print((datetime.datetime.now(datetime.timezo
 esperar "$(codigo POST "/vendedor/ofertas/$OF/permisos" "$NORTE" "{\"correo\":\"ventas.sur@mesh.com\",\"permisos\":[\"editar\"],\"fecha_vencimiento\":\"$VENCE\"}")" 201 "editar por 6 segundos"
 esperar "$(codigo PATCH "/compartidas/ofertas/$OF" "$SUR" "{\"precio\":\"$PRECIO0\"}")" 200 "mientras vale, edita (devuelve el precio de antes)"
 sleep 7
-esperar "$(codigo PATCH "/compartidas/ofertas/$OF" "$SUR" '{"precio":"1.00"}')" 404 "vencido, ya no edita, sin que nadie lo borre"
+esperar "$(codigo PATCH "/compartidas/ofertas/$OF" "$SUR" '{"precio":"1.00"}')" 403 "vencido, ya no edita, sin que nadie lo borre"
 esperar "$(llamar GET "/vendedor/ofertas/$OF/permisos" "$NORTE" | python -c "
 import sys,json
 d=json.load(sys.stdin)['payload']['permisos']

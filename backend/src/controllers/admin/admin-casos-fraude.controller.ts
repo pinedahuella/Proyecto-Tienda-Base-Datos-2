@@ -7,7 +7,8 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -15,7 +16,6 @@ import type {
   ActualizarCasoFraudePeticion,
   PaginarCasosFraudeQuery,
 } from '../../dto/paginar-casos-fraude';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { CasosFraudeService } from '../../services/fraude/casos-fraude.service';
 
 /**
@@ -27,8 +27,8 @@ import { CasosFraudeService } from '../../services/fraude/casos-fraude.service';
  * no reemplazan sus paneles individuales.
  */
 @Controller('admin/fraude/casos')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('fraude.ver')
 export class AdminCasosFraudeController {
   constructor(private readonly casosFraudeService: CasosFraudeService) {}
 
@@ -55,6 +55,7 @@ export class AdminCasosFraudeController {
   }
 
   // PATCH /admin/fraude/casos/:id { estado, motivo }
+  @Permiso('fraude.resolver')
   @Patch(':id')
   async actualizar(
     @Param('id') id: string,

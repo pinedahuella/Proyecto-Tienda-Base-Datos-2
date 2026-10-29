@@ -412,6 +412,13 @@ const CATALOGO = [
     construir: () => ['-Parte', 'compartir'],
   },
   {
+    id: 'final-permisos', grupo: 'Demos de la Entrega final', titulo: 'Permisos por rol, el ACL de funcionalidades',
+    explica: 'La matriz de permisos_por_rol en PostgreSQL y cada rol llamando directo a las mismas rutas, sin la pagina. Sin sesion 401, sin el permiso 403 con el permiso que falta. En vivo, una linea de SQL le quita ofertas.publicar al vendedor y su peticion siguiente da 403, sin reiniciar nada, y otra linea se lo devuelve. Al final el registro de auditoria_permiso. Deja la matriz como estaba. Necesita el backend.',
+    script: 'demo-entrega-final.ps1', confirmar: null,
+    campos: [],
+    construir: () => ['-Parte', 'permisos'],
+  },
+  {
     id: 'final-categorias', grupo: 'Demos de la Entrega final', titulo: 'Tambien compraron, primero la misma categoria',
     explica: 'Para un producto comprado, lo que contesta Neo4j con el grupo de cada recomendacion (0 la misma categoria, 1 el resto) y lo mismo por la ruta de la ficha. Los de la misma categoria van primero aunque tengan menos compradores. Solo lee.',
     script: 'demo-entrega-final.ps1', confirmar: null,

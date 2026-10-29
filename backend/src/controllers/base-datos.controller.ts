@@ -5,9 +5,9 @@ import {
   HttpStatus,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../decorators/roles.decorator';
+import { Permiso } from '../decorators/permiso.decorator';
+import { PermisoGuard } from '../guards/permiso.guard';
 import { SesionGuard } from '../guards/sesion.guard';
-import { ID_ROL_ADMIN } from '../models/rol-usuario';
 import { Cortacircuitos } from '../helpers/cortacircuitos';
 import { exito } from '../helpers/respuesta';
 import { BaseDatosService } from '../services/base-datos.service';
@@ -45,9 +45,9 @@ export class BaseDatosController {
   // para quien mantiene la tienda, la pagina no lo usa. Solo el admin: el
   // motivo de una caida trae hosts y puertos internos, y la tienda puede estar
   // publicada (mesh.ledkid.com).
+  @Permiso('sistema.ver')
   @Get('cortacircuitos')
-  @UseGuards(SesionGuard)
-  @Roles(ID_ROL_ADMIN)
+  @UseGuards(SesionGuard, PermisoGuard)
   cortacircuitos() {
     return exito(
       Cortacircuitos.estados(),

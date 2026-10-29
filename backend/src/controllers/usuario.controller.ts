@@ -12,6 +12,8 @@ import {
 } from '@nestjs/common';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { UsuarioActual } from '../decorators/usuario-actual.decorator';
+import { Permiso } from '../decorators/permiso.decorator';
+import { PermisoGuard } from '../guards/permiso.guard';
 import { SesionGuard } from '../guards/sesion.guard';
 import { exito } from '../helpers/respuesta';
 import { manejarErrorHttp } from '../helpers/manejar-error-http';
@@ -34,6 +36,7 @@ import { TomaCuentaService } from '../services/fraude-login/toma-cuenta.service'
 import { ViajeImposibleService } from '../services/fraude-login/viaje-imposible.service';
 import { EventosAutenticacionSyncService } from '../services/eventos-autenticacion/eventos-autenticacion-sync.service';
 import { LogService } from '../services/log.service';
+import { PermisosService } from '../services/acl/permisos.service';
 import { UsuarioService } from '../services/usuario.service';
 
 /**
@@ -75,6 +78,7 @@ export class UsuarioController {
     private readonly tomaCuentaService: TomaCuentaService,
     private readonly viajeImposibleService: ViajeImposibleService,
     private readonly eventosAutenticacionSyncService: EventosAutenticacionSyncService,
+    private readonly permisosService: PermisosService,
   ) {}
 
   /**
@@ -291,15 +295,19 @@ export class UsuarioController {
   // GET /usuario/yo
   // Protegida: SesionGuard exige una cookie valida y una cuenta activa
   // antes de dejar pasar la peticion, y deja el usuario del token listo
-  // para @UsuarioActual().
+  // para @UsuarioActual(). Suma `permisos`, los codigos del ACL de
+  // funcionalidades que tiene su rol (migracion 050), para que el frontend
+  // no ensene lo que el backend le va a negar.
+  @Permiso('cuenta.ver')
   @Get('yo')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async obtenerYo(@UsuarioActual() usuarioToken: TokenUsuario) {
     try {
-      const usuario = await this.usuarioService.obtenerPorId(
-        usuarioToken.id_usuario,
-      );
-      return exito(usuario, 'Sesion activa');
+      const [usuario, permisos] = await Promise.all([
+        this.usuarioService.obtenerPorId(usuarioToken.id_usuario),
+        this.permisosService.codigosDe(usuarioToken.id_rol_usuario),
+      ]);
+      return exito({ ...usuario, permisos }, 'Sesion activa');
     } catch (error) {
       manejarErrorHttp(error, 'No se pudo obtener el usuario');
     }

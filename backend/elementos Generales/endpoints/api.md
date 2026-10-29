@@ -164,49 +164,68 @@ Nest no trae una carpeta "guards" ni "decorators" por defecto, pero es como
 las llama su propia documentacion). Todo lo que escribimos nosotros
 (archivos, clases y funciones) esta en espanol.
 
-### Guards y decorators (sesion)
+### Guards y decorators (sesion y permisos)
 
 No hay middleware clasico en este proyecto: proteger una ruta se hace con
 un **Guard**, que en Nest corre antes del controller y ya sabe a que ruta
 va la peticion (un middleware normal no lo sabe).
 
+Desde el 2026-10-28 (migracion 050, ADR-26 en `docs/DECISIONES.md`) son dos
+guards en fila. `SesionGuard` dice QUIEN es (401 si nadie). `PermisoGuard` dice
+QUE PUEDE: cada ruta declara su accion con `@Permiso('modulo.accion')` y el guard
+le pregunta a la tabla `rol_permiso` si el rol de la cuenta la tiene (403 si
+no). Los `@Roles(...)` de antes ya no existen; la semilla de la 050 deja pasar a
+los mismos roles que ellos, ruta por ruta. Donde los demas `endpoints-*.md`
+dicen "`SesionGuard` + `@Roles(ID_ROL_ADMIN)`", hoy es `PermisoGuard` con un
+permiso que en `rol_permiso` solo tiene el admin: quien entra es lo mismo.
+
 | Archivo | Que es |
 |---|---|
-| `guards/sesion.guard.ts` | `SesionGuard`. Lee la cookie del token, la verifica, y si la ruta tiene `@Roles(...)` tambien revisa el rol |
-| `decorators/roles.decorator.ts` | `@Roles(...ids)`, marca una ruta como restringida a ciertos `id_rol_usuario` |
+| `guards/sesion.guard.ts` | `SesionGuard`. Lee la cookie del token, la verifica y revisa que la cuenta siga activa (401) |
+| `guards/permiso.guard.ts` | `PermisoGuard`. Lee el `@Permiso` de la ruta y le pregunta a `rol_permiso` (403). Una ruta con este guard y sin `@Permiso` tambien se niega |
+| `decorators/permiso.decorator.ts` | `@Permiso('ofertas.publicar')`, en la clase o en el metodo (el del metodo manda) |
+| `models/permiso.ts` | la lista de los codigos, tipada: un codigo mal escrito no compila |
+| `services/acl/permisos.service.ts` | la consulta, el registro de los negados (`auditoria_permiso`) y la API de `/admin/permisos` |
 | `decorators/usuario-actual.decorator.ts` | `@UsuarioActual()`, le da al controller el usuario que `SesionGuard` ya verifico |
 | `types/fastify.d.ts` | le agrega el campo `usuario` al `request` de Fastify, para que `SesionGuard` lo pueda guardar ahi |
 
 Para proteger una ruta:
 
 ```ts
-@UseGuards(SesionGuard)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('cuenta.ver')
 @Get('yo')
 obtenerYo(@UsuarioActual() usuario: TokenUsuario) { ... }
 ```
 
-Y para ademas restringirla a un rol (por ejemplo, solo admin), lo normal es
-ponerlo en la clase, para que proteja todas las rutas del controller de
-una sola vez:
+Lo normal es ponerlo en la clase, para que proteja todas las rutas del
+controller de una sola vez, y en el metodo solo lo que cambia:
 
 ```ts
 @Controller('admin/usuarios')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
-export class AdminUsuariosController { ... }
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('usuarios.ver')
+export class AdminUsuariosController {
+  @Get() listar() { ... }                      // usuarios.ver
+  @Permiso('usuarios.editar')
+  @Patch(':id') actualizar() { ... }          // usuarios.editar
+}
 ```
 
-`SesionGuard` no se registra en `app.module.ts`: Nest lo instancia solo
-cuando lo ve en un `@UseGuards(...)`.
+Una accion nueva va en `models/permiso.ts` y en una migracion que la inserte en
+`permiso` y le de `rol_permiso` a los roles que tocan.
+`node pruebas/permisos_cobertura.cjs` revisa que cada ruta privada tenga el
+guard y un permiso que exista en la base.
 
-Detalle tecnico si algun dia `@Roles(...)` da problemas: adentro,
-`SesionGuard` busca esa metadata con `reflector.getAllAndOverride(...)`
-revisando primero el metodo y despues la clase. Si buscara solo el metodo
-(`reflector.get(ROLES_KEY, contexto.getHandler())`), un `@Roles(...)`
-puesto en la clase nunca se encontraria y la restriccion de rol quedaria
-sin efecto en silencio, aunque el token siga verificandose bien. Esto paso
-de verdad al construir `/admin/usuarios`: cualquiera logueado, sin importar
-el rol, pasaba el guard.
+Ningun guard se registra en `app.module.ts`: Nest los instancia cuando los ve en
+un `@UseGuards(...)` (`PermisosService` si va en providers).
+
+Detalle tecnico: `PermisoGuard` busca la metadata con
+`reflector.getAllAndOverride(...)`, revisando primero el metodo y despues la
+clase. Si buscara solo el metodo, un `@Permiso(...)` puesto en la clase nunca se
+encontraria. Con `@Roles` esto paso de verdad al construir `/admin/usuarios`:
+cualquiera logueado, sin importar el rol, pasaba el guard. Aqui no pasaria en
+silencio: sin permiso encontrado la ruta se niega.
 
 ### Cada archivo y que hace
 

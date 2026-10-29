@@ -7,13 +7,13 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { MarcarAnilloFraudeBody } from '../../dto/marcar-anillo-fraude';
 import type { PaginarAnillosFraudeQuery } from '../../dto/paginar-anillos-fraude';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { FraudeAnillosPersistidosService } from '../../services/fraude/fraude-anillos-persistidos.service';
 
 /**
@@ -31,12 +31,13 @@ import { FraudeAnillosPersistidosService } from '../../services/fraude/fraude-an
  * de ESE anillo (autor/vendedor/producto/fecha/calificación de cada reseña
  * de su evidencia), consultado en vivo contra Neo4j.
  *
- * `@UseGuards(SesionGuard)` y `@Roles(ID_ROL_ADMIN)` en la clase, mismo
- * criterio que `FraudeController`/`AdminFraudeLoginController`: solo admin.
+ * `@UseGuards(SesionGuard, PermisoGuard)` y `@Permiso('fraude.ver')` en la clase
+ * (marcar pide `fraude.resolver`), mismo criterio que
+ * `FraudeController`/`AdminFraudeLoginController`: en `rol_permiso`, solo el admin.
  */
 @Controller('admin/fraude')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('fraude.ver')
 export class AdminFraudeAnillosController {
   constructor(
     private readonly fraudeAnillosPersistidosService: FraudeAnillosPersistidosService,
@@ -55,6 +56,7 @@ export class AdminFraudeAnillosController {
   }
 
   // PATCH /admin/fraude/alertas-resenas/:id
+  @Permiso('fraude.resolver')
   @Patch('alertas-resenas/:id')
   async marcar(@Param('id') id: string, @Body() body: MarcarAnilloFraudeBody) {
     try {

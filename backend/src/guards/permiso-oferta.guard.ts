@@ -23,8 +23,11 @@ import { AclOfertasService } from '../services/acl/acl-ofertas.service';
  *
  * - Si la tiene, deja en `request.permisoOferta` la oferta y su dueno, y el
  *   controller actua a nombre del dueno con los mismos servicios de siempre.
- * - Si no, contesta 404, el mismo de una oferta ajena o que no existe: no se
- *   le confirma a nadie que la oferta existe. El intento queda en el registro.
+ * - Si no tiene ninguna entrada, contesta 404, el mismo de una oferta ajena o
+ *   que no existe: no se le confirma que la oferta existe.
+ * - Si tiene alguna pero no esa (ve la oferta, pero no puede editarla),
+ *   contesta 403 con el permiso que le falta (2026-10-28).
+ *   En los dos casos el intento queda en el registro.
  *
  * Negar por defecto: sin entrada no hay paso, tambien para un admin y tambien
  * para el dueno (lo suyo va por /vendedor/ofertas).

@@ -836,8 +836,8 @@ export class ProductosVendedorService {
   /**
    * Solo la cuenta de la tienda, o cualquier cuenta con rol admin, crea/edita/
    * consulta el catalogo por estas rutas (ver la nota de CORREO_TIENDA
-   * arriba). El guard de rol (@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN) en
-   * ProductosVendedorController) ya deja pasar admin junto con vendedor;
+   * arriba). El guard de rol (`PermisoGuard` con los permisos `catalogo.*`
+   * de `rol_permiso`) ya deja pasar admin junto con vendedor;
    * esta funcion es el segundo filtro, mas fino, que distingue "vendedor
    * cualquiera" (rechazado) de "la tienda o un admin" (aceptado) dentro de
    * ese primer grupo. Un producto creado o editado por un admin no queda

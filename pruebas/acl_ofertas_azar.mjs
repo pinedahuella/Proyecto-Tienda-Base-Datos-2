@@ -163,20 +163,21 @@ for (let v = 1; v <= VUELTAS; v++) {
     } else if (accion === 'editar') {
       // El mismo precio: cambia la fila (y el historial) pero no el valor.
       const r = await pedir('PATCH', `/compartidas/ofertas/${OF}`, galleta, { precio: PRECIO });
-      const debe = tiene.has('editar') ? 200 : 404;
+      // Sin ninguna entrada, 404 (no se confirma que existe); con alguna pero sin editar, 403.
+      const debe = tiene.has('editar') ? 200 : tiene.size > 0 ? 403 : 404;
       revisar(r.codigo === debe, `vuelta ${v}: ${correo} editar con [${[...tiene]}] dio ${r.codigo}, debia ${debe}`);
-      if (debe === 404) cuenta.negados++;
+      if (debe !== 200) cuenta.negados++;
       cuenta.editar++;
     } else if (accion === 'descuento') {
       const r = await pedir('POST', `/compartidas/ofertas/${OF}/descuento`, galleta, { porcentaje_descuento: 5 });
       // Un POST que sale bien contesta 201, como todos los de Nest.
-      const debe = tiene.has('descuento') ? 201 : 404;
+      const debe = tiene.has('descuento') ? 201 : tiene.size > 0 ? 403 : 404;
       revisar(r.codigo === debe, `vuelta ${v}: ${correo} descuento con [${[...tiene]}] dio ${r.codigo}, debia ${debe} (${r.datos?.mensaje ?? ''})`);
       if (r.codigo === 201) {
         const q = await pedir('DELETE', `/compartidas/ofertas/${OF}/descuento`, galleta);
         revisar(q.codigo === 200, `vuelta ${v}: ${correo} quitar el descuento dio ${q.codigo}`);
       }
-      if (debe === 404) cuenta.negados++;
+      if (debe !== 201) cuenta.negados++;
       cuenta.descuento++;
     } else if (accion === 'lista') {
       const r = await pedir('GET', '/compartidas/ofertas', galleta);

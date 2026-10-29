@@ -6,9 +6,7 @@ import {
   Injectable,
   Logger,
 } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
 import type { FastifyRequest } from 'fastify';
-import { ROLES_KEY } from '../decorators/roles.decorator';
 import {
   ErrorConexion,
   ErrorConexionRedis,
@@ -20,9 +18,13 @@ import { NOMBRE_COOKIE_TOKEN, verificarToken } from '../helpers/token';
 import { UsuarioService } from '../services/usuario.service';
 
 /**
- * Protege una ruta. Se usa con @UseGuards(SesionGuard) en el controller.
+ * Protege una ruta: dice QUIEN es la cuenta, o 401. Se usa con
+ * @UseGuards(SesionGuard, PermisoGuard) en el controller; lo que la cuenta
+ * PUEDE hacer lo decide PermisoGuard despues, con el ACL de funcionalidades
+ * de la migracion 050 (403). Hasta el 2026-10-28 este guard tambien revisaba
+ * los @Roles(...) de cada ruta; esa lista paso a la tabla rol_permiso.
  *
- * Hace tres cosas, en orden:
+ * Hace dos cosas, en orden:
  *
  * 1. Autenticacion: lee la cookie, verifica el token. Si no hay cookie o el
  *    token no sirve (firma invalida o vencido), corta la peticion con 401.
@@ -33,8 +35,6 @@ import { UsuarioService } from '../services/usuario.service';
  *    responde, se cree al token (2026-10-20): la sesion abierta sigue y la
  *    tienda se puede mirar; lo que escribe en PostgreSQL, como pagar, falla
  *    por su lado.
- * 3. Autorizacion (opcional): si la ruta ademas tiene @Roles(...), revisa
- *    que el rol del usuario este en esa lista. Si no, 403.
  *
  * Si todo pasa, deja el usuario del token en request.usuario, listo para
  * leerse con el decorator @UsuarioActual().
@@ -45,10 +45,7 @@ export class SesionGuard implements CanActivate {
   /** Cuando se aviso por ultima vez de una sesion sin PostgreSQL. */
   private static ultimoAviso = 0;
 
-  constructor(
-    private readonly reflector: Reflector,
-    private readonly usuarioService: UsuarioService,
-  ) {}
+  constructor(private readonly usuarioService: UsuarioService) {}
 
   /**
    * Una linea en el registro, como mucho una por minuto, para que se vea que
@@ -113,27 +110,6 @@ export class SesionGuard implements CanActivate {
       throw new HttpException(
         fallo('Token invalido o expirado'),
         HttpStatus.UNAUTHORIZED,
-      );
-    }
-
-    // getAllAndOverride revisa el metodo primero y, si ahi no hay nada, la
-    // clase. @Roles(...) puede ir en cualquiera de los dos: en este
-    // proyecto va en la clase (protege todas las rutas del controller por
-    // defecto), pero un metodo especifico podria sobreescribirla.
-    const rolesPermitidos = this.reflector.getAllAndOverride<
-      number[] | undefined
-    >(ROLES_KEY, [contexto.getHandler(), contexto.getClass()]);
-
-    const hayRestriccionDeRol =
-      rolesPermitidos != null && rolesPermitidos.length > 0;
-
-    if (
-      hayRestriccionDeRol &&
-      !rolesPermitidos.includes(request.usuario.id_rol_usuario)
-    ) {
-      throw new HttpException(
-        fallo('No tienes permiso para hacer esto'),
-        HttpStatus.FORBIDDEN,
       );
     }
 

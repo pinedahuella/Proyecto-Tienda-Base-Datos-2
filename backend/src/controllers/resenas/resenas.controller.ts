@@ -11,6 +11,8 @@ import {
 } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -36,7 +38,8 @@ import { ResenasService } from '../../services/resenas/resenas.service';
  * mano (sin guard) y se la pasa al servicio para que cada voto traiga `mio`
  * y salga `puede_calificar`.
  *
- * El resto piden sesion (SesionGuard por metodo, sin @Roles: ni calificar,
+ * El resto piden sesion y su permiso (`resenas.escribir`, `resenas.votar`, que en
+ * la semilla tienen los tres roles: ni calificar,
  * ni responder, ni votar son de un rol -- cualquiera con sesion puede,
  * igual que comprar). En particular RESPONDER una resena lo puede hacer
  * cualquiera, no solo el vendedor calificado (decision del equipo; ver
@@ -63,8 +66,9 @@ export class ResenasController {
 
   // GET /productos/:id/comprado
   // ¿La cuenta logueada compro (y pago) este producto alguna vez?
+  @Permiso('pedidos.ver')
   @Get('productos/:id/comprado')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async comprado(
     @Param('id') id: string,
     @UsuarioActual() usuarioActual: TokenUsuario,
@@ -87,8 +91,9 @@ export class ResenasController {
 
   // GET /productos/:id/resenado
   // ¿La cuenta logueada ya reseño este producto (a cualquier vendedor)?
+  @Permiso('resenas.escribir')
   @Get('productos/:id/resenado')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async resenado(
     @Param('id') id: string,
     @UsuarioActual() usuarioActual: TokenUsuario,
@@ -110,8 +115,9 @@ export class ResenasController {
   }
 
   // POST /resenas
+  @Permiso('resenas.escribir')
   @Post('resenas')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async crear(
     @Body() cuerpo: CrearResenaPeticion,
     @UsuarioActual() usuarioActual: TokenUsuario,
@@ -128,8 +134,9 @@ export class ResenasController {
   }
 
   // POST /resenas/:id/respuestas   (:id es id_resena)
+  @Permiso('resenas.escribir')
   @Post('resenas/:id/respuestas')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async responder(
     @Param('id') id: string,
     @Body() cuerpo: ResponderResenaPeticion,
@@ -148,8 +155,9 @@ export class ResenasController {
   }
 
   // PUT /comentarios/:id/voto   (:id es id_comentario)
+  @Permiso('resenas.votar')
   @Put('comentarios/:id/voto')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async votar(
     @Param('id') id: string,
     @Body() cuerpo: VotarComentarioPeticion,
@@ -168,8 +176,9 @@ export class ResenasController {
   }
 
   // DELETE /comentarios/:id/voto
+  @Permiso('resenas.votar')
   @Delete('comentarios/:id/voto')
-  @UseGuards(SesionGuard)
+  @UseGuards(SesionGuard, PermisoGuard)
   async quitarVoto(
     @Param('id') id: string,
     @UsuarioActual() usuarioActual: TokenUsuario,

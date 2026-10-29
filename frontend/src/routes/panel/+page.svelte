@@ -6,6 +6,7 @@
 	import { conJson, pedir } from '$lib/api';
 	import Direcciones from '$lib/Direcciones.svelte';
 	import PanelAdmin from '$lib/PanelAdmin.svelte';
+	import PanelPermisos from '$lib/PanelPermisos.svelte';
 	import PanelVendedor from '$lib/PanelVendedor.svelte';
 	import OfertasVendedor from '$lib/OfertasVendedor.svelte';
 	import OfertasCompartidas from '$lib/OfertasCompartidas.svelte';
@@ -148,6 +149,9 @@
 				{ id: 'catalogo', nombre: 'Catalogo', pie: 'Alta, edicion e historial de los productos' },
 				{ id: 'propuestas', nombre: 'Propuestas', pie: 'Lo que otros vendedores quieren meter al catalogo' },
 				{ id: 'cuentas', nombre: 'Cuentas', pie: 'Los usuarios del sistema, su rol y su estado' },
+				// El ACL de funcionalidades (migracion 050): que puede cada rol, y
+				// quien intento algo sin permiso.
+				{ id: 'permisos', nombre: 'Permisos', pie: 'Que puede hacer cada rol y quien intento algo sin permiso' },
 				// Se llamaba "Resenas". Desde el 2026-09-10 lleva tambien los intentos de
 				// entrada sospechosos, y nadie los iria a buscar bajo ese nombre.
 				{ id: 'fraude', nombre: 'Fraude', pie: 'Resenas en anillo, intentos de entrada y compras sospechosas' },
@@ -885,6 +889,12 @@
 				<div class="hoja" class:oculta={seccionViva !== 'cuentas'}>
 					{#if visitadas.has('cuentas')}
 						<PanelAdmin alExpirarSesion={expiro} />
+					{/if}
+				</div>
+
+				<div class="hoja" class:oculta={seccionViva !== 'permisos'}>
+					{#if visitadas.has('permisos')}
+						<PanelPermisos alExpirarSesion={expiro} />
 					{/if}
 				</div>
 

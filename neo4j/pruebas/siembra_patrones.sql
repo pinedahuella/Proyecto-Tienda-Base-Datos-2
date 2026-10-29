@@ -149,12 +149,17 @@ SELECT pg_temp.resena(-2027, -228, -226, -954, 5, now() - interval '10 days');
 -- ============================================================
 -- Cada 30 dias exactos: `regularidad` tiene que dar 0, un reloj. p1 escribe
 -- ademas una sola resena a otro vendedor: exclusividad 5 de 6.
+-- La serie va anclada al dia 15 del mes pasado, a mediodia, y no a now(). Con
+-- now() - 30, 60... 150 dias, los cinco meses distintos dependian del dia: el
+-- 29 de octubre caian dos en julio y la prueba fallaba siempre (2026-10-29).
+-- Desde el 15, cada paso de 30 dias cae en el mes anterior (con febrero baja
+-- como mucho dos dias por paso, nunca del 7).
 SELECT pg_temp.resena(-2028, -225, -230, -967, 5, now() - interval '27 days');
-SELECT pg_temp.resena(-2030, -231, -230, -961, 5, now() - interval '150 days');
-SELECT pg_temp.resena(-2031, -231, -230, -962, 5, now() - interval '120 days');
-SELECT pg_temp.resena(-2032, -231, -230, -963, 5, now() - interval '90 days');
-SELECT pg_temp.resena(-2033, -231, -230, -964, 5, now() - interval '60 days');
-SELECT pg_temp.resena(-2034, -231, -230, -965, 5, now() - interval '30 days');
+SELECT pg_temp.resena(-2030, -231, -230, -961, 5, date_trunc('month', now()) - interval '1 month' + interval '14 days 12 hours' - interval '120 days');
+SELECT pg_temp.resena(-2031, -231, -230, -962, 5, date_trunc('month', now()) - interval '1 month' + interval '14 days 12 hours' - interval '90 days');
+SELECT pg_temp.resena(-2032, -231, -230, -963, 5, date_trunc('month', now()) - interval '1 month' + interval '14 days 12 hours' - interval '60 days');
+SELECT pg_temp.resena(-2033, -231, -230, -964, 5, date_trunc('month', now()) - interval '1 month' + interval '14 days 12 hours' - interval '30 days');
+SELECT pg_temp.resena(-2034, -231, -230, -965, 5, date_trunc('month', now()) - interval '1 month' + interval '14 days 12 hours');
 SELECT pg_temp.resena(-2035, -231, -220, -966, 5, now() - interval '45 days');
 
 -- CONTROL S3a: el cliente fiel. Califica a p0 en cuatro meses, pero tambien a

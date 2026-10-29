@@ -1,11 +1,11 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { ConsultarTendenciaAscensoQuery } from '../../dto/consultar-tendencia-ascenso';
 import type { ConsultarTendenciaVentanaQuery } from '../../dto/consultar-tendencia-ventana';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { AdminTendenciasAvanzadasService } from '../../services/admin/admin-tendencias-avanzadas.service';
 
 /**
@@ -23,8 +23,8 @@ import { AdminTendenciasAvanzadasService } from '../../services/admin/admin-tend
  * `elementos Generales/endpoints/endpoints-eventos.md`.
  */
 @Controller('admin/eventos')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('tendencias.ver')
 export class AdminTendenciasAvanzadasController {
   constructor(
     private readonly adminTendenciasAvanzadasService: AdminTendenciasAvanzadasService,

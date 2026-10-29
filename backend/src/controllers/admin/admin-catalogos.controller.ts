@@ -1,9 +1,9 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import { exito } from '../../helpers/respuesta';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { AdminCatalogosService } from '../../services/admin/admin-catalogos.service';
 
 /**
@@ -13,8 +13,8 @@ import { AdminCatalogosService } from '../../services/admin/admin-catalogos.serv
  * metodo.
  */
 @Controller('admin')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('usuarios.ver')
 export class AdminCatalogosController {
   constructor(private readonly adminCatalogosService: AdminCatalogosService) {}
 

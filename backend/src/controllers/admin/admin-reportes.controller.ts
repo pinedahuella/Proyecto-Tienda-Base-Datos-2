@@ -1,9 +1,9 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { AdminReportesService } from '../../services/admin/admin-reportes.service';
 
 /**
@@ -12,7 +12,7 @@ import { AdminReportesService } from '../../services/admin/admin-reportes.servic
  *   GET /admin/reportes/reservaciones   los pedidos abiertos y sin pagar
  *   GET /admin/reportes/ventas          el resumen de lo vendido y cobrado
  *
- * `@UseGuards(SesionGuard)` y `@Roles(ID_ROL_ADMIN)` van en la clase, igual
+ * `@UseGuards(SesionGuard, PermisoGuard)` y `@Permiso('reportes.ver')` van en la clase, igual
  * que en `AdminUsuariosController` y `AdminCatalogosController`: cualquier
  * ruta que se agregue despues queda protegida por defecto. Solo admin --
  * son datos de todo el sistema, no de una cuenta.
@@ -20,8 +20,8 @@ import { AdminReportesService } from '../../services/admin/admin-reportes.servic
  * Detalle del payload: `elementos Generales/endpoints-reportes.md`.
  */
 @Controller('admin/reportes')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('reportes.ver')
 export class AdminReportesController {
   constructor(private readonly adminReportesService: AdminReportesService) {}
 

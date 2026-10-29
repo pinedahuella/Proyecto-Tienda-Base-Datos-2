@@ -6,14 +6,14 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import type { AbrirVentaLimitadaPeticion } from '../../dto/abrir-venta-limitada';
-import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { VentasLimitadasService } from '../../services/vendedores/ventas-limitadas.service';
 
 /**
@@ -31,8 +31,8 @@ import { VentasLimitadasService } from '../../services/vendedores/ventas-limitad
  * `/vendedor/ofertas`). Una oferta ajena o inexistente da el 404 generico.
  */
 @Controller('vendedor/ofertas')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('ofertas.venta_relampago')
 export class VentasLimitadasController {
   constructor(
     private readonly ventasLimitadasService: VentasLimitadasService,

@@ -66,10 +66,10 @@ copia de una tabla vieja a una nueva con `ON CONFLICT DO UPDATE`, en el arranque
 siguiente vuelve a pisar la nueva con lo viejo. La 031 y la 032 copian solo
 mientras exista la columna que la 033 quita, y ese es su marcador.
 
-## Los cuarenta y nueve archivos de esquema
+## Los cincuenta archivos de esquema
 
 Este encabezado decia "los doce" y la tabla llegaba hasta la 012. Despues dijo
-"los catorce" con quince en la carpeta, "los veinte" con veintiuno, y "los veinticinco" con treinta y tres, "los treinta y tres" con treinta y nueve, "los treinta y nueve" con cuarenta y ocho, y "los cuarenta y ocho" hasta la 049. Es la misma trampa que este documento
+"los catorce" con quince en la carpeta, "los veinte" con veintiuno, y "los veinticinco" con treinta y tres, "los treinta y tres" con treinta y nueve, "los treinta y nueve" con cuarenta y ocho, "los cuarenta y ocho" hasta la 049, y "los cuarenta y nueve" hasta la 050. Es la misma trampa que este documento
 avisa mas abajo para las comprobaciones: una lista escrita a mano caduca sin
 avisar. Antes de creerle a esta, cuentalos:
 
@@ -130,6 +130,7 @@ Una linea cada uno, para no tener que abrirlos para saber donde buscar:
 | `047_catalogo_respaldo.sql` | La copia del catalogo alcanza para que la tienda se vea sin MongoDB (2026-10-19): `producto_catalogo` suma `estado`, `id_categoria`, `descripcion` y `fecha_creacion`. Con Mongo caido el backend arma el catalogo, la ficha y las tarjetas desde esta copia (`backend/src/helpers/catalogo-respaldo.ts`); las llena el backend al escribir un producto y el paso 7e de arrancar |
 | `048_buscador_respaldo.sql` | El buscador sale de PostgreSQL cuando Elasticsearch no responde (2026-10-20): las extensiones `unaccent`, `fuzzystrmatch` y `pg_trgm`, `mesh_normalizar()` (sin tildes y en minusculas, como el analizador del indice) y `mesh_coincide()` (la tolerancia de `fuzziness: AUTO`), con indices de trigramas sobre los nombres de `producto_catalogo` y `variante_catalogo`. La usa `backend/src/helpers/buscador-respaldo.ts` |
 | `049_acl_ofertas.sql` | El ACL de la aplicacion, por oferta (2026-10-26, ADR-24): `tipo_permiso_oferta` (ver, editar, descuento), `permiso_oferta` (oferta, cuenta, permiso, quien lo dio y hasta cuando; uno por los tres, nadie a si mismo) y `auditoria_permiso_oferta`, sin llaves foraneas a proposito porque es un registro. Lo revisa `PermisoOfertaGuard` en `/compartidas/ofertas`; las rutas de lo propio no cambian. El catalogo va con `WHERE NOT EXISTS` para no gastar la secuencia en cada arranque |
+| `050_permisos_por_rol.sql` | El ACL de funcionalidades, por rol (2026-10-28, ADR-26), en tercera forma normal: `modulo_permiso` (17), `permiso` (38 acciones, unica por modulo), `rol_permiso` (el ACL, rol y permiso con quien lo dio) y `auditoria_permiso` (cada intento negado con su ruta y cada permiso dado o quitado; FK al rol y al permiso, no a la cuenta), y la vista `permisos_por_rol`. Lo revisa `PermisoGuard` en las 136 rutas privadas. La semilla reproduce los `@Roles` de antes y reparte permisos SOLO cuando el permiso se crea (un `INSERT ... RETURNING` en un CTE): volver a correrla no le devuelve a un rol lo que un admin le quito |
 
 **De la 034 a la 039, las senales que no salen del grafo.** Son del 2 al 4 de
 octubre y siguen un mismo molde: el backend las detecta y la migracion solo

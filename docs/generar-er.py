@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Dibuja el diagrama entidad relacion de Mesh a partir del esquema VIVO.
 
-    python generar-er.py                  el diagrama completo, las 89 tablas
+    python generar-er.py                  el diagrama completo, las 93 tablas
     python generar-er.py --modulo fraude  solo un modulo, para el informe
 
 Escribe docs/diagrama-general.drawio (editable en diagrams.net) y, si encuentra
@@ -46,6 +46,14 @@ def leer_env():
 def psql(env, sql):
     cmd = ["docker", "exec", "mesh-postgres", "psql", "-U", env["DB_USER"],
            "-d", env["DB_NAME"], "-At", "-F", "|", "-c", sql]
+    if os.environ.get("MESH_REMOTO"):
+        # Modo remoto (source remoto/activar.sh): el docker falso de remoto/bin
+        # es un script de bash, y Windows no lo encuentra por su nombre. Con el
+        # bash de Git: "bash" a secas es el de WSL, en System32.
+        bash = r"C:\Program Files\Git\bin\bash.exe"
+        if not os.path.exists(bash):
+            bash = "bash"
+        cmd = [bash, os.path.join(RAIZ, "remoto", "bin", "docker")] + cmd[1:]
     r = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8")
     if r.returncode != 0:
         raise SystemExit("psql fallo: " + r.stderr.strip())
@@ -94,7 +102,9 @@ def leer_esquema():
 MODULOS = {
     "cuentas": ("Cuentas y seguridad", "#DAE8FC", "#6C8EBF",
                 ["usuarios", "rol_usuario", "estado_usuario", "direcciones", "estado_direccion",
-                 "direccion_historial", "log_login", "tipo_login", "log_registro"]),
+                 "direccion_historial", "log_login", "tipo_login", "log_registro",
+                 # el ACL de funcionalidades, por rol (050)
+                 "modulo_permiso", "permiso", "rol_permiso", "auditoria_permiso"]),
     "catalogo": ("Catalogo", "#D5E8D4", "#82B366",
                  ["categorias", "productos", "estado_producto", "productos_historial",
                   "productos_variantes", "estado_variantes", "productos_variantes_historial",
@@ -143,8 +153,10 @@ MODULOS = {
 
 # columnas del diagrama completo, de izquierda a derecha
 DISPOSICION = [
-    ["tipo_login", "estado_direccion"],
-    ["log_login", "log_registro", "direcciones", "direccion_historial"],
+    # el ACL de funcionalidades (050): los catalogos aqui, la lista y su registro al lado
+    ["tipo_login", "estado_direccion", "|", "modulo_permiso", "permiso"],
+    ["log_login", "log_registro", "direcciones", "direccion_historial", "|",
+     "rol_permiso", "auditoria_permiso"],
     ["rol_usuario", "usuarios", "estado_usuario"],
     ["propuesta_producto", "|", "precio_historial", "oferta", "stock_movimiento", "pedido", "|",
      "resena", "comentario", "likes", "evento_comentario", "vector_comentario", "|",

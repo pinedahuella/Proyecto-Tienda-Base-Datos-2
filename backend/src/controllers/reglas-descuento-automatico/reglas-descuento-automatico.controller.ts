@@ -9,8 +9,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -18,7 +19,6 @@ import type { TokenUsuario } from '../../dto/token-usuario';
 import type { CrearReglaDescuentoPeticion } from '../../dto/crear-regla-descuento';
 import type { EditarReglaDescuentoPeticion } from '../../dto/editar-regla-descuento';
 import type { PaginarReglasDescuentoQuery } from '../../dto/paginar-reglas-descuento';
-import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { ReglasDescuentoAutomaticoService } from '../../services/reglas-descuento-automatico/reglas-descuento-automatico.service';
 
 /**
@@ -32,14 +32,15 @@ import { ReglasDescuentoAutomaticoService } from '../../services/reglas-descuent
  * propia cuenta.
  */
 @Controller('vendedor/reglas-descuento')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('reglas.ver')
 export class ReglasDescuentoAutomaticoController {
   constructor(
     private readonly reglasDescuentoService: ReglasDescuentoAutomaticoService,
   ) {}
 
   // POST /vendedor/reglas-descuento
+  @Permiso('reglas.administrar')
   @Post()
   async crear(
     @Body() datos: CrearReglaDescuentoPeticion,
@@ -93,6 +94,7 @@ export class ReglasDescuentoAutomaticoController {
   }
 
   // PATCH /vendedor/reglas-descuento/:id
+  @Permiso('reglas.administrar')
   @Patch(':id')
   async editar(
     @Param('id') id: string,
@@ -113,6 +115,7 @@ export class ReglasDescuentoAutomaticoController {
   }
 
   // DELETE /vendedor/reglas-descuento/:id
+  @Permiso('reglas.administrar')
   @Delete(':id')
   async eliminar(
     @Param('id') id: string,

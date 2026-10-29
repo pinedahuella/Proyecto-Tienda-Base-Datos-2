@@ -8,13 +8,13 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
-import { Roles } from '../../decorators/roles.decorator';
 import type { PeticionCorreoDashboard } from '../../dto/dashboards/dashboard-general';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import { exito } from '../../helpers/respuesta';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { DashboardCorreoService } from '../../services/dashboards/dashboard-correo.service';
 import {
   DashboardExportarService,
@@ -55,8 +55,8 @@ const TIPO_EXCEL =
  * Solo admin, en la clase, como `AdminReportesController`.
  */
 @Controller('admin/dashboard')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('dashboard.ver')
 export class DashboardGeneralController {
   constructor(
     private readonly dashboard: DashboardGeneralService,
@@ -171,6 +171,7 @@ export class DashboardGeneralController {
   }
 
   // GET /admin/dashboard/exportar/excel?desde&hasta&secciones=resumen,ventas
+  @Permiso('dashboard.exportar')
   @Get('exportar/excel')
   async excel(
     @Query() q: QueryPeriodo & { secciones?: string },
@@ -195,6 +196,7 @@ export class DashboardGeneralController {
   }
 
   // GET /admin/dashboard/exportar/pdf?desde&hasta&secciones=resumen,ventas
+  @Permiso('dashboard.exportar')
   @Get('exportar/pdf')
   async pdf(
     @Query() q: QueryPeriodo & { secciones?: string },
@@ -219,6 +221,7 @@ export class DashboardGeneralController {
   }
 
   // POST /admin/dashboard/exportar/correo  { correos, formato, desde, hasta, secciones }
+  @Permiso('dashboard.exportar')
   @Post('exportar/correo')
   async enviarPorCorreo(@Body() cuerpo: PeticionCorreoDashboard) {
     try {

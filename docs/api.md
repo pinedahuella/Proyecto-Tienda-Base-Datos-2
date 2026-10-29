@@ -20,12 +20,41 @@
 > respuesta, como se manejan los errores y como esta organizado el codigo.
 > Duplicar alli la lista de rutas solo garantiza que una de las dos caduque.
 
+## Lo que llego el 2026-10-28: el ACL de funcionalidades, por rol
+
+Cada una de las 136 rutas privadas declara su accion con `@Permiso('modulo.accion')`
+y `PermisoGuard` le pregunta a la tabla `rol_permiso` (migracion 050, ADR-26,
+`docs/SEGURIDAD.md`) si el rol de la cuenta la tiene. Sin sesion sigue siendo
+401; con sesion y sin el permiso, 403 con el codigo que falta:
+
+```json
+{ "ok": false, "mensaje": "No tienes permiso para hacer esto (falta ofertas.publicar)", "payload": null }
+```
+
+Los `@Roles(...)` ya no existen; la semilla de la 050 deja pasar a los mismos
+roles que ellos, ruta por ruta. `node pruebas/permisos_matriz.cjs --tabla` lista
+cada ruta con su permiso, leido del backend compilado.
+
+| Ruta | Que es | Donde se ve |
+|---|---|---|
+| `GET /admin/permisos` | la matriz: los roles, y los permisos por modulo con los roles que los tienen y a cuales no se les pueden quitar | panel, Permisos |
+| `GET /admin/permisos/registro?limite=50` | lo ultimo de `auditoria_permiso`: intentos negados con su ruta, permisos dados y quitados | panel, Permisos |
+| `POST /admin/permisos/:idRol/:idPermiso` | dar el permiso al rol (si ya lo tenia, `cambio: false`) | panel, Permisos |
+| `DELETE /admin/permisos/:idRol/:idPermiso` | quitarlo; 409 si esta protegido, 404 si no lo tenia | panel, Permisos |
+| `GET /usuario/yo` | suma `permisos`, los codigos que tiene el rol de la cuenta | toda la app |
+
+Las cuatro de `/admin/permisos` piden `permisos.ver` o `permisos.administrar`.
+Y en `/compartidas/ofertas`, con alguna entrada vigente pero no la que pide la
+ruta, la respuesta paso de 404 a 403 (ver abajo).
+
 ## Lo que llego el 2026-10-26: el ACL de ofertas y el orden de tambien compraron
 
 El ACL de la aplicacion (migracion 049, ADR-24, `docs/SEGURIDAD.md`). Todas con
-sesion y rol de vendedor o admin. Sin una entrada vigente, las de
-`/compartidas/ofertas` contestan 404, igual que una oferta ajena. La nota
-completa para el backend esta en
+sesion y rol de vendedor o admin (desde el 28-10, el permiso
+`ofertas.usar_compartidas` o `ofertas.compartir`). Sin ninguna entrada vigente,
+las de `/compartidas/ofertas` contestan 404, igual que una oferta ajena; con
+alguna, pero no la de esa accion, 403 (desde el 28-10). La nota completa para el
+backend esta en
 `backend/cambio_propuestas/2026-10-26_2300-categoria-en-el-grafo-y-acl-de-ofertas.md`.
 
 | Ruta | Que es | Donde se ve |
@@ -115,6 +144,7 @@ El codigo y `ok` siempre concuerdan.
 | 400 | El cliente mando datos invalidos | false |
 | 401 | No hay sesion, o el token vencio | false |
 | 402 | La tarjeta fue rechazada | false |
+| 403 | Hay sesion, pero el rol no tiene el permiso de esa accion (`rol_permiso`), o la cuenta ve una oferta compartida pero no tiene ese permiso sobre ella | false |
 | 404 | No existe lo que se pidio | false |
 | 409 | Conflicto, por ejemplo stock insuficiente | false |
 | 503 | Una base de datos no responde | false |

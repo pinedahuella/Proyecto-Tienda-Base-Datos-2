@@ -2,7 +2,11 @@ import { Injectable, Logger } from '@nestjs/common';
 import type { PoolClient } from 'pg';
 import { pool } from '../../database/postgres';
 import { CORREO_TIENDA } from '../../helpers/constantes';
-import { ErrorNoEncontrado, ErrorValidacion } from '../../helpers/errores';
+import {
+  ErrorNoEncontrado,
+  ErrorPermiso,
+  ErrorValidacion,
+} from '../../helpers/errores';
 import { manejarErrorConexion } from '../../helpers/manejar-error-db';
 import { expresionPrecioFinal } from '../../helpers/precio-descuento';
 import { ID_ESTADO_ACTIVO } from '../../models/estado-usuario';
@@ -47,8 +51,10 @@ export interface OtorgarPermisoPeticion {
  * Tres cosas, en este orden de importancia:
  *
  * 1. `comprobar()`: la pregunta del guard. Esta cuenta, esta oferta, este
- *    permiso, y una entrada vigente. Lo que no esta en la lista se niega con
- *    el 404 de siempre, y el intento queda en el registro.
+ *    permiso, y una entrada vigente. Sin ninguna entrada se niega con el 404
+ *    de siempre (no se confirma que la oferta existe); con alguna, pero no la
+ *    que pide la ruta, con 403 (ya la ve, el 404 no tendria sentido). El
+ *    intento queda en el registro.
  * 2. Lo compartido conmigo: la lista y una oferta, solo con lo que la cuenta
  *    tiene permiso de ver.
  * 3. Repartir permisos: solo el dueno de la oferta (o un admin, a nombre de la
@@ -71,7 +77,8 @@ export class AclOfertasService {
   /**
    * Si `idActor` puede hacer `permiso` sobre la oferta `idOfertaParametro`.
    * `ver` lo da cualquier entrada vigente; `editar` y `descuento` piden la
-   * suya. Devuelve la oferta y su dueno, o lanza `ErrorNoEncontrado`.
+   * suya. Devuelve la oferta y su dueno, o lanza `ErrorNoEncontrado` (sin
+   * ninguna entrada) o `ErrorPermiso` (con alguna, pero no esa).
    */
   async comprobar(
     idActor: string,
@@ -121,7 +128,12 @@ export class AclOfertasService {
               : `tiene ${fila.permisos.join(', ')}, no ${permiso}`,
         },
       });
-      throw new ErrorNoEncontrado(NO_EXISTE);
+      if (fila == null) {
+        throw new ErrorNoEncontrado(NO_EXISTE);
+      }
+      throw new ErrorPermiso(
+        `No tienes el permiso ${permiso} sobre esta oferta`,
+      );
     }
     return { id_oferta: idOferta, id_dueno: fila.id_dueno, permiso };
   }

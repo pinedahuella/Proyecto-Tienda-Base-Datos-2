@@ -7,11 +7,11 @@ texto es una guia para decirlo con las propias palabras, no para leerlo.
 |---|---|---|
 | 1 a 6, la tienda y la arquitectura | Jose Manuel | 4 min |
 | 7 a 9, la recomendacion semantica | Jose David | 3 min |
-| 10 a 13, el control de acceso por servicio y por persona | Jose Manuel | 4 min |
-| 14, si se cae una base | Juan Pablo | 1 min |
-| 15 y 16, el buscador y las decisiones | Jose David | 2 min |
-| 17 y 18, la retrospectiva | Juan Pablo | 2 min |
-| 19, la demo | los tres | 5 min |
+| 10 a 14, el control de acceso por servicio, por funcionalidad y por persona | Jose Manuel | 5 min |
+| 15, si se cae una base | Juan Pablo | 1 min |
+| 16 y 17, el buscador y las decisiones | Jose David | 2 min |
+| 18 y 19, la retrospectiva | Juan Pablo | 2 min |
+| 20, la demo | los tres | 5 min |
 
 ## 1. Portada (Jose Manuel)
 Somos Mesh. Hicimos TiendaYa con seis bases de datos, y cada una entro por la
@@ -68,38 +68,53 @@ no trae roles. Los tres estan corregidos o explicados.
 93 bien y 0 mal. Cada negativa tiene su control, y lo peligroso nunca se intenta
 a ciegas.
 
-## 13. Un ACL por oferta (Jose Manuel)
+## 13. Permisos por rol (Jose Manuel)
+Lo que pidio el profesor, el control de acceso a nivel de funcionalidades. Cada
+cosa que se puede hacer en la tienda tiene su codigo, como ofertas.publicar, y
+la tabla rol_permiso de PostgreSQL dice que rol lo tiene. Antes esa lista estaba
+escrita en el codigo, con @Roles; ahora son datos. Un guard del backend la
+pregunta en cada peticion, asi que aunque alguien llame a la ruta directo, con
+curl o Postman, sin el permiso recibe 403 y el intento queda anotado. Si
+preguntan como saben que no rompieron nada, antes de cambiarlo se guardo que
+roles entraban a cada una de las 165 rutas y la prueba compara ruta por ruta:
+el primer dia todo dejaba pasar a los mismos. Si preguntan si es un ACL de
+verdad, si: la lista esta en la base, lo que no esta se niega, y se cambia sin
+compilar. Las bases siguen con su usuario por servicio, esta es la capa de las
+funciones, y la siguiente lamina es la de cada oferta.
+
+## 14. Un ACL por oferta (Jose Manuel)
 Lo de antes es por servicio, y lo hacen cumplir las bases. Pero ninguna base
 sabe que persona pide, todo llega como mesh_backend. Por eso el permiso de cada
 persona vive en la aplicacion, como dijo el profesor. Cada oferta lleva su
 lista en PostgreSQL, quien puede verla, editarla o ponerle descuento y hasta
-cuando, y un guard del backend la revisa antes de cada ruta. Lo que no esta en
-la lista se niega con el mismo 404 de una oferta ajena. Si preguntan si es un
+cuando, y un guard del backend la revisa antes de cada ruta. Sin ninguna
+entrada se niega con el mismo 404 de una oferta ajena; si la ve pero no puede
+editarla, 403. Si preguntan si es un
 ACL de verdad, si, es una lista pegada a cada objeto que niega por defecto. Si
 preguntan por que no en la base, porque la base no conoce a las personas de la
 tienda. 84 comprobaciones de cada regla y casi cinco mil al azar contra un
 modelo, ninguna mal.
 
-## 14. Si se cae una base (Juan Pablo)
+## 15. Si se cae una base (Juan Pablo)
 Cada base tiene su respaldo. Con cualquiera caida menos PostgreSQL se sigue
 comprando. Con PostgreSQL caido no se cobra nada a medias.
 
-## 15. La foto en el buscador (Jose David)
+## 16. La foto en el buscador (Jose David)
 Lo pidio el profesor. La foto viaja en el mismo documento de Elasticsearch,
 guardada sin indexar, y la tarjeta sale de una sola consulta.
 
-## 16. Las 25 decisiones (Jose David)
+## 17. Las 26 decisiones (Jose David)
 Los numeros chocaban entre entregas y ahora hay un solo registro. Las verdes son
 las que faltaban, como comprar sin MongoDB o el carrito en PostgreSQL.
 
-## 17. Retrospectiva (Juan Pablo)
+## 18. Retrospectiva (Juan Pablo)
 Siete que sostendriamos y ocho que no. La mas clara, el carrito solo en Redis,
 que el 17 de octubre paso a tener su verdad en PostgreSQL.
 
-## 18. Lo aprendido (Juan Pablo)
+## 19. Lo aprendido (Juan Pablo)
 Cada dato con un solo dueno escrito.
 
-## 19. Demo (los tres)
+## 20. Demo (los tres)
 En el panel de comandos (`.\panel-comandos.ps1`), en este orden.
 1. Buscar `labtop` y luego una frase, en la tienda. Se ven las fotos.
 2. Abrir una laptop y bajar a Parecidos a este.
@@ -112,9 +127,14 @@ En el panel de comandos (`.\panel-comandos.ps1`), en este orden.
    intenta otra vez y la pagina le dice que ya no tiene permiso. En el registro
    de la oferta queda todo, con el intento negado en rojo. Las dos cuentas usan
    Vendedor123.
+6. Permisos por rol. `.\demo-entrega-final.ps1 -Parte permisos` (boton "Permisos
+   por rol" del panel de comandos): cada rol llama directo a las mismas rutas,
+   401 sin sesion y 403 sin el permiso, y en vivo una linea de SQL le quita
+   ofertas.publicar al vendedor y su peticion siguiente da 403. Si hay tiempo,
+   lo mismo desde la tienda: como admin, Permisos, desmarcar una casilla.
 
-## 20. Gracias
-Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`, 161.
+## 21. Gracias
+Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`, 170.
 
 ## Antes de presentar
 - Las dos PC en la misma red y sin cambiarse de red durante la demo. El 23 de
@@ -130,3 +150,7 @@ Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`, 161.
   `.\remoto\caidas.ps1 -Accion levantar` unos minutos antes (tarda unos 3).
 - No correr la bateria de pruebas el mismo dia. Deja cuentas, ofertas a Q15 y
   senales de fraude de prueba.
+- La matriz de permisos completa: `SELECT count(*) FROM rol_permiso;` tiene que
+  dar 76. Si en un ensayo se quito una casilla en Permisos y no se devolvio, el
+  rol sigue sin ese permiso y alguna pantalla va a dar 403 en plena demo. La
+  demo `-Parte permisos` devuelve sola lo que quita.

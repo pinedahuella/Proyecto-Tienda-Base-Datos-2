@@ -1,6 +1,8 @@
 import { Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import type { FastifyRequest } from 'fastify';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -10,9 +12,10 @@ import { PedidosCompradorService } from '../../services/compradores/pedidos.serv
 /**
  * Controlador de las rutas /comprador/pedidos.
  *
- * Sin @Roles: a diferencia de /vendedor/productos o /admin/*, comprar no
+ * `pedidos.ver` y `pedidos.cancelar`, que en la semilla tienen los tres roles: a
+ * diferencia de /vendedor/productos o /admin/*, comprar no
  * es un privilegio de un rol en particular -- cualquiera con sesion puede
- * hacerlo, sea comprador, vendedor o admin. Solo @UseGuards(SesionGuard),
+ * hacerlo, sea comprador, vendedor o admin. Solo @UseGuards(SesionGuard, PermisoGuard),
  * sin restriccion de rol.
  *
  * Solo leer y cancelar. Se arma y se compra por /carrito: el pedido
@@ -23,7 +26,8 @@ import { PedidosCompradorService } from '../../services/compradores/pedidos.serv
  * carrito.
  */
 @Controller('comprador/pedidos')
-@UseGuards(SesionGuard)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('pedidos.ver')
 export class PedidosCompradorController {
   constructor(
     private readonly pedidosCompradorService: PedidosCompradorService,
@@ -72,6 +76,7 @@ export class PedidosCompradorController {
   }
 
   // POST /comprador/pedidos/:id/cancelar
+  @Permiso('pedidos.cancelar')
   @Post(':id/cancelar')
   async cancelar(
     @Param('id') id: string,

@@ -39,6 +39,8 @@ else
         pruebas/ofertas_y_seguimientos.sh
         pruebas/acl_ofertas.sh
         pruebas/acl_ofertas_azar.mjs
+        pruebas/permisos_cobertura.cjs
+        pruebas/permisos_rol.sh
         pruebas/busquedas_sin_resultados.sh
         pruebas/busqueda.sh
         pruebas/alertas_login.sh

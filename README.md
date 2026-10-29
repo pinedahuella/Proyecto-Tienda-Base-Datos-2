@@ -21,7 +21,7 @@ modelo `paraphrase-multilingual`. El diagrama de todo esta en
 ```
 backend/            API en NestJS con Fastify
 frontend/           Interfaz en SvelteKit
-migrations/         Esquema SQL (001 a 049) y el generador de datos
+migrations/         Esquema SQL (001 a 050) y el generador de datos
 mongo/              Colecciones e indices de MongoDB
 etl/                Cargas entre bases (catalogo, grafo, buscador, eventos, vectores)
 redis/ neo4j/ clickhouse/ elastic/    Scripts y pruebas de cada base
@@ -62,10 +62,16 @@ abren desde la misma PC. Neo4j es la excepcion, porque su edicion community no
 tiene roles. Todo esta en [docs/SEGURIDAD.md](docs/SEGURIDAD.md) y se prueba con
 `bash seguridad/prueba_acceso.sh` (93 comprobaciones).
 
-Dentro de la tienda, ademas de los roles, hay un ACL por oferta que vive en la
-aplicacion (ADR-24): el dueno le da a otra cuenta permiso para ver, editar o
-poner descuento, y lo que no esta en la lista se niega. Se prueba con
-`bash pruebas/acl_ofertas.sh` y `node pruebas/acl_ofertas_azar.mjs`.
+Dentro de la tienda hay dos ACL mas, en PostgreSQL. El de funcionalidades
+(ADR-26, migracion 050): cada ruta privada pide una accion (`ofertas.publicar`) y
+la tabla `rol_permiso` dice que rol la tiene; sin ella, 403 aunque se llame a la
+ruta directo, y el intento queda en `auditoria_permiso`. El admin lo cambia en
+el panel, seccion Permisos, y vale en la peticion siguiente. Y el de cada oferta
+(ADR-24): el dueno le da a otra cuenta permiso para ver, editar o poner
+descuento. En los dos, lo que no esta en la lista se niega. Se prueban con
+`node pruebas/permisos_cobertura.cjs`, `bash pruebas/permisos_rol.sh`,
+`bash pruebas/acl_ofertas.sh` y `node pruebas/acl_ofertas_azar.mjs`, y se
+ensenan con `.\demo-entrega-final.ps1 -Parte permisos`.
 
 Las contrasenas viven en `.env` y `backend/.env`, que no se suben. `arrancar.ps1`
 genera las que falten.
@@ -132,7 +138,7 @@ Las diapositivas de la presentacion final se abren con
 ## Pruebas y demos
 
 ```bash
-bash pruebas/correr_todas.sh        # las 44 pruebas de punta a punta, mas de media hora
+bash pruebas/correr_todas.sh        # las 46 pruebas de punta a punta, mas de media hora
 bash seguridad/prueba_acceso.sh     # el control de acceso de las seis bases
 ```
 
@@ -151,7 +157,7 @@ ensena y lo que toca, y todas tienen su boton en `.\panel-comandos.ps1`.
 |---|---|
 | [docs/instalacion.md](docs/instalacion.md) | Que instalar, como levantar todo, errores comunes |
 | [docs/ARQUITECTURA.md](docs/ARQUITECTURA.md) | La arquitectura, flujo por flujo, y su historia |
-| [docs/DECISIONES.md](docs/DECISIONES.md) | El registro unico de decisiones, ADR-1 a ADR-25 |
+| [docs/DECISIONES.md](docs/DECISIONES.md) | El registro unico de decisiones, ADR-1 a ADR-26 |
 | [docs/SEGURIDAD.md](docs/SEGURIDAD.md) | Usuarios de cada base, puertos e imagenes |
 | [docs/base-de-datos.md](docs/base-de-datos.md) | El modelo relacional y documental, y ADR-1 a ADR-5 |
 | [docs/CONSISTENCIA-CHECKOUT.md](docs/CONSISTENCIA-CHECKOUT.md) | Que pasa en el pago si falla cada paso |

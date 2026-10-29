@@ -7,13 +7,13 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
 import type { TokenUsuario } from '../../dto/token-usuario';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import { exito } from '../../helpers/respuesta';
-import { ID_ROL_ADMIN, ID_ROL_VENDEDOR } from '../../models/rol-usuario';
 import {
   AclOfertasService,
   type OtorgarPermisoPeticion,
@@ -30,8 +30,8 @@ import {
  *   DELETE /vendedor/ofertas/:id/permisos/:idPermiso   quitar una entrada
  */
 @Controller('vendedor/ofertas')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('ofertas.compartir')
 export class PermisosOfertaController {
   constructor(private readonly aclOfertasService: AclOfertasService) {}
 

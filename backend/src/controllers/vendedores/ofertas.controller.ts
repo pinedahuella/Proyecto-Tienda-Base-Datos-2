@@ -9,8 +9,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -23,7 +24,6 @@ import type {
   PaginarOfertasPendientesQuery,
   PaginarOfertasQuery,
 } from '../../dto/paginar-ofertas';
-import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { OfertasVendedorService } from '../../services/vendedores/ofertas.service';
 
 /**
@@ -43,8 +43,8 @@ import { OfertasVendedorService } from '../../services/vendedores/ofertas.servic
  * mandan tambien `usuarioActual.id_rol_usuario`, no solo el id_usuario.
  */
 @Controller('vendedor/ofertas')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('ofertas.ver')
 export class OfertasVendedorController {
   constructor(
     private readonly ofertasVendedorService: OfertasVendedorService,
@@ -92,6 +92,7 @@ export class OfertasVendedorController {
   // La cola de revision: todas las ofertas en estado "pendiente" de
   // cualquier vendedor. Solo la tienda o un admin -- un vendedor cualquiera
   // recibe el mismo 404 generico. Segmento literal, va antes de :id/rechazos.
+  @Permiso('ofertas.revisar')
   @Get('pendientes')
   async listarPendientes(@UsuarioActual() usuarioActual: TokenUsuario) {
     try {
@@ -109,6 +110,7 @@ export class OfertasVendedorController {
   // La version paginada de GET /vendedor/ofertas/pendientes (que se queda
   // tal cual): misma cola, mismo orden, solo tienda o admin (mismo 404
   // disfrazado), sin filtros. Segmento literal, va antes de :id/rechazos.
+  @Permiso('ofertas.revisar')
   @Get('pendientes/paginado')
   async listarPendientesPaginado(
     @Query() query: PaginarOfertasPendientesQuery,
@@ -170,6 +172,7 @@ export class OfertasVendedorController {
   }
 
   // POST /vendedor/ofertas
+  @Permiso('ofertas.publicar')
   @Post()
   async crear(
     @Body() datos: CrearOfertaPeticion,
@@ -190,6 +193,7 @@ export class OfertasVendedorController {
   // PATCH /vendedor/ofertas/:id/revision
   // La tienda (o un admin) aprueba o rechaza una oferta pendiente. Segmento
   // "revision" literal, va antes de :id.
+  @Permiso('ofertas.revisar')
   @Patch(':id/revision')
   async revisar(
     @Param('id') id: string,
@@ -214,6 +218,7 @@ export class OfertasVendedorController {
   // POST /vendedor/ofertas/:id/descuento
   // Aplica un % de descuento a una oferta propia. Segmento "descuento"
   // literal, va antes de :id.
+  @Permiso('ofertas.descuento')
   @Post(':id/descuento')
   async aplicarDescuento(
     @Param('id') id: string,
@@ -235,6 +240,7 @@ export class OfertasVendedorController {
 
   // DELETE /vendedor/ofertas/:id/descuento
   // Quita el descuento activo de una oferta propia.
+  @Permiso('ofertas.descuento')
   @Delete(':id/descuento')
   async quitarDescuento(
     @Param('id') id: string,
@@ -253,6 +259,7 @@ export class OfertasVendedorController {
   }
 
   // PATCH /vendedor/ofertas/:id
+  @Permiso('ofertas.editar')
   @Patch(':id')
   async editar(
     @Param('id') id: string,

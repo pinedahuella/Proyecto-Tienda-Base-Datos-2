@@ -124,10 +124,26 @@ El ACL de la aplicacion (ADR-24) visto desde el panel. Dos pantallas:
 - **Compartidas**, una seccion del panel (vendedor y admin), en
   `lib/OfertasCompartidas.svelte`. Las ofertas de otras cuentas que me dejaron
   ver o cambiar, con su dueno y mis permisos. Editar y Descuento salen solo si
-  tengo ese permiso, pero manda el backend: si contesta 404 porque el permiso se
-  quito o vencio con la pagina abierta, se dice y se recarga la lista.
+  tengo ese permiso, pero manda el backend: si contesta 404 o 403 porque el
+  permiso se quito o vencio con la pagina abierta, se dice y se recarga la lista.
 
 Las llamadas estan en `lib/compartidas.ts`.
+
+## Permisos por rol (2026-10-28)
+
+El ACL de funcionalidades (ADR-26) visto por el admin, en la seccion
+**Permisos** del panel, despues de Cuentas (`lib/PanelPermisos.svelte`).
+
+- La matriz: cada permiso (`ofertas.publicar` y su descripcion), agrupado por
+  modulo, con una casilla por rol. Marcar o desmarcar cambia una fila de
+  `rol_permiso` y vale desde la peticion siguiente de esa cuenta. Las casillas
+  protegidas (`cuenta.ver`, y `permisos.*` del admin) salen marcadas y quietas.
+- Lo ultimo que paso: los intentos negados, en rojo, con quien, su rol, el
+  permiso que le falto y la ruta que llamo; y los permisos dados y quitados.
+
+Es la pantalla, no el permiso: un rol sin el permiso recibe 403 aunque llame a
+la ruta directo. `GET /usuario/yo` trae `permisos`, los codigos de su rol. Las
+llamadas estan en `lib/permisos.ts`.
 
 ## La paleta
 

@@ -61,12 +61,19 @@
 #   categorias Tambien compraron de un producto, directo en Neo4j con el grupo
 #              de cada uno (0 la misma categoria, 1 el resto) y por la ruta de
 #              la ficha. Solo lee
+#   permisos   El ACL de funcionalidades (migracion 050). La matriz de
+#              permisos_por_rol en PostgreSQL, cada rol llamando DIRECTO a las
+#              mismas rutas (401 sin sesion, 403 sin el permiso), y en vivo: una
+#              linea de SQL le quita ofertas.publicar al vendedor, el vendedor
+#              recibe 403 con el permiso que falta, el intento queda en
+#              auditoria_permiso, y otra linea se lo devuelve. Deja la matriz como
+#              estaba y las filas del registro, que son historia
 #
 # Nada de tuberias hacia docker exec. PowerShell 5.1 les mete un BOM. Lo que
 # va a Mongo o a PostgreSQL viaja como archivo con docker cp.
 
 param(
-    [ValidateSet('acceso', 'bases', 'semantica', 'facetas', 'vectores', 'rastro', 'intencion', 'clasificador', 'hibrida', 'sugerencias', 'compartir', 'categorias')]
+    [ValidateSet('acceso', 'bases', 'semantica', 'facetas', 'vectores', 'rastro', 'intencion', 'clasificador', 'hibrida', 'sugerencias', 'compartir', 'categorias', 'permisos')]
     [string]$Parte = 'acceso',
     [string]$Producto = 'laptop',
     [string]$Texto = 'laptop',
@@ -169,11 +176,13 @@ function Entrar([string]$correo, [string]$clave) {
     }
 }
 
-# Una peticion con sesion. Devuelve @{ codigo; datos } sin lanzar en un 4xx.
+# Una peticion con sesion. Devuelve @{ codigo; datos } sin lanzar en un 4xx;
+# en un 4xx datos es el cuerpo del error ({ ok, mensaje }), si lo hay.
 # Content-Type solo con cuerpo: Fastify rechaza un DELETE que dice traer JSON
-# y no trae nada.
+# y no trae nada. Sin sesion ($null) va sin cookie.
 function Llamar($sesion, [string]$metodo, [string]$ruta, $cuerpo = $null) {
-    $p = @{ Uri = "$Backend$ruta"; Method = $metodo; WebSession = $sesion; TimeoutSec = 20; UseBasicParsing = $true }
+    $p = @{ Uri = "$Backend$ruta"; Method = $metodo; TimeoutSec = 20; UseBasicParsing = $true }
+    if ($null -ne $sesion) { $p.WebSession = $sesion }
     if ($null -ne $cuerpo) { $p.ContentType = 'application/json'; $p.Body = ($cuerpo | ConvertTo-Json -Compress) }
     try {
         $r = Invoke-WebRequest @p
@@ -181,8 +190,13 @@ function Llamar($sesion, [string]$metodo, [string]$ruta, $cuerpo = $null) {
         return @{ codigo = [int]$r.StatusCode; datos = ($texto | ConvertFrom-Json) }
     } catch {
         $codigo = 0
-        if ($_.Exception.Response) { $codigo = [int]$_.Exception.Response.StatusCode }
-        return @{ codigo = $codigo; datos = $null }
+        $datos = $null
+        if ($_.Exception.Response) {
+            $codigo = [int]$_.Exception.Response.StatusCode
+            # PowerShell 5.1 ya leyo el cuerpo del error y lo deja en ErrorDetails.
+            try { $datos = $_.ErrorDetails.Message | ConvertFrom-Json } catch { $datos = $null }
+        }
+        return @{ codigo = $codigo; datos = $datos }
     }
 }
 
@@ -216,7 +230,7 @@ SELECT o.id_oferta || '|' || coalesce(pc.nombre, 'Producto ' || o.id_producto_mo
 
     Paso '1. Sin entrada en la lista, ventas.sur no ve nada'
     Esperado (Llamar $sur 'GET' "/compartidas/ofertas/$of").codigo 404 'ventas.sur pide la oferta'
-    Write-Host '   El mismo 404 de una oferta ajena. No se le confirma que existe.' -ForegroundColor DarkGray
+    Write-Host '   El mismo 404 de una oferta ajena. No se le confirma que existe. Con alguna entrada, lo que le falte es 403.' -ForegroundColor DarkGray
 
     Paso '2. ventas.norte le da ver y editar por diez minutos'
     $vence = (Get-Date).ToUniversalTime().AddMinutes(10).ToString('yyyy-MM-ddTHH:mm:ssZ')
@@ -227,7 +241,8 @@ SELECT o.id_oferta || '|' || coalesce(pc.nombre, 'Producto ' || o.id_producto_mo
     Paso '3. Cada permiso por separado'
     $r = Llamar $sur 'GET' "/compartidas/ofertas/$of"
     Esperado $r.codigo 200 "ventas.sur ve la oferta, de $($r.datos.payload.dueno.usuario)"
-    Esperado (Llamar $sur 'POST' "/compartidas/ofertas/$of/descuento" @{ porcentaje_descuento = 10 }).codigo 404 'pero no le puede poner descuento, no tiene ese permiso'
+    $r = Llamar $sur 'POST' "/compartidas/ofertas/$of/descuento" @{ porcentaje_descuento = 10 }
+    Esperado $r.codigo 403 "pero no le puede poner descuento. $($r.datos.mensaje)"
     $r = Llamar $sur 'PATCH' "/compartidas/ofertas/$of" @{ ajuste_stock = 1 }
     Esperado $r.codigo 200 "edita la existencia, ahora $($r.datos.payload.stock)"
     Esperado (Llamar $sur 'PATCH' "/compartidas/ofertas/$of" @{ estado = 'pausada' }).codigo 400 'el estado no, eso sigue siendo de la duena'
@@ -238,7 +253,8 @@ SELECT o.id_oferta || '|' || coalesce(pc.nombre, 'Producto ' || o.id_producto_mo
     Paso '4. ventas.norte le quita editar, y vale al instante'
     $ent = (Llamar $norte 'GET' "/vendedor/ofertas/$of/permisos").datos.payload.permisos | Where-Object { $_.permiso -eq 'editar' }
     Esperado (Llamar $norte 'DELETE' "/vendedor/ofertas/$of/permisos/$($ent.id_permiso_oferta)").codigo 200 'editar quitado'
-    Esperado (Llamar $sur 'PATCH' "/compartidas/ofertas/$of" @{ ajuste_stock = 1 }).codigo 404 'ventas.sur intenta editar otra vez'
+    $r = Llamar $sur 'PATCH' "/compartidas/ofertas/$of" @{ ajuste_stock = 1 }
+    Esperado $r.codigo 403 "ventas.sur intenta editar otra vez. $($r.datos.mensaje)"
     Esperado (Llamar $sur 'GET' "/compartidas/ofertas/$of").codigo 200 'ver le sigue'
 
     Paso '5. El registro de la oferta, lo que ve la duena'
@@ -256,6 +272,74 @@ SELECT o.id_oferta || '|' || coalesce(pc.nombre, 'Producto ' || o.id_producto_mo
     }
     $quedan = @(Psql "SELECT count(p.id_permiso_oferta) || ' permisos, ' || stock || ' unidades' FROM oferta o LEFT JOIN permiso_oferta p USING (id_oferta) WHERE o.id_oferta = $of GROUP BY stock;")[0]
     Ok "La oferta $of queda con $quedan, como estaba. El registro se queda, es historia."
+    exit 0
+}
+
+if ($Parte -eq 'permisos') {
+    Contenedor 'mesh-postgres'
+    Paso 'El ACL de funcionalidades, por rol (migracion 050, ADR-26)'
+    Write-Host '   Cada ruta privada pide un permiso y rol_permiso dice que rol lo tiene. Todo se llama DIRECTO al backend, sin la pagina.' -ForegroundColor DarkGray
+    $admin = Entrar 'admin@mesh.com' 'Admin123'
+    $vendedor = Entrar 'ventas.sur@mesh.com' 'Vendedor123'
+    $comprador = Entrar 'compradora.norte@mesh.com' 'Comprador123'
+
+    Paso '1. La lista vive en PostgreSQL (vista permisos_por_rol)'
+    $filas = @(Psql @"
+SELECT rpad(permiso, 26) || rpad(CASE WHEN comprador THEN 'si' ELSE '-' END, 11)
+       || rpad(CASE WHEN vendedor THEN 'si' ELSE '-' END, 10) || CASE WHEN admin THEN 'si' ELSE '-' END
+  FROM permisos_por_rol
+ WHERE permiso IN ('carrito.comprar', 'ofertas.publicar', 'ofertas.compartir', 'usuarios.editar', 'fraude.resolver', 'permisos.administrar');
+"@)
+    Write-Host ('   {0,-26}{1,-11}{2,-10}{3}' -f 'permiso', 'comprador', 'vendedor', 'admin') -ForegroundColor DarkGray
+    foreach ($f in $filas) { Write-Host "   $f" }
+    $total = @(Psql "SELECT (SELECT count(*) FROM permiso) || ' permisos en ' || (SELECT count(*) FROM modulo_permiso) || ' modulos, ' || (SELECT count(*) FROM rol_permiso) || ' entradas en rol_permiso';")[0]
+    Write-Host "   $total" -ForegroundColor DarkGray
+
+    Paso '2. Sin sesion, nadie pasa'
+    Esperado (Llamar $null 'GET' '/admin/usuarios').codigo 401 'GET /admin/usuarios sin cookie'
+    Esperado (Llamar $null 'POST' '/vendedor/ofertas' @{}).codigo 401 'POST /vendedor/ofertas sin cookie'
+
+    Paso '3. Cada rol llama directo a las mismas rutas'
+    $r = Llamar $comprador 'POST' '/vendedor/ofertas' @{}
+    Esperado $r.codigo 403 "la compradora intenta publicar una oferta. $($r.datos.mensaje)"
+    Esperado (Llamar $vendedor 'POST' '/vendedor/ofertas' @{}).codigo 400 'el vendedor pasa el guard (el 400 es del cuerpo vacio, no del permiso)'
+    $r = Llamar $vendedor 'GET' '/admin/usuarios'
+    Esperado $r.codigo 403 "el vendedor pide las cuentas del admin. $($r.datos.mensaje)"
+    Esperado (Llamar $admin 'GET' '/admin/usuarios').codigo 200 'el admin si las ve'
+
+    $sqlId = "SELECT p.id_permiso FROM permiso p JOIN modulo_permiso m USING (id_modulo_permiso) WHERE m.modulo_permiso_nombre = 'ofertas' AND p.permiso_nombre = 'publicar'"
+    $inicio = @(Psql "SELECT coalesce(max(id_auditoria_permiso), 0) FROM auditoria_permiso;")[0]
+    try {
+        Paso '4. Una linea de SQL le quita ofertas.publicar al vendedor'
+        Write-Host '   DELETE FROM rol_permiso WHERE id_rol_usuario = 2 AND id_permiso = (ofertas.publicar)' -ForegroundColor DarkGray
+        Psql "DELETE FROM rol_permiso WHERE id_rol_usuario = 2 AND id_permiso = ($sqlId);" | Out-Null
+        $r = Llamar $vendedor 'POST' '/vendedor/ofertas' @{}
+        Esperado $r.codigo 403 "el mismo vendedor, la peticion siguiente, sin reiniciar nada. $($r.datos.mensaje)"
+        Esperado (Llamar $vendedor 'GET' '/vendedor/ofertas').codigo 200 'ver sus ofertas le sigue, es otro permiso'
+
+        Paso '5. Otra linea se lo devuelve'
+        Write-Host '   INSERT INTO rol_permiso (id_rol_usuario, id_permiso) VALUES (2, (ofertas.publicar))' -ForegroundColor DarkGray
+        Psql "INSERT INTO rol_permiso (id_rol_usuario, id_permiso) SELECT 2, ($sqlId) ON CONFLICT DO NOTHING;" | Out-Null
+        Esperado (Llamar $vendedor 'POST' '/vendedor/ofertas' @{}).codigo 400 'el vendedor vuelve a pasar el guard'
+    } finally {
+        Psql "INSERT INTO rol_permiso (id_rol_usuario, id_permiso) SELECT 2, ($sqlId) ON CONFLICT DO NOTHING;" | Out-Null
+    }
+
+    Paso '6. El registro, en auditoria_permiso'
+    $reg = @(Psql @"
+SELECT to_char(a.fecha AT TIME ZONE 'America/Guatemala', 'HH24:MI:SS') || '  ' || rpad(a.accion, 8) || rpad(coalesce(u.usuario, a.id_usuario_actor::text), 18)
+       || rpad(r.rol_usuario_nombre, 11) || rpad(m.modulo_permiso_nombre || '.' || p.permiso_nombre, 20) || coalesce(a.metodo || ' ' || a.ruta, '')
+  FROM auditoria_permiso a
+  JOIN rol_usuario r USING (id_rol_usuario)
+  JOIN permiso p USING (id_permiso)
+  JOIN modulo_permiso m USING (id_modulo_permiso)
+  LEFT JOIN usuarios u ON u.id_usuario = a.id_usuario_actor
+ WHERE a.id_auditoria_permiso > $inicio
+ ORDER BY a.id_auditoria_permiso;
+"@)
+    foreach ($x in $reg) { Write-Host "   $x" -ForegroundColor $(if ($x -match 'negado') { 'Red' } else { 'White' }) }
+    $quedan = @(Psql "SELECT count(*) FROM rol_permiso;")[0]
+    Ok "La matriz queda como estaba ($quedan entradas). El registro se queda, es historia."
     exit 0
 }
 

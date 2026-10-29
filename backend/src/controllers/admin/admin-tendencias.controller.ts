@@ -1,10 +1,10 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { ConsultarTendenciasQuery } from '../../dto/consultar-tendencias';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { AdminTendenciasService } from '../../services/admin/admin-tendencias.service';
 import { AdminBusquedasSinResultadosService } from '../../services/admin/admin-busquedas-sin-resultados.service';
 
@@ -30,14 +30,14 @@ import { AdminBusquedasSinResultadosService } from '../../services/admin/admin-b
  *   direccion   "positivo" (defecto, los primeros M / mas alto) | "negativo"
  *               (los ultimos M / mas bajo)
  *
- * **Solo admin** (`SesionGuard` + `@Roles(ID_ROL_ADMIN)`, en la clase) --
+ * **Solo admin** (`PermisoGuard` + `@Permiso('tendencias.ver')`, en la clase) --
  * no la tienda, mismo criterio que el resto de paneles de admin.
  *
  * Detalle del payload: `elementos Generales/endpoints/endpoints-eventos.md`.
  */
 @Controller('admin/eventos')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('tendencias.ver')
 export class AdminTendenciasController {
   constructor(
     private readonly adminTendenciasService: AdminTendenciasService,

@@ -1,0 +1,2326 @@
+[
+  {
+    "metodo": "GET",
+    "ruta": "/",
+    "controlador": "InicioController",
+    "funcion": "obtenerEstado",
+    "archivo": "controllers/inicio.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/busquedas",
+    "controlador": "DashboardGeneralController",
+    "funcion": "busquedas",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/cancelaciones",
+    "controlador": "DashboardGeneralController",
+    "funcion": "cancelaciones",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/categorias",
+    "controlador": "DashboardGeneralController",
+    "funcion": "categorias",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/departamentos",
+    "controlador": "DashboardGeneralController",
+    "funcion": "departamentos",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/embudo",
+    "controlador": "DashboardGeneralController",
+    "funcion": "embudo",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/admin/dashboard/exportar/correo",
+    "controlador": "DashboardGeneralController",
+    "funcion": "enviarPorCorreo",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/exportar/excel",
+    "controlador": "DashboardGeneralController",
+    "funcion": "excel",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/exportar/pdf",
+    "controlador": "DashboardGeneralController",
+    "funcion": "pdf",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/mapa",
+    "controlador": "DashboardGeneralController",
+    "funcion": "mapa",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/pagos",
+    "controlador": "DashboardGeneralController",
+    "funcion": "pagos",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/pedidos",
+    "controlador": "DashboardGeneralController",
+    "funcion": "pedidos",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/productos",
+    "controlador": "DashboardGeneralController",
+    "funcion": "productos",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/resumen",
+    "controlador": "DashboardGeneralController",
+    "funcion": "resumen",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/vendedores",
+    "controlador": "DashboardGeneralController",
+    "funcion": "vendedores",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/dashboard/ventas",
+    "controlador": "DashboardGeneralController",
+    "funcion": "ventas",
+    "archivo": "controllers/dashboards/dashboard-general.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/estados",
+    "controlador": "AdminCatalogosController",
+    "funcion": "listarEstados",
+    "archivo": "controllers/admin/admin-catalogos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/busqueda",
+    "controlador": "AdminTendenciasController",
+    "funcion": "busqueda",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/busqueda-clic",
+    "controlador": "AdminTendenciasController",
+    "funcion": "busquedaClic",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/busquedas-sin-respuesta",
+    "controlador": "AdminTendenciasAvanzadasController",
+    "funcion": "busquedasSinRespuesta",
+    "archivo": "controllers/admin/admin-tendencias-avanzadas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/busquedas-sin-resultados",
+    "controlador": "AdminTendenciasController",
+    "funcion": "busquedasSinResultados",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/calificaciones-mas-buscadas",
+    "controlador": "AdminTendenciasController",
+    "funcion": "calificacionesMasBuscadas",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/carrito",
+    "controlador": "AdminTendenciasController",
+    "funcion": "carrito",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/categorias-mas-buscadas",
+    "controlador": "AdminTendenciasController",
+    "funcion": "categoriasMasBuscadas",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/compra",
+    "controlador": "AdminTendenciasController",
+    "funcion": "compra",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/devolucion",
+    "controlador": "AdminTendenciasController",
+    "funcion": "devolucion",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/embudo",
+    "controlador": "AdminTendenciasAvanzadasController",
+    "funcion": "embudo",
+    "archivo": "controllers/admin/admin-tendencias-avanzadas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/precios-mas-buscados",
+    "controlador": "AdminTendenciasController",
+    "funcion": "preciosMasBuscados",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/tendencias",
+    "controlador": "AdminTendenciasAvanzadasController",
+    "funcion": "tendencias",
+    "archivo": "controllers/admin/admin-tendencias-avanzadas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/eventos/vista",
+    "controlador": "AdminTendenciasController",
+    "funcion": "vista",
+    "archivo": "controllers/admin/admin-tendencias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/fraude/alertas-eventos",
+    "controlador": "AdminFraudeEventosController",
+    "funcion": "listar",
+    "archivo": "controllers/admin/admin-fraude-eventos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/admin/fraude/alertas-eventos/:id",
+    "controlador": "AdminFraudeEventosController",
+    "funcion": "marcar",
+    "archivo": "controllers/admin/admin-fraude-eventos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/fraude/alertas-login",
+    "controlador": "FraudeController",
+    "funcion": "alertasLogin",
+    "archivo": "controllers/fraude/fraude.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/admin/fraude/alertas-login/:id",
+    "controlador": "AdminFraudeLoginController",
+    "funcion": "marcarAlerta",
+    "archivo": "controllers/admin/admin-fraude-login.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/fraude/alertas-resenas",
+    "controlador": "AdminFraudeAnillosController",
+    "funcion": "listar",
+    "archivo": "controllers/admin/admin-fraude-anillos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/admin/fraude/alertas-resenas/:id",
+    "controlador": "AdminFraudeAnillosController",
+    "funcion": "marcar",
+    "archivo": "controllers/admin/admin-fraude-anillos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/fraude/alertas-resenas/:id/detalle-grafo",
+    "controlador": "AdminFraudeAnillosController",
+    "funcion": "detalleGrafo",
+    "archivo": "controllers/admin/admin-fraude-anillos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/fraude/casos",
+    "controlador": "AdminCasosFraudeController",
+    "funcion": "listar",
+    "archivo": "controllers/admin/admin-casos-fraude.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/fraude/casos/:id",
+    "controlador": "AdminCasosFraudeController",
+    "funcion": "obtenerDetalle",
+    "archivo": "controllers/admin/admin-casos-fraude.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/admin/fraude/casos/:id",
+    "controlador": "AdminCasosFraudeController",
+    "funcion": "actualizar",
+    "archivo": "controllers/admin/admin-casos-fraude.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/fraude/eventos-login",
+    "controlador": "AdminFraudeLoginController",
+    "funcion": "eventosLogin",
+    "archivo": "controllers/admin/admin-fraude-login.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/grafo/conciliacion",
+    "controlador": "GrafoController",
+    "funcion": "conciliacion",
+    "archivo": "controllers/grafo/grafo.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/reportes/reservaciones",
+    "controlador": "AdminReportesController",
+    "funcion": "reservaciones",
+    "archivo": "controllers/admin/admin-reportes.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/reportes/ventas",
+    "controlador": "AdminReportesController",
+    "funcion": "ventas",
+    "archivo": "controllers/admin/admin-reportes.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/roles",
+    "controlador": "AdminCatalogosController",
+    "funcion": "listarRoles",
+    "archivo": "controllers/admin/admin-catalogos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/admin/usuarios",
+    "controlador": "AdminUsuariosController",
+    "funcion": "listar",
+    "archivo": "controllers/admin/admin-usuarios.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/admin/usuarios/:id",
+    "controlador": "AdminUsuariosController",
+    "funcion": "actualizar",
+    "archivo": "controllers/admin/admin-usuarios.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/buscador",
+    "controlador": "BaseDatosBuscadorController",
+    "funcion": "verificarConexion",
+    "archivo": "controllers/base-datos-buscador.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/buscador/productos",
+    "controlador": "BuscadorProductosController",
+    "funcion": "buscar",
+    "archivo": "controllers/buscador/productos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/buscador/productos/admin",
+    "controlador": "BuscadorProductosController",
+    "funcion": "buscarAdmin",
+    "archivo": "controllers/buscador/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/buscador/productos/facetado",
+    "controlador": "BuscadorFacetadoController",
+    "funcion": "buscar",
+    "archivo": "controllers/buscador/facetado.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/buscador/productos/hibrida",
+    "controlador": "BuscadorHibridoController",
+    "funcion": "buscar",
+    "archivo": "controllers/buscador/hibrida.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/buscador/productos/intencion",
+    "controlador": "BuscadorIntencionController",
+    "funcion": "buscar",
+    "archivo": "controllers/buscador/intencion.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/buscador/productos/sugerencias",
+    "controlador": "BuscadorSugerenciasController",
+    "funcion": "sugerir",
+    "archivo": "controllers/buscador/sugerencias.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/carrito",
+    "controlador": "CarritoController",
+    "funcion": "vaciar",
+    "archivo": "controllers/carrito/carrito.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/carrito",
+    "controlador": "CarritoController",
+    "funcion": "ver",
+    "archivo": "controllers/carrito/carrito.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/carrito/comprar",
+    "controlador": "CarritoController",
+    "funcion": "comprar",
+    "archivo": "controllers/carrito/carrito.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/carrito/lineas/:idOferta",
+    "controlador": "CarritoController",
+    "funcion": "quitarLinea",
+    "archivo": "controllers/carrito/carrito.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PUT",
+    "ruta": "/carrito/lineas/:idOferta",
+    "controlador": "CarritoController",
+    "funcion": "definirCantidad",
+    "archivo": "controllers/carrito/carrito.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/carrito/sincronizar",
+    "controlador": "CarritoController",
+    "funcion": "sincronizar",
+    "archivo": "controllers/carrito/carrito.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/categorias",
+    "controlador": "CategoriasPublicoController",
+    "funcion": "listar",
+    "archivo": "controllers/productos/categorias.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/categorias/:id",
+    "controlador": "CategoriasPublicoController",
+    "funcion": "obtener",
+    "archivo": "controllers/productos/categorias.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/clave-valor",
+    "controlador": "BaseDatosClaveValorController",
+    "funcion": "verificarConexion",
+    "archivo": "controllers/base-datos-clave-valor.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/comentarios/:id/voto",
+    "controlador": "ResenasController",
+    "funcion": "quitarVoto",
+    "archivo": "controllers/resenas/resenas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PUT",
+    "ruta": "/comentarios/:id/voto",
+    "controlador": "ResenasController",
+    "funcion": "votar",
+    "archivo": "controllers/resenas/resenas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/compartidas/ofertas",
+    "controlador": "OfertasCompartidasController",
+    "funcion": "listar",
+    "archivo": "controllers/compartidas/ofertas-compartidas.controller.js",
+    "guards": [
+      "SesionGuard",
+      "PermisoOfertaGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/compartidas/ofertas/:id",
+    "controlador": "OfertasCompartidasController",
+    "funcion": "obtener",
+    "archivo": "controllers/compartidas/ofertas-compartidas.controller.js",
+    "guards": [
+      "SesionGuard",
+      "PermisoOfertaGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": "ver"
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/compartidas/ofertas/:id",
+    "controlador": "OfertasCompartidasController",
+    "funcion": "editar",
+    "archivo": "controllers/compartidas/ofertas-compartidas.controller.js",
+    "guards": [
+      "SesionGuard",
+      "PermisoOfertaGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": "editar"
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/compartidas/ofertas/:id/descuento",
+    "controlador": "OfertasCompartidasController",
+    "funcion": "quitarDescuento",
+    "archivo": "controllers/compartidas/ofertas-compartidas.controller.js",
+    "guards": [
+      "SesionGuard",
+      "PermisoOfertaGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": "descuento"
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/compartidas/ofertas/:id/descuento",
+    "controlador": "OfertasCompartidasController",
+    "funcion": "aplicarDescuento",
+    "archivo": "controllers/compartidas/ofertas-compartidas.controller.js",
+    "guards": [
+      "SesionGuard",
+      "PermisoOfertaGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": "descuento"
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/comprador/pedidos",
+    "controlador": "PedidosCompradorController",
+    "funcion": "listar",
+    "archivo": "controllers/compradores/pedidos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/comprador/pedidos/:id",
+    "controlador": "PedidosCompradorController",
+    "funcion": "obtener",
+    "archivo": "controllers/compradores/pedidos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/comprador/pedidos/:id/cancelar",
+    "controlador": "PedidosCompradorController",
+    "funcion": "cancelar",
+    "archivo": "controllers/compradores/pedidos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/comprador/pedidos/metodos-pago",
+    "controlador": "PedidosCompradorController",
+    "funcion": "metodosPago",
+    "archivo": "controllers/compradores/pedidos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/comprador/seguimientos",
+    "controlador": "SeguimientosOfertaController",
+    "funcion": "listar",
+    "archivo": "controllers/compradores/seguimientos-oferta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/comprador/seguimientos",
+    "controlador": "SeguimientosOfertaController",
+    "funcion": "crear",
+    "archivo": "controllers/compradores/seguimientos-oferta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/comprador/seguimientos/:id",
+    "controlador": "SeguimientosOfertaController",
+    "funcion": "borrar",
+    "archivo": "controllers/compradores/seguimientos-oferta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/comprador/seguimientos/avisos",
+    "controlador": "SeguimientosOfertaController",
+    "funcion": "listarAvisos",
+    "archivo": "controllers/compradores/seguimientos-oferta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/comprador/seguimientos/avisos/:id",
+    "controlador": "SeguimientosOfertaController",
+    "funcion": "marcarAviso",
+    "archivo": "controllers/compradores/seguimientos-oferta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/db",
+    "controlador": "BaseDatosController",
+    "funcion": "verificarConexion",
+    "archivo": "controllers/base-datos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/db/cortacircuitos",
+    "controlador": "BaseDatosController",
+    "funcion": "cortacircuitos",
+    "archivo": "controllers/base-datos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/direccion-usuario",
+    "controlador": "DireccionUsuarioController",
+    "funcion": "listar",
+    "archivo": "controllers/direccion-usuario.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/direccion-usuario",
+    "controlador": "DireccionUsuarioController",
+    "funcion": "crear",
+    "archivo": "controllers/direccion-usuario.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/direccion-usuario/:id",
+    "controlador": "DireccionUsuarioController",
+    "funcion": "obtener",
+    "archivo": "controllers/direccion-usuario.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/direccion-usuario/:id",
+    "controlador": "DireccionUsuarioController",
+    "funcion": "actualizar",
+    "archivo": "controllers/direccion-usuario.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/direccion-usuario/historial",
+    "controlador": "DireccionUsuarioController",
+    "funcion": "obtenerHistorial",
+    "archivo": "controllers/direccion-usuario.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/documental",
+    "controlador": "BaseDatosDocumentalController",
+    "funcion": "verificarConexion",
+    "archivo": "controllers/base-datos-documental.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/eventos/busqueda-clic",
+    "controlador": "EventosController",
+    "funcion": "busquedaClic",
+    "archivo": "controllers/eventos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/eventos/carrito",
+    "controlador": "EventosController",
+    "funcion": "carrito",
+    "archivo": "controllers/eventos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/eventos/vista",
+    "controlador": "EventosController",
+    "funcion": "vista",
+    "archivo": "controllers/eventos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/grafo",
+    "controlador": "BaseDatosGrafoController",
+    "funcion": "verificarConexion",
+    "archivo": "controllers/base-datos-grafo.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/perfil",
+    "controlador": "PerfilController",
+    "funcion": "obtener",
+    "archivo": "controllers/perfil.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/perfil",
+    "controlador": "PerfilController",
+    "funcion": "actualizar",
+    "archivo": "controllers/perfil.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/perfil/alertas-fraude",
+    "controlador": "PerfilController",
+    "funcion": "alertasFraude",
+    "archivo": "controllers/perfil.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/perfil/alertas-fraude/:id",
+    "controlador": "PerfilController",
+    "funcion": "marcarAlertaFraudeLeida",
+    "archivo": "controllers/perfil.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/perfil/contrasena",
+    "controlador": "PerfilController",
+    "funcion": "cambiarContrasena",
+    "archivo": "controllers/perfil.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos",
+    "controlador": "ProductosController",
+    "funcion": "listar",
+    "archivo": "controllers/productos/productos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/:id",
+    "controlador": "ProductosController",
+    "funcion": "obtener",
+    "archivo": "controllers/productos/productos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/:id/comprado",
+    "controlador": "ResenasController",
+    "funcion": "comprado",
+    "archivo": "controllers/resenas/resenas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/:id/historial",
+    "controlador": "ProductosController",
+    "funcion": "obtenerHistorial",
+    "archivo": "controllers/productos/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/:id/resenado",
+    "controlador": "ResenasController",
+    "funcion": "resenado",
+    "archivo": "controllers/resenas/resenas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/:id/resenas",
+    "controlador": "ResenasController",
+    "funcion": "listar",
+    "archivo": "controllers/resenas/resenas.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/:id/similares",
+    "controlador": "SimilaresController",
+    "funcion": "similares",
+    "archivo": "controllers/productos/similares.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/:id/tambien-compraron",
+    "controlador": "TambienCompraronController",
+    "funcion": "tambienCompraron",
+    "archivo": "controllers/productos/tambien-compraron.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/:id/tambien-vieron",
+    "controlador": "TambienVieronController",
+    "funcion": "tambienVieron",
+    "archivo": "controllers/productos/tambien-vieron.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/combos",
+    "controlador": "CombosController",
+    "funcion": "obtener",
+    "archivo": "controllers/productos/combos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/mas-vendidos",
+    "controlador": "MasVendidosController",
+    "funcion": "obtener",
+    "archivo": "controllers/productos/mas-vendidos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/mas-vistos",
+    "controlador": "MasVistosController",
+    "funcion": "obtener",
+    "archivo": "controllers/productos/mas-vistos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/ofertas/:id/historial",
+    "controlador": "ProductosController",
+    "funcion": "obtenerHistorialOferta",
+    "archivo": "controllers/productos/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/ofertas/descuento",
+    "controlador": "OfertasDestacadasController",
+    "funcion": "obtenerConDescuento",
+    "archivo": "controllers/productos/ofertas-destacadas.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/ofertas/venta-relampago",
+    "controlador": "OfertasDestacadasController",
+    "funcion": "obtenerVentaRelampago",
+    "archivo": "controllers/productos/ofertas-destacadas.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/paginacion",
+    "controlador": "ProductosController",
+    "funcion": "listarPaginado",
+    "archivo": "controllers/productos/productos.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/para-ti",
+    "controlador": "ParaTiController",
+    "funcion": "paraTi",
+    "archivo": "controllers/productos/para-ti.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/productos/vistos-recientemente",
+    "controlador": "VistosRecientementeController",
+    "funcion": "vistosRecientemente",
+    "archivo": "controllers/productos/vistos-recientemente.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/resenas",
+    "controlador": "ResenasController",
+    "funcion": "crear",
+    "archivo": "controllers/resenas/resenas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/resenas/:id/respuestas",
+    "controlador": "ResenasController",
+    "funcion": "responder",
+    "archivo": "controllers/resenas/resenas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/usuario/login",
+    "controlador": "UsuarioController",
+    "funcion": "iniciarSesion",
+    "archivo": "controllers/usuario.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/usuario/logout",
+    "controlador": "UsuarioController",
+    "funcion": "cerrarSesion",
+    "archivo": "controllers/usuario.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/usuario/registro",
+    "controlador": "UsuarioController",
+    "funcion": "registrar",
+    "archivo": "controllers/usuario.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/usuario/registros-existentes",
+    "controlador": "UsuarioController",
+    "funcion": "verificarExistencia",
+    "archivo": "controllers/usuario.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/usuario/yo",
+    "controlador": "UsuarioController",
+    "funcion": "obtenerYo",
+    "archivo": "controllers/usuario.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vectores",
+    "controlador": "BaseDatosVectoresController",
+    "funcion": "verificarConexion",
+    "archivo": "controllers/base-datos-vectores.controller.js",
+    "guards": [],
+    "roles": null,
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/categorias",
+    "controlador": "CategoriasController",
+    "funcion": "listarValidas",
+    "archivo": "controllers/vendedores/categorias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/categorias/:id",
+    "controlador": "CategoriasController",
+    "funcion": "obtener",
+    "archivo": "controllers/vendedores/categorias.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/ofertas",
+    "controlador": "OfertasVendedorController",
+    "funcion": "listar",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/ofertas",
+    "controlador": "OfertasVendedorController",
+    "funcion": "crear",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/vendedor/ofertas/:id",
+    "controlador": "OfertasVendedorController",
+    "funcion": "editar",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/vendedor/ofertas/:id/descuento",
+    "controlador": "OfertasVendedorController",
+    "funcion": "quitarDescuento",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/ofertas/:id/descuento",
+    "controlador": "OfertasVendedorController",
+    "funcion": "aplicarDescuento",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/ofertas/:id/permisos",
+    "controlador": "PermisosOfertaController",
+    "funcion": "listar",
+    "archivo": "controllers/vendedores/permisos-oferta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/ofertas/:id/permisos",
+    "controlador": "PermisosOfertaController",
+    "funcion": "otorgar",
+    "archivo": "controllers/vendedores/permisos-oferta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/vendedor/ofertas/:id/permisos/:idPermiso",
+    "controlador": "PermisosOfertaController",
+    "funcion": "revocar",
+    "archivo": "controllers/vendedores/permisos-oferta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/ofertas/:id/rechazos",
+    "controlador": "OfertasVendedorController",
+    "funcion": "listarRechazos",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/vendedor/ofertas/:id/revision",
+    "controlador": "OfertasVendedorController",
+    "funcion": "revisar",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/vendedor/ofertas/:id/venta-limitada",
+    "controlador": "VentasLimitadasController",
+    "funcion": "cerrar",
+    "archivo": "controllers/vendedores/ventas-limitadas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/ofertas/:id/venta-limitada",
+    "controlador": "VentasLimitadasController",
+    "funcion": "abrir",
+    "archivo": "controllers/vendedores/ventas-limitadas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/ofertas/buscar",
+    "controlador": "BuscarOfertasController",
+    "funcion": "buscar",
+    "archivo": "controllers/vendedores/buscar-ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/ofertas/paginado",
+    "controlador": "OfertasVendedorController",
+    "funcion": "listarPaginado",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/ofertas/pendientes",
+    "controlador": "OfertasVendedorController",
+    "funcion": "listarPendientes",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/ofertas/pendientes/paginado",
+    "controlador": "OfertasVendedorController",
+    "funcion": "listarPendientesPaginado",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/ofertas/producto/:idProducto",
+    "controlador": "OfertasVendedorController",
+    "funcion": "obtenerPorProducto",
+    "archivo": "controllers/vendedores/ofertas.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/productos",
+    "controlador": "ProductosVendedorController",
+    "funcion": "listarMios",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/productos",
+    "controlador": "ProductosVendedorController",
+    "funcion": "crear",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/productos/:id",
+    "controlador": "ProductosVendedorController",
+    "funcion": "obtenerMio",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/vendedor/productos/:id",
+    "controlador": "ProductosVendedorController",
+    "funcion": "editar",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/productos/:id/historial",
+    "controlador": "ProductosVendedorController",
+    "funcion": "obtenerHistorialMio",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/vendedor/productos/:id/reenviar",
+    "controlador": "ProductosVendedorController",
+    "funcion": "reenviarPropuesta",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/vendedor/productos/:id/revision",
+    "controlador": "ProductosVendedorController",
+    "funcion": "revisarPropuesta",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/productos/paginado",
+    "controlador": "ProductosVendedorController",
+    "funcion": "listarMiosPaginado",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/productos/propuestas",
+    "controlador": "ProductosVendedorController",
+    "funcion": "listarPropuestasMias",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/productos/propuestas",
+    "controlador": "ProductosVendedorController",
+    "funcion": "proponer",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/productos/propuestas/:id/rechazos",
+    "controlador": "ProductosVendedorController",
+    "funcion": "listarRechazosPropuesta",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/productos/propuestas/sin-aprobar",
+    "controlador": "ProductosVendedorController",
+    "funcion": "listarPropuestasSinAprobar",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/productos/propuestas/todas",
+    "controlador": "ProductosVendedorController",
+    "funcion": "listarTodasLasPropuestas",
+    "archivo": "controllers/vendedores/productos.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/productos/sugerencias",
+    "controlador": "SugerenciasPropuestaController",
+    "funcion": "sugerir",
+    "archivo": "controllers/vendedores/sugerencias-propuesta.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/reglas-descuento",
+    "controlador": "ReglasDescuentoAutomaticoController",
+    "funcion": "listar",
+    "archivo": "controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/reglas-descuento",
+    "controlador": "ReglasDescuentoAutomaticoController",
+    "funcion": "crear",
+    "archivo": "controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/reglas-descuento-periodos",
+    "controlador": "ReglasDescuentoPeriodoController",
+    "funcion": "listar",
+    "archivo": "controllers/reglas-descuento-periodo/reglas-descuento-periodo.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "POST",
+    "ruta": "/vendedor/reglas-descuento-periodos",
+    "controlador": "ReglasDescuentoPeriodoController",
+    "funcion": "crear",
+    "archivo": "controllers/reglas-descuento-periodo/reglas-descuento-periodo.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/vendedor/reglas-descuento-periodos/:id",
+    "controlador": "ReglasDescuentoPeriodoController",
+    "funcion": "eliminar",
+    "archivo": "controllers/reglas-descuento-periodo/reglas-descuento-periodo.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/vendedor/reglas-descuento-periodos/:id",
+    "controlador": "ReglasDescuentoPeriodoController",
+    "funcion": "editar",
+    "archivo": "controllers/reglas-descuento-periodo/reglas-descuento-periodo.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/reglas-descuento-periodos/paginado",
+    "controlador": "ReglasDescuentoPeriodoController",
+    "funcion": "listarPaginado",
+    "archivo": "controllers/reglas-descuento-periodo/reglas-descuento-periodo.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "DELETE",
+    "ruta": "/vendedor/reglas-descuento/:id",
+    "controlador": "ReglasDescuentoAutomaticoController",
+    "funcion": "eliminar",
+    "archivo": "controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "PATCH",
+    "ruta": "/vendedor/reglas-descuento/:id",
+    "controlador": "ReglasDescuentoAutomaticoController",
+    "funcion": "editar",
+    "archivo": "controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  },
+  {
+    "metodo": "GET",
+    "ruta": "/vendedor/reglas-descuento/paginado",
+    "controlador": "ReglasDescuentoAutomaticoController",
+    "funcion": "listarPaginado",
+    "archivo": "controllers/reglas-descuento-automatico/reglas-descuento-automatico.controller.js",
+    "guards": [
+      "SesionGuard"
+    ],
+    "roles": [
+      2,
+      3
+    ],
+    "permiso": null,
+    "permiso_oferta": null
+  }
+]

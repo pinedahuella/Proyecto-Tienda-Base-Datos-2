@@ -1,10 +1,10 @@
 import { Body, Controller, HttpCode, Post, UseGuards } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import type { SugerenciasPropuestaPeticion } from '../../dto/sugerencias-propuesta';
-import { ID_ROL_ADMIN, ID_ROL_VENDEDOR } from '../../models/rol-usuario';
 import { SugerenciasPropuestaService } from '../../services/vendedores/sugerencias-propuesta.service';
 
 /**
@@ -19,8 +19,8 @@ import { SugerenciasPropuestaService } from '../../services/vendedores/sugerenci
  * nada, por eso responde 200 y no 201.
  */
 @Controller('vendedor/productos')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('catalogo.proponer')
 export class SugerenciasPropuestaController {
   constructor(
     private readonly sugerenciasPropuestaService: SugerenciasPropuestaService,

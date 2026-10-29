@@ -12,18 +12,19 @@ import {
   PermisoOferta,
   PermisoResuelto,
 } from '../../decorators/permiso-oferta.decorator';
-import { Roles } from '../../decorators/roles.decorator';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
 import type { AplicarDescuentoPeticion } from '../../dto/aplicar-descuento';
 import type { EditarOfertaPeticion } from '../../dto/editar-oferta';
 import type { TokenUsuario } from '../../dto/token-usuario';
 import { PermisoOfertaGuard } from '../../guards/permiso-oferta.guard';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { ErrorValidacion } from '../../helpers/errores';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
 import { exito } from '../../helpers/respuesta';
 import type { PermisoOfertaResuelto } from '../../models/permiso-oferta';
-import { ID_ROL_ADMIN, ID_ROL_VENDEDOR } from '../../models/rol-usuario';
+import { ID_ROL_VENDEDOR } from '../../models/rol-usuario';
 import { AclOfertasService } from '../../services/acl/acl-ofertas.service';
 import { OfertasVendedorService } from '../../services/vendedores/ofertas.service';
 
@@ -32,8 +33,10 @@ import { OfertasVendedorService } from '../../services/vendedores/ofertas.servic
  * la aplicacion (migracion 049) me da algun permiso.
  *
  * Las rutas de lo propio (`/vendedor/ofertas`) no cambian. Estas son aparte, y
- * en todas manda `PermisoOfertaGuard`: sin una entrada vigente de esta cuenta,
- * esta oferta y este permiso, 404. Si deja pasar, la accion la hace
+ * en todas manda `PermisoOfertaGuard`, despues de `PermisoGuard` (el rol tiene
+ * que tener ofertas.usar_compartidas): sin ninguna entrada vigente de esta
+ * cuenta sobre esta oferta, 404; con alguna, pero no la de esta accion, 403.
+ * Si deja pasar, la accion la hace
  * `OfertasVendedorService`, el mismo de siempre, A NOMBRE DEL DUENO (con su id
  * y como vendedor), asi que valen las mismas reglas de precio, descuento,
  * existencia y venta relampago. Despues se anota en el registro quien la hizo
@@ -46,8 +49,8 @@ import { OfertasVendedorService } from '../../services/vendedores/ofertas.servic
  *   DELETE /compartidas/ofertas/:id/descuento    descuento
  */
 @Controller('compartidas/ofertas')
-@UseGuards(SesionGuard, PermisoOfertaGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard, PermisoOfertaGuard)
+@Permiso('ofertas.usar_compartidas')
 export class OfertasCompartidasController {
   constructor(
     private readonly aclOfertasService: AclOfertasService,

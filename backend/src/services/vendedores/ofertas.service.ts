@@ -116,7 +116,7 @@ interface ProductoLigero {
  * admin, ver cambios-multivendedor.md seccion 9), publicar una OFERTA
  * sobre un producto que ya existe es justo lo que cualquier vendedor
  * puede hacer -- es el corazon del modelo multi-vendedor. El guard de rol
- * (@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN) en OfertasVendedorController)
+ * (los permisos `ofertas.*` de `rol_permiso`, migracion 050)
  * deja pasar tanto a un vendedor como a un admin.
  *
  * OJO: un admin NO opera bajo su propia cuenta aqui. Decision explicita

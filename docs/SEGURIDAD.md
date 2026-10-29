@@ -1,5 +1,20 @@
 # Seguridad y control de acceso
 
+Son tres capas, y cada una contesta una pregunta distinta:
+
+| Capa | La pregunta | Donde vive | Quien la hace cumplir | Si no | Decision |
+|---|---|---|---|---|---|
+| Las bases, por servicio | Que puede hacer el backend (o una herramienta) en cada base | Usuarios y roles de cada base | Cada base | La base rechaza el comando | ADR-14 |
+| Las funciones, por rol | Que acciones de la tienda puede usar cada rol | `rol_permiso` en PostgreSQL (migracion 050) | `PermisoGuard` en cada ruta privada | 403 con el permiso que falta | ADR-26 |
+| Cada oferta, por persona | Que cuenta puede ver, editar o descontar una oferta ajena | `permiso_oferta` en PostgreSQL (migracion 049) | `PermisoOfertaGuard` en `/compartidas/ofertas` | 404 sin ninguna entrada, 403 sin esa | ADR-24 |
+
+Antes de las tres, `SesionGuard` dice quien es la cuenta (401 si nadie, si el
+token es falso o vencio, o si la cuenta ya no esta activa). Se probo llamando a
+las rutas DIRECTO, sin la pagina: `bash pruebas/permisos_rol.sh` y la demo
+`.\demo-entrega-final.ps1 -Parte permisos`.
+
+## Las bases
+
 Quien entra a cada base, con que usuario y que puede hacer. Es el ADR-14 del
 registro unico (`docs/DECISIONES.md`), y la prueba de todo esto es
 
@@ -63,22 +78,61 @@ puerta. Si el grafo guardara algo que no se puede reconstruir, la salida seria
 la edicion enterprise o poner la consulta detras del backend; hoy es una
 proyeccion de PostgreSQL que se rehace entera.
 
-## El ACL de la aplicacion, por persona
+## Las funciones, por rol
 
 Lo de arriba es por SERVICIO, y lo hacen cumplir las bases. Ninguna base sabe
 que persona esta detras de una peticion: todas llegan como `mesh_backend`. Lo
-que puede hacer cada persona dentro de la tienda lo decide la aplicacion. Hasta
-el 26 de octubre eran roles (comprador, vendedor, admin, con `SesionGuard` y
-`@Roles`) y una regla fija de dueno escrita en el SQL. Desde ese dia hay ademas
-un ACL de verdad por oferta (ADR-24, migracion 049).
+que puede hacer cada cuenta dentro de la tienda lo decide la aplicacion. Hasta
+el 28 de octubre la lista de que rol puede que estaba escrita en el codigo, con
+`@Roles(...)` en cada controller. Desde la migracion 050 (ADR-26) vive en
+PostgreSQL y el backend la consulta en cada peticion.
+
+- **Las acciones.** `modulo_permiso` (17 modulos: ofertas, carrito, fraude...) y
+  `permiso` (38 acciones, cada una en su modulo). El codigo de una accion es
+  `modulo.accion`, por ejemplo `ofertas.publicar`.
+- **La lista.** `rol_permiso`: una fila por rol y accion, con quien la dio y
+  cuando. Lo que no esta se niega. `SELECT * FROM permisos_por_rol;` la ensena
+  como matriz, una fila por accion y una columna por rol.
+- **Quien la revisa.** `PermisoGuard`, despues de `SesionGuard`, en cada una de
+  las 136 rutas privadas. Cada ruta declara su accion con `@Permiso(...)` y el
+  guard le pregunta a `rol_permiso` en ese momento si el rol de la cuenta la
+  tiene. Si no, 403 con el codigo que falta ("No tienes permiso para hacer esto
+  (falta ofertas.publicar)"). Una ruta privada sin `@Permiso` tambien se niega.
+- **Al instante.** Quitar o poner una fila vale en la peticion siguiente, sin
+  compilar ni reiniciar. Se puede hacer con SQL o desde el panel del admin,
+  seccion Permisos (`/admin/permisos`).
+- **Lo que no se quita.** Por la API, `cuenta.ver` a nadie (la sesion no abriria)
+  ni `permisos.ver` y `permisos.administrar` al admin (nadie podria devolverlos).
+  Con SQL a mano si.
+- **El registro.** `auditoria_permiso` guarda cada intento negado con su metodo
+  y su ruta, y cada permiso dado o quitado con quien lo hizo.
+- **Sin PostgreSQL.** El guard usa la ultima matriz que leyo entera (al arrancar
+  y cada minuto), igual que la sesion se cree a su token cuando PostgreSQL esta
+  caido.
+
+La semilla de la 050 deja pasar exactamente a los mismos roles que los `@Roles`
+de antes, ruta por ruta. `node pruebas/permisos_cobertura.cjs` lo comprueba
+contra la matriz guardada antes del cambio (`pruebas/permisos_matriz_antes_050.json`),
+y tambien que cada ruta privada lleve el guard y un permiso que exista.
+`bash pruebas/permisos_rol.sh` llama a las rutas directo con los tres roles, los
+38 permisos cada uno, y quita y devuelve permisos en vivo.
+
+## Cada oferta, por persona
+
+Los roles dicen que puede hacer una cuenta con lo suyo. Que otra cuenta pueda
+tocar una oferta ajena lo dice un ACL de verdad por oferta (ADR-24, migracion
+049), desde el 26 de octubre.
 
 - **La lista.** `permiso_oferta`: una fila por oferta, cuenta y permiso (`ver`,
   `editar` o `descuento`), con quien lo dio y hasta cuando. Pegada al objeto,
   como un ACL clasico. Lo que no esta se niega.
-- **Quien la revisa.** `PermisoOfertaGuard`, despues de `SesionGuard`, en cada
+- **Quien la revisa.** `PermisoOfertaGuard`, despues de `SesionGuard` y de
+  `PermisoGuard` (el rol tiene que tener `ofertas.usar_compartidas`), en cada
   ruta de `/compartidas/ofertas`. Busca una entrada vigente de esa cuenta, esa
-  oferta y ese permiso. Sin ella contesta 404, el mismo de una oferta ajena, y
-  anota el intento. Tambien a un admin: negar por defecto no tiene excepciones.
+  oferta y ese permiso. Sin ninguna entrada contesta 404, el mismo de una oferta
+  ajena, para no confirmar que existe. Con alguna, pero no la que pide la ruta
+  (ve la oferta pero no puede editarla), 403 con el permiso que falta. Los dos
+  quedan anotados. Tambien a un admin: negar por defecto no tiene excepciones.
 - **Cada permiso por separado.** Cualquier entrada deja ver; `editar` cambia
   precio y existencia (no el estado); `descuento` pone y quita el descuento.
 - **Quien reparte.** Solo el dueno de la oferta, o un admin a nombre de la
@@ -159,6 +213,9 @@ distintas sin saberlo.
 ## Lo que queda
 
 - Neo4j con un solo usuario (arriba).
+- El rol que cuenta en el ACL de funciones es el del token, como con los
+  `@Roles` de antes: si el admin le cambia el rol a una cuenta, vale cuando
+  vuelve a entrar (el token dura 2 horas).
 - Sin TLS: entre PC el trafico va dentro de Tailscale, que ya va cifrado. Si las
   bases salieran a una red sin Tailscale, el siguiente paso es TLS en cada una.
 - pgAdmin entra con el dueno de PostgreSQL, porque es la herramienta de

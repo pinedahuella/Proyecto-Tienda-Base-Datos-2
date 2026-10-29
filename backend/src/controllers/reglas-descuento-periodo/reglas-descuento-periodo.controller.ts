@@ -9,8 +9,9 @@ import {
   Query,
   UseGuards,
 } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
 import { UsuarioActual } from '../../decorators/usuario-actual.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
@@ -18,7 +19,6 @@ import type { TokenUsuario } from '../../dto/token-usuario';
 import type { CrearReglaDescuentoPeriodoPeticion } from '../../dto/crear-regla-descuento-periodo';
 import type { EditarReglaDescuentoPeriodoPeticion } from '../../dto/editar-regla-descuento-periodo';
 import type { PaginarReglasDescuentoPeriodoQuery } from '../../dto/paginar-reglas-descuento-periodo';
-import { ID_ROL_VENDEDOR, ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { ReglasDescuentoPeriodoService } from '../../services/reglas-descuento-periodo/reglas-descuento-periodo.service';
 
 /**
@@ -33,14 +33,15 @@ import { ReglasDescuentoPeriodoService } from '../../services/reglas-descuento-p
  * propia cuenta.
  */
 @Controller('vendedor/reglas-descuento-periodos')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_VENDEDOR, ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
+@Permiso('reglas.ver')
 export class ReglasDescuentoPeriodoController {
   constructor(
     private readonly reglasDescuentoPeriodoService: ReglasDescuentoPeriodoService,
   ) {}
 
   // POST /vendedor/reglas-descuento-periodos
+  @Permiso('reglas.administrar')
   @Post()
   async crear(
     @Body() datos: CrearReglaDescuentoPeriodoPeticion,
@@ -101,6 +102,7 @@ export class ReglasDescuentoPeriodoController {
   }
 
   // PATCH /vendedor/reglas-descuento-periodos/:id
+  @Permiso('reglas.administrar')
   @Patch(':id')
   async editar(
     @Param('id') id: string,
@@ -124,6 +126,7 @@ export class ReglasDescuentoPeriodoController {
   }
 
   // DELETE /vendedor/reglas-descuento-periodos/:id
+  @Permiso('reglas.administrar')
   @Delete(':id')
   async eliminar(
     @Param('id') id: string,

@@ -1,9 +1,9 @@
 import { Controller, Get, UseGuards } from '@nestjs/common';
-import { Roles } from '../../decorators/roles.decorator';
+import { Permiso } from '../../decorators/permiso.decorator';
+import { PermisoGuard } from '../../guards/permiso.guard';
 import { SesionGuard } from '../../guards/sesion.guard';
 import { exito } from '../../helpers/respuesta';
 import { manejarErrorHttp } from '../../helpers/manejar-error-http';
-import { ID_ROL_ADMIN } from '../../models/rol-usuario';
 import { GrafoSyncService } from '../../services/grafo/grafo-sync.service';
 
 /**
@@ -14,19 +14,19 @@ import { GrafoSyncService } from '../../services/grafo/grafo-sync.service';
  * proyeccion) y devuelve el informe: que cuadra, que falta, y que hacer si
  * hay deriva (`etl/cargar_grafo.sh --limpiar`). NO repara nada.
  *
- * `@UseGuards(SesionGuard)` y `@Roles(ID_ROL_ADMIN)` van en la clase, igual
+ * `@UseGuards(SesionGuard, PermisoGuard)` y `@Permiso('sistema.ver')`, igual
  * que en `FraudeController` y `AdminReportesController`: SOLO ADMIN. No la
  * tienda -- es informacion de operacion de todo el sistema.
  *
  * Detalle del payload: `elementos Generales/endpoints-fraude.md`.
  */
 @Controller('admin/grafo')
-@UseGuards(SesionGuard)
-@Roles(ID_ROL_ADMIN)
+@UseGuards(SesionGuard, PermisoGuard)
 export class GrafoController {
   constructor(private readonly grafoSyncService: GrafoSyncService) {}
 
   // GET /admin/grafo/conciliacion
+  @Permiso('sistema.ver')
   @Get('conciliacion')
   async conciliacion() {
     try {

@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 152 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 170 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las respuestas están revisadas contra el código al 23 de octubre de 2026. Los números de línea de las primeras partes se tomaron el 20 de septiembre y el código creció desde entonces, así que pueden correrse unas líneas. El nombre del archivo y de la función siguen sirviendo para encontrar el sitio.
 
@@ -28,6 +28,7 @@ Las respuestas están revisadas contra el código al 23 de octubre de 2026. Los 
 - [Parte 10. Lo que cambió el 19 y 20 de octubre](#parte-10-lo-que-cambió-el-19-y-20-de-octubre), preguntas 142 a 148
 - [Parte 11. Lo que cambió el 23 de octubre](#parte-11-lo-que-cambió-el-23-de-octubre), preguntas 149 a 152
 - [Parte 12. Lo que cambió el 26 de octubre](#parte-12-lo-que-cambió-el-26-de-octubre), preguntas 153 a 161
+- [Parte 13. El ACL de funcionalidades, 28 de octubre](#parte-13-el-acl-de-funcionalidades-28-de-octubre), preguntas 162 a 170
 
 ---
 
@@ -90,14 +91,14 @@ Porque el dinero y el stock necesitan una transacción atómica con bloqueo de f
 ### 7. ¿Qué es el outbox hacia el grafo y cómo funciona su worker?
 Es una cola en PostgreSQL llamada `evento_grafo`. Un trigger sobre `resena` escribe un evento en la misma transacción que la reseña. Un worker del backend corre cada 10 segundos, toma cada evento con `FOR UPDATE SKIP LOCKED` y lo proyecta a Neo4j con `MERGE`. Si el evento falla 5 veces queda apartado.
 
-- Dónde se ve. `migrations/015_outbox_grafo.sql` lineas 95 a 102 crean la tabla, lineas 143 a 179 el trigger, y lineas 135 a 137 el índice parcial de pendientes. `backend/src/services/grafo/grafo-sync.service.ts` lineas 85 a 96 son el `@Interval` y lineas 183 a 232 toman, procesan y cuentan intentos. `backend/src/app.module.ts` lineas 78 a 79 activan el planificador.
+- Dónde se ve. `migrations/015_outbox_grafo.sql` lineas 95 a 102 crean la tabla, lineas 143 a 179 el trigger, y lineas 135 a 137 el índice parcial de pendientes. `backend/src/services/grafo/grafo-sync.service.ts` lineas 85 a 96 son el `@Interval` y lineas 183 a 232 toman, procesan y cuentan intentos. `backend/src/app.module.ts` lineas 80 a 81 activan el planificador.
 - Lo que pide el profesor. Entrega 3, estrategia de consistencia con una ventana de consistencia eventual aceptada y documentada. La cabecera de la 015 lo dice en las lineas 39 a 43.
 - Por qué así. Si el backend escribiera a Neo4j después del COMMIT y el proceso se cayera en medio, la reseña existiría sin rastro de que falta en el grafo. Con el outbox entran las dos cosas o ninguna.
 
 ### 8. ¿Cómo se comprueba que el grafo está al día con PostgreSQL?
 Con la conciliación. El endpoint `GET /admin/grafo/conciliacion` cuenta reseñas y relaciones en las dos bases y compara. Devuelve si cuadra, qué falta y qué eventos quedaron apartados. Solo avisa, no repara. Para reparar hay que correr el ETL del grafo con la opción de limpiar.
 
-- Dónde se ve. `backend/src/controllers/grafo/grafo.controller.ts` lineas 29 a 31 es la ruta, solo para admin. `backend/src/services/grafo/grafo-sync.service.ts` lineas 343 a 369 comparan los conteos y calculan el veredicto. `docs/CONSISTENCIA-CHECKOUT.md` lineas 273 a 275 lo explican.
+- Dónde se ve. `backend/src/controllers/grafo/grafo.controller.ts` lineas 28 a 31 es la ruta, solo para admin. `backend/src/services/grafo/grafo-sync.service.ts` lineas 343 a 369 comparan los conteos y calculan el veredicto. `docs/CONSISTENCIA-CHECKOUT.md` lineas 273 a 275 lo explican.
 - Lo que pide el profesor. Entrega 3, documento de estrategia de consistencia, 5 pts, con los puntos de falla y su mitigación.
 - Por qué así. Un panel de fraude que muestra datos viejos sin avisar engaña. Medir la deriva evita afirmar que está al día sin comprobarlo.
 
@@ -232,7 +233,7 @@ En la colección productos_eventos hay un documento por evento. El primero es la
 ### 25. ¿Cómo se consulta el estado de un producto en una fecha cualquiera?
 Con la ruta de historial del producto y el parámetro fecha. El servicio toma el evento de creación y todas las modificaciones hasta ese momento y las fusiona en orden con la agregación. Acepta solo el día, que cuenta completo en hora de Guatemala, o día con hora, que llega hasta ese instante en UTC. Si no hay eventos responde que el producto no existía en esa fecha.
 
-- Dónde se ve. `backend/src/controllers/productos/productos.controller.ts` lineas 54 a 69, la ruta `/productos/<id>/historial`. `backend/src/services/productos/productos.service.ts` lineas 319 a 392. `backend/src/helpers/momento-historial.ts` lineas 45 a 93, interpreta la fecha. `frontend/src/lib/PanelVendedor.svelte` linea 686, el panel que la llama.
+- Dónde se ve. `backend/src/controllers/productos/productos.controller.ts` lineas 57 a 72, la ruta `/productos/<id>/historial`. `backend/src/services/productos/productos.service.ts` lineas 319 a 392. `backend/src/helpers/momento-historial.ts` lineas 45 a 93, interpreta la fecha. `frontend/src/lib/PanelVendedor.svelte` linea 686, el panel que la llama.
 - Lo que pide el profesor. Entrega 1, una consulta que reconstruya el estado vigente en una fecha arbitraria a partir de los eventos, y verla desde el panel administrativo. Vale 1.25 pts junto con el modelado de eventos.
 - Por qué así. Quedarse solo con el último evento perdería los cambios anteriores que tocaron otros campos. Por eso se aplican todos, en orden.
 
@@ -610,7 +611,7 @@ Cuando el backend crea o edita un producto en Mongo, marca el mismo documento co
 ### 72. ¿Por qué se indexan todos los estados de producto y no solo los activos?
 Porque el administrador necesita encontrar justo lo que no circula, como lo rechazado o en revisión. El filtro se movió al backend. La ruta pública agrega siempre estado activo, fijo en el código, y solo la ruta de admin se lo salta y exige rol admin.
 
-- Dónde se ve. `backend/src/services/buscador/productos.service.ts` lineas 98 a 105, el filter fijo. `backend/src/controllers/buscador/productos.controller.ts` lineas 71 a 74, la ruta admin protegida. `etl/extraer_busqueda.js` lineas 26 a 50, la explicación y el filtro vacío.
+- Dónde se ve. `backend/src/services/buscador/productos.service.ts` lineas 98 a 105, el filter fijo. `backend/src/controllers/buscador/productos.controller.ts` lineas 72 a 74, la ruta admin protegida. `etl/extraer_busqueda.js` lineas 26 a 50, la explicación y el filtro vacío.
 - Lo que pide el profesor. Entrega 3, buscador funcional. Aquí se ve una decisión de arquitectura justificada, que el enunciado pide registrar (sección 5.3).
 - Por qué así. Si el ETL seguía filtrando, una reconstrucción completa borraba lo que el worker ya había indexado, sin dar error (`backend/cambio_propuestas/2026-09-04_2208-elastic-indexar-todos-los-estados.md`).
 
@@ -759,7 +760,7 @@ Solo corre en login exitoso. Pregunta a Elasticsearch las IPs desde las que esa 
 ### 91. ¿Cada cuánto corren los patrones lentos y hay que esperar a que corran?
 Un worker corre cada 15 minutos y revisa las últimas 24 horas con tres señales. Son fallos contra una cuenta con umbral 15, cuentas distintas desde una IP con umbral 8 y IPs distintas contra una cuenta con umbral 5. Además, después de cada login se corre una versión acotada solo a esa cuenta y esa IP, para no esperar los 15 minutos.
 
-- Dónde se ve. `backend/src/services/fraude-login/fraude-login-retrospectivo.service.ts` lineas 64 a 70, intervalo, ventana y umbrales. Lineas 77 a 100, el worker. Lineas 293 a 321, la evaluación inmediata. `backend/src/controllers/usuario.controller.ts` lineas 88 a 108, donde se encadena tras cada login.
+- Dónde se ve. `backend/src/services/fraude-login/fraude-login-retrospectivo.service.ts` lineas 64 a 70, intervalo, ventana y umbrales. Lineas 77 a 100, el worker. Lineas 293 a 321, la evaluación inmediata. `backend/src/controllers/usuario.controller.ts` lineas 92 a 112, donde se encadena tras cada login.
 - Lo que pide el profesor. Entrega 3, agregaciones del motor de búsqueda, aquí con terms, min_doc_count y bucket_selector.
 - Por qué así. El disparo inmediato y el worker usan el mismo tipo y la misma hora, así que se juntan en una sola alerta y no se duplican. El worker queda de respaldo si Elasticsearch estaba caído en ese instante.
 
@@ -787,14 +788,14 @@ Depende de la forma de la alerta. Si trae una cuenta resuelta, le llega a esa cu
 ### 95. ¿Qué ve el usuario afectado y qué no se le enseña?
 Ve una campana en la cabecera con el número de alertas sin leer y una pestaña Alertas en su panel. Solo ve las de su propia cuenta y las puede marcar como leídas. En multi cuenta se le quita la lista de las demás cuentas probadas y solo se le deja el conteo.
 
-- Dónde se ve. `frontend/src/lib/NotificacionesFraude.svelte` lineas 5 a 19 y línea 72, la campana y su consulta. `frontend/src/lib/AlertasFraudeUsuario.svelte` lineas 5 a 20, la pestaña. `backend/src/controllers/perfil.controller.ts` lineas 87 a 119, GET y PATCH de alertas-fraude. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 579 a 598, cómo se quitan los identificadores ajenos.
+- Dónde se ve. `frontend/src/lib/NotificacionesFraude.svelte` lineas 5 a 19 y línea 72, la campana y su consulta. `frontend/src/lib/AlertasFraudeUsuario.svelte` lineas 5 a 20, la pestaña. `backend/src/controllers/perfil.controller.ts` lineas 92 a 125, GET y PATCH de alertas-fraude. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 579 a 598, cómo se quitan los identificadores ajenos.
 - Lo que pide el profesor. Se pidió que el usuario también vea sus alertas, según el encabezado de `migrations/018_notificacion_fraude.sql` lineas 4 a 7.
 - Por qué así. El id de la cuenta sale siempre de la sesión y nunca de un parámetro, y marcar leída tiene el chequeo de dueño dentro del UPDATE, lineas 501 a 527 del servicio. Así nadie se entera de quiénes fueron las otras víctimas.
 
 ### 96. ¿Por qué nadie se bloquea solo y para qué sirve el botón Bloquear?
 El sistema solo avisa, nunca frena el login. Cruzar un umbral deja una alerta para que un admin la revise. Si el admin decide actuar, pulsa Bloquear junto a la cuenta afectada. Pide una confirmación y suspende la cuenta, y se puede deshacer.
 
-- Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 63 a 71, el comentario de que es best-effort y solo alerta. `backend/src/controllers/usuario.controller.ts` lineas 178 a 183, se llama sin await. `frontend/src/lib/BloquearCuenta.svelte` lineas 22 a 36 y 57 a 78, el botón. `frontend/src/lib/PanelFraude.svelte` línea 1042 del commit, donde se pone junto a cada cuenta afectada. Una cuenta suspendida no entra, `backend/src/services/usuario.service.ts` lineas 153 a 155.
+- Dónde se ve. `backend/src/services/fraude-login/fraude-login.service.ts` lineas 63 a 71, el comentario de que es best-effort y solo alerta. `backend/src/controllers/usuario.controller.ts` lineas 182 a 187, se llama sin await. `frontend/src/lib/BloquearCuenta.svelte` lineas 22 a 36 y 57 a 78, el botón. `frontend/src/lib/PanelFraude.svelte` línea 1042 del commit, donde se pone junto a cada cuenta afectada. Una cuenta suspendida no entra, `backend/src/services/usuario.service.ts` lineas 153 a 155.
 - Lo que pide el profesor. No es requisito del enunciado, es decisión del equipo escrita en el comentario del servicio.
 - Por qué así. Una regla automática bloquearía a un usuario legítimo con VPN o a todo el equipo probando desde la misma máquina. Un fallo de Redis tampoco debe tumbar el login. El humano decide con la evidencia a la vista.
 
@@ -808,7 +809,7 @@ Cada alerta es una tarjeta con qué pasó y su estado. Muestra la IP o la cuenta
 ### 98. ¿Qué estados tiene una alerta y cómo pasa de pendiente a revisada o descartada?
 Tiene tres estados, pendiente, revisada y descartada. Nace pendiente. El admin pulsa Marcar revisada o Descartar y solo se permite el cambio desde pendiente. Si la alerta ya no está pendiente el backend contesta 409, y si no existe contesta 404.
 
-- Dónde se ve. `migrations/016_alerta_fraude.sql` lineas 109 a 122, el catálogo de estados, que ahora usa `senal_fraude`. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 58 a 73, el PATCH. `backend/src/services/fraude-login/fraude-login-exploracion.service.ts` línea 242, el UPDATE de la señal con condición, y la 265, la distinción entre 404 y 409. `frontend/src/lib/PanelFraude.svelte` lineas 1093 a 1112, los botones.
+- Dónde se ve. `migrations/016_alerta_fraude.sql` lineas 109 a 122, el catálogo de estados, que ahora usa `senal_fraude`. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 59 a 75, el PATCH. `backend/src/services/fraude-login/fraude-login-exploracion.service.ts` línea 242, el UPDATE de la señal con condición, y la 265, la distinción entre 404 y 409. `frontend/src/lib/PanelFraude.svelte` lineas 1093 a 1112, los botones.
 - Lo que pide el profesor. Nada literal, es el triage del panel administrativo.
 - Por qué así. La condición de estado pendiente va dentro del propio UPDATE, así dos admins a la vez no se pisan y el segundo recibe el 409. Los estados son una tabla catálogo y no un texto libre.
 
@@ -873,21 +874,21 @@ Todas piden usuario y contraseña, y desde el 23 de octubre cada servicio entra 
 ### 105. ¿Cómo funciona el inicio de sesión, la contraseña y la expiración de 2 horas?
 Al iniciar sesión el backend compara la contraseña contra su hash y firma un JWT con el id y el rol. El token viaja en la cookie mesh_token, httpOnly y sameSite lax, y vence a las 2 horas. La contraseña se guarda con scrypt de Node y un salt al azar por usuario. Un comentario de usuario.service dice bcrypt pero el código usa scrypt.
 
-- Dónde se ve. `backend/src/helpers/token.ts` lineas 6 a 30 (HS256, 2 horas y opciones de la cookie) y 48 a 54 (firma). `backend/src/helpers/contrasena.ts` lineas 9 a 21 (hash) y 23 a 48 (comparación con timingSafeEqual). `backend/src/services/usuario.service.ts` lineas 113 a 165, iniciarSesion. `backend/src/controllers/usuario.controller.ts` linea 166, donde se pone la cookie.
+- Dónde se ve. `backend/src/helpers/token.ts` lineas 6 a 30 (HS256, 2 horas y opciones de la cookie) y 48 a 54 (firma). `backend/src/helpers/contrasena.ts` lineas 9 a 21 (hash) y 23 a 48 (comparación con timingSafeEqual). `backend/src/services/usuario.service.ts` lineas 113 a 165, iniciarSesion. `backend/src/controllers/usuario.controller.ts` linea 170, donde se pone la cookie.
 - Lo que pide el profesor. Fase inicial, registro y autenticación con roles de comprador, vendedor y administrador. Entrega final, control de acceso (4 pts).
 - Por qué así. Un solo número de 2 horas sirve para el token y para la cookie y no se pueden desincronizar. La cookie httpOnly impide que JavaScript robe el token, y los tres fallos de login dan el mismo mensaje para no revelar qué cuentas existen.
 
 ### 106. ¿Cómo se protege una ruta y cómo funcionan los roles comprador, vendedor y admin?
-Se pone SesionGuard en el controller y, si hace falta, Roles con los ids de rol. El guard revisa la cookie y el token (401), revisa que la cuenta siga activa en la base (401) y compara el rol contra la lista (403). Los ids son 1 comprador, 2 vendedor y 3 admin. Las rutas de admin llevan Roles de admin en la clase, las de vendedor admiten vendedor y admin, y carrito y pedidos solo piden sesión.
+Cada ruta privada lleva dos guards, en este orden. `SesionGuard` dice quién es. Revisa la cookie y el token y que la cuenta siga activa en la base, y si algo falla contesta 401. `PermisoGuard` dice qué puede hacer. Lee el `@Permiso('modulo.accion')` de la ruta y le pregunta a `rol_permiso` si el rol de la cuenta lo tiene. Si no lo tiene contesta 403 y anota el intento en `auditoria_permiso`. Los ids de rol son 1 comprador, 2 vendedor y 3 admin. El permiso puede ir en la clase, y vale para todas sus rutas, o en un método. Hasta el 28 de octubre la lista de roles estaba escrita en el código con `@Roles`, y desde la migración 050 vive en PostgreSQL (preguntas 163 a 170).
 
-- Dónde se ve. `backend/src/guards/sesion.guard.ts` lineas 41 a 98. `backend/src/decorators/roles.decorator.ts` lineas 3 a 18. `backend/src/models/rol-usuario.ts` lineas 11 a 13. `backend/src/controllers/admin/admin-usuarios.controller.ts` lineas 20 a 22, y el mismo patrón en `backend/src/controllers/admin/admin-reportes.controller.ts` lineas 22 a 24. Para vendedor, `backend/src/controllers/vendedores/productos.controller.ts` lineas 37 a 38.
+- Dónde se ve. `backend/src/guards/sesion.guard.ts` lineas 65 a 117, la sesión. `backend/src/guards/permiso.guard.ts` lineas 41 a 87, el permiso. `backend/src/decorators/permiso.decorator.ts` lineas 6 a 19. `backend/src/services/acl/permisos.service.ts` linea 106, tiene. `backend/src/models/rol-usuario.ts` lineas 11 a 13. `backend/src/controllers/admin/admin-usuarios.controller.ts` lineas 20 a 22, y el mismo patrón en `backend/src/controllers/admin/admin-reportes.controller.ts` lineas 22 a 24. Para vendedor, `backend/src/controllers/vendedores/productos.controller.ts` lineas 36 a 38. La tabla `rol_permiso` está en `migrations/050_permisos_por_rol.sql` lineas 70 a 79.
 - Lo que pide el profesor. Entrega final, control de acceso con autorización por rol (4 pts). Fase inicial, roles de comprador, vendedor y administrador.
-- Por qué así. El token vale 2 horas aunque suspendan la cuenta, por eso el guard consulta la base en cada petición con estaActivo, en `backend/src/services/usuario.service.ts` linea 206.
+- Por qué así. El token vale 2 horas aunque suspendan la cuenta, por eso `SesionGuard` consulta la base en cada petición con estaActivo, en `backend/src/services/usuario.service.ts` linea 243. El permiso también se consulta en cada petición, así que quitar una fila de `rol_permiso` vale desde la siguiente llamada, sin reiniciar el backend.
 
 ### 107. ¿Cómo consume el panel administrativo varias fuentes de datos?
 El panel es una sola pantalla con pestañas para el admin y cada pestaña llama rutas de admin del backend que leen una base distinta. Reportes y Cuentas leen PostgreSQL y Tendencias lee ClickHouse. Fraude junta alertas de PostgreSQL, el log de login de Elasticsearch y el detalle de anillos de Neo4j. Esconder una pestaña no protege nada, el backend responde 403.
 
-- Dónde se ve. `frontend/src/routes/panel/+page.svelte` lineas 132 a 148 (pestañas del admin), 815 a 834 (Cuentas y Fraude) y 842 a 850 (Tendencias). `backend/src/controllers/admin/admin-tendencias.controller.ts` lineas 30 a 32, y `backend/src/services/admin/admin-tendencias.service.ts` linea 2, cliente de ClickHouse. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 44 a 48, ruta del log de Elasticsearch. `frontend/src/lib/sesion.ts` lineas 50 a 62, donde se explica que el rol solo decide qué se pinta.
+- Dónde se ve. `frontend/src/routes/panel/+page.svelte` lineas 132 a 148 (pestañas del admin), 815 a 834 (Cuentas y Fraude) y 842 a 850 (Tendencias). `backend/src/controllers/admin/admin-tendencias.controller.ts` lineas 30 a 32, y `backend/src/services/admin/admin-tendencias.service.ts` linea 2, cliente de ClickHouse. `backend/src/controllers/admin/admin-fraude-login.controller.ts` lineas 45 a 49, ruta del log de Elasticsearch. `frontend/src/lib/sesion.ts` lineas 50 a 62, donde se explica que el rol solo decide qué se pinta.
 - Lo que pide el profesor. Panel administrativo, componente transversal que consume múltiples fuentes. Entrega 2 pide los paneles de fraude y de tendencias.
 - Por qué así. Cada pestaña usa la base que mejor contesta su pregunta, y el navegador nunca sabe de cuál sale el dato porque toda respuesta trae ok, mensaje y payload.
 
@@ -908,14 +909,14 @@ Hay un solo registro, de ADR-1 a ADR-23, en `docs/DECISIONES.md` y en la secció
 ### 110. ¿Cómo está estructurado el backend en NestJS?
 Es NestJS sobre Fastify en el puerto 3000. El archivo app.module registra cada controller y cada servicio, y si una clase no está ahí su ruta no existe. El controller recibe la petición y traduce errores a HTTP, el service tiene la lógica y el SQL a mano, dto define la forma de las peticiones y database tiene un cliente por base.
 
-- Dónde se ve. `backend/src/app.module.ts` lineas 76 a 151. `backend/src/main.ts` lineas 32 a 35 y 54, servidor Fastify y puerto. `backend/src/database/postgres.ts` lineas 16 a 22 y `backend/src/database/redis.ts` lineas 33 a 40, dos de los seis clientes.
+- Dónde se ve. `backend/src/app.module.ts` lineas 78 a 153. `backend/src/main.ts` lineas 32 a 35 y 54, servidor Fastify y puerto. `backend/src/database/postgres.ts` lineas 16 a 22 y `backend/src/database/redis.ts` lineas 33 a 40, dos de los seis clientes.
 - Lo que pide el profesor. Sección 5.2, backend a elección del equipo. Entrega final, repositorio completo del sistema.
 - Por qué así. Cada cliente lleva tiempos límite propios, así una base caída da un 503 rápido y no una petición colgada. La explicación está en `backend/src/database/redis.ts` lineas 17 a 28.
 
 ### 111. ¿Cómo se manejan los errores en el backend?
 Los servicios lanzan errores de dominio y un solo helper los traduce a HTTP. Validación es 400, conflicto 409, sesión 401, no encontrado 404, pago 402 y conexión 503. Lo que no se reconoce sale como 500 con un mensaje genérico y el detalle va al log. Toda respuesta, buena o mala, trae ok, mensaje y payload.
 
-- Dónde se ve. `backend/src/helpers/errores.ts` lineas 10 a 49. `backend/src/helpers/manejar-error-http.ts` lineas 18 a 48. `backend/src/helpers/manejar-error-db.ts` lineas 14 a 22 y 39 a 59, que decide si un fallo de PostgreSQL es de conexión. `backend/src/helpers/respuesta.ts` lineas 12 a 30.
+- Dónde se ve. `backend/src/helpers/errores.ts` lineas 10 a 49. `backend/src/helpers/manejar-error-http.ts` lineas 19 a 52. `backend/src/helpers/manejar-error-db.ts` lineas 14 a 22 y 39 a 59, que decide si un fallo de PostgreSQL es de conexión. `backend/src/helpers/respuesta.ts` lineas 12 a 30.
 - Lo que pide el profesor. Entrega 3, manejo explícito de fallos parciales con un comportamiento definido y comunicado al usuario. La consistencia del checkout vale 5 pts y la prueba de falla 4 pts.
 - Por qué así. El mismo mapeo sirve a controllers y guards y vive en un solo lugar. Cada base tiene su propio manejador, por ejemplo `backend/src/helpers/manejar-error-redis.ts` lineas 11 a 14.
 
@@ -1228,7 +1229,7 @@ En dos tablas de PostgreSQL de la migración 049, `permiso_oferta` (oferta, cuen
 - Ojo. PostgreSQL no hace nada especial con estas tablas. Pone llaves foráneas, una entrada única por oferta, cuenta y permiso, y un CHECK para que nadie se dé permisos a sí mismo.
 
 ### 155. ¿Cómo decide el backend si alguien puede editar una oferta compartida?
-Antes de entrar al controlador pasa por dos guards. `SesionGuard` comprueba la sesión y el rol. Después `PermisoOfertaGuard` lee el permiso que pide la ruta, marcado con `@PermisoOferta('editar')`, y busca en `permiso_oferta` una entrada vigente de esa cuenta, esa oferta y ese permiso. Si no la hay contesta 404, el mismo de una oferta ajena, y anota el intento como negado. Si la hay, deja la oferta y su dueño en la petición, y el controlador llama al mismo `OfertasVendedorService.editar` de siempre a nombre del dueño. Ver lo da cualquier entrada, y editar y descuento piden la suya.
+Antes de entrar al controlador pasa por tres guards. `SesionGuard` comprueba la sesión (401). `PermisoGuard` comprueba que el rol tenga `ofertas.usar_compartidas` en `rol_permiso` (403, desde el 28 de octubre). Después `PermisoOfertaGuard` lee el permiso que pide la ruta, marcado con `@PermisoOferta('editar')`, y busca en `permiso_oferta` una entrada vigente de esa cuenta, esa oferta y ese permiso. Si no tiene ninguna entrada contesta 404, el mismo de una oferta ajena, para no confirmar que existe. Si tiene alguna pero no esa, por ejemplo ve la oferta pero no puede editarla, contesta 403 con el permiso que falta. Los dos quedan anotados como negados. Si la hay, deja la oferta y su dueño en la petición, y el controlador llama al mismo `OfertasVendedorService.editar` de siempre a nombre del dueño. Ver lo da cualquier entrada, y editar y descuento piden la suya.
 
 - Dónde se ve. `backend/src/guards/permiso-oferta.guard.ts`, `backend/src/decorators/permiso-oferta.decorator.ts` y `backend/src/controllers/compartidas/ofertas-compartidas.controller.ts`.
 - Ojo si preguntan por el admin. Sin una entrada, un admin tampoco pasa por las rutas compartidas. Negar por defecto no tiene excepciones.
@@ -1246,7 +1247,7 @@ Cada permiso dado o quitado, cada cambio hecho por la vía compartida y cada int
 - Ojo. Al dar o quitar un permiso, el registro va en la misma transacción. Al editar por la vía compartida se escribe después de que la edición salió bien, y si esa escritura fallara la edición queda hecha y el backend lo avisa en su log.
 
 ### 158. ¿El ACL de la aplicación cuenta para el punto de control de acceso del enunciado?
-No lo reemplaza. El enunciado pide control de acceso en al menos un componente NoSQL, con permisos según el servicio que lo usa y la prueba de que alguien sin permiso no puede, y eso ya estaba con Redis y su ACL nativo, más MongoDB, ClickHouse y Elasticsearch con usuarios por servicio, 93 comprobaciones. El ACL de la aplicación es la otra capa, la de las personas, y se agregó porque el profesor comentó que podía vivir en la aplicación. Juntas dan defensa en profundidad.
+No lo reemplaza. El enunciado pide control de acceso en al menos un componente NoSQL, con permisos según el servicio que lo usa y la prueba de que alguien sin permiso no puede, y eso ya estaba con Redis y su ACL nativo, más MongoDB, ClickHouse y Elasticsearch con usuarios por servicio, 93 comprobaciones. El ACL de la aplicación es la otra capa, la de las personas, y se agregó porque el profesor comentó que podía vivir en la aplicación. Juntas dan defensa en profundidad. Desde el 28 de octubre hay una tercera capa en medio, la de las funcionalidades por rol (Parte 13).
 
 - Dónde se ve. `bash seguridad/prueba_acceso.sh` para las bases, `bash pruebas/acl_ofertas.sh` y `node pruebas/acl_ofertas_azar.mjs` para la aplicación.
 
@@ -1265,3 +1266,55 @@ Un cambio de categoría por la API escribe MongoDB y la copia en PostgreSQL al i
 Porque se rompió el código a propósito y fallaron. Quitando el orden por grupo, en el Cypher y en el respaldo, la prueba de categorías dio 8 fallas. Dejando que cualquier entrada permitiera todo, la del ACL dio 11 y la prueba al azar 9. Quitando el vencimiento, 3. Con el código bueno, 32, 84 y casi cinco mil comprobaciones al azar, ninguna mal. La prueba al azar da y quita permisos sin orden, intenta acciones con varias cuentas y compara cada respuesta con un modelo de lo que debería pasar.
 
 - Dónde se ve. `pruebas/tambien_compraron_categoria.sh`, `pruebas/acl_ofertas.sh` y `pruebas/acl_ofertas_azar.mjs`, las tres en `pruebas/correr_todas.sh`.
+
+## Parte 13. El ACL de funcionalidades, 28 de octubre
+
+El profesor pidió el control de acceso a nivel de base de datos y a nivel de funcionalidades, con una demo donde alguien sin permiso llama al backend directo y recibe un error. Esto es lo que se hizo y cómo se defiende.
+
+### 162. ¿Qué capas de control de acceso tiene Mesh?
+Tres, y cada una contesta una pregunta distinta. Las bases, por servicio: qué puede hacer el backend o una herramienta en cada base, con usuarios y roles de cada base (ADR-14). Las funcionalidades, por rol: qué acciones de la tienda puede usar cada rol, con la tabla `rol_permiso` de PostgreSQL (ADR-26). Y cada oferta, por persona: qué cuenta puede ver, editar o descontar una oferta ajena, con `permiso_oferta` (ADR-24). Antes de las tres, `SesionGuard` dice quién es la cuenta.
+
+- Dónde se ve. La tabla del principio de `docs/SEGURIDAD.md`.
+- Ojo. Ninguna base sabe qué persona está detrás de una petición, todas llegan como `mesh_backend`. Por eso las dos capas de personas viven en la aplicación, en tablas de PostgreSQL.
+
+### 163. ¿Por qué los roles con `@Roles` no bastaban, si ya devolvían 403?
+Porque la lista de qué rol puede qué vivía en el código, en 38 decoradores. Funcionaba, pero no se podía enseñar como datos ni cambiar sin compilar, y en sentido estricto era control por roles escrito a mano, no una lista de control de acceso. Ahora la lista es una tabla: se lee con un SELECT y se cambia con una fila, y vale en la petición siguiente.
+
+- Dónde se ve. ADR-26 en `docs/DECISIONES.md`. La matriz de antes quedó guardada en `pruebas/permisos_matriz_antes_050.json`.
+
+### 164. ¿Cómo son las tablas y por qué están en tercera forma normal?
+`modulo_permiso` tiene los 17 grupos de funciones. `permiso` tiene las 38 acciones, cada una dentro de su módulo, únicas por módulo. `rol_permiso` es el ACL, una fila por rol y permiso con quién lo dio y cuándo. `auditoria_permiso` guarda cada intento negado y cada cambio. El módulo va en su tabla y no repetido como texto en cada permiso; el código `ofertas.publicar` se arma con un JOIN y no se guarda, así que renombrar un módulo es una fila. En `rol_permiso` quién lo dio y cuándo dependen de la llave completa, el rol junto con el permiso. En la auditoría cada columna depende solo de su id.
+
+- Dónde se ve. `migrations/050_permisos_por_rol.sql` y la vista `permisos_por_rol`.
+- Ojo si preguntan por la ruta en la auditoría. La ruta que se pidió es un hecho del momento, como el rol que tenía la cuenta. Qué permiso pide cada ruta vive en el código y cambia entre versiones, no es una dependencia de la base.
+
+### 165. ¿Qué pasa, paso a paso, cuando alguien sin permiso llama a una ruta directo?
+`SesionGuard` lee la cookie y verifica el token; sin cookie o con un token armado a mano, 401. `PermisoGuard` lee el `@Permiso` de la ruta, por ejemplo `ofertas.publicar`, y pregunta a `rol_permiso` si el rol del token lo tiene. Si no, anota el intento en `auditoria_permiso` con el método y la ruta, y contesta 403 con "No tienes permiso para hacer esto (falta ofertas.publicar)". El controlador no llega a correr.
+
+- Dónde se ve. `backend/src/guards/permiso.guard.ts` y `backend/src/services/acl/permisos.service.ts`. En vivo, `.\demo-entrega-final.ps1 -Parte permisos`.
+- Ojo. Una ruta privada sin `@Permiso` también se niega. Negar por defecto vale también cuando alguien se olvida de declararla.
+
+### 166. ¿Cómo se demuestra que cambiar la tabla cambia lo que puede cada rol, sin reiniciar?
+En la demo se borra con una línea de SQL la fila de `ofertas.publicar` del vendedor, y su petición siguiente da 403. Ver sus ofertas le sigue funcionando, porque es otro permiso. Otra línea se la devuelve y vuelve a pasar. Lo mismo desde el panel del admin, sección Permisos, con una casilla. El guard pregunta a la tabla en cada petición, no guarda nada entre una y otra.
+
+- Dónde se ve. `demo-entrega-final.ps1 -Parte permisos`, pasos 4 y 5, y `pruebas/permisos_rol.sh`, partes 3 a 5.
+
+### 167. ¿Cómo saben que el cambio no le quitó ni le dio nada a nadie el primer día?
+Antes de tocar el código se leyó del backend compilado cada ruta con sus roles y se guardó. Después, `pruebas/permisos_cobertura.cjs` compara, ruta por ruta, los roles que hoy tienen el permiso de cada ruta con los que dejaba pasar su `@Roles`. Las 165 rutas dan lo mismo. Además comprueba que las 136 privadas lleven el guard y un permiso que exista, y que el catálogo de la base y el del código sean el mismo. Se rompió a propósito, quitando una fila y quitando un guard, y falló las dos veces.
+
+- Dónde se ve. `pruebas/permisos_matriz.cjs`, `pruebas/permisos_matriz_antes_050.json` y `pruebas/permisos_cobertura.cjs`.
+
+### 168. ¿Qué pasa si se cae PostgreSQL, donde vive la lista?
+El guard usa la última matriz que leyó entera, al arrancar y cada minuto. Es la misma decisión que con la sesión, que con PostgreSQL caído se cree al token: la tienda se puede seguir mirando y lo que escribe en PostgreSQL falla por su lado. Si el backend arranca sin PostgreSQL y nunca leyó la matriz, contesta 503 hasta que vuelva.
+
+- Dónde se ve. `tiene()` y `refrescarCopia()` en `backend/src/services/acl/permisos.service.ts`, y ADR-26.
+
+### 169. ¿Quién puede cambiar los permisos, y qué no se puede quitar?
+Solo un rol con `permisos.administrar`, hoy el admin, por `/admin/permisos`, que se protege con su propio ACL: un vendedor que intenta darse permisos recibe 403 y queda anotado. Por la API no se puede quitar `cuenta.ver` a nadie, porque sin él la sesión no abre, ni `permisos.ver` y `permisos.administrar` al admin, porque nadie podría devolverlos. Esas casillas salen quietas en el panel. Con SQL a mano sí se puede, y eso es responsabilidad de quien administra la base.
+
+- Dónde se ve. `backend/src/controllers/admin/admin-permisos.controller.ts` y `revocar()` en el servicio.
+
+### 170. ¿Por qué por rol y no por persona, y por qué el rol del token?
+Porque con tres roles la lista por rol es corta y se entiende de un vistazo, y los permisos por persona ya existen donde hacen falta, en las ofertas compartidas. Una tabla por persona para cada función sería un segundo lugar para darle algo a una cuenta. El rol que cuenta es el del token, igual que con los `@Roles` de antes; si el admin le cambia el rol a una cuenta, vale cuando vuelve a entrar, como mucho en las dos horas del token.
+
+- Dónde se ve. Alternativas de ADR-26, y `docs/SEGURIDAD.md`, Lo que queda.
