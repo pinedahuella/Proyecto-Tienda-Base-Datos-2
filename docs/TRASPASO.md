@@ -32,7 +32,12 @@ documentado. La laptop se reinicio a las 07:37: backend, frontend, Ollama y Tail
 - **Demos:** las 13 partes de `demo-entrega-final.ps1` corridas contra David, todas bien; `-Parte bases` 93 OK,
   `-Parte permisos` deja la matriz en 76 y `-Parte compartir` la oferta 3 sin permisos. Las 21 laminas vistas en
   Edge sin nada fuera; la 20 suma Permisos por rol y la 14 dice 85.
-- **Word final:** suma los commits al 29-10, las 26 decisiones, el rango 001 a 050 y el 403 de compartidas.
+- **Word final:** suma los commits al 29-10, las 26 decisiones, el rango 001 a 050 y el 403 de compartidas. El Word
+  de la Entrega 3 tambien dice el conteo de hoy; su portada sigue en el martes 20 de octubre, cuando se entrego.
+- **NO aplicado en la PC de Meme (local).** Al prender Docker la RAM llego a 97 % y Meme pidio dejarlo. La base local
+  todavia no tiene la 050: el proximo `.\arrancar.ps1` la aplica solo. Por eso `falla_checkout.sh` no se ha corrido
+  con el ACL por rol (en remoto siempre dice SIN MEDIR); lo cubre `caidas.mjs`, 51 y 51, con la compra y PostgreSQL
+  caido incluidos. Todo quedo apuntando a la PC de Jose David.
 - **Sin cambiar:** el Word de la Entrega 3, que es lo que se entrego el 20-21 de octubre.
 
 **Antes, del 28 al 29-10, noche. El ACL de funcionalidades, por rol (ADR-26, migracion 050), probado con las

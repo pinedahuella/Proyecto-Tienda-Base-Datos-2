@@ -13,6 +13,10 @@ nivel de funcionalidades. Esta hecho, aplicado en la PC de Jose David y probado,
 y el 29 quedo commiteado y pusheado. Lo de abajo sigue igual: el 29 de octubre
 el repo todavia era privado.
 
+Sin medir, y no lo pide el enunciado: la base local de la PC de Meme no tiene la
+050 (la aplica el proximo `arrancar.ps1`) y `pruebas/falla_checkout.sh` no se ha
+corrido con el ACL por rol, porque solo se puede con las bases en la misma PC.
+
 ## Como esta al 2026-10-26
 
 Todo lo que pide el enunciado para las cuatro entregas esta hecho y probado
