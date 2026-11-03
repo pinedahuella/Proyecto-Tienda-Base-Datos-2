@@ -199,15 +199,20 @@ if [ -n "$ID_ANILLO" ]; then
 
     titulo "5. El detalle sale de Neo4j, y el caso se trabaja como una cola"
 
-    det=$(curl -s -o "$TEMP/anillo_detalle.json" -w '%{http_code}' "$API/admin/fraude/alertas-resenas/$ID_ANILLO/detalle-grafo" -H "Cookie: $ADMIN")
+    # El cuerpo y el codigo van en una variable y no en un archivo de $TEMP: en
+    # un Git Bash recien abierto TEMP es /tmp, curl.exe con MSYS_NO_PATHCONV no
+    # lo puede escribir (sale con 23 pero dice 200) y python lo buscaba en otra
+    # carpeta. Desde la terminal de Claude pasaba; desde la de una persona,
+    # "el detalle trae 0 resenas" (2026-11-02).
+    r=$(curl -s -w '\n%{http_code}' "$API/admin/fraude/alertas-resenas/$ID_ANILLO/detalle-grafo" -H "Cookie: $ADMIN")
+    det=$(echo "$r" | tail -1)
     [ "$det" = "200" ] && OK "GET .../detalle-grafo contesta 200" || FALLA "detalle-grafo contesto $det"
-    n_res=$(python -c "
-import json,os
-try: d=json.load(open(os.environ['TEMP']+'/anillo_detalle.json'))['payload']
+    n_res=$(echo "$r" | sed '$d' | python -c "
+import sys,json
+try: d=json.load(sys.stdin)['payload']
 except Exception: print(0); raise SystemExit
 print(len(d.get('resenas') or []))")
     [ "$n_res" = "3" ] && OK "el detalle trae las 3 resenas del ciclo, leidas del grafo" || FALLA "el detalle trae $n_res resenas"
-    rm -f "$TEMP/anillo_detalle.json"
 
     r=$(llamar PATCH "/admin/fraude/alertas-resenas/$ID_ANILLO" "$ADMIN" '{"estado":"revisada"}')
     [ "$(echo "$r" | campo ok)" = "True" ] && OK "PATCH lo marco revisado" || FALLA "PATCH, $(echo "$r" | campo mensaje)"

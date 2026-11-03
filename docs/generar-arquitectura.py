@@ -47,13 +47,14 @@ CAJAS = [
         "recorridos de dos saltos en vivo",
     ], "#E1D5E7", "#9673A6"),
     ("pg", "PostgreSQL 18", "FUENTE DE VERDAD", [
-        "86 tablas y 107 llaves foráneas",
+        "93 tablas y 117 llaves foráneas",
         "pedidos, pagos, ofertas, stock",
         "la verdad del carrito y las reservas",
         "de venta relámpago",
         "vectores con pgvector e índice HNSW",
         "respaldo del catálogo y del buscador",
         "reseñas, señales y casos de fraude",
+        "permisos por rol y por oferta (ACL)",
         "colas hacia los otros motores",
     ], "#DAE8FC", "#6C8EBF"),
     ("mongo", "MongoDB", "CATÁLOGO Y LOG DE LOGIN", [
@@ -282,7 +283,7 @@ def construir():
     x0 = 40
 
     L.texto(x0, 14, 1500, 30, "Mesh, arquitectura políglota con seis motores de persistencia", 20, negrita=True)
-    L.texto(x0, 48, 1700, 24, "Estado al 23 de octubre de 2026. Las flechas continuas son lo que hace el backend, "
+    L.texto(x0, 48, 1700, 24, "Estado al 2 de noviembre de 2026. Las flechas continuas son lo que hace el backend, "
             "las punteadas y numeradas son datos que viajan de un motor a otro, y su mecanismo está en la leyenda.",
             11, gris=True)
 
@@ -292,7 +293,7 @@ def construir():
     L.rect("cliente", x0, 90, 300, 62, "<b>Frontend</b><br>SvelteKit, puerto 5173", "#E6E6F5", "#3D3D99")
     x_ollama = x0 + (len(CAJAS) - 1) * (ANCHO_DB + HUECO_DB)
     L.rect("workers", x0 + 400, 80, x_ollama - x0 - 430, 104,
-           "<b>Workers del backend</b><br>grafo de reseñas y de compras 10 s, buscador 10 s, catálogo a MongoDB 5 s, "
+           "<b>Workers del backend</b><br>grafo de reseñas y de compras 10 s, categoría del grafo 60 s, buscador 10 s, catálogo a MongoDB 5 s, "
            "ofertas a Elasticsearch 5 s, login a Elasticsearch 5 s, vectores de productos y de reseñas 10 s, clasificador de reseñas 30 s, "
            "reservas de venta relámpago 10 s, ventas relámpago y descuentos vencidos 1 min, reglas automáticas 60 s, reglas por fecha 15 min, "
            "carritos vencidos 10 min, más vendidos y más vistos 10 min, también vieron 15 min, combos 30 min, registro de ofertas en Redis 10 min, "

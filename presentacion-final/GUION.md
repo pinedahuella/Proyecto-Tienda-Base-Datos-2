@@ -79,8 +79,11 @@ preguntan como saben que no rompieron nada, antes de cambiarlo se guardo que
 roles entraban a cada una de las 165 rutas y la prueba compara ruta por ruta:
 el primer dia todo dejaba pasar a los mismos. Si preguntan si es un ACL de
 verdad, si: la lista esta en la base, lo que no esta se niega, y se cambia sin
-compilar. Las bases siguen con su usuario por servicio, esta es la capa de las
-funciones, y la siguiente lamina es la de cada oferta.
+compilar. Si preguntan que pasa si el admin le baja el rol a alguien con la
+sesion abierta, vale en su peticion siguiente: el rol se lee de la base en cada
+peticion, no del token (pregunta 170). Las bases siguen con su usuario por
+servicio, esta es la capa de las funciones, y la siguiente lamina es la de cada
+oferta.
 
 ## 14. Un ACL por oferta (Jose Manuel)
 Lo de antes es por servicio, y lo hacen cumplir las bases. Pero ninguna base

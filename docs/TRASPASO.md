@@ -3,9 +3,61 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-10-29, manana**.
+Ultima actualizacion: **2026-11-02, noche**.
 
-**EMPIEZA AQUI (29-10, manana). Lo de la noche revisado, commiteado y pusheado (`bd6d47d`, 354 commits), y los
+**EMPIEZA AQUI (02-11, noche). Revision entera para la entrega final, con las bases de la PC de Meme y despues con
+las de la PC de Jose David.** Meme pidio revisar todo, que corra en su PC con sus bases y que quede perfecto para la
+nota. El relato minuto a minuto esta en `LOCAL-02-11-LEEME.txt` (fuera de git). Lo que se encontro y se arreglo:
+- **El rol del ACL salia del token.** `PermisoGuard` preguntaba con el `id_rol_usuario` firmado al entrar, y el token
+  dura 2 horas: si el admin le bajaba el rol a alguien, seguia entrando con el de antes, y `/usuario/yo` mezclaba la
+  cuenta de la base con los permisos del token. Ahora `SesionGuard` trae el rol de hoy en la misma consulta con que ya
+  revisaba que la cuenta siguiera activa (`estadoDeSesion` en `usuario.service.ts`); con PostgreSQL caido se queda el
+  del token. `pruebas/permisos_rol.sh` suma la parte 9 (el admin le baja el rol al vendedor y su MISMA cookie ya da
+  403): 171 OK; con los dos archivos de antes, 4 FALLA. Nota para David en
+  `backend/cambio_propuestas/2026-11-02_2100-el-rol-sale-de-la-base.md`. SEGURIDAD, DECISIONES (ADR-26), api.md,
+  PREGUNTAS 165, 170 y la de los guards, GUION y el Word final al dia.
+- **Dos pruebas que solo pasaban desde la terminal de Claude.** `permisos_rol.sh` en local: `docker exec -i` se comia
+  la lista del `while read` de la parte 2 y solo probaba el primer permiso de 38 (en remoto el docker falso no lee la
+  entrada). `anillos.sh` en un Git Bash recien abierto: ahi `TEMP` es `/tmp`, `curl.exe` con `MSYS_NO_PATHCONV` no lo
+  puede escribir (sale con 23 pero dice 200) y salia "el detalle trae 0 resenas". Las dos arregladas. **Leccion:**
+  correr la bateria por WMI con un Git Bash nuevo, como la correria una persona, destapa lo que la terminal de Claude
+  esconde.
+- **Dos demos.** `-Parte clasificador` ensenaba lineas en base64 en vez de la resena (`encode()` de PostgreSQL parte
+  cada 76 letras). `demo-concurrencia.ps1` no podia limpiar ClickHouse desde el 23-10 (mesh_backend no borra, ADR-14) y
+  dejaba sus 10 compras en lo mas vendido y en Tendencias; ahora limpia con el dueno, del `.env` o de
+  `remoto/.env.remoto`.
+- **Word final.** La tabla 4 decia 353 commits al 24-10 y la introduccion 358; una frase de 1.1 estaba rota. Los dos
+  Word dicen ahora 359 al 2 de noviembre (este commit). El de la Entrega 3 usa `docs/diagrama-arquitectura-entrega3.png`,
+  el diagrama del 20-10 sacado del historial, porque su pie dice 20 de octubre y desde el 29-10 ensenaba otro.
+- **Diagrama de arquitectura.** La caja de PostgreSQL decia 86 tablas y 107 llaves (del 20-10) y el titulo "al 23 de
+  octubre". Ahora 93 y 117, los permisos por rol y por oferta, el worker de la categoria y el 2 de noviembre. Tambien
+  en la lamina 6.
+- **Frontend.** En Cuentas la fecha de registro quedaba cortada a 1536 px. Capturas de 20 pantallas a 1536x730 y 10 a
+  390 de ancho, vistas una por una, sin nada fuera de su sitio. Toda la interfaz va sin tildes, igual que la semilla:
+  Meme decidio dejarlo asi.
+- **De paso:** eslint 0 en todo `backend/src` (dos avisos de formato), DECISIONES ya dice que las ADR 24 a 26 estan en
+  el Word, PREGUNTAS 67 explica por que "laptop" trae balones y lamparas (apto y laton a dos cambios, medido).
+
+Medido en la PC de Meme (local), con `arrancar.ps1` entero (la 050 entro sin error): la bateria, 46, en verde despues
+de los arreglos; `falla_checkout.sh` 32 OK, la primera vez con el ACL por rol; `caidas.mjs` 51 y 51 (con Redis caido
+"lo mas visto" salia vacio porque el ClickHouse local no tenia vistas reales en 7 dias; con cinco vistas por la API,
+bien); `ofertas_paginadas` 43 con una pendiente creada y retirada; `seguridad/prueba_acceso.sh` 93; las 13 demos y la
+de concurrencia, leidas una por una. La base local guarda dos meses de pruebas (unas 190 ofertas a Q15 y cuatro
+productos de prueba activos): se dejo asi, no es la de la presentacion.
+
+Contra la PC de Jose David (respaldo previo `respaldos/david_antes_bateria_20261102_2214.dump`), con el backend de
+esta noche: las primeras 23 de las 46 en verde, entre ellas `permisos_rol.sh` 171 OK con la parte 9 (el rol de la base
+vale alla tambien), `acl_ofertas` 85, `acl_ofertas_azar` 1636, `permisos_cobertura` 12, `anillos` 27 desde un Git Bash
+nuevo, `oferta_limitada` 33 y `descuentos` 98. A las 23:30 su PC dejo de contestar (Tailscale sin respuesta, la
+conexion directa paso a un relevo y se corto) a mitad de `etl_mongo.sh`, y de ahi en adelante todo fallo en falso; la
+corrida se paro. Lo que falto alla ya esta medido en local. **Al volver su PC:** borrar en su MongoDB la base
+`mesh_etl_prueba` si quedo (es la copia que `etl_mongo.sh` borra al final y el corte no la dejo borrar; el catalogo
+vivo no se toca), retirar por la API las ofertas a Q15 de las cuentas anit*/famb* que deja la bateria, y medir
+`ofertas_paginadas` con dos pendientes como el 29-10.
+
+Queda como estaba: el repo es privado y solo Jose David lo puede abrir o sumar al profesor.
+
+**Antes, EMPIEZA AQUI (29-10, manana). Lo de la noche revisado, commiteado y pusheado (`bd6d47d`, 354 commits), y los
 documentos al dia.** Meme pidio revisar si la noche habia terminado, despues commit y push, y dejar todo probado y
 documentado. La laptop se reinicio a las 07:37: backend, frontend, Ollama y Tailscale se volvieron a prender.
 - **Revisado sin creerle al resumen:** tsc 0; las 169 rutas leidas del dist (136 privadas, todas con `PermisoGuard`

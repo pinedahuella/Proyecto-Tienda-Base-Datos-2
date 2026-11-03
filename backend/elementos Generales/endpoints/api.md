@@ -179,9 +179,15 @@ los mismos roles que ellos, ruta por ruta. Los demas `endpoints-*.md` ya nombran
 el permiso de cada ruta (29-10). "Solo admin" quiere decir un permiso que en
 `rol_permiso` solo tiene el admin, y "pide sesion" uno que tienen los tres roles.
 
+El rol de la cuenta es el de la base y no el del token (2026-11-02). `SesionGuard`
+lo trae en la misma consulta con que revisa que la cuenta siga activa y lo deja en
+`request.usuario.id_rol_usuario`, asi que `PermisoGuard` y todo lo que lee
+`@UsuarioActual()` usan el rol de hoy: si el admin le cambia el rol a una cuenta,
+vale en su peticion siguiente. Con PostgreSQL caido se queda el del token.
+
 | Archivo | Que es |
 |---|---|
-| `guards/sesion.guard.ts` | `SesionGuard`. Lee la cookie del token, la verifica y revisa que la cuenta siga activa (401) |
+| `guards/sesion.guard.ts` | `SesionGuard`. Lee la cookie del token, la verifica y revisa en la base que la cuenta siga activa (401) y que rol tiene hoy |
 | `guards/permiso.guard.ts` | `PermisoGuard`. Lee el `@Permiso` de la ruta y le pregunta a `rol_permiso` (403). Una ruta con este guard y sin `@Permiso` tambien se niega |
 | `decorators/permiso.decorator.ts` | `@Permiso('ofertas.publicar')`, en la clase o en el metodo (el del metodo manda) |
 | `models/permiso.ts` | la lista de los codigos, tipada: un codigo mal escrito no compila |

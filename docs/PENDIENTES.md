@@ -2,8 +2,33 @@
 
 Lo que se sabe que falta. Un solo sitio para mirar.
 
-**Al 2026-10-29.** Lo que esta hecho y probado no esta aqui: esta en
+**Al 2026-11-02.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
+
+## Como esta al 2026-11-02
+
+Revision entera del proyecto el dia de la entrega final, con las bases de la PC
+de Meme y despues con las de la PC de Jose David. Lo que quedaba sin medir el
+29-10 ya se midio: la base local tiene la 050 (la aplico `arrancar.ps1`, sin
+error) y `pruebas/falla_checkout.sh` dio 32 OK con el ACL por rol. Lo que se
+encontro y se arreglo esta en el EMPIEZA AQUI (02-11) de `docs/TRASPASO.md`.
+
+Para la entrega sigue faltando una sola cosa, y no es de codigo:
+
+| Que | De quien |
+|---|---|
+| El repo es privado. Hacerlo publico o agregar al profesor como colaborador. El 2 de noviembre los colaboradores eran Tunuba, pinedahuella y jptorresg | Jose David, es el dueno del repo |
+
+Abierto y sin prioridad, no lo pide el enunciado:
+- La busqueda difusa trae al final productos con "apto" o "laton", que quedan a
+  dos cambios de "laptop" (pregunta 67). `prefix_length: 1` lo quitaria; no se
+  toco para no cambiar el buscador despues de la Entrega 3.
+- La base local de la PC de Meme acumula unas 190 ofertas a Q15 de dos meses de
+  pruebas y cuatro productos de prueba activos (tecnokid, barbuchin, PRUEBA
+  candado propuesta y crepas, con foto "aaaa"). Es la base de desarrollo; con la
+  de Jose David, que es la de la presentacion, no pasa.
+- Toda la interfaz va sin tildes ni enies, igual que los datos de la semilla. Se
+  decidio dejarlo asi el 2026-11-02.
 
 ## Como esta al 2026-10-29
 

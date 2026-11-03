@@ -28,22 +28,28 @@ import { UsuarioService } from '../services/usuario.service';
  *
  * 1. Autenticacion: lee la cookie, verifica el token. Si no hay cookie o el
  *    token no sirve (firma invalida o vencido), corta la peticion con 401.
- * 2. Cuenta activa: el token es valido hasta por 2 horas sin importar lo
- *    que le pase a la cuenta mientras tanto. Esta consulta revisa el
- *    estado actual en la base; si ya no esta activa (la suspendieron
- *    despues de firmar el token), corta con 401 igual. Si PostgreSQL no
- *    responde, se cree al token (2026-10-20): la sesion abierta sigue y la
- *    tienda se puede mirar; lo que escribe en PostgreSQL, como pagar, falla
- *    por su lado.
+ * 2. Cuenta activa y su rol de hoy: el token es valido hasta por 2 horas sin
+ *    importar lo que le pase a la cuenta mientras tanto. Esta consulta revisa
+ *    el estado y el rol actuales en la base; si ya no esta activa (la
+ *    suspendieron despues de firmar el token), corta con 401 igual, y si le
+ *    cambiaron el rol, vale el nuevo desde esta peticion (2026-11-02). Si
+ *    PostgreSQL no responde, se cree al token (2026-10-20): la sesion abierta
+ *    sigue con el rol del token y la tienda se puede mirar; lo que escribe en
+ *    PostgreSQL, como pagar, falla por su lado.
  *
- * Si todo pasa, deja el usuario del token en request.usuario, listo para
- * leerse con el decorator @UsuarioActual().
+ * Si todo pasa, deja el usuario del token, con el rol de hoy, en
+ * request.usuario, listo para leerse con el decorator @UsuarioActual().
  */
 @Injectable()
 export class SesionGuard implements CanActivate {
   private static readonly logger = new Logger('SesionGuard');
   /** Cuando se aviso por ultima vez de una sesion sin PostgreSQL. */
   private static ultimoAviso = 0;
+  /**
+   * Los cambios de rol ya anotados en el registro (cuenta, rol del token, rol
+   * de hoy), para escribir una linea por cambio y no una por peticion.
+   */
+  private static readonly rolesCambiadosAvisados = new Set<string>();
 
   constructor(private readonly usuarioService: UsuarioService) {}
 
@@ -83,9 +89,11 @@ export class SesionGuard implements CanActivate {
       throw new HttpException(fallo(mensaje), HttpStatus.UNAUTHORIZED);
     }
 
-    let activo: boolean;
+    let cuenta: { activo: boolean; id_rol_usuario: number } | null;
     try {
-      activo = await this.usuarioService.estaActivo(request.usuario.id_usuario);
+      cuenta = await this.usuarioService.estadoDeSesion(
+        request.usuario.id_usuario,
+      );
     } catch (error) {
       // PostgreSQL no respondio (2026-10-20). La pregunta de la cuenta activa
       // no se pudo hacer, pero el token si se verifico: tiene firma y no
@@ -94,23 +102,42 @@ export class SesionGuard implements CanActivate {
       // tienda, su carrito y sus recomendaciones; comprar igual no se puede,
       // porque eso lo escribe PostgreSQL. Solo cuando la base NO CONTESTA: si
       // contesta que la cuenta esta suspendida, se corta como siempre (abajo).
-      // En cuanto vuelve, la siguiente peticion pregunta otra vez.
+      // En cuanto vuelve, la siguiente peticion pregunta otra vez. Mientras
+      // tanto el rol que vale es el del token, el ultimo que se conoce.
       if (
         error instanceof ErrorConexion &&
         !(error instanceof ErrorConexionRedis)
       ) {
         this.avisarSesionSinPostgres();
-        activo = true;
+        cuenta = {
+          activo: true,
+          id_rol_usuario: request.usuario.id_rol_usuario,
+        };
       } else {
         manejarErrorHttp(error, 'No se pudo verificar la sesion');
       }
     }
 
-    if (!activo) {
+    if (cuenta == null || !cuenta.activo) {
       throw new HttpException(
         fallo('Token invalido o expirado'),
         HttpStatus.UNAUTHORIZED,
       );
+    }
+
+    // El rol de AHORA, el de la base, y no el que tenia al entrar (2026-11-02).
+    // PermisoGuard y todo lo que lee @UsuarioActual() usan este: si el admin
+    // le cambia el rol a una cuenta, vale en su peticion siguiente, igual que
+    // quitar una fila de rol_permiso, sin esperar a que el token venza.
+    if (cuenta.id_rol_usuario !== request.usuario.id_rol_usuario) {
+      const clave = `${request.usuario.id_usuario}:${request.usuario.id_rol_usuario}:${cuenta.id_rol_usuario}`;
+      if (!SesionGuard.rolesCambiadosAvisados.has(clave)) {
+        SesionGuard.rolesCambiadosAvisados.add(clave);
+        SesionGuard.logger.log(
+          `La cuenta ${request.usuario.id_usuario} entro con el rol ${request.usuario.id_rol_usuario} y hoy tiene el ${cuenta.id_rol_usuario}: vale el de hoy`,
+        );
+      }
+      request.usuario.id_rol_usuario = cuenta.id_rol_usuario;
     }
 
     return true;

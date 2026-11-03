@@ -1,12 +1,12 @@
 # Arquitectura de Mesh
 
-**Al 2026-10-28.** Es el diagrama de arquitectura que pide el enunciado, y **no
+**Al 2026-11-02.** Es el diagrama de arquitectura que pide el enunciado, y **no
 es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 93 tablas de
 PostgreSQL y sus llaves y lo genera `python docs/generar-er.py` desde la base
 viva; este dibuja los **seis** motores de persistencia, quien escribe en cada
 uno y por donde viajan los datos entre ellos.
 
-**El `.drawio` de arquitectura se rehizo el 2026-09-19 y se puso al dia el 2026-10-20** con
+**El `.drawio` de arquitectura se rehizo el 2026-09-19 y se puso al dia el 2026-10-20, el 23 y el 27-10 y el 2026-11-02** con
 `python docs/generar-arquitectura.py`: seis motores, lo que hace el backend con
 cada uno y las doce rutas de datos entre motores, numeradas y explicadas en su
 leyenda. `--informe` saca la variante compacta que va en el Word, y `--grafo` el
@@ -319,6 +319,7 @@ levantar el backend (`remoto/README.md`). El detalle esta en
 | **2026-10-23** | **Control de acceso en todas las bases** (ADR-14, `docs/SEGURIDAD.md`): un `mesh_backend` que solo lee y escribe datos y un `mesh_lectura` en **PostgreSQL**, **MongoDB**, **ClickHouse** y **Elasticsearch**, que enciende su seguridad; en **Redis** el backend pasa a su usuario `backend`, solo claves `mesh:*`. **Neo4j** community no tiene roles. Los crea el paso 9f de arrancar y los prueba `seguridad/prueba_acceso.sh` (93 OK). Herramientas solo en 127.0.0.1 e imagenes con version fija. El documento de **Elasticsearch** guarda la foto de la tarjeta (`imagen`, sin indexar, ADR-23). Registro unico de decisiones ADR-1 a ADR-23 en `docs/DECISIONES.md`. El diagrama suma la caja de Ollama, el usuario de cada base y el recuadro del modo remoto |
 | **2026-10-26** | **Neo4j** guarda la categoria en cada `:Producto` (`id_categoria` y `categoria`, de `producto_catalogo`), y quienes lo compraron tambien llevaron pone primero, como grupo, los de la misma categoria (ADR-25). La escriben los workers de compras y de resenas y el ETL, y un worker nuevo la compara con **PostgreSQL** cada minuto (flecha nueva, PG a N4). **PostgreSQL** suma el ACL de la aplicacion por oferta, `permiso_oferta` y su registro (migracion 049, ADR-24) |
 | **2026-10-28** | **PostgreSQL** suma el ACL de funcionalidades por rol (migracion 050, ADR-26): `modulo_permiso`, `permiso`, `rol_permiso` y `auditoria_permiso`, y la vista `permisos_por_rol`. `PermisoGuard` lo revisa en las 136 rutas privadas y reemplaza a los `@Roles` del codigo, con los mismos roles por ruta el primer dia. 93 tablas |
+| **2026-11-02** | Sin motores ni flechas nuevas. El rol con que pasa cada peticion es el de **PostgreSQL** y no el del token: `SesionGuard` lo lee en la misma consulta con que revisa que la cuenta siga activa. El diagrama se pone al dia: la caja de PostgreSQL dice 93 tablas y 117 llaves (decia 86 y 107, del 20-10) y suma los permisos por rol y por oferta, y los workers suman el de la categoria del grafo. El Word de la Entrega 3 usa `docs/diagrama-arquitectura-entrega3.png`, el PNG del 20-10 sacado del historial (938c4ce), porque su pie dice "al 20 de octubre" y desde el 29-10 ensenaba el de despues |
 
 El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el
 compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. Cuando toco no

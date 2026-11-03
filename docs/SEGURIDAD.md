@@ -115,7 +115,9 @@ de antes, ruta por ruta. `node pruebas/permisos_cobertura.cjs` lo comprueba
 contra la matriz guardada antes del cambio (`pruebas/permisos_matriz_antes_050.json`),
 y tambien que cada ruta privada lleve el guard y un permiso que exista.
 `bash pruebas/permisos_rol.sh` llama a las rutas directo con los tres roles, los
-38 permisos cada uno, y quita y devuelve permisos en vivo.
+38 permisos cada uno, quita y devuelve permisos en vivo, y le cambia el rol a una
+cuenta con la sesion abierta para ver que vale en la peticion siguiente (171
+comprobaciones el 2026-11-02, con las bases de la PC de Meme).
 
 ## Cada oferta, por persona
 
@@ -213,9 +215,12 @@ distintas sin saberlo.
 ## Lo que queda
 
 - Neo4j con un solo usuario (arriba).
-- El rol que cuenta en el ACL de funciones es el del token, como con los
-  `@Roles` de antes: si el admin le cambia el rol a una cuenta, vale cuando
-  vuelve a entrar (el token dura 2 horas).
+- El rol que cuenta en el ACL de funciones es el de la base, no el del token
+  (desde el 2026-11-02). `SesionGuard` lo trae en la misma consulta con que
+  revisa que la cuenta siga activa, asi que si el admin le cambia el rol a una
+  cuenta, vale en su peticion siguiente. Solo con PostgreSQL caido se usa el
+  rol del token, el ultimo que se conoce, igual que la sesion se cree a su
+  token. Antes valia el del token y el cambio tardaba hasta 2 horas.
 - Sin TLS: entre PC el trafico va dentro de Tailscale, que ya va cifrado. Si las
   bases salieran a una red sin Tailscale, el siguiente paso es TLS en cada una.
 - pgAdmin entra con el dueno de PostgreSQL, porque es la herramienta de

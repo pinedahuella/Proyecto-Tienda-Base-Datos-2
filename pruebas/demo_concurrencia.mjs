@@ -34,6 +34,7 @@
 // backend). La primera corrida registra las cuentas desde una sola IP, asi que
 // el panel de fraude puede marcar multi cuenta por IP. Es lo esperado.
 
+import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -71,9 +72,26 @@ if (CAIDA && !BASES.includes(CAIDA)) {
 const e = process.env;
 const pg = new Pool({ host: e.DB_HOST, port: Number(e.DB_PORT ?? 5432), user: e.DB_USER, password: e.DB_PASSWORD, database: e.DB_NAME, max: 2 });
 const sql = async (texto, valores) => (await pg.query(texto, valores)).rows;
+// ClickHouse solo se usa para BORRAR lo de la demo, y eso lo puede el dueno de
+// la base y no mesh_backend: desde el 2026-10-23 (ADR-14) el backend lee y
+// agrega eventos pero no borra, y la limpieza fallaba con "Not enough
+// privileges" dejando las compras de la demo en lo mas vendido y en las
+// tendencias (2026-11-02). El dueno sale del .env de la PC que tiene las
+// bases: el de la raiz si son las de esta PC, remoto/.env.remoto si son las de
+// la otra. Si no esta, se intenta con el del backend y se avisa al limpiar.
+function duenoClickHouse() {
+  const local = ['localhost', '127.0.0.1'].includes(e.CLICKHOUSE_HOST ?? 'localhost');
+  const archivo = local ? join(RAIZ, '.env') : join(RAIZ, 'remoto', '.env.remoto');
+  if (!existsSync(archivo)) return null;
+  const v = requerir('dotenv').parse(readFileSync(archivo));
+  return v.CLICKHOUSE_USER && v.CLICKHOUSE_PASSWORD ? { username: v.CLICKHOUSE_USER, password: v.CLICKHOUSE_PASSWORD } : null;
+}
+const dueno = duenoClickHouse();
 const ch = createClient({
   url: `http://${e.CLICKHOUSE_HOST ?? 'localhost'}:${e.CLICKHOUSE_PORT ?? 8123}`,
-  username: e.CLICKHOUSE_USER, password: e.CLICKHOUSE_PASSWORD, database: e.CLICKHOUSE_DB,
+  username: dueno?.username ?? e.CLICKHOUSE_USER,
+  password: dueno?.password ?? e.CLICKHOUSE_PASSWORD,
+  database: e.CLICKHOUSE_DB,
 });
 
 const titulo = (t) => console.log(`\n=== ${t}`);

@@ -5,7 +5,7 @@ Cada entrega numero sus decisiones por su cuenta y los numeros chocaron: en
 Entrega 2 el ADR-3 es grafos contra columnar. Desde el 23 de octubre de 2026 hay
 un solo registro, numerado en el orden en que se tomaron las decisiones. Esta es
 la lista. Cada una esta escrita completa, con contexto, alternativas, decision,
-justificacion y consecuencias, donde dice la ultima columna, y las 15 a 23 estan
+justificacion y consecuencias, donde dice la ultima columna, y las 15 a 26 estan
 en la seccion 5 del informe de la Entrega final.
 
 La columna "Antes" dice como se cito cada una en los informes ya entregados, para
@@ -36,9 +36,9 @@ poder seguirla.
 | ADR-21 | La verdad del carrito y de las reservas en PostgreSQL | 2026-10-17 | Vigente | propuesta ADR-13 | Informe de la Entrega final, 5.4 |
 | ADR-22 | Un respaldo por base, con cortacircuitos | 2026-10-20 | Vigente | sin registro | Informe de la Entrega final, 5.4, y `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` |
 | ADR-23 | La tarjeta del buscador sale entera de Elasticsearch, con su foto | 2026-10-23 | Vigente | sin registro | Informe de la Entrega final, 5.4 |
-| ADR-24 | Un ACL en la aplicacion, por oferta | 2026-10-26 | Vigente | sin registro | Aqui abajo, y `docs/SEGURIDAD.md` |
-| ADR-25 | La categoria del producto vive tambien en el grafo, para ordenar por grupos | 2026-10-26 | Vigente | sin registro | Aqui abajo |
-| ADR-26 | Un ACL de funcionalidades, por rol, en PostgreSQL | 2026-10-28 | Vigente | sin registro | Aqui abajo, y `docs/SEGURIDAD.md` |
+| ADR-24 | Un ACL en la aplicacion, por oferta | 2026-10-26 | Vigente | sin registro | Aqui abajo, en el informe de la Entrega final, 5.4, y `docs/SEGURIDAD.md` |
+| ADR-25 | La categoria del producto vive tambien en el grafo, para ordenar por grupos | 2026-10-26 | Vigente | sin registro | Aqui abajo, y en el informe de la Entrega final, 5.4 |
+| ADR-26 | Un ACL de funcionalidades, por rol, en PostgreSQL | 2026-10-28 | Vigente | sin registro | Aqui abajo, en el informe de la Entrega final, 5.4, y `docs/SEGURIDAD.md` |
 
 De las seis decisiones propuestas el 28 de septiembre en
 `docs/PROPUESTAS-FRAUDE-Y-DEPENDENCIAS.md`, tres se hicieron tal cual (ADR-17,
@@ -49,8 +49,9 @@ termino con el vector solo en pgvector (ADR-13).
 La regla desde ahora: una decision nueva entra a esta tabla con el siguiente
 numero, en el mismo cambio que el codigo que la implementa.
 
-Las tres ultimas son posteriores al informe de la Entrega final y estan
-escritas completas aqui.
+Las tres ultimas se tomaron despues de la tercera version del informe de la
+Entrega final (20 de octubre). Estan escritas completas aqui abajo, y desde el 29
+de octubre tambien en la seccion 5.4 del informe.
 
 ## ADR-24. Un ACL en la aplicacion, por oferta
 
@@ -188,8 +189,10 @@ permisos por persona siguen siendo los de las ofertas (ADR-24), y una ruta de
 peticion privada hace una consulta mas, por llave, con el mismo limite corto
 que la de la sesion. Si PostgreSQL no contesta, el guard usa la ultima matriz que
 leyo entera (al arrancar y cada minuto), igual que la sesion se cree a su token,
-y la tienda se sigue pudiendo mirar. El rol que cuenta es el del token, como con
-los `@Roles`: un cambio de rol de una cuenta vale cuando vuelve a entrar.
+y la tienda se sigue pudiendo mirar. El rol que cuenta es el de la base: la
+consulta de la sesion, que ya revisaba en cada peticion que la cuenta siguiera
+activa, trae tambien el rol de hoy, y un cambio de rol vale en la peticion
+siguiente (2026-11-02; antes valia el del token, hasta 2 horas tarde).
 `cuenta.ver` (la sesion no abriria sin el) y `permisos.*` del admin (nadie
 podria devolverlos) no se pueden quitar por la API; con SQL a mano si. Pruebas,
 `node pruebas/permisos_cobertura.cjs` y `bash pruebas/permisos_rol.sh`. Demo,

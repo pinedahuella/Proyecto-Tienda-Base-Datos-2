@@ -741,11 +741,13 @@ SELECT v.valoracion_texto || '|' || count(*)
     Paso 'Resenas cuyas estrellas contradicen el texto'
     # La misma regla que NotasIncoherentesDetectorService: texto malo con 4 o 5
     # estrellas, o bueno con 1 o 2. El texto viaja en base64 para que las tildes
-    # y los saltos de linea no rompan la fila.
+    # y los saltos de linea no rompan la fila. Sin los saltos que mete encode():
+    # parte el base64 cada 76 letras, y cada pedazo salia como otra fila
+    # ("IHZleiBx... estrellas") con la resena cortada (2026-11-02).
     $contra = "((v.valoracion_texto = 'mala' AND r.calificacion >= 4) OR (v.valoracion_texto = 'buena' AND r.calificacion <= 2))"
     $total = @(Psql "SELECT count(*) FROM resena r JOIN vector_comentario v ON v.id_comentario = r.id_comentario WHERE $contra;")[0]
     $algunas = Psql @"
-SELECT r.calificacion || '|' || coalesce(v.prob_mala::text, '') || '|' || encode(convert_to(c.comentario, 'UTF8'), 'base64')
+SELECT r.calificacion || '|' || coalesce(v.prob_mala::text, '') || '|' || replace(encode(convert_to(c.comentario, 'UTF8'), 'base64'), E'\n', '')
   FROM resena r
   JOIN vector_comentario v ON v.id_comentario = r.id_comentario
   JOIN comentario c ON c.id_comentario = r.id_comentario

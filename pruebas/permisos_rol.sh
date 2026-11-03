@@ -27,8 +27,13 @@
 #   7. La API se protege con su propio ACL: un comprador y un vendedor no la
 #      ven ni la cambian.
 #   8. GET /usuario/yo trae los permisos del rol, los mismos de la tabla.
-#   9. Limpieza: la matriz queda exactamente como estaba al empezar. Si la
-#      prueba se corta a la mitad, la trampa de salida la devuelve igual.
+#   9. Un cambio de rol vale en la peticion siguiente: el admin le baja el rol
+#      al vendedor por la API y su MISMA sesion, con el token de antes, ya da
+#      403 en lo de vendedor y /usuario/yo trae los permisos del comprador. Al
+#      devolverle el rol, vuelve a pasar. El rol que cuenta es el de la base.
+#  10. Limpieza: la matriz queda exactamente como estaba al empezar. Si la
+#      prueba se corta a la mitad, la trampa de salida la devuelve igual, y el
+#      vendedor de la prueba vuelve a ser vendedor.
 #
 # Deja: las cuentas permcomprador@mesh.com y permvendedor@mesh.com (se reusan)
 # y las filas de auditoria_permiso, que son historia a proposito.
@@ -55,7 +60,10 @@ OK()    { echo "  OK    $1"; ok=$((ok+1)); }
 FALLA() { echo "  FALLA $1"; fallo=$((fallo+1)); }
 titulo(){ echo; echo "=============================================================="; echo "$1"; echo "=============================================================="; }
 
-sql() { docker exec -i "$PG" psql -U "$PG_USUARIO" -d "$PG_BASE" -tAc "$1" 2>/dev/null | tr -d '\r'; }
+# </dev/null: con -i, docker exec se come la entrada estandar, y dentro del
+# while read de la parte 2 se tragaba el resto de la lista. En local solo se
+# probaba el primer permiso de 38; en modo remoto no pasaba (2026-11-02).
+sql() { docker exec -i "$PG" psql -U "$PG_USUARIO" -d "$PG_BASE" -tAc "$1" </dev/null 2>/dev/null | tr -d '\r'; }
 campo() { python -c "
 import sys,json
 try: d=json.load(sys.stdin)
@@ -118,6 +126,8 @@ INICIO_REG=$(sql "SELECT coalesce(max(id_auditoria_permiso), 0) FROM auditoria_p
 echo "  matriz al empezar: $(echo "$MATRIZ0" | tr ',' '\n' | grep -c .) entradas"
 # Pase lo que pase, la matriz vuelve a como estaba.
 devolver_matriz() {
+    # Si se corta en la parte 9, el vendedor de la prueba vuelve a ser vendedor.
+    sql "UPDATE usuarios SET id_rol_usuario = 2 WHERE id_usuario = $ID_VENDEDOR AND id_rol_usuario <> 2;" >/dev/null
     sql "DELETE FROM rol_permiso WHERE (id_rol_usuario || ':' || id_permiso) <> ALL (string_to_array('$MATRIZ0', ','));" >/dev/null
     sql "INSERT INTO rol_permiso (id_rol_usuario, id_permiso)
          SELECT split_part(x, ':', 1)::smallint, split_part(x, ':', 2)::smallint
@@ -287,7 +297,24 @@ for par in "1:$COMPRADOR:comprador" "2:$VENDEDOR:vendedor" "3:$ADMIN:admin"; do
 done
 
 
-titulo "9. Limpieza"
+titulo "9. Un cambio de rol vale en la peticion siguiente, con la misma sesion"
+# La sesion del vendedor se abrio con el rol 2 dentro del token. El admin le
+# baja el rol a comprador por la API y la MISMA cookie ya pasa como comprador:
+# el rol que cuenta es el de la base, no el del token (2026-11-02).
+esperar "$(codigo PATCH "/admin/usuarios/$ID_VENDEDOR" "$ADMIN" '{"id_rol_usuario":1}')" 200 "el admin le baja el rol a comprador"
+N0=$(negados ofertas.ver "$ID_VENDEDOR" /vendedor/ofertas)
+esperar "$(codigo GET /vendedor/ofertas "$VENDEDOR")" 403 "con el token de antes ya no ve ofertas"
+esperar "$(( $(negados ofertas.ver "$ID_VENDEDOR" /vendedor/ofertas) - N0 ))" 1 "el intento quedo anotado"
+esperar "$(sql "SELECT id_rol_usuario FROM auditoria_permiso WHERE accion = 'negado' AND id_usuario_actor = $ID_VENDEDOR ORDER BY id_auditoria_permiso DESC LIMIT 1;")" 1 "y anotado con el rol de hoy, comprador"
+yo=$(llamar GET /usuario/yo "$VENDEDOR")
+esperar "$(echo "$yo" | campo payload.id_rol_usuario)" 1 "GET /usuario/yo dice rol comprador"
+esperar "$(echo "$yo" | python -c "import sys,json; print(len(json.load(sys.stdin)['payload']['permisos']))")" "$(sql "SELECT count(*) FROM rol_permiso WHERE id_rol_usuario = 1;")" "y trae los permisos del comprador, no los del vendedor"
+esperar "$(codigo GET /carrito "$VENDEDOR")" 200 "lo de comprador le sigue funcionando"
+esperar "$(codigo PATCH "/admin/usuarios/$ID_VENDEDOR" "$ADMIN" '{"id_rol_usuario":2}')" 200 "el admin le devuelve el rol de vendedor"
+paso "$(codigo GET /vendedor/ofertas "$VENDEDOR")" && OK "con la misma sesion vuelve a ver sus ofertas" || FALLA "sigue sin ver sus ofertas"
+
+
+titulo "10. Limpieza"
 trap - EXIT
 devolver_matriz
 esperar "$([ "$(matriz)" = "$MATRIZ0" ] && echo igual || echo distinta)" "igual" "la matriz queda exactamente como al empezar"

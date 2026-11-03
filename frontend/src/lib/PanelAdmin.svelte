@@ -238,7 +238,7 @@
 						<tr class:protegida={esTienda}>
 							<td class="fuerte">{usuario.usuario}</td>
 							<td>{usuario.correo_electronico}</td>
-							<td>{nombreCompleto(usuario)}</td>
+							<td class="nombre">{nombreCompleto(usuario)}</td>
 							<td>
 								<!--
 									La cuenta de la tienda no se edita desde aqui: el backend
@@ -382,6 +382,14 @@
 		color: var(--texto);
 		border-bottom: 1px solid var(--linea);
 		white-space: nowrap;
+	}
+
+	/* El nombre si puede partirse en dos lineas. Con todo en una sola, a 1536 px
+	   la tabla no cabia y la fecha de registro quedaba cortada detras del
+	   desplazamiento (2026-11-02). */
+	td.nombre {
+		white-space: normal;
+		min-width: 140px;
 	}
 
 	.fuerte {

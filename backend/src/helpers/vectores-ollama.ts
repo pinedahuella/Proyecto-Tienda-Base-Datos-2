@@ -38,7 +38,11 @@ export async function pedirVectores(
     fetch(`${OLLAMA_URL}/api/embed`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODELO, input: textos, keep_alive: MANTENER_MODELO }),
+      body: JSON.stringify({
+        model: OLLAMA_MODELO,
+        input: textos,
+        keep_alive: MANTENER_MODELO,
+      }),
     }),
     limiteMs,
     'Ollama',

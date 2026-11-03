@@ -233,19 +233,28 @@ export class UsuarioService {
   }
 
   /**
-   * Dice si la cuenta sigue activa ahora mismo. La usa SesionGuard en cada
-   * peticion protegida, no solo en el login: el token es valido por 2 horas
-   * sin importar lo que pase con la cuenta mientras tanto, asi que si a
-   * alguien lo suspenden a mitad de esas 2 horas, su token seguiria
-   * pasando la verificacion de firma. Esta consulta es la unica forma de
-   * cortarlo antes de que expire solo.
+   * Como esta la cuenta ahora mismo: si sigue activa y que rol tiene. La usa
+   * SesionGuard en cada peticion protegida, no solo en el login: el token es
+   * valido por 2 horas sin importar lo que pase con la cuenta mientras
+   * tanto, asi que si a alguien lo suspenden o le cambian el rol a mitad de
+   * esas 2 horas, su token seguiria pasando la verificacion de firma con lo
+   * de antes. Esta consulta es la unica forma de cortarlo, o de aplicarle el
+   * rol nuevo, antes de que el token expire solo (2026-11-02: antes solo
+   * traia el estado y el rol salia del token).
+   *
+   * null si la cuenta ya no existe.
    */
-  async estaActivo(idUsuario: string): Promise<boolean> {
-    let fila: { id_estado_usuario: number } | undefined;
+  async estadoDeSesion(
+    idUsuario: string,
+  ): Promise<{ activo: boolean; id_rol_usuario: number } | null> {
+    let fila: { id_estado_usuario: number; id_rol_usuario: number } | undefined;
     try {
       // Con limite corto: corre en cada peticion con sesion (consultaCorta).
-      const resultado = await consultaCorta<{ id_estado_usuario: number }>(
-        'SELECT id_estado_usuario FROM usuarios WHERE id_usuario = $1',
+      const resultado = await consultaCorta<{
+        id_estado_usuario: number;
+        id_rol_usuario: number;
+      }>(
+        'SELECT id_estado_usuario, id_rol_usuario FROM usuarios WHERE id_usuario = $1',
         [idUsuario],
       );
       fila = resultado.rows[0];
@@ -253,7 +262,13 @@ export class UsuarioService {
       this.manejarErrorBaseDatos(error);
     }
 
-    return fila != null && fila.id_estado_usuario === ID_ESTADO_ACTIVO;
+    if (fila == null) {
+      return null;
+    }
+    return {
+      activo: fila.id_estado_usuario === ID_ESTADO_ACTIVO,
+      id_rol_usuario: Number(fila.id_rol_usuario),
+    };
   }
 
   /** Quita el hash de la contrasena antes de mandar el usuario para afuera. */

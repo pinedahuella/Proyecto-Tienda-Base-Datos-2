@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 358 commits sobre `main` entre el 15 de agosto y el 29 de octubre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y el orden por categoría de quienes lo compraron también llevaron."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 359 commits sobre `main` entre el 15 de agosto y el 2 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron."
      }
     ]
    },
@@ -173,7 +173,7 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "230"
+         "236"
         ],
         [
          "José David Navichoque Pineda",
@@ -188,7 +188,7 @@
         [
          "Total",
          "",
-         "353"
+         "359"
         ]
        ],
        "anchos": [
@@ -196,7 +196,7 @@
         2.4,
         1.2
        ],
-       "leyenda": "Commits por integrante en el historial de git al 24 de octubre de 2026."
+       "leyenda": "Commits por integrante en el historial de git al 2 de noviembre de 2026."
       }
      }
     ]
@@ -618,10 +618,10 @@
       }
      },
      {
-      "p": "Cada una de las 136 rutas privadas declara la acción que hace, por ejemplo `ofertas.publicar`, y un guard del backend le pregunta a `rol_permiso` en ese momento si el rol de la cuenta la tiene. Antes esa lista estaba escrita en el código. Ahora son datos, y quitar una fila vale en la petición siguiente, sin compilar ni reiniciar. Cada intento negado queda en `auditoria_permiso` con quién, su rol y la ruta que llamó, y el administrador ve y cambia la matriz en el panel."
+      "p": "Cada una de las 136 rutas privadas declara la acción que hace, por ejemplo `ofertas.publicar`, y un guard del backend le pregunta a `rol_permiso` en ese momento si el rol de la cuenta la tiene. Ese rol se lee de la base y no del token con que la cuenta entró, así que también un cambio de rol vale en la petición siguiente. Antes esa lista estaba escrita en el código. Ahora son datos, y quitar una fila vale en la petición siguiente, sin compilar ni reiniciar. Cada intento negado queda en `auditoria_permiso` con quién, su rol y la ruta que llamó, y el administrador ve y cambia la matriz en el panel."
      },
      {
-      "p": "Antes de cambiarlo se guardó qué roles entraban a cada una de las 165 rutas, leído del backend compilado, y `pruebas/permisos_cobertura.cjs` comprueba que con la tabla nueva entran exactamente los mismos. `pruebas/permisos_rol.sh` llama a las rutas directo con los tres roles y los 38 permisos, y quita y devuelve permisos en vivo. En clase se enseña con `.\\demo-entrega-final.ps1 -Parte permisos`."
+      "p": "Antes de cambiarlo se guardó qué roles entraban a cada una de las 165 rutas, leído del backend compilado, y `pruebas/permisos_cobertura.cjs` comprueba que con la tabla nueva entran exactamente los mismos. `pruebas/permisos_rol.sh` llama a las rutas directo con los tres roles y los 38 permisos, quita y devuelve permisos en vivo y le cambia el rol a una cuenta con la sesión abierta, con 171 comprobaciones en verde. En clase se enseña con `.\\demo-entrega-final.ps1 -Parte permisos`."
      }
     ]
    }
@@ -634,12 +634,12 @@
     "titulo": "4.1. El diagrama de arquitectura",
     "bloques": [
      {
-      "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. El flujo 11 lleva el texto de cada producto de MongoDB a Ollama, que tiene su propia caja, y guarda su vector en PostgreSQL. Las reseñas no llevan flecha, porque su vector va de la cola `evento_comentario` a `vector_comentario` dentro de la misma base. Cada caja dice con qué usuario entra el backend, y el recuadro de las bases dice que pueden correr en otra PC y usarse por Tailscale. El diagrama está al 23 de octubre."
+      "p": "Las flechas continuas son lo que hace el backend con cada base, y las punteadas y numeradas son datos que viajan de una base a otra. El flujo 11 lleva el texto de cada producto de MongoDB a Ollama, que tiene su propia caja, y guarda su vector en PostgreSQL. Las reseñas no llevan flecha, porque su vector va de la cola `evento_comentario` a `vector_comentario` dentro de la misma base. Cada caja dice con qué usuario entra el backend, y el recuadro de las bases dice que pueden correr en otra PC y usarse por Tailscale. Los dos ACL de la tienda, por rol y por oferta, son tablas de PostgreSQL y no llevan flecha. El diagrama está al 2 de noviembre."
      },
      {
       "figura": {
        "archivo": "diagrama-arquitectura.png",
-       "leyenda": "Arquitectura final de Mesh al 23 de octubre de 2026, generada con docs/generar-arquitectura.py.",
+       "leyenda": "Arquitectura final de Mesh al 2 de noviembre de 2026, generada con docs/generar-arquitectura.py.",
        "ancho": 9.0,
        "horizontal": true
       }

@@ -144,7 +144,6 @@ export class EventoProductoSyncService {
       this.procesando = false;
     }
   }
-
 }
 
 function mensajeCorto(error: unknown): string {
