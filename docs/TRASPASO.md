@@ -27,7 +27,8 @@ nota. El relato minuto a minuto esta en `LOCAL-02-11-LEEME.txt` (fuera de git). 
   dejaba sus 10 compras en lo mas vendido y en Tendencias; ahora limpia con el dueno, del `.env` o de
   `remoto/.env.remoto`.
 - **Word final.** La tabla 4 decia 353 commits al 24-10 y la introduccion 358; una frase de 1.1 estaba rota. Los dos
-  Word dicen ahora 359 al 2 de noviembre (este commit). El de la Entrega 3 usa `docs/diagrama-arquitectura-entrega3.png`,
+  Word dicen ahora 360 al 2 de noviembre: `b1e76a9` (359) con lo de la noche y el commit siguiente con PREGUNTAS
+  repasada (partes 7 a 13 contra el codigo: arquitectura, diagrama, ADR 1 a 26, fechas del vector, el rol de la base). El de la Entrega 3 usa `docs/diagrama-arquitectura-entrega3.png`,
   el diagrama del 20-10 sacado del historial, porque su pie dice 20 de octubre y desde el 29-10 ensenaba otro.
 - **Diagrama de arquitectura.** La caja de PostgreSQL decia 86 tablas y 107 llaves (del 20-10) y el titulo "al 23 de
   octubre". Ahora 93 y 117, los permisos por rol y por oferta, el worker de la categoria y el 2 de noviembre. Tambien
