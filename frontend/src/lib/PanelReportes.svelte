@@ -310,7 +310,7 @@
 
 			<article class="tarjeta ancha">
 				<h3>Como pagan</h3>
-				<p class="sub">Lo cobrado por cada forma de pago</p>
+				<p class="sub">Todo lo pagado con cada forma de pago, tambien lo devuelto</p>
 				<Barras filas={filasMetodo} color="var(--g5)" />
 			</article>
 		</div>

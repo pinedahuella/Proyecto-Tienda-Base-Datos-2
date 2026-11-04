@@ -3,7 +3,25 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-11-02, noche**.
+Ultima actualizacion: **2026-11-04, manana**.
+
+**EMPIEZA AQUI (04-11, manana). Lo que corto el apagon del 02-11, terminado contra la PC de Jose David, y la app
+revisada pantalla por pantalla.** Respaldos previos `respaldos/david_antes_bateria_20261104_0649.dump` y
+`respaldos/david_antes_limpieza_20261104_0833.dump`. Avance en `LOCAL-02-11-LEEME.txt`.
+- **Bateria contra David:** las 22 que faltaban, en verde. `buscador_escribiendo.mjs` dio 4 FALLA una vez porque
+  Elasticsearch de David tardo y el backend paso solo a la copia en PostgreSQL; repetida, 20 OK. `caidas.mjs` 51 y 51
+  despues de 5 vistas por `POST /eventos/vista` (su ClickHouse no tenia vistas reales desde el 24-10), borradas al
+  final. `ofertas_paginadas` 43 con 2 pendientes de ventas.sur. Las 13 demos y la de concurrencia, bien.
+- **Limpieza alla:** borrada `mesh_etl_prueba` de MongoDB, retiradas las 7 ofertas a Q15 de anit*/famb* (entrando
+  como cada dueno, `PATCH /vendedor/ofertas/:id` no deja al admin) y descartadas las dos alertas enormes de
+  127.0.0.1 (ids 1 y 2). Los dos productos de prueba inactivos (ayuda, Termo de prueba) se quedan: no hay ruta
+  para borrar un producto.
+- **Pantallas:** 37 capturas contra David (20 de escritorio, 10 de telefono, 7 mas), vistas una por una. Un
+  arreglo: en Reportes, Como pagan decia "Lo cobrado por cada forma de pago" y suma tambien lo devuelto; ahora
+  lo dice. Los dos Word con 361 commits al 4 de noviembre (34 y 30 paginas).
+- **Para presentar:** Lo mas visto del inicio sale con un solo producto hasta que alguien abra fichas; unos 15
+  minutos antes, abrir 5 o 6 fichas distintas desde la tienda.
+
 
 **EMPIEZA AQUI (02-11, noche). Revision entera para la entrega final, con las bases de la PC de Meme y despues con
 las de la PC de Jose David.** Meme pidio revisar todo, que corra en su PC con sus bases y que quede perfecto para la
