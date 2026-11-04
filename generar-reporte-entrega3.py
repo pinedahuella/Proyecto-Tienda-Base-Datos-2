@@ -153,6 +153,10 @@ def fmt(p, alineado=None, interlineado=1.5, antes=0, despues=0):
 
 
 def run(p, texto, tam=T_CUERPO, negrita=False, cursiva=False, fuente=FUENTE, color=None):
+    # Word parte la linea en el guion de ADR-22 y deja el numero solo en la linea
+    # siguiente. Fuera del codigo va un guion que no se parte (U+2011), que se ve igual.
+    if fuente == FUENTE:
+        texto = texto.replace("ADR-", "ADR‑")
     r = p.add_run(texto)
     r.font.name = fuente
     r._element.rPr.rFonts.set(qn("w:eastAsia"), fuente)

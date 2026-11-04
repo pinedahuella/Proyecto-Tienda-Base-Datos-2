@@ -70,6 +70,8 @@ else
         pruebas/dashboard.mjs
         pruebas/buscador_escribiendo.mjs
         pruebas/caidas.mjs
+        pruebas/caidas_varias.mjs
+        pruebas/dos_paises.sh
         pruebas/falla_checkout.sh
     )
 fi

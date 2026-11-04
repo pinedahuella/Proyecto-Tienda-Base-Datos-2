@@ -35,6 +35,43 @@ ejemplo) ve un aviso comun que dice que no se pudo completar y que intente en un
 momento. El nombre de la base queda en la consola del navegador y en el registro
 del backend, para quien tenga que arreglarlo.
 
+## Varias bases caidas a la vez
+
+Lo de arriba es una base caida por vez. El 4 de noviembre de 2026 se midio
+tambien con solo 1, 2 o 3 bases prendidas, contra las bases de la PC de Jose
+David, con `node pruebas/caidas_varias.mjs` (apaga con el interruptor todas menos
+las del escenario, recorre lo que hace una persona y compra una unidad, que
+despues cancela). SI es que contesto con datos, AVISA es un 503 hecho a proposito
+porque esa parte no tiene otra fuente.
+
+| Bases prendidas | Funciona | Avisa |
+|---|---|---|
+| Solo PostgreSQL | Catalogo, categorias, ficha, buscar con filtros y con errores de tecleo, ofertas con descuento, parecidos a este, quienes lo compraron tambien llevaron, para ti, iniciar sesion, perfil, carrito, reportes y COMPRAR | Lo mas vendido, lo mas visto, se compran juntos y tendencias |
+| PostgreSQL y Redis | Todo lo anterior, mas lo mas vendido, lo mas visto y se compran juntos | Tendencias |
+| PostgreSQL y MongoDB | Lo mismo que solo PostgreSQL, y la ficha con sus caracteristicas | Lo mas vendido, lo mas visto, se compran juntos y tendencias |
+| PostgreSQL, MongoDB y Redis | Toda la tienda | Tendencias |
+| PostgreSQL, MongoDB y Elasticsearch | Lo mismo que PostgreSQL y MongoDB, con el buscador de siempre | Lo mas vendido, lo mas visto, se compran juntos y tendencias |
+| Las cinco sin PostgreSQL | Catalogo, ficha, buscar, los estantes de la portada, para ti y la sesion ya abierta | Comprar, iniciar sesion, parecidos a este y reportes. Tendencias sale vacia |
+
+Lo que lo explica:
+
+- Mientras PostgreSQL este prendido se puede comprar, sea cual sea el resto. El
+  dinero, el stock y el carrito de verdad viven ahi.
+- Los rankings de la portada salen de Redis, y si Redis no esta se recalculan
+  desde ClickHouse. Con los dos apagados no hay de donde sacarlos y la portada
+  los esconde, sin ensenar ningun error (se vio en Edge con solo PostgreSQL).
+- Tendencias del admin solo vive en ClickHouse.
+- Con MongoDB apagado la primera pagina del catalogo tarda unos 3 segundos, el
+  limite del cliente de MongoDB, y despues el cortacircuitos la contesta al
+  instante.
+- En los seis escenarios, al prender otra vez las bases el backend volvio a
+  usarlas solo, sin reiniciar nada. Un cortacircuitos se cierra con la siguiente
+  consulta que llega a su base, por eso la prueba le pide algo a cada una antes
+  de mirar `/db/cortacircuitos`.
+
+Ningun paso dio error ni se quedo sin contestar. Los cinco pedidos de la prueba
+se cancelaron por la API y sus devoluciones se borraron de ClickHouse.
+
 ## Como se apaga una base en vivo
 
 Hay dos formas, y las dos sirven con las bases en esta computadora o en otra.

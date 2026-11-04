@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 170 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 172 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las partes 7 a 13, las de la entrega final, se repasaron contra el código el 2 de noviembre de 2026; las primeras, al 23 de octubre. Los números de línea de las primeras partes se tomaron el 20 de septiembre y el código creció desde entonces, así que pueden correrse unas líneas. El nombre del archivo y de la función siguen sirviendo para encontrar el sitio.
 
@@ -1322,3 +1322,17 @@ Porque con tres roles la lista por rol es corta y se entiende de un vistazo, y l
 - Ojo. Hasta el 2 de noviembre valía el rol del token, y un cambio de rol tardaba hasta dos horas en aplicarse.
 
 - Dónde se ve. Alternativas de ADR-26, y `docs/SEGURIDAD.md`, Lo que queda.
+
+## Parte 14. Varias bases caídas a la vez y dos países, 4 de noviembre
+
+### 171. ¿Qué pasa si solo tienen PostgreSQL, o dos o tres bases?
+Se midió el 4 de noviembre contra las bases de la otra PC, apagando varias a la vez con el interruptor. Con solo PostgreSQL se navega, se busca, se ve la ficha y los parecidos, se inicia sesión y se compra. Solo avisan los rankings de la portada y las tendencias. Con PostgreSQL y Redis vuelven los rankings, y con PostgreSQL, MongoDB y Redis funciona toda la tienda menos las tendencias. Sin PostgreSQL se puede mirar pero no comprar ni iniciar sesión, y lo dice con un aviso. En los seis casos, al prender las bases el backend volvió a usarlas solo.
+
+- Dónde se ve. `pruebas/caidas_varias.mjs`, la sección Varias bases caídas a la vez de `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` y la 4.4 del informe final.
+- Por qué. PostgreSQL es la verdad del dinero, el stock y los pedidos, y casi todo lo demás tiene una copia ahí (ADR-22). Los rankings salen de Redis o, si no está, de ClickHouse. Con los dos apagados no hay de dónde sacarlos y la portada los esconde sin error.
+
+### 172. Si dos personas entran desde países distintos, ¿salta un viaje imposible?
+No. Es la misma cuenta la que no puede estar en dos países a la vez, no dos cuentas. `pruebas/dos_paises.sh` registra una persona en Guatemala y otra en Tokio, las hace entrar a la vez dos veces y no sale ninguna señal. Después la de Guatemala entra desde Tokio segundos más tarde y ahí sí salta `viaje_imposible`, unos 12 300 km, mientras la de Tokio sigue sin nada. Ese último paso es el control, para que un detector apagado no pase la prueba.
+
+- Dónde se ve. `pruebas/dos_paises.sh` y, en vivo, `.\demo-evento-fraude.ps1 -Tipo viaje_imposible`, o con una IP real de otro país `.\demo-entrar-otro-pais.ps1`.
+- Ojo. Las IPs van en `X-Forwarded-For`, que el backend solo acepta si la petición viene de la misma máquina (`trustProxy` en `backend/src/main.ts`).

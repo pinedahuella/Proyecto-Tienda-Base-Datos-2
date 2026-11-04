@@ -19,6 +19,16 @@ revisada pantalla por pantalla.** Respaldos previos `respaldos/david_antes_bater
 - **Pantallas:** 37 capturas contra David (20 de escritorio, 10 de telefono, 7 mas), vistas una por una. Un
   arreglo: en Reportes, Como pagan decia "Lo cobrado por cada forma de pago" y suma tambien lo devuelto; ahora
   lo dice. Los dos Word con 361 commits al 4 de noviembre (34 y 30 paginas).
+- **Varias bases caidas a la vez (nuevo):** `pruebas/caidas_varias.mjs` apaga con el interruptor todas menos las
+  del escenario. Con solo PostgreSQL se navega, se busca y se compra; solo avisan los rankings (Redis y ClickHouse
+  apagados juntos) y las tendencias. Sin PostgreSQL se mira pero no se compra. En los seis escenarios el backend
+  vuelve solo. Tabla en `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md` y en la 4.4 del Word final. Ojo: un cortacircuitos se
+  cierra con la siguiente consulta a su base, no solo; `/db/cortacircuitos` sin tocar la base sigue diciendo caida.
+- **Dos paises (nuevo):** `pruebas/dos_paises.sh`, dos personas en Guatemala y Tokio a la vez no dan ninguna senal, y
+  la de Guatemala entrando desde Tokio si da `viaje_imposible` (12 325 km). Borra lo que siembra. correr_todas = 48.
+  PREGUNTAS 171 y 172.
+- **Word:** el final suma la 4.4 (35 paginas) y los dos dicen 362 commits al 4 de noviembre. Los generadores escriben
+  ADR con un guion que no se parte (U+2011): Word dejaba el numero solo en la linea siguiente en cuatro lugares.
 - **Para presentar:** Lo mas visto del inicio sale con un solo producto hasta que alguien abra fichas; unos 15
   minutos antes, abrir 5 o 6 fichas distintas desde la tienda.
 
@@ -2838,7 +2848,7 @@ etl/                 las cargas entre bases (catalogo, grafo, buscador, eventos,
 mongo/ redis/ neo4j/ clickhouse/ elastic/
                      scripts, consultas y pruebas de cada base (todas menos mongo/ con README)
 seguridad/           usuarios de cada base y prueba_acceso.sh
-pruebas/             las 46 pruebas de punta a punta y correr_todas.sh
+pruebas/             las 48 pruebas de punta a punta y correr_todas.sh
 remoto/              las bases en otra PC por Tailscale
 panel-comandos/      la pagina de botones y servicios.ps1
 presentacion-final/  las 21 laminas y GUION.md
@@ -2846,7 +2856,7 @@ respaldos/           dumps de PostgreSQL antes de cada cambio grande (no se sube
 docs/                DECISIONES.md el registro unico; ARQUITECTURA.md el diagrama
                      (no el ER); base-de-datos.md el modelo; SEGURIDAD.md,
                      CONSISTENCIA-CHECKOUT.md, QUE-PASA-SI-SE-CAE-UNA-BASE.md
-PREGUNTAS-SUSTENTACION.md   170 preguntas para la sustentacion
+PREGUNTAS-SUSTENTACION.md   172 preguntas para la sustentacion
 ```
 
 ---

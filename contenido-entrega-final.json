@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 361 commits sobre `main` entre el 15 de agosto y el 4 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 362 commits sobre `main` entre el 15 de agosto y el 4 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron."
      }
     ]
    },
@@ -173,7 +173,7 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "238"
+         "239"
         ],
         [
          "José David Navichoque Pineda",
@@ -188,7 +188,7 @@
         [
          "Total",
          "",
-         "361"
+         "362"
         ]
        ],
        "anchos": [
@@ -722,7 +722,68 @@
       "p": "Todo se levanta con `.\\arrancar.ps1`. El script prende los contenedores, corre las migraciones, carga los datos, reconstruye el catálogo en MongoDB, el índice de búsqueda y el grafo, pone al día la copia del catálogo en PostgreSQL, calcula los vectores que falten, crea los usuarios de cada base y al final cuenta lo que quedó en cada base contra PostgreSQL en lugar de suponer que salió bien. Las contraseñas que falten se agregan solas al `.env`, y si el backend usa las bases de esa PC, sus usuarios quedan escritos en `backend\\.env`."
      },
      {
-      "p": "El backend, el frontend y el panel de comandos se prenden con `.\\panel-comandos\\servicios.ps1`, sin abrir ventanas. Como una laptop de 16 GB no aguanta las seis bases y el resto a la vez, el equipo trabajó casi todo octubre con las bases en otra PC. Esa PC se prepara una vez con `.\\preparar-pc-bases.ps1`, que instala lo necesario, abre los puertos solo para Tailscale y corre el arranque, y la PC de trabajo apunta a ella con `.\\usar-bases-remotas.ps1`, que cambia direcciones, usuarios y contraseñas del backend, y vuelve con `-Local`. La guía completa está en `docs/instalacion.md` y el modo remoto en `remoto/README.md`."
+      "p": "`.\\panel-comandos\\servicios.ps1` prende el backend, el frontend y el panel de comandos sin abrir ventanas. Como una laptop de 16 GB no aguanta las seis bases y el resto a la vez, el equipo trabajó casi todo octubre con las bases en otra PC. Esa PC se prepara una vez con `.\\preparar-pc-bases.ps1`, que instala lo necesario, abre los puertos solo para Tailscale y corre el arranque, y la PC de trabajo apunta a ella con `.\\usar-bases-remotas.ps1`, que cambia direcciones, usuarios y contraseñas del backend, y vuelve con `-Local`. La guía completa está en `docs/instalacion.md` y el modo remoto en `remoto/README.md`."
+     }
+    ]
+   },
+   {
+    "titulo": "4.4. Qué pasa si solo quedan una, dos o tres bases",
+    "bloques": [
+     {
+      "p": "El profesor preguntó qué hace la tienda si no están las seis bases. La prueba de caídas apaga una base por vez, así que el 4 de noviembre se midió también con varias apagadas a la vez, contra las bases de la otra PC. `pruebas/caidas_varias.mjs` apaga con el interruptor todas menos las del escenario, recorre lo que hace una persona en la tienda y compra una unidad, que después cancela por la API."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Bases prendidas",
+        "Lo que funciona",
+        "Lo que avisa que no puede"
+       ],
+       "filas": [
+        [
+         "Solo PostgreSQL",
+         "Catálogo, ficha, búsqueda con filtros y con errores de tecleo, ofertas con descuento, productos parecidos, quienes lo compraron también llevaron, para ti, iniciar sesión, reportes y comprar",
+         "Lo más vendido, lo más visto, se compran juntos y tendencias"
+        ],
+        [
+         "PostgreSQL y Redis",
+         "Todo lo anterior, más lo más vendido, lo más visto y se compran juntos",
+         "Tendencias"
+        ],
+        [
+         "PostgreSQL y MongoDB",
+         "Lo mismo que solo PostgreSQL, y la ficha con sus características",
+         "Lo más vendido, lo más visto, se compran juntos y tendencias"
+        ],
+        [
+         "PostgreSQL, MongoDB y Redis",
+         "Toda la tienda",
+         "Tendencias"
+        ],
+        [
+         "PostgreSQL, MongoDB y Elasticsearch",
+         "Lo mismo que PostgreSQL y MongoDB, con el buscador de siempre",
+         "Lo más vendido, lo más visto, se compran juntos y tendencias"
+        ],
+        [
+         "Las cinco sin PostgreSQL",
+         "Catálogo, ficha, búsqueda, los estantes de la portada, para ti y la sesión ya abierta",
+         "Comprar, iniciar sesión, productos parecidos y reportes"
+        ]
+       ],
+       "anchos": [
+        1.6,
+        3.0,
+        1.9
+       ],
+       "leyenda": "Lo que hace la tienda con varias bases apagadas a la vez, medido el 4 de noviembre de 2026."
+      }
+     },
+     {
+      "p": "Lo explica la misma regla de la sección 4.2 y del registro ADR-22. PostgreSQL guarda el dinero, el stock y los pedidos, así que mientras esté prendido se puede comprar, sea cual sea el resto. Los rankings de la portada salen de Redis, y si Redis no está se recalculan desde ClickHouse. Con los dos apagados no hay de dónde sacarlos y la portada los esconde sin enseñar ningún error. Las tendencias del administrador solo viven en ClickHouse. Sin PostgreSQL la tienda se puede mirar pero no comprar, y lo dice con un aviso en lugar de quedarse esperando."
+     },
+     {
+      "p": "En los seis casos, al prender otra vez las bases, el backend volvió a usarlas solo, sin reiniciar nada, y ningún paso dio error ni se quedó sin contestar. Con MongoDB apagado la primera página del catálogo tardó unos 3 segundos, el límite de su cliente, y después el cortacircuitos la contestó al instante. El detalle está en `docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md`."
      }
     ]
    }
