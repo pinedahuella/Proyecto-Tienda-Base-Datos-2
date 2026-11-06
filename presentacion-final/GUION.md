@@ -66,8 +66,11 @@ que viaja de una base a otra. Cada caja dice con que usuario entra el backend.
 cerrar.
 
 **Si pregunta.** Sale de `docs/generar-arquitectura.py`. El diagrama entidad
-relacion sale de `docs/generar-er.py`, que lee la base en funcionamiento y falla
-si una tabla queda sin dibujar.
+relacion es `docs/diagrama-er.png`, el mismo de la Entrega 1 puesto al dia el 6
+de noviembre con las 93 tablas y sus 117 llaves foraneas. Lo actualiza
+`docs/actualizar-er.py`, que lee la base en funcionamiento y falla si una tabla
+queda sin caja o una llave sin flecha. Se abre editable en draw.io con
+`docs/diagrama-er.drawio`.
 
 ### 7. La tienda en vivo
 Ahora la tienda. Primero buscar, despues comprar. La tarjeta de cada resultado
