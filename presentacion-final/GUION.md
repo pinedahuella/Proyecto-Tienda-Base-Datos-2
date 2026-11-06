@@ -25,7 +25,10 @@ lamina 10 suma un minuto y va solo si se llega adelantado. Si el tiempo
 aprieta, en las bases en vivo se ensenan PostgreSQL, Redis y ClickHouse, y en
 Postman solo el Run de la coleccion. Conviene ensayarlo una vez con reloj.
 
-Antes de empezar, la lista del final de este archivo.
+Antes de empezar, la lista **Antes de presentar**, despues de la parte 3. Al final
+van tres apoyos para las preguntas, donde esta el control de cada peticion de
+Postman, como se conecta la pagina con el backend y la tienda entera clic por
+clic.
 
 ---
 
@@ -81,12 +84,32 @@ El buscador tolera errores de tecleo y ordena por relevancia. El profesor pidio
 la foto en el resultado, y la foto viaja en el mismo documento que el nombre y
 el precio, guardada sin indexar, asi que una sola consulta pinta la tarjeta.
 
-**Se hace, en la tienda (unos 2 minutos).**
-1. Escribir `labtop` en el buscador de arriba. Salen las laptops.
-2. Enter, y en `/buscar` marcar una faceta, por ejemplo la categoria Laptops y
-   un rango de precio. Los numeros de cada filtro salen de la misma consulta.
-3. Abrir una laptop. La ficha trae sus variantes y sus caracteristicas de
-   MongoDB, y abajo los estantes de recomendaciones.
+**Se hace, en la tienda (unos 2 minutos).** En la ventana normal de Edge, la
+tienda en `http://localhost:5173`, sin sesion.
+1. Clic en el buscador de arriba, **Buscar productos**, y escribir `labtop`, mal
+   escrito a proposito. Sin dar Enter ya sale una lista con Laptop Aurora 14,
+   Laptop Nimbo 13 y las demas laptops.
+2. Enter. Se abre la pagina de resultados. Arriba dice **Tal vez quisiste decir
+   laptop**, y a la izquierda estan los filtros **Categoria**, **Precio**,
+   **Calificacion** y **Existencias**, cada uno con su numero.
+3. Marcar **Laptops** y despues **Mas de Q3,000**. La lista y los numeros
+   cambian juntos, de 83 productos a 68.
+4. Clic en **Laptop Aurora 14**. Arriba sale la foto, el precio y **5 vendedores
+   lo tienen**. En la pestana **Comprar** cada presentacion trae sus
+   vendedores, con su precio y sus unidades. **Detalles** trae las
+   caracteristicas que guarda MongoDB y **Resenas** lo que dicen los
+   compradores. Bajando salen **Parecidos a este** y **Quienes lo compraron
+   tambien llevaron**.
+
+**Por dentro, si pregunta como se conecta.**
+- Al escribir, la pagina llama `GET /buscador/productos`, con `buscarProductos()`
+  de `frontend/src/lib/buscador.ts:107`.
+- La pagina de resultados llama `GET /buscador/productos/facetado`, con
+  `buscarFacetado()` de `frontend/src/lib/buscador.ts:397`. Cada filtro marcado
+  vuelve a llamar la misma ruta con `categoria=7` o `precio=desde-3000`.
+- La ficha llama `GET /productos/7`, y despues `/productos/7/similares`,
+  `/productos/7/tambien-compraron` y `/productos/7/resenas`, cada estante por su
+  lado.
 
 **Si pregunta por la tolerancia a errores (fuzziness).**
 - La consulta de `/buscar` esta en
@@ -113,7 +136,19 @@ productos en ascenso compara las vistas de los ultimos siete dias contra las
 anteriores, y cuenta cuantas personas distintas hay detras, para que un producto
 inflado con clics repetidos no parezca una tendencia.
 
-**Se hace.** Panel del admin, pestana **Tendencias**, y despues **Dashboard**.
+**Se hace.** En la ventana InPrivate de Edge, donde ya entro el admin
+(`admin@mesh.com`, clave `Admin123`).
+1. Arriba, clic en **Admin**. Se abre el panel con sus pestanas.
+2. Clic en **Tendencias**. Sale **Lo que mas esta creciendo**, **Lo mas visto**,
+   **Lo que mas llevan al carrito**, **Lo mas vendido**, **Lo mas devuelto** y
+   **Lo mas buscado**, todo de los ultimos 30 dias.
+3. Clic en **Dashboard**. Sale **Ventas en el tiempo**, **Por categoria** y **Por
+   metodo de pago**, de este anio contra el anterior.
+
+**Por dentro.** Cada cuadro de Tendencias llama `GET /admin/eventos/vista`,
+`/admin/eventos/carrito`, `/admin/eventos/compra` y las demas, que leen ClickHouse.
+El Dashboard llama `GET /admin/dashboard/resumen`, `/ventas`, `/categorias` y
+`/pagos`, desde `frontend/src/lib/PanelDashboard.svelte`.
 
 **Si pregunta.**
 - Las tablas estan en `clickhouse/001_esquema.sql`. `vista_producto` en la
@@ -134,8 +169,25 @@ prueba un fraude, senalan cuentas para que una persona las revise. Y el mismo
 grafo da quienes lo compraron tambien llevaron, primero los de su misma
 categoria.
 
-**Se hace.** Panel del admin, pestana **Fraude**, y en una ficha el estante
-**Quienes lo compraron tambien llevaron**.
+**Se hace.** En la ventana InPrivate del admin.
+1. Clic en la pestana **Fraude** y despues en **Resenas en anillo**. Sale
+   **Manipulacion de resenas** con los pendientes. Cada tarjeta dice el tipo,
+   por ejemplo **Reputacion en minutos**, las cuentas, cuantas resenas y cuando
+   se detecto.
+2. Las otras tres son **Casos**, que junta varias senales en un caso para
+   revisar, **Intentos de entrada** y **Compras y navegacion**.
+3. En la ventana normal, la ficha de **Laptop Aurora 14** y bajar hasta **Quienes
+   lo compraron tambien llevaron**. Las primeras son laptops, porque van primero
+   las de su misma categoria.
+
+**Por dentro.** La pestana llama `GET /admin/fraude/alertas-resenas` y
+`GET /admin/fraude/alertas-login`, desde `frontend/src/lib/PanelFraude.svelte`.
+El estante llama `GET /productos/7/tambien-compraron`, que lee Neo4j.
+
+**Si pregunta por que dice revisado hace unas horas.** Esa linea dice cuando
+llego al grafo la ultima resena nueva, no cuando corrio el detector. **Al dia**
+quiere decir que no falta ninguna por pasar. Sale de `max(procesado_en)` en
+`backend/src/services/grafo/grafo-sync.service.ts:495`.
 
 **Si pregunta.**
 - El anillo es el Cypher de `backend/src/services/fraude/anillos-detector.service.ts:268`,
@@ -210,9 +262,16 @@ el vector, sin decirle la categoria al modelo, dos de cada tres vecinos ya son d
 la misma categoria, contra seis de cada cien al azar. Y la ruta da los mismos
 seis que el calculo exacto en los mil productos.
 
-**Se hace.** Abrir el Maillot de ruta Peloton y bajar a **Parecidos a este**.
-Salen cinco de Ciclismo y despues una comoda. La comoda tiene mas parecido que
-la bomba de piso, pero va despues porque es de otra categoria.
+**Se hace.** En la ventana normal.
+1. En el buscador de arriba escribir `maillot` y, en la lista que sale, clic en
+   **Maillot de ruta Peloton**.
+2. Bajar hasta **Parecidos a este**. Salen cinco de ciclismo, el candado, los
+   guantes, el casco, el sillin y la bomba de piso, y al final la **Comoda
+   Sendero**. La comoda tiene mas parecido que la bomba de piso, pero va despues
+   porque es de otra categoria.
+
+**Por dentro.** El estante llama `GET /productos/70/similares`, desde
+`traerSimilares()` en `frontend/src/routes/producto/[id]/+page.svelte:178`.
 
 **Si pregunta.**
 - La ruta es `GET /productos/:id/similares`,
@@ -238,8 +297,15 @@ PostgreSQL. La de intencion compara la frase con el vector de las resenas y
 ensena lo que cuentan otros compradores. Asi una frase encuentra un producto
 aunque no comparta ninguna palabra con su nombre.
 
-**Se hace.** Buscar `algo para salir a pedalear`. Sale la seccion **Lo que
-cuentan otros compradores**.
+**Se hace.** En la ventana normal, en el buscador de arriba escribir `algo para
+salir a pedalear` y dar Enter. En la pagina de resultados sale arriba la seccion
+**Lo que cuentan otros compradores**, con resenas que hablan de eso aunque no
+usen esas palabras.
+
+**Por dentro.** Esa pagina llama tres rutas a la vez.
+`GET /buscador/productos/hibrida`, con `buscarHibrida()` de
+`frontend/src/lib/buscador.ts:196`, `GET /buscador/productos/intencion`, con
+`buscarPorIntencion()` de la linea 262, y la facetada de siempre.
 
 **Si pregunta.**
 - La hibrida mezcla las dos listas por posicion con RRF, `combinar()` en
@@ -292,8 +358,18 @@ ese momento si el rol de la cuenta la tiene. Si no, 403, y el intento queda
 anotado. Quitar una fila vale en la peticion siguiente, sin compilar ni
 reiniciar.
 
-**Se hace.** Panel del admin, pestana **Permisos**. La matriz, y abajo **Lo
-ultimo que paso** con los intentos negados.
+**Se hace.** En la ventana InPrivate del admin, pestana **Permisos**. Arriba
+**Permisos por rol**, los 38 permisos con una columna por rol, Comprador,
+Vendedor y Admin. Las casillas de `cuenta.ver` y las dos de `permisos` del admin
+salen en gris, porque no se pueden quitar, y al pasar el raton dicen **No se
+puede quitar**. Abajo **Lo ultimo que paso**, con cuando, quien, su rol, el
+permiso que le falto y la ruta que pidio. Si Postman ya corrio, ahi salen sus
+403.
+
+**Por dentro.** La matriz llama `GET /admin/permisos` y el registro
+`GET /admin/permisos/registro`, desde `leerMatriz()` y `leerRegistro()` de
+`frontend/src/lib/permisos.ts:53` y `:57`. Marcar o desmarcar una casilla llama
+`POST` o `DELETE /admin/permisos/:idRol/:idPermiso`.
 
 **Si pregunta.**
 - Las tablas son de `migrations/050_permisos_por_rol.sql`, `rol_permiso` en la
@@ -388,3 +464,183 @@ Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`.
   de fraude de prueba.
 - Para apagar una base en vivo, `.\remoto\caidas.ps1 -Accion levantar` unos
   minutos antes, tarda unos 3.
+- Dos ventanas de Edge con la tienda, `http://localhost:5173`. Una normal, sin
+  sesion, para la parte 1 y las laminas 15 y 16. Otra InPrivate, con Ctrl Shift
+  N, donde ya se entro como `admin@mesh.com` con `Admin123`, para Tendencias,
+  Fraude y Permisos. Cada ventana guarda su propia sesion, asi que no se pisan.
+- La carpeta 5 de Postman cambia la oferta 3 de verdad. La corre una sola
+  persona a la vez, nunca dos Postman al mismo tiempo.
+
+---
+
+## Apoyo de la parte 3. Donde esta el control de cada peticion de Postman
+
+Para Jose David, si el profesor pregunta donde esta en el codigo lo que acaba de
+dar 401 o 403.
+
+**La idea en tres frases.** La pagina esconde botones segun el rol, pero eso es
+solo comodidad. El que decide es el backend, en cada peticion, con dos guardias.
+Postman se salta la pagina y llama directo, y por eso prueba al backend.
+
+**Las dos guardias del backend, iguales para todas las rutas.**
+1. `SesionGuard`, `backend/src/guards/sesion.guard.ts:71`. Sin cookie o con la
+   cookie vencida, 401.
+2. `PermisoGuard`, `backend/src/guards/permiso.guard.ts:41`. Lee el `@Permiso`
+   de la ruta y le pregunta a la tabla `rol_permiso` si el rol lo tiene. Si no,
+   403 en la linea 81. Una ruta sin `@Permiso` tambien se niega, linea 55.
+
+**Lo que hace la pagina.** El panel arma sus pestanas segun el rol, en
+`frontend/src/routes/panel/+page.svelte:61` y `:62` (`esAdmin` y
+`esVendedor`) y la lista de la linea 135. Una compradora no ve la pestana
+Cuentas, pero si llama la ruta igual, la frena el backend.
+
+| Carpeta | Peticion | Da | Su `@Permiso` en el backend | Pantalla de la pagina que la usa |
+|---|---|---|---|---|
+| 1 | `GET /usuario/yo` sin sesion | 401 | `cuenta.ver`, `backend/src/controllers/usuario.controller.ts:301` | Toda la pagina, al cargar, `frontend/src/lib/sesion.ts:138` |
+| 1 | `GET /admin/permisos` sin sesion | 401 | `permisos.ver`, `backend/src/controllers/admin/admin-permisos.controller.ts:32` | Admin, pestana Permisos, `frontend/src/lib/permisos.ts:53` |
+| 1 y 2 | `POST /vendedor/ofertas` | 401 y 403 | `ofertas.publicar`, `backend/src/controllers/vendedores/ofertas.controller.ts:175` | Vendedor, **Publicar una oferta** |
+| 2 | `GET /comprador/pedidos`, el control que si pasa | 200 | `pedidos.ver`, `backend/src/controllers/compradores/pedidos.controller.ts:30` | **Mis pedidos**, `frontend/src/lib/pedido.ts:297` |
+| 2 y 3 | `GET /admin/usuarios` | 403 | `usuarios.ver`, `backend/src/controllers/admin/admin-usuarios.controller.ts:22` | Admin, pestana Cuentas |
+| 2 y 3 | `PATCH /admin/usuarios/:id`, hacerse admin | 403 | `usuarios.editar`, misma ruta, linea 42 | Admin, **Bloquear**, `frontend/src/lib/BloquearCuenta.svelte:60` |
+| 2 y 3 | `GET /admin/reportes/ventas` | 403 | `reportes.ver`, `backend/src/controllers/admin/admin-reportes.controller.ts:24` | Admin, pestana Reportes |
+| 2 | `GET /admin/fraude/casos` | 403 | `fraude.ver`, `backend/src/controllers/admin/admin-casos-fraude.controller.ts:31` | Admin, Fraude, **Casos** |
+| 2 | `GET /vendedor/ofertas` | 403 | `ofertas.ver`, `backend/src/controllers/vendedores/ofertas.controller.ts:47` | Vendedor, pestana Ofertas |
+| 2 y 3 | `GET /db/cortacircuitos` | 403 | `sistema.ver`, `backend/src/controllers/base-datos.controller.ts:48` | Ninguna, es del admin y de las demos |
+| 3 | `GET /vendedor/ofertas/paginado`, el control que si pasa | 200 | `ofertas.ver`, la misma linea 47 | Vendedor, **Mis ofertas** |
+| 3 | `GET /admin/dashboard/resumen` | 403 | `dashboard.ver`, `backend/src/controllers/dashboards/dashboard-general.controller.ts:59` | Admin, pestana Dashboard |
+| 3 | `GET /admin/fraude/alertas-login` | 403 | `fraude.ver`, `backend/src/controllers/fraude/fraude.controller.ts:28` | Admin, Fraude, **Intentos de entrada** |
+| 3 | `GET /admin/eventos/tendencias` | 403 | `tendencias.ver`, `backend/src/controllers/admin/admin-tendencias-avanzadas.controller.ts:27` | Admin, pestana Tendencias |
+| 4 | `GET /admin/permisos` y `/admin/permisos/registro` como admin | 200 | `permisos.ver`, la misma linea 32 | Admin, pestana Permisos |
+
+**La carpeta 5 tiene una guardia mas, la de cada oferta.** Pasa por las dos de
+arriba y despues por `PermisoOfertaGuard`, `backend/src/guards/permiso-oferta.guard.ts:42`,
+que le pregunta a `AclOfertasService.comprobar()` en
+`backend/src/services/acl/acl-ofertas.service.ts:83` si esa cuenta tiene una
+entrada para esa oferta. Sin ninguna entrada, 404 en la linea 132. Con ver pero
+sin editar, 403 en la 134.
+
+| Peticion | Da | Donde | Pantalla |
+|---|---|---|---|
+| `GET /compartidas/ofertas/3` sin entrada, con ver y ya quitado | 404, 200 y 404 | `@PermisoOferta('ver')`, `backend/src/controllers/compartidas/ofertas-compartidas.controller.ts:75`, y `ofertas.usar_compartidas` en la 53 | Vendedor, pestana **Compartidas** |
+| `PATCH /compartidas/ofertas/3`, cambiar el precio sin editar | 403 | `@PermisoOferta('editar')`, misma ruta, linea 95 | En **Compartidas** el boton **Editar** ni sale si no tiene editar, `frontend/src/lib/OfertasCompartidas.svelte:198` |
+| `POST /vendedor/ofertas/3/permisos`, la duena le da ver | 201 | `ofertas.compartir`, `backend/src/controllers/vendedores/permisos-oferta.controller.ts:34` | Vendedor, Ofertas, **Compartir**, `frontend/src/lib/compartidas.ts:83` |
+| `DELETE /vendedor/ofertas/3/permisos/:id`, se lo quita | 200 | La misma, linea 77 | El mismo **Compartir**, `frontend/src/lib/compartidas.ts:95` |
+
+**Las carpetas 6 y 7 no pasan por el backend.** Llaman directo a Elasticsearch y
+a ClickHouse con sus usuarios de servicio. Ahi el control lo hace cada base, con
+los roles de `seguridad/elastic.sh` y `seguridad/clickhouse.sql`. No hay pagina
+que las use.
+
+**La carpeta 8 no es de permisos.** Prueba que lo que se escribe no se vuelve
+SQL. El login, `backend/src/services/usuario.service.ts:137`, la pantalla
+**Iniciar sesion**, `frontend/src/routes/entrar/+page.svelte:61`. El id del
+pedido, `backend/src/services/compradores/pedidos.service.ts:120`, la pantalla
+**Mis pedidos** y **Ver detalle**.
+
+---
+
+## Como se conecta todo, para explicarlo facil
+
+La pagina nunca habla con las bases. Habla solo con el backend, y el backend es
+el unico que entra a las seis.
+
+1. **La pagina.** Cada pantalla llama una ruta que empieza con `/api`, por
+   ejemplo `/api/productos/7`. Eso esta en `frontend/src/lib/api.ts:14`.
+2. **El paso de en medio.** Vite, el que sirve la pagina en el puerto 5173, le
+   quita el `/api` y se la pasa al backend en el puerto 3000. Esta en
+   `frontend/vite.config.ts:53`.
+3. **El backend.** Cada ruta tiene su controller en `backend/src/controllers/`.
+   Si es privada, primero `SesionGuard` dice quien es o 401, y despues
+   `PermisoGuard` dice si su rol puede o 403. Solo si pasa las dos llega al
+   servicio, y el servicio es el que va a PostgreSQL, MongoDB, Redis, Neo4j,
+   ClickHouse o Elasticsearch.
+4. **Postman.** Llama las mismas rutas del paso 3, pero directo al puerto 3000,
+   sin la pagina. Por eso sirve de prueba, si la pagina esconde un boton pero la
+   ruta dejara pasar, Postman lo veria. Y no lo ve, da 403.
+
+Ejemplo completo. La compradora da clic en **Agregar**. La ficha,
+`frontend/src/routes/producto/[id]/+page.svelte:683`, llama
+`PUT /api/carrito/lineas/:idOferta`. Vite la pasa a `PUT /carrito/lineas/:idOferta`.
+El backend la recibe en `backend/src/controllers/carrito/carrito.controller.ts:60`,
+revisa la sesion y el permiso `carrito.usar`, y guarda la linea en PostgreSQL y
+su copia en Redis.
+
+---
+
+## La tienda entera, clic por clic
+
+Para cuando el profesor pida ver algo que no esta en las laminas. Probado el 6
+de noviembre en la tienda en vivo. Las cuentas son las de siempre.
+
+| Cuenta | Clave | Para que |
+|---|---|---|
+| `compradora.norte@mesh.com` | `Comprador123` | Comprar, pedidos, avisos y resenas |
+| `ventas.norte@mesh.com` | `Vendedor123` | Ofertas, descuentos, compartir y reglas |
+| `admin@mesh.com` | `Admin123` | Todo el panel de administracion |
+
+Para entrar, arriba a la derecha **Iniciar sesion**, escribir el correo y la
+clave y **Entrar**. Para salir, **Salir**. Para cambiar de cuenta en la misma
+ventana hay que salir primero.
+
+### Sin sesion
+
+| Clic | Lo que sale | Ruta que llama |
+|---|---|---|
+| Abrir `http://localhost:5173` | **Lo mas vendido ahora**, **Ventas relampago**, **Ofertas con descuento**, **Se compran juntos** y el catalogo con **Filtros** | `GET /productos/mas-vendidos`, `/productos/ofertas/venta-relampago`, `/productos/ofertas/descuento`, `/productos/combos`, `/productos` |
+| Escribir en **Buscar productos** | La lista mientras se escribe, tolera errores como `labtop` | `GET /buscador/productos` |
+| Enter | Resultados con filtros y sus numeros, y **Tal vez quisiste decir** | `GET /buscador/productos/facetado` y `/hibrida` |
+| Una frase, como `algo para salir a pedalear` | Ademas **Lo que cuentan otros compradores** | `GET /buscador/productos/intencion` |
+| Clic en un producto | La ficha con **Comprar**, **Detalles**, **Resenas**, **Parecidos a este** y **Quienes lo compraron tambien llevaron** | `GET /productos/:id`, `/similares`, `/tambien-compraron`, `/resenas` |
+| **Agregar** sin sesion | No hay boton, dice **Inicia sesion para agregar al pedido** | Ninguna |
+
+### Como compradora
+
+| Clic | Lo que sale | Ruta que llama |
+|---|---|---|
+| **Entrar** | El panel, **Hola, Ana**, con **Avisos**, **Alertas** y **Mi cuenta** | `POST /usuario/login` |
+| Volver al inicio | Suman **Para ti** y **Viste hace poco**, que dice **Ya lo compraste** en lo que ya compro | `GET /productos/para-ti`, `/productos/vistos-recientemente` |
+| En una ficha, **Agregar** junto a un vendedor | Se abre **Tu carrito** a la derecha con la linea, **-**, **+**, **Quitar** y **Continuar al pago** | `PUT /carrito/lineas/:idOferta` |
+| **Continuar al pago** | **Confirmar la compra**, la direccion, **Lo que llevas**, el total y **Como quieres pagar**, con Tarjeta, Transferencia o Efectivo contra entrega | `GET /comprador/pedidos/metodos-pago` y `/direccion-usuario` |
+| Elegir **Efectivo contra entrega** y **Pagar** | **Gracias por tu compra** con el numero de pedido | `POST /carrito/comprar`, una sola transaccion en PostgreSQL |
+| Arriba **Mis pedidos** | La lista con **Todos**, **Comprado** y **Cancelado**, y en cada uno **Ver detalle** y **Cancelar** | `GET /comprador/pedidos` |
+| **Cancelar** y **Si, cancelar el pedido** | **Pedido cancelado**, se devuelven las unidades y el pago queda reembolsado | `POST /comprador/pedidos/:id/cancelar` |
+| En una ficha, **Avisame si baja de precio** | Queda en **Avisos** del panel, en **Lo que sigues** | `POST /comprador/seguimientos` |
+| Pestana **Resenas** de la ficha | Las estrellas, cada resena y **Util** o **No util**. Escribir una solo se puede si ya lo compro | `GET /productos/:id/resenas`, `POST /comentarios/:id/voto` |
+| Panel, **Alertas** | **Alertas de seguridad** de su propia cuenta, con **Cambiar mi contrasena ahora** | `GET /perfil/alertas-fraude` |
+| Panel, **Mi cuenta** | **Tu perfil**, **Tus direcciones** y **Tus pedidos** | `GET /perfil`, `/direccion-usuario` |
+
+La compra de prueba del 6 de noviembre fue el pedido 1954, Cartas al puerto
+seco por Q24.00, y se cancelo enseguida desde **Mis pedidos**.
+
+### Como vendedor
+
+| Clic | Lo que sale | Ruta que llama |
+|---|---|---|
+| **Entrar** | **Hola, Carlos** y las pestanas **Ofertas**, **Compartidas**, **Reglas**, **Proponer** y **Propuestas** | `POST /usuario/login` |
+| **Ofertas** | **Mis ofertas** con **Todas**, **Activas**, **Pausadas** y las demas, y en cada una **Pausar**, **Descuento**, **Abrir venta relampago**, **Compartir** y **Editar** | `GET /vendedor/ofertas/paginado` |
+| **Publicar una oferta** | Elegir un producto del catalogo y ponerle precio y unidades | `POST /vendedor/ofertas` |
+| **Descuento** | Ponerle un porcentaje a esa oferta | `POST /vendedor/ofertas/:id/descuento` |
+| **Abrir venta relampago** | Pocas unidades a precio especial, las aparta Redis | `/vendedor/ofertas/:id/venta-limitada` |
+| **Compartir** | Darle a otra cuenta ver, editar o descontar esa oferta, hasta una fecha | `POST /vendedor/ofertas/:id/permisos` |
+| **Compartidas** | **Compartidas contigo**, las ofertas de otros que le dejaron usar | `GET /compartidas/ofertas` |
+| **Reglas** | **Descuentos automaticos** y **Descuentos por fecha**, con **Nueva regla** | `GET /vendedor/reglas-descuento/paginado` |
+| **Proponer** | **Proponer un producto**, que entra al catalogo cuando el admin lo aprueba | `GET /vendedor/categorias` |
+| **Propuestas** | **Mis propuestas al catalogo**, con **Reenviar a revision** si se la rechazaron | `GET /vendedor/productos/propuestas` |
+
+### Como admin
+
+| Clic | Lo que sale | Ruta que llama |
+|---|---|---|
+| **Entrar** y arriba **Admin** | **Hola, Sofia** y las pestanas **Dashboard**, **Reportes**, **Ofertas**, **Compartidas**, **Reglas**, **Catalogo**, **Propuestas**, **Cuentas**, **Permisos**, **Fraude** y **Tendencias** | `POST /usuario/login` |
+| **Dashboard** | **Ventas en el tiempo**, **Por categoria**, **Por metodo de pago**, con **Ventas**, **Clientes**, **Vendedores y productos**, **Busquedas**, **Cancelaciones** y **Pedidos**, y **Exportar** | `GET /admin/dashboard/resumen` y las demas de `/admin/dashboard` |
+| **Reportes** | **Pedidos**, **Pagos**, **Como pagan** y **Pedidos sin pagar** | `GET /admin/reportes/ventas` y `/admin/reportes/reservaciones` |
+| **Catalogo** | **El catalogo** con **Publicar producto**, y en cada uno **Editar**, **Historial** y **Retirar** | `GET /vendedor/productos/paginado` |
+| **Propuestas** | **Productos por revisar**, con **Aprobar** y **Rechazar** | `GET /vendedor/productos/propuestas/sin-aprobar` |
+| **Cuentas** | Todas las cuentas con su rol y su estado | `GET /admin/usuarios`, `/admin/roles`, `/admin/estados` |
+| **Permisos** | La matriz por rol y **Lo ultimo que paso** | `GET /admin/permisos` y `/admin/permisos/registro` |
+| **Fraude** | **Casos**, **Intentos de entrada**, **Resenas en anillo** y **Compras y navegacion**, con **Bloquear**, **Marcar revisada** y **Descartar** | `GET /admin/fraude/alertas-login`, `/admin/fraude/alertas-resenas` |
+| **Tendencias** | **Resumen**, **Para revisar** y **Rankings**, de ClickHouse | `GET /admin/eventos/vista`, `/carrito`, `/compra`, `/devolucion`, `/busqueda` |
+
+Lo que se marca a mano en el admin, como **Bloquear** o **Aprobar**, cambia datos
+de verdad. En la presentacion se ensena sin apretarlo, salvo que el profesor lo
+pida.
