@@ -68,11 +68,15 @@ $cab = @{ 'X-Api-Key' = $ApiKey }
 function Llamar($metodo, $ruta, $cuerpo) {
   $p = @{ Method = $metodo; Uri = "$Api$ruta"; Headers = $cab; UseBasicParsing = $true }
   if ($cuerpo) { $p.Body = $utf8.GetBytes($cuerpo); $p.ContentType = 'application/json; charset=utf-8' }
-  try { Invoke-RestMethod @p }
-  catch {
-    $c = $_.Exception.Response.StatusCode.value__
-    if ($c -eq 401) { throw 'Postman no acepto la llave (401). Genera otra en Settings, API keys.' }
-    throw "Postman contesto $c en $metodo $ruta. $($_.ErrorDetails.Message)"
+  # Postman a veces contesta 500 o 503 sin motivo. Se reintenta tres veces.
+  for ($intento = 1; ; $intento++) {
+    try { return Invoke-RestMethod @p }
+    catch {
+      $c = $_.Exception.Response.StatusCode.value__
+      if ($c -eq 401) { throw 'Postman no acepto la llave (401). Genera otra en Settings, API keys.' }
+      if ($c -ge 500 -and $intento -lt 3) { Write-Host "  Postman contesto $c, reintento en 3 s"; Start-Sleep -Seconds 3; continue }
+      throw "Postman contesto $c en $metodo $ruta. $($_.ErrorDetails.Message)"
+    }
   }
 }
 
@@ -85,17 +89,23 @@ if (-not $esp) { $esp = $espacios | Select-Object -First 1 }
 if (-not $esp) { throw 'Tu cuenta de Postman no tiene ningun workspace.' }
 Write-Output "Workspace $($esp.name)"
 
+# Lo que ya hay en el workspace, para actualizar en vez de duplicar. Si Postman
+# no lo da, se crea igual.
+$yaHay = $null
+try { $yaHay = (Llamar GET "/workspaces/$($esp.id)").workspace }
+catch { Write-Output "  No pude leer lo que ya tienes ($($_.Exception.Message)). Lo creo nuevo." }
+
 # Coleccion, el texto tal cual para no deformar el JSON
 $textoCol = [IO.File]::ReadAllText($archColeccion, $utf8)
 $nombreCol = ($textoCol | ConvertFrom-Json).info.name
 $cuerpoCol = '{"collection":' + $textoCol + '}'
-$yaCol = (Llamar GET "/collections?workspace=$($esp.id)").collections | Where-Object { $_.name -eq $nombreCol } | Select-Object -First 1
+$yaCol = $yaHay.collections | Where-Object { $_.name -eq $nombreCol } | Select-Object -First 1
 if ($yaCol) { Llamar PUT "/collections/$($yaCol.uid)" $cuerpoCol | Out-Null; Write-Output "Coleccion actualizada  $nombreCol" }
 else { Llamar POST "/collections?workspace=$($esp.id)" $cuerpoCol | Out-Null; Write-Output "Coleccion creada  $nombreCol" }
 
 # Ambiente
 $cuerpoAmb = @{ environment = @{ name = $ambiente.name; values = @($ambiente.values) } } | ConvertTo-Json -Depth 10
-$yaAmb = (Llamar GET "/environments?workspace=$($esp.id)").environments | Where-Object { $_.name -eq $ambiente.name } | Select-Object -First 1
+$yaAmb = $yaHay.environments | Where-Object { $_.name -eq $ambiente.name } | Select-Object -First 1
 if ($yaAmb) { Llamar PUT "/environments/$($yaAmb.uid)" $cuerpoAmb | Out-Null; Write-Output "Ambiente actualizado  $($ambiente.name)" }
 else { Llamar POST "/environments?workspace=$($esp.id)" $cuerpoAmb | Out-Null; Write-Output "Ambiente creado  $($ambiente.name)" }
 
