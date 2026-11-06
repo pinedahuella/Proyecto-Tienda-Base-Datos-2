@@ -1,0 +1,1903 @@
+{
+  "info": {
+    "_postman_id": "7ba810f1-a9fd-5e71-b87a-a42af6feefcf",
+    "name": "Mesh, control de acceso en vivo",
+    "description": "Llamadas directas al backend de Mesh y a dos de sus bases para comprobar en vivo que lo que una cuenta o un usuario no tiene permitido devuelve 401 o 403. Se corre de arriba hacia abajo, carpeta por carpeta, porque cada carpeta empieza iniciando sesion con su cuenta. Explicacion completa en docs/GUIA-ESTUDIO-ACL.md.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "0. Antes de empezar, salir",
+      "item": [
+        {
+          "name": "Salir (borra la cookie)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/usuario/logout",
+            "description": "Borra la cookie mesh_token, por si quedo una sesion abierta de antes.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, sin sesion', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1. Sin sesion, 401",
+      "item": [
+        {
+          "name": "Quien soy, sin sesion",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/usuario/yo",
+            "description": "SesionGuard (backend/src/guards/sesion.guard.ts) no encuentra la cookie y corta con 401.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver la matriz de permisos, sin sesion",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/permisos",
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publicar una oferta, sin sesion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/vendedor/ofertas",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401 Unauthorized', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Comprador, 403",
+      "item": [
+        {
+          "name": "Entrar como compradora.norte@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Inicia sesion. El backend contesta con la cookie mesh_token (httpOnly) y Postman la guarda en su frasco de cookies para localhost, asi que las peticiones de abajo ya van como esta cuenta. Backend, backend/src/controllers/usuario.controller.ts, @Post('login').",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"compradora.norte@mesh.com\",\n  \"contrasena\": \"Comprador123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como comprador', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quien soy y que permisos tengo",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/usuario/yo",
+            "description": "El rol sale de la base en cada peticion, no del token. permisos trae los 12 del comprador.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, soy comprador y no tengo permisos.ver', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    const p = pm.response.json().payload;",
+                  "    pm.expect(JSON.stringify(p)).to.include('comprador');",
+                  "    pm.expect(JSON.stringify(p.permisos || [])).to.not.include('permisos.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Control, mis pedidos (lo mio si)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/comprador/pedidos",
+            "description": "Control, pedidos.ver si lo tiene el comprador. Sin este 200, los 403 de abajo no dirian nada.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, lo suyo si', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver la matriz de permisos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/permisos",
+            "description": "La ruta declara @Permiso('permisos.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta permisos.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('permisos.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver todas las cuentas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/usuarios",
+            "description": "La ruta declara @Permiso('usuarios.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta usuarios.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('usuarios.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hacerse admin (cuenta que no existe)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/admin/usuarios/99999999",
+            "description": "La ruta declara @Permiso('usuarios.editar'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_rol_usuario\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta usuarios.editar', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('usuarios.editar');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reporte de ventas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/reportes/ventas",
+            "description": "La ruta declara @Permiso('reportes.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta reportes.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('reportes.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Casos de fraude",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/fraude/casos",
+            "description": "La ruta declara @Permiso('fraude.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta fraude.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('fraude.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ofertas de vendedor",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/vendedor/ofertas",
+            "description": "La ruta declara @Permiso('ofertas.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta ofertas.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('ofertas.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Publicar una oferta",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/vendedor/ofertas",
+            "description": "La ruta declara @Permiso('ofertas.publicar'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta ofertas.publicar', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('ofertas.publicar');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estado de las bases",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/db/cortacircuitos",
+            "description": "La ruta declara @Permiso('sistema.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta sistema.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('sistema.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. Vendedor, 403",
+      "item": [
+        {
+          "name": "Entrar como ventas.norte@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Inicia sesion. El backend contesta con la cookie mesh_token (httpOnly) y Postman la guarda en su frasco de cookies para localhost, asi que las peticiones de abajo ya van como esta cuenta. Backend, backend/src/controllers/usuario.controller.ts, @Post('login').",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"ventas.norte@mesh.com\",\n  \"contrasena\": \"Vendedor123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como vendedor', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Control, mis ofertas (lo mio si)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/vendedor/ofertas/paginado?limite=1",
+            "description": "Control, ofertas.ver si lo tiene el vendedor.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, lo suyo si', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver la matriz de permisos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/permisos",
+            "description": "La ruta declara @Permiso('permisos.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta permisos.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('permisos.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver todas las cuentas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/usuarios",
+            "description": "La ruta declara @Permiso('usuarios.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta usuarios.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('usuarios.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Hacerse admin (cuenta que no existe)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/admin/usuarios/99999999",
+            "description": "La ruta declara @Permiso('usuarios.editar'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id_rol_usuario\": 3\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta usuarios.editar', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('usuarios.editar');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reporte de ventas",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/reportes/ventas",
+            "description": "La ruta declara @Permiso('reportes.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta reportes.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('reportes.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Dashboard del admin",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/dashboard/resumen",
+            "description": "La ruta declara @Permiso('dashboard.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta dashboard.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('dashboard.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Alertas de fraude de inicio de sesion",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/fraude/alertas-login",
+            "description": "La ruta declara @Permiso('fraude.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta fraude.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('fraude.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Tendencias",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/eventos/tendencias",
+            "description": "La ruta declara @Permiso('tendencias.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta tendencias.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('tendencias.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Estado de las bases",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/db/cortacircuitos",
+            "description": "La ruta declara @Permiso('sistema.ver'). PermisoGuard (backend/src/guards/permiso.guard.ts) le pregunta a rol_permiso si el rol de esta cuenta lo tiene y, como no, corta con 403 antes de llegar al controller. El intento queda en auditoria_permiso.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, falta sistema.ver', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('sistema.ver');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Admin, lo que quedo anotado",
+      "item": [
+        {
+          "name": "Entrar como admin@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Inicia sesion. El backend contesta con la cookie mesh_token (httpOnly) y Postman la guarda en su frasco de cookies para localhost, asi que las peticiones de abajo ya van como esta cuenta. Backend, backend/src/controllers/usuario.controller.ts, @Post('login').",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"admin@mesh.com\",\n  \"contrasena\": \"Admin123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como admin', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "La matriz de permisos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/permisos",
+            "description": "Los 3 roles y los 38 permisos por modulo. Es la tabla rol_permiso, 76 filas.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, 3 roles y 38 permisos', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    const p = pm.response.json().payload;",
+                  "    pm.expect(p.roles.length).to.eql(3);",
+                  "    const n = p.modulos.reduce(function (s, m) { return s + m.permisos.length; }, 0);",
+                  "    pm.expect(n).to.eql(38);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "El registro de lo negado",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/admin/permisos/registro?limite=20",
+            "description": "auditoria_permiso. Arriba salen los 403 de las carpetas 2 y 3, con la cuenta, su rol, el permiso que falto y la ruta.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, los intentos de arriba estan anotados', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    const filas = pm.response.json().payload;",
+                  "    pm.expect(filas.some(function (f) { return f.accion === 'negado'; })).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Una oferta, por persona",
+      "description": "El ACL por oferta (migracion 049). ventas.norte le da solo ver a ventas.oriente sobre su oferta, ventas.oriente la ve pero no la puede editar, y al final se le quita. Deja todo como estaba.",
+      "item": [
+        {
+          "name": "Entrar como ventas.oriente@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Inicia sesion. El backend contesta con la cookie mesh_token (httpOnly) y Postman la guarda en su frasco de cookies para localhost, asi que las peticiones de abajo ya van como esta cuenta. Backend, backend/src/controllers/usuario.controller.ts, @Post('login').",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"ventas.oriente@mesh.com\",\n  \"contrasena\": \"Vendedor123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como vendedor', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver la oferta ajena, sin ninguna entrada",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/compartidas/ofertas/{{oferta_id}}",
+            "description": "PermisoOfertaGuard (backend/src/guards/permiso-oferta.guard.ts). Sin ninguna entrada contesta el mismo 404 de una oferta que no existe.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404, ni siquiera se confirma que existe', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Entrar como ventas.norte@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Inicia sesion. El backend contesta con la cookie mesh_token (httpOnly) y Postman la guarda en su frasco de cookies para localhost, asi que las peticiones de abajo ya van como esta cuenta. Backend, backend/src/controllers/usuario.controller.ts, @Post('login').",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"ventas.norte@mesh.com\",\n  \"contrasena\": \"Vendedor123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como vendedor', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "La duena le da solo ver",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/vendedor/ofertas/{{oferta_id}}/permisos",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"correo\": \"ventas.oriente@mesh.com\",\n  \"permisos\": [\n    \"ver\"\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('201, permiso dado', function () {",
+                  "    pm.expect(pm.response.code).to.be.oneOf([200, 201]);",
+                  "    const p = pm.response.json().payload.permisos.find(function (x) {",
+                  "        return x.receptor.correo === 'ventas.oriente@mesh.com' && x.permiso === 'ver'; });",
+                  "    pm.expect(p).to.be.an('object');",
+                  "    pm.collectionVariables.set('id_permiso_oferta', p.id_permiso_oferta);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Entrar como ventas.oriente@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Inicia sesion. El backend contesta con la cookie mesh_token (httpOnly) y Postman la guarda en su frasco de cookies para localhost, asi que las peticiones de abajo ya van como esta cuenta. Backend, backend/src/controllers/usuario.controller.ts, @Post('login').",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"ventas.oriente@mesh.com\",\n  \"contrasena\": \"Vendedor123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como vendedor', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver la oferta, ahora si",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/compartidas/ofertas/{{oferta_id}}",
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, ya la ve', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.collectionVariables.set('precio_actual', pm.response.json().payload.precio);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Cambiarle el precio, sin el permiso editar",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/compartidas/ofertas/{{oferta_id}}",
+            "description": "Manda el mismo precio que ya tiene, asi que aunque pasara no cambiaria nada.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"precio\": \"{{precio_actual}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403 Forbidden, no tiene editar', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('editar');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Entrar como ventas.norte@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Inicia sesion. El backend contesta con la cookie mesh_token (httpOnly) y Postman la guarda en su frasco de cookies para localhost, asi que las peticiones de abajo ya van como esta cuenta. Backend, backend/src/controllers/usuario.controller.ts, @Post('login').",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"ventas.norte@mesh.com\",\n  \"contrasena\": \"Vendedor123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como vendedor', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "La duena se lo quita",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/vendedor/ofertas/{{oferta_id}}/permisos/{{id_permiso_oferta}}",
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, permiso quitado', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Entrar como ventas.oriente@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Inicia sesion. El backend contesta con la cookie mesh_token (httpOnly) y Postman la guarda en su frasco de cookies para localhost, asi que las peticiones de abajo ya van como esta cuenta. Backend, backend/src/controllers/usuario.controller.ts, @Post('login').",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"ventas.oriente@mesh.com\",\n  \"contrasena\": \"Vendedor123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como vendedor', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Ver la oferta otra vez",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/compartidas/ofertas/{{oferta_id}}",
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404, ya no la ve', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Salir",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/usuario/logout",
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "6. Elasticsearch directo, 401 y 403",
+      "description": "Directo a la base, sin pasar por el backend. Lo que borraria algo se intenta sobre un indice que no existe. Usuarios en seguridad/elastic.sh.",
+      "item": [
+        {
+          "name": "Sin usuario",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es_url}}/_cluster/health",
+            "description": "",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401, sin usuario no se entra', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_lectura busca productos",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es_url}}/mesh_productos/_count",
+            "description": "",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_lectura",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{es_lectura_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, lee', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_lectura intenta escribir",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{es_url}}/mesh_productos/_update/prueba-acl-no-existe",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doc\": {\n    \"x\": 1\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_lectura",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{es_lectura_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403, mesh_lectura no escribe', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Control, mesh_backend si puede escribir (404, el documento no existe)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{es_url}}/mesh_productos/_update/prueba-acl-no-existe",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"doc\": {\n    \"x\": 1\n  }\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_backend",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{es_backend_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('404, tenia permiso y no encontro el documento', function () {",
+                  "    pm.response.to.have.status(404);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_backend intenta borrar un indice",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{es_url}}/mesh_prueba_acl_no_existe",
+            "description": "",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_backend",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{es_backend_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403, no borra indices', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_backend intenta crear un indice",
+          "request": {
+            "method": "PUT",
+            "header": [],
+            "url": "{{es_url}}/mesh_prueba_acl_no_existe",
+            "description": "",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_backend",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{es_backend_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403, no crea indices', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_backend intenta ver los usuarios",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{es_url}}/_security/user",
+            "description": "",
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_backend",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{es_backend_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('403, no administra usuarios', function () {",
+                  "    pm.response.to.have.status(403);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7. ClickHouse directo, ACCESS_DENIED",
+      "description": "ClickHouse por HTTP, sin pasar por el backend. Niega con el codigo 497 ACCESS_DENIED y responde HTTP 500, no 403. Usuarios en seguridad/clickhouse.sql.",
+      "item": [
+        {
+          "name": "Sin contrasena",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{ch_url}}/",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "SELECT 1"
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401, sin contrasena no se entra', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_lectura lee las vistas",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{ch_url}}/",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "SELECT count() FROM mesh_eventos.vista_producto"
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_lectura",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ch_lectura_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, lee', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_lectura intenta agregar (cero filas)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{ch_url}}/",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "INSERT INTO mesh_eventos.vista_producto SELECT * FROM mesh_eventos.vista_producto WHERE 0"
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_lectura",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ch_lectura_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('mesh_lectura no agrega, ClickHouse contesta ACCESS_DENIED (codigo 497)', function () {",
+                  "    pm.expect(pm.response.code).to.not.eql(200);",
+                  "    pm.expect(pm.response.text()).to.include('ACCESS_DENIED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Control, mesh_backend si agrega (cero filas)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{ch_url}}/",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "INSERT INTO mesh_eventos.vista_producto SELECT * FROM mesh_eventos.vista_producto WHERE 0"
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_backend",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ch_backend_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, el backend si agrega', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_backend intenta borrar eventos (ninguno)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{ch_url}}/",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "ALTER TABLE mesh_eventos.vista_producto DELETE WHERE 0"
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_backend",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ch_backend_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('no borra eventos, ClickHouse contesta ACCESS_DENIED (codigo 497)', function () {",
+                  "    pm.expect(pm.response.code).to.not.eql(200);",
+                  "    pm.expect(pm.response.text()).to.include('ACCESS_DENIED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_backend intenta crear una tabla",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{ch_url}}/",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "CREATE TABLE mesh_eventos.intruso (x UInt8) ENGINE = Memory"
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_backend",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ch_backend_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('no crea tablas, ClickHouse contesta ACCESS_DENIED (codigo 497)', function () {",
+                  "    pm.expect(pm.response.code).to.not.eql(200);",
+                  "    pm.expect(pm.response.text()).to.include('ACCESS_DENIED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "mesh_backend intenta ver los usuarios",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              }
+            ],
+            "url": "{{ch_url}}/",
+            "description": "",
+            "body": {
+              "mode": "raw",
+              "raw": "SELECT count() FROM system.users"
+            },
+            "auth": {
+              "type": "basic",
+              "basic": [
+                {
+                  "key": "username",
+                  "value": "mesh_backend",
+                  "type": "string"
+                },
+                {
+                  "key": "password",
+                  "value": "{{ch_backend_clave}}",
+                  "type": "string"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('no ve los usuarios, ClickHouse contesta ACCESS_DENIED (codigo 497)', function () {",
+                  "    pm.expect(pm.response.code).to.not.eql(200);",
+                  "    pm.expect(pm.response.text()).to.include('ACCESS_DENIED');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000"
+    },
+    {
+      "key": "es_url",
+      "value": "http://localhost:9200"
+    },
+    {
+      "key": "ch_url",
+      "value": "http://localhost:8123"
+    },
+    {
+      "key": "oferta_id",
+      "value": "3"
+    },
+    {
+      "key": "id_permiso_oferta",
+      "value": ""
+    },
+    {
+      "key": "precio_actual",
+      "value": ""
+    }
+  ]
+}

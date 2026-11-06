@@ -167,9 +167,11 @@
 
 	/**
 	 * Recomendacion semantica de la Entrega final, "parecidos por descripcion":
-	 * GET /productos/:id/similares. La ruta busca con kNN sobre el vector de cada
-	 * producto en mesh_productos (Elasticsearch, desde el 2026-10-02) y trae cada
-	 * producto de Mongo, igual que tambien-vieron. Si contesta 404 el estante no sale.
+	 * GET /productos/:id/similares. La ruta busca los vecinos del vector de cada
+	 * producto en vector_producto (PostgreSQL, pgvector, desde el 2026-10-16) y
+	 * trae cada producto de Mongo, igual que tambien-vieron. Llegan ya en orden,
+	 * primero los de la misma categoria y despues el resto (como tambien-compraron),
+	 * y aqui se pintan tal cual. Si contesta 404 el estante no sale.
 	 */
 	let similares = $state<Recomendado[]>([]);
 

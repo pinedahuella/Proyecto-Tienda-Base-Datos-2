@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 362 commits sobre `main` entre el 15 de agosto y el 4 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 363 commits sobre `main` entre el 15 de agosto y el 5 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron. El 5 de noviembre los parecidos por el vector pasaron a ese mismo orden."
      }
     ]
    },
@@ -173,7 +173,7 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "239"
+         "240"
         ],
         [
          "José David Navichoque Pineda",
@@ -188,7 +188,7 @@
         [
          "Total",
          "",
-         "362"
+         "363"
         ]
        ],
        "anchos": [
@@ -196,7 +196,7 @@
         2.4,
         1.2
        ],
-       "leyenda": "Commits por integrante en el historial de git al 4 de noviembre de 2026."
+       "leyenda": "Commits por integrante en el historial de git al 5 de noviembre de 2026."
       }
      }
     ]
@@ -291,6 +291,56 @@
       "p": "El operador `<=>` de pgvector mide la distancia coseno, de 0 a 2, así que el parecido es uno menos la distancia, en la escala de 0 a 1 que enseña la ficha. El vector va como parámetro y no como subconsulta, porque con una subconsulta el planificador no usa el índice HNSW."
      },
      {
+      "p": "Desde el 5 de noviembre el estante ordena por bloques, con el mismo esquema que quienes lo compraron también llevaron (ADR-25). Antes de la consulta de arriba corre otra igual pero solo sobre los productos activos de su misma categoría, que salen de `producto_catalogo`. Los seis se llenan en ese orden, primero todos los de su categoría, del más parecido al menos, y lo que falte con el resto del catálogo, siempre uno por grupo. Un producto de la misma categoría con 0,40 de parecido va antes que uno de otra con 0,80, y cada resultado dice si es de la misma categoría en `misma_categoria`. La consulta del resto sigue sin JOIN para que use el índice HNSW."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Maillot de ruta Peloton, Ciclismo",
+        "Parecido",
+        "Bloque"
+       ],
+       "filas": [
+        [
+         "Candado plegable Cerrojo F8",
+         "0,707",
+         "Su categoría"
+        ],
+        [
+         "Guantes de ciclismo Palma Corta L1-0728",
+         "0,639",
+         "Su categoría"
+        ],
+        [
+         "Casco de ruta Aerodino",
+         "0,624",
+         "Su categoría"
+        ],
+        [
+         "Sillin de ruta Vertebra SR-2 L1-0822",
+         "0,549",
+         "Su categoría"
+        ],
+        [
+         "Bomba de piso Piston",
+         "0,456",
+         "Su categoría"
+        ],
+        [
+         "Comoda Sendero 4 gavetas L1-0779",
+         "0,657",
+         "El resto"
+        ]
+       ],
+       "anchos": [
+        3.2,
+        1.3,
+        1.6
+       ],
+       "leyenda": "Los seis parecidos del producto 70 el 5 de noviembre. La cómoda se parece más que la bomba de piso, pero es de otra categoría y va al final."
+      }
+     },
+     {
       "p": "Con pgvector aprendimos a revisar si el índice de vecinos se usa de verdad. La primera versión de la función nunca lo usaba, y la migración 027 lo corrigió, de 32 a 3,8 ms por producto. La misma revisión encontró un problema con las reseñas, que entonces estaban en Elasticsearch. Con textos repetidos muchas veces, el grafo de vecinos se atascaba y no encontraba las mejores. Al volver a pgvector apareció lo mismo con otra cara. Con los valores por defecto el índice HNSW revisa 40 candidatos, el filtro de activos descarta algunos y un `LIMIT 200` volvía con 39 filas. Por eso cada búsqueda sube `hnsw.ef_search` y activa `hnsw.iterative_scan` solo dentro de su transacción, y con eso vuelven las 200."
      },
      {
@@ -326,13 +376,13 @@
     "titulo": "2.5. Evidencia y dónde se ve",
     "bloques": [
      {
-      "p": "La prueba `python pruebas/recomendacion_semantica.py` corre contra las bases en funcionamiento y dio 15 comprobaciones en verde el 20 de octubre, con el vector en PostgreSQL. Revisa que cada producto de MongoDB esté en la copia del catálogo y tenga su vector de 768 dimensiones, todos del mismo modelo, que los parecidos compartan categoría mucho más seguido de lo que daría el azar, 66 por ciento contra 6 en esa corrida, con ese azar medido sobre los mismos productos como control, que la búsqueda no devuelva el propio producto, productos inactivos ni copias del mismo producto, y que un producto sin vector devuelva una lista vacía sin romper nada. `node pruebas/vectores_worker.cjs` comprueba con 5 en verde que el worker del backend calcula el mismo vector que el ETL, con distancia cero."
+      "p": "La prueba `python pruebas/recomendacion_semantica.py` corre contra las bases en funcionamiento y dio 21 comprobaciones en verde el 5 de noviembre, con el vector en PostgreSQL. Revisa que cada producto de MongoDB esté en la copia del catálogo y tenga su vector de 768 dimensiones, todos del mismo modelo, que solo por el vector, calculado contra todos en PostgreSQL, los vecinos compartan categoría mucho más seguido de lo que daría el azar, 66 por ciento contra 6 en la muestra de esa corrida, con ese azar medido sobre los mismos productos como control, que la ficha ponga primero todos los de su categoría y que `misma_categoria` diga la verdad, que la búsqueda no devuelva el propio producto, productos inactivos ni copias del mismo producto, y que un producto sin vector devuelva una lista vacía sin romper nada. La parte de los bloques se probó también con el orden anterior y falló, como debía. `node pruebas/vectores_worker.cjs` comprueba con 5 en verde que el worker del backend calcula el mismo vector que el ETL, con distancia cero."
      },
      {
-      "p": "Al modelo nunca se le dice la categoría como dato aparte, solo la lee dentro del texto. Que los parecidos caigan en la misma categoría es la señal de que el vector captura de qué trata el producto."
+      "p": "Al modelo nunca se le dice la categoría como dato aparte, solo la lee dentro del texto. Que los vecinos caigan en la misma categoría es la señal de que el vector captura de qué trata el producto, y por eso esa cifra se mide solo con el vector y no con el orden por bloques. Medido en los 1000 productos activos el 5 de noviembre, solo por el vector el 68 por ciento de los vecinos es de su categoría, y en la ficha, con su categoría primero, el 84,5 por ciento. La ruta dio los mismos seis, en el mismo orden y con los mismos bloques, que el cálculo exacto contra todos en los 1000."
      },
      {
-      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo en clase están `.\\demo-entrega-final.ps1 -Parte semantica` y `-Parte vectores`, que buscan un producto por nombre, muestran sus seis parecidos con el porcentaje de similitud y comprueban que la ruta devuelve los mismos productos en el mismo orden."
+      "p": "En la tienda, la ficha de cada producto tiene el estante Parecidos a este, que pide los parecidos a la ruta `GET /productos/:id/similares` del backend. Para enseñarlo en clase están `.\\demo-entrega-final.ps1 -Parte semantica` y `-Parte vectores`, que buscan un producto por nombre, muestran sus seis parecidos con el porcentaje de similitud, separados en sus dos bloques, y comprueban que la ruta devuelve los mismos productos en el mismo orden."
      }
     ]
    },
@@ -622,6 +672,9 @@
      },
      {
       "p": "Antes de cambiarlo se guardó qué roles entraban a cada una de las 165 rutas, leído del backend compilado, y `pruebas/permisos_cobertura.cjs` comprueba que con la tabla nueva entran exactamente los mismos. `pruebas/permisos_rol.sh` llama a las rutas directo con los tres roles y los 38 permisos, quita y devuelve permisos en vivo y le cambia el rol a una cuenta con la sesión abierta, con 171 comprobaciones en verde. En clase se enseña con `.\\demo-entrega-final.ps1 -Parte permisos`."
+     },
+     {
+      "p": "Para la presentación el profesor pidió dos pruebas sin script. La primera es entrar en vivo a cada base con un usuario que no tiene el permiso y ver que la base lo rechaza, con las órdenes de `docs/GUIA-ESTUDIO-ACL.md`. La segunda es llamar las rutas directo con Postman. La colección de `presentacion-final/postman` entra como compradora, como vendedor y como administrador, pide lo que cada uno no tiene y espera 401 o 403, comparte una oferta y la devuelve, y llama a Elasticsearch y ClickHouse con los usuarios de servicio. Cada petición lleva su prueba y su control, y el 5 de noviembre las 54 dieron lo esperado."
      }
     ]
    }
@@ -1223,7 +1276,7 @@
         "**Patrón de consulta.** El orden se resuelve en la misma consulta de la recomendación, antes del límite.",
         "**Costo operativo.** La categoría casi no cambia y copiarla cuesta poco. El precio y la existencia cambian a cada rato y no se copian."
        ],
-       "consecuencias": "Con Neo4j y con MongoDB caídos, los 100 productos comprados dan la misma lista en el mismo orden. Un cambio de categoría llega al grafo en menos de un minuto, y mientras tanto el orden puede usar la categoría vieja."
+       "consecuencias": "Con Neo4j y con MongoDB caídos, los 100 productos comprados dan la misma lista en el mismo orden. Un cambio de categoría llega al grafo en menos de un minuto, y mientras tanto el orden puede usar la categoría vieja. Desde el 5 de noviembre los parecidos por el vector siguen el mismo orden, primero su categoría (sección 2.4)."
       }
      },
      {

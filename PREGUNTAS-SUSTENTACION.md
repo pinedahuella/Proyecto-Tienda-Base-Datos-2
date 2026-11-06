@@ -29,6 +29,8 @@ Las partes 7 a 13, las de la entrega final, se repasaron contra el código el 2 
 - [Parte 11. Lo que cambió el 23 de octubre](#parte-11-lo-que-cambió-el-23-de-octubre), preguntas 149 a 152
 - [Parte 12. Lo que cambió el 26 de octubre](#parte-12-lo-que-cambió-el-26-de-octubre), preguntas 153 a 161
 - [Parte 13. El ACL de funcionalidades, 28 de octubre](#parte-13-el-acl-de-funcionalidades-28-de-octubre), preguntas 162 a 170
+- [Parte 14. Varias bases caídas a la vez y dos países, 4 de noviembre](#parte-14-varias-bases-caídas-a-la-vez-y-dos-países-4-de-noviembre), preguntas 171 a 172
+- [Parte 15. Parecidos por bloques y el control de acceso en vivo, 5 de noviembre](#parte-15-parecidos-por-bloques-y-el-control-de-acceso-en-vivo-5-de-noviembre), preguntas 173 a 179
 
 ---
 
@@ -965,9 +967,9 @@ Sí, en todos los que tienen roles. En Redis cuatro usuarios de ACL, con el del 
 - Ojo si preguntan por Neo4j. Es la única sin roles, porque la edición community no los tiene. La prueba le pide crear un rol y guarda lo que contesta, `Unsupported administration command`.
 
 ### 117. ¿Qué hay hoy del componente vectorial y la recomendación por similitud semántica?
-Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector, tabla `vector_producto`, con un índice HNSW de coseno. `SimilaresService` pide los 200 vecinos más cercanos que estén activos y no sean el propio producto ni sus copias, y se queda con uno por grupo. Después pide a MongoDB cómo se ven, y si MongoDB no contesta, a la copia del catálogo en PostgreSQL. Cada producto del catálogo tiene su vector, 1003 en la base de hoy, 1000 de ellos activos. Las reseñas tienen el suyo en `vector_comentario`.
+Está hecho y se ve en la ficha de cada producto, en el estante Parecidos a este. El texto de cada producto (nombre, categoría y descripción) sale de MongoDB, Ollama lo convierte en un vector de 768 números con el modelo paraphrase-multilingual, y el vector se guarda en PostgreSQL con pgvector, tabla `vector_producto`, con un índice HNSW de coseno. `SimilaresService` pide primero los vecinos activos de su misma categoría y después los 200 más cercanos de todo el catálogo, sin el propio producto ni sus copias, y llena los seis en ese orden, uno por grupo (desde el 5 de noviembre, pregunta 173). Después pide a MongoDB cómo se ven, y si MongoDB no contesta, a la copia del catálogo en PostgreSQL. Cada producto del catálogo tiene su vector, 1003 en la base de hoy, 1000 de ellos activos. Las reseñas tienen el suyo en `vector_comentario`.
 
-- Dónde se ve. `migrations/040_vectores_en_postgres.sql`, las dos tablas. `etl/cargar_vectores.ps1`, paso 7d de arrancar. `backend/src/services/productos/similares.service.ts` y `helpers/vectores-pgvector.ts` (`buscarCercanos()`, que sube `hnsw.ef_search` y activa `iterative_scan` para que el filtro no deje la lista corta). `vectores-sync.service.ts` recalcula cada 10 segundos los productos editados. `pruebas/recomendacion_semantica.py`, 15 OK. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`, que compara el índice HNSW con la búsqueda exacta: 1,6 ms contra 7,4 ms, los mismos seis.
+- Dónde se ve. `migrations/040_vectores_en_postgres.sql`, las dos tablas. `etl/cargar_vectores.ps1`, paso 7d de arrancar. `backend/src/services/productos/similares.service.ts` y `helpers/vectores-pgvector.ts` (`buscarCercanos()`, que sube `hnsw.ef_search` y activa `iterative_scan` para que el filtro no deje la lista corta). `vectores-sync.service.ts` recalcula cada 10 segundos los productos editados. `pruebas/recomendacion_semantica.py`, 21 OK el 5 de noviembre. En vivo, `.\demo-entrega-final.ps1 -Parte semantica`, que enseña los dos bloques y compara el índice HNSW con la búsqueda exacta, 1,9 ms contra 3,2 ms el 5 de noviembre, los mismos seis.
 - Lo que pide el profesor. Entrega final, recomendación por similitud semántica de la descripción con representaciones vectoriales (5 pts). La sección 5.2 da como referencia una extensión vectorial sobre PostgreSQL, y el 16 de octubre pidió explícitamente pgvector.
 - Por qué así. Es más exacto. Medido por Jose David con el mismo catálogo, pgvector da el coseno exacto en 1000 de 1001 productos y el índice `int8_hnsw` de Elasticsearch en 317, porque cuantiza los vectores. Y las comparaciones de todas las reseñas contra todas las hace PostgreSQL sin sacar los vectores de la base.
 - Ojo si preguntan por la historia. Estuvo en pgvector del 25 de septiembre al 4 de octubre, en Elasticsearch del 4 al 16 de octubre, y volvió. Al volver, arrancar copió los 3105 vectores de Elasticsearch a PostgreSQL sin llamar a Ollama (mismo hash, mismo modelo). El ADR-13 del informe de la Entrega final, secciones 2.1 y 2.2, lo cuenta con números.
@@ -1336,3 +1338,40 @@ No. Es la misma cuenta la que no puede estar en dos países a la vez, no dos cue
 
 - Dónde se ve. `pruebas/dos_paises.sh` y, en vivo, `.\demo-evento-fraude.ps1 -Tipo viaje_imposible`, o con una IP real de otro país `.\demo-entrar-otro-pais.ps1`.
 - Ojo. Las IPs van en `X-Forwarded-For`, que el backend solo acepta si la petición viene de la misma máquina (`trustProxy` en `backend/src/main.ts`).
+
+## Parte 15. Parecidos por bloques y el control de acceso en vivo, 5 de noviembre
+
+### 173. ¿Cómo ordena hoy Parecidos a este?
+Por bloques, igual que quienes lo compraron también llevaron. Primero todos los productos activos de su misma categoría, del más parecido al menos, y después el resto del catálogo, también por parecido, siempre uno por grupo y sin el propio producto. Uno de la misma categoría con 0,40 va antes que otro de otra categoría con 0,80. Cada resultado trae `misma_categoria`. En el Maillot de ruta Peloton salen cinco de Ciclismo y al final una cómoda, que se parece más que la bomba de piso pero es de otra categoría.
+
+- Dónde se ve. `backend/src/services/productos/similares.service.ts`, el bloque 1 en la línea 107 (filtrado por `producto_catalogo.id_categoria`) y el bloque 2 en la 127 (la consulta de siempre, sin JOIN para que use el índice HNSW). Se llenan en las líneas 170 y 171. En la tienda, cualquier ficha, estante Parecidos a este.
+- Por qué. Se pidió el mismo esquema que ADR-25, para que en la ficha de una laptop salgan primero laptops. El vector sigue decidiendo el orden dentro de cada bloque.
+
+### 174. Si la ficha ya pone primero su categoría, ¿cómo saben que el vector entiende de qué trata el producto?
+Porque esa cifra se mide solo con el vector, sin el orden por bloques. `pruebas/recomendacion_semantica.py` calcula en PostgreSQL, contra todos y sin índice, los seis vecinos de cada producto de la muestra sin mirar la categoría. El 5 de noviembre el 66 por ciento era de su categoría en la muestra y el 68 por ciento en los 1000 productos activos, contra un 6 por ciento al azar. Con el orden por bloques la ficha llega al 84,5, pero esa cifra ya incluye la regla y no se usa como prueba del modelo.
+
+- Dónde se ve. `vecinos_solo_vector()` y la sección 2 de `pruebas/recomendacion_semantica.py`, y la 2.5 del informe final.
+
+### 175. ¿Cómo saben que la ruta devuelve lo correcto con el orden nuevo?
+Se calculó el mismo orden en SQL contra todos, sin índice, para los 1000 productos activos, y se comparó con la ruta. Dieron los mismos seis, en el mismo orden y con los mismos bloques, en los 1000, y la misma similitud. La prueba revisa además que ningún producto de su categoría quede después de uno de otra, que `misma_categoria` coincida con MongoDB y que el primer bloque traiga todos los de su categoría que caben. Esa parte se probó con el orden viejo y dio 2 FALLA, como debía.
+
+- Dónde se ve. Sección 2b de `pruebas/recomendacion_semantica.py`, 21 OK, y `.\demo-entrega-final.ps1 -Parte semantica`, que compara su propio cálculo con la ruta.
+
+### 176. ¿Cómo se prueba en vivo, sin script, que una base no deja hacer lo que no corresponde?
+Se entra a cada base con el usuario que no tiene el permiso y se escribe la orden a mano. PostgreSQL como `mesh_lectura` lee los pedidos y a un UPDATE contesta `cannot execute UPDATE in a read-only transaction`, y como `mesh_backend` a un CREATE TABLE contesta `permission denied for schema public`. MongoDB como `mesh_lectura` cuenta productos y a un updateOne contesta `not authorized on mesh`. Redis como `inspeccion` contesta NOPERM a un SET, y como `backend` a KEYS. ClickHouse como `mesh_lectura` contesta ACCESS_DENIED a un INSERT. Neo4j contesta `Unsupported administration command` a CREATE ROLE.
+
+- Dónde se ve. `docs/GUIA-ESTUDIO-ACL.md`, sección 5, con cada orden y lo que contestó cada base el 5 de noviembre. La lámina 23 de la presentación.
+- Ojo. En PostgreSQL desde dentro del contenedor se entra con `-h postgres` y no con `localhost`, porque `localhost` adentro no pide contraseña. Lo que borraría algo se intenta dentro de una transacción que se deshace, sobre algo que no existe o con una condición que no toca ninguna fila.
+
+### 177. ¿Qué demuestra la colección de Postman?
+Que las rutas a las que una cuenta no tiene acceso devuelven 403 aunque se llamen directo, sin la página. Entra como compradora y pide la matriz de permisos, las cuentas, hacerse admin, el reporte de ventas, los casos de fraude y publicar una oferta, y todas dan 403 con el permiso que falta. Como vendedor, las de admin dan 403. Sin sesión, 401. El admin ve en el registro cada intento negado. Además comparte una oferta para enseñar el 404 y el 403 por persona, y llama a Elasticsearch y ClickHouse con los usuarios de servicio. Cada carpeta tiene un control que sí pasa, como la compradora viendo sus propios pedidos.
+
+- Dónde se ve. `presentacion-final/postman/Mesh-ACL.postman_collection.json`, 54 peticiones con su prueba, todas en verde el 5 de noviembre con Newman. Cómo se usa en `docs/GUIA-ESTUDIO-ACL.md`, sección 6.
+
+### 178. ¿Por qué ClickHouse responde 500 y no 403?
+Porque ClickHouse por HTTP no usa los códigos de permiso de HTTP. Niega con su propio código, 497 `ACCESS_DENIED`, y el mensaje dice qué grant le falta, por ejemplo `ALTER DELETE ON mesh_eventos.vista_producto`. Por eso las pruebas de esa carpeta revisan el texto y no el código.
+
+- Dónde se ve. Carpeta 7 de la colección de Postman y `seguridad/clickhouse.sql`.
+
+### 179. ¿Dónde está cada cosa de vectores y de control de acceso, línea por línea?
+En las dos guías de estudio, `docs/GUIA-ESTUDIO-VECTORES.md` y `docs/GUIA-ESTUDIO-ACL.md`, con el archivo y la línea de cada función, lo que se hace clic en la tienda y las preguntas probables. El guion de la presentación, `presentacion-final/GUION.md`, repite las líneas de lo que se enseña en cada lámina.

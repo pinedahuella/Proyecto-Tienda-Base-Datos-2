@@ -61,8 +61,7 @@ b { font-weight: 600; color: #fff; }
 
 /* las seis bases */
 .bases { display: grid; grid-template-columns: repeat(3, 1fr); gap: 28px; }
-.base { border-radius: 22px; padding: 30px 32px 32px; position: relative; overflow: hidden; background: rgba(255,255,255,.05); border: 1px solid var(--linea); }
-.base::before { content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 10px; background: var(--c); }
+.base { border-radius: 22px; padding: 30px 32px 32px; position: relative; overflow: hidden; background: rgba(255,255,255,.05); border: 1px solid var(--c); }
 .base .n { font: 700 40px/1 var(--titulo); color: var(--c); }
 .base .r { font: 600 22px/1 var(--titulo); letter-spacing: 3px; text-transform: uppercase; color: var(--suave); margin: 10px 0 16px; }
 .base p { font: 300 27px/1.4 var(--texto); color: #d8ddf5; }
@@ -85,9 +84,14 @@ b { font-weight: 600; color: #fff; }
 .tabla { width: 100%; border-collapse: separate; border-spacing: 0 12px; font: 300 27px/1.3 var(--texto); }
 .tabla th { text-align: left; font: 600 22px/1 var(--titulo); letter-spacing: 3px; text-transform: uppercase; color: var(--suave); padding: 0 22px 6px; }
 .tabla td { background: rgba(255,255,255,.05); padding: 20px 22px; color: #dfe3fa; }
-.tabla td:first-child { border-radius: 16px 0 0 16px; font: 700 30px/1 var(--titulo); color: var(--c); border-left: 8px solid var(--c); }
+.tabla td:first-child { border-radius: 16px 0 0 16px; font: 700 30px/1 var(--titulo); color: var(--c); }
 .tabla td:last-child { border-radius: 0 16px 16px 0; }
 
+.term { background: rgba(0,0,0,.42); border: 1px solid var(--linea); border-radius: 16px; padding: 20px 24px; font: 500 21px/1.5 var(--mono); color: #d8ddf5; }
+.term .q { color: var(--suave); font-family: var(--texto); font-weight: 600; font-size: 22px; margin-bottom: 8px; letter-spacing: .5px; }
+.term .si { color: var(--acento-2); }
+.term .no { color: #ff8a80; }
+.vivo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 22px; }
 .captura { display: block; width: 100%; border-radius: 18px; border: 1px solid var(--linea); box-shadow: 0 30px 80px rgba(0,0,0,.55); }
 .pie { font: 300 24px/1.35 var(--texto); color: var(--suave); margin-top: 16px; }
 [data-zoom] { cursor: zoom-in; }
@@ -161,7 +165,7 @@ b { font-weight: 600; color: #fff; }
 <div class="marco"><div class="escenario" id="escenario">
 <canvas id="malla" width="1920" height="1080" aria-hidden="true"></canvas>
 
-<!-- 1 Portada -->
+<!-- Portada -->
 <section class="lamina">
   <div class="centro" style="gap:30px">
     <p class="etiqueta" data-in="1">Bases de Datos 2 · Entrega final</p>
@@ -172,7 +176,7 @@ b { font-weight: 600; color: #fff; }
   <img src="img/logo-unis.png" alt="Universidad del Istmo" style="position:absolute;left:70px;bottom:60px;height:110px" data-in="5">
 </section>
 
-<!-- 2 Equipo -->
+<!-- Equipo -->
 <section class="lamina">
   <div class="cabeza" data-in="1"><p class="etiqueta">El equipo</p><h2 class="titulo">Quién hizo qué</h2></div>
   <div class="equipo">
@@ -197,7 +201,7 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 3 El reto -->
+<!-- El reto -->
 <section class="lamina">
   <div class="cabeza" data-in="1"><p class="etiqueta">El reto</p><h2 class="titulo">Muchos vendedores,<br>un solo catálogo</h2></div>
   <p class="sub" data-in="2" style="max-width:1500px;margin-bottom:60px">Un producto describe una cosa del mundo y no es de nadie. Quién lo vende, a qué precio y con cuántas unidades es una oferta. Y cada parte de la tienda hace preguntas muy distintas.</p>
@@ -209,7 +213,7 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 4 Las seis bases -->
+<!-- Las seis bases -->
 <section class="lamina">
   <div class="cabeza" data-in="1" style="margin-bottom:40px"><p class="etiqueta">La arquitectura</p><h2 class="titulo">Cada base, por la pregunta que contesta</h2></div>
   <div class="bases">
@@ -222,7 +226,7 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 5 La regla -->
+<!-- La regla -->
 <section class="lamina">
   <div class="centro">
     <p class="etiqueta" data-in="1">La idea que lo explica todo</p>
@@ -231,142 +235,13 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 6 Diagrama -->
+<!-- Diagrama -->
 <section class="lamina" style="padding:50px 70px">
   <div class="cabeza" data-in="1" style="margin-bottom:22px;flex-direction:row;align-items:baseline;gap:30px"><p class="etiqueta">Diagrama final</p><p class="sub" style="font-size:30px">continuas, lo que hace el backend · punteadas, datos entre bases</p></div>
   <img class="captura" data-in="2" data-zoom src="img/arquitectura.png" alt="Diagrama de arquitectura de Mesh" style="height:880px;width:auto;margin:0 auto;background:#fff">
 </section>
 
-<!-- 7 Recomendacion semantica -->
-<section class="lamina">
-  <div class="cabeza" data-in="1"><p class="etiqueta">Recomendación semántica · 5 puntos</p><h2 class="titulo">Parecidos por lo que significan</h2></div>
-  <div class="pasos" style="margin-bottom:50px">
-    <div class="paso" data-in="2" style="--c:var(--mongo)"><span class="k">1</span><h4>El texto</h4><p>Nombre, categoría y descripción de cada producto, leídos de MongoDB</p></div>
-    <div class="unir" data-in="2">›</div>
-    <div class="paso" data-in="3" style="--c:#cfd5f5"><span class="k">2</span><h4>Ollama</h4><p>Lo vuelve 768 números con paraphrase-multilingual, en la misma PC y sin costo</p></div>
-    <div class="unir" data-in="3">›</div>
-    <div class="paso" data-in="4" style="--c:var(--pg)"><span class="k">3</span><h4>pgvector</h4><p>Guarda el vector con un índice HNSW por coseno, junto a ofertas y pedidos</p></div>
-    <div class="unir" data-in="4">›</div>
-    <div class="paso" data-in="5" style="--c:var(--acento-2)"><span class="k">4</span><h4>La ficha</h4><p>Los seis más cercanos, activos y sin copias, en el estante Parecidos a este</p></div>
-  </div>
-  <div class="cifras">
-    <div class="cifra" data-in="6"><div class="v">1000<span style="font-size:52px;color:var(--suave)"> de 1001</span></div><div class="t">coinciden con el coseno exacto, contra 317 en Elasticsearch</div></div>
-    <div class="cifra" data-in="6"><div class="v">3,8 ms</div><div class="t">por producto con el índice, antes 32 ms comparando contra todos</div></div>
-    <div class="cifra" data-in="7"><div class="v">66 %</div><div class="t">de los parecidos comparten categoría, contra 6 % al azar</div></div>
-  </div>
-</section>
-
-<!-- 8 En la tienda -->
-<section class="lamina">
-  <div class="cabeza" data-in="1" style="margin-bottom:34px"><p class="etiqueta">En la tienda</p><h2 class="titulo" style="font-size:70px">Una frase encuentra lo que nombra</h2></div>
-  <div class="fila">
-    <div class="col" data-in="2"><img class="captura" src="img/buscar-frase.png" alt="Busqueda por una frase"><p class="pie">Algo para escuchar música sin cables. Ninguna palabra coincide con audífonos, y los encuentra por las reseñas de otros compradores.</p></div>
-    <div class="col" data-in="3"><img class="captura" src="img/ficha-parecidos.png" alt="Parecidos a este en la ficha"><p class="pie">La ficha de una laptop y sus seis parecidos, que salen de pgvector.</p></div>
-  </div>
-</section>
-
-<!-- 9 La historia del vector -->
-<section class="lamina">
-  <div class="cabeza" data-in="1"><p class="etiqueta">Una decisión que cambiamos dos veces</p><h2 class="titulo">El viaje del vector</h2></div>
-  <div class="tiempo">
-    <div class="hito" data-in="2" style="--c:var(--pg)"><div class="punto">25 sep</div><h4>pgvector</h4><p>Ya venía en la imagen de PostgreSQL. Sin contenedor nuevo</p></div>
-    <div class="hito" data-in="3" style="--c:var(--es)"><div class="punto">4 oct</div><h4>Elasticsearch</h4><p>El vector junto al texto para la búsqueda híbrida. Cómodo, pero sin medir</p></div>
-    <div class="hito" data-in="4" style="--c:var(--pg)"><div class="punto">16 oct</div><h4>De vuelta a pgvector</h4><p>Medido, 1000 de 1001 contra 317. Y lo pidió el profesor</p></div>
-  </div>
-  <p class="cita" data-in="5" style="font-size:52px;margin-top:90px">Una decisión cómoda <em>también hay que medirla</em></p>
-</section>
-
-<!-- 10 Control de acceso -->
-<section class="lamina" style="padding-top:70px">
-  <div class="cabeza" data-in="1" style="margin-bottom:24px"><p class="etiqueta">Control de acceso · 4 puntos</p><h2 class="titulo" style="font-size:70px">Cada servicio entra con lo justo</h2></div>
-  <table class="tabla" data-in="2">
-    <tr><th>Base</th><th>El backend entra como</th><th>No puede</th><th>Para mirar</th></tr>
-    <tr style="--c:var(--redis)"><td>Redis</td><td><span class="mono">backend</span></td><td>tocar claves fuera de mesh, FLUSHALL, CONFIG, KEYS</td><td><span class="mono">inspeccion</span></td></tr>
-    <tr style="--c:var(--mongo)"><td>MongoDB</td><td><span class="mono">mesh_backend</span></td><td>crear o borrar colecciones e índices, ver usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
-    <tr style="--c:var(--es)"><td>Elasticsearch</td><td><span class="mono">mesh_backend</span></td><td>crear o borrar índices, administrar usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
-    <tr style="--c:var(--ch)"><td>ClickHouse</td><td><span class="mono">mesh_backend</span></td><td>borrar eventos, crear o borrar tablas</td><td><span class="mono">mesh_lectura</span></td></tr>
-    <tr style="--c:var(--pg)"><td>PostgreSQL</td><td><span class="mono">mesh_backend</span></td><td>crear, borrar o vaciar tablas, crear usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
-    <tr style="--c:var(--neo)"><td>Neo4j</td><td><span class="mono">neo4j</span></td><td>la edición community no trae roles</td><td>no existe</td></tr>
-  </table>
-</section>
-
-<!-- 11 Lo que encontramos -->
-<section class="lamina">
-  <div class="cabeza" data-in="1"><p class="etiqueta">Revisando la seguridad</p><h2 class="titulo">Lo que encontramos y arreglamos</h2></div>
-  <div class="fila">
-    <div class="col tarjeta" data-in="2" style="border-top:6px solid var(--es)"><h3>Elasticsearch abierto</h3><p>Tenía la seguridad apagada con un comentario que decía <b>solo escucha en la misma PC</b>. No era cierto, el puerto se abría a la red para el modo remoto. Hoy pide usuario, y Kibana y el ETL entran con el suyo.</p></div>
-    <div class="col tarjeta" data-in="3" style="border-top:6px solid var(--mongo)"><h3>DbGate como root</h3><p>La ventana de MongoDB no pide login y entraba como <b>root</b>. Hoy entra como <span class="mono">mesh_lectura</span> y, como todas las herramientas, solo se abre desde la misma PC.</p></div>
-    <div class="col tarjeta" data-in="4" style="border-top:6px solid var(--neo)"><h3>Neo4j sin roles</h3><p>Le pedimos crear un rol y contestó <span class="mono">Unsupported administration command</span>. Los roles son de la edición de pago. Queda con contraseña y una sola puerta.</p></div>
-  </div>
-</section>
-
-<!-- 12 Evidencia -->
-<section class="lamina">
-  <div class="centro" style="gap:34px">
-    <p class="etiqueta" data-in="1">La prueba</p>
-    <p data-in="2" style="font:700 230px/1 var(--titulo);letter-spacing:-6px"><span class="ok" data-contar="93">93</span><span style="font-size:90px;color:var(--suave)"> OK</span> <span style="font-size:90px" class="no">0 mal</span></p>
-    <p class="mono" data-in="3" style="font-size:40px">bash seguridad/prueba_acceso.sh</p>
-    <p class="sub" data-in="4" style="max-width:1450px">Cada negativa tiene su control. Que <b>mesh_lectura</b> no pueda escribir solo cuenta si <b>mesh_backend</b> sí pudo. Lo que borraría algo se intenta en una transacción que se deshace, sobre algo que no existe, o se le pregunta antes a la base.</p>
-  </div>
-</section>
-
-<!-- 13 El ACL de funcionalidades -->
-<section class="lamina" style="padding-top:70px">
-  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Control de acceso por funcionalidad</p><h2 class="titulo" style="font-size:66px">Cada ruta pide un permiso, y la lista vive en la base</h2></div>
-  <div class="fila" style="align-items:flex-start">
-    <div style="flex:1" data-in="2">
-      <ul class="puntos" style="--c:var(--pg)">
-        <li>Cada acción tiene su código, como <span class="mono">ofertas.publicar</span>, y la tabla <span class="mono">rol_permiso</span> dice qué rol lo tiene</li>
-        <li>Un guard lo pregunta en cada petición. Sin el permiso la respuesta es <b>403</b>, también llamando a la ruta directo</li>
-        <li>Se quita una fila y vale en la petición siguiente, sin reiniciar nada</li>
-        <li>Cada intento negado queda anotado con quién, su rol y la ruta</li>
-      </ul>
-      <p class="mono" style="display:block;margin-top:30px;padding:18px 24px;background:rgba(0,0,0,.35);border-radius:14px;font-size:23px;line-height:1.55;color:#d8ddf5">POST /vendedor/ofertas, sesión de compradora<br><span class="no">403</span> No tienes permiso para hacer esto (falta ofertas.publicar)</p>
-      <div class="cifras" style="margin-top:30px">
-        <div class="cifra"><div class="v" style="font-size:72px">38</div><div class="t">permisos en 17 módulos</div></div>
-        <div class="cifra"><div class="v" style="font-size:72px">136</div><div class="t">rutas privadas, cada una con el suyo</div></div>
-      </div>
-    </div>
-    <div style="flex:1.05" data-in="3"><img class="captura" src="img/permisos-rol.png" alt="Permisos por rol en el panel del admin"><p class="pie">rol_permiso en PostgreSQL y PermisoGuard en el backend, ADR-26</p></div>
-  </div>
-</section>
-
-<!-- 14 El ACL de la aplicacion, por oferta -->
-<section class="lamina" style="padding-top:70px">
-  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Control de acceso por persona</p><h2 class="titulo" style="font-size:66px">Y cada oferta, con su propia lista</h2></div>
-  <div class="fila" style="align-items:flex-start">
-    <div style="flex:1" data-in="2">
-      <ul class="puntos" style="--c:var(--pg)">
-        <li>Las bases no saben qué persona pide, todo llega como <span class="mono">mesh_backend</span>. Por eso esta lista vive en la aplicación</li>
-        <li>Cada oferta lleva su lista, quién puede ver, editar o poner descuento, y hasta cuándo</li>
-        <li>Sin ninguna entrada, el mismo 404 de una oferta ajena. Si la ve pero no puede editarla, 403</li>
-        <li>Cada permiso se revisa por separado y cada cambio queda con quién lo hizo</li>
-      </ul>
-      <div class="cifras" style="margin-top:40px">
-        <div class="cifra"><div class="v" style="font-size:72px">85</div><div class="t">comprobaciones, cada regla una vez</div></div>
-        <div class="cifra"><div class="v" style="font-size:72px">4896</div><div class="t">al azar contra un modelo, 0 mal</div></div>
-      </div>
-    </div>
-    <div style="flex:1.05" data-in="3"><img class="captura" src="img/acl-compartir.png" alt="Compartir una oferta"><p class="pie">permiso_oferta en PostgreSQL y PermisoOfertaGuard en el backend, ADR-24</p></div>
-  </div>
-</section>
-
-<!-- 15 Si se cae una base -->
-<section class="lamina" style="padding-top:70px">
-  <div class="cabeza" data-in="1" style="margin-bottom:22px"><p class="etiqueta">Un respaldo por base</p><h2 class="titulo" style="font-size:70px">Si se cae una, la tienda sigue</h2></div>
-  <table class="tabla" data-in="2">
-    <tr><th>Se cae</th><th>Lo que daba sale de</th><th>Se compra</th></tr>
-    <tr style="--c:var(--mongo)"><td>MongoDB</td><td>la copia del catálogo en PostgreSQL</td><td class="ok">sí</td></tr>
-    <tr style="--c:var(--redis)"><td>Redis</td><td>el carrito de PostgreSQL y los rankings de ClickHouse</td><td class="ok">sí</td></tr>
-    <tr style="--c:var(--es)"><td>Elasticsearch</td><td>el buscador sobre la copia en PostgreSQL, con foto y filtros</td><td class="ok">sí</td></tr>
-    <tr style="--c:var(--neo)"><td>Neo4j</td><td>las recomendaciones salen de los pedidos</td><td class="ok">sí</td></tr>
-    <tr style="--c:var(--ch)"><td>ClickHouse</td><td>los rankings ya calculados en Redis</td><td class="ok">sí</td></tr>
-    <tr style="--c:var(--pg)"><td>PostgreSQL</td><td>avisa y no cobra nada a medias</td><td class="no">no</td></tr>
-  </table>
-  <p class="pie" data-in="3">node pruebas/caidas.mjs, 51 comprobaciones con cada base apagada y otras 51 congelada</p>
-</section>
-
-<!-- 16 Buscador con foto -->
+<!-- Buscador con foto -->
 <section class="lamina">
   <div class="cabeza" data-in="1" style="margin-bottom:34px"><p class="etiqueta">Lo que pidió el profesor</p><h2 class="titulo" style="font-size:70px">La tarjeta sale entera de Elasticsearch</h2></div>
   <div class="fila" style="align-items:flex-start">
@@ -378,7 +253,59 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 17 Registro unico -->
+<!-- ClickHouse -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">ClickHouse · Entrega 2</p><h2 class="titulo" style="font-size:70px">Lo que pasa en el tiempo</h2></div>
+  <div class="fila" style="align-items:flex-start">
+    <div style="flex:1" data-in="2">
+      <ul class="puntos" style="--c:var(--ch)">
+        <li>Cada vista, carrito, búsqueda, compra y devolución queda como un evento</li>
+        <li>Guarda cada columna por separado y compara periodos sin definir la pregunta antes de guardar el dato</li>
+        <li>El orden físico es <span class="mono">(id_producto, fecha)</span>, no un índice aparte</li>
+        <li>Productos en ascenso, siete días contra los anteriores, con las <b>personas</b> detrás para que unos clics repetidos no parezcan una tendencia</li>
+      </ul>
+      <div class="cifras" style="margin-top:34px">
+        <div class="cifra"><div class="v" style="font-size:72px">13 ms</div><div class="t">la consulta de ascenso, sobre el resumen diario</div></div>
+        <div class="cifra"><div class="v" style="font-size:72px">45</div><div class="t">vistas por persona del producto inflado, contra 1,6 del ascenso real</div></div>
+      </div>
+    </div>
+    <div style="flex:1.15" data-in="3"><img class="captura" src="img/tendencias.png" alt="Tendencias en el panel del admin"><p class="pie">Panel del admin, Tendencias</p></div>
+  </div>
+</section>
+
+<!-- Neo4j -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Neo4j · Entrega 2</p><h2 class="titulo" style="font-size:70px">Las relaciones que delatan</h2></div>
+  <div class="fila" style="align-items:flex-start">
+    <div style="flex:1" data-in="2">
+      <ul class="puntos" style="--c:var(--neo)">
+        <li>Cuentas, reseñas, compras y productos como grafo. La reseña es un nodo, con su nota, su fecha y su producto</li>
+        <li>Un anillo es un camino que sale de una cuenta y vuelve a ella en 4 a 8 saltos, un par, un triángulo o un cuadrado</li>
+        <li>Se revisa al llegar cada reseña y cada 15 minutos. Ninguna consulta prueba un fraude, señala cuentas para revisar</li>
+        <li>El mismo grafo da quienes lo compraron también llevaron, primero los de su categoría</li>
+      </ul>
+      <p class="term" style="margin-top:30px">MATCH (inicio:Usuario)<br>&nbsp;&nbsp;-[:ESCRIBIO|CALIFICA_A*4..8]-&gt;(inicio)</p>
+    </div>
+    <div style="flex:1.15" data-in="3"><img class="captura" src="img/fraude-anillo.png" alt="Una señal de reseñas en el panel del admin"><p class="pie">Panel del admin, Fraude, Reseñas en anillo</p></div>
+  </div>
+</section>
+
+<!-- Si se cae una base -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:22px"><p class="etiqueta">Un respaldo por base</p><h2 class="titulo" style="font-size:70px">Si se cae una, la tienda sigue</h2></div>
+  <table class="tabla" data-in="2">
+    <tr><th>Se cae</th><th>Lo que daba sale de</th><th>Se compra</th></tr>
+    <tr style="--c:var(--mongo)"><td>MongoDB</td><td>la copia del catálogo en PostgreSQL</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--redis)"><td>Redis</td><td>el carrito de PostgreSQL y los rankings de ClickHouse</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--es)"><td>Elasticsearch</td><td>el buscador sobre la copia en PostgreSQL, con foto y filtros</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--neo)"><td>Neo4j</td><td>las recomendaciones salen de los pedidos</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--ch)"><td>ClickHouse</td><td>los rankings ya calculados en Redis</td><td class="ok">sí</td></tr>
+    <tr style="--c:var(--pg)"><td>PostgreSQL</td><td>avisa y no cobra nada a medias</td><td class="no">no</td></tr>
+  </table>
+  <p class="pie" data-in="3">node pruebas/caidas.mjs, 51 comprobaciones con cada base apagada y otras 51 congelada. Con varias a la vez, mientras PostgreSQL esté prendido se compra, informe 4.4</p>
+</section>
+
+<!-- Registro unico -->
 <section class="lamina" style="padding-top:70px">
   <div class="cabeza" data-in="1" style="margin-bottom:28px"><p class="etiqueta">Registro único de decisiones</p><h2 class="titulo" style="font-size:66px">26 decisiones, un solo número cada una</h2></div>
   <div class="registro" data-in="2" style="grid-template-columns:repeat(7, 1fr)">
@@ -412,7 +339,7 @@ b { font-weight: 600; color: #fff; }
   <p class="pie" data-in="3">Las que tienen fondo verde se habían hecho sin su registro y ahora lo tienen, con el flujo que tocan y qué pasa si cada base se cae. La 24, la 25 y la 26 son de las dos últimas semanas y nacieron con el suyo.</p>
 </section>
 
-<!-- 18 Retrospectiva -->
+<!-- Retrospectiva -->
 <section class="lamina">
   <div class="cabeza" data-in="1"><p class="etiqueta">Retrospectiva · 4 puntos</p><h2 class="titulo">Lo que sostendríamos y lo que no</h2></div>
   <div class="fila">
@@ -423,7 +350,7 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 19 Lo aprendido -->
+<!-- Lo aprendido -->
 <section class="lamina">
   <div class="centro">
     <p class="etiqueta" data-in="1">Lo que aprendimos</p>
@@ -432,22 +359,170 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
-<!-- 20 Demo -->
+<!-- Recomendacion semantica -->
 <section class="lamina">
-  <div class="centro" style="gap:46px">
-    <p data-in="1" style="font:700 220px/1 var(--titulo);letter-spacing:-6px">DEMO</p>
-    <div class="fila" data-in="2" style="gap:24px;flex-wrap:wrap;justify-content:center;max-width:1600px">
-      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Buscar con errores y por frase</span>
-      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Parecidos a este</span>
-      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Quién puede qué en cada base</span>
-      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Apagar una base en vivo</span>
-      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Compartir una oferta</span>
-      <span class="tarjeta" style="padding:18px 30px;font-size:30px">Permisos por rol</span>
-    </div>
+  <div class="cabeza" data-in="1"><p class="etiqueta">Recomendación semántica · 5 puntos</p><h2 class="titulo">Parecidos por lo que significan</h2></div>
+  <div class="pasos" style="margin-bottom:50px">
+    <div class="paso" data-in="2" style="--c:var(--mongo)"><span class="k">1</span><h4>El texto</h4><p>Nombre, categoría y descripción de cada producto, leídos de MongoDB</p></div>
+    <div class="unir" data-in="2">›</div>
+    <div class="paso" data-in="3" style="--c:#cfd5f5"><span class="k">2</span><h4>Ollama</h4><p>Lo vuelve 768 números con paraphrase-multilingual, en la misma PC y sin costo</p></div>
+    <div class="unir" data-in="3">›</div>
+    <div class="paso" data-in="4" style="--c:var(--pg)"><span class="k">3</span><h4>pgvector</h4><p>Guarda el vector con un índice HNSW por coseno, junto a ofertas y pedidos</p></div>
+    <div class="unir" data-in="4">›</div>
+    <div class="paso" data-in="5" style="--c:var(--acento-2)"><span class="k">4</span><h4>La ficha</h4><p>Los seis más cercanos, primero los de su categoría, en Parecidos a este</p></div>
+  </div>
+  <div class="cifras">
+    <div class="cifra" data-in="6"><div class="v">1000<span style="font-size:52px;color:var(--suave)"> de 1001</span></div><div class="t">coinciden con el coseno exacto, contra 317 en Elasticsearch</div></div>
+    <div class="cifra" data-in="6"><div class="v">3,8 ms</div><div class="t">por producto con el índice, antes 32 ms comparando contra todos</div></div>
+    <div class="cifra" data-in="7"><div class="v">68 %</div><div class="t">de los vecinos, solo por el vector, son de su categoría, contra 6 % al azar</div></div>
   </div>
 </section>
 
-<!-- 21 Gracias -->
+<!-- Parecidos por bloques -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Parecidos a este</p><h2 class="titulo" style="font-size:66px">Primero su categoría, después el resto</h2></div>
+  <div class="fila" style="align-items:flex-start">
+    <div style="flex:1" data-in="2">
+      <ul class="puntos" style="--c:var(--acento-2)">
+        <li>El mismo esquema que quienes lo compraron también llevaron</li>
+        <li>Bloque 1, los de su misma categoría, del más parecido al menos</li>
+        <li>Bloque 2, el resto del catálogo, con el índice HNSW</li>
+        <li>Cada resultado dice <span class="mono">misma_categoria</span></li>
+      </ul>
+      <div class="cifras" style="margin-top:34px">
+        <div class="cifra"><div class="v" style="font-size:60px;white-space:nowrap">1000<span style="font-size:34px;color:var(--suave)"> de 1000</span></div><div class="t">iguales al cálculo exacto, mismo orden</div></div>
+        <div class="cifra"><div class="v" style="font-size:72px">68 %</div><div class="t">solo por el vector ya son de su categoría</div></div>
+      </div>
+    </div>
+    <div style="flex:1.25" data-in="3"><img class="captura" src="img/ficha-bloques.png" alt="Parecidos a este del Maillot de ruta Peloton"><p class="pie">Maillot de ruta Peloton. Cinco de Ciclismo y después una cómoda, que se parece más que la bomba de piso pero es de otra categoría</p></div>
+  </div>
+</section>
+
+<!-- En la tienda -->
+<section class="lamina">
+  <div class="cabeza" data-in="1" style="margin-bottom:34px"><p class="etiqueta">En la tienda</p><h2 class="titulo" style="font-size:70px">Una frase encuentra lo que nombra</h2></div>
+  <div class="fila">
+    <div class="col" data-in="2"><img class="captura" src="img/buscar-frase.png" alt="Busqueda por una frase"><p class="pie">Algo para escuchar música sin cables. Ninguna palabra coincide con audífonos, y los encuentra por las reseñas de otros compradores.</p></div>
+    <div class="col" data-in="3"><img class="captura" src="img/ficha-parecidos.png" alt="Parecidos a este en la ficha"><p class="pie">La ficha de una laptop y sus seis parecidos, que salen de pgvector.</p></div>
+  </div>
+</section>
+
+<!-- La historia del vector -->
+<section class="lamina">
+  <div class="cabeza" data-in="1"><p class="etiqueta">Una decisión que cambiamos dos veces</p><h2 class="titulo">El viaje del vector</h2></div>
+  <div class="tiempo">
+    <div class="hito" data-in="2" style="--c:var(--pg)"><div class="punto">25 sep</div><h4>pgvector</h4><p>Ya venía en la imagen de PostgreSQL. Sin contenedor nuevo</p></div>
+    <div class="hito" data-in="3" style="--c:var(--es)"><div class="punto">4 oct</div><h4>Elasticsearch</h4><p>El vector junto al texto para la búsqueda híbrida. Cómodo, pero sin medir</p></div>
+    <div class="hito" data-in="4" style="--c:var(--pg)"><div class="punto">16 oct</div><h4>De vuelta a pgvector</h4><p>Medido, 1000 de 1001 contra 317. Y lo pidió el profesor</p></div>
+  </div>
+  <p class="cita" data-in="5" style="font-size:52px;margin-top:90px">Una decisión cómoda <em>también hay que medirla</em></p>
+</section>
+
+<!-- Control de acceso -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:24px"><p class="etiqueta">Control de acceso · 4 puntos</p><h2 class="titulo" style="font-size:70px">Cada servicio entra con lo justo</h2></div>
+  <table class="tabla" data-in="2">
+    <tr><th>Base</th><th>El backend entra como</th><th>No puede</th><th>Para mirar</th></tr>
+    <tr style="--c:var(--redis)"><td>Redis</td><td><span class="mono">backend</span></td><td>tocar claves fuera de mesh, FLUSHALL, CONFIG, KEYS</td><td><span class="mono">inspeccion</span></td></tr>
+    <tr style="--c:var(--mongo)"><td>MongoDB</td><td><span class="mono">mesh_backend</span></td><td>crear o borrar colecciones e índices, ver usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
+    <tr style="--c:var(--es)"><td>Elasticsearch</td><td><span class="mono">mesh_backend</span></td><td>crear o borrar índices, administrar usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
+    <tr style="--c:var(--ch)"><td>ClickHouse</td><td><span class="mono">mesh_backend</span></td><td>borrar eventos, crear o borrar tablas</td><td><span class="mono">mesh_lectura</span></td></tr>
+    <tr style="--c:var(--pg)"><td>PostgreSQL</td><td><span class="mono">mesh_backend</span></td><td>crear, borrar o vaciar tablas, crear usuarios</td><td><span class="mono">mesh_lectura</span></td></tr>
+    <tr style="--c:var(--neo)"><td>Neo4j</td><td><span class="mono">neo4j</span></td><td>la edición community no trae roles</td><td>no existe</td></tr>
+  </table>
+</section>
+
+<!-- Lo que encontramos -->
+<section class="lamina">
+  <div class="cabeza" data-in="1"><p class="etiqueta">Revisando la seguridad</p><h2 class="titulo">Lo que encontramos y arreglamos</h2></div>
+  <div class="fila">
+    <div class="col tarjeta" data-in="2" style="border-top:6px solid var(--es)"><h3>Elasticsearch abierto</h3><p>Tenía la seguridad apagada con un comentario que decía <b>solo escucha en la misma PC</b>. No era cierto, el puerto se abría a la red para el modo remoto. Hoy pide usuario, y Kibana y el ETL entran con el suyo.</p></div>
+    <div class="col tarjeta" data-in="3" style="border-top:6px solid var(--mongo)"><h3>DbGate como root</h3><p>La ventana de MongoDB no pide login y entraba como <b>root</b>. Hoy entra como <span class="mono">mesh_lectura</span> y, como todas las herramientas, solo se abre desde la misma PC.</p></div>
+    <div class="col tarjeta" data-in="4" style="border-top:6px solid var(--neo)"><h3>Neo4j sin roles</h3><p>Le pedimos crear un rol y contestó <span class="mono">Unsupported administration command</span>. Los roles son de la edición de pago. Queda con contraseña y una sola puerta.</p></div>
+  </div>
+</section>
+
+<!-- Evidencia -->
+<section class="lamina">
+  <div class="centro" style="gap:34px">
+    <p class="etiqueta" data-in="1">La prueba</p>
+    <p data-in="2" style="font:700 230px/1 var(--titulo);letter-spacing:-6px"><span class="ok" data-contar="93">93</span><span style="font-size:90px;color:var(--suave)"> OK</span> <span style="font-size:90px" class="no">0 mal</span></p>
+    <p class="mono" data-in="3" style="font-size:40px">bash seguridad/prueba_acceso.sh</p>
+    <p class="sub" data-in="4" style="max-width:1450px">Cada negativa tiene su control. Que <b>mesh_lectura</b> no pueda escribir solo cuenta si <b>mesh_backend</b> sí pudo. Lo que borraría algo se intenta en una transacción que se deshace, sobre algo que no existe, o se le pregunta antes a la base.</p>
+  </div>
+</section>
+
+<!-- El ACL de funcionalidades -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Control de acceso por funcionalidad</p><h2 class="titulo" style="font-size:66px">Cada ruta pide un permiso, y la lista vive en la base</h2></div>
+  <div class="fila" style="align-items:flex-start">
+    <div style="flex:1" data-in="2">
+      <ul class="puntos" style="--c:var(--pg)">
+        <li>Cada acción tiene su código, como <span class="mono">ofertas.publicar</span>, y la tabla <span class="mono">rol_permiso</span> dice qué rol lo tiene</li>
+        <li>Un guard lo pregunta en cada petición. Sin el permiso la respuesta es <b>403</b>, también llamando a la ruta directo</li>
+        <li>Se quita una fila y vale en la petición siguiente, sin reiniciar nada</li>
+        <li>Cada intento negado queda anotado con quién, su rol y la ruta</li>
+      </ul>
+      <p class="mono" style="display:block;margin-top:30px;padding:18px 24px;background:rgba(0,0,0,.35);border-radius:14px;font-size:23px;line-height:1.55;color:#d8ddf5">POST /vendedor/ofertas, sesión de compradora<br><span class="no">403</span> No tienes permiso para hacer esto (falta ofertas.publicar)</p>
+      <div class="cifras" style="margin-top:30px">
+        <div class="cifra"><div class="v" style="font-size:72px">38</div><div class="t">permisos en 17 módulos</div></div>
+        <div class="cifra"><div class="v" style="font-size:72px">136</div><div class="t">rutas privadas, cada una con el suyo</div></div>
+      </div>
+    </div>
+    <div style="flex:1.05" data-in="3"><img class="captura" src="img/permisos-rol.png" alt="Permisos por rol en el panel del admin"><p class="pie">rol_permiso en PostgreSQL y PermisoGuard en el backend, ADR-26</p></div>
+  </div>
+</section>
+
+<!-- El ACL de la aplicacion, por oferta -->
+<section class="lamina" style="padding-top:70px">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Control de acceso por persona</p><h2 class="titulo" style="font-size:66px">Y cada oferta, con su propia lista</h2></div>
+  <div class="fila" style="align-items:flex-start">
+    <div style="flex:1" data-in="2">
+      <ul class="puntos" style="--c:var(--pg)">
+        <li>Las bases no saben qué persona pide, todo llega como <span class="mono">mesh_backend</span>. Por eso esta lista vive en la aplicación</li>
+        <li>Cada oferta lleva su lista, quién puede ver, editar o poner descuento, y hasta cuándo</li>
+        <li>Sin ninguna entrada, el mismo 404 de una oferta ajena. Si la ve pero no puede editarla, 403</li>
+        <li>Cada permiso se revisa por separado y cada cambio queda con quién lo hizo</li>
+      </ul>
+      <div class="cifras" style="margin-top:40px">
+        <div class="cifra"><div class="v" style="font-size:72px">85</div><div class="t">comprobaciones, cada regla una vez</div></div>
+        <div class="cifra"><div class="v" style="font-size:72px">4896</div><div class="t">al azar contra un modelo, 0 mal</div></div>
+      </div>
+    </div>
+    <div style="flex:1.05" data-in="3"><img class="captura" src="img/acl-compartir.png" alt="Compartir una oferta"><p class="pie">permiso_oferta en PostgreSQL y PermisoOfertaGuard en el backend, ADR-24</p></div>
+  </div>
+</section>
+
+<!-- En vivo en cada base -->
+<section class="lamina" style="padding:60px 90px">
+  <div class="cabeza" data-in="1" style="margin-bottom:26px"><p class="etiqueta">En vivo, sin script</p><h2 class="titulo" style="font-size:62px">Dentro de cada base, sin el permiso</h2></div>
+  <div class="vivo" data-in="2">
+    <div class="term"><p class="q" style="color:var(--pg)">PostgreSQL · mesh_lectura</p>SELECT count(*) FROM pedido;<br><span class="si">devuelve los pedidos</span><br>UPDATE pedido ... WHERE false;<br><span class="no">cannot execute UPDATE in a read-only transaction</span></div>
+    <div class="term"><p class="q" style="color:var(--pg)">PostgreSQL · mesh_backend</p>CREATE TABLE intruso (x int);<br><span class="no">permission denied for schema public</span><br>DROP TABLE pedido_producto;<br><span class="no">must be owner of table</span></div>
+    <div class="term"><p class="q" style="color:var(--mongo)">MongoDB · mesh_lectura</p>db.productos.countDocuments()<br><span class="si">1003</span><br>db.productos.updateOne(...)<br><span class="no">not authorized on mesh</span></div>
+    <div class="term"><p class="q" style="color:var(--redis)">Redis · inspeccion y backend</p>SET mesh:prueba:acl 1<br><span class="no">NOPERM ... the 'set' command</span><br>KEYS *<br><span class="no">NOPERM ... the 'keys' command</span></div>
+    <div class="term"><p class="q" style="color:var(--ch)">ClickHouse · mesh_lectura</p>SELECT count() FROM vista_producto;<br><span class="si">sí lee</span><br>INSERT INTO vista_producto ...<br><span class="no">Code 497, ACCESS_DENIED</span></div>
+    <div class="term"><p class="q" style="color:var(--neo)">Neo4j · community</p>CREATE ROLE lector;<br><span class="no">Unsupported administration command</span><br><br><span style="color:var(--suave);font-family:var(--texto)">los roles son de la edición de pago</span></div>
+  </div>
+  <p class="pie" data-in="3">Lo que borraría algo se intenta en una transacción que se deshace, sobre algo que no existe o con una condición que no toca ninguna fila. Las órdenes están en docs/GUIA-ESTUDIO-ACL.md</p>
+</section>
+
+<!-- Postman -->
+<section class="lamina" style="padding-top:60px">
+  <div class="cabeza" data-in="1" style="margin-bottom:20px"><p class="etiqueta">Postman, la ruta directo</p><h2 class="titulo" style="font-size:62px">Sin el permiso, 403 aunque se llame directo</h2></div>
+  <table class="tabla" data-in="2" style="font-size:25px">
+    <tr><th>Cuenta</th><th>Petición</th><th>Respuesta</th></tr>
+    <tr style="--c:var(--suave)"><td>Sin sesión</td><td><span class="mono">GET /admin/permisos</span></td><td><span class="no">401</span> No hay sesión activa</td></tr>
+    <tr style="--c:var(--acento-2)"><td>Compradora</td><td><span class="mono">POST /vendedor/ofertas</span></td><td><span class="no">403</span> falta ofertas.publicar</td></tr>
+    <tr style="--c:var(--acento-2)"><td>Compradora</td><td><span class="mono">PATCH /admin/usuarios/:id</span>, hacerse admin</td><td><span class="no">403</span> falta usuarios.editar</td></tr>
+    <tr style="--c:var(--acento)"><td>Vendedor</td><td><span class="mono">GET /admin/reportes/ventas</span></td><td><span class="no">403</span> falta reportes.ver</td></tr>
+    <tr style="--c:var(--es)"><td>mesh_backend</td><td><span class="mono">DELETE /mesh_prueba_acl_no_existe</span>, Elasticsearch</td><td><span class="no">403</span> security_exception</td></tr>
+    <tr style="--c:var(--pg)"><td>Admin</td><td><span class="mono">GET /admin/permisos/registro</span></td><td><span class="ok">200</span> cada intento negado, anotado</td></tr>
+  </table>
+  <p class="pie" data-in="3">presentacion-final/postman, 54 peticiones con su prueba, todas en verde el 5 de noviembre. Cada carpeta lleva un control que sí pasa</p>
+</section>
+
+<!-- Gracias -->
 <section class="lamina">
   <div class="centro" style="gap:30px">
     <p class="cita" data-in="1" style="font-size:150px">Gracias</p>

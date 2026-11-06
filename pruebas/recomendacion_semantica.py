@@ -16,9 +16,15 @@ PostgreSQL solo se mira.
 Que se comprueba
   1. Cada producto de producto_catalogo tiene su vector, de 768 y del mismo
      modelo, y cada producto de MongoDB esta en producto_catalogo.
-  2. Los parecidos de un producto son de su misma categoria mucho mas seguido
-     de lo que daria el azar. El control es ese azar, medido con los mismos
-     productos, no un numero supuesto.
+  2. Solo por el vector, sin mirar la categoria, los vecinos de un producto
+     son de su misma categoria mucho mas seguido de lo que daria el azar. El
+     control es ese azar, medido con los mismos productos, no un numero
+     supuesto. Se calcula en PostgreSQL contra todos (exacto), porque desde el
+     2026-11-05 la ruta ya pone primero su categoria y su cifra no diria nada
+     del modelo.
+  2b. Van por bloques, como tambien-compraron (desde el 2026-11-05): primero
+     todos los de su categoria y despues el resto, cada bloque del mas
+     parecido al menos, y misma_categoria dice la verdad.
   3. La ruta no devuelve el propio producto ni productos inactivos.
   4. Un producto sin vector no rompe nada, devuelve vacio.
 
@@ -95,6 +101,31 @@ def documentos():
     return out
 
 
+def vecinos_solo_vector(ids):
+    """id -> los 6 vecinos mas cercanos por coseno, uno por grupo, sin mirar la
+    categoria: lo que devolvia la ruta antes del orden por bloques. Contra todos
+    (DISTINCT ON por grupo y despues los 6 de menor distancia), sin indice."""
+    sql = ("SELECT b.id_producto_mongo || '|' || string_agg(x.id::text, ',' ORDER BY x.d) "
+           "FROM vector_producto b CROSS JOIN LATERAL ("
+           " SELECT id, d FROM ("
+           "  SELECT DISTINCT ON (v.grupo) v.id_producto_mongo AS id, v.vector <=> b.vector AS d"
+           "    FROM vector_producto v"
+           "   WHERE v.activo AND v.id_producto_mongo <> b.id_producto_mongo AND v.grupo <> b.grupo"
+           "   ORDER BY v.grupo, v.vector <=> b.vector) u"
+           " ORDER BY d LIMIT 6) x "
+           "WHERE b.id_producto_mongo IN (%s) GROUP BY b.id_producto_mongo;" % ','.join(str(i) for i in ids))
+    r = subprocess.run(DOCKER + ['exec', 'mesh-postgres', 'psql', '-U', ENV['DB_USER'], '-d', ENV['DB_NAME'],
+                        '-qtAX', '-c', sql], capture_output=True, text=True, encoding='utf-8')
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.strip())
+    out = {}
+    for linea in r.stdout.splitlines():
+        c = linea.strip().split('|')
+        if len(c) == 2 and c[1]:
+            out[int(c[0])] = [int(x) for x in c[1].split(',')]
+    return out
+
+
 def mongo_categorias():
     js = ("db.productos.find({}, {'categoria.nombre': 1, estado: 1}).forEach(function (d) {"
           " print(JSON.stringify({ id: d._id, cat: (d.categoria && d.categoria.nombre) || '', activo: d.estado === 'activo' })); });")
@@ -133,6 +164,14 @@ def similares(pid):
     return [i for i, _ in similares_con_nota(pid)]
 
 
+def similares_con_bloque(pid):
+    try:
+        r = pedir('%s/productos/%d/similares' % (BACKEND, pid))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError('la ruta contesto %d para el producto %d' % (e.code, pid))
+    return [(int(f['id_producto']), f['similitud'], f.get('misma_categoria')) for f in r['payload']]
+
+
 def main():
     try:
         pedir(BACKEND + '/vectores')
@@ -151,13 +190,15 @@ def main():
     modelos = set(d['modelo'] for d in docs.values() if d['tiene'])
     revisar(len(modelos) == 1, 'todos del mismo modelo, %s' % ', '.join(str(m) for m in modelos))
 
-    print('2. Los parecidos son de la misma categoria mucho mas que al azar')
+    print('2. Solo por el vector, los vecinos son de la misma categoria mucho mas que al azar')
     activos = [p for p, d in cat.items() if d['activo'] and p in con_vector]
     random.seed(25)
     muestra = random.sample(activos, min(60, len(activos)))
+    vecinos = vecinos_solo_vector(muestra)
+    revisar(set(vecinos) == set(muestra), 'PostgreSQL calculo los vecinos de los %d, contra todos' % len(muestra))
     misma = total = 0
     for p in muestra:
-        for s_ in similares(p):
+        for s_ in vecinos.get(p, []):
             total += 1
             misma += cat.get(s_, {}).get('cat') == cat[p]['cat']
     tasa = misma / total if total else 0
@@ -169,8 +210,32 @@ def main():
     # Sin las copias del generador quedan unos 106 productos distintos, unos 6 por
     # categoria, asi que de 6 parecidos a lo sumo 5 pueden ser de la misma. Por
     # eso el piso es la mitad y lo que de verdad dice algo es el control de abajo.
-    revisar(tasa >= 0.5, 'en %d productos, el %d %% de sus parecidos es de su categoria' % (len(muestra), round(tasa * 100)))
+    revisar(tasa >= 0.5, 'en %d productos, el %d %% de sus 6 vecinos es de su categoria' % (len(muestra), round(tasa * 100)))
     revisar(tasa > 5 * azar, 'control, al azar seria el %d %%' % round(azar * 100))
+
+    print('2b. Primero los de su categoria, despues el resto')
+    grupo_de = dict((i, d['grupo']) for i, d in docs.items())
+    en_orden = dice_verdad = completos = bajando = True
+    con_resto = 0
+    for p in muestra:
+        lista = similares_con_bloque(p)
+        banderas = [m for _, _, m in lista]
+        # Ningun True despues de un False: el bloque de su categoria va entero delante.
+        en_orden &= banderas == sorted(banderas, key=lambda m: not m)
+        dice_verdad &= all(m == (cat.get(i, {}).get('cat') == cat[p]['cat']) for i, _, m in lista)
+        # Cuantos grupos distintos de su categoria podian salir: activos, con vector y no de su grupo.
+        posibles = set(grupo_de[i] for i in activos
+                       if i != p and cat[i]['cat'] == cat[p]['cat'] and grupo_de[i] != grupo_de[p])
+        completos &= sum(1 for m in banderas if m) == min(6, len(posibles))
+        for bloque in (True, False):
+            notas = [s for _, s, m in lista if m == bloque]
+            bajando &= all(a >= b for a, b in zip(notas, notas[1:]))
+        con_resto += any(not m for m in banderas)
+    revisar(en_orden, 'en los %d, el bloque de su categoria va delante y despues el resto' % len(muestra))
+    revisar(dice_verdad, 'misma_categoria coincide con la categoria de MongoDB en cada parecido')
+    revisar(completos, 'el primer bloque trae todos los de su categoria que caben, hasta 6, uno por grupo')
+    revisar(bajando, 'dentro de cada bloque, del mas parecido al menos')
+    revisar(con_resto > 0, 'control, en %d de %d el segundo bloque si trae otras categorias' % (con_resto, len(muestra)))
 
     print('3. Lo que la ruta no devuelve')
     revisar(all(p not in similares(p) for p in muestra[:20]), 'nunca el propio producto')
@@ -203,8 +268,8 @@ def main():
     ejemplo = muestra[0]
     print()
     print('Ejemplo, producto %d (%s)' % (ejemplo, cat[ejemplo]['cat']))
-    for pid, nota in similares_con_nota(ejemplo):
-        print('    %d  %.3f %s' % (pid, nota, cat.get(pid, {}).get('cat')))
+    for pid, nota, misma_ in similares_con_bloque(ejemplo):
+        print('    %d  %.3f %-18s %s' % (pid, nota, cat.get(pid, {}).get('cat'), 'bloque 1' if misma_ else 'bloque 2'))
 
     print()
     print('%d OK, %d FALLA' % (OKS, FALLAS))

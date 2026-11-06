@@ -1162,15 +1162,27 @@ funcion `productos_similares()`, retiradas en la 036); del 2026-10-02 al
 estan la ruta, la bandera y el worker que lo mantiene al dia.
 
 **Pública, sin sesión**, igual que `tambien-vieron`. Valida el `:id` con el
-mismo `REGEX_ID` que el resto de rutas de producto. Por dentro son dos
+mismo `REGEX_ID` que el resto de rutas de producto. Por dentro son cuatro
 consultas a PostgreSQL:
 
-1. El `vector` y el `grupo` del producto en `vector_producto`.
-2. Sus 200 vecinos mas cercanos por coseno (`ORDER BY vector <=> $1
-   LIMIT 200`, sobre el indice HNSW), solo `activo`, sin el propio producto
-   y sin ninguno de su mismo `grupo`. Del resultado se queda con uno por
-   grupo (el mas cercano) y corta en 6 -- las mismas reglas que tenia
-   `productos_similares()`. `similitud` es el coseno, `1 - distancia`.
+1. El `vector`, el `grupo` y la categoria (`producto_catalogo.id_categoria`)
+   del producto.
+2. **Bloque 1, desde el 2026-11-05.** Sus vecinos mas cercanos por coseno
+   solo entre los productos activos de su misma categoria, sin el propio
+   producto y sin ninguno de su mismo `grupo`.
+3. **Bloque 2.** Sus 200 vecinos mas cercanos de todo el catalogo
+   (`ORDER BY vector <=> $1 LIMIT 200`, sobre el indice HNSW, sin JOIN para
+   que el planificador use el indice), con los mismos filtros.
+4. La categoria de los candidatos del bloque 2, para no repetir los de su
+   categoria.
+
+Se llenan los 6 en ese orden, uno por grupo (el mas cercano): primero todos
+los de su categoria y lo que falte con el resto. Es el mismo esquema que
+`tambien-compraron` (ADR-25): uno de la misma categoria con 0,40 va antes que
+otro de otra con 0,80. Cada resultado trae `misma_categoria`. `similitud` es
+el coseno, `1 - distancia`. Medido el 2026-11-05 en los 1000 productos
+activos: la ruta da los mismos 6, en el mismo orden y con los mismos bloques,
+que el mismo calculo hecho en SQL contra todos sin indice.
 
 La busqueda la corre `buscarCercanos()` (`helpers/vectores-pgvector.ts`), que
 dentro de su transaccion sube `hnsw.ef_search` y activa
@@ -1196,6 +1208,7 @@ Elasticsearch apagado.
     {
       "id_producto": 4,
       "similitud": 0.7776658734087394,
+      "misma_categoria": true,
       "producto": { "...documento completo de Mongo..." : "" }
     }
   ]

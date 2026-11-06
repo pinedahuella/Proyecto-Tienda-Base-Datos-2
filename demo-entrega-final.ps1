@@ -516,22 +516,54 @@ db.productos.find({ nombre: { `$regex: $patron, `$options: 'i' }, estado: 'activ
     $id = [long]$base.id
     Ok "$($base.nombre), de $($base.cat) (id $id)"
 
-    # La misma consulta que SimilaresService del backend: los 200 mas cercanos
-    # por coseno (<=>), solo activos, sin el propio ni su grupo, con el vector
-    # como constante (asi el ORDER BY puede usar el indice HNSW) y los mismos
-    # ajustes que buscarCercanos(): ef_search 400 e iterative_scan. Despues,
-    # uno por grupo, aqui abajo.
+    # Las mismas dos consultas que SimilaresService del backend, con los mismos
+    # ajustes que buscarCercanos(): ef_search 400 e iterative_scan. El bloque 1
+    # son los de su misma categoria (producto_catalogo.id_categoria), el bloque
+    # 2 los 200 mas cercanos de todo el catalogo, con el vector como constante
+    # (asi el ORDER BY puede usar el indice HNSW). Cada fila lleva su bloque y
+    # su categoria. Despues, uno por grupo y por bloques, aqui abajo.
     $consulta = @"
-SELECT vector::text AS v, grupo AS g FROM vector_producto WHERE id_producto_mongo = $id \gset
+SELECT v.vector::text AS v, v.grupo AS g, coalesce(pc.id_categoria, -1) AS c
+  FROM vector_producto v LEFT JOIN producto_catalogo pc USING (id_producto_mongo)
+ WHERE v.id_producto_mongo = $id \gset
 BEGIN;
 SELECT set_config('hnsw.ef_search', '400', true) AS ef, set_config('hnsw.iterative_scan', 'strict_order', true) AS it \gset
-SELECT id_producto_mongo || '|' || grupo || '|' || (1 - (vector <=> :'v'::vector))
+SELECT '1|' || v.id_producto_mongo || '|' || v.grupo || '|' || (1 - (v.vector <=> :'v'::vector)) || '|' || pc.id_categoria
+  FROM vector_producto v JOIN producto_catalogo pc USING (id_producto_mongo)
+ WHERE v.activo AND v.id_producto_mongo <> $id AND v.grupo <> :'g' AND pc.id_categoria = :c
+ ORDER BY v.vector <=> :'v'::vector
+ LIMIT 200;
+SELECT '2|' || id_producto_mongo || '|' || grupo || '|' || (1 - (vector <=> :'v'::vector)) || '|' ||
+       coalesce((SELECT pc.id_categoria FROM producto_catalogo pc WHERE pc.id_producto_mongo = vector_producto.id_producto_mongo), -1)
   FROM vector_producto
  WHERE activo AND id_producto_mongo <> $id AND grupo <> :'g'
  ORDER BY vector <=> :'v'::vector
  LIMIT 200;
+SELECT '0|' || :c;
 COMMIT;
 "@
+    # Primero el bloque 1 entero, despues el 2 sin los grupos ya vistos ni los
+    # de su categoria (esos ya estaban en el 1). Seis en total, como la ficha.
+    function Por-Bloques($filas) {
+        $cat = (@($filas | Where-Object { $_ -like '0|*' })[0]).Split('|')[1]
+        $vistos = @{}
+        $r = [ordered]@{}
+        foreach ($bloque in '1', '2') {
+            foreach ($f in $filas) {
+                $c = $f.Split('|')
+                if ($c.Count -ne 5 -or $c[0] -ne $bloque) { continue }
+                if ($r.Count -eq 6) { break }
+                if ($vistos.ContainsKey($c[2])) { continue }
+                if ($bloque -eq '2' -and $c[4] -eq $cat) { continue }
+                $vistos[$c[2]] = $true
+                $r[[long]$c[1]] = [pscustomobject]@{
+                    s = [double]::Parse($c[3], [Globalization.CultureInfo]::InvariantCulture)
+                    misma = ($bloque -eq '1')
+                }
+            }
+        }
+        return $r
+    }
     function Uno-PorGrupo($filas) {
         $vistos = @{}
         $r = [ordered]@{}
@@ -545,8 +577,8 @@ COMMIT;
         return $r
     }
 
-    Paso "Los mas parecidos por su descripcion"
-    $sim = Uno-PorGrupo (Psql $consulta)
+    Paso "Los mas parecidos por su descripcion, primero los de su categoria y despues el resto"
+    $sim = Por-Bloques (Psql $consulta)
     if ($sim.Count -eq 0) { Av "No salio ninguno parecido"; exit 0 }
     $nombres = @{}
     Mongo @"
@@ -555,16 +587,19 @@ db.productos.find({ _id: { `$in: [$(($sim.Keys) -join ',')] } }, { nombre: 1, 'c
 });
 "@ | ForEach-Object { $nombres[[long]$_.id] = $_ }
     Write-Host ("   {0,-9} {1,-46} {2}" -f 'SIMILITUD', 'PRODUCTO', 'CATEGORIA') -ForegroundColor DarkGray
+    $titulo = ''
     foreach ($k in $sim.Keys) {
+        $bloque = if ($sim[$k].misma) { "   Bloque 1, de su misma categoria, $($base.cat)" } else { '   Bloque 2, el resto del catalogo' }
+        if ($bloque -ne $titulo) { Write-Host $bloque -ForegroundColor DarkGray; $titulo = $bloque }
         $n = $nombres[$k]
         $nombre = if ($n) { $n.nombre } else { "(id $k, no esta en Mongo)" }
         if ($nombre.Length -gt 45) { $nombre = $nombre.Substring(0, 45) }
         $cat = if ($n) { $n.cat } else { '' }
-        $color = if ($n -and $n.cat -eq $base.cat) { 'Green' } else { 'Gray' }
-        $coseno = [math]::Round($sim[$k] * 100, 1)
+        $color = if ($sim[$k].misma) { 'Green' } else { 'Gray' }
+        $coseno = [math]::Round($sim[$k].s * 100, 1)
         Write-Host ("   {0,8}% {1,-46} {2}" -f $coseno, $nombre, $cat) -ForegroundColor $color
     }
-    Write-Host "   En verde, los de la misma categoria. Nadie le dijo la categoria al modelo, solo leyo el texto" -ForegroundColor DarkGray
+    Write-Host "   Igual que Quienes lo compraron tambien llevaron, los de su categoria van siempre primero" -ForegroundColor DarkGray
 
     Paso "Como lo resuelve PostgreSQL, con el indice HNSW o comparando contra todos"
     # EXPLAIN ANALYZE de la misma consulta dos veces: una obligando al indice
@@ -617,10 +652,12 @@ COMMIT;
         $idsBase = @($sim.Keys)
         foreach ($f in $api) {
             $nombre = if ($f.producto) { $f.producto.nombre } else { "(id $($f.id_producto), no esta en Mongo)" }
-            Write-Host ("   {0,8}% {1}" -f [math]::Round($f.similitud * 100, 1), $nombre)
+            Write-Host ("   {0,8}% {1,-46} misma_categoria {2}" -f [math]::Round($f.similitud * 100, 1), $nombre, "$($f.misma_categoria)".ToLower())
         }
-        if (($idsApi -join ',') -eq ($idsBase -join ',')) {
-            Ok "La ruta devuelve los mismos $($idsApi.Count), en el mismo orden. Es el estante Parecidos a este de la ficha"
+        $bloquesApi = @($api | ForEach-Object { [bool]$_.misma_categoria }) -join ','
+        $bloquesBase = @($sim.Values | ForEach-Object { $_.misma }) -join ','
+        if (($idsApi -join ',') -eq ($idsBase -join ',') -and $bloquesApi -eq $bloquesBase) {
+            Ok "La ruta devuelve los mismos $($idsApi.Count), en el mismo orden y con los mismos bloques. Es el estante Parecidos a este de la ficha"
         } else {
             Mal "La ruta devolvio otros ids. Aqui $($idsBase -join ','), ruta $($idsApi -join ',')"
         }
