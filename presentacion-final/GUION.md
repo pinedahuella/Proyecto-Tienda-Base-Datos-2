@@ -415,18 +415,61 @@ con el 404 en la linea 132 y el 403 en la 134.
 Ahora sin ningun script. Entramos a cada base con un usuario que no tiene el
 permiso, ensenamos que si puede lo suyo, y que la base le dice que no.
 
-**Se hace, en la PC de las bases (unos 3 minutos).** Las ordenes exactas estan en
-`docs/GUIA-ESTUDIO-ACL.md`, seccion 5.
-1. PostgreSQL como `mesh_lectura`. `SELECT count(*) FROM pedido` devuelve los
-   pedidos, y un `UPDATE` contesta `cannot execute UPDATE in a read-only
-   transaction`. Como `mesh_backend`, `CREATE TABLE` contesta `permission denied
-   for schema public`.
-2. MongoDB como `mesh_lectura`. Cuenta los productos y un `updateOne` contesta
-   `not authorized on mesh`.
-3. Redis como `inspeccion`. `SET` contesta `NOPERM`. Como `backend`, `KEYS *`
-   tambien.
-4. ClickHouse como `mesh_lectura`. `SELECT` si, `INSERT` contesta `ACCESS_DENIED`.
-5. Neo4j. `CREATE ROLE lector` contesta `Unsupported administration command`.
+**Se hace, lo corre Jose David en su PC, donde viven las bases (unos 3
+minutos).** En PowerShell. Cada cliente pide la clave al entrar, y las claves
+estan en el `.env` de su PC, nunca en el repositorio. Nada de esto dana la
+tienda, lo que borraria algo apunta a algo que no existe o a cero filas.
+
+1. **PostgreSQL** como el usuario que solo lee.
+   ```
+   docker exec -it mesh-postgres psql -h postgres -U mesh_lectura -d mesh
+   ```
+   - `SELECT count(*) FROM pedido;` devuelve los pedidos, si puede leer.
+   - `UPDATE pedido SET id_pedido = id_pedido WHERE false;` contesta
+     `cannot execute UPDATE in a read-only transaction`.
+   - `\q` para salir y entrar como el backend, el mismo comando con
+     `-U mesh_backend`. `CREATE TABLE intruso (x int);` contesta
+     `permission denied for schema public`.
+   - Ojo, va con `-h postgres`. Con `localhost` entra sin clave y no probaria
+     nada.
+2. **MongoDB** como el usuario que solo lee.
+   ```
+   docker exec -it mesh-mongo mongosh -u mesh_lectura -p --authenticationDatabase admin mesh
+   ```
+   - `db.productos.countDocuments()` devuelve 1003, si puede leer.
+   - `db.productos.updateOne({ _id: -1 }, { $set: { intruso: 1 } })` contesta
+     `not authorized on mesh`.
+   - `exit` y el mismo comando con `-u mesh_backend`. `db.prueba_acl.drop()`
+     contesta `not authorized on mesh to execute command drop`.
+3. **Redis** como el usuario de RedisInsight, que solo lee.
+   ```
+   docker exec -it mesh-redis redis-cli --user inspeccion --askpass
+   ```
+   - `DBSIZE` devuelve un numero, si puede leer.
+   - `SET mesh:prueba:acl 1` contesta `NOPERM`.
+   - `exit` y el mismo comando con `--user backend`. `KEYS *` contesta
+     `NOPERM`. Nunca escribir `FLUSHALL`.
+4. **ClickHouse** como el usuario que solo lee.
+   ```
+   docker exec -it mesh-clickhouse clickhouse-client --user mesh_lectura --ask-password --database mesh_eventos
+   ```
+   - `SELECT count() FROM vista_producto;` si.
+   - `INSERT INTO vista_producto SELECT * FROM vista_producto WHERE 0;` contesta
+     `Code 497 ACCESS_DENIED`.
+5. **Neo4j**, la que no tiene roles.
+   ```
+   docker exec -it mesh-neo4j cypher-shell -u neo4j -d system
+   ```
+   - `CREATE ROLE lector;` contesta `Unsupported administration command`,
+     porque la edicion community no trae roles.
+
+Si el tiempo aprieta, solo 1, 3 y 4.
+
+**Si pregunta por que esto no esta en Postman.** Postman solo habla HTTP.
+Elasticsearch y ClickHouse contestan por HTTP y por eso tienen las carpetas 6 y
+7. PostgreSQL, MongoDB y Redis tienen su propio protocolo, asi que se prueban
+con su cliente de verdad, dentro de cada base. Todo junto, y mas, lo corre
+`bash seguridad/prueba_acceso.sh`, 93 en verde.
 
 ### 24. Postman, la ruta directo
 Y el control de las funciones, llamando al backend directo, sin la pagina.
