@@ -518,8 +518,9 @@ b { font-weight: 600; color: #fff; }
     <tr style="--c:var(--acento)"><td>Vendedor</td><td><span class="mono">GET /admin/reportes/ventas</span></td><td><span class="no">403</span> falta reportes.ver</td></tr>
     <tr style="--c:var(--es)"><td>mesh_backend</td><td><span class="mono">DELETE /mesh_prueba_acl_no_existe</span>, Elasticsearch</td><td><span class="no">403</span> security_exception</td></tr>
     <tr style="--c:var(--pg)"><td>Admin</td><td><span class="mono">GET /admin/permisos/registro</span></td><td><span class="ok">200</span> cada intento negado, anotado</td></tr>
+    <tr style="--c:var(--suave)"><td>Sin sesión</td><td><span class="mono">POST /usuario/login</span> con <span class="mono">' OR '1'='1' --</span></td><td><span class="no">401</span> la inyección no entra</td></tr>
   </table>
-  <p class="pie" data-in="3">presentacion-final/postman, 54 peticiones con su prueba, todas en verde el 5 de noviembre. Cada carpeta lleva un control que sí pasa</p>
+  <p class="pie" data-in="3">presentacion-final/postman, 62 peticiones con su prueba, 54 de permisos y 8 de inyección SQL, todas en verde el 6 de noviembre. Cada carpeta lleva un control que sí pasa</p>
 </section>
 
 <!-- Gracias -->

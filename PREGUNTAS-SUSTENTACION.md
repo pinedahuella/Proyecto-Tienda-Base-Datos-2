@@ -1366,7 +1366,7 @@ Se entra a cada base con el usuario que no tiene el permiso y se escribe la orde
 ### 177. ¿Qué demuestra la colección de Postman?
 Que las rutas a las que una cuenta no tiene acceso devuelven 403 aunque se llamen directo, sin la página. Entra como compradora y pide la matriz de permisos, las cuentas, hacerse admin, el reporte de ventas, los casos de fraude y publicar una oferta, y todas dan 403 con el permiso que falta. Como vendedor, las de admin dan 403. Sin sesión, 401. El admin ve en el registro cada intento negado. Además comparte una oferta para enseñar el 404 y el 403 por persona, y llama a Elasticsearch y ClickHouse con los usuarios de servicio. Cada carpeta tiene un control que sí pasa, como la compradora viendo sus propios pedidos.
 
-- Dónde se ve. `presentacion-final/postman/Mesh-ACL.postman_collection.json`, 54 peticiones con su prueba, todas en verde el 5 de noviembre con Newman. Cómo se usa en `docs/GUIA-ESTUDIO-ACL.md`, sección 6.
+- Dónde se ve. `presentacion-final/postman/Mesh-ACL.postman_collection.json`, 62 peticiones con su prueba, 54 de permisos y 8 de inyección SQL, todas en verde el 6 de noviembre con Newman y con el Runner de Postman. `presentacion-final/postman/importar-a-postman.ps1` la mete con su ambiente en el Postman de quien lo corra, con las claves del `.env`. Cómo se usa en `docs/GUIA-ESTUDIO-ACL.md`, sección 6.
 
 ### 178. ¿Por qué ClickHouse responde 500 y no 403?
 Porque ClickHouse por HTTP no usa los códigos de permiso de HTTP. Niega con su propio código, 497 `ACCESS_DENIED`, y el mensaje dice qué grant le falta, por ejemplo `ALTER DELETE ON mesh_eventos.vista_producto`. Por eso las pruebas de esa carpeta revisan el texto y no el código.
@@ -1375,3 +1375,9 @@ Porque ClickHouse por HTTP no usa los códigos de permiso de HTTP. Niega con su 
 
 ### 179. ¿Dónde está cada cosa de vectores y de control de acceso, línea por línea?
 En las dos guías de estudio, `docs/GUIA-ESTUDIO-VECTORES.md` y `docs/GUIA-ESTUDIO-ACL.md`, con el archivo y la línea de cada función, lo que se hace clic en la tienda y las preguntas probables. El guion de la presentación, `presentacion-final/GUION.md`, repite las líneas de lo que se enseña en cada lámina.
+
+### 180. ¿Se le puede hacer una inyección SQL a Mesh?
+No. Lo que escribe la persona nunca se pega dentro del SQL. Va con parámetros, `$1`, `$2`, y el texto viaja aparte como un valor que PostgreSQL compara entero y nunca lee como SQL. Las partes que sí se arman por pedazos, como el orden ASC o DESC o la columna de un ranking, salen de listas fijas del código y no del texto que llega. Así `' OR '1'='1' --` en el login es solo un correo que no existe y contesta 401. Los id se revisan antes de tocar la base, solo dígitos, y `1 OR 1=1` contesta 400. Un `DROP TABLE usuario` en el buscador se busca como palabras, y la petición siguiente lee la cuenta de esa misma tabla.
+
+- Dónde se ve. `backend/src/services/usuario.service.ts:137` y `:138`, la consulta del login y su valor aparte. `backend/src/services/compradores/pedidos.service.ts:120`, el id. La carpeta 8 de la colección de Postman, 8 peticiones en verde el 6 de noviembre.
+- Ojo. Esto cuida el backend. Si aun así pasara algo, `mesh_backend` no puede borrar ni crear tablas (capítulo 3 del informe final), así que un DROP TABLE tampoco correría.

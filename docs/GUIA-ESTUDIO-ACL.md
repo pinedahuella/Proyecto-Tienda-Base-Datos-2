@@ -347,16 +347,29 @@ clientes de esa PC.
 
 Esta en `presentacion-final/postman/`.
 
-1. En Postman, **Import**, y elegir `Mesh-ACL.postman_collection.json`.
-2. Importar tambien el ambiente con las claves de las bases,
-   `presentacion-final/postman/secrets/Mesh-con-claves.postman_environment.json`.
-   Esa carpeta no se sube a git. En otra PC se importa
-   `Mesh.postman_environment.json` y se llenan las cuatro claves a mano.
-3. Elegir el ambiente arriba a la derecha.
-4. Correr las carpetas en orden, de arriba hacia abajo. Cada carpeta empieza
-   entrando con su cuenta, y Postman guarda la cookie `mesh_token` y la manda en
-   las siguientes. Cada peticion trae su prueba, y la pestana **Test Results**
-   dice si dio el codigo esperado.
+Postman tiene que tener la sesion iniciada. Sin cuenta solo deja mandar
+peticiones sueltas, sin colecciones ni ambientes.
+
+1. Meter la coleccion y el ambiente. Hay dos formas.
+   - Con el script, desde la raiz del repo,
+     `powershell -ExecutionPolicy Bypass -File presentacion-final\postman\importar-a-postman.ps1`.
+     Lee las cuatro claves del `.env` de la raiz, el mismo que usan las bases
+     (`ELASTIC_LECTURA_PASSWORD`, `ELASTIC_BACKEND_PASSWORD`,
+     `CLICKHOUSE_LECTURA_PASSWORD` y `CLICKHOUSE_BACKEND_PASSWORD`), y las sube
+     con la coleccion por la API de Postman. Pide una llave de la API, que se
+     saca en Postman con la foto de perfil, **Settings**, **API keys** y
+     **Generate API Key**, y no se guarda. Si ya estaban, las actualiza en vez
+     de duplicarlas.
+   - A mano. El mismo script con `-SinPostman` solo arma
+     `presentacion-final/postman/secrets/Mesh-con-claves.postman_environment.json`
+     con las claves. Despues se arrastran a Postman ese archivo y
+     `Mesh-ACL.postman_collection.json`. La carpeta `secrets/` no se sube a git.
+2. Elegir el ambiente **Mesh, claves de las bases** arriba a la derecha.
+3. Correr todo con **Run** y **Start run**, o las carpetas en orden, de arriba
+   hacia abajo. Cada carpeta empieza entrando con su cuenta, y Postman guarda la
+   cookie `mesh_token` y la manda en las siguientes. Cada peticion trae su
+   prueba en la pestana **Scripts**, y **Test Results** dice si dio el codigo
+   esperado.
 
 | Carpeta | Que ensena | Codigos |
 |---|---|---|
@@ -368,6 +381,7 @@ Esta en `presentacion-final/postman/`.
 | 5. Una oferta | Sin entrada 404, con ver 200, editar sin permiso 403, y se quita al final | 404, 201, 200, 403 |
 | 6. Elasticsearch directo | Sin usuario 401, `mesh_lectura` lee pero no escribe, `mesh_backend` no crea ni borra indices ni ve usuarios | 401, 200, 403 |
 | 7. ClickHouse directo | `mesh_lectura` lee pero no agrega, `mesh_backend` no borra, no crea tablas, no ve usuarios | 200 y ACCESS_DENIED |
+| 8. Inyeccion SQL | `' OR '1'='1' --` en el login, `admin@mesh.com' --` para saltarse la clave, `1 OR 1=1` como id de pedido y `DROP TABLE usuario` en el buscador. Al final la cuenta se sigue leyendo de la tabla `usuario` | 401, 400 y 200 |
 
 ClickHouse no usa 403 por HTTP. Niega con su codigo 497 `ACCESS_DENIED` y
 responde HTTP 500. Las pruebas de la carpeta 7 revisan ese texto.
@@ -381,8 +395,18 @@ La carpeta 5 cambia datos y los devuelve. Usa a ventas.oriente, que no tiene
 nada compartido, sobre la oferta 3 de ventas.norte, y al final le quita el
 permiso. El cambio de precio manda el mismo precio que ya tiene.
 
-Corrida completa la noche del 5 de noviembre con Newman, la version de terminal
-de Postman, 54 peticiones y 54 pruebas en verde.
+La carpeta 8 no prueba permisos sino la forma de armar las consultas. El login
+busca con `WHERE correo_electronico = $1 OR usuario = $1`
+(`backend/src/services/usuario.service.ts:137`) y manda lo escrito aparte, como
+un valor (`:138`). PostgreSQL lo compara entero y nunca lo lee como SQL, asi que
+`' OR '1'='1' --` es solo un correo que no existe. Los id se revisan antes de
+tocar la base, solo digitos o 400
+(`backend/src/services/compradores/pedidos.service.ts:120`). En el buscador
+cualquier texto vale, por eso ahi el control es la peticion siguiente, que lee
+la cuenta de la tabla que el `DROP TABLE` habria borrado.
+
+Corrida completa el 6 de noviembre con Newman, la version de terminal de
+Postman, y con el Runner dentro de Postman, 62 peticiones y 62 pruebas en verde.
 
 ## 7. Las pruebas automaticas
 

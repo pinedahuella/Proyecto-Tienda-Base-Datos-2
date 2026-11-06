@@ -18,9 +18,12 @@ la tienda y sus seis bases (1 a 7), lo que la tienda aprende y como resiste (8 a
   `docs/diagrama-arquitectura.png`), las fotos del equipo y el escudo.
 - `GUION.md` dice quien presenta cada lamina, que decir, que se hace en la
   pantalla y en que archivo y linea esta cada cosa.
-- `postman/` tiene la coleccion de Postman de la lamina 24, 54 peticiones que
-  comprueban los 401 y 403. Las claves de las bases van en `postman/secrets/`,
-  que no se sube a git. Como se usa esta en `docs/GUIA-ESTUDIO-ACL.md`, seccion 6.
+- `postman/` tiene la coleccion de Postman de la lamina 24, 62 peticiones, 54
+  que comprueban los 401 y 403 y 8 que intentan una inyeccion SQL. Las claves
+  de las bases van en `postman/secrets/`, que no se sube a git.
+  `postman/importar-a-postman.ps1` lee esas claves del `.env` de la raiz y mete
+  la coleccion y su ambiente en el Postman de quien lo corra. Como se usa esta
+  en `docs/GUIA-ESTUDIO-ACL.md`, seccion 6.
 
 Los colores de cada base son los del diagrama de arquitectura. El fondo es una
 malla de puntos de esos seis colores que se mueve despacio y se queda quieta si
@@ -30,4 +33,4 @@ Si cambia una cifra, cambiarla aqui y en el informe a la vez. Las de hoy salen
 de la prueba de acceso (93), de la recomendacion (1000 de 1001 y 3,8 ms del 16
 de octubre, y del 5 de noviembre 68 por ciento solo por el vector y 1000 de 1000
 iguales al calculo exacto con el orden por bloques), de la prueba de caidas (51)
-y de la coleccion de Postman (54).
+y de la coleccion de Postman (62).

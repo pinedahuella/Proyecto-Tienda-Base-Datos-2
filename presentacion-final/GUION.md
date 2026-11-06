@@ -1,6 +1,6 @@
 # Guion de la presentacion final
 
-Entre 20 y 25 minutos, en tres partes, una por persona. La parte 3 es la mas
+Pensado para 20 minutos, en tres partes, una por persona. La parte 3 es la mas
 larga porque ensena en detalle lo de la Entrega final, los vectores y el control
 de acceso, con las dos pruebas en vivo que pidio el profesor. El texto de cada
 lamina es una guia para decirlo con las propias palabras, no para leerlo. Cada
@@ -12,21 +12,24 @@ pregunta**, el archivo y la linea donde esta. El detalle completo esta en
 
 | Parte | Laminas | Quien | Tiempo |
 |---|---|---|---|
-| 1. La tienda y sus seis bases | 1 a 7, con la tienda en vivo | Jose Manuel | 6 min |
-| 2. Lo que la tienda aprende y como resiste | 8 a 13 | Juan Pablo | 5 min |
-| 3. La Entrega final, vectores y control de acceso | 14 a 25, con las pruebas en vivo | Jose David | 12 min |
+| 1. La tienda y sus seis bases | 1 a 7, con la tienda en vivo | Jose Manuel | 5 min |
+| 2. Lo que la tienda aprende y como resiste | 8 a 13 | Juan Pablo | 4 min |
+| 3. La Entrega final, vectores y control de acceso | 14 a 25, con las pruebas en vivo | Jose David | 10 min |
 
-Medido el 5 de noviembre. Lo que se dice, leido con la voz Sabina de Windows,
-dura 2,2, 2,1 y 4,1 minutos. A ritmo de persona y con lo que se ensena en la
-pantalla (la tienda unos 2 minutos, las bases en vivo unos 3 y Postman unos 2)
-da unos 23 minutos. Si el tiempo aprieta, en la parte 2 se salta la caida en
-vivo y en la parte 3 Postman se queda en las carpetas 1 a 4.
+Medido el 6 de noviembre. Lo que se dice, leido con la voz Sabina de Windows,
+dura 2,2, 2,1 y 4,3 minutos. Una persona habla mas despacio, como un tercio
+mas, y a eso se suma lo que se ensena en la pantalla, la tienda unos 2 minutos,
+los paneles de la parte 2 uno, las bases en vivo unos 3 y Postman uno. Da unos
+19 minutos y queda uno para pasar de una parte a otra. La caida en vivo de la
+lamina 10 suma un minuto y va solo si se llega adelantado. Si el tiempo
+aprieta, en las bases en vivo se ensenan PostgreSQL, Redis y ClickHouse, y en
+Postman solo el Run de la coleccion. Conviene ensayarlo una vez con reloj.
 
 Antes de empezar, la lista del final de este archivo.
 
 ---
 
-## Parte 1. La tienda y sus seis bases (Jose Manuel, 6 min)
+## Parte 1. La tienda y sus seis bases (Jose Manuel, 5 min)
 
 ### 1. Portada
 Buenos dias. Somos Mesh. Hicimos TiendaYa, una tienda en linea donde varios
@@ -100,7 +103,7 @@ el precio, guardada sin indexar, asi que una sola consulta pinta la tarjeta.
 
 ---
 
-## Parte 2. Lo que la tienda aprende y como resiste (Juan Pablo, 5 min)
+## Parte 2. Lo que la tienda aprende y como resiste (Juan Pablo, 4 min)
 
 ### 8. Lo que pasa en el tiempo, ClickHouse
 Cada vista, carrito, busqueda, compra y devolucion queda como un evento en
@@ -181,7 +184,7 @@ copia termino comportandose como si fuera la verdad.
 
 ---
 
-## Parte 3. La Entrega final, vectores y control de acceso (Jose David, 12 min)
+## Parte 3. La Entrega final, vectores y control de acceso (Jose David, 10 min)
 
 ### 14. Recomendacion semantica
 El enunciado pide sugerencias por la similitud semantica de la descripcion. El
@@ -335,15 +338,26 @@ permiso, ensenamos que si puede lo suyo, y que la base le dice que no.
 Y el control de las funciones, llamando al backend directo, sin la pagina.
 Entramos como compradora y pedimos rutas de vendedor y de admin. Todas dan 403
 con el permiso que falta. Despues como vendedor, las de admin dan 403. Y al final
-el admin ve en el registro cada intento negado.
+el admin ve en el registro cada intento negado. La ultima carpeta intenta una
+inyeccion SQL en el login, en un id y en el buscador, y no pasa, porque las
+consultas van con parametros.
 
-**Se hace.** En Postman, la coleccion **Mesh, control de acceso en vivo**,
-carpetas 1, 2, 3 y 4, con **Send** una por una. Si hay tiempo, la 5 (una oferta
-compartida, 404, 200 y 403) y la 6 (Elasticsearch directo, 403).
+**Se hace (1 minuto).** En Postman, la coleccion **Mesh, control de acceso en
+vivo**, **Run** y **Start run**. En unos once segundos salen 62 en verde.
+Despues, con **Send**, **Ver todas las cuentas** de la carpeta 2 para que se vea
+el 403, y **Login con inyeccion SQL** de la carpeta 8 para que se vea el 401.
 
-**Si pregunta.** Cada peticion tiene su prueba en la pestana **Test Results**.
-La coleccion completa se corrio el 5 de noviembre, 54 peticiones en verde. Esta
-en `presentacion-final/postman/`.
+**Si pregunta.**
+- Cada peticion tiene su prueba en la pestana **Scripts**, y lo que dio en
+  **Test Results**. Las carpetas 0 a 7 son las 54 de permisos y la 8 las 8 de
+  inyeccion.
+- El login busca con `WHERE correo_electronico = $1 OR usuario = $1`,
+  `backend/src/services/usuario.service.ts:137`. Lo que escribe la persona viaja
+  aparte como un valor y nunca se pega al SQL. Un id con letras se corta con 400
+  antes de tocar la base, `backend/src/services/compradores/pedidos.service.ts:120`.
+- La coleccion completa se corrio el 6 de noviembre con Newman y en Postman, 62
+  peticiones en verde. Esta en `presentacion-final/postman/`, y
+  `importar-a-postman.ps1` la mete con su ambiente en el Postman de quien lo corra.
 
 ### 25. Gracias
 Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`.
@@ -357,12 +371,15 @@ Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`.
   octubre.
 - Tailscale prendido en las dos, y en la PC del backend
   `.\usar-bases-remotas.ps1 -Ip 100.64.42.11` antes de prender el backend.
-- `node remoto/tunel.cjs 100.64.42.11` prendido en la PC del backend, para la
-  carpeta 6 de Postman y la pagina `http://localhost:8123/play`.
+- `node remoto/tunel.cjs 100.64.42.11` prendido en la PC del backend, para las
+  carpetas 6 y 7 de Postman y la pagina `http://localhost:8123/play`. Cada demo
+  del panel de comandos lo apaga al terminar, asi que si se usa una hay que
+  prenderlo otra vez antes de Postman.
 - `ollama serve` prendido en la PC del backend, y una busqueda por frase de
   prueba antes de empezar.
-- Postman abierto con la coleccion y el ambiente **Mesh, claves de las bases**
-  elegido, y una terminal abierta en la PC de las bases.
+- Postman abierto con la sesion iniciada, porque sin cuenta no deja usar
+  colecciones, y con la coleccion y el ambiente **Mesh, claves de las bases**
+  elegido. Una terminal abierta en la PC de las bases.
 - Unos 15 minutos antes, abrir cinco o seis fichas en la tienda, porque lo mas
   visto sale con un solo producto si nadie navego.
 - La matriz de permisos completa, `SELECT count(*) FROM rol_permiso;` tiene que

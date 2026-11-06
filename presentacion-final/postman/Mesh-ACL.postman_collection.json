@@ -1872,6 +1872,258 @@
           ]
         }
       ]
+    },
+    {
+      "name": "8. Inyeccion SQL, no pasa",
+      "item": [
+        {
+          "name": "Salir antes de probar",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/usuario/logout",
+            "description": "Empieza sin sesion, para que la inyeccion del login no se confunda con una sesion que ya estaba abierta.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, sin sesion', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login con inyeccion SQL",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "El truco clasico. Si el backend pegara el texto dentro del SQL, la condicion OR '1'='1' seria verdadera para todas las filas y entraria con la primera cuenta. No pasa porque la consulta va con parametros, el texto viaja aparte como un valor ($1) y PostgreSQL lo compara entero contra el correo y el usuario. Backend, backend/src/services/usuario.service.ts:137 y :138.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"' OR '1'='1' --\",\n  \"contrasena\": \"' OR '1'='1' --\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401, la inyeccion no abre sesion', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('incorrectos');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Login como admin cortando la contrasena",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Otra variante, poner el correo del admin y -- para comentar el resto de la consulta y saltarse la contrasena. Como el texto es un valor y no SQL, se busca una cuenta cuyo correo sea literalmente admin@mesh.com' -- y no existe.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"admin@mesh.com' --\",\n  \"contrasena\": \"x\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('401, no entra como admin', function () {",
+                  "    pm.response.to.have.status(401);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Entrar como compradora.norte@mesh.com",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{base_url}}/usuario/login",
+            "description": "Ahora si con su clave, para probar las rutas que piden sesion.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"identificador\": \"compradora.norte@mesh.com\",\n  \"contrasena\": \"Comprador123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, entro como comprador', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Un pedido con 1 OR 1=1 en el id",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/comprador/pedidos/1 OR 1=1",
+            "description": "Si el id se pegara al SQL, OR 1=1 traeria los pedidos de todos. El backend exige que el id sean solo digitos antes de tocar la base y corta con 400. Backend, backend/src/services/compradores/pedidos.service.ts:120.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('400, el id no es valido', function () {",
+                  "    pm.response.to.have.status(400);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('id no es valido');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Buscar con DROP TABLE en el texto",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/buscador/productos/hibrida?q=' OR 1=1; DROP TABLE usuario; --&limite=5",
+            "description": "La busqueda acepta cualquier texto, asi que aqui no hay 400. El texto se busca como palabras y no se ejecuta. Contesta normal y la tabla usuario sigue ahi, lo comprueba la peticion siguiente.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, se busco como texto', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().ok).to.eql(true);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "La tabla usuario sigue ahi",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{base_url}}/usuario/yo",
+            "description": "Lee la cuenta desde la tabla usuario. Si el DROP TABLE de arriba se hubiera ejecutado, esto fallaria.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, la cuenta sigue', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "    pm.expect(pm.response.json().payload.usuario).to.eql('compradora_norte');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Salir",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": "{{base_url}}/usuario/logout",
+            "description": "Deja Postman sin sesion.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('200, salio', function () {",
+                  "    pm.response.to.have.status(200);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
