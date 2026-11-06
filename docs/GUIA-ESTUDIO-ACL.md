@@ -377,7 +377,7 @@ peticiones sueltas, sin colecciones ni ambientes.
 | 1. Sin sesion | Sin cookie el backend no deja pasar | 401 |
 | 2. Comprador | Entra, ve lo suyo, y todo lo de vendedor y admin da 403 con el permiso que falta | 200 y 403 |
 | 3. Vendedor | Ve sus ofertas, y todo lo de admin da 403 | 200 y 403 |
-| 4. Admin | La matriz, 3 roles y 38 permisos, y el registro con los 403 de arriba | 200 |
+| 4. Admin | La matriz, 3 roles y 38 permisos, quitarse `permisos.administrar` o quitarle `cuenta.ver` al comprador, que el backend niega aunque se pida directo, y el registro con los 403 de arriba | 200 y 409 |
 | 5. Una oferta | Sin entrada 404, con ver 200, editar sin permiso 403, y se quita al final | 404, 201, 200, 403 |
 | 6. Elasticsearch directo | Sin usuario 401, `mesh_lectura` lee pero no escribe, `mesh_backend` no crea ni borra indices ni ve usuarios | 401, 200, 403 |
 | 7. ClickHouse directo | `mesh_lectura` lee pero no agrega, `mesh_backend` no borra, no crea tablas, no ve usuarios | 200 y ACCESS_DENIED |
@@ -406,7 +406,7 @@ cualquier texto vale, por eso ahi el control es la peticion siguiente, que lee
 la cuenta de la tabla que el `DROP TABLE` habria borrado.
 
 Corrida completa el 6 de noviembre con Newman, la version de terminal de
-Postman, y con el Runner dentro de Postman, 62 peticiones y 62 pruebas en verde.
+Postman, y con el Runner dentro de Postman, 64 peticiones y 64 pruebas en verde.
 
 ## 7. Las pruebas automaticas
 

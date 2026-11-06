@@ -822,6 +822,62 @@
                   "    pm.expect(p.roles.length).to.eql(3);",
                   "    const n = p.modulos.reduce(function (s, m) { return s + m.permisos.length; }, 0);",
                   "    pm.expect(n).to.eql(38);",
+                  "    // guarda los id que usan las dos peticiones de abajo",
+                  "    const todos = [].concat.apply([], p.modulos.map(function (m) { return m.permisos; }));",
+                  "    pm.collectionVariables.set('id_permisos_administrar', todos.find(function (x) { return x.codigo === 'permisos.administrar'; }).id_permiso);",
+                  "    pm.collectionVariables.set('id_cuenta_ver', todos.find(function (x) { return x.codigo === 'cuenta.ver'; }).id_permiso);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitarse a si mismo permisos.administrar",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/admin/permisos/3/{{id_permisos_administrar}}",
+            "description": "El admin intenta quitarle al rol admin (3) el permiso de administrar permisos. En la pagina esa casilla sale en gris y no se puede desmarcar. Aqui se pide directo y el backend tampoco deja, con 409, porque si el admin lo perdiera nadie podria devolverselo. La revision esta en backend/src/services/acl/permisos.service.ts:350, antes del DELETE de la linea 359, asi que no se borra nada.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409, no se le puede quitar al admin', function () {",
+                  "    pm.response.to.have.status(409);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('nadie podria devolverlo');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Quitarle cuenta.ver al comprador",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": "{{base_url}}/admin/permisos/1/{{id_cuenta_ver}}",
+            "description": "El admin intenta quitarle al rol comprador (1) cuenta.ver. Sin ese permiso nadie podria iniciar sesion, porque al entrar la pagina pide GET /usuario/yo. El backend contesta 409 y no lo quita, en la misma linea 350.",
+            "auth": {
+              "type": "noauth"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('409, sin cuenta.ver la sesion no abre', function () {",
+                  "    pm.response.to.have.status(409);",
+                  "    pm.expect(pm.response.json().mensaje).to.include('sesion no abre');",
                   "});"
                 ]
               }
@@ -2149,6 +2205,14 @@
     },
     {
       "key": "precio_actual",
+      "value": ""
+    },
+    {
+      "key": "id_permisos_administrar",
+      "value": ""
+    },
+    {
+      "key": "id_cuenta_ver",
       "value": ""
     }
   ]

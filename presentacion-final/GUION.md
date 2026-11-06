@@ -381,7 +381,8 @@ Vendedor y Admin. Las casillas de `cuenta.ver` y las dos de `permisos` del admin
 salen en gris, porque no se pueden quitar, y al pasar el raton dicen **No se
 puede quitar**. Abajo **Lo ultimo que paso**, con cuando, quien, su rol, el
 permiso que le falto y la ruta que pidio. Si Postman ya corrio, ahi salen sus
-403.
+403. Las casillas en gris tambien las prueba Postman, en la carpeta 4. Quitarlas
+directo contesta 409 y no borra nada.
 
 **Por dentro.** La matriz llama `GET /admin/permisos` y el registro
 `GET /admin/permisos/registro`, desde `leerMatriz()` y `leerRegistro()` de
@@ -436,19 +437,19 @@ inyeccion SQL en el login, en un id y en el buscador, y no pasa, porque las
 consultas van con parametros.
 
 **Se hace (1 minuto).** En Postman, la coleccion **Mesh, control de acceso en
-vivo**, **Run** y **Start run**. En unos once segundos salen 62 en verde.
+vivo**, **Run** y **Start run**. En unos once segundos salen 64 en verde.
 Despues, con **Send**, **Ver todas las cuentas** de la carpeta 2 para que se vea
 el 403, y **Login con inyeccion SQL** de la carpeta 8 para que se vea el 401.
 
 **Si pregunta.**
 - Cada peticion tiene su prueba en la pestana **Scripts**, y lo que dio en
-  **Test Results**. Las carpetas 0 a 7 son las 54 de permisos y la 8 las 8 de
+  **Test Results**. Las carpetas 0 a 7 son las 56 de permisos y la 8 las 8 de
   inyeccion.
 - El login busca con `WHERE correo_electronico = $1 OR usuario = $1`,
   `backend/src/services/usuario.service.ts:137`. Lo que escribe la persona viaja
   aparte como un valor y nunca se pega al SQL. Un id con letras se corta con 400
   antes de tocar la base, `backend/src/services/compradores/pedidos.service.ts:120`.
-- La coleccion completa se corrio el 6 de noviembre con Newman y en Postman, 62
+- La coleccion completa se corrio el 6 de noviembre con Newman y en Postman, 64
   peticiones en verde. Esta en `presentacion-final/postman/`, y
   `importar-a-postman.ps1` la mete con su ambiente en el Postman de quien lo corra.
 
@@ -528,6 +529,8 @@ Cuentas, pero si llama la ruta igual, la frena el backend.
 | 3 | `GET /admin/fraude/alertas-login` | 403 | `fraude.ver`, `backend/src/controllers/fraude/fraude.controller.ts:28` | Admin, Fraude, **Intentos de entrada** |
 | 3 | `GET /admin/eventos/tendencias` | 403 | `tendencias.ver`, `backend/src/controllers/admin/admin-tendencias-avanzadas.controller.ts:27` | Admin, pestana Tendencias |
 | 4 | `GET /admin/permisos` y `/admin/permisos/registro` como admin | 200 | `permisos.ver`, la misma linea 32 | Admin, pestana Permisos |
+| 4 | `DELETE /admin/permisos/3/:id`, el admin se quita `permisos.administrar` | 409 | La revision de `backend/src/services/acl/permisos.service.ts:350`, antes del borrado de la linea 359 | Admin, Permisos, la casilla en gris que no se puede desmarcar |
+| 4 | `DELETE /admin/permisos/1/:id`, le quita `cuenta.ver` al comprador | 409 | La misma linea 350 | La misma casilla en gris |
 
 **La carpeta 5 tiene una guardia mas, la de cada oferta.** Pasa por las dos de
 arriba y despues por `PermisoOfertaGuard`, `backend/src/guards/permiso-oferta.guard.ts:42`,
