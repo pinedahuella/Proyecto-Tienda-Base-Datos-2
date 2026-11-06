@@ -12,7 +12,7 @@
             "p": "La Entrega 3 agrega dos cosas. Un motor de búsqueda que tolera errores de escritura, ordena por relevancia y calcula filtros facetados con sus propias agregaciones, y una estrategia de consistencia para el checkout, que en este punto ya toca varias bases a la vez y puede fallar a medias. Hicimos además la evaluación opcional de un motor NewSQL para los pagos."
           },
           {
-            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 375 commits sobre `main` entre el 15 de agosto y el 6 de noviembre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre y la segunda del 8 de octubre."
+            "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 376 commits sobre `main` entre el 15 de agosto y el 6 de noviembre de 2026. Todo lo que se afirma en este informe sale de código que corre y de pruebas que se pueden repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre y la segunda del 8 de octubre."
           },
           {
             "p": "Esta versión, del 20 de octubre, suma lo que se pidió al revisar la entrega. Que la tienda siga respondiendo cuando se apaga cualquiera de las seis bases, y que eso se pueda ver en vivo. Que los filtros del buscador se apliquen dentro de la consulta. Y que una búsqueda sin sentido, como asdffff, no deje la página vacía. Está en las secciones 2.4, 2.6, 2.7 y 5."
@@ -176,7 +176,7 @@
                 [
                   "José Manuel González Corado",
                   "José Manuel González Corado",
-                  "252"
+                  "253"
                 ],
                 [
                   "José David Navichoque Pineda",
@@ -191,7 +191,7 @@
                 [
                   "Total",
                   "",
-                  "375"
+                  "376"
                 ]
               ],
               "leyenda": "Commits por integrante en el historial de git al 6 de noviembre de 2026.",

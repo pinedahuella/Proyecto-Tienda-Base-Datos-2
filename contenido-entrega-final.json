@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 375 commits sobre `main` entre el 15 de agosto y el 6 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron. El 5 de noviembre los parecidos por el vector pasaron a ese mismo orden."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 376 commits sobre `main` entre el 15 de agosto y el 6 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron. El 5 de noviembre los parecidos por el vector pasaron a ese mismo orden."
      }
     ]
    },
@@ -56,7 +56,7 @@
          "Presentación del proyecto",
          "4",
          "fuera del informe",
-         "Las diapositivas en `presentacion-final/index.html`, las demos del panel de comandos y `PREGUNTAS-SUSTENTACION.md`"
+         "Las diapositivas en `presentacion-final/index.html`, las demos del panel de comandos, `PREGUNTAS-SUSTENTACION.md` y las guías de estudio del backend, los vectores y el control de acceso en `docs/GUIA-ESTUDIO-BACKEND.md`, `docs/GUIA-ESTUDIO-VECTORES.md` y `docs/GUIA-ESTUDIO-ACL.md`"
         ]
        ],
        "anchos": [
@@ -173,7 +173,7 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "252"
+         "253"
         ],
         [
          "José David Navichoque Pineda",
@@ -188,7 +188,7 @@
         [
          "Total",
          "",
-         "375"
+         "376"
         ]
        ],
        "anchos": [
@@ -764,7 +764,7 @@
       }
      },
      {
-      "p": "El diagrama entidad relación se genera leyendo el esquema de la base en funcionamiento con `docs/generar-er.py`, y el script falla si una tabla o una llave foránea queda sin dibujar, así que no puede quedar atrás de las migraciones. Hoy son 93 tablas y 117 llaves foráneas, de las migraciones 001 a 050."
+      "p": "El diagrama entidad relación es el de la Entrega 1, puesto al día el 6 de noviembre en `docs/diagrama-er.drawio` y `docs/diagrama-er.png`. Lo hace `docs/actualizar-er.py`, que lee el esquema de la base en funcionamiento y deja intacto todo lo que el original ya tenía, en su lugar. Solo agrega a la derecha las tablas que vinieron después y una flecha por cada llave foránea que faltaba, trazada sin cruzar ninguna caja, y al final revisa que cada tabla tenga su caja. Hoy son 93 tablas y 117 llaves foráneas, de las migraciones 001 a 050."
      }
     ]
    },
