@@ -12,18 +12,19 @@ pregunta**, el archivo y la linea donde esta. El detalle completo esta en
 
 | Parte | Laminas | Quien | Tiempo |
 |---|---|---|---|
-| 1. La tienda y sus seis bases | 1 a 7, con la tienda en vivo | Jose Manuel | 5 min |
+| 1. La tienda y sus seis bases | 1 a 7, con la tienda en vivo | Jose Manuel | 6 min |
 | 2. Lo que la tienda aprende y como resiste | 8 a 13 | Juan Pablo | 4 min |
 | 3. La Entrega final, vectores y control de acceso | 14 a 25, con las pruebas en vivo | Jose David | 10 min |
 
 Medido el 6 de noviembre. Lo que se dice, leido con la voz Sabina de Windows,
-dura 2,2, 2,1 y 4,3 minutos. Una persona habla mas despacio, como un tercio
-mas, y a eso se suma lo que se ensena en la pantalla, la tienda unos 2 minutos,
+dura 1,4, 2,1 y 4,3 minutos. Una persona habla mas despacio, como un tercio
+mas, y a eso se suma lo que se ensena en la pantalla, buscar y comprar en la
+tienda unos 3 minutos y medio,
 los paneles de la parte 2 uno, las bases en vivo unos 3 y Postman uno. Da unos
 19 minutos y queda uno para pasar de una parte a otra. La caida en vivo de la
 lamina 10 suma un minuto y va solo si se llega adelantado. Si el tiempo
-aprieta, en las bases en vivo se ensenan PostgreSQL, Redis y ClickHouse, y en
-Postman solo el Run de la coleccion. Conviene ensayarlo una vez con reloj.
+aprieta, en la tienda se salta la compra, en las bases en vivo se ensenan
+PostgreSQL, Redis y ClickHouse, y en Postman solo el Run de la coleccion. Conviene ensayarlo una vez con reloj.
 
 Antes de empezar, la lista **Antes de presentar**, despues de la parte 3. Al final
 van tres apoyos para las preguntas, donde esta el control de cada peticion de
@@ -32,45 +33,34 @@ clic.
 
 ---
 
-## Parte 1. La tienda y sus seis bases (Jose Manuel, 5 min)
+## Parte 1. La tienda y sus seis bases (Jose Manuel, 6 min)
 
 ### 1. Portada
-Buenos dias. Somos Mesh. Hicimos TiendaYa, una tienda en linea donde varios
-vendedores comparten un mismo catalogo, con seis bases de datos, y cada una entro
-por la forma de la pregunta que contesta.
+Buenos dias, somos Mesh. Hicimos una tienda en linea con varios vendedores y
+seis bases de datos.
 
 ### 2. El equipo
-Mantuvimos el reparto de todo el semestre. Jose David se encargo del backend. Yo
-del frontend, las migraciones, los ETL, los scripts de cada base, las pruebas y
-el arranque. Juan Pablo de los modulos de ClickHouse y Neo4j. Cada uno va a
-presentar su parte.
+Jose David hizo el backend, yo el frontend, las bases y las pruebas, y Juan
+Pablo ClickHouse y Neo4j. Cada uno presenta lo suyo.
 
 ### 3. El reto
-Un producto describe una cosa del mundo y no es de nadie. Quien lo vende, a que
-precio y con cuantas unidades es una oferta. Al cerrar el semestre son seis
-bases, 93 tablas de 50 migraciones, 26 decisiones con su registro y 93
-comprobaciones del control de acceso, ninguna mal.
+Un producto es la cosa, y una oferta es quien la vende, a que precio y cuantas
+tiene. Son 93 tablas en seis bases.
 
 ### 4. Cada base, por la pregunta que contesta
-PostgreSQL es la fuente de verdad del dinero y del stock. MongoDB guarda el
-catalogo, porque cada categoria trae atributos distintos y la ficha se lee
-entera. Redis guarda el carrito y la venta relampago, con operaciones atomicas.
-Neo4j las relaciones entre cuentas y resenas. ClickHouse los eventos en el
-tiempo. Y Elasticsearch el indice de busqueda.
+PostgreSQL guarda el dinero y el stock, MongoDB el catalogo, Redis el carrito,
+Neo4j las relaciones, ClickHouse los eventos y Elasticsearch la busqueda.
 
 ### 5. La regla
-PostgreSQL es la verdad y lo demas se puede rehacer. El dinero, el stock, los
-pedidos y el carrito solo se escriben ahi, en una transaccion. Cada copia en
-otra base tiene de donde reconstruirse.
+Lo que es dinero solo se escribe en PostgreSQL. Lo demas se puede rehacer desde
+ahi.
 
 **Si pregunta por que no todo en PostgreSQL.** Cada base contesta mejor su
 pregunta, pero solo una guarda la verdad. Informe final, 4.2, la tabla de los componentes.
 
 ### 6. El diagrama
-Las flechas continuas son lo que hace el backend con cada base, y las punteadas
-y numeradas son datos que viajan de una base a otra. El flujo 11 lleva el texto
-de cada producto de MongoDB a Ollama y guarda su vector en PostgreSQL. Cada caja
-dice con que usuario entra el backend.
+Las flechas llenas son lo que hace el backend con cada base, y las punteadas lo
+que viaja de una base a otra. Cada caja dice con que usuario entra el backend.
 
 **Se hace.** Clic sobre el diagrama para abrirlo a tamano completo, Esc para
 cerrar.
@@ -79,12 +69,11 @@ cerrar.
 relacion sale de `docs/generar-er.py`, que lee la base en funcionamiento y falla
 si una tabla queda sin dibujar.
 
-### 7. La tarjeta sale entera de Elasticsearch, y la tienda en vivo
-El buscador tolera errores de tecleo y ordena por relevancia. El profesor pidio
-la foto en el resultado, y la foto viaja en el mismo documento que el nombre y
-el precio, guardada sin indexar, asi que una sola consulta pinta la tarjeta.
+### 7. La tienda en vivo
+Ahora la tienda. Primero buscar, despues comprar. La tarjeta de cada resultado
+sale entera de Elasticsearch, con su foto, en una sola consulta.
 
-**Se hace, en la tienda (unos 2 minutos).** En la ventana normal de Edge, la
+**Se hace, buscar (un minuto y medio).** En la ventana normal de Edge, la
 tienda en `http://localhost:5173`, sin sesion.
 1. Clic en el buscador de arriba, **Buscar productos**, y escribir `labtop`, mal
    escrito a proposito. Sin dar Enter ya sale una lista con Laptop Aurora 14,
@@ -101,6 +90,24 @@ tienda en `http://localhost:5173`, sin sesion.
    compradores. Bajando salen **Parecidos a este** y **Quienes lo compraron
    tambien llevaron**.
 
+**Se hace, comprar (dos minutos).** En la misma ventana.
+5. Arriba a la derecha **Iniciar sesion**. Correo `compradora.norte@mesh.com`,
+   clave `Comprador123`, **Entrar**. Sale **Hola, Ana**.
+6. En el buscador escribir `cartas` y clic en **Cartas al puerto seco**. Ahora
+   cada vendedor trae su boton **Agregar**. Clic en el primer **Agregar**. Se
+   abre **Tu carrito** a la derecha con el libro.
+7. **Continuar al pago**. Sale **Confirmar la compra**, con la direccion, **Lo
+   que llevas** y **Como quieres pagar**.
+8. Elegir **Efectivo contra entrega** y clic en **Pagar**. Sale **Gracias por tu
+   compra** con el numero de pedido.
+9. Arriba **Mis pedidos**. El pedido nuevo sale primero, **Comprado**.
+10. En ese pedido **Cancelar** y **Si, cancelar el pedido**. Dice que se
+    devolvieron las unidades y que el pago quedo reembolsado.
+
+Lo que se dice mientras. El carrito vive en PostgreSQL con una copia rapida en
+Redis. Pagar es una sola transaccion en PostgreSQL, que cobra y descuenta el
+stock juntos o no hace nada. Cancelar devuelve las unidades a la oferta.
+
 **Por dentro, si pregunta como se conecta.**
 - Al escribir, la pagina llama `GET /buscador/productos`, con `buscarProductos()`
   de `frontend/src/lib/buscador.ts:107`.
@@ -110,6 +117,13 @@ tienda en `http://localhost:5173`, sin sesion.
 - La ficha llama `GET /productos/7`, y despues `/productos/7/similares`,
   `/productos/7/tambien-compraron` y `/productos/7/resenas`, cada estante por su
   lado.
+- **Agregar** llama `PUT /carrito/lineas/:idOferta`, desde
+  `frontend/src/routes/producto/[id]/+page.svelte:683`, y lo recibe
+  `backend/src/controllers/carrito/carrito.controller.ts:60`.
+- **Pagar** llama `POST /carrito/comprar`, que recibe la linea 124 del mismo
+  controller, con el permiso `carrito.comprar`.
+- **Cancelar** llama `POST /comprador/pedidos/:id/cancelar`, en
+  `backend/src/controllers/compradores/pedidos.controller.ts:80`.
 
 **Si pregunta por la tolerancia a errores (fuzziness).**
 - La consulta de `/buscar` esta en
