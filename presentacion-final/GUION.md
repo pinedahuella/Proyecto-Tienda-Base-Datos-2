@@ -577,6 +577,7 @@ de noviembre en la tienda en vivo. Las cuentas son las de siempre.
 | `compradora.norte@mesh.com` | `Comprador123` | Comprar, pedidos, avisos y resenas |
 | `ventas.norte@mesh.com` | `Vendedor123` | Ofertas, descuentos, compartir y reglas |
 | `admin@mesh.com` | `Admin123` | Todo el panel de administracion |
+| `desarrollador1@mesh.com` | `Desarrollo123!` | La pestana Comandos, para correr las demos |
 
 Para entrar, arriba a la derecha **Iniciar sesion**, escribir el correo y la
 clave y **Entrar**. Para salir, **Salir**. Para cambiar de cuenta en la misma
@@ -644,3 +645,27 @@ seco por Q24.00, y se cancelo enseguida desde **Mis pedidos**.
 Lo que se marca a mano en el admin, como **Bloquear** o **Aprobar**, cambia datos
 de verdad. En la presentacion se ensena sin apretarlo, salvo que el profesor lo
 pida.
+
+### Como desarrollador, la pestana Comandos
+
+Solo la ven las cuentas cuyo correo es `desarrollador`, un numero y
+`@mesh.com`. El admin no la ve, porque corre programas en la PC.
+
+| Clic | Lo que sale | A quien le habla |
+|---|---|---|
+| **Entrar** con `desarrollador1@mesh.com` | **Hola, Desarrollador 1**, con lo de un vendedor | `POST /usuario/login` |
+| Arriba, **Desarrollador** | **Comandos**, con los grupos **Arrancar y parar**, **Productos de prueba**, **Reconstruir bases**, **Demos de fraude**, **Demo de descuentos**, **Caida de una base**, **Demo de Redis**, **Demos de la Entrega final** y **Demos de resenas** | Al panel de comandos en `http://127.0.0.1:5199`, no al backend |
+| En un comando, **Ejecutar** | Corre la demo y ensena lo que va saliendo | El mismo panel, que corre el script en esa PC |
+| En un comando, **Copiar** | Copia la orden para correrla a mano en una terminal | Ninguna |
+
+**Donde esta.** La regla del correo es `esCuentaDesarrollador()` en
+`frontend/src/lib/sesion.ts:93`. El panel agrega la pestana solo si cumple, en
+`frontend/src/routes/panel/+page.svelte:71`, `:72`, `:177` y `:186`. La pestana
+le habla a `http://127.0.0.1:5199`, en `frontend/src/lib/PanelComandos.svelte:65`.
+Ese panel lo levanta `node panel-comandos/servidor.mjs`, escucha solo en la
+misma PC y es el que decide que se puede correr.
+
+**Ojo.** Solo funciona en la PC donde corre el panel. Cada demo apaga el tunel
+al terminar, salvo las de caida, asi que despues de usar una hay que volver a
+correr `node remoto/tunel.cjs 100.64.42.11` antes de las carpetas 6 y 7 de
+Postman.
