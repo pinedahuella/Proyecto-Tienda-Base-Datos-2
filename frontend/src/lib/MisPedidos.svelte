@@ -370,6 +370,9 @@
 							>
 								{p.estado_pedido_nombre}
 							</span>
+							{#if p.cancelado_por_tienda}
+								<p class="menor">Lo cancelo la tienda</p>
+							{/if}
 						</div>
 
 						<div class="pago">

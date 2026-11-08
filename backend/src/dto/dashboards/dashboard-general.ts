@@ -151,6 +151,14 @@ export interface FilaPedidoDashboard {
   total: string;
   unidades: number;
   departamento: string | null;
+  /**
+   * Del ultimo cambio de estado (`pedido_cambio_estado`, migracion 051): true
+   * si lo hizo la tienda, false si el comprador. NULL en los pedidos que no
+   * cambiaron desde la 051.
+   */
+  por_la_tienda: boolean | null;
+  /** Lo que escribio la tienda al cancelar, si escribio algo. */
+  motivo: string | null;
 }
 
 export interface PedidosDashboard {

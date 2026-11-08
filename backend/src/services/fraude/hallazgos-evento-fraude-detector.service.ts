@@ -329,6 +329,7 @@ export class HallazgosEventoFraudeDetectorService {
                                groupUniqArray(id_pedido) AS pedidos_devueltos
                           FROM devolucion_producto FINAL
                          WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
+                           AND por_la_tienda = 0
                          GROUP BY id_usuario)
                 SELECT
                   d.id_usuario                          AS id_usuario,

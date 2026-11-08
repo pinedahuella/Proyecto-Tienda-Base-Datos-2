@@ -140,9 +140,12 @@ export class EventosService {
    * -- no hay una razon mas especifica que capturar todavia.
    */
   async registrarDevolucion(datos: {
+    /** El comprador, como en la compra, tambien si cancelo la tienda. */
     idUsuario: string;
     idPedido: number;
     ip: string;
+    /** La cancelo la tienda (migracion 051): F5 y el embudo no la cuentan. */
+    porLaTienda?: boolean;
     lineas: { idProducto: number; idOferta: number; cantidad: number }[];
   }): Promise<void> {
     if (datos.lineas.length === 0) {
@@ -161,6 +164,7 @@ export class EventosService {
           id_pedido: datos.idPedido,
           ip: datos.ip,
           lote: 'real',
+          por_la_tienda: datos.porLaTienda ? 1 : 0,
         })),
         format: 'JSONEachRow',
       });

@@ -150,6 +150,8 @@ export interface ResumenPedido {
 	metodo_pago: string | null;
 	estado_pago: string | null;
 	fecha_cancelacion: string | null;
+	/** true si lo cancelo la tienda y no la cuenta (migracion 051). */
+	cancelado_por_tienda?: boolean;
 }
 
 export interface MetodoPago {

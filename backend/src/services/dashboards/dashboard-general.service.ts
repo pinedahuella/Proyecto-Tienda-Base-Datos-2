@@ -306,7 +306,7 @@ export class DashboardGeneralService {
               sum(l.importe)::numeric(14,2)::text AS ingresos,
               sum(l.cantidad)::int AS unidades,
               count(DISTINCT l.id_pedido)::int AS pedidos,
-              (SELECT round(avg(r.calificacion), 2)::float FROM resena r WHERE r.id_usuario_vendedor = u.id_usuario) AS nota_promedio
+              (SELECT round(avg(r.calificacion), 2)::float FROM resena r WHERE r.id_usuario_vendedor = u.id_usuario AND r.id_estado_resena = 1) AS nota_promedio
          FROM lineas l
          JOIN oferta o ON o.id_oferta = l.id_oferta
          JOIN usuarios u ON u.id_usuario = o.id_usuario
@@ -538,7 +538,8 @@ export class DashboardGeneralService {
            SELECT p.id_pedido, p.fecha_creacion, ep.estado_pedido_nombre AS estado,
                   COALESCE(NULLIF(trim(concat_ws(' ', u.nombre, u.apellido)), ''), u.usuario) AS cliente,
                   u.correo_electronico AS correo, dh.departamento,
-                  mp.metodo_nombre AS metodo, epa.estado_pago_nombre AS estado_pago
+                  mp.metodo_nombre AS metodo, epa.estado_pago_nombre AS estado_pago,
+                  ult.por_la_tienda, ult.motivo
              FROM pedido p
              JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
              JOIN usuarios u ON u.id_usuario = p.id_usuario
@@ -546,6 +547,14 @@ export class DashboardGeneralService {
              LEFT JOIN pago pg ON pg.id_pedido = p.id_pedido
              LEFT JOIN metodo_pago mp ON mp.id_metodo_pago = pg.id_metodo_pago
              LEFT JOIN estado_pago epa ON epa.id_estado_pago = pg.id_estado_pago
+             -- El ultimo cambio de estado (migracion 051): si lo cancelo o lo
+             -- envio la tienda, y por que. NULL en los pedidos de antes.
+             LEFT JOIN LATERAL (
+                  SELECT pce.por_la_tienda, pce.motivo
+                    FROM pedido_cambio_estado pce
+                   WHERE pce.id_pedido = p.id_pedido
+                   ORDER BY pce.fecha DESC, pce.id_pedido_cambio_estado DESC
+                   LIMIT 1) ult ON true
             WHERE ep.estado_pedido_nombre <> 'pendiente'
               AND ${enPeriodo('p.fecha_creacion')}
               AND ($3 = '' OR ep.estado_pedido_nombre = $3)
@@ -557,13 +566,15 @@ export class DashboardGeneralService {
          SELECT b.id_pedido::int AS id_pedido,
                 to_char(b.fecha_creacion AT TIME ZONE '${ZONA_TIENDA}', 'YYYY-MM-DD HH24:MI') AS fecha,
                 b.cliente, b.correo, b.estado, b.metodo, b.estado_pago, b.departamento,
+                b.por_la_tienda, b.motivo,
                 COALESCE(sum(${expresionPrecioFinal('ph')} * pp.cantidad), 0)::numeric(14,2)::text AS total,
                 COALESCE(sum(pp.cantidad), 0)::int AS unidades,
                 count(*) OVER ()::int AS total_filas
            FROM base b
            LEFT JOIN pedido_producto pp ON pp.id_pedido = b.id_pedido
            LEFT JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
-          GROUP BY b.id_pedido, b.fecha_creacion, b.cliente, b.correo, b.estado, b.metodo, b.estado_pago, b.departamento
+          GROUP BY b.id_pedido, b.fecha_creacion, b.cliente, b.correo, b.estado, b.metodo, b.estado_pago, b.departamento,
+                   b.por_la_tienda, b.motivo
           ORDER BY b.fecha_creacion DESC, b.id_pedido DESC
           LIMIT $6 OFFSET $7`,
         [

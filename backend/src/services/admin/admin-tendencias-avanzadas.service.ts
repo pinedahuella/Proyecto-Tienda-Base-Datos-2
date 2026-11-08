@@ -174,6 +174,7 @@ export class AdminTendenciasAvanzadasService {
                            GROUP BY id_producto),
                     d AS (SELECT id_producto, sum(cantidad) AS devueltas FROM devolucion_producto FINAL
                            WHERE lote = 'real' AND fecha >= now() - INTERVAL {diasVentana:UInt32} DAY
+                             AND por_la_tienda = 0
                            GROUP BY id_producto),
                     ids AS (SELECT id_producto FROM v UNION DISTINCT SELECT id_producto FROM k)
                   SELECT

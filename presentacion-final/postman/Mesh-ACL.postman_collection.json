@@ -805,7 +805,7 @@
             "method": "GET",
             "header": [],
             "url": "{{base_url}}/admin/permisos",
-            "description": "Los 3 roles y los 38 permisos por modulo. Es la tabla rol_permiso, 76 filas.",
+            "description": "Los 3 roles y los 42 permisos por modulo. Es la tabla rol_permiso, 80 filas.",
             "auth": {
               "type": "noauth"
             }
@@ -816,12 +816,12 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test('200, 3 roles y 38 permisos', function () {",
+                  "pm.test('200, 3 roles y 42 permisos', function () {",
                   "    pm.response.to.have.status(200);",
                   "    const p = pm.response.json().payload;",
                   "    pm.expect(p.roles.length).to.eql(3);",
                   "    const n = p.modulos.reduce(function (s, m) { return s + m.permisos.length; }, 0);",
-                  "    pm.expect(n).to.eql(38);",
+                  "    pm.expect(n).to.eql(42);",
                   "    // guarda los id que usan las dos peticiones de abajo",
                   "    const todos = [].concat.apply([], p.modulos.map(function (m) { return m.permisos; }));",
                   "    pm.collectionVariables.set('id_permisos_administrar', todos.find(function (x) { return x.codigo === 'permisos.administrar'; }).id_permiso);",

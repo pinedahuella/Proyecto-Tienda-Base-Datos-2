@@ -30,8 +30,10 @@ WITH
             FROM compra_producto FINAL
            WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
            GROUP BY id_producto),
+    -- Sin lo que cancelo la tienda: el comprador no lo devolvio (2026-11-07).
     d AS (SELECT id_producto, sum(cantidad) AS devueltas FROM devolucion_producto FINAL
            WHERE lote = {lote:String} AND fecha >= now() - INTERVAL {dias_ventana:UInt32} DAY
+             AND por_la_tienda = 0
            GROUP BY id_producto),
     ids AS (SELECT id_producto FROM v UNION DISTINCT SELECT id_producto FROM k)
 SELECT

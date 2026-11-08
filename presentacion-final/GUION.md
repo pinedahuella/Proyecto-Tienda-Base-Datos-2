@@ -1,10 +1,11 @@
 # Guion de la presentacion final
 
-Pensado para 20 minutos, en tres partes, una por persona. La parte 3 es la mas
-larga porque ensena en detalle lo de la Entrega final, los vectores y el control
-de acceso, con las dos pruebas en vivo que pidio el profesor. El texto de cada
-lamina es una guia para decirlo con las propias palabras, no para leerlo. Cada
-cifra sale del informe final o de los anteriores.
+Pensado para 30 minutos, en tres partes, una por persona. Las partes 1 y 2
+recorren todo lo que hace la tienda, y la parte 3 ensena en detalle lo de la
+Entrega final, los vectores y el control de acceso, con las dos pruebas en vivo
+que pidio el profesor. El texto de cada lamina es una guia para decirlo con las
+propias palabras, no para leerlo. Cada cifra sale del informe final o de los
+anteriores.
 
 Debajo de cada lamina va **Se hace**, lo que se ensena en la pantalla, y **Si
 pregunta**, el archivo y la linea donde esta. El detalle completo esta en
@@ -12,19 +13,21 @@ pregunta**, el archivo y la linea donde esta. El detalle completo esta en
 
 | Parte | Laminas | Quien | Tiempo |
 |---|---|---|---|
-| 1. La tienda y sus seis bases | 1 a 7, con la tienda en vivo | Jose Manuel | 6 min |
-| 2. Lo que la tienda aprende y como resiste | 8 a 13 | Juan Pablo | 4 min |
-| 3. La Entrega final, vectores y control de acceso | 14 a 25, con las pruebas en vivo | Jose David | 10 min |
+| 1. La tienda y todo lo que hace | 1 a 9, con la tienda en vivo y un producto nuevo de punta a punta | Jose Manuel | 12 min |
+| 2. Lo que la tienda aprende y como resiste | 10 a 17, con el panel del admin | Juan Pablo | 8 min |
+| 3. La Entrega final, vectores y control de acceso | 18 a 29, con las pruebas en vivo | Jose David | 10 min |
 
-Medido el 6 de noviembre. Lo que se dice, leido con la voz Sabina de Windows,
-dura 1,4, 2,1 y 4,3 minutos. Una persona habla mas despacio, como un tercio
-mas, y a eso se suma lo que se ensena en la pantalla, buscar y comprar en la
-tienda unos 3 minutos y medio,
-los paneles de la parte 2 uno, las bases en vivo unos 3 y Postman uno. Da unos
-19 minutos y queda uno para pasar de una parte a otra. La caida en vivo de la
-lamina 10 suma un minuto y va solo si se llega adelantado. Si el tiempo
-aprieta, en la tienda se salta la compra, en las bases en vivo se ensenan
-PostgreSQL, Redis y ClickHouse, y en Postman solo el Run de la coleccion. Conviene ensayarlo una vez con reloj.
+Calculado el 7 de noviembre. Lo que se dice, leido con la voz Sabina de
+Windows, dura 2,8, 4,1 y 4,3 minutos. Una persona habla mas despacio, como un
+tercio mas, y a eso se suma lo que se ensena en la pantalla. En la parte 1,
+buscar un minuto y medio y el producto nuevo de punta a punta unos 5 y medio. En
+la parte 2, los paneles del admin unos 3. En la parte 3, las bases en vivo unos 3
+y Postman uno. Da unos 11, 8 y medio y 10 minutos, 29 en total, y queda uno para
+pasar de una parte a otra. La caida en vivo de la lamina 14 suma un minuto y va
+solo si se llega adelantado. Si el tiempo aprieta, en el producto nuevo no se
+cancela el pedido, en el panel del admin se dicen las pestanas sin abrirlas, en
+las bases en vivo se ensenan PostgreSQL, Redis y ClickHouse, y en Postman solo
+el Run de la coleccion. Conviene ensayarlo una vez con reloj.
 
 Antes de empezar, la lista **Antes de presentar**, despues de la parte 3. Al final
 van tres apoyos para las preguntas, donde esta el control de cada peticion de
@@ -33,7 +36,7 @@ clic.
 
 ---
 
-## Parte 1. La tienda y sus seis bases (Jose Manuel, 6 min)
+## Parte 1. La tienda y todo lo que hace (Jose Manuel, 12 min)
 
 ### 1. Portada
 Buenos dias, somos Mesh. Hicimos una tienda en linea con varios vendedores y
@@ -45,7 +48,7 @@ Pablo ClickHouse y Neo4j. Cada uno presenta lo suyo.
 
 ### 3. El reto
 Un producto es la cosa, y una oferta es quien la vende, a que precio y cuantas
-tiene. Son 93 tablas en seis bases.
+tiene. Son 96 tablas en seis bases.
 
 ### 4. Cada base, por la pregunta que contesta
 PostgreSQL guarda el dinero y el stock, MongoDB el catalogo, Redis el carrito,
@@ -66,15 +69,15 @@ que viaja de una base a otra. Cada caja dice con que usuario entra el backend.
 cerrar.
 
 **Si pregunta.** Sale de `docs/generar-arquitectura.py`. El diagrama entidad
-relacion es `docs/diagrama-er.png`, el mismo de la Entrega 1 puesto al dia el 6
-de noviembre con las 93 tablas y sus 117 llaves foraneas. Lo actualiza
+relacion es `docs/diagrama-er.png`, el mismo de la Entrega 1 puesto al dia el 7
+de noviembre con las 96 tablas y sus 126 llaves foraneas. Lo actualiza
 `docs/actualizar-er.py`, que lee la base en funcionamiento y falla si una tabla
 queda sin caja o una llave sin flecha. Se abre editable en draw.io con
 `docs/diagrama-er.drawio`.
 
-### 7. La tienda en vivo
-Ahora la tienda. Primero buscar, despues comprar. La tarjeta de cada resultado
-sale entera de Elasticsearch, con su foto, en una sola consulta.
+### 7. La tienda en vivo, buscar
+Ahora la tienda. Primero buscar. La tarjeta de cada resultado sale entera de
+Elasticsearch, con su foto, en una sola consulta.
 
 **Se hace, buscar (un minuto y medio).** En la ventana normal de Edge, la
 tienda en `http://localhost:5173`, sin sesion.
@@ -93,24 +96,6 @@ tienda en `http://localhost:5173`, sin sesion.
    compradores. Bajando salen **Parecidos a este** y **Quienes lo compraron
    tambien llevaron**.
 
-**Se hace, comprar (dos minutos).** En la misma ventana.
-5. Arriba a la derecha **Iniciar sesion**. Correo `compradora.norte@mesh.com`,
-   clave `Comprador123`, **Entrar**. Sale **Hola, Ana**.
-6. En el buscador escribir `cartas` y clic en **Cartas al puerto seco**. Ahora
-   cada vendedor trae su boton **Agregar**. Clic en el primer **Agregar**. Se
-   abre **Tu carrito** a la derecha con el libro.
-7. **Continuar al pago**. Sale **Confirmar la compra**, con la direccion, **Lo
-   que llevas** y **Como quieres pagar**.
-8. Elegir **Efectivo contra entrega** y clic en **Pagar**. Sale **Gracias por tu
-   compra** con el numero de pedido.
-9. Arriba **Mis pedidos**. El pedido nuevo sale primero, **Comprado**.
-10. En ese pedido **Cancelar** y **Si, cancelar el pedido**. Dice que se
-    devolvieron las unidades y que el pago quedo reembolsado.
-
-Lo que se dice mientras. El carrito vive en PostgreSQL con una copia rapida en
-Redis. Pagar es una sola transaccion en PostgreSQL, que cobra y descuenta el
-stock juntos o no hace nada. Cancelar devuelve las unidades a la oferta.
-
 **Por dentro, si pregunta como se conecta.**
 - Al escribir, la pagina llama `GET /buscador/productos`, con `buscarProductos()`
   de `frontend/src/lib/buscador.ts:107`.
@@ -120,13 +105,6 @@ stock juntos o no hace nada. Cancelar devuelve las unidades a la oferta.
 - La ficha llama `GET /productos/7`, y despues `/productos/7/similares`,
   `/productos/7/tambien-compraron` y `/productos/7/resenas`, cada estante por su
   lado.
-- **Agregar** llama `PUT /carrito/lineas/:idOferta`, desde
-  `frontend/src/routes/producto/[id]/+page.svelte:683`, y lo recibe
-  `backend/src/controllers/carrito/carrito.controller.ts:60`.
-- **Pagar** llama `POST /carrito/comprar`, que recibe la linea 124 del mismo
-  controller, con el permiso `carrito.comprar`.
-- **Cancelar** llama `POST /comprador/pedidos/:id/cancelar`, en
-  `backend/src/controllers/compradores/pedidos.controller.ts:80`.
 
 **Si pregunta por la tolerancia a errores (fuzziness).**
 - La consulta de `/buscar` esta en
@@ -139,13 +117,127 @@ stock juntos o no hace nada. Cancelar devuelve las unidades a la oferta.
   `elastic/001_indice.json:8`, con `lowercase` y `asciifolding`.
 - El buscador de la cabecera usa la misma idea en
   `backend/src/services/buscador/productos.service.ts:149`.
-- En el frontend, `frontend/src/lib/buscador.ts:397` (`buscarFacetado`).
+
+### 8. Un producto nuevo, de punta a punta
+Ahora el camino entero de un producto, que junta las partes principales de la
+tienda. Un vendedor quiere vender una cafetera. Primero la escribe como el la
+conoce, y la tienda le avisa que esa ya existe, aunque la escribio distinto. Eso
+lo hace el vector, que compara lo que significa el texto y no sus letras.
+Despues propone una que no existe, la tienda la aprueba, el le pone su oferta y
+una compradora la compra.
+
+**Se hace, proponer (dos minutos).** En la ventana normal de Edge, la misma de
+buscar.
+1. Arriba a la derecha **Iniciar sesion**. Correo `ventas.norte@mesh.com`, clave
+   `Vendedor123`, **Entrar**. Sale **Hola, Carlos**, con las pestanas
+   **Ofertas**, **Compartidas**, **Reglas**, **Proponer** y **Propuestas**.
+2. Pestana **Proponer**. Sale **Proponer un producto** con su formulario.
+3. En **Nombre del producto** escribir `Cafetera espresso Alba` y en
+   **Descripcion** `Cafetera espresso de 15 bares con vaporizador de leche`. Clic
+   fuera del cuadro. En unos segundos sale **Suele ir en COCINA**, con la
+   categoria ya elegida arriba, y **Ya hay parecidos en la tienda**, con
+   **Cafetera Alba Espresso** y en rojo **Puede que ya exista**.
+4. Cambiar el nombre por `Cafetera de goteo Aroma 12 tazas` y la descripcion por
+   `Cafetera electrica con jarra de vidrio y filtro permanente`. Clic fuera.
+   Sigue **Suele ir en COCINA** y salen parecidos, como la Cafetera Alba
+   Espresso, pero ninguno dice **Puede que ya exista**. Esta si es nueva.
+5. Bajar. En **Caracteristicas del producto**, **Marca** `Aroma` y **Potencia
+   (W)** `900`. En **Variantes**, **Nombre** `Negra`, **Descripcion** `Cuerpo
+   negro y jarra de vidrio` y en **Imagenes** pegar la direccion de la foto, que
+   esta abajo en **Para copiar**. En **Lo que distingue a esta variante**,
+   **Color** `Negro` y **Capacidad (L)** `1.8`.
+6. **Enviar a revision**. Arriba dice que quedo enviado a revision y que se
+   sigue en **Mis propuestas al catalogo**.
+
+**Se hace, aprobar (medio minuto).** En la ventana InPrivate del admin.
+7. Arriba **Admin**, pestana **Propuestas**. En **Productos por revisar** sale
+   la cafetera de goteo, de Carlos. **Aprobar**. Dice que ya esta en el
+   catalogo.
+
+**Se hace, la oferta (un minuto).** En la ventana normal, la del vendedor.
+8. Pestana **Ofertas** y **Publicar una oferta**. Escribir `cafetera de goteo` y
+   elegirla en la lista. Marcar la variante **Negra**, que dice **Nadie la
+   ofrece todavia**. **Tu precio** `349.00`, **Unidades iniciales** `10` y
+   **Publicar la oferta**.
+9. En la ventana InPrivate, pestana **Ofertas** y el boton **Revisar ofertas**.
+   Sale **Ofertas por revisar** con la oferta de Carlos, **Aprobar**.
+
+**Se hace, comprar (dos minutos).** En la ventana normal.
+10. Arriba **Salir** e **Iniciar sesion** con `compradora.norte@mesh.com` y
+    `Comprador123`. Sale **Hola, Ana**.
+11. En el buscador escribir `cafetera de goteo` y clic en **Cafetera de goteo
+    Aroma 12 tazas**. Llego sola al buscador unos segundos despues de
+    aprobarla. Ahi esta la oferta de Carlos con su boton **Agregar**. Clic en
+    **Agregar** y se abre **Tu carrito** a la derecha.
+12. **Continuar al pago**. Sale **Confirmar la compra**, con la direccion, **Lo
+    que llevas** y **Como quieres pagar**. Elegir **Efectivo contra entrega** y
+    **Pagar**. Sale **Gracias por tu compra** con el numero de pedido.
+13. Arriba **Mis pedidos**. El pedido nuevo sale primero, **Comprado**. Si sobra
+    tiempo, **Cancelar** y **Si, cancelar el pedido**, y dice que se devolvieron
+    las unidades y que el pago quedo reembolsado.
+
+Lo que se dice mientras. La propuesta nace en revision y no se ve en la tienda
+hasta que la aprueban, porque el catalogo es de todos. Al aprobarla, los workers
+la llevan al buscador y le calculan su vector, por eso aparece sola. La oferta de
+un vendedor tambien pasa por la tienda. El carrito vive en PostgreSQL con una
+copia rapida en Redis, y pagar es una sola transaccion en PostgreSQL, que cobra y
+descuenta el stock juntos o no hace nada.
+
+**Para copiar.** Conviene tenerlo en un bloc de notas abierto.
+- `Cafetera espresso Alba`
+- `Cafetera espresso de 15 bares con vaporizador de leche`
+- `Cafetera de goteo Aroma 12 tazas`
+- `Cafetera electrica con jarra de vidrio y filtro permanente`
+- `Cuerpo negro y jarra de vidrio`
+- La foto, `https://upload.wikimedia.org/wikipedia/commons/thumb/7/7f/A_black_espresso_machine_sits_on_a_wooden_table%2C_with_a_clear_glass_cup_filled_with_freshly_brewed_coffee.jpg/960px-A_black_espresso_machine_sits_on_a_wooden_table%2C_with_a_clear_glass_cup_filled_with_freshly_brewed_coffee.jpg`
+
+**Por dentro, si pregunta como se conecta.**
+- Al salir del cuadro del nombre, la pagina llama
+  `POST /vendedor/productos/sugerencias`, que es `sugerir()` en
+  `backend/src/services/vendedores/sugerencias-propuesta.service.ts:113`. Pasa el
+  texto a vector con Ollama, busca los productos activos mas cercanos en
+  PostgreSQL con pgvector y las categorias de esos vecinos votan por su
+  parecido. Desde 0,85 de parecido dice Puede que ya exista (`UMBRAL_DUPLICADO`
+  en la linea 37) y por debajo de 0,5 no lo cuenta (linea 33).
+- Si la categoria esta vacia, la pagina elige sola la primera que sugiere,
+  `frontend/src/lib/PanelVendedor.svelte:584`.
+- **Enviar a revision** llama `POST /vendedor/productos/propuestas`. El producto
+  nace `en_revision` en MongoDB y la propuesta queda en PostgreSQL.
+- **Aprobar** llama `PATCH /vendedor/productos/:id/revision` con la decision
+  aprobar, y el producto pasa a `activo`.
+- **Publicar la oferta** llama `POST /vendedor/ofertas`. La de un vendedor nace
+  `pendiente` y la de la tienda nace activa,
+  `backend/src/services/vendedores/ofertas.service.ts:280`.
+- **Aprobar** la oferta llama `PATCH /vendedor/ofertas/:id/revision`.
+- **Agregar** llama `PUT /carrito/lineas/:idOferta`, desde
+  `frontend/src/routes/producto/[id]/+page.svelte:683`, y lo recibe
+  `backend/src/controllers/carrito/carrito.controller.ts:60`.
+- **Pagar** llama `POST /carrito/comprar`, que recibe la linea 124 del mismo
+  controller, con el permiso `carrito.comprar`.
+- **Cancelar** llama `POST /comprador/pedidos/:id/cancelar`, en
+  `backend/src/controllers/compradores/pedidos.controller.ts:80`.
+
+**Si pregunta cuanto tarda en llegar al buscador.** En el ensayo del 7 de
+noviembre, por la API contra las bases de la PC de Jose David, un producto
+aprobado salio en el buscador 3,8 segundos despues.
+
+### 9. Todo lo que hace la tienda
+Para cerrar mi parte, todo lo que hace la tienda en una lamina. Quien compra
+busca aunque escriba mal, ve cada vendedor y los parecidos, tiene un carrito que
+no se pierde, paga de tres formas, cancela, resena lo que compro y pide avisos.
+Quien vende publica ofertas, les pone descuentos, ventas relampago y reglas que
+se aplican solas, comparte una oferta con otra cuenta y propone productos. La
+tienda aprueba productos y ofertas, envia, entrega o cancela cualquier pedido,
+pausa o retira ofertas, oculta resenas falsas sin borrarlas, crea categorias y
+tiene sus reportes, sus permisos y su fraude. Y sola mantiene al dia el buscador, el
+grafo y los vectores, recomienda, busca fraude y sigue vendiendo si se cae una
+base. Juan Pablo sigue con lo que la tienda aprende de todo esto.
 
 ---
 
-## Parte 2. Lo que la tienda aprende y como resiste (Juan Pablo, 4 min)
+## Parte 2. Lo que la tienda aprende y como resiste (Juan Pablo, 8 min)
 
-### 8. Lo que pasa en el tiempo, ClickHouse
+### 10. Lo que pasa en el tiempo, ClickHouse
 Cada vista, carrito, busqueda, compra y devolucion queda como un evento en
 ClickHouse. Lo elegimos porque guarda cada columna por separado y compara
 periodos sin definir cada pregunta antes de guardar el dato. La consulta de
@@ -159,13 +251,9 @@ inflado con clics repetidos no parezca una tendencia.
 2. Clic en **Tendencias**. Sale **Lo que mas esta creciendo**, **Lo mas visto**,
    **Lo que mas llevan al carrito**, **Lo mas vendido**, **Lo mas devuelto** y
    **Lo mas buscado**, todo de los ultimos 30 dias.
-3. Clic en **Dashboard**. Sale **Ventas en el tiempo**, **Por categoria** y **Por
-   metodo de pago**, de este anio contra el anterior.
 
 **Por dentro.** Cada cuadro de Tendencias llama `GET /admin/eventos/vista`,
 `/admin/eventos/carrito`, `/admin/eventos/compra` y las demas, que leen ClickHouse.
-El Dashboard llama `GET /admin/dashboard/resumen`, `/ventas`, `/categorias` y
-`/pagos`, desde `frontend/src/lib/PanelDashboard.svelte`.
 
 **Si pregunta.**
 - Las tablas estan en `clickhouse/001_esquema.sql`. `vista_producto` en la
@@ -177,40 +265,47 @@ El Dashboard llama `GET /admin/dashboard/resumen`, `/ventas`, `/categorias` y
 - En la Entrega 2 respondio en 13 ms sobre un lote sembrado y separo el ascenso
   real del producto inflado, 45 vistas por persona contra 1,6.
 
-### 9. Las relaciones que delatan, Neo4j
-El fraude en resenas es un problema de relaciones. Cuentas que se califican
-entre si, en circulo. La consulta principal busca un camino cerrado que sale de
-una cuenta y vuelve a ella recorriendo entre cuatro y ocho relaciones, asi que
-cuatro saltos son un par, seis un triangulo y ocho un cuadrado. Ninguna consulta
-prueba un fraude, senalan cuentas para que una persona las revise. Y el mismo
-grafo da quienes lo compraron tambien llevaron, primero los de su misma
-categoria.
+### 11. Las relaciones que delatan, y no solo en circulo
+En la Entrega 2 parecia que en Neo4j solo buscabamos anillos. Buscamos siete
+patrones, y solo tres son circulos, tres o cuatro cuentas que se califican en
+rueda, dos que se califican una a la otra, y esas dos sobre el mismo producto.
+Los otros cuatro no tienen ningun circulo. Cuentas nuevas que solo le ponen
+cinco a un vendedor, como satelites a su alrededor. Una cuenta que califica al
+mismo vendedor mes tras mes y casi a nadie mas. Dos cuentas que califican lo
+mismo casi a la vez. Y un vendedor de una semana con notas de cuentas recien
+creadas.
+
+La consulta que mas nos gusta es la de las dos cuentas coordinadas. Dos cuentas,
+dos resenas, el mismo producto y el mismo vendedor, con menos de un dia entre las
+dos y tres veces o mas. Ninguna califica a la otra, asi que no hay circulo, y aun
+asi el grafo las junta. Ninguna consulta prueba un fraude, senalan cuentas para
+que una persona las revise. Y el mismo grafo da quienes lo compraron tambien
+llevaron.
 
 **Se hace.** En la ventana InPrivate del admin.
-1. Clic en la pestana **Fraude** y despues en **Resenas en anillo**. Sale
-   **Manipulacion de resenas** con los pendientes. Cada tarjeta dice el tipo,
-   por ejemplo **Reputacion en minutos**, las cuentas, cuantas resenas y cuando
-   se detecto.
-2. Las otras tres son **Casos**, que junta varias senales en un caso para
-   revisar, **Intentos de entrada** y **Compras y navegacion**.
-3. En la ventana normal, la ficha de **Laptop Aurora 14** y bajar hasta **Quienes
-   lo compraron tambien llevaron**. Las primeras son laptops, porque van primero
-   las de su misma categoria.
+1. Pestana **Fraude** y despues **Resenas en anillo**. Sale **Manipulacion de
+   resenas** con los pendientes.
+2. En **Tipo** elegir **Cuentas que solo califican a un vendedor**. Salen las
+   granjas alrededor de un vendedor, cada tarjeta con sus cuentas y sus resenas.
+3. En **Tipo**, **Reputacion en minutos**, el vendedor nuevo con notas de cuentas
+   recien nacidas. Si se quiere ver la de coordinadas, arriba **Todas** y en
+   **Tipo** **Califican juntas lo mismo**, porque las que habia ya se revisaron.
 
-**Por dentro.** La pestana llama `GET /admin/fraude/alertas-resenas` y
-`GET /admin/fraude/alertas-login`, desde `frontend/src/lib/PanelFraude.svelte`.
-El estante llama `GET /productos/7/tambien-compraron`, que lee Neo4j.
-
-**Si pregunta por que dice revisado hace unas horas.** Esa linea dice cuando
-llego al grafo la ultima resena nueva, no cuando corrio el detector. **Al dia**
-quiere decir que no falta ninguna por pasar. Sale de `max(procesado_en)` en
-`backend/src/services/grafo/grafo-sync.service.ts:495`.
+**Por dentro.** La pestana llama `GET /admin/fraude/alertas-resenas` con el
+tipo, desde `frontend/src/lib/PanelFraude.svelte`.
 
 **Si pregunta.**
-- El anillo es el Cypher de `backend/src/services/fraude/anillos-detector.service.ts:268`,
-  `MATCH camino = (inicio:Usuario)-[:ESCRIBIO|CALIFICA_A*4..8]->(inicio)`. El
-  detector corre cada 15 minutos (`:29`) y al momento cuando llega una resena
-  (`detectarInmediato()` en `:84`).
+- Los tres en circulo los busca `backend/src/services/fraude/anillos-detector.service.ts`.
+  El ciclo es el Cypher de la linea 268,
+  `MATCH camino = (inicio:Usuario)-[:ESCRIBIO|CALIFICA_A*4..8]->(inicio)`.
+- Los cuatro sin circulo los busca
+  `backend/src/services/fraude/patrones-fraude-detector.service.ts`. La de
+  coordinadas es el `MATCH` de la linea 342 y el de la 348, con 24 horas (`:58`)
+  y 3 coincidencias (`:59`). Corren cada 15 minutos (`@Interval` de la linea 65)
+  y al llegar una resena (`detectarInmediato()` en la 119).
+- Las mismas consultas, para correrlas a mano en el navegador de Neo4j, estan en
+  `neo4j/consultas/`, la de coordinadas en `B6_coordinados.cypher` y la de
+  satelites en `B2_satelites.cypher`.
 - La resena es un nodo y no una arista, para poder colgarle la calificacion, la
   fecha y el producto. Informe de la Entrega 2, 5.2.
 - Tambien compraron esta en
@@ -218,7 +313,55 @@ quiere decir que no falta ninguna por pasar. Sale de `max(procesado_en)` en
   `CASE WHEN` de la linea 136 pone grupo 0 a la misma categoria y el `ORDER BY
   grupo` de la 140 los pone primero. Es ADR-25.
 
-### 10. Si se cae una base, la tienda sigue
+**Si pregunta por que dice revisado hace unas horas.** Esa linea dice cuando
+llego al grafo la ultima resena nueva, no cuando corrio el detector. **Al dia**
+quiere decir que no falta ninguna por pasar. Sale de `max(procesado_en)` en
+`backend/src/services/grafo/grafo-sync.service.ts:495`.
+
+### 12. 30 tipos de fraude, cada uno en la base que mejor lo ve
+El fraude no vive solo en Neo4j. Son 30 tipos repartidos en cinco bases, cada uno
+donde mejor se ve. Neo4j ve como se califican las cuentas entre ellas. PostgreSQL
+compara el texto de las resenas por su significado, encuentra estrellas que
+contradicen lo escrito y resenas con la compra cancelada. Redis cuenta al
+instante las contrasenas probadas una tras otra. Elasticsearch recuerda desde
+donde entra cada cuenta, para la IP que nunca uso y el viaje imposible. Y
+ClickHouse mira como se compra y se devuelve. Cada hallazgo es una senal, y cada
+15 minutos las que comparten cuentas se juntan en un caso para que una persona
+decida.
+
+**Se hace.** En la ventana InPrivate, dentro de **Fraude**, la pestana
+**Casos**. Cada caso junta senales de varias bases con sus cuentas. Despues un
+vistazo a **Intentos de entrada** y a **Compras y navegacion**.
+
+**Si pregunta.**
+- Cada tipo, con un ejemplo y como se demuestra, en `docs/FRAUDE-CATALOGO.md`.
+- El agrupador de casos es `backend/src/services/fraude/agrupador-fraude-worker.service.ts`.
+- Los de ClickHouse corren una vez al dia, los demas al instante y cada 15 minutos.
+
+### 13. El panel del admin, pestana por pestana
+Y lo que se ve del lado de la tienda, pestana por pestana. Dashboard, las ventas y
+los clientes contra el periodo anterior, y cada pedido, para marcarlo enviado o
+entregado o cancelarlo, sin culpar al comprador. Reportes, pedidos, pagos y
+como paga la gente. Ofertas, donde se aprueban las de cada vendedor, como la de la
+cafetera. Compartidas y Reglas, igual que un vendedor. Catalogo, cada producto con
+su historial a cualquier fecha, sus ofertas para pausarlas o retirarlas y las
+categorias. Propuestas, donde se aprobo la cafetera. Cuentas y
+Permisos, que Jose David ensena en su parte. Fraude, con la pestana de Neo4j, donde una resena falsa se oculta sin borrarla. Y
+Tendencias, de ClickHouse.
+
+**Se hace (un minuto).** En la ventana InPrivate, un clic en cada pestana sin
+apretar nada adentro, **Dashboard**, **Reportes**, **Ofertas**, **Catalogo**,
+**Cuentas** y **Tendencias**.
+
+**Por dentro.** El Dashboard llama `GET /admin/dashboard/resumen`, `/ventas`,
+`/categorias` y `/pagos`, desde `frontend/src/lib/PanelDashboard.svelte`. Las
+pestanas que ve cada rol salen de `frontend/src/routes/panel/+page.svelte:135`.
+
+**Si pregunta por el historial del catalogo.** En **Catalogo**, en un producto,
+**Historial**. Rehace como era el producto en cualquier fecha a partir de sus
+eventos en MongoDB, que es lo de la Entrega 1.
+
+### 14. Si se cae una base, la tienda sigue
 Cada base tiene su respaldo, con un cortacircuitos. El profesor pregunto que hace
 la tienda si no estan las seis, y lo medimos tambien con varias apagadas a la
 vez. Mientras PostgreSQL este prendido se puede comprar, sea cual sea el resto.
@@ -237,17 +380,17 @@ prender -Base redis`.
 - `node pruebas/caidas.mjs` da 51 comprobaciones con cada base apagada y otras
   51 congelada. `pruebas/caidas_varias.mjs` mide una, dos o tres a la vez.
 
-### 11. Las 26 decisiones
+### 15. Las 26 decisiones
 Los numeros de las decisiones chocaban entre entregas y ahora hay un solo
 registro, del 1 al 26. Las de fondo verde se habian hecho sin su registro y
 ahora lo tienen, como comprar sin MongoDB o la verdad del carrito en
 PostgreSQL.
 
-### 12. Retrospectiva
+### 16. Retrospectiva
 Siete decisiones que sostendriamos y ocho que no. La mas clara, el carrito solo
 en Redis, que el 17 de octubre paso a tener su verdad en PostgreSQL.
 
-### 13. Lo aprendido
+### 17. Lo aprendido
 Cada dato con un solo dueno escrito. En casi todo lo que replanteariamos, una
 copia termino comportandose como si fuera la verdad.
 
@@ -255,7 +398,7 @@ copia termino comportandose como si fuera la verdad.
 
 ## Parte 3. La Entrega final, vectores y control de acceso (Jose David, 10 min)
 
-### 14. Recomendacion semantica
+### 18. Recomendacion semantica
 El enunciado pide sugerencias por la similitud semantica de la descripcion. El
 texto de cada producto se arma con su nombre, su categoria y su descripcion,
 leidos de MongoDB. Ollama lo convierte en un vector de 768 numeros con el modelo
@@ -271,7 +414,7 @@ PostgreSQL con pgvector y un indice HNSW por coseno.
   `backend/src/services/productos/vectores-sync.service.ts:66`, cada 10
   segundos. Solo llama a Ollama si cambio el md5 del texto.
 
-### 15. Primero su categoria, despues el resto
+### 19. Primero su categoria, despues el resto
 En la ficha, el estante Parecidos a este sigue el mismo esquema que quienes lo
 compraron tambien llevaron. El primer bloque trae los productos de su misma
 categoria, del mas parecido al menos, y despues el resto del catalogo. Solo por
@@ -307,7 +450,7 @@ seis que el calculo exacto en los mil productos.
   `frontend/src/routes/producto/[id]/+page.svelte:178` y el estante en la 1204.
 - La prueba es `python pruebas/recomendacion_semantica.py`, 21 en verde.
 
-### 16. Una frase encuentra lo que nombra
+### 20. Una frase encuentra lo que nombra
 Con los mismos vectores el buscador sumo dos formas de buscar. La hibrida junta
 la busqueda por palabras de Elasticsearch con la busqueda por significado de
 PostgreSQL. La de intencion compara la frase con el vector de las resenas y
@@ -336,13 +479,13 @@ usen esas palabras.
   `paresParecidos()` en `backend/src/helpers/vectores-pgvector.ts:74`, sin sacar
   los vectores de la base.
 
-### 17. El viaje del vector
+### 21. El viaje del vector
 Empezo en pgvector el 25 de septiembre. El 4 de octubre se mudo a Elasticsearch,
 y el 16 volvio a pgvector, porque el profesor pidio pgvector y al medir contra el
 coseno exacto pgvector coincidio en 1000 de 1001 y Elasticsearch en 317. Una
 decision comoda tambien hay que medirla.
 
-### 18. Cada servicio entra con lo justo
+### 22. Cada servicio entra con lo justo
 El control de acceso empezo en Redis con un usuario por servicio, y el 23 de
 octubre lo llevamos a las cinco bases que lo permiten. El backend lee y escribe
 datos, pero no puede crear ni borrar tablas, colecciones o indices. Las
@@ -354,12 +497,12 @@ la edicion community no trae roles.
 de Redis, en `docker-compose.yml` de la linea 170 a la 205. El backend entra con
 `mesh_backend`, se ve en `backend/.env`.
 
-### 19. Lo que encontramos
+### 23. Lo que encontramos
 Revisando la seguridad encontramos que Elasticsearch tenia la seguridad apagada
 con un comentario que decia lo contrario, que DbGate entraba a MongoDB como root,
 y que Neo4j no puede tener roles. Los tres estan corregidos o explicados.
 
-### 20. La prueba
+### 24. La prueba
 93 bien y 0 mal. Cada negativa tiene su control, que mesh_lectura no pueda
 escribir solo cuenta si mesh_backend si pudo. Lo que borraria algo se intenta en
 una transaccion que se deshace o sobre algo que no existe.
@@ -367,16 +510,16 @@ una transaccion que se deshace o sobre algo que no existe.
 **Si pregunta.** `bash seguridad/prueba_acceso.sh`, corrida otra vez el 5 de
 noviembre contra las bases, 93 OK.
 
-### 21. Permisos por rol
+### 25. Permisos por rol
 El profesor pidio el control de acceso tambien a nivel de funcionalidades. Cada
-una de las 136 rutas privadas declara la accion que hace, por ejemplo
+una de las 146 rutas privadas declara la accion que hace, por ejemplo
 ofertas.publicar, y un guard del backend le pregunta a la tabla rol_permiso en
 ese momento si el rol de la cuenta la tiene. Si no, 403, y el intento queda
 anotado. Quitar una fila vale en la peticion siguiente, sin compilar ni
 reiniciar.
 
 **Se hace.** En la ventana InPrivate del admin, pestana **Permisos**. Arriba
-**Permisos por rol**, los 38 permisos con una columna por rol, Comprador,
+**Permisos por rol**, los 42 permisos con una columna por rol, Comprador,
 Vendedor y Admin. Las casillas de `cuenta.ver` y las dos de `permisos` del admin
 salen en gris, porque no se pueden quitar, y al pasar el raton dicen **No se
 puede quitar**. Abajo **Lo ultimo que paso**, con cuando, quien, su rol, el
@@ -399,7 +542,7 @@ directo contesta 409 y no borra nada.
 - La pregunta es `PermisosService.tiene()`,
   `backend/src/services/acl/permisos.service.ts:106`.
 
-### 22. Un ACL por oferta
+### 26. Un ACL por oferta
 Lo de arriba es por rol. Ninguna base sabe que persona pide, todo llega como
 mesh_backend, asi que el permiso de cada persona vive en la aplicacion. Cada
 oferta lleva su lista, quien puede verla, editarla o ponerle descuento y hasta
@@ -411,14 +554,25 @@ la ve pero no la puede editar, 403.
 `AclOfertasService.comprobar()` en `backend/src/services/acl/acl-ofertas.service.ts:83`,
 con el 404 en la linea 132 y el 403 en la 134.
 
-### 23. En vivo, dentro de cada base
+### 27. En vivo, dentro de cada base
 Ahora sin ningun script. Entramos a cada base con un usuario que no tiene el
 permiso, ensenamos que si puede lo suyo, y que la base le dice que no.
 
 **Se hace, lo corre Jose David en su PC, donde viven las bases (unos 3
-minutos).** En PowerShell. Cada cliente pide la clave al entrar, y las claves
-estan en el `.env` de su PC, nunca en el repositorio. Nada de esto dana la
+minutos).** En PowerShell. Cada cliente pide la clave al entrar, se pega y no
+se ve mientras se escribe. Son las del `.env` de su PC. Nada de esto dana la
 tienda, lo que borraria algo apunta a algo que no existe o a cero filas.
+
+| Base | Usuario | Clave |
+|---|---|---|
+| PostgreSQL | `mesh_lectura` | `rxdmtazh0s58jb3lpi261qev` |
+| PostgreSQL | `mesh_backend` | `128xo93mu0nhc56zvlqispar` |
+| MongoDB | `mesh_lectura` | `twoxug1mke52b9dh4cpj8ayv` |
+| MongoDB | `mesh_backend` | `5ofgismu0p1bc46nrk8hyx23` |
+| Redis | `inspeccion` | `hlow3n7iptmjye58kguqfb9a` |
+| Redis | `backend` | `97hb8xzcna32yd64tkmspl0u` |
+| ClickHouse | `mesh_lectura` | `yat2fo3bukge50dsqchivwj4` |
+| Neo4j | `neo4j` | `meme1234` |
 
 1. **PostgreSQL** como el usuario que solo lee.
    ```
@@ -471,7 +625,7 @@ Elasticsearch y ClickHouse contestan por HTTP y por eso tienen las carpetas 6 y
 con su cliente de verdad, dentro de cada base. Todo junto, y mas, lo corre
 `bash seguridad/prueba_acceso.sh`, 93 en verde.
 
-### 24. Postman, la ruta directo
+### 28. Postman, la ruta directo
 Y el control de las funciones, llamando al backend directo, sin la pagina.
 Entramos como compradora y pedimos rutas de vendedor y de admin. Todas dan 403
 con el permiso que falta. Despues como vendedor, las de admin dan 403. Y al final
@@ -480,7 +634,9 @@ inyeccion SQL en el login, en un id y en el buscador, y no pasa, porque las
 consultas van con parametros.
 
 **Se hace (1 minuto).** En Postman, la coleccion **Mesh, control de acceso en
-vivo**, **Run** y **Start run**. En unos once segundos salen 64 en verde.
+vivo**, **Run** y **Start run**. En unos once segundos salen 64 en verde. Si el
+boton se queda en **Preparing to run**, Ctrl+R para recargar Postman y otra vez
+**Start run**. Paso el 7 de noviembre y con eso corrio.
 Despues, con **Send**, **Ver todas las cuentas** de la carpeta 2 para que se vea
 el 403, y **Login con inyeccion SQL** de la carpeta 8 para que se vea el 401.
 
@@ -493,10 +649,11 @@ el 403, y **Login con inyeccion SQL** de la carpeta 8 para que se vea el 401.
   aparte como un valor y nunca se pega al SQL. Un id con letras se corta con 400
   antes de tocar la base, `backend/src/services/compradores/pedidos.service.ts:120`.
 - La coleccion completa se corrio el 6 de noviembre con Newman y en Postman, 64
-  peticiones en verde. Esta en `presentacion-final/postman/`, y
+  peticiones en verde, y otra vez el 7 en el Postman de Jose Manuel, ya con los
+  42 permisos. Esta en `presentacion-final/postman/`, y
   `importar-a-postman.ps1` la mete con su ambiente en el Postman de quien lo corra.
 
-### 25. Gracias
+### 29. Gracias
 Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`.
 
 ---
@@ -509,9 +666,8 @@ Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`.
 - Tailscale prendido en las dos, y en la PC del backend
   `.\usar-bases-remotas.ps1 -Ip 100.64.42.11` antes de prender el backend.
 - `node remoto/tunel.cjs 100.64.42.11` prendido en la PC del backend, para las
-  carpetas 6 y 7 de Postman y la pagina `http://localhost:8123/play`. Cada demo
-  del panel de comandos lo apaga al terminar, asi que si se usa una hay que
-  prenderlo otra vez antes de Postman.
+  carpetas 6 y 7 de Postman y la pagina `http://localhost:8123/play`. Las demos
+  del panel de comandos lo usan y lo dejan prendido.
 - `ollama serve` prendido en la PC del backend, y una busqueda por frase de
   prueba antes de empezar.
 - Postman abierto con la sesion iniciada, porque sin cuenta no deja usar
@@ -520,15 +676,28 @@ Preguntas. Las respuestas cortas estan en `PREGUNTAS-SUSTENTACION.md`.
 - Unos 15 minutos antes, abrir cinco o seis fichas en la tienda, porque lo mas
   visto sale con un solo producto si nadie navego.
 - La matriz de permisos completa, `SELECT count(*) FROM rol_permiso;` tiene que
-  dar 76.
+  dar 80, los 76 de la 050 y los 4 de la 051 a la 054.
 - No correr la bateria de pruebas el mismo dia. Deja cuentas, ofertas y senales
-  de fraude de prueba.
+  de fraude de prueba. Varias pruebas compran y cancelan con
+  `compradora.norte`, y si en **Fraude** sale **Devoluciones seriales** de Ana
+  Lopez es por eso. Se descarta con **Descartar**. El 7 de noviembre se descarto
+  la que salio.
 - Para apagar una base en vivo, `.\remoto\caidas.ps1 -Accion levantar` unos
   minutos antes, tarda unos 3.
 - Dos ventanas de Edge con la tienda, `http://localhost:5173`. Una normal, sin
-  sesion, para la parte 1 y las laminas 15 y 16. Otra InPrivate, con Ctrl Shift
-  N, donde ya se entro como `admin@mesh.com` con `Admin123`, para Tendencias,
-  Fraude y Permisos. Cada ventana guarda su propia sesion, asi que no se pisan.
+  sesion al empezar, para la parte 1, donde se entra primero como vendedor y
+  despues como compradora, y para las laminas 19 y 20. Otra InPrivate, con Ctrl
+  Shift N, donde ya se entro como `admin@mesh.com` con `Admin123`, para aprobar
+  la cafetera y su oferta, Tendencias, Fraude y Permisos. Cada ventana guarda su
+  propia sesion, asi que no se pisan.
+- Entrar antes como `compradora.norte@mesh.com` y vaciar **Tu carrito**, porque
+  **Pagar** se lleva todo lo que haya en el. El 7 de noviembre tenia un producto
+  olvidado de otra prueba.
+- Si ya se ensayo con la cafetera de goteo, en Admin, **Catalogo**, buscarla y
+  **Retirar** la del ensayo. Si sigue activa, el vector avisa que ya existe y la
+  demo no se ve igual. Otra opcion es cambiarle el nombre, por ejemplo
+  `Cafetera de goteo Aroma 10 tazas`.
+- Un bloc de notas abierto con los textos de **Para copiar** de la lamina 8.
 - La carpeta 5 de Postman cambia la oferta 3 de verdad. La corre una sola
   persona a la vez, nunca dos Postman al mismo tiempo.
 
@@ -667,7 +836,8 @@ ventana hay que salir primero.
 | **Continuar al pago** | **Confirmar la compra**, la direccion, **Lo que llevas**, el total y **Como quieres pagar**, con Tarjeta, Transferencia o Efectivo contra entrega | `GET /comprador/pedidos/metodos-pago` y `/direccion-usuario` |
 | Elegir **Efectivo contra entrega** y **Pagar** | **Gracias por tu compra** con el numero de pedido | `POST /carrito/comprar`, una sola transaccion en PostgreSQL |
 | Arriba **Mis pedidos** | La lista con **Todos**, **Comprado** y **Cancelado**, y en cada uno **Ver detalle** y **Cancelar** | `GET /comprador/pedidos` |
-| **Cancelar** y **Si, cancelar el pedido** | **Pedido cancelado**, se devuelven las unidades y el pago queda reembolsado | `POST /comprador/pedidos/:id/cancelar` |
+| **Cancelar** y **Si, cancelar el pedido** | **Pedido cancelado**, se devuelven las unidades y el pago queda reembolsado. Solo mientras esta **Comprado**, enviado ya no | `POST /comprador/pedidos/:id/cancelar` |
+| Un pedido que cancelo la tienda | Dice **Lo cancelo la tienda** | `GET /comprador/pedidos` |
 | En una ficha, **Avisame si baja de precio** | Queda en **Avisos** del panel, en **Lo que sigues** | `POST /comprador/seguimientos` |
 | Pestana **Resenas** de la ficha | Las estrellas, cada resena y **Util** o **No util**. Escribir una solo se puede si ya lo compro | `GET /productos/:id/resenas`, `POST /comentarios/:id/voto` |
 | Panel, **Alertas** | **Alertas de seguridad** de su propia cuenta, con **Cambiar mi contrasena ahora** | `GET /perfil/alertas-fraude` |
@@ -697,12 +867,17 @@ seco por Q24.00, y se cancelo enseguida desde **Mis pedidos**.
 |---|---|---|
 | **Entrar** y arriba **Admin** | **Hola, Sofia** y las pestanas **Dashboard**, **Reportes**, **Ofertas**, **Compartidas**, **Reglas**, **Catalogo**, **Propuestas**, **Cuentas**, **Permisos**, **Fraude** y **Tendencias** | `POST /usuario/login` |
 | **Dashboard** | **Ventas en el tiempo**, **Por categoria**, **Por metodo de pago**, con **Ventas**, **Clientes**, **Vendedores y productos**, **Busquedas**, **Cancelaciones** y **Pedidos**, y **Exportar** | `GET /admin/dashboard/resumen` y las demas de `/admin/dashboard` |
+| **Dashboard**, **Pedidos** | El registro con la columna **Gestion**, **Enviado**, **Entregado** y **Cancelar** con su motivo. Lo que cancelo la tienda dice **por la tienda** | `POST /admin/pedidos/:id/enviado`, `/entregado` y `/cancelar` |
 | **Reportes** | **Pedidos**, **Pagos**, **Como pagan** y **Pedidos sin pagar** | `GET /admin/reportes/ventas` y `/admin/reportes/reservaciones` |
-| **Catalogo** | **El catalogo** con **Publicar producto**, y en cada uno **Editar**, **Historial** y **Retirar** | `GET /vendedor/productos/paginado` |
+| **Catalogo** | **El catalogo** con **Publicar producto**, y en cada uno **Editar**, **Historial**, **Retirar** y **Ofertas** | `GET /vendedor/productos/paginado` |
+| **Catalogo**, **Ofertas** de un producto | Las ofertas de todos los vendedores, con **Pausar** o **Activar**, **Retirar** y **Ajustar** las unidades. El precio no, es del vendedor | `GET /admin/ofertas?producto=`, `PATCH /admin/ofertas/:id` |
+| **Catalogo**, **Categorias** | Cada categoria con lo que pregunta, **Nueva categoria**, **Cambiar nombre** y **Agregar caracteristica** | `GET`, `POST` y `PATCH /admin/categorias` |
 | **Propuestas** | **Productos por revisar**, con **Aprobar** y **Rechazar** | `GET /vendedor/productos/propuestas/sin-aprobar` |
 | **Cuentas** | Todas las cuentas con su rol y su estado | `GET /admin/usuarios`, `/admin/roles`, `/admin/estados` |
 | **Permisos** | La matriz por rol y **Lo ultimo que paso** | `GET /admin/permisos` y `/admin/permisos/registro` |
-| **Fraude** | **Casos**, **Intentos de entrada**, **Resenas en anillo** y **Compras y navegacion**, con **Bloquear**, **Marcar revisada** y **Descartar** | `GET /admin/fraude/alertas-login`, `/admin/fraude/alertas-resenas` |
+| **Fraude** | **Casos**, **Intentos de entrada**, **Resenas en anillo** y **Compras y navegacion**, con **Bloquear**, **Marcar revisada** y **Descartar**. Una alerta con muchas cuentas ensena 8 y **Ver las N cuentas**, y lo mismo los correos tecleados con **Ver los N** | `GET /admin/fraude/alertas-login`, `/admin/fraude/alertas-resenas` |
+| **Fraude**, **Resenas en anillo**, **Ver detalle real** | Cada resena del anillo y la columna **En la tienda**, con **Ocultar** o **Publicar**. Oculta, sale de la ficha y del promedio y sigue aqui como evidencia | `PATCH /admin/resenas/:id` |
+| La ficha de un producto, pestana **Resenas** | Al admin le sale **Ocultar** en cada resena | `PATCH /admin/resenas/:id` |
 | **Tendencias** | **Resumen**, **Para revisar** y **Rankings**, de ClickHouse | `GET /admin/eventos/vista`, `/carrito`, `/compra`, `/devolucion`, `/busqueda` |
 
 Lo que se marca a mano en el admin, como **Bloquear** o **Aprobar**, cambia datos
@@ -728,7 +903,6 @@ le habla a `http://127.0.0.1:5199`, en `frontend/src/lib/PanelComandos.svelte:65
 Ese panel lo levanta `node panel-comandos/servidor.mjs`, escucha solo en la
 misma PC y es el que decide que se puede correr.
 
-**Ojo.** Solo funciona en la PC donde corre el panel. Cada demo apaga el tunel
-al terminar, salvo las de caida, asi que despues de usar una hay que volver a
-correr `node remoto/tunel.cjs 100.64.42.11` antes de las carpetas 6 y 7 de
-Postman.
+**Ojo.** Solo funciona en la PC donde corre el panel. Si el tunel ya estaba
+prendido, cada demo lo usa y lo deja prendido. Si no lo estaba, la demo levanta
+uno y lo apaga al terminar.

@@ -10,7 +10,7 @@
 # QUE COMPRUEBA
 # ============================================================
 #   1. Sin sesion, o con un token armado a mano, 401 en las rutas privadas.
-#   2. La matriz entera: los 38 permisos para los tres roles (114 llamadas). Cada
+#   2. La matriz entera: los 42 permisos para los tres roles (126 llamadas). Cada
 #      permiso con una ruta que lo pide; si el rol lo tiene en rol_permiso el
 #      guard deja pasar (lo que conteste despues no es 403), si no, 403. Las
 #      llamadas que pasan no cambian nada: ids que no existen, cuerpos vacios o
@@ -195,6 +195,10 @@ reportes.ver|GET|/admin/reportes/ventas|
 sistema.ver|GET|/db/cortacircuitos|
 permisos.ver|GET|/admin/permisos|
 permisos.administrar|POST|/admin/permisos/x/1|
+pedidos.administrar|POST|/admin/pedidos/x/enviado|
+resenas.moderar|PATCH|/admin/resenas/x|
+ofertas.administrar|PATCH|/admin/ofertas/x|
+catalogo.categorias|PATCH|/admin/categorias/x|
 "
 probados=""
 while IFS='|' read -r cod met ruta cuerpo; do
@@ -215,7 +219,7 @@ while IFS='|' read -r cod met ruta cuerpo; do
     done
 done <<< "$PRUEBAS"
 faltan=$(sql "SELECT string_agg(m.modulo_permiso_nombre || '.' || p.permiso_nombre, ' ') FROM permiso p JOIN modulo_permiso m USING (id_modulo_permiso);" | tr ' ' '\n' | while read -r x; do echo "$probados" | grep -qw -- "$x" || echo "$x"; done)
-[ -z "$faltan" ] && OK "se probaron los 38 permisos de la base" || FALLA "permisos sin probar: $faltan"
+[ -z "$faltan" ] && OK "se probaron los 42 permisos de la base" || FALLA "permisos sin probar: $faltan"
 
 
 titulo "3. Quitar y devolver por la API: el vendedor y ofertas.publicar"
@@ -276,7 +280,7 @@ m=$(llamar GET /admin/permisos "$ADMIN")
 esperar "$(echo "$m" | python -c "
 import sys,json
 d=json.load(sys.stdin)['payload']
-print(len(d['roles']), sum(len(x['permisos']) for x in d['modulos']), len(d['modulos']))")" "3 38 17" "la matriz trae 3 roles, 38 permisos y 17 modulos"
+print(len(d['roles']), sum(len(x['permisos']) for x in d['modulos']), len(d['modulos']))")" "3 42 17" "la matriz trae 3 roles, 42 permisos y 17 modulos"
 
 
 titulo "7. La API se protege con su propio ACL"

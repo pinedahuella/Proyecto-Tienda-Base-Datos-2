@@ -18,4 +18,9 @@ export interface PedidoResumen {
   estado_pago: string | null;
   /** Cuando se salda el pago (ver Pago.fecha_cancelacion). null mientras el pedido sigue pendiente. */
   fecha_cancelacion: Date | null;
+  /**
+   * true si el pedido lo cancelo la tienda y no el comprador
+   * (`pedido_cambio_estado`, migracion 051). false en todo lo demas.
+   */
+  cancelado_por_tienda: boolean;
 }

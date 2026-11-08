@@ -1,5 +1,11 @@
 # Endpoints de reseñas
 
+> **2026-11-07 (migracion 052).** La tienda puede ocultar una resena sin
+> borrarla (`PATCH /admin/resenas/:id`, en [endpoints.md](endpoints.md)). La
+> oculta no sale en `GET /productos/:id/resenas` ni cuenta en el resumen, y
+> responderle da **404**. Su autor sigue sin poder escribir otra sobre ese
+> producto de ese vendedor.
+
 La parte social de la Entrega 2: reseñas de un vendedor sobre un producto,
 con su conversación (respuestas) y sus votos. Las tres tablas viven en
 PostgreSQL desde `migrations/011_resenas.sql` (`resena`, `comentario`,

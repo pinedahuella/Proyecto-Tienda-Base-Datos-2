@@ -273,7 +273,12 @@
 					</div>
 
 					<div class="acciones">
-						{#if administraLaTienda}
+						{#if administraLaTienda && p.producto?.estado === 'rechazado'}
+							<!-- Ya se rechazo: el backend no deja aprobarla ni rechazarla otra
+							     vez hasta que el vendedor la corrija y la reenvie. Antes salian
+							     los dos botones y Aprobar contestaba "no esta en revision". -->
+							<span class="menor">Espera que el vendedor la corrija y la reenvie</span>
+						{:else if administraLaTienda}
 							<button
 								type="button"
 								class="principal"

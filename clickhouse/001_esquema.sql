@@ -160,7 +160,8 @@ TTL toDateTime(fecha) + INTERVAL 12 MONTH;
 -- devolucion_producto -- linea de un pedido devuelto o cancelado
 -- ============================================================
 --
--- IDENTICA a compra_producto en columnas. Se evaluo agregar un campo
+-- Las columnas de compra_producto mas `por_la_tienda` (abajo, en ALTER).
+-- Se evaluo agregar un campo
 -- `motivo` (el motivo_movimiento de PostgreSQL) y se descarto: aqui solo
 -- tiene un valor relevante (devolucion, generico), sin ninguna variante mas
 -- especifica que capturar -- una columna con un solo valor posible no
@@ -183,6 +184,17 @@ CREATE TABLE IF NOT EXISTS devolucion_producto
 ENGINE = ReplacingMergeTree
 ORDER BY (id_producto, fecha, id_pedido, id_oferta)
 TTL toDateTime(fecha) + INTERVAL 12 MONTH;
+
+-- Quien cancelo (2026-11-07, con la migracion 051 de PostgreSQL). 1 si fue la
+-- tienda (POST /admin/pedidos/:id/cancelar). El pedido sale de las ventas como
+-- cualquier cancelado (mas vendidos, combos y tendencias excluyen todo
+-- id_pedido de esta tabla), pero F5 (devoluciones seriales) y el embudo
+-- (devolucion alta) no se lo cuentan ni al comprador ni al producto: no
+-- devolvio nada, le cancelaron. id_usuario sigue siendo el comprador, como en
+-- compra_producto. En ALTER y no en el CREATE por lo mismo que las columnas de
+-- busqueda_realizada: este archivo se reaplica sobre tablas que ya existen.
+ALTER TABLE devolucion_producto
+    ADD COLUMN IF NOT EXISTS por_la_tienda UInt8 DEFAULT 0;
 
 
 -- ============================================================

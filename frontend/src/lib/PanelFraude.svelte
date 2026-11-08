@@ -382,6 +382,18 @@
 	let errorAlertas = $state('');
 
 	/**
+	 * Una alerta por IP puede traer cientos de cuentas (la de 127.0.0.1 junta
+	 * todas las de prueba). Se ven las primeras y el resto se despliega con un
+	 * boton, alerta por alerta.
+	 */
+	const CUENTAS_A_LA_VISTA = 8;
+	let cuentasDesplegadas = $state<Record<string, boolean>>({});
+
+	function alternarCuentas(id: string) {
+		cuentasDesplegadas = { ...cuentasDesplegadas, [id]: !cuentasDesplegadas[id] };
+	}
+
+	/**
 	 * El numero del ultimo pedido de alertas. No es $state a proposito: nadie
 	 * lo pinta.
 	 *
@@ -610,9 +622,12 @@
 
 	/** El titulo de la lista de `vistosEnDetalle`, distinto si son IPs o identificadores tecleados. */
 	function tituloVistos(a: AlertaLogin): string {
-		return a.tipo_alerta === 'ip_rotacion_cuenta' || a.tipo_alerta === 'ip_rotacion_cuenta_lenta'
-			? 'IPs vistas'
-			: 'Correos o usuarios tecleados';
+		return esListaDeIps(a) ? 'IPs vistas' : 'Correos o usuarios tecleados';
+	}
+
+	/** Si `vistosEnDetalle` trae IPs y no identificadores tecleados. */
+	function esListaDeIps(a: AlertaLogin): boolean {
+		return a.tipo_alerta === 'ip_rotacion_cuenta' || a.tipo_alerta === 'ip_rotacion_cuenta_lenta';
 	}
 
 	/** La ubicacion de `viaje_imposible`, como "Ciudad, Pais" -- ya sea la anterior o la actual. */
@@ -786,6 +801,8 @@
 		producto: string;
 		calificacion: number;
 		fecha: string;
+		/** Si se ve en la tienda (migracion 052). */
+		estado_en_tienda: 'publicada' | 'oculta' | null;
 	}
 
 	interface DetalleAnilloGrafo {
@@ -969,6 +986,44 @@
 			...detalleAnilloP,
 			[a.id_anillo_fraude]: r.ok && r.payload ? r.payload : 'error'
 		};
+	}
+
+	/**
+	 * Oculta una resena del anillo o la vuelve a publicar (PATCH
+	 * /admin/resenas/:id, migracion 052). No la borra: sigue en el grafo y en
+	 * esta misma tabla, que es la evidencia.
+	 */
+	let moderandoResena = $state<number | null>(null);
+	let errorModerar = $state('');
+	async function moderarResena(idAnillo: string, resena: ResenaDetalleAnillo) {
+		const estado = resena.estado_en_tienda === 'oculta' ? 'publicada' : 'oculta';
+		moderandoResena = resena.id_resena;
+		errorModerar = '';
+		const r = await pedir<{ estado: string }>(
+			`/admin/resenas/${resena.id_resena}`,
+			conJson('PATCH', { estado, motivo: estado === 'oculta' ? 'Senalada en Fraude, resenas en anillo' : null })
+		);
+		moderandoResena = null;
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+		if (!r.ok) {
+			errorModerar = `Resena ${resena.id_resena}. ${mensajeUtil(r)}`;
+			return;
+		}
+		const detalle = detalleAnilloP[idAnillo];
+		if (detalle && typeof detalle === 'object') {
+			detalleAnilloP = {
+				...detalleAnilloP,
+				[idAnillo]: {
+					...detalle,
+					resenas: detalle.resenas.map((x) =>
+						x.id_resena === resena.id_resena ? { ...x, estado_en_tienda: estado } : x
+					)
+				}
+			};
+		}
 	}
 
 	/** El texto de la etiqueta del titulo, igual que `etiquetaAlertas`. */
@@ -1929,10 +1984,12 @@
 							</dd>
 						</div>
 						{#if a.cuentas_afectadas.length > 0}
+							{@const abiertas = cuentasDesplegadas[a.id_alerta_fraude] === true}
+							{@const sobran = a.cuentas_afectadas.length > CUENTAS_A_LA_VISTA}
 							<div>
 								<dt>{a.cuentas_afectadas.length === 1 ? 'Cuenta afectada' : 'Cuentas afectadas'}</dt>
 								<dd class="afectadas">
-									{#each a.cuentas_afectadas as c (c.id_usuario)}
+									{#each sobran && !abiertas ? a.cuentas_afectadas.slice(0, CUENTAS_A_LA_VISTA) : a.cuentas_afectadas as c (c.id_usuario)}
 										<span class="cuenta-con-accion">
 										<span class="clave afectada" title={c.fecha_lectura ? `Leida ${fecha(c.fecha_lectura)}` : 'No leida por esta cuenta'}>
 											{c.usuario}
@@ -1941,6 +1998,17 @@
 										<BloquearCuenta idUsuario={c.id_usuario} usuario={c.usuario} {alExpirarSesion} />
 										</span>
 									{/each}
+									{#if sobran}
+										<button
+											type="button"
+											class="ver-cuentas"
+											aria-expanded={abiertas}
+											onclick={() => alternarCuentas(a.id_alerta_fraude)}
+										>
+											{abiertas ? 'Ver menos' : `Ver las ${a.cuentas_afectadas.length} cuentas`}
+											<span class="flecha" class:arriba={abiertas} aria-hidden="true"></span>
+										</button>
+									{/if}
 								</dd>
 							</div>
 						{/if}
@@ -1969,6 +2037,9 @@
 					</dl>
 
 					{#if ids.length > 0}
+						{@const llaveIds = 'tecleados-' + a.id_alerta_fraude}
+						{@const idsAbiertos = cuentasDesplegadas[llaveIds] === true}
+						{@const idsSobran = ids.length > CUENTAS_A_LA_VISTA}
 						<div class="probadas">
 							<h4>
 								{tituloVistos(a)}{vistas !== null && vistas > ids.length
@@ -1981,11 +2052,22 @@
 							     peso, y un identificador puede pesar un mega. La lista no se
 							     reordena ni se edita, asi que la posicion basta. -->
 							<ul class="lista-probadas">
-								{#each ids as id, j (j)}
+								{#each idsAbiertos || !idsSobran ? ids : ids.slice(0, CUENTAS_A_LA_VISTA) as id, j (j)}
 									{@const t = tecleado(id)}
 									<li class="probada" title={t.titulo}>{t.texto}</li>
 								{/each}
 							</ul>
+							{#if idsSobran}
+								<button
+									type="button"
+									class="ver-cuentas ver-probadas"
+									aria-expanded={idsAbiertos}
+									onclick={() => alternarCuentas(llaveIds)}
+								>
+									{idsAbiertos ? 'Ver menos' : `${esListaDeIps(a) ? 'Ver las' : 'Ver los'} ${ids.length}`}
+									<span class="flecha" class:arriba={idsAbiertos} aria-hidden="true"></span>
+								</button>
+							{/if}
 						</div>
 					{/if}
 
@@ -2127,15 +2209,24 @@
 
 					<dl class="datos">
 						{#if h.cuentas.length > 0}
+							{@const llave = 'hallazgo-' + h.id_hallazgo_evento_fraude}
+							{@const abiertas = cuentasDesplegadas[llave] === true}
+							{@const sobran = h.cuentas.length > CUENTAS_A_LA_VISTA}
 							<div>
 								<dt>{h.cuentas.length === 1 ? 'Cuenta' : 'Cuentas'}</dt>
 								<dd class="afectadas">
-									{#each h.cuentas as c (c.id_usuario)}
+									{#each sobran && !abiertas ? h.cuentas.slice(0, CUENTAS_A_LA_VISTA) : h.cuentas as c (c.id_usuario)}
 										<span class="cuenta-con-accion">
 											<span class="clave">{c.usuario}</span>
 											<BloquearCuenta idUsuario={c.id_usuario} usuario={c.usuario} {alExpirarSesion} />
 										</span>
 									{/each}
+									{#if sobran}
+										<button type="button" class="ver-cuentas" aria-expanded={abiertas} onclick={() => alternarCuentas(llave)}>
+											{abiertas ? 'Ver menos' : `Ver las ${h.cuentas.length} cuentas`}
+											<span class="flecha" class:arriba={abiertas} aria-hidden="true"></span>
+										</button>
+									{/if}
 								</dd>
 							</div>
 						{/if}
@@ -2324,6 +2415,9 @@
 			{#each anillosPersistidos as a (a.id_anillo_fraude)}
 				{@const detalle = detalleAnilloP[a.id_anillo_fraude]}
 				{@const desplegado = abiertoAnilloP === a.id_anillo_fraude}
+				{@const llaveCuentas = 'anillo-' + a.id_anillo_fraude}
+				{@const cuentasAbiertas = cuentasDesplegadas[llaveCuentas] === true}
+				{@const sobranCuentas = a.cuentas.length > CUENTAS_A_LA_VISTA}
 				<li
 					class="alerta"
 					class:senalado={anilloSenalado === a.id_anillo_fraude}
@@ -2338,12 +2432,18 @@
 						<div>
 							<dt>Cuentas</dt>
 							<dd class="afectadas">
-								{#each a.cuentas as c (c.id_usuario)}
+								{#each sobranCuentas && !cuentasAbiertas ? a.cuentas.slice(0, CUENTAS_A_LA_VISTA) : a.cuentas as c (c.id_usuario)}
 									<span class="cuenta-con-accion">
 										<span class="clave">{c.usuario}</span>
 										<BloquearCuenta idUsuario={c.id_usuario} usuario={c.usuario} {alExpirarSesion} />
 									</span>
 								{/each}
+								{#if sobranCuentas}
+									<button type="button" class="ver-cuentas" aria-expanded={cuentasAbiertas} onclick={() => alternarCuentas(llaveCuentas)}>
+										{cuentasAbiertas ? 'Ver menos' : `Ver las ${a.cuentas.length} cuentas`}
+										<span class="flecha" class:arriba={cuentasAbiertas} aria-hidden="true"></span>
+									</button>
+								{/if}
 							</dd>
 						</div>
 						<div>
@@ -2400,6 +2500,7 @@
 												<th>Producto</th>
 												<th>Nota</th>
 												<th>Cuando</th>
+												<th>En la tienda</th>
 											</tr>
 										</thead>
 										<tbody>
@@ -2410,11 +2511,29 @@
 													<td>{resena.producto}</td>
 													<td class="nota">{resena.calificacion}</td>
 													<td class="gris">{fecha(resena.fecha)}</td>
+													<td class="en-tienda">
+														{#if resena.estado_en_tienda}
+															<span class:oculta={resena.estado_en_tienda === 'oculta'}>
+																{resena.estado_en_tienda === 'oculta' ? 'Oculta' : 'Publicada'}
+															</span>
+															<button
+																type="button"
+																class="moderar"
+																disabled={moderandoResena === resena.id_resena}
+																onclick={() => moderarResena(a.id_anillo_fraude, resena)}
+															>
+																{resena.estado_en_tienda === 'oculta' ? 'Publicar' : 'Ocultar'}
+															</button>
+														{:else}
+															<span class="gris">Ya no esta</span>
+														{/if}
+													</td>
 												</tr>
 											{/each}
 										</tbody>
 									</table>
 								</div>
+								{#if errorModerar}<p class="error-motivo" role="alert">{errorModerar}</p>{/if}
 							{/if}
 						</div>
 					{/if}
@@ -2620,6 +2739,39 @@
 		border-top: 1px solid var(--linea);
 	}
 
+	/* La resena del anillo en la tienda: se oculta sin borrarla (052). */
+	.en-tienda {
+		white-space: nowrap;
+	}
+
+	.en-tienda span.oculta {
+		color: var(--rojo);
+	}
+
+	.en-tienda .moderar {
+		margin-left: 8px;
+		padding: 2px 10px;
+		font: inherit;
+		font-size: var(--f-xs);
+		color: var(--tinta);
+		background: none;
+		border: 1px solid var(--linea);
+		border-radius: 999px;
+		cursor: pointer;
+	}
+
+	.en-tienda .moderar:hover:not(:disabled) {
+		border-color: var(--indigo);
+		color: var(--indigo);
+	}
+
+	/* Debajo de los botones del caso o del anillo, el detalle deja el mismo
+	   aire que los botones dejan arriba. Sin esto la tabla quedaba pegada. */
+	.triage ~ .detalle {
+		margin-top: var(--e3);
+		padding-top: var(--e3);
+	}
+
 	/* La tabla se desborda en horizontal DENTRO de su caja, y nunca empuja el
 	   ancho de la pagina. */
 	.tabla {
@@ -2809,6 +2961,38 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: var(--e1);
+	}
+
+	/* Despliega el resto de las cuentas. Va como un texto con flecha, no como
+	   otro boton de accion, para que no se confunda con Bloquear. */
+	.ver-cuentas {
+		display: inline-flex;
+		align-items: center;
+		gap: 8px;
+		padding: 4px 2px;
+		border: none;
+		background: none;
+		color: var(--indigo);
+		font: inherit;
+		font-weight: 600;
+		cursor: pointer;
+	}
+
+	.ver-cuentas:hover {
+		text-decoration: underline;
+	}
+
+	.ver-cuentas .flecha {
+		width: 7px;
+		height: 7px;
+		border-right: 2px solid currentColor;
+		border-bottom: 2px solid currentColor;
+		transform: translateY(-2px) rotate(45deg);
+		transition: transform 0.15s ease;
+	}
+
+	.ver-cuentas .flecha.arriba {
+		transform: translateY(2px) rotate(-135deg);
 	}
 
 	.afectada {
@@ -3031,6 +3215,12 @@
 		gap: var(--e2);
 		flex-wrap: wrap;
 		font-size: var(--f-sm);
+	}
+
+	/* Plegada como las cuentas afectadas: una IP que tecleo setenta correos
+	   llenaba la pantalla del telefono con veinte etiquetas en columna. */
+	.ver-probadas {
+		margin-top: var(--e2);
 	}
 
 	.probada {

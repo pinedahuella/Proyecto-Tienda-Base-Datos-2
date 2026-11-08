@@ -83,6 +83,12 @@ Cada 15 minutos y al cancelar un pedido. Ventana de 60 dias.
 | `resena_positiva_cancelada` | Una resena buena de una compra que despues se cancelo | 4 o 5 estrellas, cancelada a 72 horas o menos | `.\demo-resenas-texto.ps1 -Caso cancelada` |
 | `resenas_negativas_canceladas_vendedor` | Un vendedor con muchas resenas malas de compras canceladas | 5 | `.\demo-resenas-texto.ps1 -Caso negativas` |
 
+Solo cuentan las cancelaciones que hizo el mismo comprador. Desde el 2026-11-07 la
+tienda puede cancelar cualquier pedido (migracion 051), y esa cancelacion no corre
+el detector: el movimiento de devolucion queda a nombre del admin y el detector lo
+salta, igual que la regla R-CASI-3. La devolucion si llega a ClickHouse, con
+`por_la_tienda = 1`, y F5 (devoluciones seriales) y el embudo solo cuentan las de 0.
+
 ## E. Login, en el momento (Redis y Elasticsearch)
 
 Salen en el mismo intento de login, de los contadores de Redis (las ventanas
@@ -150,6 +156,10 @@ quito y F6 (la granja) se movio al login, en Elasticsearch.
   la 042 fue una sola vez, al migrar).
 - **La semilla se renueva** con `semilla-fraude/quitar.sql` y otro arranque: sus
   fechas son relativas al dia en que se sembro.
+- **Una resena falsa se oculta, no se borra** (migracion 052). En el panel, Fraude,
+  Resenas en anillo, Ver detalle real, columna En la tienda. Sale de la ficha y del
+  promedio, pero sigue en el grafo y en la senal, que es la evidencia, y su autor
+  no puede volver a resenar ese producto de ese vendedor.
 
 ## Probado
 

@@ -130,13 +130,17 @@ MODULOS = {
     "pedidos": ("Pedidos y pagos", "#FFF2CC", "#D6B656",
                 ["pedido", "estado_pedido", "pedido_producto", "pago", "estado_pago", "metodo_pago",
                  # los pedidos que borran las semillas, para ClickHouse (046)
-                 "pedido_quitado"]),
+                 "pedido_quitado",
+                 # quien cambio cada pedido y si fue la tienda (051)
+                 "pedido_cambio_estado"]),
     "resenas": ("Resenas", "#E1D5E7", "#9673A6",
                 # evento_comentario (034): la cola que lleva cada resena con su
                 # vector a mesh_comentarios de Elasticsearch
                 ["resena", "comentario", "likes", "evento_comentario",
                  # el vector de cada resena en pgvector (040)
-                 "vector_comentario"]),
+                 "vector_comentario",
+                 # la resena oculta por la tienda, sin borrarla (052)
+                 "estado_resena", "resena_moderacion"]),
     "fraude": ("Fraude y grafo", "#F8CECC", "#B85450",
                ["alerta_fraude", "tipo_alerta_fraude", "estado_alerta_fraude", "notificacion_fraude",
                 "anillo_fraude", "tipo_anillo_fraude", "anillo_fraude_resena", "evento_grafo",
@@ -159,7 +163,9 @@ DISPOSICION = [
      "rol_permiso", "auditoria_permiso"],
     ["rol_usuario", "usuarios", "estado_usuario"],
     ["propuesta_producto", "|", "precio_historial", "oferta", "stock_movimiento", "pedido", "|",
-     "resena", "comentario", "likes", "evento_comentario", "vector_comentario", "|",
+     "resena", "comentario", "likes", "evento_comentario", "vector_comentario",
+     # la resena oculta por la tienda (052)
+     "estado_resena", "resena_moderacion", "|",
      "alerta_fraude", "notificacion_fraude", "|",
      "hallazgo_evento_fraude_cuenta"],
     ["rechazo_producto", "|", "estado_oferta", "rechazo_oferta", "motivo_movimiento",
@@ -169,7 +175,8 @@ DISPOSICION = [
      "|", "tipo_alerta_fraude", "estado_alerta_fraude", "tipo_anillo_fraude", "evento_grafo",
      "evento_grafo_compra",
      "|", "hallazgo_evento_fraude", "tipo_hallazgo_evento"],
-    ["metodo_pago", "estado_pago", "pedido_quitado", "|",
+    # quien cambio cada pedido (051), junto a pago
+    ["metodo_pago", "estado_pago", "pedido_quitado", "pedido_cambio_estado", "|",
      # el ACL de la aplicacion (049), las reservas (045) y los avisame (044)
      "permiso_oferta", "tipo_permiso_oferta", "auditoria_permiso_oferta", "|",
      "reserva_venta_relampago", "estado_reserva_venta_relampago", "|",

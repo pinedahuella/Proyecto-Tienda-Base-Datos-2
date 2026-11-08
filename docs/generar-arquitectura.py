@@ -47,7 +47,7 @@ CAJAS = [
         "recorridos de dos saltos en vivo",
     ], "#E1D5E7", "#9673A6"),
     ("pg", "PostgreSQL 18", "FUENTE DE VERDAD", [
-        "93 tablas y 117 llaves foráneas",
+        "96 tablas y 126 llaves foráneas",
         "pedidos, pagos, ofertas, stock",
         "la verdad del carrito y las reservas",
         "de venta relámpago",
@@ -283,7 +283,7 @@ def construir():
     x0 = 40
 
     L.texto(x0, 14, 1500, 30, "Mesh, arquitectura políglota con seis motores de persistencia", 20, negrita=True)
-    L.texto(x0, 48, 1700, 24, "Estado al 2 de noviembre de 2026. Las flechas continuas son lo que hace el backend, "
+    L.texto(x0, 48, 1700, 24, "Estado al 7 de noviembre de 2026. Las flechas continuas son lo que hace el backend, "
             "las punteadas y numeradas son datos que viajan de un motor a otro, y su mecanismo está en la leyenda.",
             11, gris=True)
 

@@ -1,9 +1,10 @@
 # Presentacion de la Entrega final
 
 Una sola pagina HTML de 1920x1080 que se escala a la pantalla, con la misma
-tecnica de las presentaciones de LECTORTIE e ITIL. 25 laminas en tres partes,
-la tienda y sus seis bases (1 a 7), lo que la tienda aprende y como resiste (8 a
-13) y la Entrega final con los vectores y el control de acceso (14 a 25).
+tecnica de las presentaciones de LECTORTIE e ITIL. 29 laminas para 30 minutos,
+en tres partes, la tienda y todo lo que hace, con un producto nuevo de punta a
+punta (1 a 9), lo que la tienda aprende y como resiste, con el panel del admin
+(10 a 17), y la Entrega final con los vectores y el control de acceso (18 a 29).
 
 - Abrir `index.html` en Edge o Chrome. Flechas, espacio o clic avanzan, flecha
   izquierda o clic en el cuarto izquierdo retroceden, F pantalla completa,
@@ -18,7 +19,7 @@ la tienda y sus seis bases (1 a 7), lo que la tienda aprende y como resiste (8 a
   `docs/diagrama-arquitectura.png`), las fotos del equipo y el escudo.
 - `GUION.md` dice quien presenta cada lamina, que decir, que se hace en la
   pantalla y en que archivo y linea esta cada cosa.
-- `postman/` tiene la coleccion de Postman de la lamina 24, 64 peticiones, 56
+- `postman/` tiene la coleccion de Postman de la lamina 28, 64 peticiones, 56
   que comprueban los 401, 403 y 409 y 8 que intentan una inyeccion SQL. Las claves
   de las bases van en `postman/secrets/`, que no se sube a git.
   `postman/importar-a-postman.ps1` lee esas claves del `.env` de la raiz y mete

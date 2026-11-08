@@ -3,7 +3,73 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-11-04, manana**.
+Ultima actualizacion: **2026-11-07, noche**.
+
+**EMPIEZA AQUI (07-11, noche). La presentacion a 30 minutos y lo que la tienda gestiona desde el panel.** Respaldo
+previo `respaldos/david_antes_noche_20261107_2004.dump`. Avance minuto a minuto en `NOCHE-07-11-LEEME.txt` (raiz,
+fuera de git). Todo probado contra las bases de la PC de Jose David. SIN COMMIT: Meme no lo pidio.
+- **Presentacion a 30 minutos, 29 laminas.** Parte 1 (1 a 9) la tienda y todo lo que hace, con un producto nuevo de
+  punta a punta en la lamina 8: el vendedor escribe Cafetera espresso Alba y el vector le dice Puede que ya exista
+  (la Cafetera Alba Espresso, id 33), propone Cafetera de goteo Aroma 12 tazas (sugiere Cocina, sin duplicado), el
+  admin la aprueba, el vendedor le publica una oferta, el admin la aprueba en Ofertas, Revisar ofertas, y la
+  compradora la compra. Parte 2 (10 a 17) Neo4j no son solo anillos (3 en circulo y 4 sin circulo, la consulta de
+  coordinadas en `patrones-fraude-detector.service.ts:342`), los 30 tipos de fraude por base y el panel del admin
+  pestana por pestana. Parte 3 (18 a 29) igual que antes, con las claves de cada base en la tabla de la 27 (Meme lo
+  decidio). Tiempos con la voz Sabina 2,8, 4,1 y 4,3 min, unos 11, 8 y medio y 10 con lo de la pantalla.
+- **El tunel ya no se apaga solo.** `remoto/desactivar.ps1` y `.sh` lo paraban siempre, aunque lo hubiera
+  levantado otra consola, y cada demo del panel de comandos dejaba a Postman sin las carpetas 6 y 7. Ahora
+  `activar` anota `MESH_REMOTO_TUNEL_PROPIO` (1 si lo levanto, 0 si reuso uno vivo) y `desactivar` solo para el
+  suyo. Probado en vivo las dos versiones el 07-11, el tunel 67412 siguio prendido.
+- **Diez rutas nuevas, solo del admin, y cuatro permisos (rol_permiso de 76 a 80).** 051 la tienda cancela
+  cualquier pedido (tambien enviado o entregado) y lo marca enviado o entregado, `pedido_cambio_estado` dice quien;
+  al cancelar la tienda no corren los detectores contra el comprador y el detector de resenas canceladas solo
+  cuenta lo que cancelo el mismo comprador (R-CASI-3 igual). La devolucion SI va a ClickHouse, a nombre del
+  comprador y con `por_la_tienda = 1` (columna nueva, ya aplicada en la ClickHouse de David): el pedido sale de
+  mas vendidos, combos y tendencias, y F5 y el embudo no la cuentan. El ETL de compras pone la marca leyendo
+  `pedido_cambio_estado`. Antes no se mandaba y el ETL la copiaba despues a nombre del comprador, sin marca. 052 `estado_resena`, la tienda oculta una resena sin borrarla (sigue
+  en Neo4j y en las senales; el UNIQUE de la 011 no deja volver a resenar). 053 la tienda pausa, retira o ajusta
+  la oferta de cualquier vendedor, sin el precio. 054 la tienda crea categorias, las renombra (un updateMany en
+  MongoDB, PostgreSQL es el dueno y se copia en la misma transaccion) y les agrega caracteristicas. Ademas un
+  producto retirado ya no se cobra aunque este en un carrito (`producto_no_disponible`). Panel: Dashboard,
+  Pedidos, columna Gestion; Catalogo, botones Ofertas y Categorias; Fraude, Resenas en anillo, columna En la
+  tienda; Ocultar en la ficha. Detalles de pantalla: cuentas plegadas a 8 en Fraude, aire bajo los botones del
+  caso, fondo en Compartidas contigo, Publicar oferta ya no dice que nace activa a un vendedor, a una propuesta
+  rechazada ya no se le ofrece Aprobar.
+- **Una carrera que ya existia, arreglada.** Los workers del buscador y de los vectores bajaban su bandera a ciegas
+  despues de indexar y un cambio hecho mientras tanto se perdia (20 productos de Fragancias quedaron con el nombre
+  de prueba en Elastic). Ahora `findOneAndUpdate` con el documento de antes, y si cambio la bandera vuelve a subir.
+- **Pruebas nuevas, todas en verde:** `pedidos_tienda.mjs` 34 (con la devolucion marcada en ClickHouse),
+  `resenas_moderar.mjs` 20, `ofertas_tienda.mjs` 23, `categorias_tienda.mjs` 26, `producto_inactivo.mjs` 13. Al dia:
+  `permisos_rol.sh` 183 (42 permisos), `permisos_cobertura.cjs` 12 (146 rutas privadas), Newman 64/64.
+- **La bateria entera contra David el 07-11 en la noche:** las 50 de `correr_todas.sh` (sin las tres de modo remoto)
+  con exit 0, 2964 comprobaciones OK y 0 FALLA. Despues, con el backend nuevo, las que tocan lo cambiado otra vez en
+  verde. `caidas.mjs` con el interruptor 51 apagadas y 51 congeladas. `clickhouse/correr_consultas.sh` con dos
+  controles nuevos de `por_la_tienda` (la cuenta 4004 y el producto 30 de la siembra). Recorrido en Edge 17 de 17.
+  La coleccion de Postman reemplazada en el Postman de Meme y corrida ahi, 64 de 64; si el Runner se queda en
+  Preparing to run, Ctrl+R. `caidas_varias.mjs` no se corrio: compra y cancela seis veces con compradora.norte.
+- **El carrito revivia al vaciarlo en seguida (bug viejo, arreglado el 08-11 de madrugada).** Un `DELETE /carrito`
+  justo despues de agregar chocaba con la replica a PostgreSQL de ese agregado y la linea volvia en el siguiente
+  GET (12 de 12 con un PUT y un DELETE seguidos). Era el producto olvidado en el carrito de compradora.norte, que
+  dejaba `producto_inactivo.mjs`. Arreglo en `carrito.service.ts`, `replicarUnaVez()`; prueba nueva
+  `pruebas/carrito_vaciar.mjs`; detalle en la nota de `backend/cambio_propuestas/2026-11-07_2200-*`.
+- **compradora.norte y F5.** Las pruebas compran y cancelan con ella, y quedo con 29 devueltas de 57 en 30 dias:
+  F5 la marco (senal 19469). Se descarto por la API del admin, y con los mismos pedidos no se reabre. Cada
+  corrida de `pedidos_tienda.mjs` o `caidas_varias.mjs` le suma una o seis cancelaciones; antes de presentar no
+  correrlas, o descartar otra vez en Fraude.
+- **Arnes:** `correr_detectores_fraude.cjs` y `correr_detectores_resenas.cjs` cargan el `.env` del backend con
+  `override`. En modo remoto el detector de login lento entraba como mesh_backend con la clave de elastic y se
+  cortaba con 401. Lint del backend en 0 (habia 53 errores de lo de esta noche) y tsc en 0.
+- **Esquema:** 96 tablas y 126 llaves, migraciones 001 a 054. ER de la Entrega 1 regenerado con
+  `docs/actualizar-er.py` (54 tablas agregadas, 86 flechas, original intacto) y exportado con draw.io; el ER general
+  y el diagrama de arquitectura tambien. Informe final con 3.6 y 4.2 al dia; PREGUNTAS 181 a 189.
+- **Quedo en la base de David por las pruebas y el ensayo:** productos de prueba inactivos 1106 (tostadora del
+  primer ensayo), 1107 a 1110 (producto_inactivo, la prueba reutiliza el 1110) y 1111 a 1115 (molinillos del
+  recorrido en Edge), con sus ofertas retiradas; pedidos de prueba cancelados 1960 a 1965, 2041 a 2049. Las siete
+  ofertas a Q15 de los anillos de esta bateria (cuentas anit1126291 en adelante) retiradas con la ruta nueva del
+  admin, como las de antes. El pedido 1958 de
+  compradora.norte lo cancelo por error el recorrido en Edge y se dejo exactamente como estaba (comprado, pagado,
+  stock 17) con SQL. Para la presentacion, si la cafetera de goteo ya se uso en un ensayo, retirarla o cambiarle el
+  nombre (lo dice Antes de presentar).
 
 **EMPIEZA AQUI (04-11, manana). Lo que corto el apagon del 02-11, terminado contra la PC de Jose David, y la app
 revisada pantalla por pantalla.** Respaldos previos `respaldos/david_antes_bateria_20261104_0649.dump` y

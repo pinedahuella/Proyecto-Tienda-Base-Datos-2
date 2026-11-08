@@ -72,6 +72,12 @@ else
         pruebas/caidas.mjs
         pruebas/caidas_varias.mjs
         pruebas/dos_paises.sh
+        pruebas/pedidos_tienda.mjs
+        pruebas/resenas_moderar.mjs
+        pruebas/ofertas_tienda.mjs
+        pruebas/categorias_tienda.mjs
+        pruebas/producto_inactivo.mjs
+        pruebas/carrito_vaciar.mjs
         pruebas/falla_checkout.sh
     )
 fi

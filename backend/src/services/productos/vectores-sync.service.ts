@@ -133,6 +133,9 @@ export class VectoresSyncService {
       activo: boolean;
     }[] = [];
     const listos: number[] = [];
+    // Lo que se proceso de cada producto: si al bajar la bandera el documento
+    // ya dice otra cosa, se cambio mientras se calculaba y va otra vez.
+    const firmas = new Map<number, string>();
     let soloGrupoOActivo = 0;
 
     for (const producto of pendientes) {
@@ -146,6 +149,7 @@ export class VectoresSyncService {
         `${producto.categoria?.nombre ?? ''}|${producto.descripcion ?? ''}`.trim(),
       );
       const activo = producto.estado === 'activo';
+      firmas.set(producto._id, firmaDe(producto));
       const previo = guardados.get(producto._id);
 
       if (previo == null || previo.texto_hash !== hash) {
@@ -219,12 +223,25 @@ export class VectoresSyncService {
 
     if (listos.length > 0) {
       try {
-        await mongoDb
-          .collection<Producto>('productos')
-          .updateMany(
-            { _id: { $in: listos } },
+        // Uno por uno y de forma atomica, devolviendo el documento de ANTES:
+        // si alguien lo cambio mientras Ollama calculaba (y volvio a poner la
+        // bandera), el vector guardado es del texto viejo y la bandera vuelve
+        // a subir. Antes un updateMany la bajaba a ciegas y ese cambio se
+        // perdia (la misma carrera que tenia el worker del buscador).
+        const coleccion = mongoDb.collection<Producto>('productos');
+        for (const id of listos) {
+          const antes = await coleccion.findOneAndUpdate(
+            { _id: id },
             { $unset: { pendiente_vector: '' } },
+            { returnDocument: 'before' },
           );
+          if (antes != null && firmaDe(antes) !== firmas.get(id)) {
+            await coleccion.updateOne(
+              { _id: id },
+              { $set: { pendiente_vector: true } },
+            );
+          }
+        }
       } catch (error) {
         this.logger.warn(
           `worker de vectores: no se pudo limpiar pendiente_vector en Mongo (${(error as Error)?.message ?? error})`,
@@ -297,4 +314,16 @@ export class VectoresSyncService {
       ],
     );
   }
+}
+
+/**
+ * Lo que decide el vector de un producto y sus dos banderas de vector_producto:
+ * el texto (su md5), el grupo de copias y si esta activo. Si cambia, hay que
+ * volver a pasar por el worker.
+ */
+function firmaDe(producto: ProductoPendiente): string {
+  const grupo = md5(
+    `${producto.categoria?.nombre ?? ''}|${producto.descripcion ?? ''}`.trim(),
+  );
+  return `${md5(construirTexto(producto))}|${grupo}|${producto.estado === 'activo'}`;
 }

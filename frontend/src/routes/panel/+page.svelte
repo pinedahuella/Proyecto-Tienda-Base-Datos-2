@@ -876,7 +876,7 @@
 					     commit `bd12cd4` el backend le abre las mismas rutas que a la
 					     tienda, asi que se le pintan las mismas pantallas. -->
 					{#if visitadas.has('catalogo')}
-						<PanelVendedor alExpirarSesion={expiro} />
+						<PanelVendedor alExpirarSesion={expiro} administraOfertas={esAdmin} />
 					{/if}
 				</div>
 

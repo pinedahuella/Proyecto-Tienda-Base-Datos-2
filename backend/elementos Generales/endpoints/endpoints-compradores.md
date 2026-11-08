@@ -1,5 +1,13 @@
 # Endpoints de comprador
 
+> **2026-11-07 (migracion 051).** `GET /comprador/pedidos` suma
+> `cancelado_por_tienda` (true si lo cancelo la tienda). `POST
+> /comprador/pedidos/:id/cancelar` sigue cancelando solo lo `comprado`: un
+> pedido `enviado` o `entregado` contesta **409**, porque ya solo lo cancela la
+> tienda (`POST /admin/pedidos/:id/cancelar`, en [endpoints.md](endpoints.md)).
+> Por dentro ahora llama a `cancelar_pedido_por()` y queda anotado en
+> `pedido_cambio_estado`.
+
 Este archivo documenta solo las rutas de `/comprador/*`. Las demás rutas del
 backend están en [endpoints.md](endpoints.md) (usuario, perfil, direcciones,
 admin), [endpoints-productos.md](endpoints-productos.md) (el catálogo

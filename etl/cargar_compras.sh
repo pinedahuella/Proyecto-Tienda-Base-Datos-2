@@ -99,11 +99,16 @@ copiar() { # tabla, motivo, etiqueta
 
     local filas
     filas="$(grep -c . "$TRABAJO" || true)"
+    # extraer_compras.sql le suma por_la_tienda a las devoluciones (2026-11-07).
+    local columnas="fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip, lote"
+    if [ "$tabla" = "devolucion_producto" ]; then
+        columnas="$columnas, por_la_tienda"
+    fi
     if [ "$filas" -gt 0 ]; then
         docker exec -i mesh-clickhouse clickhouse-client \
             --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" \
             --database "$CH_BASE" \
-            --query "INSERT INTO $tabla (fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip, lote) FORMAT TabSeparated" \
+            --query "INSERT INTO $tabla ($columnas) FORMAT TabSeparated" \
             < "$TRABAJO"
     fi
 

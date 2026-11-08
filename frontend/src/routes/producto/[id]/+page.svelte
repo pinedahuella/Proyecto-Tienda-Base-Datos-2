@@ -538,11 +538,18 @@
 	 * Sale de la misma peticion que ya se hacia, no de una nueva.
 	 */
 	let correoSesion = $state<string | null>(null);
+	/**
+	 * Quien tiene `resenas.moderar` (en la semilla, el admin) puede ocultar
+	 * resenas desde aqui (migracion 052). Sale de los permisos de /usuario/yo,
+	 * asi que sigue lo que diga la matriz de Permisos.
+	 */
+	let puedeModerar = $state(false);
 
 	async function mirarSesion() {
-		const r = await pedir<{ correo_electronico?: string }>('/usuario/yo');
+		const r = await pedir<{ correo_electronico?: string; permisos?: string[] }>('/usuario/yo');
 		haySesion = r.ok;
 		correoSesion = r.ok ? (r.payload?.correo_electronico ?? null) : null;
+		puedeModerar = r.ok && (r.payload?.permisos ?? []).includes('resenas.moderar');
 		if (r.ok) void cargarEnCarrito();
 	}
 
@@ -1193,6 +1200,7 @@
 					idProducto={id}
 					{haySesion}
 					{correoSesion}
+					{puedeModerar}
 					abrirAlLlegar={vieneAResenar}
 					{vendedorSugerido}
 					alContar={(n) => (totalResenas = n)}

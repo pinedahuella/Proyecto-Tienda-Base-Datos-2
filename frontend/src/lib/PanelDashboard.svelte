@@ -120,6 +120,9 @@
 		total: string;
 		unidades: number;
 		departamento: string | null;
+		/** Del ultimo cambio de estado (migracion 051). true si lo hizo la tienda. */
+		por_la_tienda: boolean | null;
+		motivo: string | null;
 	}
 	interface Pedidos {
 		pedidos: FilaPedido[];
@@ -255,6 +258,62 @@
 		if (filtroTexto.trim()) partes.push(`texto=${encodeURIComponent(filtroTexto.trim())}`);
 		await traer<Pedidos>(`pedidos?${partes.join('&')}`, (s) => (pedidos = s), esta);
 	}
+	// La tienda gestiona cada pedido desde el registro (migracion 051):
+	// marcarlo enviado o entregado, o cancelarlo aunque ya se haya enviado.
+	// Cancelar pide confirmar en la misma fila, sin ventanas del navegador.
+	let pedidoEnCurso = $state<number | null>(null);
+	let confirmandoCancelar = $state<number | null>(null);
+	let motivoCancelar = $state('');
+	let avisoPedido = $state('');
+	let errorPedido = $state('');
+	async function gestionarPedido(p: FilaPedido, que: 'enviado' | 'entregado' | 'cancelar') {
+		pedidoEnCurso = p.id_pedido;
+		avisoPedido = '';
+		errorPedido = '';
+		const motivo = que === 'cancelar' ? motivoCancelar.trim() || null : null;
+		const r = await pedir<unknown>(
+			`/admin/pedidos/${p.id_pedido}/${que}`,
+			conJson('POST', que === 'cancelar' ? { motivo } : {})
+		);
+		pedidoEnCurso = null;
+		if (r.estado === 401) {
+			alExpirarSesion();
+			return;
+		}
+		if (!r.ok) {
+			errorPedido = `Pedido ${p.id_pedido}. ${mensajeUtil(r)}`;
+			return;
+		}
+		const estado = que === 'cancelar' ? 'cancelado' : que;
+		// Se cambia la fila en su sitio en vez de volver a pedir la pagina, que
+		// la vaciaria mientras carga y se perderia de vista el pedido tocado.
+		if (pedidos.datos) {
+			pedidos = {
+				...pedidos,
+				datos: {
+					...pedidos.datos,
+					pedidos: pedidos.datos.pedidos.map((x) =>
+						x.id_pedido === p.id_pedido
+							? {
+									...x,
+									estado,
+									por_la_tienda: true,
+									motivo,
+									estado_pago: que === 'cancelar' && x.estado_pago ? 'reembolsado' : x.estado_pago
+								}
+							: x
+					)
+				}
+			};
+		}
+		avisoPedido =
+			que === 'cancelar'
+				? `Pedido ${p.id_pedido} cancelado por la tienda. Se devolvieron las unidades y el pago quedo reembolsado.`
+				: `Pedido ${p.id_pedido} marcado como ${estado}.`;
+		confirmandoCancelar = null;
+		motivoCancelar = '';
+	}
+
 	let esperaTexto: ReturnType<typeof setTimeout> | undefined;
 	function alEscribirTexto() {
 		clearTimeout(esperaTexto);
@@ -986,6 +1045,8 @@
 					aria-label="Buscar pedido"
 				/>
 			</div>
+			{#if avisoPedido}<p class="hecho" role="status">{avisoPedido}</p>{/if}
+			{#if errorPedido}<p class="aviso" role="alert">{errorPedido}</p>{/if}
 			{#if pedidos.error}<p class="aviso">{pedidos.error}</p>
 			{:else if pedidos.datos && pedidos.datos.pedidos.length === 0}
 				<p class="nota">Ningun pedido con esos filtros.</p>
@@ -1002,6 +1063,7 @@
 								<th class="ocultable">Departamento</th>
 								<th class="num">Unidades</th>
 								<th class="num">Total</th>
+								<th>Gestion</th>
 							</tr>
 						</thead>
 						<tbody>
@@ -1013,11 +1075,60 @@
 										<span class="cliente">{p.cliente}</span>
 										<span class="apagado correo">{p.correo}</span>
 									</td>
-									<td><span class="estado e-{p.estado}">{NOMBRE_ESTADO[p.estado] ?? p.estado}</span></td>
+									<td>
+										<span class="estado e-{p.estado}">{NOMBRE_ESTADO[p.estado] ?? p.estado}</span>
+										{#if p.por_la_tienda && p.estado === 'cancelado'}
+											<span class="apagado por-tienda" title={p.motivo ?? ''}>por la tienda</span>
+										{/if}
+									</td>
 									<td class="apagado ocultable">{p.metodo ? mayuscula(p.metodo) : 'Sin pago'}{p.estado_pago && p.estado_pago !== 'pagado' ? `, ${p.estado_pago}` : ''}</td>
 									<td class="apagado ocultable">{p.departamento ?? ''}</td>
 									<td class="num">{p.unidades}</td>
 									<td class="num">{quetzales(p.total)}</td>
+									<td class="gestion">
+										{#if confirmandoCancelar === p.id_pedido}
+											<div class="confirmar">
+												<input
+													type="text"
+													maxlength="300"
+													placeholder="Motivo, si quieres"
+													bind:value={motivoCancelar}
+													aria-label="Motivo de la cancelacion"
+												/>
+												<button
+													type="button"
+													class="peligro"
+													disabled={pedidoEnCurso === p.id_pedido}
+													onclick={() => gestionarPedido(p, 'cancelar')}
+												>
+													{pedidoEnCurso === p.id_pedido ? 'Cancelando...' : 'Si, cancelar'}
+												</button>
+												<button type="button" onclick={() => (confirmandoCancelar = null)}>No</button>
+											</div>
+										{:else if p.estado !== 'cancelado'}
+											{#if p.estado === 'comprado'}
+												<button type="button" disabled={pedidoEnCurso === p.id_pedido} onclick={() => gestionarPedido(p, 'enviado')}>
+													Enviado
+												</button>
+											{/if}
+											{#if p.estado === 'comprado' || p.estado === 'enviado'}
+												<button type="button" disabled={pedidoEnCurso === p.id_pedido} onclick={() => gestionarPedido(p, 'entregado')}>
+													Entregado
+												</button>
+											{/if}
+											<button
+												type="button"
+												class="suave-rojo"
+												disabled={pedidoEnCurso === p.id_pedido}
+												onclick={() => {
+													confirmandoCancelar = p.id_pedido;
+													motivoCancelar = '';
+												}}
+											>
+												Cancelar
+											</button>
+										{/if}
+									</td>
 								</tr>
 							{/each}
 						</tbody>
@@ -1586,6 +1697,86 @@
 		border: 1px solid var(--linea);
 		border-radius: 999px;
 		white-space: nowrap;
+	}
+
+	.por-tienda {
+		display: block;
+		margin-top: 2px;
+		font-size: var(--f-xs);
+	}
+
+	/* ---------- gestion de cada pedido (migracion 051) ---------- */
+	.hecho {
+		margin: 0;
+		padding: 10px 12px;
+		font-size: var(--f-sm);
+		color: var(--g3);
+		background: color-mix(in srgb, var(--g3) 12%, transparent);
+		border-radius: var(--r);
+	}
+
+	.gestion {
+		white-space: nowrap;
+	}
+
+	.gestion button {
+		padding: 4px 10px;
+		margin-right: 4px;
+		font: inherit;
+		font-size: var(--f-xs);
+		color: var(--tinta);
+		background: none;
+		border: 1px solid var(--linea);
+		border-radius: 999px;
+		cursor: pointer;
+	}
+
+	.gestion button:hover:not(:disabled) {
+		border-color: var(--indigo);
+		color: var(--indigo);
+	}
+
+	.gestion button:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+
+	.gestion .suave-rojo {
+		color: var(--rojo);
+		border-color: color-mix(in srgb, var(--rojo) 45%, transparent);
+	}
+
+	.gestion .suave-rojo:hover:not(:disabled) {
+		color: var(--rojo);
+		border-color: var(--rojo);
+	}
+
+	.gestion .peligro {
+		color: #fff;
+		background: var(--rojo);
+		border-color: var(--rojo);
+	}
+
+	.gestion .peligro:hover:not(:disabled) {
+		color: #fff;
+		border-color: var(--rojo);
+	}
+
+	.confirmar {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+	}
+
+	.confirmar input {
+		width: 130px;
+		padding: 4px 8px;
+		font: inherit;
+		font-size: var(--f-xs);
+		color: var(--tinta);
+		background: var(--panel);
+		border: 1px solid var(--linea);
+		border-radius: var(--r);
 	}
 
 	.e-cancelado {

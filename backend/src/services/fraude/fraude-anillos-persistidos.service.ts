@@ -351,12 +351,32 @@ export class FraudeAnillosPersistidosService {
       manejarErrorGrafo(this.logger, error);
     }
 
+    // Si cada resena se ve hoy en la tienda (052), para ocultarla o volverla
+    // a publicar desde el mismo detalle. El grafo la guarda igual.
+    const estados = new Map<number, string>();
+    try {
+      const { rows } = await pool.query<{ id_resena: string; estado: string }>(
+        `SELECT r.id_resena, er.estado_resena_nombre AS estado
+           FROM resena r
+           JOIN estado_resena er ON er.id_estado_resena = r.id_estado_resena
+          WHERE r.id_resena = ANY($1::bigint[])`,
+        [idsResena],
+      );
+      for (const fila of rows) estados.set(Number(fila.id_resena), fila.estado);
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+
     return {
       id_anillo_fraude: id,
       tipo,
       clave,
       resenas: filasGrafo
         .map(aResenaDeAnilloGrafo)
+        .map((r) => ({
+          ...r,
+          estado_en_tienda: estados.get(r.id_resena) ?? null,
+        }))
         .sort((a, b) => a.fecha.localeCompare(b.fecha)),
     };
   }
@@ -413,6 +433,7 @@ function aResenaDeAnilloGrafo(fila: FilaResenaGrafo): ResenaDeAnilloGrafo {
     producto: fila.producto,
     calificacion: aNumero(fila.calificacion),
     fecha: fila.fecha,
+    estado_en_tienda: null,
   };
 }
 

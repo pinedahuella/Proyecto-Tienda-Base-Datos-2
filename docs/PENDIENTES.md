@@ -5,6 +5,18 @@ Lo que se sabe que falta. Un solo sitio para mirar.
 **Al 2026-11-02.** Lo que esta hecho y probado no esta aqui: esta en
 `docs/TRASPASO.md`.
 
+## Como esta al 2026-11-07
+
+La tienda gestiona desde el panel lo que faltaba (migraciones 051 a 054, detalle en el EMPIEZA AQUI del 07-11 de
+`docs/TRASPASO.md`) y la presentacion es de 30 minutos. Sigue faltando lo mismo que el 2 de noviembre, que no es de
+codigo, y suma uno:
+
+| Que | De quien |
+|---|---|
+| El repo es privado. Hacerlo publico o agregar al profesor como colaborador (el 7 de noviembre los colaboradores seguian siendo jptorresg, Tunuba y pinedahuella) | Jose David, es el dueno del repo |
+| ~~Reemplazar en Postman la coleccion importada el 6 de noviembre por la de `presentacion-final/postman`, que ahora espera 42 permisos~~ HECHO el 7 de noviembre en el Postman de Meme, 64 de 64 en su Runner. Si la parte 3 se presenta desde otro Postman, reemplazarla ahi (la vieja da una falla en la carpeta 4) | Quien presente la parte 3 |
+| Commit y push de lo del 7 de noviembre. Todo esta probado pero sin commit, porque Meme no lo ha pedido. Al hacerlo, regenerar los dos Word, que dicen cuantos commits hay | Meme |
+
 ## Como esta al 2026-11-02
 
 Revision entera del proyecto el dia de la entrega final, con las bases de la PC

@@ -3,7 +3,8 @@
  * tiene un codigo modulo.accion, cada ruta privada declara el suyo con
  * @Permiso(...) y la tabla rol_permiso dice que rol lo tiene.
  *
- * Esta lista es la misma de la semilla de la 050. Esta aqui para que un
+ * Esta lista es la misma de la semilla de la 050, mas lo que suman la 051 en
+ * adelante. Esta aqui para que un
  * @Permiso('ofertas.publcar') no compile; que cada codigo exista en la base y
  * que cada ruta privada declare uno lo comprueba pruebas/permisos_cobertura.cjs.
  */
@@ -15,9 +16,13 @@ export const PERMISOS = [
   'carrito.comprar',
   'pedidos.ver',
   'pedidos.cancelar',
+  // 051: la tienda cancela cualquier pedido y lo marca enviado o entregado.
+  'pedidos.administrar',
   'avisos.usar',
   'resenas.escribir',
   'resenas.votar',
+  // 052: la tienda oculta una resena o la vuelve a publicar.
+  'resenas.moderar',
   'productos.historial',
   'productos.para_ti',
   'ofertas.ver',
@@ -28,11 +33,15 @@ export const PERMISOS = [
   'ofertas.revisar',
   'ofertas.compartir',
   'ofertas.usar_compartidas',
+  // 053: la tienda pausa, retira o ajusta la oferta de cualquier vendedor.
+  'ofertas.administrar',
   'catalogo.ver',
   'catalogo.proponer',
   'catalogo.editar',
   'catalogo.revisar',
   'catalogo.buscar_todo',
+  // 054: la tienda crea categorias, las renombra y les agrega caracteristicas.
+  'catalogo.categorias',
   'reglas.ver',
   'reglas.administrar',
   'dashboard.ver',

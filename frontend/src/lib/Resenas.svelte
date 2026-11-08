@@ -62,7 +62,8 @@
 		correoSesion = null,
 		abrirAlLlegar = false,
 		vendedorSugerido = null,
-		alContar = undefined
+		alContar = undefined,
+		puedeModerar = false
 	}: {
 		idProducto: number;
 		haySesion: boolean;
@@ -104,6 +105,12 @@
 		 * Es opcional: quien no lo pase no paga nada.
 		 */
 		alContar?: (total: number) => void;
+		/**
+		 * La tienda ve un boton Ocultar en cada resena (PATCH /admin/resenas/:id,
+		 * migracion 052). La oculta sale de aqui y del promedio, pero no se
+		 * borra: sigue como evidencia en el panel de Fraude.
+		 */
+		puedeModerar?: boolean;
 	} = $props();
 
 	interface Voto {
@@ -303,6 +310,23 @@
 	 * inventar un motivo. Es la misma regla del resto del componente: callar
 	 * antes que afirmar algo que no se sabe.
 	 */
+	let ocultando = $state<number | null>(null);
+	async function ocultar(resena: Resena) {
+		ocultando = resena.id_resena;
+		error = '';
+		const r = await pedir<{ estado: string }>(
+			`/admin/resenas/${resena.id_resena}`,
+			conJson('PATCH', { estado: 'oculta', motivo: 'Oculta desde la ficha del producto' })
+		);
+		ocultando = null;
+		if (!r.ok) {
+			error = mensajeUtil(r);
+			return;
+		}
+		await cargar();
+		confirmacion = 'Resena oculta. Ya no se ve ni cuenta en el promedio, y sigue en Fraude como evidencia.';
+	}
+
 	async function cargarPorQue() {
 		if (!haySesion) {
 			comprado = null;
@@ -718,6 +742,16 @@
 							     una funcionalidad que existe, y nadie encuentra por que.
 							     Antes esto exigia ser el vendedor y le apagaba el boton a
 							     todo el mundo menos a uno. -->
+							{#if puedeModerar}
+								<button
+									type="button"
+									class="contestar ocultar"
+									disabled={ocultando === resena.id_resena}
+									onclick={() => ocultar(resena)}
+								>
+									{ocultando === resena.id_resena ? 'Ocultando...' : 'Ocultar'}
+								</button>
+							{/if}
 							{#if haySesion}
 								<button
 									type="button"
@@ -855,6 +889,16 @@
 	.botones button,
 	.fallo button,
 	.filtro-activo button,
+	.contestar.ocultar {
+		color: var(--rojo);
+		border-color: color-mix(in srgb, var(--rojo) 45%, transparent);
+	}
+
+	/* Ocultar ya empuja a la derecha: Responder va pegado a el, no repartido. */
+	.contestar.ocultar + .contestar {
+		margin-left: 0;
+	}
+
 	.contestar {
 		padding: 8px 16px;
 		font-size: var(--f-base);

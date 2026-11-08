@@ -94,7 +94,7 @@ PostgreSQL y el backend la consulta en cada peticion.
   cuando. Lo que no esta se niega. `SELECT * FROM permisos_por_rol;` la ensena
   como matriz, una fila por accion y una columna por rol.
 - **Quien la revisa.** `PermisoGuard`, despues de `SesionGuard`, en cada una de
-  las 136 rutas privadas. Cada ruta declara su accion con `@Permiso(...)` y el
+  las 146 rutas privadas. Cada ruta declara su accion con `@Permiso(...)` y el
   guard le pregunta a `rol_permiso` en ese momento si el rol de la cuenta la
   tiene. Si no, 403 con el codigo que falta ("No tienes permiso para hacer esto
   (falta ofertas.publicar)"). Una ruta privada sin `@Permiso` tambien se niega.
@@ -115,9 +115,19 @@ de antes, ruta por ruta. `node pruebas/permisos_cobertura.cjs` lo comprueba
 contra la matriz guardada antes del cambio (`pruebas/permisos_matriz_antes_050.json`),
 y tambien que cada ruta privada lleve el guard y un permiso que exista.
 `bash pruebas/permisos_rol.sh` llama a las rutas directo con los tres roles, los
-38 permisos cada uno, quita y devuelve permisos en vivo, y le cambia el rol a una
+42 permisos cada uno, quita y devuelve permisos en vivo, y le cambia el rol a una
 cuenta con la sesion abierta para ver que vale en la peticion siguiente (171
 comprobaciones el 2026-11-02, con las bases de la PC de Meme).
+
+Desde el 2026-11-07 hay cuatro permisos mas, los dos solo del admin, para lo que la
+tienda gestiona en el panel: `pedidos.administrar` (051, cancelar cualquier pedido y
+marcarlo enviado o entregado), `resenas.moderar` (052, ocultar una resena sin
+borrarla), `ofertas.administrar` (053, pausar, retirar o ajustar la oferta de
+cualquier vendedor) y `catalogo.categorias` (054, crear categorias, renombrarlas y
+agregarles caracteristicas). Se reparten igual que los de la 050, solo la primera vez
+que se crean, y `rol_permiso` pasa de 76 a 80 filas. Son diez rutas mas, de 136 a 146.
+Las prueban `pruebas/pedidos_tienda.mjs`, `resenas_moderar.mjs`, `ofertas_tienda.mjs`
+y `categorias_tienda.mjs`, cada una con su 401 y su 403.
 
 ## Cada oferta, por persona
 

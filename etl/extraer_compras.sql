@@ -45,6 +45,12 @@
 --   ip           '::' -- PostgreSQL no guarda la IP de una compra. Es el mismo
 --                comodin que ya usa el ETL de logins para un dato que no existe.
 --   lote         'real'
+--   por_la_tienda  solo en devoluciones (2026-11-07): 1 si el pedido lo
+--                cancelo la tienda, segun pedido_cambio_estado (migracion 051).
+--                Va pegado al final de lote con un tabulador, porque este
+--                mismo SELECT sirve a compra_producto, que no tiene la columna;
+--                cargar_compras.sh y arrancar.ps1 la suman a la lista del
+--                INSERT solo para devolucion_producto.
 --
 -- Sin GROUP BY, una fila por (pedido, oferta): stock_movimiento ya trae una sola
 -- por par y motivo (medido: 0 duplicados en 148 filas), y agrupar de mas esconderia
@@ -77,7 +83,15 @@ SELECT
     sm.cantidad,
     sm.id_pedido,
     '::',
-    'real'
+    'real' || CASE WHEN :'motivo' = 'devolucion'
+                   THEN chr(9) || (EXISTS (
+                            SELECT 1
+                              FROM pedido_cambio_estado pce
+                              JOIN estado_pedido ep ON ep.id_estado_pedido = pce.id_estado_nuevo
+                             WHERE pce.id_pedido = sm.id_pedido
+                               AND pce.por_la_tienda
+                               AND ep.estado_pedido_nombre = 'cancelado'))::int::text
+                   ELSE '' END
 FROM stock_movimiento sm
 JOIN motivo_movimiento mm ON mm.id_motivo_movimiento = sm.id_motivo_movimiento
 JOIN oferta o             ON o.id_oferta = sm.id_oferta

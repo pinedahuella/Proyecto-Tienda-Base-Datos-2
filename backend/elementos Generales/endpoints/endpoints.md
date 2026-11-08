@@ -752,6 +752,133 @@ Requiere la cookie `mesh_token` y rol admin. Trae el catalogo completo de
 
 ---
 
+## Lo que la tienda gestiona (2026-11-07, migraciones 051 a 054)
+
+Las diez rutas son del admin. Cada controller pide su permiso en la clase
+(`pedidos.administrar`, `resenas.moderar`, `ofertas.administrar` y
+`catalogo.categorias`), asi que sin sesion contestan **401** y con un rol que no
+lo tiene **403** con el permiso que falta. Un id con letras da **400** antes de
+tocar la base.
+
+---
+
+## POST /admin/pedidos/:id/cancelar
+
+Cancela un pedido de cualquiera, tambien `enviado` o `entregado`. Devuelve las
+unidades a cada oferta (movimiento `devolucion` a nombre del admin), reembolsa el
+pago y anota el cambio en `pedido_cambio_estado` con `por_la_tienda = true` y el
+motivo. NO corre los detectores de fraude contra el comprador. La devolucion va a
+ClickHouse a nombre del comprador con `por_la_tienda = 1`: el pedido sale de las
+ventas (mas vendidos, combos, tendencias) y F5 y el embudo no la cuentan.
+
+Cuerpo opcional: `{ "motivo": "..." }`, hasta 300 letras.
+
+**201**
+
+```json
+{ "ok": true, "mensaje": "Pedido cancelado por la tienda",
+  "payload": { "id_pedido": 1961, "estado_previo": "entregado", "por_la_tienda": true,
+               "stock": [{ "id_oferta": "426", "id_producto": 77, "id_producto_variante": 155, "stock": 18 }] } }
+```
+
+**404** no existe el pedido. **409** ya estaba cancelado, o es el carrito de
+alguien (`pendiente`). **400** motivo de mas de 300 letras.
+
+---
+
+## POST /admin/pedidos/:id/enviado y POST /admin/pedidos/:id/entregado
+
+Solo hacia adelante: `enviado` sale de `comprado`, `entregado` de `comprado` o de
+`enviado`. Queda en `pedido_cambio_estado`.
+
+**201** `{ "id_pedido": 1961, "estado_previo": "comprado", "estado": "enviado" }`.
+**409** si el salto no vale (por ejemplo, de entregado a enviado).
+
+---
+
+## PATCH /admin/resenas/:id
+
+Oculta una resena o la vuelve a publicar, sin borrarla. Cuerpo
+`{ "estado": "oculta" | "publicada", "motivo": "..." }`. La oculta sale de
+`GET /productos/:id/resenas`, del promedio del producto y de la busqueda por
+intencion, y sigue en el grafo y en las senales. Queda en `resena_moderacion`.
+
+**200** `{ "id_resena": 571, "id_producto": 83, "estado": "oculta" }`.
+**400** estado que no existe. **404** no existe la resena. **409** ya estaba asi.
+
+---
+
+## GET /admin/ofertas?producto=7
+
+Todas las ofertas del producto, de cualquier vendedor y en cualquier estado, las
+activas primero. Cada una con `id_oferta`, `variante`, `vendedor`,
+`correo_vendedor`, `precio`, `precio_final`, `stock`, `estado`, `aprobada` y
+`es_inventario_limitado`. **400** si `producto` no es un id.
+
+---
+
+## PATCH /admin/ofertas/:id
+
+`{ "estado": "activa" | "pausada" | "retirada", "ajuste_stock": -2 }`, uno o los
+dos. Sin precio: el precio es del vendedor. El ajuste va por `reponer_stock()` y
+queda en el kardex a nombre del admin. Contesta la oferta como la del vendedor.
+
+**400** sin estado ni ajuste, o un estado que no es de esos tres. **404** no
+existe. **409** la oferta no esta aprobada (se aprueba en Revisar ofertas), el
+ajuste la dejaria en negativo, o tiene la venta relampago abierta.
+
+---
+
+## GET /admin/categorias
+
+`{ "categorias": [...], "tipos_dato": ["texto", "entero", "decimal", "booleano", "lista"] }`.
+Cada categoria con `id_categoria`, `nombre`, `id_categoria_padre`,
+`categoria_padre`, `es_raiz`, `productos`, `caracteristicas` y
+`caracteristicas_variante` (`{ nombre, tipo_dato, unidad }`), leidas de
+PostgreSQL.
+
+---
+
+## POST /admin/categorias
+
+```json
+{ "nombre": "Jardin", "id_categoria_padre": 3,
+  "caracteristicas": [{ "nombre": "Marca", "tipo_dato": "texto" }],
+  "caracteristicas_variante": [{ "nombre": "Color", "tipo_dato": "texto" }] }
+```
+
+Crea la categoria debajo de una raiz y la copia a `categorias` de Mongo en la
+misma transaccion. Una caracteristica que ya existe con ese nombre se reutiliza
+si es del mismo tipo.
+
+**201** la categoria creada. **400** nombre vacio o de mas de 100 letras, padre
+que no es raiz, tipo que no existe, una caracteristica repetida. **409** ya hay
+una categoria con ese nombre, o la caracteristica existe con otro tipo.
+
+---
+
+## PATCH /admin/categorias/:id
+
+`{ "nombre": "..." }`. Cambia el nombre en PostgreSQL, en su copia de Mongo y en
+todos sus productos con un solo `updateMany`, y los marca para el buscador y los
+vectores. Si es una raiz, tambien en sus hijas.
+
+**200** `{ "id_categoria": 23, "nombre": "...", "productos_actualizados": 44 }`.
+**404** no existe. **409** ya se llama asi, u otra categoria tiene ese nombre.
+
+---
+
+## POST /admin/categorias/:id/caracteristicas
+
+`{ "nombre": "Peso", "tipo_dato": "decimal", "unidad": "kg", "para": "producto" | "variante" }`.
+La suma a la paleta, en PostgreSQL y en Mongo. No toca ningun producto.
+
+**201** `{ "id_categoria": 23, "para": "producto", "caracteristica": { ... } }`.
+**400** a una raiz, o datos que no valen. **409** la categoria ya la ofrece, o
+existe con otro tipo.
+
+---
+
 ## GET /perfil
 
 Requiere la cookie `mesh_token` (cualquier usuario logueado, no solo

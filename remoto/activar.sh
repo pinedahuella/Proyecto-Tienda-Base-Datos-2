@@ -41,6 +41,8 @@ _remoto_activar() {
     fi
     if [ -n "$pid" ]; then
         echo "El tunel a $_remoto_ip ya estaba levantado (pid $pid), se reusa."
+        # No es de esta consola: desactivar.sh lo deja prendido (2026-11-07).
+        export MESH_REMOTO_TUNEL_PROPIO=0
     else
         node "$_remoto_dir/tunel.cjs" "$_remoto_ip" > "$registro" 2>&1 &
         pid=$!
@@ -57,6 +59,7 @@ _remoto_activar() {
             return 1
         fi
         disown "$pid" 2>/dev/null || true
+        export MESH_REMOTO_TUNEL_PROPIO=1
         echo "$pid" > "$_remoto_dir/.tunel.pid"
         echo "$_remoto_ip" > "$_remoto_dir/.tunel.ip"
     fi

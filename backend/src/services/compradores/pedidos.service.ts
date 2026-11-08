@@ -71,7 +71,13 @@ export class PedidosCompradorService {
                 COUNT(pp.id_pedido_producto)::int AS cantidad_lineas,
                 mp.metodo_nombre AS metodo_pago,
                 epa.estado_pago_nombre AS estado_pago,
-                pg.fecha_cancelacion
+                pg.fecha_cancelacion,
+                EXISTS (SELECT 1
+                          FROM pedido_cambio_estado pce
+                          JOIN estado_pedido epn ON epn.id_estado_pedido = pce.id_estado_nuevo
+                         WHERE pce.id_pedido = p.id_pedido
+                           AND pce.por_la_tienda
+                           AND epn.estado_pedido_nombre = 'cancelado') AS cancelado_por_tienda
          FROM pedido p
          JOIN estado_pedido ep ON ep.id_estado_pedido = p.id_estado_pedido
          LEFT JOIN pedido_producto pp ON pp.id_pedido = p.id_pedido
@@ -237,12 +243,10 @@ export class PedidosCompradorService {
   }
 
   /**
-   * Cancela un pedido propio, llamando a cancelar_pedido(). Si estaba
-   * comprado, la propia funcion devuelve las unidades con un movimiento de
-   * devolucion; si estaba pendiente, no toca el stock porque nunca se
-   * descontó. En cualquier caso donde si hubo movimiento, pone al dia los
-   * cuatro numeros calculados de los productos afectados en Mongo (ver
-   * comprarPedido).
+   * Cancela un pedido propio. Si estaba comprado, la funcion devuelve las
+   * unidades con un movimiento de devolucion y reembolsa el pago. El comprador
+   * solo cancela lo `comprado`: lo `enviado` y lo `entregado` ya no (lo dice
+   * cancelar_pedido_por(), migracion 051), y el pendiente es su carrito.
    */
   async cancelarPedido(
     idPedidoParametro: string,
@@ -265,11 +269,103 @@ export class PedidosCompradorService {
       );
     }
 
+    return this.ejecutarCancelacion(idPedido, idUsuario, ip, false, null);
+  }
+
+  /**
+   * La tienda cancela un pedido de cualquiera, tambien enviado o entregado
+   * (`POST /admin/pedidos/:id/cancelar`, permiso `pedidos.administrar`).
+   * Devuelve las unidades y reembolsa igual que si cancelara el comprador,
+   * pero sin culparlo: no corre el detector de resenas canceladas, y la
+   * devolucion va a ClickHouse con `por_la_tienda = 1`, que F5 y el embudo no
+   * cuentan (el pedido si sale de las ventas). Queda anotado quien cancelo y
+   * por que en `pedido_cambio_estado`.
+   */
+  async cancelarComoTienda(
+    idPedidoParametro: string,
+    idAdmin: string,
+    ip: string,
+    motivo: string | null | undefined,
+  ): Promise<CancelacionResultado> {
+    if (!REGEX_ID.test(idPedidoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    if (motivo != null && typeof motivo !== 'string') {
+      throw new ErrorValidacion('El motivo tiene que ser texto');
+    }
+    const texto = (motivo ?? '').trim();
+    if (texto.length > 300) {
+      throw new ErrorValidacion('El motivo no puede pasar de 300 letras');
+    }
+    return this.ejecutarCancelacion(
+      Number(idPedidoParametro),
+      idAdmin,
+      ip,
+      true,
+      texto === '' ? null : texto,
+    );
+  }
+
+  /**
+   * La tienda marca un pedido como enviado o entregado
+   * (`POST /admin/pedidos/:id/enviado|entregado`). Solo hacia adelante: lo
+   * revisa marcar_envio_pedido() en PostgreSQL (migracion 051) y un salto que
+   * no vale vuelve como 409.
+   */
+  async marcarEnvio(
+    idPedidoParametro: string,
+    estado: 'enviado' | 'entregado',
+    idAdmin: string,
+  ): Promise<{ id_pedido: number; estado_previo: string; estado: string }> {
+    if (!REGEX_ID.test(idPedidoParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
     try {
       const resultado = await pool.query<{
-        cancelar_pedido: CancelacionResultado;
-      }>('SELECT cancelar_pedido($1)', [idPedido]);
-      const cancelacion = resultado.rows[0].cancelar_pedido;
+        marcar_envio_pedido: {
+          id_pedido: number;
+          estado_previo: string;
+          estado: string;
+        };
+      }>('SELECT marcar_envio_pedido($1, $2, $3)', [
+        Number(idPedidoParametro),
+        estado,
+        idAdmin,
+      ]);
+      return resultado.rows[0].marcar_envio_pedido;
+    } catch (error) {
+      if (this.esErrorDeNegocio(error)) {
+        throw this.errorDeNegocio(error);
+      }
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * Lo comun a las dos cancelaciones. cancelar_pedido_por() devuelve las
+   * unidades, reembolsa y anota quien cancelo, todo en una transaccion de
+   * PostgreSQL. Despues, fuera de ella y sin esperar, lo que no es la verdad:
+   * el contador de Redis de la venta relampago, el evento de devolucion (con
+   * quien cancelo) y, solo si cancelo el comprador, el detector de resenas
+   * canceladas.
+   */
+  private async ejecutarCancelacion(
+    idPedido: number,
+    idUsuario: string,
+    ip: string,
+    porLaTienda: boolean,
+    motivo: string | null,
+  ): Promise<CancelacionResultado> {
+    try {
+      const resultado = await pool.query<{
+        cancelar_pedido_por: CancelacionResultado;
+      }>('SELECT cancelar_pedido_por($1, $2, $3, $4)', [
+        idPedido,
+        idUsuario,
+        porLaTienda,
+        motivo,
+      ]);
+      const cancelacion = resultado.rows[0].cancelar_pedido_por;
 
       if (cancelacion.stock.length > 0) {
         // Las unidades volvieron al stock de PostgreSQL. Si alguna oferta esta
@@ -283,44 +379,64 @@ export class PedidosCompradorService {
         // `evento_producto` (lo encola el trigger de `oferta`).
 
         // Evento de analitica en ClickHouse (plan pendiente/eventos-clickhouse.md).
-        // Solo cuando el pedido SI estaba comprado (stock.length > 0) -- uno
-        // pendiente nunca llego a "compra" en el embudo, asi que cancelarlo
-        // no es una devolucion que valga la pena medir. Fire-and-forget, SIN
-        // `await`: mismo criterio que `registrarCompra`.
+        // Fire-and-forget, SIN `await`: mismo criterio que `registrarCompra`.
+        // Va siempre, tambien si cancelo la tienda: mas vendidos, combos y
+        // tendencias sacan de las ventas todo pedido que tenga devolucion, y si
+        // no la anotaba el backend la copiaba despues etl/cargar_compras.sh.
+        // Con `porLaTienda` F5 y el embudo no se la cuentan al comprador. El
+        // id_usuario es el comprador, como en la compra, y no el admin.
         const lineas = await pool.query<{
           id_producto: string;
           id_oferta: string;
           cantidad: number;
+          id_comprador: string;
         }>(
-          `SELECT pp.id_producto_mongo AS id_producto, ph.id_oferta, pp.cantidad
+          `SELECT pp.id_producto_mongo AS id_producto, ph.id_oferta, pp.cantidad,
+                  pe.id_usuario AS id_comprador
              FROM pedido_producto pp
              JOIN precio_historial ph ON ph.id_precio_historial = pp.id_precio_historial
+             JOIN pedido pe ON pe.id_pedido = pp.id_pedido
             WHERE pp.id_pedido = $1`,
           [idPedido],
         );
-        // Deteccion de fraude: reseñar y cancelar la compra. Es la cancelacion
-        // la que completa el patron (al escribir la reseña todavia no pasaba).
-        // Fire-and-forget: no retrasa la respuesta, un error solo se loguea.
-        void this.resenasCanceladasDetectorService.detectarInmediato(idPedido);
         void this.eventosService.registrarDevolucion({
-          idUsuario,
+          idUsuario: lineas.rows[0]?.id_comprador ?? idUsuario,
           idPedido,
           ip,
+          porLaTienda,
           lineas: lineas.rows.map((linea) => ({
             idProducto: Number(linea.id_producto),
             idOferta: Number(linea.id_oferta),
             cantidad: linea.cantidad,
           })),
         });
+        if (!porLaTienda) {
+          // Deteccion de fraude: resenar y cancelar la compra. Es la cancelacion
+          // la que completa el patron (al escribir la resena todavia no pasaba).
+          // Fire-and-forget: no retrasa la respuesta, un error solo se loguea.
+          // Si cancelo la tienda no: el comprador no hizo nada.
+          void this.resenasCanceladasDetectorService.detectarInmediato(
+            idPedido,
+          );
+        }
       }
 
       return cancelacion;
     } catch (error) {
       if (this.esErrorDeNegocio(error)) {
-        throw new ErrorConflicto((error as Error).message);
+        throw this.errorDeNegocio(error);
       }
       manejarErrorConexion(this.logger, error);
     }
+  }
+
+  /** `No existe el pedido` es un 404; lo demas de negocio, un 409. */
+  private errorDeNegocio(error: unknown): Error {
+    const codigo = (error as { code?: string } | undefined)?.code;
+    const mensaje = (error as Error).message;
+    return codigo === '23503'
+      ? new ErrorNoEncontrado('No existe un pedido con ese id')
+      : new ErrorConflicto(mensaje);
   }
 
   /** El pedido tiene que existir y ser del usuario logueado. */

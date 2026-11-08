@@ -59,16 +59,34 @@ export class BuscadorSyncService {
         try {
           // `update` con `doc_as_upsert`: crea el documento si no existe y, si
           // existe, reemplaza solo los campos de `aDocumentoIndice`.
+          const indexado = aDocumentoIndice(producto);
           await elasticClient.update({
             index: INDICE,
             id: String(producto._id),
-            doc: aDocumentoIndice(producto),
+            doc: indexado,
             doc_as_upsert: true,
           });
-          await coleccion.updateOne(
+          // La bandera se apaga de forma atomica y devolviendo el documento de
+          // ANTES. Si alguien lo cambio mientras se indexaba (y volvio a poner
+          // la bandera), lo indexado ya no es lo de hoy: se vuelve a prender y
+          // va en la proxima corrida. Antes se apagaba a ciegas y ese cambio se
+          // perdia; paso al renombrar una categoria dos veces seguidas
+          // (2026-11-07): 20 productos quedaron con el nombre viejo.
+          const antes = await coleccion.findOneAndUpdate(
             { _id: producto._id },
             { $unset: { pendiente_busqueda: '' } },
+            { returnDocument: 'before' },
           );
+          if (
+            antes != null &&
+            JSON.stringify(aDocumentoIndice(antes)) !== JSON.stringify(indexado)
+          ) {
+            await coleccion.updateOne(
+              { _id: producto._id },
+              { $set: { pendiente_busqueda: true } },
+            );
+            continue;
+          }
           sincronizados++;
         } catch (error) {
           // Uno solo fallido (Elasticsearch caido, o este producto en

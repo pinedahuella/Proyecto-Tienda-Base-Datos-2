@@ -3611,11 +3611,14 @@ SELECT round(extract(epoch FROM r.fecha_registro)::numeric, 3),
             $lineas = @($crudo | ForEach-Object { $_ -replace "`r", "" } | Where-Object { $_ -ne '' })
             if ($lineas.Count -eq 0) { return 0 }
 
+            # extraer_compras.sql le suma por_la_tienda a las devoluciones (2026-11-07).
+            $columnas = 'fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip, lote'
+            if ($tabla -eq 'devolucion_producto') { $columnas += ', por_la_tienda' }
             ($lineas -join "`n") | docker exec -i mesh-clickhouse clickhouse-client `
                 --user $env_['CLICKHOUSE_USER'] --password $env_['CLICKHOUSE_PASSWORD'] `
                 --database $env_['CLICKHOUSE_DB'] `
                 --input_format_tsv_crlf_end_of_line 1 `
-                --query "INSERT INTO $tabla (fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip, lote) FORMAT TabSeparated" | Out-Null
+                --query "INSERT INTO $tabla ($columnas) FORMAT TabSeparated" | Out-Null
             if ($LASTEXITCODE -ne 0) {
                 Aviso "$tabla no se pudo copiar a ClickHouse."
                 return -1

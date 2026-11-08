@@ -30,6 +30,9 @@ $vivo = Get-CimInstance Win32_Process -Filter "Name='node.exe'" |
 if ($vivo) {
     $pidTunel = $vivo.ProcessId
     Write-Host "El tunel a $Ip ya estaba levantado (pid $pidTunel), se reusa."
+    # No es de esta consola: desactivar.ps1 lo deja prendido (2026-11-07). Antes
+    # lo paraba, y cada demo del panel dejaba sin tunel a Postman y a /play.
+    $env:MESH_REMOTO_TUNEL_PROPIO = '0'
 } else {
     $registro = Join-Path $env:TEMP 'mesh-tunel.log'
     Remove-Item $registro -ErrorAction SilentlyContinue
@@ -47,6 +50,7 @@ if ($vivo) {
         return
     }
     $pidTunel = $p.Id
+    $env:MESH_REMOTO_TUNEL_PROPIO = '1'
     Set-Content -Path (Join-Path $remoto '.tunel.pid') -Value $p.Id
     Set-Content -Path (Join-Path $remoto '.tunel.ip') -Value $Ip
 }

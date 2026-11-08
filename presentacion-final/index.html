@@ -207,7 +207,7 @@ b { font-weight: 600; color: #fff; }
   <p class="sub" data-in="2" style="max-width:1500px;margin-bottom:60px">Un producto describe una cosa del mundo y no es de nadie. Quién lo vende, a qué precio y con cuántas unidades es una oferta. Y cada parte de la tienda hace preguntas muy distintas.</p>
   <div class="cifras">
     <div class="cifra" data-in="3"><div class="v" data-contar="6">6</div><div class="t">bases de datos, cada una por la forma de su pregunta</div></div>
-    <div class="cifra" data-in="4"><div class="v" data-contar="93">93</div><div class="t">tablas en PostgreSQL, de 50 migraciones</div></div>
+    <div class="cifra" data-in="4"><div class="v" data-contar="96">96</div><div class="t">tablas en PostgreSQL, de 54 migraciones</div></div>
     <div class="cifra" data-in="5"><div class="v" data-contar="26">26</div><div class="t">decisiones con su registro, del 1 al 26</div></div>
     <div class="cifra" data-in="6"><div class="v" data-contar="93">93</div><div class="t">comprobaciones del control de acceso, ninguna mal</div></div>
   </div>
@@ -253,6 +253,39 @@ b { font-weight: 600; color: #fff; }
   </div>
 </section>
 
+<!-- Un producto nuevo, de punta a punta -->
+<section class="lamina" style="padding-top:64px">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">La tienda en vivo · Un producto nuevo</p><h2 class="titulo" style="font-size:66px">De la idea del vendedor a la compra</h2></div>
+  <div class="fila" style="align-items:flex-start;gap:44px">
+    <div style="flex:0 0 640px;display:flex;flex-direction:column;gap:16px" data-in="2">
+      <div class="paso" style="--c:var(--mongo);flex:none;padding:20px 26px"><p class="k">1 · Propone el vendedor</p><p>Nombre, descripción y lo que pide su categoría</p></div>
+      <div class="paso" style="--c:var(--pg);flex:none;padding:20px 26px"><p class="k">2 · El vector avisa</p><p>Si ya existe lo dice aunque esté escrito distinto, y sugiere la categoría</p></div>
+      <div class="paso" style="--c:var(--es);flex:none;padding:20px 26px"><p class="k">3 · La tienda lo aprueba</p><p>Pasa a activo y llega solo al buscador en segundos</p></div>
+      <div class="paso" style="--c:var(--pg);flex:none;padding:20px 26px"><p class="k">4 · Su oferta</p><p>Precio y unidades, y la tienda también la aprueba</p></div>
+      <div class="paso" style="--c:var(--redis);flex:none;padding:20px 26px"><p class="k">5 · Se compra</p><p>Carrito, pago en una sola transacción y Mis pedidos</p></div>
+    </div>
+    <div style="flex:1;min-width:0" data-in="3">
+      <img class="captura" src="img/propuesta-duplicado.png" alt="El formulario de proponer avisa que el producto puede que ya exista" style="background:#fff">
+      <p class="pie">El vendedor escribe Cafetera espresso Alba, al revés, y el vector encuentra la Cafetera Alba Espresso que ya está en la tienda. Con un producto que no existe solo sugiere Cocina.</p>
+    </div>
+  </div>
+</section>
+
+<!-- Todo lo que hace la tienda -->
+<section class="lamina" style="padding:64px 90px">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Resumen de la parte 1</p><h2 class="titulo" style="font-size:66px">Todo lo que hace la tienda</h2></div>
+  <div class="fila" style="gap:24px;align-items:stretch">
+    <div class="col tarjeta" data-in="2" style="--c:var(--es);padding:28px 28px"><h3 style="font-size:32px">Quien compra</h3>
+      <ul class="puntos" style="gap:10px"><li style="font-size:23px">Busca aunque escriba mal, con filtros o con una frase</li><li style="font-size:23px">Ve cada vendedor, los parecidos y lo que también compraron</li><li style="font-size:23px">Un carrito que no se pierde y tres formas de pago</li><li style="font-size:23px">Mis pedidos, cancelar y reseñar lo que compró</li><li style="font-size:23px">Avisos si baja de precio o si llega, y alertas de su cuenta</li></ul></div>
+    <div class="col tarjeta" data-in="3" style="--c:var(--mongo);padding:28px 28px"><h3 style="font-size:32px">Quien vende</h3>
+      <ul class="puntos" style="gap:10px"><li style="font-size:23px">Publica ofertas con su precio y sus unidades</li><li style="font-size:23px">Descuentos, ventas relámpago y reglas que se aplican solas</li><li style="font-size:23px">Comparte una oferta con otra cuenta, con permisos y fecha</li><li style="font-size:23px">Propone productos nuevos al catálogo</li><li style="font-size:23px">Ve sus propuestas y por qué se las rechazaron</li></ul></div>
+    <div class="col tarjeta" data-in="4" style="--c:var(--pg);padding:28px 28px"><h3 style="font-size:32px">La tienda y el admin</h3>
+      <ul class="puntos" style="gap:10px"><li style="font-size:23px">Aprueba productos y ofertas</li><li style="font-size:23px">Envía, entrega o cancela cualquier pedido</li><li style="font-size:23px">Pausa o retira ofertas y oculta reseñas falsas</li><li style="font-size:23px">Categorías, catálogo con su historial y reportes</li><li style="font-size:23px">Cuentas, permisos por rol y fraude</li></ul></div>
+    <div class="col tarjeta" data-in="5" style="--c:var(--acento-2);padding:28px 28px"><h3 style="font-size:32px">Lo que hace sola</h3>
+      <ul class="puntos" style="gap:10px"><li style="font-size:23px">Mantiene al día el buscador, el grafo y los vectores</li><li style="font-size:23px">Recomienda Para ti y Viste hace poco</li><li style="font-size:23px">Busca fraude al instante y cada 15 minutos</li><li style="font-size:23px">Sigue vendiendo si se cae una base</li></ul></div>
+  </div>
+</section>
+
 <!-- ClickHouse -->
 <section class="lamina" style="padding-top:70px">
   <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">ClickHouse · Entrega 2</p><h2 class="titulo" style="font-size:70px">Lo que pasa en el tiempo</h2></div>
@@ -275,19 +308,53 @@ b { font-weight: 600; color: #fff; }
 
 <!-- Neo4j -->
 <section class="lamina" style="padding-top:70px">
-  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Neo4j · Entrega 2</p><h2 class="titulo" style="font-size:70px">Las relaciones que delatan</h2></div>
-  <div class="fila" style="align-items:flex-start">
+  <div class="cabeza" data-in="1" style="margin-bottom:30px"><p class="etiqueta">Neo4j · Entrega 2</p><h2 class="titulo" style="font-size:66px">Las relaciones que delatan, y no solo en círculo</h2></div>
+  <div class="fila" style="align-items:flex-start;gap:40px">
     <div style="flex:1" data-in="2">
-      <ul class="puntos" style="--c:var(--neo)">
-        <li>Cuentas, reseñas, compras y productos como grafo. La reseña es un nodo, con su nota, su fecha y su producto</li>
-        <li>Un anillo es un camino que sale de una cuenta y vuelve a ella en 4 a 8 saltos, un par, un triángulo o un cuadrado</li>
-        <li>Se revisa al llegar cada reseña y cada 15 minutos. Ninguna consulta prueba un fraude, señala cuentas para revisar</li>
-        <li>El mismo grafo da quienes lo compraron también llevaron, primero los de su categoría</li>
-      </ul>
-      <p class="term" style="margin-top:30px">MATCH (inicio:Usuario)<br>&nbsp;&nbsp;-[:ESCRIBIO|CALIFICA_A*4..8]-&gt;(inicio)</p>
+      <div class="tarjeta" style="padding:24px 30px;margin-bottom:20px"><h3 style="font-size:30px;color:var(--neo)">En círculo, 3</h3>
+        <ul class="puntos" style="--c:var(--neo);gap:8px"><li style="font-size:25px">Tres o cuatro cuentas que se califican en círculo</li><li style="font-size:25px">Dos que se califican una a la otra</li><li style="font-size:25px">Las mismas dos, sobre el mismo producto</li></ul></div>
+      <div class="tarjeta" style="padding:24px 30px"><h3 style="font-size:30px;color:var(--acento-2)">Sin ningún círculo, 4</h3>
+        <ul class="puntos" style="--c:var(--acento-2);gap:8px"><li style="font-size:25px">Cuentas nuevas que solo le ponen cinco a un vendedor</li><li style="font-size:25px">Una cuenta que califica al mismo vendedor mes tras mes</li><li style="font-size:25px">Dos cuentas que califican lo mismo casi a la vez</li><li style="font-size:25px">Un vendedor nuevo con notas de cuentas recién creadas</li></ul></div>
     </div>
-    <div style="flex:1.15" data-in="3"><img class="captura" src="img/fraude-anillo.png" alt="Una señal de reseñas en el panel del admin"><p class="pie">Panel del admin, Fraude, Reseñas en anillo</p></div>
+    <div style="flex:1" data-in="3">
+      <p class="term"><span class="q" style="display:block">La consulta de dos cuentas coordinadas</span>MATCH (a:Usuario)-[:ESCRIBIO]-&gt;(ra:Resena)<br>&nbsp;&nbsp;-[:SOBRE]-&gt;(p:Producto)&lt;-[:SOBRE]-(rb:Resena)<br>&nbsp;&nbsp;&lt;-[:ESCRIBIO]-(b:Usuario)<br>MATCH (ra)-[:CALIFICA_A]-&gt;(v:Usuario)<br>&nbsp;&nbsp;&lt;-[:CALIFICA_A]-(rb)<br><span class="si">con menos de 24 horas entre las dos, 3 veces o más</span></p>
+      <p class="sub" style="font-size:27px;margin-top:22px">Dos cuentas, dos reseñas, el mismo producto y el mismo vendedor, casi a la misma hora. Ninguna califica a la otra, así que no hay círculo, y aun así el grafo las junta.</p>
+      <p class="pie">Se revisa al llegar cada reseña y cada 15 minutos. El mismo grafo da quienes lo compraron también llevaron.</p>
+    </div>
   </div>
+</section>
+
+<!-- Treinta fraudes -->
+<section class="lamina" style="padding-top:64px">
+  <div class="cabeza" data-in="1" style="margin-bottom:24px"><p class="etiqueta">Fraude en toda la tienda</p><h2 class="titulo" style="font-size:66px">30 tipos, cada uno en la base que mejor lo ve</h2></div>
+  <table class="tabla" data-in="2" style="font-size:26px">
+    <tr><th>Base</th><th>Tipos</th><th>Lo que mira</th></tr>
+    <tr style="--c:var(--neo)"><td>Neo4j</td><td>7</td><td>cómo se califican las cuentas entre ellas</td></tr>
+    <tr style="--c:var(--pg)"><td>PostgreSQL</td><td>9</td><td>reseñas copiadas, estrellas que contradicen el texto y reseñas con la compra cancelada</td></tr>
+    <tr style="--c:var(--redis)"><td>Redis</td><td>4</td><td>contraseñas probadas una tras otra, al instante</td></tr>
+    <tr style="--c:var(--es)"><td>Elasticsearch</td><td>6</td><td>una IP que nunca usó, un viaje imposible y ataques lentos en el día</td></tr>
+    <tr style="--c:var(--ch)"><td>ClickHouse</td><td>4</td><td>compras en ráfaga, muchas cuentas en una IP y devoluciones seriales</td></tr>
+  </table>
+  <p class="sub" data-in="3" style="font-size:28px;margin-top:18px">Cada hallazgo es una <b>señal</b>. Cada 15 minutos las que comparten cuentas se juntan en un <b>caso</b>, y una persona decide.</p>
+</section>
+
+<!-- El menu del admin -->
+<section class="lamina" style="padding:64px 90px">
+  <div class="cabeza" data-in="1" style="margin-bottom:26px"><p class="etiqueta">Resumen de la parte 2</p><h2 class="titulo" style="font-size:66px">El panel del admin, pestaña por pestaña</h2></div>
+  <div class="registro" data-in="2" style="grid-template-columns:repeat(4, 1fr);gap:18px">
+    <div class="adr" style="--c:var(--pg);min-height:112px"><div class="i">Dashboard</div><p>Ventas y clientes, y cada pedido para enviarlo o cancelarlo</p></div>
+    <div class="adr" style="--c:var(--pg);min-height:112px"><div class="i">Reportes</div><p>Pedidos, pagos y cómo paga la gente</p></div>
+    <div class="adr" style="--c:var(--pg);min-height:112px"><div class="i">Ofertas</div><p>Aprobar las de cada vendedor</p></div>
+    <div class="adr" style="--c:var(--pg);min-height:112px"><div class="i">Compartidas</div><p>Las ofertas que otros le dejaron usar</p></div>
+    <div class="adr" style="--c:var(--pg);min-height:112px"><div class="i">Reglas</div><p>Descuentos automáticos y por fecha</p></div>
+    <div class="adr" style="--c:var(--mongo);min-height:112px"><div class="i">Catálogo</div><p>Productos con su historial, sus ofertas y las categorías</p></div>
+    <div class="adr" style="--c:var(--mongo);min-height:112px"><div class="i">Propuestas</div><p>Aprobar los productos que proponen</p></div>
+    <div class="adr" style="--c:var(--pg);min-height:112px"><div class="i">Cuentas</div><p>Rol y estado de cada cuenta</p></div>
+    <div class="adr" style="--c:var(--pg);min-height:112px"><div class="i">Permisos</div><p>Qué puede hacer cada rol</p></div>
+    <div class="adr nuevo" style="--c:var(--neo);min-height:112px"><div class="i">Fraude</div><p>Casos, entradas, reseñas en anillo de Neo4j y ocultar reseñas</p></div>
+    <div class="adr" style="--c:var(--ch);min-height:112px"><div class="i">Tendencias</div><p>Lo que crece, lo más visto y lo más buscado</p></div>
+  </div>
+  <p class="pie" data-in="3">La pestaña de Neo4j es Fraude, en Reseñas en anillo. Los colores son los de la base que contesta cada pestaña.</p>
 </section>
 
 <!-- Si se cae una base -->

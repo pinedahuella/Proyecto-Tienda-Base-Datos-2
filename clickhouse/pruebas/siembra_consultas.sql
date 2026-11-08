@@ -221,6 +221,27 @@ INSERT INTO devolucion_producto (fecha, id_producto, id_oferta, id_usuario, cant
 SELECT now64(3) - INTERVAL 5 DAY + toIntervalHour(number), 29, 29, 4003, 1, 40030 + number,
        toIPv6('::ffff:10.10.0.2')
   FROM numbers(2);
+-- (control, 2026-11-07): la 4004 compra 5 y la TIENDA le cancela 4
+-- (por_la_tienda = 1, migracion 051). Los mismos numeros que la 4001, pero no
+-- devolvio nada: no sale.
+INSERT INTO compra_producto (fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip)
+SELECT now64(3) - INTERVAL 9 DAY + toIntervalHour(number), 29, 29, 4004, 1, 40040 + number,
+       toIPv6('::ffff:10.10.0.4')
+  FROM numbers(5);
+INSERT INTO devolucion_producto (fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip, por_la_tienda)
+SELECT now64(3) - INTERVAL 5 DAY + toIntervalHour(number), 29, 29, 4004, 1, 40040 + number,
+       toIPv6('::ffff:10.10.0.4'), 1
+  FROM numbers(4);
+-- (control del embudo, 2026-11-07): el producto 30 vende 10 y la tienda
+-- cancela 6. Sin la marca seria devolucion alta, con mas que el 26.
+INSERT INTO compra_producto (fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip)
+SELECT now64(3) - INTERVAL 6 DAY, 30, 30, 7000 + number, 1, 97000 + number,
+       toIPv6(concat('::ffff:10.30.0.', toString(number)))
+  FROM numbers(10);
+INSERT INTO devolucion_producto (fecha, id_producto, id_oferta, id_usuario, cantidad, id_pedido, ip, por_la_tienda)
+SELECT now64(3) - INTERVAL 2 DAY, 30, 30, 7000 + number, 1, 97000 + number,
+       toIPv6(concat('::ffff:10.30.0.', toString(number))), 1
+  FROM numbers(6);
 
 
 -- ============================================================

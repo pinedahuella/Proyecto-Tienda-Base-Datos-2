@@ -82,6 +82,12 @@ interface FilaOferta {
   nombre_producto: string | null;
   nombre_variante: string | null;
   estado_variante: string | null;
+  /**
+   * El estado del producto en la copia del catalogo (`producto_catalogo.estado`,
+   * 047). Si la tienda lo retira (`inactivo`), sus ofertas siguen `activa` pero
+   * no se venden. NULL si el producto no esta en la copia.
+   */
+  estado_producto: string | null;
   imagen: string | null;
   /** La fila de `precio_historial` vigente: la que se guarda con la linea. */
   id_precio_historial: string | null;
@@ -1036,6 +1042,22 @@ export class CarritoService {
         () => this.deseadasDesdeRedis(hash),
         { versionEsperada: hash.version, capacidad: 'conflicto' },
       );
+      // Un DELETE /carrito que llego mientras esta copia escribia leyo la
+      // version de antes (la de `hash`) y borro la clave, asi que
+      // marcarSincronizado ya no tiene donde anotar la nueva. El vaciado
+      // pendiente tiene que esperar la version que acaba de dejar esta misma
+      // copia: si no, choca contra ella, PostgreSQL se queda con las lineas y
+      // el proximo GET las revive (2026-11-07: 12 de 12 con un PUT y enseguida
+      // un DELETE, y la prueba producto_inactivo.mjs dejaba su linea en el
+      // carrito de compradora.norte). Si la version no es la de partida, otra
+      // escritura que esta copia no vio toco PostgreSQL, y ahi chocar es lo
+      // correcto.
+      if (
+        this.vaciados.has(idUsuario) &&
+        (this.vaciados.get(idUsuario) ?? null) === hash.version
+      ) {
+        this.vaciados.set(idUsuario, resultado.version);
+      }
       await this.carritoRedis.marcarSincronizado(idUsuario, resultado.version);
       if (Object.keys(hash.lineas).length === 0) {
         // Quedo vacio y PostgreSQL ya lo sabe: la clave sobra. Solo si sigue
@@ -1514,6 +1536,13 @@ export class CarritoService {
     if (oferta.estado_oferta_nombre !== 'activa') {
       return { disponible: false, motivo: 'oferta_no_disponible' };
     }
+    // El producto retirado del catalogo no se vende, aunque la oferta siga
+    // activa y este en el carrito de alguien. No se toca el estado de las
+    // ofertas: si la tienda lo vuelve a activar, todo vuelve solo. Sin fila
+    // en la copia (NULL) se deja pasar, igual que la variante.
+    if (oferta.estado_producto != null && oferta.estado_producto !== 'activo') {
+      return { disponible: false, motivo: 'producto_no_disponible' };
+    }
     // La variante puede haberse desactivado en el catalogo despues de
     // agregarla. Si la variante no esta en `variante_catalogo`,
     // `estadoVariante` es undefined y se deja pasar.
@@ -1550,6 +1579,7 @@ export class CarritoService {
                 pc.nombre AS nombre_producto,
                 vc.nombre_variante,
                 vc.estado AS estado_variante,
+                pc.estado AS estado_producto,
                 vc.imagen,
                 (SELECT ph.id_precio_historial FROM precio_historial ph
                   WHERE ph.id_oferta = o.id_oferta
@@ -1590,6 +1620,8 @@ export class CarritoService {
         return 'ya no esta disponible';
       case 'variante_no_disponible':
         return 'ya no esta disponible en el catalogo';
+      case 'producto_no_disponible':
+        return 'es de un producto que la tienda retiro del catalogo';
       case 'agotado':
         return 'esta agotada';
       case 'stock_insuficiente':

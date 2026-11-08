@@ -13,6 +13,11 @@ import { BaseDatosGrafoService } from './services/base-datos-grafo.service';
 import { UsuarioController } from './controllers/usuario.controller';
 import { UsuarioService } from './services/usuario.service';
 import { AdminUsuariosController } from './controllers/admin/admin-usuarios.controller';
+import { AdminPedidosController } from './controllers/admin/admin-pedidos.controller';
+import { AdminResenasController } from './controllers/admin/admin-resenas.controller';
+import { AdminOfertasController } from './controllers/admin/admin-ofertas.controller';
+import { AdminCategoriasController } from './controllers/admin/admin-categorias.controller';
+import { AdminCategoriasService } from './services/admin/admin-categorias.service';
 import { AdminPermisosController } from './controllers/admin/admin-permisos.controller';
 import { AdminUsuariosService } from './services/admin/admin-usuarios.service';
 import { AdminCatalogosController } from './controllers/admin/admin-catalogos.controller';
@@ -172,6 +177,10 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     BaseDatosGrafoController,
     UsuarioController,
     AdminUsuariosController,
+    AdminPedidosController,
+    AdminResenasController,
+    AdminOfertasController,
+    AdminCategoriasController,
     AdminPermisosController,
     AdminCatalogosController,
     PerfilController,
@@ -244,6 +253,7 @@ import { DisparadorReglasAutomaticoService } from './services/reglas-descuento-a
     RegistroOfertasRedisService,
     RegistroOfertasSyncService,
     PedidosCompradorService,
+    AdminCategoriasService,
     SeguimientosOfertaService,
     PercolarSeguimientosService,
     ResenasService,

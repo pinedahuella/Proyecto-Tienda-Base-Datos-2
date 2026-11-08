@@ -440,6 +440,17 @@ Si diera una fila, el contenedor sigue con la configuracion vieja y hay que rein
   dos consultas siguen en `consultas/` marcadas como fuera de uso, y
   `pruebas/comprobar.py` las sigue midiendo sobre su siembra.
 
+# Quien cancelo, en devolucion_producto (2026-11-07)
+
+Desde la migracion 051 la tienda cancela pedidos de cualquiera. Esa devolucion se
+guarda igual (el pedido tiene que salir de mas vendidos, combos y tendencias, que
+excluyen todo `id_pedido` de esta tabla), a nombre del comprador como su compra,
+pero con `por_la_tienda = 1`. F5 (devoluciones seriales) y T2 (el embudo, la
+devolucion alta) cuentan solo `por_la_tienda = 0`: al comprador le cancelaron, no
+devolvio nada. La columna va en ALTER en `001_esquema.sql` con DEFAULT 0, asi que
+las filas de antes y los INSERT que no la nombran quedan en 0. El ETL de compras la
+calcula con `pedido_cambio_estado`.
+
 # Los pedidos quitados ya se borran de aqui (2026-10-18)
 
 `compra_producto` y `devolucion_producto` son una copia de `stock_movimiento` y el

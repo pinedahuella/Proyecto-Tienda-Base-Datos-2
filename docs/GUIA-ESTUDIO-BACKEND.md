@@ -189,8 +189,8 @@ SELECT EXISTS (
 | Tabla | Linea | Que guarda |
 |---|---|---|
 | `modulo_permiso` | 43 | Los 17 modulos, como `ofertas` o `fraude` |
-| `permiso` | 55 | Los 38 permisos, cada uno de un modulo |
-| `rol_permiso` | 70 | Que rol tiene que permiso, 76 filas. Llave primaria rol y permiso, linea 78 |
+| `permiso` | 55 | Los 38 permisos de la 050, cada uno de un modulo. Con los 4 de la 051 a la 054, 42 |
+| `rol_permiso` | 70 | Que rol tiene que permiso, 80 filas (76 de la 050). Llave primaria rol y permiso, linea 78 |
 | `auditoria_permiso` | 93 | Cada intento negado, y cada permiso dado o quitado |
 
 Quitar una fila de `rol_permiso` vale en la peticion siguiente, porque
@@ -293,7 +293,7 @@ llame recibe 403.
 
 | Ruta | Linea | Permiso | Que hace |
 |---|---|---|---|
-| `GET /admin/permisos` | 37 | `permisos.ver`, en la 32 | La matriz, 3 roles y 38 permisos, con `roles` y `protegido_para` de cada uno |
+| `GET /admin/permisos` | 37 | `permisos.ver`, en la 32 | La matriz, 3 roles y 42 permisos, con `roles` y `protegido_para` de cada uno |
 | `GET /admin/permisos/registro` | 47 | `permisos.ver` | Lo ultimo de `auditoria_permiso` |
 | `POST /admin/permisos/:idRol/:idPermiso` | 61 | `permisos.administrar`, en la 60 | Darle el permiso al rol |
 | `DELETE /admin/permisos/:idRol/:idPermiso` | 86 | `permisos.administrar`, en la 85 | Quitarselo, 409 si esta protegido |

@@ -169,7 +169,8 @@ modulo; el codigo `ofertas.publicar` se arma con un JOIN y no se guarda)
 son los catalogos. `rol_permiso` es el ACL, una fila por rol y permiso con quien
 lo dio y cuando. `auditoria_permiso` guarda cada intento negado con su ruta y
 cada permiso dado o quitado. La vista `permisos_por_rol` la ensena como matriz.
-Cada una de las 136 rutas privadas declara su accion con `@Permiso(...)`, y
+Cada una de las 136 rutas privadas (146 desde el 2026-11-07, con las diez de
+la tienda) declara su accion con `@Permiso(...)`, y
 `PermisoGuard`, despues de `SesionGuard`, pregunta a `rol_permiso` en ese momento
 si el rol de la cuenta la tiene. Sin ella, 403 con el codigo que falta. Los
 `@Roles` desaparecieron y `SesionGuard` solo autentica (401). El admin ve y

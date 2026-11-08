@@ -1,7 +1,7 @@
 # Arquitectura de Mesh
 
-**Al 2026-11-02.** Es el diagrama de arquitectura que pide el enunciado, y **no
-es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 93 tablas de
+**Al 2026-11-07.** Es el diagrama de arquitectura que pide el enunciado, y **no
+es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 96 tablas de
 PostgreSQL y sus llaves y lo genera `python docs/generar-er.py` desde la base
 viva; este dibuja los **seis** motores de persistencia, quien escribe en cada
 uno y por donde viajan los datos entre ellos.
@@ -272,7 +272,7 @@ Eso es por SERVICIO. Dentro de la tienda hay dos capas mas, las dos en tablas
 del mismo PostgreSQL, asi que no son flechas nuevas del dibujo:
 
 - Por ROL, desde el 2026-10-28, el ACL de funcionalidades (ADR-26, migracion
-  050): cada una de las 136 rutas privadas declara su accion (`@Permiso`) y
+  050): cada una de las 146 rutas privadas declara su accion (`@Permiso`) y
   `PermisoGuard` le pregunta a `rol_permiso` si el rol de la cuenta la tiene. Sin
   ella, 403, tambien llamando a la ruta directo. Antes era `@Roles` en el codigo.
 - Por PERSONA, desde el 2026-10-26, el ACL de ofertas (ADR-24): `permiso_oferta`
@@ -320,6 +320,7 @@ levantar el backend (`remoto/README.md`). El detalle esta en
 | **2026-10-26** | **Neo4j** guarda la categoria en cada `:Producto` (`id_categoria` y `categoria`, de `producto_catalogo`), y quienes lo compraron tambien llevaron pone primero, como grupo, los de la misma categoria (ADR-25). La escriben los workers de compras y de resenas y el ETL, y un worker nuevo la compara con **PostgreSQL** cada minuto (flecha nueva, PG a N4). **PostgreSQL** suma el ACL de la aplicacion por oferta, `permiso_oferta` y su registro (migracion 049, ADR-24) |
 | **2026-10-28** | **PostgreSQL** suma el ACL de funcionalidades por rol (migracion 050, ADR-26): `modulo_permiso`, `permiso`, `rol_permiso` y `auditoria_permiso`, y la vista `permisos_por_rol`. `PermisoGuard` lo revisa en las 136 rutas privadas y reemplaza a los `@Roles` del codigo, con los mismos roles por ruta el primer dia. 93 tablas |
 | **2026-11-02** | Sin motores ni flechas nuevas. El rol con que pasa cada peticion es el de **PostgreSQL** y no el del token: `SesionGuard` lo lee en la misma consulta con que revisa que la cuenta siga activa. El diagrama se pone al dia: la caja de PostgreSQL dice 93 tablas y 117 llaves (decia 86 y 107, del 20-10) y suma los permisos por rol y por oferta, y los workers suman el de la categoria del grafo. El Word de la Entrega 3 usa `docs/diagrama-arquitectura-entrega3.png`, el PNG del 20-10 sacado del historial (938c4ce), porque su pie dice "al 20 de octubre" y desde el 29-10 ensenaba el de despues |
+| **2026-11-07** | Sin motores ni flechas nuevas. La tienda gestiona desde el panel: **PostgreSQL** suma `pedido_cambio_estado` (051, quien cambio cada pedido y si fue la tienda), `estado_resena` y `resena_moderacion` (052, la resena oculta sigue en la base y en el grafo de **Neo4j** como evidencia) y cuatro permisos (051 a 054). 96 tablas. Renombrar una categoria escribe en **PostgreSQL** y en su copia de **MongoDB** en la misma transaccion y cambia todos sus productos con un solo `updateMany`. Los workers del buscador y de los vectores bajan su bandera de forma atomica (`findOneAndUpdate` devolviendo el documento de antes): antes un cambio hecho mientras indexaban se perdia |
 
 El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el
 compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. Cuando toco no

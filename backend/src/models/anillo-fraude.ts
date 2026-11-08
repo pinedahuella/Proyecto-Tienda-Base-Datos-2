@@ -57,6 +57,11 @@ export interface ResenaDeAnilloGrafo {
   producto: string | null;
   calificacion: number;
   fecha: string;
+  /**
+   * Si se ve en la tienda (`resena.id_estado_resena`, migracion 052):
+   * `publicada` u `oculta`. NULL si la resena ya no esta en PostgreSQL.
+   */
+  estado_en_tienda: string | null;
 }
 
 /**

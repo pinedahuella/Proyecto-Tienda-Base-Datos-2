@@ -1,5 +1,11 @@
 # Endpoints del carrito
 
+> **2026-11-07.** Hay un motivo mas de no disponible, `producto_no_disponible`:
+> la tienda retiro el producto del catalogo. La oferta sigue activa, la linea se
+> puede quedar en el carrito, pero `POST /carrito/comprar` contesta **409** con
+> "es de un producto que la tienda retiro del catalogo". Al reactivarlo vuelve
+> solo.
+
 > **2026-10-17 — CAMBIO DE MODELO pedido por el profesor: "Redis nunca debe ser
 > la fuente de verdad".** El carrito se escribe en Redis (rápido) y debajo, en
 > un intento asíncrono, en PostgreSQL, que es la VERDAD: el pedido `pendiente`

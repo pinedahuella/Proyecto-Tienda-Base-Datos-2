@@ -2,7 +2,7 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 172 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 189 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
 Las partes 7 a 13, las de la entrega final, se repasaron contra el código el 2 de noviembre de 2026; las primeras, al 23 de octubre. Los números de línea de las primeras partes se tomaron el 20 de septiembre y el código creció desde entonces, así que pueden correrse unas líneas. El nombre del archivo y de la función siguen sirviendo para encontrar el sitio.
 
@@ -28,6 +28,10 @@ Las partes 7 a 13, las de la entrega final, se repasaron contra el código el 2 
 - [Parte 10. Lo que cambió el 19 y 20 de octubre](#parte-10-lo-que-cambió-el-19-y-20-de-octubre), preguntas 142 a 148
 - [Parte 11. Lo que cambió el 23 de octubre](#parte-11-lo-que-cambió-el-23-de-octubre), preguntas 149 a 152
 - [Parte 12. Lo que cambió el 26 de octubre](#parte-12-lo-que-cambió-el-26-de-octubre), preguntas 153 a 161
+- [Parte 13. El ACL de funcionalidades, 28 de octubre](#parte-13-el-acl-de-funcionalidades-28-de-octubre), preguntas 162 a 170
+- [Parte 14. Varias bases caídas a la vez y dos países, 4 de noviembre](#parte-14-varias-bases-caídas-a-la-vez-y-dos-países-4-de-noviembre), preguntas 171 y 172
+- [Parte 15. Parecidos por bloques y el control de acceso en vivo, 5 de noviembre](#parte-15-parecidos-por-bloques-y-el-control-de-acceso-en-vivo-5-de-noviembre), preguntas 173 a 180
+- [Parte 16. Lo que la tienda gestiona desde el panel, 7 de noviembre](#parte-16-lo-que-la-tienda-gestiona-desde-el-panel-7-de-noviembre), preguntas 181 a 189
 - [Parte 13. El ACL de funcionalidades, 28 de octubre](#parte-13-el-acl-de-funcionalidades-28-de-octubre), preguntas 162 a 170
 - [Parte 14. Varias bases caídas a la vez y dos países, 4 de noviembre](#parte-14-varias-bases-caídas-a-la-vez-y-dos-países-4-de-noviembre), preguntas 171 a 172
 - [Parte 15. Parecidos por bloques y el control de acceso en vivo, 5 de noviembre](#parte-15-parecidos-por-bloques-y-el-control-de-acceso-en-vivo-5-de-noviembre), preguntas 173 a 179
@@ -304,6 +308,7 @@ Desde el 17 de octubre, porque el profesor pidió que Redis nunca sea la fuente 
 - Lo que pide el profesor. Entrega 2, carrito sobre un almacén clave-valor con expiración por inactividad (1.5 pts), y su directiva posterior de que Redis no sea la verdad.
 - Por qué así. Redis contesta en microsegundos y se queda como la puerta rápida; PostgreSQL guarda lo que no se puede perder. Hasta el 17 de octubre el carrito vivía solo en Redis y un Redis vaciado se lo llevaba.
 - Ojo si preguntan qué pasa si las dos copias no coinciden. Redis guarda la versión de PostgreSQL que conoce. Si la copia falla o choca, el carrito queda marcado como desincronizado, la pantalla lo dice con un botón para guardarlo (`POST /carrito/sincronizar`) y el checkout no cobra hasta que se arregle.
+- Un caso que se encontró el 8 de noviembre. Vaciar el carrito justo después de agregar algo chocaba con la copia de ese agregado, que todavía se estaba escribiendo en PostgreSQL, y el producto volvía al recargar. Ahora el vaciado espera la versión que deja esa copia. Lo mide `pruebas/carrito_vaciar.mjs`, que agrega y vacía diez veces seguidas.
 
 ### 33. ¿Qué tipo de dato y qué estructura de claves usa el carrito?
 Un hash por cuenta. El campo es el id de la oferta y el valor es la línea en JSON, una foto con la cantidad, el precio (ya con descuento), el porcentaje de descuento, el nombre, la imagen y el vendedor. Si la línea es de venta relámpago, hay un segundo campo con el ticket de la reserva. Desde el 17 de octubre lleva dos campos más: `_v`, la versión de PostgreSQL que conoce, y `_d`, la marca de desincronizado. Ver el carrito lee Redis; solo si Redis no lo tiene se reconstruye desde PostgreSQL. Al pagar, el backend compara la foto con el precio de hoy y avisa si cambió.
@@ -1381,3 +1386,52 @@ No. Lo que escribe la persona nunca se pega dentro del SQL. Va con parámetros, 
 
 - Dónde se ve. `backend/src/services/usuario.service.ts:137` y `:138`, la consulta del login y su valor aparte. `backend/src/services/compradores/pedidos.service.ts:120`, el id. La carpeta 8 de la colección de Postman, 8 peticiones en verde el 6 de noviembre.
 - Ojo. Esto cuida el backend. Si aun así pasara algo, `mesh_backend` no puede borrar ni crear tablas (capítulo 3 del informe final), así que un DROP TABLE tampoco correría.
+
+## Parte 16. Lo que la tienda gestiona desde el panel, 7 de noviembre
+
+### 181. ¿La tienda puede cancelar el pedido de un comprador?
+Sí, cualquiera, también si ya está enviado o entregado. Devuelve las unidades a cada oferta y reembolsa el pago, igual que cuando cancela el comprador, y queda anotado quién lo canceló, que fue la tienda y por qué, en `pedido_cambio_estado`. El comprador lo ve en Mis pedidos como Lo canceló la tienda.
+
+- Dónde se ve. `migrations/051_pedidos_de_la_tienda.sql:75`, `cancelar_pedido_por()`. `backend/src/services/compradores/pedidos.service.ts:283`, `cancelarComoTienda()`. En el panel, Dashboard, Pedidos, la columna Gestión.
+- La prueba. `node pruebas/pedidos_tienda.mjs`, 32 en verde el 7 de noviembre contra las bases de la PC de José David.
+
+### 182. Si la tienda cancela, ¿el comprador queda marcado como sospechoso?
+No, y era el riesgo. Al cancelar se alimentan tres cosas que miran a quien compró, el detector de reseñar y cancelar la compra, la regla R-CASI-3 (reseña más compra devuelta) y las devoluciones seriales de ClickHouse (F5). Si cancela la tienda, el backend no corre el primero, y los dos primeros solo cuentan las cancelaciones del mismo comprador, porque el movimiento de stock de la devolución queda a nombre de quien canceló. La devolución sí va a ClickHouse, porque los más vendidos, los combos y las tendencias sacan de las ventas todo pedido devuelto, pero va con `por_la_tienda = 1` y F5 y el embudo solo cuentan las de 0. El ETL de compras pone la misma marca si le toca copiarla, leyendo `pedido_cambio_estado`.
+
+- Dónde se ve. `backend/src/services/compradores/pedidos.service.ts`, `ejecutarCancelacion()`, el `if (!porLaTienda)`. `backend/src/services/fraude/resenas-canceladas-detector.service.ts:166` y `reglas-casi-confirmado.service.ts`, el `id_usuario_modifico = id_usuario`. `clickhouse/001_esquema.sql`, la columna `por_la_tienda`, y `hallazgos-evento-fraude-detector.service.ts`, F5 con `por_la_tienda = 0`. `etl/extraer_compras.sql`, la marca en la copia. Las devoluciones que ya había eran todas del mismo comprador, así que ninguna detección de antes cambió.
+
+### 183. ¿Por qué el comprador ya no puede cancelar un pedido enviado?
+Porque ya salió de la tienda, como en cualquier tienda en línea. Lo que está comprado lo cancela él. Lo que está enviado o entregado solo lo cancela la tienda, que es quien sabe si el paquete regresó. Los pedidos pasan de comprado a enviado y a entregado solo hacia adelante.
+
+- Dónde se ve. `migrations/051_pedidos_de_la_tienda.sql:113`, la regla. `marcar_envio_pedido()` en la línea 186 de la misma migración.
+
+### 184. ¿Cómo se quita una reseña falsa sin perder la evidencia?
+Se oculta, no se borra. `resena` suma `id_estado_resena`, publicada u oculta. La oculta sale de la ficha, del promedio de estrellas, de lo que cuentan otros compradores en el buscador y de la nota del vendedor en el dashboard. Se queda en el grafo de Neo4j y en las señales de fraude, porque es la evidencia del anillo. Cada vez que se oculta o se vuelve a publicar queda en `resena_moderacion` con quién y por qué.
+
+- Dónde se ve. `migrations/052_estado_resena.sql`. `backend/src/services/resenas/resenas.service.ts:735`, `moderar()`, y el filtro de las publicadas en la línea 138. En el panel, Fraude, Reseñas en anillo, Ver detalle real, la columna En la tienda, y en la ficha el botón Ocultar que solo ve el admin.
+- La prueba. `node pruebas/resenas_moderar.mjs`, 20 en verde.
+
+### 185. Si a alguien le ocultan la reseña, ¿puede volver a escribir otra?
+No sobre el mismo producto del mismo vendedor. La fila sigue en la tabla, y el UNIQUE de la 011 sobre cuenta, vendedor y producto no deja otra. No hizo falta ninguna regla nueva para eso.
+
+- Dónde se ve. `migrations/011_resenas.sql:214`. La prueba lo intenta con un INSERT directo en una transacción que se deshace y PostgreSQL contesta 23505.
+
+### 186. ¿Qué pasa si la tienda retira un producto que ya estaba en el carrito de alguien?
+Ya no se cobra. Sus ofertas siguen activas, para que el vendedor no pierda nada si el producto vuelve, pero el carrito revisa también el estado del producto en la copia del catálogo en PostgreSQL. La línea sale como no disponible, con el motivo producto_no_disponible, y pagar contesta 409 diciendo que la tienda lo retiró. Al volverlo a activar, todo vuelve solo.
+
+- Dónde se ve. `backend/src/services/carrito/carrito.service.ts:1528`. La prueba es `node pruebas/producto_inactivo.mjs`, 13 en verde.
+
+### 187. ¿La tienda puede cambiarle el precio a la oferta de un vendedor?
+No. Puede pausarla, volverla a activar, retirarla y ajustarle las unidades, que es lo que hace falta para cuidar el catálogo. El precio sigue siendo solo del vendedor. Cada ajuste de unidades queda en el kardex, `stock_movimiento`, a nombre del admin.
+
+- Dónde se ve. `backend/src/services/vendedores/ofertas.service.ts:833`, `administrar()`, y `:779`, la lista de todas las ofertas de un producto. En el panel, Catálogo, el botón Ofertas de cada producto. La prueba es `node pruebas/ofertas_tienda.mjs`, 23 en verde.
+
+### 188. Si se le cambia el nombre a una categoría, ¿hay que tocar producto por producto?
+No. Cada producto de MongoDB lleva su categoría como `{id_categoria, nombre}`, así que un solo `updateMany` por id cambia el nombre en todos, y se marcan para que el buscador los vuelva a indexar. Agregar una característica a una categoría no toca ningún producto, porque cada uno guarda solo las que llena. Es la razón de la Entrega 1 para tener el catálogo en una base documental. PostgreSQL sigue siendo el dueño de la paleta y su copia en MongoDB se escribe en la misma transacción.
+
+- Dónde se ve. `backend/src/services/admin/admin-categorias.service.ts:168`, `renombrar()`, con el `updateMany` en la línea 196. En el panel, Catálogo, el botón Categorías. La prueba es `node pruebas/categorias_tienda.mjs`, que renombra Fragancias en sus 44 productos y la regresa.
+
+### 189. Al probar las categorías encontraron un error en el buscador. ¿Cuál era?
+El worker del buscador leía los productos pendientes, los indexaba y después bajaba su bandera a ciegas. Si alguien cambiaba un producto mientras tanto, el cambio nuevo perdía su bandera y el índice se quedaba con lo viejo. Pasó al renombrar Fragancias dos veces seguidas, 20 productos se quedaron con el nombre de prueba. Ahora la bandera se baja de forma atómica, con `findOneAndUpdate` devolviendo el documento de antes, y si ya no es lo que se indexó se vuelve a subir. El worker de los vectores tenía la misma carrera y se arregló igual.
+
+- Dónde se ve. `backend/src/services/buscador/buscador-sync.service.ts:75` y `backend/src/services/productos/vectores-sync.service.ts:233`. La prueba de categorías comprueba al final que el buscador vuelve a decir solo Fragancias.

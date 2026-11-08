@@ -315,6 +315,10 @@
 		padding: 0.9rem 1rem;
 		border: 1px solid var(--linea);
 		border-radius: var(--r);
+		/* Con fondo blanco (oscuro en el tema oscuro), como las tarjetas del
+		   catalogo. Sin el, la trama de la pagina se veia a traves y la tarjeta
+		   parecia flotar. */
+		background: var(--blanco);
 	}
 
 	.cosa {

@@ -20,6 +20,35 @@
 > respuesta, como se manejan los errores y como esta organizado el codigo.
 > Duplicar alli la lista de rutas solo garantiza que una de las dos caduque.
 
+## Lo que llego el 2026-11-07: la tienda gestiona pedidos, resenas, ofertas y categorias
+
+Diez rutas nuevas, todas del admin y cada una con su permiso nuevo en
+`rol_permiso` (migraciones 051 a 054). Con ellas las rutas privadas pasan de
+136 a 146 y los permisos de 38 a 42.
+
+| Ruta | Que es | Permiso | Donde se ve |
+|---|---|---|---|
+| `POST /admin/pedidos/:id/cancelar` | cancelar cualquier pedido, tambien enviado o entregado, con `motivo` opcional. Devuelve las unidades y reembolsa, y no corre los detectores de fraude contra el comprador | `pedidos.administrar` | Dashboard, Pedidos, Gestion |
+| `POST /admin/pedidos/:id/enviado` | de comprado a enviado | `pedidos.administrar` | lo mismo |
+| `POST /admin/pedidos/:id/entregado` | de comprado o enviado a entregado | `pedidos.administrar` | lo mismo |
+| `PATCH /admin/resenas/:id` | `{ "estado": "oculta" \| "publicada", "motivo" }`. La oculta sale de la ficha y del promedio y sigue como evidencia | `resenas.moderar` | ficha del producto y Fraude, Resenas en anillo |
+| `GET /admin/ofertas?producto=7` | todas las ofertas de un producto, de cualquier vendedor y estado | `ofertas.administrar` | Catalogo, Ofertas |
+| `PATCH /admin/ofertas/:id` | `{ "estado": "activa" \| "pausada" \| "retirada", "ajuste_stock": -2 }`, sin precio | `ofertas.administrar` | lo mismo |
+| `GET /admin/categorias` | todas las categorias con su paleta y los cinco tipos de dato | `catalogo.categorias` | Catalogo, Categorias |
+| `POST /admin/categorias` | crear una, debajo de una raiz, con sus caracteristicas | `catalogo.categorias` | lo mismo |
+| `PATCH /admin/categorias/:id` | cambiarle el nombre, en PostgreSQL, en MongoDB y en todos sus productos | `catalogo.categorias` | lo mismo |
+| `POST /admin/categorias/:id/caracteristicas` | agregarle una caracteristica de producto o de variante | `catalogo.categorias` | lo mismo |
+
+Cambian tres respuestas que ya existian. `GET /comprador/pedidos` suma
+`cancelado_por_tienda`, `GET /admin/dashboard/pedidos` suma `por_la_tienda` y
+`motivo`, y `GET /admin/fraude/alertas-resenas/:id/detalle-grafo` suma
+`estado_en_tienda` en cada resena. La compradora ya no puede cancelar un pedido
+enviado (409). Y una linea del carrito de un producto que la tienda retiro sale
+con `motivo: producto_no_disponible` y no se cobra (409 al pagar).
+
+Las pruebas son `node pruebas/pedidos_tienda.mjs`, `resenas_moderar.mjs`,
+`ofertas_tienda.mjs`, `categorias_tienda.mjs` y `producto_inactivo.mjs`.
+
 ## Lo que llego el 2026-10-28: el ACL de funcionalidades, por rol
 
 Cada una de las 136 rutas privadas declara su accion con `@Permiso('modulo.accion')`

@@ -91,6 +91,21 @@ const CODIGO_CHECK_VIOLATION = '23514';
  * nada de caracteristicas ni historial. Proyeccion interna de Mongo, se
  * queda aca -- no es una fila de PostgreSQL ni una forma de la API.
  */
+/** Una fila de GET /admin/ofertas?producto= (migracion 053). */
+export interface OfertaDeProductoAdmin {
+  id_oferta: string;
+  id_producto_variante: string;
+  variante: string | null;
+  vendedor: string;
+  correo_vendedor: string;
+  precio: string;
+  precio_final: string;
+  stock: number;
+  estado: string;
+  aprobada: boolean;
+  es_inventario_limitado: boolean;
+}
+
 interface ProductoLigero {
   _id: number;
   nombre: string;
@@ -768,6 +783,132 @@ export class OfertasVendedorService {
     return this.armarOfertaPropia(
       await this.obtenerFilaPropia(idOferta, idUsuario),
     );
+  }
+
+  /**
+   * Todas las ofertas de un producto, de cualquier vendedor y en cualquier
+   * estado (`GET /admin/ofertas?producto=`, permiso `ofertas.administrar`,
+   * migracion 053). Es lo que la tienda mira en Catalogo antes de pausar o
+   * retirar una: la ficha publica solo ensena las activas.
+   */
+  async listarDeProducto(
+    idProductoParametro: unknown,
+  ): Promise<OfertaDeProductoAdmin[]> {
+    const texto =
+      typeof idProductoParametro === 'string' ||
+      typeof idProductoParametro === 'number'
+        ? String(idProductoParametro)
+        : '';
+    if (!REGEX_ID.test(texto)) {
+      throw new ErrorValidacion('producto tiene que ser el id de un producto');
+    }
+    try {
+      const { rows } = await pool.query<OfertaDeProductoAdmin>(
+        `SELECT o.id_oferta, o.id_producto_variante_mongo AS id_producto_variante,
+                vc.nombre_variante AS variante,
+                COALESCE(NULLIF(trim(concat_ws(' ', u.nombre, u.apellido)), ''), u.usuario) AS vendedor,
+                u.correo_electronico AS correo_vendedor,
+                o.precio, ${expresionPrecioFinal('o')}::text AS precio_final,
+                o.stock, eo.estado_oferta_nombre AS estado,
+                o.fecha_aprobacion IS NOT NULL AS aprobada,
+                o.es_inventario_limitado
+           FROM oferta o
+           JOIN estado_oferta eo ON eo.id_estado_oferta = o.id_estado_oferta
+           JOIN usuarios u ON u.id_usuario = o.id_usuario
+           LEFT JOIN variante_catalogo vc
+                  ON vc.id_producto_mongo = o.id_producto_mongo
+                 AND vc.id_producto_variante_mongo = o.id_producto_variante_mongo
+          WHERE o.id_producto_mongo = $1
+          ORDER BY (eo.estado_oferta_nombre = 'activa') DESC, vendedor, o.id_oferta`,
+        [Number(texto)],
+      );
+      return rows;
+    } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * La tienda pausa, reactiva o retira la oferta de cualquier vendedor y le
+   * ajusta las unidades (`PATCH /admin/ofertas/:id`, permiso
+   * `ofertas.administrar`, migracion 053). Lo mismo que `editar()` pero sin
+   * exigir que sea suya, y sin el precio, que sigue siendo solo del vendedor.
+   * El ajuste queda en el kardex (`stock_movimiento`) a nombre del admin.
+   * Una oferta sin aprobar se resuelve en Ofertas por revisar, no aqui, y con
+   * la venta relampago abierta las unidades no se tocan (las lleva Redis).
+   */
+  async administrar(
+    idAdmin: string,
+    idOfertaParametro: string,
+    datos: { estado?: unknown; ajuste_stock?: unknown } | undefined,
+  ): Promise<OfertaPropia> {
+    if (!REGEX_ID.test(idOfertaParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    const idOferta = Number(idOfertaParametro);
+    if (datos?.estado == null && datos?.ajuste_stock == null) {
+      throw new ErrorValidacion('Envia estado, ajuste_stock o los dos');
+    }
+    // Lo que no es texto cae en la validacion de abajo, con el mismo 400.
+    const estado =
+      datos.estado == null
+        ? null
+        : typeof datos.estado === 'string'
+          ? datos.estado
+          : '';
+    if (estado != null && !['activa', 'pausada', 'retirada'].includes(estado)) {
+      throw new ErrorValidacion(
+        'estado tiene que ser activa, pausada o retirada',
+      );
+    }
+    const ajusteStock =
+      datos.ajuste_stock != null
+        ? validarAjusteStock(datos.ajuste_stock)
+        : null;
+
+    const actual = await this.obtenerFilaPorId(idOferta);
+    if (actual.fecha_aprobacion == null && estado !== 'retirada') {
+      throw new ErrorConflicto(
+        'Esta oferta todavia no esta aprobada: se aprueba o se rechaza en Ofertas por revisar',
+      );
+    }
+    if (ajusteStock != null && actual.es_inventario_limitado) {
+      throw new ErrorConflicto(
+        'La oferta esta en una venta relampago: cierra la venta relampago antes de ajustar su existencia',
+      );
+    }
+
+    const cliente = await pool.connect();
+    try {
+      await cliente.query('BEGIN');
+      if (estado != null) {
+        await cliente.query(
+          `UPDATE oferta
+              SET id_estado_oferta = (SELECT id_estado_oferta FROM estado_oferta WHERE estado_oferta_nombre = $1)
+            WHERE id_oferta = $2`,
+          [estado, idOferta],
+        );
+      }
+      if (ajusteStock != null) {
+        await cliente.query('SELECT reponer_stock($1, $2, $3, $4)', [
+          idOferta,
+          Math.abs(ajusteStock),
+          ajusteStock > 0 ? 'reposicion' : 'ajuste',
+          idAdmin,
+        ]);
+      }
+      await cliente.query('COMMIT');
+    } catch (error) {
+      await this.intentarRollback(cliente);
+      if (this.esErrorDeNegocio(error)) {
+        throw new ErrorConflicto((error as Error).message);
+      }
+      manejarErrorConexion(this.logger, error);
+    } finally {
+      cliente.release();
+    }
+
+    return this.armarOfertaPropia(await this.obtenerFilaPorId(idOferta));
   }
 
   /**

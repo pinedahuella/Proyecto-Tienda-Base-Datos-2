@@ -185,6 +185,7 @@ export class SugeridosBusquedaService {
       `SELECT pc.id_producto_mongo AS id
          FROM producto_catalogo pc
          LEFT JOIN resena r ON r.id_producto_mongo = pc.id_producto_mongo
+                           AND r.id_estado_resena = 1
         WHERE pc.estado = 'activo'
         GROUP BY pc.id_producto_mongo
         ORDER BY count(r.*) DESC, pc.id_producto_mongo

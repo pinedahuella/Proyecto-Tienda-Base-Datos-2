@@ -1769,7 +1769,11 @@
 
 		if (r.ok && r.payload) {
 			guardarEnLista(r.payload);
-			aviso = `Publicaste "${r.payload.nombre_producto} - ${r.payload.nombre_variante}" a ${quetzales(r.payload.precio)}`;
+			// La de un vendedor nace `pendiente` (ofertas.service.ts, estadoInicial):
+			// se dice aqui, o parece publicada y no sale en la tienda.
+			aviso =
+				`Publicaste "${r.payload.nombre_producto} - ${r.payload.nombre_variante}" a ${quetzales(r.payload.precio)}` +
+				(administraLaTienda ? '' : '. Queda pendiente hasta que la tienda la apruebe');
 
 			// Cada quien vuelve a SU pantalla.
 			//
@@ -3236,7 +3240,10 @@
 					</div>
 
 					<p class="menor nota">
-						La oferta nace activa. Las unidades iniciales entran como una reposicion en el
+						{administraLaTienda
+							? 'La oferta nace activa.'
+							: 'La oferta queda pendiente hasta que la tienda la apruebe.'}
+						Las unidades iniciales entran como una reposicion en el
 						kardex, no sueltas: por eso cada unidad tiene de donde salir.
 					</p>
 

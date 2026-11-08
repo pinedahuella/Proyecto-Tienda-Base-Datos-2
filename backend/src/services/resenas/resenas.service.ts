@@ -134,6 +134,8 @@ export class ResenasService {
            JOIN usuarios  ua ON ua.id_usuario   = r.id_usuario
            JOIN usuarios  uv ON uv.id_usuario   = r.id_usuario_vendedor
           WHERE r.id_producto_mongo = $1
+            -- Solo las publicadas: la que oculto la tienda (052) no se ve.
+            AND r.id_estado_resena = 1
           ORDER BY c.fecha_publicacion DESC, r.id_resena DESC`,
         [idProducto],
       );
@@ -392,6 +394,7 @@ export class ResenasService {
          SELECT $1, r.id_comentario, $2
            FROM resena r
           WHERE r.id_resena = $3
+            AND r.id_estado_resena = 1
          RETURNING id_comentario`,
         [idUsuario, comentario, idResena],
       );
@@ -716,6 +719,60 @@ export class ResenasService {
       );
       return resultado.rows;
     } catch (error) {
+      manejarErrorConexion(this.logger, error);
+    }
+  }
+
+  /**
+   * La tienda oculta una resena o la vuelve a publicar
+   * (`PATCH /admin/resenas/:id`, permiso `resenas.moderar`, migracion 052).
+   * No la borra: sigue en el grafo y en las senales de fraude como evidencia,
+   * y como la fila sigue en la tabla esa cuenta no puede volver a resenar el
+   * mismo producto del mismo vendedor. La funcion moderar_resena() cambia el
+   * estado y lo anota en resena_moderacion; el trigger de la 030 encola el
+   * producto y el worker le recalcula el promedio sin ella.
+   */
+  async moderar(
+    idResenaParametro: string,
+    estado: unknown,
+    idAdmin: string,
+    motivo: unknown,
+  ): Promise<{ id_resena: number; id_producto: number; estado: string }> {
+    if (!REGEX_ID.test(idResenaParametro)) {
+      throw new ErrorValidacion('El id no es valido');
+    }
+    if (estado !== 'oculta' && estado !== 'publicada') {
+      throw new ErrorValidacion('estado tiene que ser oculta o publicada');
+    }
+    if (motivo != null && typeof motivo !== 'string') {
+      throw new ErrorValidacion('El motivo tiene que ser texto');
+    }
+    const texto = (motivo ?? '').trim();
+    if (texto.length > 300) {
+      throw new ErrorValidacion('El motivo no puede pasar de 300 letras');
+    }
+    try {
+      const resultado = await pool.query<{
+        moderar_resena: {
+          id_resena: number;
+          id_producto: number;
+          estado: string;
+        };
+      }>('SELECT moderar_resena($1, $2, $3, $4)', [
+        Number(idResenaParametro),
+        estado,
+        idAdmin,
+        texto === '' ? null : texto,
+      ]);
+      return resultado.rows[0].moderar_resena;
+    } catch (error) {
+      const codigo = (error as { code?: string } | undefined)?.code;
+      if (codigo === CODIGO_FK_VIOLATION) {
+        throw new ErrorNoEncontrado('No existe una resena con ese id');
+      }
+      if (codigo === CODIGO_CHECK_VIOLATION) {
+        throw new ErrorConflicto((error as Error).message);
+      }
       manejarErrorConexion(this.logger, error);
     }
   }

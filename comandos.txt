@@ -378,7 +378,13 @@ Las Demos de la Entrega final:
                                                               SQL le quita y le devuelve ofertas.publicar al vendedor
   .\demo-entrega-final.ps1 -Parte compartir                   el ACL por oferta: compartir, quitar, el registro
   node pruebas/permisos_cobertura.cjs                         cada ruta privada con su permiso, los mismos roles que antes
-  bash pruebas/permisos_rol.sh                                los 38 permisos con los tres roles, llamando directo
+  bash pruebas/permisos_rol.sh                                los 42 permisos con los tres roles, llamando directo
+  node pruebas/pedidos_tienda.mjs                             la tienda cancela, envia y entrega pedidos de cualquiera
+  node pruebas/resenas_moderar.mjs                            la tienda oculta una resena y la vuelve a publicar
+  node pruebas/ofertas_tienda.mjs                             la tienda pausa, retira y ajusta ofertas de otro vendedor
+  node pruebas/categorias_tienda.mjs                          la tienda crea, renombra y amplia categorias
+  node pruebas/producto_inactivo.mjs                          un producto retirado ya no se vende aunque este en un carrito
+  node pruebas/carrito_vaciar.mjs                             vaciar el carrito justo despues de agregar no lo deja revivir
   node pruebas/permisos_matriz.cjs --tabla                    cada ruta con su permiso, leido del backend compilado
   .\demo-entrega-final.ps1 -Parte semantica -Producto laptop  los parecidos, en la base y por /similares
   .\demo-entrega-final.ps1 -Parte facetas -Texto laptop       facetas, palabra mal escrita y sugerencias
@@ -729,7 +735,7 @@ Desde la raiz del proyecto. El .png sale solo si draw.io esta instalado
 tiene que estar arriba.
 
   python docs/generar-er.py
-      el ER de las 93 tablas, en docs/diagrama-general.drawio y .png. Falla
+      el ER de las 96 tablas, en docs/diagrama-general.drawio y .png. Falla
       si una tabla no tiene caja, si una llave no tiene linea o si dos cajas
       se pisan
   python docs/generar-er.py --modulo fraude --salida docs/informe-entrega2/er-fraude.drawio

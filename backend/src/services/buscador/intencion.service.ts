@@ -203,6 +203,7 @@ export class BuscadorIntencionService {
          JOIN resena r ON r.id_comentario = v.id_comentario
          JOIN comentario c ON c.id_comentario = v.id_comentario
         WHERE r.calificacion >= $2
+          AND r.id_estado_resena = 1
         ORDER BY v.vector <=> $1::vector
         LIMIT $3`,
       [vector, calificacionMinima, CANDIDATOS_RESENAS],

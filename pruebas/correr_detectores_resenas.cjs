@@ -13,7 +13,12 @@
 const path = require('path');
 const BACK = path.join(__dirname, '..', 'backend');
 process.chdir(BACK);
-require(path.join(BACK, 'node_modules', 'dotenv')).config({ path: path.join(BACK, '.env'), quiet: true });
+// override: los servicios de abajo son los del backend y tienen que entrar con
+// sus usuarios. En modo remoto activar.sh exporta las contrasenas de la otra PC,
+// donde ELASTIC_PASSWORD es la de `elastic`, y sin override quedaba mesh_backend
+// con esa contrasena: Elasticsearch contestaba 401 y el detector de login lento
+// se interrumpia (2026-11-07, igual que en buscador_escribiendo.mjs).
+require(path.join(BACK, 'node_modules', 'dotenv')).config({ path: path.join(BACK, '.env'), quiet: true, override: true });
 const { pool } = require(path.join(BACK, 'dist', 'database', 'postgres'));
 
 const DETECTORES = [

@@ -83,6 +83,8 @@ t2 = {f['id_producto']: f for f in leer('T2_embudo')}
 check(t2.get('25', {}).get('diagnostico') == 'mucho_interes_poca_compra', 'T2 el 25: lo miran 25 y no lo compra nadie')
 check(t2.get('26', {}).get('diagnostico') == 'devolucion_alta', 'T2 el 26: vuelven 4 de 10')
 check('24' not in t2, 'T2 control: el 24 convierte al 20 % y no sale')
+check(t2.get('30', {}).get('diagnostico') != 'devolucion_alta',
+      'T2 control: al 30 la tienda le cancelo 6 de 10, no es devolucion alta', str(t2.get('30')))
 
 t3 = {f['termino']: f for f in leer('T3_busquedas_sin_respuesta')}
 check(t3.get('dron acuatico', {}).get('diagnostico') == 'no_tenemos'
@@ -110,7 +112,7 @@ check([(f['id_usuario'], f['agregadas'], f['compradas']) for f in f4] == [('3001
 
 f5 = leer('F5_devoluciones_seriales')
 check([(f['id_usuario'], f['devueltas'], f['tasa_devolucion']) for f in f5] == [('4001', '4', '0.8')],
-      'F5 la cuenta 4001: devuelve 4 de 5; ni la de 1 de 5 ni la de 2 de 2', str(f5))
+      'F5 la cuenta 4001: devuelve 4 de 5; ni la de 1 de 5, ni la de 2 de 2, ni la 4004 a la que la tienda le cancelo 4', str(f5))
 
 f6 = leer('F6_granja_de_registros')
 check(ids(f6, 'ip') == ['::ffff:10.7.7.7'] and f6[0]['cuentas'] == '[6001,6002,6003,6004,6005,6006]',

@@ -159,7 +159,11 @@ export class ResenasCanceladasDetectorService {
          JOIN motivo_movimiento mm
            ON mm.id_motivo_movimiento = sm.id_motivo_movimiento
           AND mm.motivo_nombre = 'devolucion'
+         -- Solo si cancelo el mismo comprador. Si cancelo la tienda
+         -- (cancelar_pedido_por, migracion 051) el movimiento queda a nombre
+         -- del admin y el comprador no hizo nada que senalar.
          JOIN pedido pe ON pe.id_pedido = sm.id_pedido
+                       AND pe.id_usuario = sm.id_usuario_modifico
          JOIN oferta o ON o.id_oferta = sm.id_oferta
          JOIN precio_historial ph ON ph.id_oferta = sm.id_oferta
          JOIN pedido_producto pp

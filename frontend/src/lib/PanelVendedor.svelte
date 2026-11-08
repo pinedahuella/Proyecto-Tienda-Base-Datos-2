@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { pedir, conJson, type RespuestaApi } from './api';
+	import CategoriasTienda from './CategoriasTienda.svelte';
 
 	/**
 	 * El panel del vendedor: sus productos, publicar uno nuevo, editarlo y ver
@@ -34,8 +35,19 @@
 	 */
 	let {
 		alExpirarSesion,
-		modo = 'catalogo'
-	}: { alExpirarSesion?: () => void; modo?: 'catalogo' | 'propuesta' } = $props();
+		modo = 'catalogo',
+		administraOfertas = false
+	}: {
+		alExpirarSesion?: () => void;
+		modo?: 'catalogo' | 'propuesta';
+		/**
+		 * El admin ve en cada producto el boton Ofertas, con todas las ofertas
+		 * de todos los vendedores, para pausarlas, retirarlas o ajustarles las
+		 * unidades (GET y PATCH /admin/ofertas, migracion 053). Esconderlo no
+		 * protege nada: el backend contesta 403 sin `ofertas.administrar`.
+		 */
+		administraOfertas?: boolean;
+	} = $props();
 
 	let proponiendo = $derived(modo === 'propuesta');
 
@@ -140,7 +152,7 @@
 		propias: { nombre: string; valor: string }[];
 	}
 
-	type Vista = 'lista' | 'forma' | 'historial';
+	type Vista = 'lista' | 'forma' | 'historial' | 'categorias';
 
 	// ---------------------------------------------------------------- estado
 	// Arranca en 'lista' y el modo la corrige en onMount. Es `$state` y no
@@ -250,6 +262,82 @@
 			return true;
 		}
 		return false;
+	}
+
+	// ------------------------------------------------- ofertas de un producto
+	interface OfertaDeLaTienda {
+		id_oferta: string;
+		variante: string | null;
+		vendedor: string;
+		correo_vendedor: string;
+		precio_final: string;
+		stock: number;
+		estado: string;
+		aprobada: boolean;
+		es_inventario_limitado: boolean;
+	}
+	let ofertasDe = $state<number | null>(null);
+	let ofertasProducto = $state<OfertaDeLaTienda[] | 'cargando' | 'error'>('cargando');
+	let ajusteOferta = $state<Record<string, string>>({});
+	let ofertaEnCurso = $state<string | null>(null);
+	let confirmandoRetiro = $state<string | null>(null);
+	let avisoOfertas = $state('');
+	let errorOfertas = $state('');
+
+	async function traerOfertasDe(idProducto: number) {
+		const r = await pedir<OfertaDeLaTienda[]>(`/admin/ofertas?producto=${idProducto}`);
+		if (expiro(r)) return;
+		ofertasProducto = r.ok && r.payload ? r.payload : 'error';
+		if (!r.ok) errorOfertas = r.mensaje;
+	}
+
+	async function alternarOfertas(p: ProductoGuardado) {
+		avisoOfertas = '';
+		errorOfertas = '';
+		confirmandoRetiro = null;
+		if (ofertasDe === p._id) {
+			ofertasDe = null;
+			return;
+		}
+		ofertasDe = p._id;
+		ofertasProducto = 'cargando';
+		await traerOfertasDe(p._id);
+	}
+
+	async function cambiarOferta(
+		o: OfertaDeLaTienda,
+		cambios: { estado?: 'activa' | 'pausada' | 'retirada'; ajuste_stock?: number }
+	) {
+		ofertaEnCurso = o.id_oferta;
+		avisoOfertas = '';
+		errorOfertas = '';
+		const r = await pedir<unknown>(`/admin/ofertas/${o.id_oferta}`, conJson('PATCH', cambios));
+		ofertaEnCurso = null;
+		if (expiro(r)) return;
+		if (!r.ok) {
+			errorOfertas = `Oferta ${o.id_oferta}. ${r.mensaje}`;
+			return;
+		}
+		confirmandoRetiro = null;
+		ajusteOferta = { ...ajusteOferta, [o.id_oferta]: '' };
+		const n = Math.abs(cambios.ajuste_stock ?? 0);
+		avisoOfertas = cambios.estado
+			? `La oferta ${o.id_oferta} de ${o.vendedor} quedo ${cambios.estado}.`
+			: `La oferta ${o.id_oferta} de ${o.vendedor} ${(cambios.ajuste_stock ?? 0) > 0 ? 'sumo' : 'resto'} ${n} ${n === 1 ? 'unidad' : 'unidades'}.`;
+		if (ofertasDe != null) await traerOfertasDe(ofertasDe);
+	}
+
+	function aplicarAjuste(o: OfertaDeLaTienda) {
+		const n = Number((ajusteOferta[o.id_oferta] ?? '').trim());
+		if (!Number.isInteger(n) || n === 0) {
+			errorOfertas = 'Escribe cuantas unidades sumar o restar, por ejemplo 5 o -2';
+			return;
+		}
+		void cambiarOferta(o, { ajuste_stock: n });
+	}
+
+	function enQuetzales(texto: string): string {
+		return `Q${Number(texto).toLocaleString('es-GT', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 	}
 
 	interface PaginaDeProductos {
@@ -880,6 +968,8 @@
 					{totalProductos === 1 ? 'producto en el catalogo' : 'productos en el catalogo'}
 				{:else if vista === 'forma'}
 					{editando === null ? 'Publicar un producto nuevo' : 'Editando el producto ' + editando}
+				{:else if vista === 'categorias'}
+					Las categorias y lo que pregunta cada una
 				{:else}
 					Como estaba en una fecha
 				{/if}
@@ -894,7 +984,15 @@
 				Empezar otra
 			</button>
 		{:else if vista === 'lista'}
-			<button type="button" class="principal" onclick={nuevo}>Publicar producto</button>
+			<div class="botones-titulo">
+				{#if administraOfertas}
+					<!-- Las categorias son del admin (catalogo.categorias, 054). -->
+					<button type="button" class="secundario" onclick={() => ((vista = 'categorias'), (aviso = ''))}>
+						Categorias
+					</button>
+				{/if}
+				<button type="button" class="principal" onclick={nuevo}>Publicar producto</button>
+			</div>
 		{:else}
 			<button type="button" class="secundario" onclick={() => ((vista = 'lista'), (aviso = '')) }>
 				Volver a la lista
@@ -1012,9 +1110,87 @@
 								{/if}
 								<button type="button" onclick={() => editar(p)}>Editar</button>
 								<button type="button" onclick={() => abrirHistorial(p)}>Historial</button>
+								{#if administraOfertas}
+									<button type="button" aria-expanded={ofertasDe === p._id} onclick={() => alternarOfertas(p)}>
+										{ofertasDe === p._id ? 'Cerrar ofertas' : 'Ofertas'}
+									</button>
+								{/if}
 							{/if}
 						</div>
 					</article>
+					{#if ofertasDe === p._id}
+						<section class="ofertas-producto" aria-label="Ofertas de {p.nombre}">
+							<h4>Las ofertas de {p.nombre}, de todos los vendedores</h4>
+							{#if avisoOfertas}<p class="ok" role="status">{avisoOfertas}</p>{/if}
+							{#if errorOfertas}<p class="malo" role="alert">{errorOfertas}</p>{/if}
+							{#if ofertasProducto === 'cargando'}
+								<p class="quieto">Trayendo las ofertas...</p>
+							{:else if ofertasProducto === 'error'}
+								<p class="quieto">No se pudieron traer las ofertas.</p>
+							{:else if ofertasProducto.length === 0}
+								<p class="quieto">Nadie ofrece este producto todavia.</p>
+							{:else}
+								<div class="tabla-ofertas">
+									<table>
+										<thead>
+											<tr>
+												<th>Vendedor</th>
+												<th>Variante</th>
+												<th>Precio</th>
+												<th>Unidades</th>
+												<th>Estado</th>
+												<th>Que hacer</th>
+											</tr>
+										</thead>
+										<tbody>
+											{#each ofertasProducto as o (o.id_oferta)}
+												<tr>
+													<td title={o.correo_vendedor}>{o.vendedor}</td>
+													<td>{o.variante ?? ''}</td>
+													<td>{enQuetzales(o.precio_final)}</td>
+													<td>{o.stock}</td>
+													<td><span class="chip {o.estado === 'activa' ? 'activo' : 'inactivo'}">{o.estado}</span></td>
+													<td class="que-hacer"><div class="botones-oferta">
+														{#if confirmandoRetiro === o.id_oferta}
+															<span class="menor">Deja de venderse.</span>
+															<button type="button" class="rojo" disabled={ofertaEnCurso === o.id_oferta} onclick={() => cambiarOferta(o, { estado: 'retirada' })}>
+																Si, retirar
+															</button>
+															<button type="button" onclick={() => (confirmandoRetiro = null)}>No</button>
+														{:else if !o.aprobada && o.estado === 'pendiente'}
+															<span class="menor">Se aprueba en Revisar ofertas</span>
+														{:else}
+															{#if o.estado === 'activa'}
+																<button type="button" disabled={ofertaEnCurso === o.id_oferta} onclick={() => cambiarOferta(o, { estado: 'pausada' })}>Pausar</button>
+															{:else if o.aprobada}
+																<button type="button" disabled={ofertaEnCurso === o.id_oferta} onclick={() => cambiarOferta(o, { estado: 'activa' })}>Activar</button>
+															{/if}
+															{#if o.estado !== 'retirada'}
+																<button type="button" class="rojo" disabled={ofertaEnCurso === o.id_oferta} onclick={() => (confirmandoRetiro = o.id_oferta)}>Retirar</button>
+															{/if}
+															{#if !o.es_inventario_limitado}
+																<input
+																	type="text"
+																	inputmode="numeric"
+																	placeholder="5 o -2"
+																	aria-label="Unidades a sumar o restar"
+																	value={ajusteOferta[o.id_oferta] ?? ''}
+																	oninput={(e) => (ajusteOferta = { ...ajusteOferta, [o.id_oferta]: e.currentTarget.value })}
+																/>
+																<button type="button" disabled={ofertaEnCurso === o.id_oferta} onclick={() => aplicarAjuste(o)}>Ajustar</button>
+															{:else}
+																<span class="menor">En venta relampago</span>
+															{/if}
+														{/if}
+													</div></td>
+												</tr>
+											{/each}
+										</tbody>
+									</table>
+								</div>
+							{/if}
+						</section>
+					{/if}
 				{/each}
 			</div>
 
@@ -1347,6 +1523,8 @@
 		</div>
 
 		<!-- ══════════════════════════════ HISTORIAL ══════════════════════ -->
+	{:else if vista === 'categorias'}
+		<CategoriasTienda {alExpirarSesion} />
 	{:else if vista === 'historial' && productoHistorial}
 		<div class="bloque">
 			<h3>{productoHistorial.nombre}</h3>
@@ -1511,6 +1689,77 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: var(--e2);
+	}
+
+	.botones-titulo {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--e2);
+	}
+
+	/* ---------- ofertas de un producto, para la tienda (migracion 053) ---------- */
+	.ofertas-producto {
+		margin-top: calc(-1 * var(--e2));
+		padding: 1rem 1.1rem;
+		background: var(--blanco);
+		border: 1px solid var(--linea);
+		border-radius: var(--r2);
+	}
+
+	.ofertas-producto h4 {
+		margin: 0 0 var(--e2);
+		font-size: var(--f-base);
+	}
+
+	.tabla-ofertas {
+		overflow-x: auto;
+	}
+
+	.tabla-ofertas table {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: var(--f-sm);
+	}
+
+	.tabla-ofertas th,
+	.tabla-ofertas td {
+		padding: 8px 10px;
+		text-align: left;
+		border-bottom: 1px solid var(--linea);
+		vertical-align: middle;
+	}
+
+	.tabla-ofertas th {
+		font-size: var(--f-xs);
+		color: var(--gris);
+		font-weight: 600;
+	}
+
+	/* En una sola linea: en el telefono la tabla ya se desliza de lado, y
+	   apilados los cuatro controles dejaban cada fila de 136 px. La celda
+	   sigue siendo celda (un td con flex pierde su borde y su alto). */
+	.botones-oferta {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		white-space: nowrap;
+	}
+
+	.que-hacer button {
+		padding: 4px 10px;
+		font-size: var(--f-xs);
+	}
+
+	.que-hacer button.rojo {
+		color: var(--rojo);
+		border-color: color-mix(in srgb, var(--rojo) 45%, transparent);
+	}
+
+	.que-hacer input {
+		width: 70px;
+		padding: 4px 8px;
+		font: inherit;
+		font-size: var(--f-xs);
 	}
 
 	/* Ocupa el lugar de los botones que no van, para que la fila no quede

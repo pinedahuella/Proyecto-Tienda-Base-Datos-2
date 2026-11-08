@@ -709,12 +709,14 @@ export class ProductosService {
           [idProducto],
         ),
         // Nota media y total de resenas del producto (todas, entre todos los
-        // vendedores). AVG da NULL y COUNT da 0 cuando no hay ninguna.
+        // vendedores). AVG da NULL y COUNT da 0 cuando no hay ninguna. Solo
+        // las publicadas: la que oculto la tienda (052) no cuenta.
         pool.query<{ promedio: string | null; total: number }>(
           `SELECT ROUND(AVG(calificacion), 2)::text AS promedio,
                   COUNT(*)::int AS total
            FROM resena
-           WHERE id_producto_mongo = $1`,
+           WHERE id_producto_mongo = $1
+             AND id_estado_resena = 1`,
           [idProducto],
         ),
       ]);

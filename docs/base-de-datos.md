@@ -1542,6 +1542,50 @@ Mientras espera, cada seguimiento vive tambien como consulta en el percolator
 `mesh_seguimientos`. Se evito llamarlos "alerta" o "notificacion", que ya son
 del fraude.
 
+## Lo que la tienda gestiona (migraciones 051 a 054, 2026-11-07)
+
+Tres tablas nuevas y cuatro permisos. Con ellas son 96 tablas y 126 llaves
+foraneas.
+
+### Quien cambio cada pedido (051)
+
+`pedido_cambio_estado` guarda cada cambio de estado de un pedido pagado: de que
+estado a cual (dos llaves a `estado_pedido`), quien lo hizo (`id_usuario`, SET
+NULL si se borra la cuenta), si fue la tienda (`por_la_tienda`, guardado y no
+deducido del rol, que puede cambiar) y el motivo. Cuelga del pedido con CASCADE,
+porque sin el pedido su historia no dice nada. Lo escriben dos funciones:
+
+- `cancelar_pedido_por(pedido, usuario, por_la_tienda, motivo)`. El comprador
+  cancela lo `comprado`; la tienda tambien lo `enviado` y lo `entregado`. Devuelve
+  las unidades con un movimiento `devolucion` a nombre de quien cancelo y
+  reembolsa. Bloquea el pedido con `FOR UPDATE`: dos cancelaciones a la vez no
+  devuelven dos veces. `cancelar_pedido()` de la 007 queda sin uso.
+- `marcar_envio_pedido(pedido, estado, usuario)`, solo hacia adelante.
+
+En ClickHouse, `devolucion_producto` suma `por_la_tienda UInt8 DEFAULT 0`. La
+devolucion de una cancelacion de la tienda se guarda igual, a nombre del
+comprador, para que el pedido salga de mas vendidos, combos y tendencias, pero con
+1, y las devoluciones seriales (F5) y el embudo solo cuentan las de 0. El ETL de
+compras pone la marca leyendo `pedido_cambio_estado`.
+
+### La resena oculta (052)
+
+`estado_resena` (1 publicada, 2 oculta, con id fijo porque es el DEFAULT) y
+`resena.id_estado_resena`. `resena_moderacion` es la historia de cada vez que la
+tienda la oculta o la vuelve a publicar, con quien y por que, y la escribe
+`moderar_resena()`. La oculta no se borra porque es evidencia del fraude, y como
+la fila sigue, el UNIQUE de la 011 (cuenta, vendedor, producto) no deja volver a
+resenar. Un indice parcial `WHERE id_estado_resena = 1` sirve la lista de la
+ficha.
+
+### Sin tabla nueva (053 y 054)
+
+La tienda ajusta ofertas ajenas con `oferta` y `stock_movimiento`, que ya
+guardaban el estado y quien movio cada unidad. Y crea categorias con las tablas de
+la 003 y la 004 (`categorias`, `caracteristica`, `caracteristica_variante` y sus
+dos tablas de union); el backend copia cada cambio a la coleccion `categorias` de
+MongoDB en la misma transaccion. Las dos migraciones solo traen su permiso.
+
 ## Los historiales no llevan estado
 
 Un historial solo se inserta, nunca se actualiza. El estado vive en la fila viva,

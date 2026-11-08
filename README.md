@@ -21,7 +21,7 @@ modelo `paraphrase-multilingual`. El diagrama de todo esta en
 ```
 backend/            API en NestJS con Fastify
 frontend/           Interfaz en SvelteKit
-migrations/         Esquema SQL (001 a 050) y el generador de datos
+migrations/         Esquema SQL (001 a 054) y el generador de datos
 mongo/              Colecciones e indices de MongoDB
 etl/                Cargas entre bases (catalogo, grafo, buscador, eventos, vectores)
 redis/ neo4j/ clickhouse/ elastic/    Scripts y pruebas de cada base
@@ -48,7 +48,11 @@ con vencimiento) y propone productos nuevos para el catalogo compartido. La tien
 administrador revisan ofertas y propuestas, administran el catalogo con su
 historial por fecha, ven tendencias y el dashboard general, y revisan las
 senales y casos de fraude (anillos de resenas, textos repetidos, notas que no
-cuadran, fuerza bruta, viaje imposible y mas).
+cuadran, fuerza bruta, viaje imposible y mas). Desde el 7 de noviembre la tienda
+tambien cancela cualquier pedido y lo marca enviado o entregado, pausa, retira o
+ajusta la oferta de cualquier vendedor, oculta una resena sin borrarla (sigue
+como evidencia) y crea categorias, les cambia el nombre y les agrega
+caracteristicas (migraciones 051 a 054).
 
 Si se cae una base, la tienda sigue con las que quedan, cada una con su respaldo
 ([docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md](docs/QUE-PASA-SI-SE-CAE-UNA-BASE.md)).
@@ -138,7 +142,7 @@ Las diapositivas de la presentacion final se abren con
 ## Pruebas y demos
 
 ```bash
-bash pruebas/correr_todas.sh        # las 48 pruebas de punta a punta, mas de media hora
+bash pruebas/correr_todas.sh        # las 54 pruebas de punta a punta, mas de media hora
 bash seguridad/prueba_acceso.sh     # el control de acceso de las seis bases
 ```
 
@@ -172,7 +176,7 @@ ensena y lo que toca, y todas tienen su boton en `.\panel-comandos.ps1`.
 | [migrations/README.md](migrations/README.md) | Como se nombran y se corren las migraciones |
 | [etl/README.md](etl/README.md) | Las cargas entre bases |
 | [comandos.txt](comandos.txt) | Todos los comandos, con lo que hace cada uno |
-| [PREGUNTAS-SUSTENTACION.md](PREGUNTAS-SUSTENTACION.md) | 172 preguntas para la sustentacion, con donde se ve cada cosa |
+| [PREGUNTAS-SUSTENTACION.md](PREGUNTAS-SUSTENTACION.md) | 189 preguntas para la sustentacion, con donde se ve cada cosa |
 
 Los informes de cada entrega estan en la raiz, en Word, y salen de los
 `contenido-*.json` con sus `generar-reporte-*.py`.

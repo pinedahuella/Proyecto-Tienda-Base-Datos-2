@@ -117,6 +117,9 @@ export class ReglasCasiConfirmadoService {
              JOIN stock_movimiento sm
                ON sm.id_pedido = p.id_pedido
               AND sm.id_motivo_movimiento = $2
+              -- Solo lo que cancelo el mismo comprador: una cancelacion de la
+              -- tienda (migracion 051) lleva al admin en id_usuario_modifico.
+              AND sm.id_usuario_modifico = p.id_usuario
              JOIN oferta o
                ON o.id_oferta = sm.id_oferta
               AND o.id_usuario = r.id_usuario_vendedor

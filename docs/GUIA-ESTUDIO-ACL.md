@@ -96,8 +96,8 @@ las usa por Tailscale, y todas piden usuario y contrasena.
 | Tabla | Linea | Que guarda |
 |---|---|---|
 | `modulo_permiso` | `migrations/050_permisos_por_rol.sql:43` | Los 17 modulos, por ejemplo ofertas o fraude |
-| `permiso` | `migrations/050_permisos_por_rol.sql:55` | Los 38 permisos, cada uno de un modulo |
-| `rol_permiso` | `migrations/050_permisos_por_rol.sql:70` | Que rol tiene que permiso. Llave primaria rol y permiso (`:78`). 76 filas |
+| `permiso` | `migrations/050_permisos_por_rol.sql:55` | Los 38 permisos de la 050, cada uno de un modulo, y 4 mas desde el 7 de noviembre (051 a 054, abajo). 42 en total |
+| `rol_permiso` | `migrations/050_permisos_por_rol.sql:70` | Que rol tiene que permiso. Llave primaria rol y permiso (`:78`). 76 filas de la 050 y 4 de la 051 a la 054, 80 |
 | `auditoria_permiso` | `migrations/050_permisos_por_rol.sql:93` | Cada intento negado, y cada permiso dado o quitado (`:97`) |
 | Vista `permisos_por_rol` | `migrations/050_permisos_por_rol.sql:206` | La matriz lista para leer |
 
@@ -166,6 +166,24 @@ de la matriz.
   esconde lo que no tiene. Esconder un boton no es seguridad. Aunque alguien
   llame la ruta directo, el backend niega con 403, y eso es lo que ensena
   Postman.
+
+### Los cuatro permisos del 7 de noviembre
+
+Lo que la tienda gestiona desde el panel. Los cuatro son solo del admin en la
+semilla y se reparten igual que los de la 050, solo la primera vez que se crean.
+Cada uno va en la clase de su controller, asi que cubre todas sus rutas.
+
+| Permiso | Donde nace | Donde se pide | Lo que deja hacer |
+|---|---|---|---|
+| `pedidos.administrar` | `migrations/051_pedidos_de_la_tienda.sql:249` | `backend/src/controllers/admin/admin-pedidos.controller.ts:29` | Cancelar cualquier pedido, tambien enviado o entregado, y marcarlo enviado o entregado |
+| `resenas.moderar` | `migrations/052_estado_resena.sql:146` | `backend/src/controllers/admin/admin-resenas.controller.ts:26` | Ocultar una resena o volverla a publicar, sin borrarla |
+| `ofertas.administrar` | `migrations/053_ofertas_de_la_tienda.sql:23` | `backend/src/controllers/admin/admin-ofertas.controller.ts:27` | Ver todas las ofertas de un producto, pausarlas, retirarlas y ajustar sus unidades, sin el precio |
+| `catalogo.categorias` | `migrations/054_categorias_de_la_tienda.sql:29` | `backend/src/controllers/admin/admin-categorias.controller.ts:22` | Crear categorias, cambiarles el nombre y agregarles caracteristicas |
+
+Se prueban con `node pruebas/pedidos_tienda.mjs`, `resenas_moderar.mjs`,
+`ofertas_tienda.mjs` y `categorias_tienda.mjs`, cada una con su 401 sin sesion y
+su 403 con un rol que no lo tiene, y `bash pruebas/permisos_rol.sh` los llama a
+los cuatro con los tres roles.
 
 ## 4. Capa 3, ACL por oferta (ADR-24, migracion 049)
 
@@ -377,7 +395,7 @@ peticiones sueltas, sin colecciones ni ambientes.
 | 1. Sin sesion | Sin cookie el backend no deja pasar | 401 |
 | 2. Comprador | Entra, ve lo suyo, y todo lo de vendedor y admin da 403 con el permiso que falta | 200 y 403 |
 | 3. Vendedor | Ve sus ofertas, y todo lo de admin da 403 | 200 y 403 |
-| 4. Admin | La matriz, 3 roles y 38 permisos, quitarse `permisos.administrar` o quitarle `cuenta.ver` al comprador, que el backend niega aunque se pida directo, y el registro con los 403 de arriba | 200 y 409 |
+| 4. Admin | La matriz, 3 roles y 42 permisos, quitarse `permisos.administrar` o quitarle `cuenta.ver` al comprador, que el backend niega aunque se pida directo, y el registro con los 403 de arriba | 200 y 409 |
 | 5. Una oferta | Sin entrada 404, con ver 200, editar sin permiso 403, y se quita al final | 404, 201, 200, 403 |
 | 6. Elasticsearch directo | Sin usuario 401, `mesh_lectura` lee pero no escribe, `mesh_backend` no crea ni borra indices ni ve usuarios | 401, 200, 403 |
 | 7. ClickHouse directo | `mesh_lectura` lee pero no agrega, `mesh_backend` no borra, no crea tablas, no ve usuarios | 200 y ACCESS_DENIED |

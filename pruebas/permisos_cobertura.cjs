@@ -120,8 +120,11 @@ function revisar(condicion, texto, detalle) {
     revisar(distintas.length === 0, `las ${comparadas} rutas de antes dejan pasar a los mismos roles`,
       distintas.join('\n         ') + '\n         (si un admin ya cambio rol_permiso a proposito, corre con --sin-semilla)');
     const nuevas = rutas.filter((r) => !antes.some((a) => clave(a) === clave(r)));
-    revisar(nuevas.every((r) => r.ruta.startsWith('/admin/permisos') && r.guards.includes('PermisoGuard')),
-      `las ${nuevas.length} rutas nuevas son las de /admin/permisos y van protegidas`,
+    // Nuevas desde la 050: /admin/permisos (050) y lo que la tienda gestiona
+    // desde la 051 (pedidos), 052 (resenas), 053 (ofertas) y 054 (categorias).
+    const NUEVAS = ['/admin/permisos', '/admin/pedidos', '/admin/resenas', '/admin/ofertas', '/admin/categorias'];
+    revisar(nuevas.every((r) => NUEVAS.some((n) => r.ruta.startsWith(n)) && r.guards.includes('PermisoGuard')),
+      `las ${nuevas.length} rutas nuevas son las de ${NUEVAS.join(', ')} y van protegidas`,
       nuevas.map((r) => `${clave(r)} [${r.guards}]`).join('\n         '));
   }
 
