@@ -2,12 +2,12 @@
 
 Para la presentacion final. Dice donde vive cada vector, quien lo calcula, cada
 lugar donde se usa, en que linea esta y donde se hace clic en la tienda para
-verlo. Las lineas son las del repositorio al 5 de noviembre de 2026. Si el
+verlo. Las lineas son las del repositorio al 8 de noviembre de 2026. Si el
 profesor pregunta por una funcion, primero se abre el archivo en esa linea y
 despues se explica.
 
-Las cifras salen de la base de la PC de Jose David, medidas la noche del 5 de
-noviembre.
+Las cifras salen de la base de la PC de Jose David, medidas la noche del 8 de
+noviembre, despues de sumar el vector de caracteristicas (migracion 055).
 
 ## 1. La idea en dos minutos
 
@@ -18,17 +18,21 @@ vectores cercanos. Que tan cerca estan se mide con el coseno, de -1 a 1, y en la
 tienda se ensena como porcentaje de parecido.
 
 - Se calcula un vector por producto, con el texto `nombre. Categoria X.
-  descripcion`.
+  descripcion`. Es el vector general.
+- Desde el 8 de noviembre cada producto tiene un segundo vector, el de sus
+  caracteristicas, con un texto como `Marca Aurora. Memoria RAM 16 GB, 32 GB.`
+  Lo pidio el profesor, que la similitud mire mas campos.
 - Se calcula un vector por resena o respuesta, con su texto.
-- Los dos se guardan en PostgreSQL con la extension pgvector, cada uno en su
-  tabla y con un indice HNSW para buscar vecinos sin compararse contra todos.
+- Se guardan en PostgreSQL con la extension pgvector, cada uno en su tabla y
+  con un indice HNSW para buscar vecinos sin compararse contra todos.
 - Ningun texto sale a un servicio externo y no hay costo por consulta.
 
 | Que | Cuantos hoy |
 |---|---|
-| Productos con vector en `vector_producto` | 1003, de ellos 1000 activos |
-| Comentarios con vector en `vector_comentario` | 787 de 787 |
-| Comentarios con valoracion del clasificador | 758 |
+| Productos con vector en `vector_producto` | 1014, de ellos 1001 activos |
+| Productos con vector de caracteristicas | 1007. Los otros 7 no tienen caracteristicas |
+| Comentarios con vector en `vector_comentario` | 799 |
+| Comentarios con valoracion del clasificador | 770 |
 | Modelo | `paraphrase-multilingual`, 768 dimensiones |
 | Version de pgvector | 0.8.6 |
 
@@ -40,6 +44,7 @@ tienda se ensena como porcentaje de parecido.
 | Tabla `vector_producto` | `migrations/040_vectores_en_postgres.sql:40` | Un vector por producto, con `texto_hash`, `grupo`, `activo` y `modelo` |
 | Columna `vector vector(768)` | `migrations/040_vectores_en_postgres.sql:44` | Los 768 numeros |
 | Indice HNSW de productos | `migrations/040_vectores_en_postgres.sql:69` | `USING hnsw (vector vector_cosine_ops)`, vecinos por coseno |
+| Columnas `vector_caracteristicas` y `caracteristicas_hash` | `migrations/055_vector_caracteristicas.sql:35` | El segundo vector, el de caracteristicas, y la huella de su texto. Sin indice, solo se compara contra los candidatos |
 | Tabla `vector_comentario` | `migrations/040_vectores_en_postgres.sql:75` | Un vector por comentario, mas la valoracion del texto |
 | `valoracion_texto` y `prob_mala` | `migrations/040_vectores_en_postgres.sql:83` y `:85` | Lo que dijo el clasificador, mala, buena, dudosa o corta |
 | La cola de comentarios | `migrations/034_evento_comentario.sql:33` | `evento_comentario`, la llenan los triggers de `:100` y `:139` |
@@ -75,24 +80,48 @@ Esta en el informe final, 2.2, y en ADR-13.
 
 - **Carga completa**, `etl/cargar_vectores.ps1`. La corre `arrancar.ps1` en el
   paso 7d (`arrancar.ps1:1488`). Lee nombre, categoria y descripcion de MongoDB
-  (`etl/cargar_vectores.ps1:250`), arma el texto en `:268`, calcula el md5 en
-  `:263` y solo pide a Ollama los productos sin vector o cuyo texto cambio.
+  (`etl/cargar_vectores.ps1:256`), arma el texto en `:274`, calcula el md5 en
+  `:269` y solo pide a Ollama los productos sin vector o cuyo texto cambio. Su
+  paso 7 (`:441`) no calcula el vector de caracteristicas, solo marca con la
+  bandera los productos que todavia no lo tienen, y el worker lo calcula.
 - **Al dia**, `VectoresSyncService` en
-  `backend/src/services/productos/vectores-sync.service.ts:66`. Corre cada 10
-  segundos (`:73` y `:77`). Cuando un vendedor crea o edita un producto,
+  `backend/src/services/productos/vectores-sync.service.ts:148`. Corre cada 10
+  segundos (`:155` y `:159`). Cuando un vendedor crea o edita un producto,
   `backend/src/services/vendedores/productos.service.ts` le pone
-  `pendiente_vector: true` en MongoDB (lineas 205, 327, 633, 742 y 1300). El
-  worker arma el mismo texto con `construirTexto()`
-  (`vectores-sync.service.ts:42`), compara su md5 con `texto_hash`, y solo si
-  cambio llama a `pedirVectores()` (`vectores-sync.service.ts:180`). Si solo
-  cambio el estado, actualiza `grupo` y `activo` sin Ollama
-  (`vectores-sync.service.ts:158`). Al final borra la bandera
-  (`vectores-sync.service.ts:226`).
+  `pendiente_vector: true` en MongoDB (lineas 205, 327, 633, 742 y 1300), y
+  tambien el admin al renombrar una categoria
+  (`backend/src/services/admin/admin-categorias.service.ts:239`).
+- **Los dos textos.** `construirTexto()` (`vectores-sync.service.ts:61`) arma el
+  general, nombre, categoria y descripcion. `construirTextoCaracteristicas()`
+  (`vectores-sync.service.ts:98`) arma el de caracteristicas, las del producto y
+  las de sus variantes, una por nombre, ordenadas por nombre y sin repetir
+  valores, por ejemplo `Color Gris grafito. Marca Aurora. Memoria RAM 16 GB,
+  32 GB.` Si no tiene ninguna, el texto queda vacio.
+- **Cuando llama a Ollama.** Compara el md5 de cada texto con su huella
+  guardada, `texto_hash` y `caracteristicas_hash` (`vectores-sync.service.ts:248`
+  y `:249`). Solo pide el vector que cambio, con `pedirVectores()` (`:329`). Como
+  cada producto puede pedir dos textos, el lote es de 16 productos, la mitad de
+  `LOTE_VECTORES` (`:310`). Si no cambio ningun texto y solo cambio el estado,
+  actualiza `grupo` y `activo` sin Ollama (`:289`).
+- **Donde guarda.** El general con `guardar()` (`:462`), un `INSERT ... ON
+  CONFLICT` que crea la fila. El de caracteristicas despues, con
+  `guardarCaracteristicas()` (`:491`), un `UPDATE` de la misma fila. Sin
+  caracteristicas queda `NULL` y la huella es la del texto vacio, asi se sabe que
+  ya se miro.
+- **La bandera.** Al final la baja uno por uno con `findOneAndUpdate` (`:402`) y
+  compara la `firmaDe()` (`:517`) del documento de antes. Si alguien edito el
+  producto mientras Ollama calculaba, la firma no coincide y la bandera vuelve a
+  subir.
 
 El `grupo` es el md5 de la categoria y la descripcion, sin el nombre
-(`etl/cargar_vectores.ps1:273` y `vectores-sync.service.ts:145`). Las copias
+(`etl/cargar_vectores.ps1:279` y `vectores-sync.service.ts:240`). Las copias
 que hizo el generador de datos solo cambian el sufijo del nombre, asi que caen
 en el mismo grupo y no salen como parecidas entre si.
+
+Por que el de caracteristicas va en un vector aparte y no dentro del mismo
+texto. Asi cada parte pesa lo que se decide al ordenar, y si un producto no
+tiene caracteristicas el general sigue igual. Esta en la cabecera de
+`migrations/055_vector_caracteristicas.sql`.
 
 ### 3.3 Las resenas
 
@@ -132,43 +161,76 @@ la migracion 027, que bajo de 32 ms a 3,8 ms por producto.
 - **Donde se ve.** Tienda, abrir cualquier producto, bajar al estante
   **Parecidos a este**.
 - **Frontend.** `frontend/src/routes/producto/[id]/+page.svelte:178`
-  (`traerSimilares`) pide la ruta y el estante esta en `:1204`.
+  (`traerSimilares`) pide la ruta y el estante esta en `:1212`.
 - **Ruta.** `GET /productos/:id/similares`, publica, en
   `backend/src/controllers/productos/similares.controller.ts:20`.
 - **Servicio.** `SimilaresService` en
-  `backend/src/services/productos/similares.service.ts:57`.
+  `backend/src/services/productos/similares.service.ts:120`.
 
-Como decide los seis, desde el 5 de noviembre, con el mismo esquema que
-"Quienes lo compraron tambien llevaron" (ADR-25).
+Como decide los seis, con el mismo esquema que "Quienes lo compraron tambien
+llevaron" (ADR-25), y desde el 8 de noviembre con un puntaje por mas campos.
 
-1. Lee el vector, el grupo y la categoria del producto (`:86`, la consulta en
-   `:93`).
+1. Lee los dos vectores, el grupo y la categoria del producto (`:152`, la
+   consulta en `:160`).
 2. **Bloque 1, su misma categoria.** Busca los mas cercanos solo entre los
-   productos activos de su categoria (`:107`, el `ORDER BY` en `:119`).
-3. **Bloque 2, el resto del catalogo.** La consulta de siempre con el indice
-   HNSW, los 200 mas cercanos de todo el catalogo (`:127`).
-4. Llena los seis en ese orden, uno por grupo, sin el propio producto ni sus
-   copias, primero el bloque 1 entero y lo que falte con el bloque 2 (`:170` y
-   `:171`). Cada resultado dice `misma_categoria` true o false.
+   productos activos de su categoria (`:184`, el filtro `pc.id_categoria` en
+   `:192`).
+3. **Bloque 2, el resto del catalogo.** La consulta con el indice HNSW, los 200
+   mas cercanos de todo el catalogo (`:201`).
+4. **El puntaje.** `puntuar()` (`:277`) mira solo esos candidatos, por su id. Saca
+   en PostgreSQL el parecido de caracteristicas, `1 - (vector_caracteristicas <=>
+   ...)`, y la nota de sus resenas publicadas. `puntajeDe()` (`:75`) hace la
+   cuenta.
+5. Ordena cada bloque por puntaje (`enOrden`, `:223`) y llena los seis, uno por
+   grupo, sin el propio producto ni sus copias, primero el bloque 1 y lo que
+   falte con el bloque 2 (`:263` y `:264`). Cada resultado dice
+   `misma_categoria`, `similitud`, `puntaje`, `parecido_caracteristicas` y
+   `nota_resenas`.
+
+**La cuenta del puntaje**, con los pesos de `:20` a `:27`.
+
+```text
+puntaje = 0,7 x parecido general + 0,2 x parecido de caracteristicas + 0,1 x nota / 5
+nota    = (suma de estrellas + 2 x 3) / (resenas + 2)
+```
+
+- El parecido general manda, es el de nombre, categoria y descripcion.
+- Si a alguno de los dos productos le faltan las caracteristicas, esa parte vale
+  lo mismo que el general, asi no gana ni pierde por eso.
+- La nota es un promedio bayesiano, como si cada producto tuviera dos resenas
+  imaginarias de 3 estrellas. Una sola resena de 5 no le gana a veinte buenas, y
+  un producto sin resenas cuenta como de 3.
+- Los pesos suman 1, asi el puntaje va de 0 a 1 igual que el parecido.
 
 Un producto de la misma categoria con 0,40 de parecido va antes que uno de otra
-categoria con 0,80. Por ejemplo el Maillot de ruta Peloton (id 70) ensena cinco
-de Ciclismo, la Bomba de piso Piston con 45,6 %, y despues una comoda con 65,7 %.
+categoria con 0,80. Ejemplo, el Maillot de ruta Peloton (id 70).
 
-Cifras de la noche del 5 de noviembre.
+| Parecido | Puntaje | General | Caracteristicas | Nota |
+|---|---|---|---|---|
+| Candado plegable Cerrojo F8 (69) | 0,683 | 0,707 | 0,621 | 3,3 |
+| Casco de ruta Aerodino (74) | 0,666 | 0,624 | 0,747 | 4,7 |
+| Guantes de ciclismo Palma Corta (72) | 0,650 | 0,629 | 0,710 | 3,5 |
+| Sillin de ruta Vertebra SR-2 (71) | 0,583 | 0,538 | 0,580 | 5,0 |
+| Bomba de piso Piston (73) | 0,483 | 0,456 | 0,539 | 2,7 |
+| Bloque 2, Comoda Sendero 4 gavetas (881) | 0,655 | 0,657 | 0,679 | sin resenas |
+
+Solo por el parecido general los Guantes (0,629) iban antes que el Casco (0,624).
+Con el puntaje el Casco sube, porque sus caracteristicas se parecen mas a las del
+Maillot y tiene mejor nota.
+
+Cifras de la noche del 8 de noviembre.
 
 | Medicion | Resultado |
 |---|---|
-| La ruta contra el mismo orden calculado sin indice, en los 1000 productos activos | 1000 de 1000 iguales, mismo orden y mismos bloques |
-| Solo por el vector, sin mirar la categoria, vecinos de la misma categoria | 68,1 %, contra 6 % al azar |
-| En la ficha, con la categoria primero | 84,5 % de los parecidos son de su categoria |
-| Consulta del bloque 2 con el indice HNSW | 1,9 ms, contra 3,2 ms comparando contra los 1003 |
+| La ruta contra el mismo puntaje calculado aparte sin indice, en 60 productos | 60 de 60 iguales, mismos seis, mismo orden, mismos bloques y diferencia de puntaje 0 |
+| Las caracteristicas y la nota cambian el orden | en 58 de 60 productos |
+| Solo por el vector general, sin mirar la categoria, vecinos de la misma categoria | 68 % en los 1000 activos (5 de noviembre, el vector general no cambio desde entonces) y 67 % en la muestra de 60 de esta noche, contra 6 % al azar |
+| Consulta del bloque 2 con el indice HNSW | 2,2 ms, contra 3,3 ms comparando contra los 1014 |
 
-Por que el 68,1 % sigue siendo la prueba de que el modelo entiende. Al modelo
+Por que el 68 % sigue siendo la prueba de que el modelo entiende. Al modelo
 nunca se le dice la categoria como dato aparte, solo la lee dentro del texto. Si
 solo con el vector dos de cada tres vecinos son de la misma categoria, contra 6
-de cada cien al azar, el vector capto de que trata el producto. El 84,5 % ya
-incluye la regla del bloque 1, por eso no se usa como prueba del modelo.
+de cada cien al azar, el vector capto de que trata el producto.
 
 ### 5.2 Busqueda hibrida
 
@@ -202,8 +264,8 @@ incluye la regla del bloque 1, por eso no se usa como prueba del modelo.
 - **Servicio.** `BuscadorIntencionService`,
   `backend/src/services/buscador/intencion.service.ts:105`. Busca en las resenas
   (`buscarResenas()` en `:194`, sobre `vector_comentario`) y en los productos
-  (`buscarProductos()` en `:239`), con umbrales de `:34` y `:35`, y junta por
-  producto en `juntar()` (`:265`).
+  (`buscarProductos()` en `:240`), con umbrales de `:34` y `:35`, y junta por
+  producto en `juntar()` (`:266`).
 - Sin Ollama da 503, porque sin el vector de la frase no hay nada que buscar.
 
 ### 5.4 Sugerencias al proponer un producto
@@ -211,8 +273,8 @@ incluye la regla del bloque 1, por eso no se usa como prueba del modelo.
 - **Donde se ve.** Panel, pestana **Catalogo**, boton **Publicar producto**. Al
   escribir el nombre, la tienda sugiere la categoria y ensena productos
   parecidos, con el aviso **Puede que ya exista**.
-- **Frontend.** `frontend/src/lib/PanelVendedor.svelte:568` (`sugerir`), el aviso
-  en `:1125`.
+- **Frontend.** `frontend/src/lib/PanelVendedor.svelte:656` (`sugerir`), el aviso
+  en `:1301`.
 - **Ruta.** `POST /vendedor/productos/sugerencias`, con el permiso
   `catalogo.proponer`,
   `backend/src/controllers/vendedores/sugerencias-propuesta.controller.ts:30`.
@@ -245,7 +307,7 @@ y tambien al instante cuando alguien escribe una resena.
 
 - El chequeo al instante es `ChequeoTextoInmediatoService`
   (`backend/src/services/fraude/chequeo-texto-inmediato.service.ts:53`). Lo
-  llama `backend/src/services/resenas/resenas.service.ts:334` sin esperar, asi
+  llama `backend/src/services/resenas/resenas.service.ts:336` sin esperar, asi
   que no retrasa la respuesta al comprador.
 - Cuanto suma cada senal al puntaje de una cuenta esta en
   `backend/src/services/fraude/puntaje-fraude.service.ts:23` a `:26`.
@@ -275,20 +337,28 @@ y tambien al instante cuando alguien escribe una resena.
 
 | Que | Comando |
 |---|---|
-| Los seis parecidos de un producto, con sus dos bloques, el plan del indice y la ruta | `.\demo-entrega-final.ps1 -Parte semantica -Producto maillot` |
+| Los seis parecidos de un producto, con su puntaje, sus dos bloques, el plan del indice y la ruta | `.\demo-entrega-final.ps1 -Parte semantica -Producto maillot` |
 | Cuantos productos y resenas tienen vector y si el backend llega a Ollama | `.\demo-entrega-final.ps1 -Parte vectores` |
 | La busqueda por intencion | `.\demo-entrega-final.ps1 -Parte intencion -Texto "algo para salir a pedalear"` |
 | La hibrida y las sugerencias | `-Parte hibrida` y `-Parte sugerencias` |
 | Como leyo el clasificador cada resena | `-Parte clasificador` |
-| La prueba de la recomendacion | `python pruebas/recomendacion_semantica.py`, 21 OK |
-| El worker calcula lo mismo que el ETL | `node pruebas/vectores_worker.cjs` |
+| La prueba de la recomendacion | `python pruebas/recomendacion_semantica.py`, 30 OK |
+| El worker calcula lo mismo que el ETL, y el vector de caracteristicas | `node pruebas/vectores_worker.cjs`, 10 OK |
 | Si Ollama responde y tiene el modelo | `GET http://localhost:3000/vectores` |
 
 `pruebas/recomendacion_semantica.py` comprueba que cada producto tiene su vector
-de 768, que solo por el vector los vecinos son de la misma categoria mucho mas
-que al azar (seccion 2), que la ficha va por bloques y que `misma_categoria` dice
-la verdad (seccion 2b), y que nunca devuelve el propio producto, inactivos ni
-copias. La seccion 2b se probo saboteandola con el orden viejo y dio 2 FALLA.
+de 768, y tambien el de caracteristicas o la huella del texto vacio si no tiene
+ninguna (seccion 1b). Que solo por el vector los vecinos son de la misma
+categoria mucho mas que al azar (seccion 2), que la ficha va por bloques y que
+`misma_categoria` dice la verdad (seccion 2b). Que el puntaje calculado aparte,
+sin indice y contra todos, da los mismos seis en el mismo orden que la ruta
+(seccion 2c). Y que nunca devuelve el propio producto, inactivos ni copias. Se
+probo saboteandola con los pesos 1, 0 y 0, es decir solo el parecido general, y
+la seccion 2c dio 2 FALLA.
+
+Con el modo remoto, las pruebas en Python van con `source remoto/activar.sh` y
+`export BACKEND=http://127.0.0.1:3000`. Con `localhost` Windows prueba primero
+`::1` y el backend solo escucha en IPv4, y la prueba se queda colgada.
 
 ## 8. Preguntas que puede hacer el profesor
 
@@ -317,7 +387,27 @@ para que no salgan como parecidas entre si.
 
 **Por que primero la misma categoria.** Se pidio el mismo esquema que "Quienes lo
 compraron tambien llevaron" para que en la ficha de una laptop salgan primero
-laptops. El vector sigue decidiendo el orden dentro de cada bloque.
+laptops. El puntaje decide el orden dentro de cada bloque.
+
+**Con que campos se calcula la similitud.** Con dos vectores y la nota. El
+general lee nombre, categoria y descripcion. El segundo lee las caracteristicas
+del producto y de sus variantes, como marca, memoria, talla o color. El puntaje
+es 0,7 del general, 0,2 del de caracteristicas y 0,1 de la nota de las resenas
+(`similares.service.ts:75`).
+
+**Por que un vector aparte y no meter las caracteristicas en el mismo texto.**
+Asi cada parte pesa lo que se decide, el general manda y las caracteristicas
+suman. Y si un producto no tiene caracteristicas, o su vector todavia no se
+calcula, el general no cambia y esa parte vale lo mismo que el general.
+
+**Por que el vector de caracteristicas no tiene indice.** No se buscan vecinos
+con el. El indice HNSW del general trae los candidatos, y el de
+caracteristicas solo se compara contra esos pocos cientos, por su id.
+
+**Por que la nota es bayesiana y no el promedio.** Con el promedio, un producto
+con una sola resena de 5 estrellas le ganaria a uno con veinte de 4,8. Sumarle
+dos resenas imaginarias de 3 estrellas lo acerca al medio hasta que tenga
+suficientes resenas.
 
 **Por que no se guarda el vector en MongoDB o Elasticsearch.** Se probo en
 Elasticsearch del 2 al 16 de octubre. El profesor pidio pgvector y medido contra

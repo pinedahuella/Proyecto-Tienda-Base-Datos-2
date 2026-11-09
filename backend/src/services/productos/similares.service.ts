@@ -11,10 +11,28 @@ const LIMITE = 6;
  * `LIMIT 200` que tenia `productos_similares()` (migracion 027). */
 const CANDIDATOS = 200;
 
+/**
+ * Cuanto pesa cada parte del puntaje que ordena Parecidos a este (2026-11-08).
+ * Manda el parecido general, el del texto con nombre, categoria y descripcion.
+ * Suma el de las caracteristicas (migracion 055) y un poco la nota de las
+ * resenas. Suman 1, asi que el puntaje va de 0 a 1 igual que el parecido.
+ */
+export const PESO_GENERAL = 0.7;
+export const PESO_CARACTERISTICAS = 0.2;
+export const PESO_NOTA = 0.1;
+/** La nota es un promedio bayesiano: se le suman RESENAS_PREVIAS resenas
+ * imaginarias de NOTA_PREVIA estrellas. Asi una sola resena de 5 no le gana a
+ * veinte buenas, y un producto sin resenas cuenta como de 3 estrellas. */
+export const RESENAS_PREVIAS = 2;
+export const NOTA_PREVIA = 3;
+
 interface Similar {
   id_producto: number;
   similitud: number;
   misma_categoria: boolean;
+  puntaje: number;
+  parecido_caracteristicas: number | null;
+  nota_resenas: number | null;
 }
 
 /** Una fila de vecinos de `vector_producto`, del mas cercano al mas lejano. */
@@ -24,12 +42,50 @@ interface FilaCercana {
   similitud: number;
 }
 
+/** Un candidato ya puntuado. */
+interface Puntuado extends FilaCercana {
+  puntaje: number;
+  parecido_caracteristicas: number | null;
+  nota_resenas: number | null;
+}
+
 export interface ProductoSimilar {
   id_producto: number;
+  /** El parecido general, `1 - distancia` del vector de nombre, categoria y
+   * descripcion. */
   similitud: number;
   /** Si es de la misma categoria que el producto pedido: esos van siempre primero. */
   misma_categoria: boolean;
+  /** Lo que ordena cada bloque: 0,7 del parecido general, 0,2 del de
+   * caracteristicas y 0,1 de la nota. */
+  puntaje: number;
+  /** `1 - distancia` de los vectores de caracteristicas, o null si a alguno de
+   * los dos le falta. Entonces en el puntaje vale lo mismo que el general. */
+  parecido_caracteristicas: number | null;
+  /** El promedio de estrellas de sus resenas publicadas, o null si no tiene. */
+  nota_resenas: number | null;
   producto: Producto | null;
+}
+
+/**
+ * El puntaje de un candidato. Si a alguno de los dos productos le faltan las
+ * caracteristicas, esa parte vale lo mismo que el parecido general, asi no
+ * gana ni pierde por eso.
+ */
+export function puntajeDe(
+  general: number,
+  caracteristicas: number | null,
+  promedio: number | null,
+  totalResenas: number,
+): number {
+  const suma = (promedio ?? 0) * totalResenas;
+  const nota =
+    (suma + RESENAS_PREVIAS * NOTA_PREVIA) / (totalResenas + RESENAS_PREVIAS);
+  return (
+    PESO_GENERAL * general +
+    PESO_CARACTERISTICAS * (caracteristicas ?? general) +
+    PESO_NOTA * (nota / 5)
+  );
 }
 
 /**
@@ -52,6 +108,13 @@ export interface ProductoSimilar {
  * va antes que otro de otra categoria con 0,80. La categoria es la de
  * `producto_catalogo.id_categoria`, la misma que lleva el grafo. Se pidio el
  * 2026-11-05 para la presentacion final.
+ *
+ * Desde el 2026-11-08, por mas campos (migracion 055). Dentro de cada bloque
+ * no ordena solo el parecido general: cada candidato lleva un puntaje, 0,7 del
+ * parecido general (nombre, categoria y descripcion), 0,2 del parecido de sus
+ * caracteristicas y 0,1 de la nota de sus resenas (`puntajeDe`). Los
+ * candidatos son los mismos de antes, todos los de su categoria y los 200 mas
+ * cercanos por el indice HNSW, y despues se puntuan (`puntuar`).
  */
 @Injectable()
 export class SimilaresService {
@@ -78,6 +141,9 @@ export class SimilaresService {
       id_producto: fila.id_producto,
       similitud: fila.similitud,
       misma_categoria: fila.misma_categoria,
+      puntaje: fila.puntaje,
+      parecido_caracteristicas: fila.parecido_caracteristicas,
+      nota_resenas: fila.nota_resenas,
       producto: productoPorId.get(fila.id_producto) ?? null,
     }));
   }
@@ -87,10 +153,13 @@ export class SimilaresService {
     try {
       const { rows: base } = await pool.query<{
         vector: string;
+        vector_caracteristicas: string | null;
         grupo: string;
         id_categoria: string | null;
       }>(
-        `SELECT v.vector::text AS vector, v.grupo, pc.id_categoria
+        `SELECT v.vector::text AS vector,
+                v.vector_caracteristicas::text AS vector_caracteristicas,
+                v.grupo, pc.id_categoria
            FROM vector_producto v
            LEFT JOIN producto_catalogo pc USING (id_producto_mongo)
           WHERE v.id_producto_mongo = $1`,
@@ -99,7 +168,12 @@ export class SimilaresService {
       if (base.length === 0) {
         return [];
       }
-      const { vector, grupo, id_categoria: categoria } = base[0];
+      const {
+        vector,
+        vector_caracteristicas: vectorCarac,
+        grupo,
+        id_categoria: categoria,
+      } = base[0];
 
       // Bloque 1, los de su misma categoria. Una categoria tiene decenas de
       // productos, asi que PostgreSQL los filtra primero por categoria y los
@@ -139,12 +213,28 @@ export class SimilaresService {
         cercanos.map((fila) => fila.id_producto_mongo),
       );
 
-      // Llegan del mas cercano al mas lejano: el primero de cada grupo es el
-      // que se queda. Primero se llena con su categoria y lo que falte, con
-      // el resto. Los de su categoria ya entraron todos en el bloque 1.
+      // Los candidatos de los dos bloques se puntuan juntos: parecido general,
+      // parecido de caracteristicas y nota. Cada bloque queda del puntaje mas
+      // alto al mas bajo; en un empate, el id mas bajo, para que sea estable.
+      const puntuados = await this.puntuar(
+        [...deSuCategoria, ...cercanos],
+        vectorCarac,
+      );
+      const enOrden = (filas: FilaCercana[]) =>
+        filas
+          .map((fila) => puntuados.get(fila.id_producto_mongo)!)
+          .sort(
+            (a, b) =>
+              b.puntaje - a.puntaje ||
+              Number(a.id_producto_mongo) - Number(b.id_producto_mongo),
+          );
+
+      // El primero de cada grupo es el que se queda, el de mejor puntaje.
+      // Primero se llena con su categoria y lo que falte, con el resto. Los de
+      // su categoria ya entraron todos en el bloque 1.
       const vistos = new Set<string>();
       const similares: Similar[] = [];
-      const agregar = (filas: FilaCercana[], mismaCategoria: boolean) => {
+      const agregar = (filas: Puntuado[], mismaCategoria: boolean) => {
         for (const fila of filas) {
           if (similares.length === LIMITE) {
             return;
@@ -164,15 +254,75 @@ export class SimilaresService {
             id_producto: Number(fila.id_producto_mongo),
             similitud: fila.similitud,
             misma_categoria: mismaCategoria,
+            puntaje: fila.puntaje,
+            parecido_caracteristicas: fila.parecido_caracteristicas,
+            nota_resenas: fila.nota_resenas,
           });
         }
       };
-      agregar(deSuCategoria, true);
-      agregar(cercanos, false);
+      agregar(enOrden(deSuCategoria), true);
+      agregar(enOrden(cercanos), false);
       return similares;
     } catch (error) {
       manejarErrorConexion(this.logger, error);
     }
+  }
+
+  /**
+   * El puntaje de cada candidato. Solo mira los candidatos, por su id, asi la
+   * consulta de los vecinos sigue usando el indice HNSW y esta compara unos
+   * cientos de filas. El parecido de caracteristicas sale de PostgreSQL, sin
+   * traer los vectores, y la nota de las resenas publicadas de `resena`.
+   */
+  private async puntuar(
+    filas: FilaCercana[],
+    vectorCarac: string | null,
+  ): Promise<Map<string, Puntuado>> {
+    const ids = [...new Set(filas.map((fila) => fila.id_producto_mongo))];
+    if (ids.length === 0) {
+      return new Map();
+    }
+    const { rows } = await pool.query<{
+      id_producto_mongo: string;
+      parecido_caracteristicas: number | null;
+      promedio: number | null;
+      total: number;
+    }>(
+      `SELECT v.id_producto_mongo,
+              CASE WHEN v.vector_caracteristicas IS NULL OR $2::vector IS NULL
+                   THEN NULL
+                   ELSE 1 - (v.vector_caracteristicas <=> $2::vector)
+              END AS parecido_caracteristicas,
+              r.promedio,
+              coalesce(r.total, 0)::int AS total
+         FROM vector_producto v
+         LEFT JOIN (
+               SELECT id_producto_mongo,
+                      avg(calificacion)::float8 AS promedio,
+                      count(*) AS total
+                 FROM resena
+                WHERE id_estado_resena = 1
+                  AND id_producto_mongo = ANY($1::bigint[])
+                GROUP BY id_producto_mongo
+              ) r USING (id_producto_mongo)
+        WHERE v.id_producto_mongo = ANY($1::bigint[])`,
+      [ids, vectorCarac],
+    );
+    const extra = new Map(rows.map((fila) => [fila.id_producto_mongo, fila]));
+    const puntuados = new Map<string, Puntuado>();
+    for (const fila of filas) {
+      const e = extra.get(fila.id_producto_mongo);
+      const caracteristicas = e?.parecido_caracteristicas ?? null;
+      const promedio = e?.promedio ?? null;
+      const total = e?.total ?? 0;
+      puntuados.set(fila.id_producto_mongo, {
+        ...fila,
+        puntaje: puntajeDe(fila.similitud, caracteristicas, promedio, total),
+        parecido_caracteristicas: caracteristicas,
+        nota_resenas: promedio,
+      });
+    }
+    return puntuados;
   }
 
   /** La categoria de cada producto, de `producto_catalogo`. */

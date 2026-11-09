@@ -23,8 +23,15 @@ Que se comprueba
      2026-11-05 la ruta ya pone primero su categoria y su cifra no diria nada
      del modelo.
   2b. Van por bloques, como tambien-compraron (desde el 2026-11-05): primero
-     todos los de su categoria y despues el resto, cada bloque del mas
-     parecido al menos, y misma_categoria dice la verdad.
+     todos los de su categoria y despues el resto, cada bloque del puntaje
+     mas alto al mas bajo, y misma_categoria dice la verdad.
+  2c. Por mas campos (desde el 2026-11-08, migracion 055). Cada candidato se
+     ordena por un puntaje, 0,7 del parecido general, 0,2 del parecido de
+     caracteristicas y 0,1 de la nota de sus resenas. Se calcula aparte, en
+     PostgreSQL contra todos y sin indice, y en Python con la misma formula, y
+     tiene que dar los mismos seis, en el mismo orden y con el mismo puntaje
+     que la ruta. El control es que las caracteristicas si cambian el orden
+     en algunos productos, si no la prueba no diria nada.
   3. La ruta no devuelve el propio producto ni productos inactivos.
   4. Un producto sin vector no rompe nada, devuelve vacio.
 
@@ -81,24 +88,103 @@ def pedir(url, cuerpo=None):
         return json.loads(r.read().decode('utf-8'))
 
 
-def documentos():
-    """id -> {grupo, modelo, dims, tiene} de cada producto de producto_catalogo.
-
-    Se mira PostgreSQL, sin traer los vectores: vector_dims() dice el largo de
-    cada uno, y un producto sin fila en vector_producto sale con tiene=False."""
-    sql = ("SELECT pc.id_producto_mongo || '|' || coalesce(v.grupo, '') || '|' || coalesce(v.modelo, '') || '|' || "
-           "coalesce(vector_dims(v.vector)::text, '0') FROM producto_catalogo pc "
-           "LEFT JOIN vector_producto v USING (id_producto_mongo);")
+def psql(sql):
     r = subprocess.run(DOCKER + ['exec', 'mesh-postgres', 'psql', '-U', ENV['DB_USER'], '-d', ENV['DB_NAME'],
                         '-qtAX', '-c', sql], capture_output=True, text=True, encoding='utf-8')
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip())
+    return [linea.strip() for linea in r.stdout.splitlines() if linea.strip()]
+
+
+def documentos():
+    """id -> {grupo, modelo, dims, tiene, dims_carac, huella_carac} de cada
+    producto de producto_catalogo.
+
+    Se mira PostgreSQL, sin traer los vectores: vector_dims() dice el largo de
+    cada uno, y un producto sin fila en vector_producto sale con tiene=False.
+    huella_carac dice si el de caracteristicas ya se calculo (055): 'nula' si
+    no, 'vacia' si se calculo y el producto no tiene caracteristicas."""
+    sql = ("SELECT pc.id_producto_mongo || '|' || coalesce(v.grupo, '') || '|' || coalesce(v.modelo, '') || '|' || "
+           "coalesce(vector_dims(v.vector)::text, '0') || '|' || "
+           "coalesce(vector_dims(v.vector_caracteristicas)::text, '0') || '|' || "
+           "CASE WHEN v.caracteristicas_hash IS NULL THEN 'nula' "
+           "     WHEN v.caracteristicas_hash = md5('') THEN 'vacia' ELSE 'texto' END "
+           "FROM producto_catalogo pc LEFT JOIN vector_producto v USING (id_producto_mongo);")
     out = {}
-    for linea in r.stdout.splitlines():
-        c = linea.strip().split('|')
-        if len(c) == 4:
-            out[int(c[0])] = {'grupo': c[1] or None, 'modelo': c[2] or None, 'dims': int(c[3]), 'tiene': c[3] != '0'}
+    for linea in psql(sql):
+        c = linea.split('|')
+        if len(c) == 6:
+            out[int(c[0])] = {'grupo': c[1] or None, 'modelo': c[2] or None, 'dims': int(c[3]), 'tiene': c[3] != '0',
+                              'dims_carac': int(c[4]), 'huella_carac': c[5]}
     return out
+
+
+# Los mismos pesos que backend/src/services/productos/similares.service.ts
+PESO_GENERAL, PESO_CARACTERISTICAS, PESO_NOTA = 0.7, 0.2, 0.1
+RESENAS_PREVIAS, NOTA_PREVIA = 2, 3
+
+
+def puntaje(general, caracteristicas, promedio, total):
+    nota = ((promedio or 0) * total + RESENAS_PREVIAS * NOTA_PREVIA) / (total + RESENAS_PREVIAS)
+    return (PESO_GENERAL * general + PESO_CARACTERISTICAS * (general if caracteristicas is None else caracteristicas)
+            + PESO_NOTA * (nota / 5))
+
+
+def candidatos_exactos(ids):
+    """base -> filas de candidatos, calculadas contra todos y sin indice.
+
+    Los mismos dos bloques de la ruta. Bloque 1, todos los activos de su
+    categoria. Bloque 2, los 200 mas cercanos de todo el catalogo por el vector
+    general. Para cada uno, su parecido general, el de caracteristicas y la
+    nota de sus resenas publicadas."""
+    sql = ("SET enable_indexscan = off; SET enable_bitmapscan = off; "
+           "WITH b AS (SELECT v.*, pc.id_categoria FROM vector_producto v JOIN producto_catalogo pc USING (id_producto_mongo) "
+           "           WHERE v.id_producto_mongo IN (%s)), "
+           "c AS (SELECT v.id_producto_mongo AS id, v.grupo, v.activo, v.vector, v.vector_caracteristicas, pc.id_categoria "
+           "        FROM vector_producto v JOIN producto_catalogo pc USING (id_producto_mongo)), "
+           "r AS (SELECT id_producto_mongo AS id, avg(calificacion)::float8 AS promedio, count(*) AS total "
+           "        FROM resena WHERE id_estado_resena = 1 GROUP BY 1), "
+           "x AS (SELECT b.id_producto_mongo AS base, 1 AS bloque, c.* FROM b JOIN c ON c.id_categoria = b.id_categoria "
+           "        WHERE c.activo AND c.id <> b.id_producto_mongo AND c.grupo <> b.grupo "
+           "      UNION ALL "
+           "      SELECT b.id_producto_mongo, 2, k.* FROM b CROSS JOIN LATERAL ("
+           "        SELECT c.* FROM c WHERE c.activo AND c.id <> b.id_producto_mongo AND c.grupo <> b.grupo "
+           "         ORDER BY c.vector <=> b.vector LIMIT 200) k) "
+           "SELECT x.base || '|' || x.bloque || '|' || x.id || '|' || x.grupo || '|' || "
+           "       coalesce(b.id_categoria IS NOT NULL AND x.id_categoria = b.id_categoria, false) || '|' || "
+           "       (1 - (x.vector <=> b.vector))::text || '|' || "
+           "       coalesce((1 - (x.vector_caracteristicas <=> b.vector_caracteristicas))::text, '') || '|' || "
+           "       coalesce(r.promedio::text, '') || '|' || coalesce(r.total, 0) "
+           "  FROM x JOIN b ON b.id_producto_mongo = x.base LEFT JOIN r ON r.id = x.id;"
+           % ','.join(str(i) for i in ids))
+    out = {}
+    for linea in psql(sql):
+        c = linea.split('|')
+        if len(c) != 9:
+            continue
+        out.setdefault(int(c[0]), []).append({
+            'bloque': int(c[1]), 'id': int(c[2]), 'grupo': c[3], 'misma': c[4] == 't',
+            'general': float(c[5]), 'carac': float(c[6]) if c[6] else None,
+            'promedio': float(c[7]) if c[7] else None, 'total': int(c[8])})
+    return out
+
+
+def esperados(filas):
+    """Lo que tiene que devolver la ruta, con la misma regla: cada bloque por
+    puntaje (empate, el id mas bajo), uno por grupo, primero su categoria."""
+    for f in filas:
+        f['puntaje'] = puntaje(f['general'], f['carac'], f['promedio'], f['total'])
+    vistos, salida = set(), []
+    for bloque in (1, 2):
+        lista = sorted((f for f in filas if f['bloque'] == bloque), key=lambda f: (-f['puntaje'], f['id']))
+        for f in lista:
+            if len(salida) == 6:
+                break
+            if f['grupo'] in vistos or (bloque == 2 and f['misma']):
+                continue
+            vistos.add(f['grupo'])
+            salida.append((f['id'], f['puntaje'], bloque == 1))
+    return salida
 
 
 def vecinos_solo_vector(ids):
@@ -169,7 +255,15 @@ def similares_con_bloque(pid):
         r = pedir('%s/productos/%d/similares' % (BACKEND, pid))
     except urllib.error.HTTPError as e:
         raise RuntimeError('la ruta contesto %d para el producto %d' % (e.code, pid))
-    return [(int(f['id_producto']), f['similitud'], f.get('misma_categoria')) for f in r['payload']]
+    return [(int(f['id_producto']), f['puntaje'], f.get('misma_categoria')) for f in r['payload']]
+
+
+def similares_completos(pid):
+    try:
+        r = pedir('%s/productos/%d/similares' % (BACKEND, pid))
+    except urllib.error.HTTPError as e:
+        raise RuntimeError('la ruta contesto %d para el producto %d' % (e.code, pid))
+    return r['payload']
 
 
 def main():
@@ -189,6 +283,16 @@ def main():
     revisar(all(docs[i]['dims'] == 768 for i in con_vector), 'todos con 768 dimensiones (vector_dims)')
     modelos = set(d['modelo'] for d in docs.values() if d['tiene'])
     revisar(len(modelos) == 1, 'todos del mismo modelo, %s' % ', '.join(str(m) for m in modelos))
+
+    print('1b. Cada producto tiene tambien su vector de caracteristicas (055)')
+    calculados = [i for i in con_vector if docs[i]['huella_carac'] != 'nula']
+    con_carac = [i for i in con_vector if docs[i]['huella_carac'] == 'texto']
+    vacios = [i for i in con_vector if docs[i]['huella_carac'] == 'vacia']
+    revisar(len(calculados) == len(con_vector), '%d de %d ya calculados por el worker' % (len(calculados), len(con_vector)))
+    revisar(all(docs[i]['dims_carac'] == 768 for i in con_carac), '%d con caracteristicas, todos de 768' % len(con_carac))
+    revisar(all(docs[i]['dims_carac'] == 0 for i in vacios),
+            '%d sin caracteristicas, sin vector y con la huella del texto vacio' % len(vacios))
+    revisar(len(con_carac) > len(vacios), 'control, casi todo el catalogo tiene caracteristicas')
 
     print('2. Solo por el vector, los vecinos son de la misma categoria mucho mas que al azar')
     activos = [p for p, d in cat.items() if d['activo'] and p in con_vector]
@@ -234,8 +338,39 @@ def main():
     revisar(en_orden, 'en los %d, el bloque de su categoria va delante y despues el resto' % len(muestra))
     revisar(dice_verdad, 'misma_categoria coincide con la categoria de MongoDB en cada parecido')
     revisar(completos, 'el primer bloque trae todos los de su categoria que caben, hasta 6, uno por grupo')
-    revisar(bajando, 'dentro de cada bloque, del mas parecido al menos')
+    revisar(bajando, 'dentro de cada bloque, del puntaje mas alto al mas bajo')
     revisar(con_resto > 0, 'control, en %d de %d el segundo bloque si trae otras categorias' % (con_resto, len(muestra)))
+
+    print('2c. El puntaje, calculado aparte contra todos, da lo mismo que la ruta')
+    exactos = candidatos_exactos(muestra)
+    revisar(set(exactos) == set(muestra), 'PostgreSQL saco los candidatos de los %d, sin indice' % len(muestra))
+    iguales = cambia_orden = con_parte_carac = 0
+    peor = 0.0
+    for p in muestra:
+        ruta = similares_completos(p)
+        esperado = esperados(exactos.get(p, []))
+        mismos = [int(f['id_producto']) for f in ruta] == [i for i, _, _ in esperado]
+        if mismos:
+            peor = max([peor] + [abs(f['puntaje'] - s) for f, (_, s, _) in zip(ruta, esperado)])
+        iguales += mismos and all(f['misma_categoria'] == m for f, (_, _, m) in zip(ruta, esperado))
+        con_parte_carac += any(f['parecido_caracteristicas'] is not None for f in ruta)
+        # Lo que habria salido ordenando cada bloque solo por el parecido general.
+        filas = exactos.get(p, [])
+        solo_general = []
+        vistos = set()
+        for bloque in (1, 2):
+            for f in sorted((f for f in filas if f['bloque'] == bloque), key=lambda f: (-f['general'], f['id'])):
+                if len(solo_general) == 6:
+                    break
+                if f['grupo'] in vistos or (bloque == 2 and f['misma']):
+                    continue
+                vistos.add(f['grupo'])
+                solo_general.append(f['id'])
+        cambia_orden += solo_general != [int(f['id_producto']) for f in ruta]
+    revisar(iguales == len(muestra), 'en %d de %d, los mismos seis, en el mismo orden y en el mismo bloque' % (iguales, len(muestra)))
+    revisar(peor < 1e-9, 'y el mismo puntaje, la diferencia mas grande es %.1e' % peor)
+    revisar(con_parte_carac == len(muestra), 'en los %d, el parecido de caracteristicas si cuenta' % con_parte_carac)
+    revisar(cambia_orden > 0, 'control, en %d de %d las caracteristicas y la nota cambian el orden' % (cambia_orden, len(muestra)))
 
     print('3. Lo que la ruta no devuelve')
     revisar(all(p not in similares(p) for p in muestra[:20]), 'nunca el propio producto')

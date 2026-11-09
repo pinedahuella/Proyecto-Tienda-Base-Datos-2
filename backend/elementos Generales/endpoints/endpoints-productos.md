@@ -1165,8 +1165,8 @@ estan la ruta, la bandera y el worker que lo mantiene al dia.
 mismo `REGEX_ID` que el resto de rutas de producto. Por dentro son cuatro
 consultas a PostgreSQL:
 
-1. El `vector`, el `grupo` y la categoria (`producto_catalogo.id_categoria`)
-   del producto.
+1. El `vector`, el `vector_caracteristicas`, el `grupo` y la categoria
+   (`producto_catalogo.id_categoria`) del producto.
 2. **Bloque 1, desde el 2026-11-05.** Sus vecinos mas cercanos por coseno
    solo entre los productos activos de su misma categoria, sin el propio
    producto y sin ninguno de su mismo `grupo`.
@@ -1175,14 +1175,22 @@ consultas a PostgreSQL:
    que el planificador use el indice), con los mismos filtros.
 4. La categoria de los candidatos del bloque 2, para no repetir los de su
    categoria.
+5. **El puntaje, desde el 2026-11-08 (migracion 055).** Para los candidatos de
+   los dos bloques, por su id: el parecido de sus caracteristicas,
+   `1 - (vector_caracteristicas <=> $2)`, y la nota de sus resenas publicadas.
 
-Se llenan los 6 en ese orden, uno por grupo (el mas cercano): primero todos
-los de su categoria y lo que falte con el resto. Es el mismo esquema que
-`tambien-compraron` (ADR-25): uno de la misma categoria con 0,40 va antes que
-otro de otra con 0,80. Cada resultado trae `misma_categoria`. `similitud` es
-el coseno, `1 - distancia`. Medido el 2026-11-05 en los 1000 productos
-activos: la ruta da los mismos 6, en el mismo orden y con los mismos bloques,
-que el mismo calculo hecho en SQL contra todos sin indice.
+Cada bloque se ordena por `puntaje` = 0,7 x `similitud` + 0,2 x
+`parecido_caracteristicas` + 0,1 x nota / 5, con la nota bayesiana
+`(suma + 2 x 3) / (resenas + 2)` (`puntajeDe()` en `similares.service.ts`). Si
+a alguno de los dos le faltan las caracteristicas, esa parte vale lo mismo que
+`similitud`. Se llenan los 6 en ese orden, uno por grupo (el de mejor
+puntaje): primero todos los de su categoria y lo que falte con el resto. Es el
+mismo esquema que `tambien-compraron` (ADR-25): uno de la misma categoria con
+0,40 va antes que otro de otra con 0,80. Cada resultado trae
+`misma_categoria`. `similitud` es el coseno del vector general,
+`1 - distancia`. Medido el 2026-11-08 en 60 productos: la ruta da los mismos
+6, en el mismo orden, con los mismos bloques y el mismo puntaje que el mismo
+calculo hecho en SQL contra todos sin indice.
 
 La busqueda la corre `buscarCercanos()` (`helpers/vectores-pgvector.ts`), que
 dentro de su transaccion sube `hnsw.ef_search` y activa
@@ -1206,9 +1214,12 @@ Elasticsearch apagado.
   "mensaje": "Similares obtenidos",
   "payload": [
     {
-      "id_producto": 4,
-      "similitud": 0.7776658734087394,
+      "id_producto": 69,
+      "similitud": 0.7069098317405811,
       "misma_categoria": true,
+      "puntaje": 0.6830363244498348,
+      "parecido_caracteristicas": 0.6209972111571396,
+      "nota_resenas": 3.3333333333333335,
       "producto": { "...documento completo de Mongo..." : "" }
     }
   ]

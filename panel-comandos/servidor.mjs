@@ -372,7 +372,7 @@ const CATALOGO = [
   },
   {
     id: 'final-semantica', grupo: 'Demos de la Entrega final', titulo: 'Productos parecidos por su descripcion',
-    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen segun su descripcion, con el porcentaje de parecido. El vector vive en PostgreSQL, en vector_producto (pgvector): compara cuanto tarda con el indice HNSW y comparando contra todos, y que den lo mismo. Al final se los pide a la ruta de la ficha, GET /productos/:id/similares, y comprueba que sean los mismos. Si el backend esta apagado, ese ultimo paso solo avisa.',
+    explica: 'Busca un producto por nombre y ensena los seis que mas se le parecen, primero los de su categoria, con su puntaje: 0,7 del parecido de nombre, categoria y descripcion, 0,2 del de sus caracteristicas y 0,1 de la nota de sus resenas. Los vectores viven en PostgreSQL, en vector_producto (pgvector): compara cuanto tarda con el indice HNSW y comparando contra todos, y que den lo mismo. Al final se los pide a la ruta de la ficha, GET /productos/:id/similares, y comprueba que sean los mismos. Si el backend esta apagado, ese ultimo paso solo avisa.',
     script: 'demo-entrega-final.ps1', confirmar: null,
     campos: [
       { nombre: 'producto', etiqueta: 'Palabra del nombre', tipo: 'texto', patron: '^[A-Za-z0-9 ]{2,30}$', defecto: 'laptop' },

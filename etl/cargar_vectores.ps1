@@ -25,6 +25,12 @@
 # IGUAL que en VectoresSyncService del backend, que mantiene al dia los
 # productos que se editan; si cambian aqui, cambian alli.
 #
+# Desde el 2026-11-08 cada producto tiene un SEGUNDO vector, el de sus
+# caracteristicas (vector_caracteristicas y caracteristicas_hash, migracion
+# 055). Ese no lo calcula este script: el paso 7 solo marca con
+# pendiente_vector los productos que todavia no lo tienen, y el worker del
+# backend lo calcula. Parecidos a este lo suma al puntaje (similares.service.ts).
+#
 # Solo entran los productos que ya estan en producto_catalogo: la FK de
 # vector_producto lo exige. Los copia a PostgreSQL el paso 7e de arrancar,
 # que corre antes que este. Un producto que se borra de producto_catalogo se
@@ -430,4 +436,32 @@ if ($conVector -lt $validos.Count) {
     exit 1
 }
 Write-Host "   Vectores en $conVector de $($validos.Count) productos, $($copiar.Count) copiados de Elasticsearch, $($aOllama.Count) calculados, $($soloGrupo.Count) cambiaron de grupo o de activo" -ForegroundColor Green
+
+
+# 7. El vector de caracteristicas (migracion 055, 2026-11-08)
+# Lo calcula el worker del backend, VectoresSyncService, que es el unico que
+# arma ese texto: asi tiene una sola forma de escribirse y su huella no cambia
+# por como PowerShell escribe un numero. Aqui solo se marcan con la bandera
+# pendiente_vector de MongoDB los productos que todavia no lo tienen, y al
+# prender el backend el worker los calcula en un par de minutos. El general ya
+# esta al dia, asi que el worker no lo vuelve a pedir.
+try {
+    $sinCarac = @((Psql-Archivo "SELECT id_producto_mongo FROM vector_producto WHERE caracteristicas_hash IS NULL;") -split "`r?`n" |
+        Where-Object { $_.Trim() -match '^\d+$' } | ForEach-Object { $_.Trim() })
+} catch {
+    Write-Host "   No se pudo mirar el vector de caracteristicas. Falta la migracion 055? $($_.Exception.Message)" -ForegroundColor Yellow
+    $sinCarac = @()
+}
+if ($sinCarac.Count) {
+    $jsMarca = 'db.productos.updateMany({ _id: { $in: [' + ($sinCarac -join ',') + '] } }, { $set: { pendiente_vector: true } });'
+    [IO.File]::WriteAllText((Join-Path $tmp 'marcar.js'), $jsMarca, $sinBom)
+    docker cp (Join-Path $tmp 'marcar.js') mesh-mongo:/tmp/marcar_vectores.js | Out-Null
+    $cmd = 'mongosh --quiet -u $MONGO_INITDB_ROOT_USERNAME -p $MONGO_INITDB_ROOT_PASSWORD --authenticationDatabase admin $MONGO_INITDB_DATABASE --file /tmp/marcar_vectores.js'
+    docker exec mesh-mongo sh -c $cmd | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "   No se pudieron marcar los productos sin vector de caracteristicas" -ForegroundColor Yellow
+    } else {
+        Write-Host "   $($sinCarac.Count) productos sin vector de caracteristicas, marcados para que el backend lo calcule"
+    }
+}
 exit 0

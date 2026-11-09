@@ -430,13 +430,13 @@ b { font-weight: 600; color: #fff; }
 <section class="lamina">
   <div class="cabeza" data-in="1"><p class="etiqueta">Recomendación semántica · 5 puntos</p><h2 class="titulo">Parecidos por lo que significan</h2></div>
   <div class="pasos" style="margin-bottom:50px">
-    <div class="paso" data-in="2" style="--c:var(--mongo)"><span class="k">1</span><h4>El texto</h4><p>Nombre, categoría y descripción de cada producto, leídos de MongoDB</p></div>
+    <div class="paso" data-in="2" style="--c:var(--mongo)"><span class="k">1</span><h4>Dos textos</h4><p>Nombre, categoría y descripción, y aparte sus características, leídos de MongoDB</p></div>
     <div class="unir" data-in="2">›</div>
-    <div class="paso" data-in="3" style="--c:#cfd5f5"><span class="k">2</span><h4>Ollama</h4><p>Lo vuelve 768 números con paraphrase-multilingual, en la misma PC y sin costo</p></div>
+    <div class="paso" data-in="3" style="--c:#cfd5f5"><span class="k">2</span><h4>Ollama</h4><p>Vuelve cada texto 768 números con paraphrase-multilingual, en la misma PC y sin costo</p></div>
     <div class="unir" data-in="3">›</div>
-    <div class="paso" data-in="4" style="--c:var(--pg)"><span class="k">3</span><h4>pgvector</h4><p>Guarda el vector con un índice HNSW por coseno, junto a ofertas y pedidos</p></div>
+    <div class="paso" data-in="4" style="--c:var(--pg)"><span class="k">3</span><h4>pgvector</h4><p>Guarda los dos vectores, el general con un índice HNSW por coseno</p></div>
     <div class="unir" data-in="4">›</div>
-    <div class="paso" data-in="5" style="--c:var(--acento-2)"><span class="k">4</span><h4>La ficha</h4><p>Los seis más cercanos, primero los de su categoría, en Parecidos a este</p></div>
+    <div class="paso" data-in="5" style="--c:var(--acento-2)"><span class="k">4</span><h4>La ficha</h4><p>Los seis de mejor puntaje, primero los de su categoría, en Parecidos a este</p></div>
   </div>
   <div class="cifras">
     <div class="cifra" data-in="6"><div class="v">1000<span style="font-size:52px;color:var(--suave)"> de 1001</span></div><div class="t">coinciden con el coseno exacto, contra 317 en Elasticsearch</div></div>
@@ -452,16 +452,16 @@ b { font-weight: 600; color: #fff; }
     <div style="flex:1" data-in="2">
       <ul class="puntos" style="--c:var(--acento-2)">
         <li>El mismo esquema que quienes lo compraron también llevaron</li>
-        <li>Bloque 1, los de su misma categoría, del más parecido al menos</li>
-        <li>Bloque 2, el resto del catálogo, con el índice HNSW</li>
-        <li>Cada resultado dice <span class="mono">misma_categoria</span></li>
+        <li>Bloque 1, su misma categoría. Bloque 2, el resto, con el índice HNSW</li>
+        <li>Dentro de cada bloque, un puntaje. 0,7 del parecido general, 0,2 de las características y 0,1 de la nota</li>
+        <li>Cada resultado dice <span class="mono">misma_categoria</span> y su puntaje</li>
       </ul>
       <div class="cifras" style="margin-top:34px">
-        <div class="cifra"><div class="v" style="font-size:60px;white-space:nowrap">1000<span style="font-size:34px;color:var(--suave)"> de 1000</span></div><div class="t">iguales al cálculo exacto, mismo orden</div></div>
-        <div class="cifra"><div class="v" style="font-size:72px">68 %</div><div class="t">solo por el vector ya son de su categoría</div></div>
+        <div class="cifra"><div class="v" style="font-size:60px;white-space:nowrap">60<span style="font-size:34px;color:var(--suave)"> de 60</span></div><div class="t">iguales al puntaje calculado aparte, mismo orden</div></div>
+        <div class="cifra"><div class="v" style="font-size:60px;white-space:nowrap">58<span style="font-size:34px;color:var(--suave)"> de 60</span></div><div class="t">cambian de orden por las características y la nota</div></div>
       </div>
     </div>
-    <div style="flex:1.25" data-in="3"><img class="captura" src="img/ficha-bloques.png" alt="Parecidos a este del Maillot de ruta Peloton"><p class="pie">Maillot de ruta Peloton. Cinco de Ciclismo y después una cómoda, que se parece más que la bomba de piso pero es de otra categoría</p></div>
+    <div style="flex:1.25" data-in="3"><img class="captura" src="img/ficha-bloques.png" alt="Parecidos a este del Maillot de ruta Peloton"><p class="pie">Maillot de ruta Peloton. El Casco pasa delante de los Guantes por sus características y su nota, y la cómoda va al final porque es de otra categoría</p></div>
   </div>
 </section>
 

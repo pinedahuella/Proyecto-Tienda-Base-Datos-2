@@ -30,9 +30,10 @@
 #              la de Redis. No cambia nada de la tienda
 #   semantica  Busca un producto por nombre y pide sus parecidos a
 #              PostgreSQL con la misma consulta que SimilaresService (pgvector,
-#              tabla vector_producto desde la migracion 040), con la similitud
-#              de cada uno, y la compara con la busqueda exacta contra todos
-#              para ensenar lo que ahorra el indice HNSW
+#              tabla vector_producto desde la migracion 040), con el puntaje de
+#              cada uno (parecido general, de caracteristicas desde la 055 y
+#              nota), y la compara con la busqueda exacta contra todos para
+#              ensenar lo que ahorra el indice HNSW
 #   facetas    La consulta de elastic/pruebas/facetas.py contra el indice real.
 #              Solo lee
 #   vectores   Cuantos productos y cuantas resenas tienen vector, cuantos
@@ -520,21 +521,30 @@ db.productos.find({ nombre: { `$regex: $patron, `$options: 'i' }, estado: 'activ
     # ajustes que buscarCercanos(): ef_search 400 e iterative_scan. El bloque 1
     # son los de su misma categoria (producto_catalogo.id_categoria), el bloque
     # 2 los 200 mas cercanos de todo el catalogo, con el vector como constante
-    # (asi el ORDER BY puede usar el indice HNSW). Cada fila lleva su bloque y
-    # su categoria. Despues, uno por grupo y por bloques, aqui abajo.
+    # (asi el ORDER BY puede usar el indice HNSW). Cada fila lleva su bloque, su
+    # categoria y, desde el 2026-11-08 (migracion 055), el parecido de sus
+    # caracteristicas y la nota de sus resenas publicadas. Despues se puntua y
+    # se ordena aqui abajo, con la misma formula que puntajeDe() del backend.
     $consulta = @"
-SELECT v.vector::text AS v, v.grupo AS g, coalesce(pc.id_categoria, -1) AS c
+SELECT v.vector::text AS v, coalesce(v.vector_caracteristicas::text, '') AS vc, v.grupo AS g,
+       coalesce(pc.id_categoria, -1) AS c
   FROM vector_producto v LEFT JOIN producto_catalogo pc USING (id_producto_mongo)
  WHERE v.id_producto_mongo = $id \gset
 BEGIN;
 SELECT set_config('hnsw.ef_search', '400', true) AS ef, set_config('hnsw.iterative_scan', 'strict_order', true) AS it \gset
-SELECT '1|' || v.id_producto_mongo || '|' || v.grupo || '|' || (1 - (v.vector <=> :'v'::vector)) || '|' || pc.id_categoria
+SELECT '1|' || v.id_producto_mongo || '|' || v.grupo || '|' || (1 - (v.vector <=> :'v'::vector)) || '|' || pc.id_categoria || '|' ||
+       coalesce((1 - (v.vector_caracteristicas <=> nullif(:'vc', '')::vector))::text, '') || '|' ||
+       coalesce((SELECT avg(r.calificacion)::float8 FROM resena r WHERE r.id_producto_mongo = v.id_producto_mongo AND r.id_estado_resena = 1)::text, '') || '|' ||
+       (SELECT count(*) FROM resena r WHERE r.id_producto_mongo = v.id_producto_mongo AND r.id_estado_resena = 1)
   FROM vector_producto v JOIN producto_catalogo pc USING (id_producto_mongo)
  WHERE v.activo AND v.id_producto_mongo <> $id AND v.grupo <> :'g' AND pc.id_categoria = :c
  ORDER BY v.vector <=> :'v'::vector
  LIMIT 200;
 SELECT '2|' || id_producto_mongo || '|' || grupo || '|' || (1 - (vector <=> :'v'::vector)) || '|' ||
-       coalesce((SELECT pc.id_categoria FROM producto_catalogo pc WHERE pc.id_producto_mongo = vector_producto.id_producto_mongo), -1)
+       coalesce((SELECT pc.id_categoria FROM producto_catalogo pc WHERE pc.id_producto_mongo = vector_producto.id_producto_mongo), -1) || '|' ||
+       coalesce((1 - (vector_caracteristicas <=> nullif(:'vc', '')::vector))::text, '') || '|' ||
+       coalesce((SELECT avg(r.calificacion)::float8 FROM resena r WHERE r.id_producto_mongo = vector_producto.id_producto_mongo AND r.id_estado_resena = 1)::text, '') || '|' ||
+       (SELECT count(*) FROM resena r WHERE r.id_producto_mongo = vector_producto.id_producto_mongo AND r.id_estado_resena = 1)
   FROM vector_producto
  WHERE activo AND id_producto_mongo <> $id AND grupo <> :'g'
  ORDER BY vector <=> :'v'::vector
@@ -542,24 +552,43 @@ SELECT '2|' || id_producto_mongo || '|' || grupo || '|' || (1 - (vector <=> :'v'
 SELECT '0|' || :c;
 COMMIT;
 "@
-    # Primero el bloque 1 entero, despues el 2 sin los grupos ya vistos ni los
-    # de su categoria (esos ya estaban en el 1). Seis en total, como la ficha.
+    # El puntaje de puntajeDe() en similares.service.ts: 0,7 del parecido
+    # general, 0,2 del de caracteristicas (si falta, vale el general) y 0,1 de
+    # la nota, con dos resenas imaginarias de 3 estrellas.
+    function Puntaje([double]$general, $carac, $promedio, [int]$total) {
+        $c = if ($null -eq $carac) { $general } else { [double]$carac }
+        $suma = if ($null -eq $promedio) { 0 } else { [double]$promedio * $total }
+        $nota = ($suma + 2 * 3) / ($total + 2)
+        return 0.7 * $general + 0.2 * $c + 0.1 * ($nota / 5)
+    }
+    # Cada bloque por puntaje (empate, el id mas bajo), primero el bloque 1
+    # entero, despues el 2 sin los grupos ya vistos ni los de su categoria
+    # (esos ya estaban en el 1). Seis en total, como la ficha.
     function Por-Bloques($filas) {
+        $inv = [Globalization.CultureInfo]::InvariantCulture
         $cat = (@($filas | Where-Object { $_ -like '0|*' })[0]).Split('|')[1]
+        $todas = foreach ($f in $filas) {
+            $c = $f.Split('|')
+            if ($c.Count -ne 8 -or $c[0] -eq '0') { continue }
+            $general = [double]::Parse($c[3], $inv)
+            $carac = if ($c[5]) { [double]::Parse($c[5], $inv) } else { $null }
+            $promedio = if ($c[6]) { [double]::Parse($c[6], $inv) } else { $null }
+            [pscustomobject]@{
+                bloque = $c[0]; id = [long]$c[1]; grupo = $c[2]; cat = $c[4]
+                s = $general; carac = $carac; nota = $promedio
+                puntaje = (Puntaje $general $carac $promedio ([int]$c[7]))
+            }
+        }
         $vistos = @{}
         $r = [ordered]@{}
         foreach ($bloque in '1', '2') {
-            foreach ($f in $filas) {
-                $c = $f.Split('|')
-                if ($c.Count -ne 5 -or $c[0] -ne $bloque) { continue }
+            $lista = @($todas | Where-Object { $_.bloque -eq $bloque } | Sort-Object @{ e = 'puntaje'; Descending = $true }, @{ e = 'id' })
+            foreach ($f in $lista) {
                 if ($r.Count -eq 6) { break }
-                if ($vistos.ContainsKey($c[2])) { continue }
-                if ($bloque -eq '2' -and $c[4] -eq $cat) { continue }
-                $vistos[$c[2]] = $true
-                $r[[long]$c[1]] = [pscustomobject]@{
-                    s = [double]::Parse($c[3], [Globalization.CultureInfo]::InvariantCulture)
-                    misma = ($bloque -eq '1')
-                }
+                if ($vistos.ContainsKey($f.grupo)) { continue }
+                if ($bloque -eq '2' -and $f.cat -eq $cat) { continue }
+                $vistos[$f.grupo] = $true
+                $r[$f.id] = [pscustomobject]@{ s = $f.s; carac = $f.carac; nota = $f.nota; puntaje = $f.puntaje; misma = ($bloque -eq '1') }
             }
         }
         return $r
@@ -577,7 +606,7 @@ COMMIT;
         return $r
     }
 
-    Paso "Los mas parecidos por su descripcion, primero los de su categoria y despues el resto"
+    Paso "Los mas parecidos, por nombre, categoria y descripcion, por caracteristicas y por su nota, primero los de su categoria"
     $sim = Por-Bloques (Psql $consulta)
     if ($sim.Count -eq 0) { Av "No salio ninguno parecido"; exit 0 }
     $nombres = @{}
@@ -586,7 +615,7 @@ db.productos.find({ _id: { `$in: [$(($sim.Keys) -join ',')] } }, { nombre: 1, 'c
   print(JSON.stringify({ id: d._id, nombre: d.nombre, cat: (d.categoria && d.categoria.nombre) || '' }));
 });
 "@ | ForEach-Object { $nombres[[long]$_.id] = $_ }
-    Write-Host ("   {0,-9} {1,-46} {2}" -f 'SIMILITUD', 'PRODUCTO', 'CATEGORIA') -ForegroundColor DarkGray
+    Write-Host ("   {0,-8} {1,-8} {2,-8} {3,-5} {4,-46} {5}" -f 'PUNTAJE', 'GENERAL', 'CARACT.', 'NOTA', 'PRODUCTO', 'CATEGORIA') -ForegroundColor DarkGray
     $titulo = ''
     foreach ($k in $sim.Keys) {
         $bloque = if ($sim[$k].misma) { "   Bloque 1, de su misma categoria, $($base.cat)" } else { '   Bloque 2, el resto del catalogo' }
@@ -596,9 +625,11 @@ db.productos.find({ _id: { `$in: [$(($sim.Keys) -join ',')] } }, { nombre: 1, 'c
         if ($nombre.Length -gt 45) { $nombre = $nombre.Substring(0, 45) }
         $cat = if ($n) { $n.cat } else { '' }
         $color = if ($sim[$k].misma) { 'Green' } else { 'Gray' }
-        $coseno = [math]::Round($sim[$k].s * 100, 1)
-        Write-Host ("   {0,8}% {1,-46} {2}" -f $coseno, $nombre, $cat) -ForegroundColor $color
+        $caracTxt = if ($null -eq $sim[$k].carac) { '-' } else { '{0:N3}' -f $sim[$k].carac }
+        $notaTxt = if ($null -eq $sim[$k].nota) { '-' } else { '{0:N1}' -f $sim[$k].nota }
+        Write-Host ("   {0,-8:N3} {1,-8:N3} {2,-8} {3,-5} {4,-46} {5}" -f $sim[$k].puntaje, $sim[$k].s, $caracTxt, $notaTxt, $nombre, $cat) -ForegroundColor $color
     }
+    Write-Host "   Puntaje = 0,7 del parecido general + 0,2 del de caracteristicas + 0,1 de la nota de sus resenas" -ForegroundColor DarkGray
     Write-Host "   Igual que Quienes lo compraron tambien llevaron, los de su categoria van siempre primero" -ForegroundColor DarkGray
 
     Paso "Como lo resuelve PostgreSQL, con el indice HNSW o comparando contra todos"
@@ -652,7 +683,7 @@ COMMIT;
         $idsBase = @($sim.Keys)
         foreach ($f in $api) {
             $nombre = if ($f.producto) { $f.producto.nombre } else { "(id $($f.id_producto), no esta en Mongo)" }
-            Write-Host ("   {0,8}% {1,-46} misma_categoria {2}" -f [math]::Round($f.similitud * 100, 1), $nombre, "$($f.misma_categoria)".ToLower())
+            Write-Host ("   {0,-8:N3} {1,-46} misma_categoria {2}" -f [double]$f.puntaje, $nombre, "$($f.misma_categoria)".ToLower())
         }
         $bloquesApi = @($api | ForEach-Object { [bool]$_.misma_categoria }) -join ','
         $bloquesBase = @($sim.Values | ForEach-Object { $_.misma }) -join ','

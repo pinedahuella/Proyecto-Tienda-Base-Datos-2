@@ -3,9 +3,39 @@
 **Para quien retome el proyecto: leete esto entero antes de tocar nada.**
 Son cinco minutos y te ahorra el dia.
 
-Ultima actualizacion: **2026-11-07, noche**.
+Ultima actualizacion: **2026-11-08, noche**.
 
-**EMPIEZA AQUI (07-11, noche). La presentacion a 30 minutos y lo que la tienda gestiona desde el panel.** Respaldo
+**EMPIEZA AQUI (08-11, noche). Parecidos a este por mas campos, el diagrama C4 y el guion por importancia.**
+Respaldo previo `respaldos/david_antes_vectores_20261108_1811.dump`. Avance en `NOCHE-08-11-LEEME.txt` (raiz,
+fuera de git). Todo probado contra las bases de la PC de Jose David. Commit 378, el que dicen los Word.
+- **El profesor pregunto con que campos se calcula la similitud.** Cada producto tiene ahora un segundo vector,
+  el de sus caracteristicas y las de sus variantes (`construirTextoCaracteristicas()` en
+  `vectores-sync.service.ts`), en `vector_producto.vector_caracteristicas` con su huella `caracteristicas_hash`
+  (migracion 055, APLICADA en David, sin indice). Lo calcula el mismo worker con la misma bandera; el ETL del
+  arranque solo marca los que faltan (paso 7 de `etl/cargar_vectores.ps1`). 1014 calculados, 1007 con vector y 7
+  sin caracteristicas.
+- **Parecidos a este ordena cada bloque por un puntaje** (`puntajeDe()` en `similares.service.ts`): 0,7 del
+  parecido general, 0,2 del de caracteristicas (si falta, vale lo mismo que el general) y 0,1 de la nota
+  bayesiana `(suma + 2*3) / (n + 2) / 5`. La categoria sigue decidiendo el bloque. La ruta devuelve tambien
+  `puntaje`, `parecido_caracteristicas` y `nota_resenas`. Maillot (70): Candado 0,683, Casco 0,666, Guantes
+  0,650, Sillin 0,583, Bomba 0,483 y la Comoda 0,655 en el bloque 2. Captura nueva en la lamina 19.
+- **Pruebas.** `recomendacion_semantica.py` 30 OK (1b y 2c nuevas, 60 de 60 igual al calculo aparte sin indice,
+  saboteada con pesos 1,0,0 da 2 FALLA), `vectores_worker.cjs` 10 OK, `caidas.mjs` 51 OK, Newman 64 de 64,
+  lint del backend 0, tsc 0, svelte-check 0 en 237. Pruebas en Python con `export BACKEND=http://127.0.0.1:3000`:
+  con localhost Windows prueba ::1 primero y se cuelga.
+- **Diagrama de arquitectura nuevo**, blanco y negro, notacion C4, `docs/dibujar-arquitectura.py` (lamina 6 y
+  figura 1 del informe). El de draw.io sigue con `python docs/generar-arquitectura.py --drawio`, renombrado a
+  `docs/diagrama-arquitectura-drawio.drawio`.
+- **GUION reestructurado por importancia**: Antes de presentar, partes 1 a 3, lo que pregunta el profesor y el
+  codigo, los flujos, los apoyos y el glosario. Cada funcionalidad con su accion y entre parentesis el service
+  (`src/services/...:linea`), el helper, el controller con su `@Permiso` y como explicarlo. Nuevo
+  `docs/MAPA-FUNCIONALIDADES.md`, los 12 modulos con sus 99 services, sus rutas, permisos y workers.
+- **Docs al dia con lineas recalculadas**: GUIA-ESTUDIO-VECTORES, GUIA-ESTUDIO-BACKEND (seccion 10, Pagar),
+  PREGUNTAS (192, Parte 17 nueva), ARQUITECTURA, migrations/README, endpoints-productos, laminas 18 y 19.
+- **Antes de presentar**: retirar el producto 1116 (`cafeta de gotero aroma 12 tazas`, de un ensayo del 08-11,
+  con su oferta 6250 activa) o el vector dira Puede que ya exista en la demo de la cafetera. No se toco sin Meme.
+
+**Antes, EMPIEZA AQUI (07-11, noche). La presentacion a 30 minutos y lo que la tienda gestiona desde el panel.** Respaldo
 previo `respaldos/david_antes_noche_20261107_2004.dump`. Avance minuto a minuto en `NOCHE-07-11-LEEME.txt` (raiz,
 fuera de git). Todo probado contra las bases de la PC de Jose David. SIN COMMIT: Meme no lo pidio.
 - **Presentacion a 30 minutos, 29 laminas.** Parte 1 (1 a 9) la tienda y todo lo que hace, con un producto nuevo de
@@ -1458,9 +1488,11 @@ docs/generar-er.py            dibuja docs/diagrama-general.drawio y .png LEYENDO
                               y pg_constraint). 50 cajas y 66 lineas. Falla si una tabla no tiene caja, si una
                               llave no tiene linea o si dos cajas se pisan. `--modulo fraude` saca la vista
                               recortada del informe. El ER de la Entrega 1 quedo en diagrama-general-entrega1.*
-docs/generar-arquitectura.py  dibuja docs/diagrama-arquitectura.drawio y .png: seis motores y ocho rutas de datos
-                              numeradas. `--informe` es la variante compacta para el Word y `--grafo` el modelo de
-                              Neo4j. El del 2026-09-03 quedo como diagrama-arquitectura-2026-09-03.drawio
+docs/dibujar-arquitectura.py  dibuja el diagrama de arquitectura de hoy (2026-11-08), blanco y negro, notacion C4:
+                              docs/diagrama-arquitectura.svg y .png y la lamina 6. El PNG sale de Edge sin ventana
+docs/generar-arquitectura.py  llama a dibujar-arquitectura.py. Con `--drawio` saca el dibujo viejo de draw.io en
+                              docs/diagrama-arquitectura-drawio.drawio. `--informe` es su variante compacta y
+                              `--grafo` el modelo de Neo4j. El del 2026-09-03 quedo como diagrama-arquitectura-2026-09-03.drawio
 docs/informe-entrega2/        los .drawio y .png que usa el Word
 ```
 

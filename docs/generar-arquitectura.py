@@ -1,9 +1,17 @@
 # -*- coding: utf-8 -*-
 """Dibuja el diagrama de arquitectura de Mesh (no es el entidad relacion).
 
-    python docs/generar-arquitectura.py
+    python docs/generar-arquitectura.py            el diagrama de hoy
+    python docs/generar-arquitectura.py --drawio   el dibujo viejo de draw.io
 
-Escribe docs/diagrama-arquitectura.drawio y, si encuentra draw.io, el .png.
+Desde el 8 de noviembre el diagrama sale de docs/dibujar-arquitectura.py, en
+blanco y negro y con la notacion del modelo C4, y este comando lo llama. Escribe
+docs/diagrama-arquitectura.svg y .png y la lamina 6. Lo de abajo es el dibujo
+anterior en draw.io, que queda con --drawio, --informe y --grafo porque
+docs/generar-respaldos.py reusa su lienzo y su exportacion.
+
+Con --drawio escribe docs/diagrama-arquitectura-drawio.drawio y su .png, aparte,
+para no pisar el diagrama de hoy.
 
 Es un dibujo hecho a mano en coordenadas, no sale de la base. Lo que cambia con
 el tiempo son las cifras de cada caja, y estan en la tabla CAJAS de abajo, en un
@@ -25,7 +33,7 @@ import sys
 from xml.sax.saxutils import escape
 
 BASE = os.path.dirname(os.path.abspath(__file__))
-SALIDA = os.path.join(BASE, "diagrama-arquitectura.drawio")
+SALIDA = os.path.join(BASE, "diagrama-arquitectura-drawio.drawio")
 
 # ---------------------------------------------------------------- las cajas
 
@@ -405,6 +413,10 @@ def exportar_png(drawio):
 
 
 def main():
+    if not any(f in sys.argv for f in ("--drawio", "--informe", "--grafo")):
+        import runpy
+        runpy.run_path(os.path.join(BASE, "dibujar-arquitectura.py"), run_name="__main__")
+        return 0
     salida = SALIDA
     if "--salida" in sys.argv:
         salida = sys.argv[sys.argv.index("--salida") + 1]

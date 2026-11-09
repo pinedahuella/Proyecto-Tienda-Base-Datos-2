@@ -1,24 +1,33 @@
 # Arquitectura de Mesh
 
-**Al 2026-11-07.** Es el diagrama de arquitectura que pide el enunciado, y **no
+**Al 2026-11-08.** Es el diagrama de arquitectura que pide el enunciado, y **no
 es el ER**: el ER (`docs/diagrama-general.drawio`) dibuja las 96 tablas de
 PostgreSQL y sus llaves y lo genera `python docs/generar-er.py` desde la base
 viva; este dibuja los **seis** motores de persistencia, quien escribe en cada
 uno y por donde viajan los datos entre ellos.
 
-**El `.drawio` de arquitectura se rehizo el 2026-09-19 y se puso al dia el 2026-10-20, el 23 y el 27-10 y el 2026-11-02** con
-`python docs/generar-arquitectura.py`: seis motores, lo que hace el backend con
-cada uno y las doce rutas de datos entre motores, numeradas y explicadas en su
-leyenda. `--informe` saca la variante compacta que va en el Word, y `--grafo` el
-dibujo del modelo de Neo4j. El anterior quedo como
-`diagrama-arquitectura-2026-09-03.drawio`.
+**El diagrama se rehizo el 2026-11-08** con `python docs/dibujar-arquitectura.py`
+(o `python docs/generar-arquitectura.py`, que lo llama). Escribe
+`docs/diagrama-arquitectura.svg` y `docs/diagrama-arquitectura.png`, y copia el
+PNG a `presentacion-final/img/arquitectura.png`, la lamina 6. Va en blanco y
+negro y con la notacion del modelo C4, nivel de contenedores, junto con el
+despliegue. Las personas arriba, la PC de la aplicacion con la tienda web, el
+backend y Ollama, y la PC de las bases abajo. PostgreSQL va al fondo, ancha,
+como fuente de verdad, y las otras cinco bases encima, cada una unida a ella por
+dos flechas numeradas. Las doce copias de fondo se explican en la tabla de
+abajo del dibujo. El PNG sale de Edge sin ventana.
+
+El dibujo anterior, el de draw.io, se rehizo el 2026-09-19 y se puso al dia
+hasta el 2026-11-02. Sigue saliendo con `python docs/generar-arquitectura.py
+--drawio` en `docs/diagrama-arquitectura-drawio.drawio`, y `--informe` y
+`--grafo` sacan su variante compacta y el dibujo del modelo de Neo4j. El primero
+quedo como `diagrama-arquitectura-2026-09-03.drawio`.
 
 Se actualiza en cada entrega, porque las tres lo piden como entregable. El
 historial de que entro y cuando esta al final.
 
-Para el informe, la version editable y exportable esta en
-`docs/diagrama-arquitectura.drawio`. La de aqui abajo es la misma, en Mermaid,
-para poder leerla sin abrir nada.
+La de aqui abajo es la misma arquitectura, en Mermaid, para poder leerla sin
+abrir nada.
 
 ---
 
@@ -61,7 +70,7 @@ flowchart TB
     PG -. "etl/cargar_grafo.sh + worker<br/>COLA evento_grafo" .-> N4
     MG -. "etl/cargar_busqueda.sh + worker<br/>BANDERA pendiente_busqueda" .-> ES
     MG -. "worker cada 5 s<br/>BANDERA pendiente_elastic" .-> ES
-    MG -. "etl/cargar_vectores.ps1 + worker, con Ollama<br/>BANDERA pendiente_vector, a vector_producto" .-> PG
+    MG -. "etl/cargar_vectores.ps1 + worker, con Ollama<br/>BANDERA pendiente_vector, los dos vectores<br/>(general y caracteristicas) a vector_producto" .-> PG
     RD -. "copia asincrona del carrito<br/>al pedido pendiente y sus reservas" .-> PG
     PG -. "worker cada 5 s<br/>COLA evento_oferta, y el percolator" .-> ES
     PG -. "worker cada 10 s<br/>COLA evento_grafo_compra" .-> N4
@@ -321,6 +330,7 @@ levantar el backend (`remoto/README.md`). El detalle esta en
 | **2026-10-28** | **PostgreSQL** suma el ACL de funcionalidades por rol (migracion 050, ADR-26): `modulo_permiso`, `permiso`, `rol_permiso` y `auditoria_permiso`, y la vista `permisos_por_rol`. `PermisoGuard` lo revisa en las 136 rutas privadas y reemplaza a los `@Roles` del codigo, con los mismos roles por ruta el primer dia. 93 tablas |
 | **2026-11-02** | Sin motores ni flechas nuevas. El rol con que pasa cada peticion es el de **PostgreSQL** y no el del token: `SesionGuard` lo lee en la misma consulta con que revisa que la cuenta siga activa. El diagrama se pone al dia: la caja de PostgreSQL dice 93 tablas y 117 llaves (decia 86 y 107, del 20-10) y suma los permisos por rol y por oferta, y los workers suman el de la categoria del grafo. El Word de la Entrega 3 usa `docs/diagrama-arquitectura-entrega3.png`, el PNG del 20-10 sacado del historial (938c4ce), porque su pie dice "al 20 de octubre" y desde el 29-10 ensenaba el de despues |
 | **2026-11-07** | Sin motores ni flechas nuevas. La tienda gestiona desde el panel: **PostgreSQL** suma `pedido_cambio_estado` (051, quien cambio cada pedido y si fue la tienda), `estado_resena` y `resena_moderacion` (052, la resena oculta sigue en la base y en el grafo de **Neo4j** como evidencia) y cuatro permisos (051 a 054). 96 tablas. Renombrar una categoria escribe en **PostgreSQL** y en su copia de **MongoDB** en la misma transaccion y cambia todos sus productos con un solo `updateMany`. Los workers del buscador y de los vectores bajan su bandera de forma atomica (`findOneAndUpdate` devolviendo el documento de antes): antes un cambio hecho mientras indexaban se perdia |
+| **2026-11-08** | Sin motores ni flechas nuevas. **PostgreSQL** suma a `vector_producto` un segundo vector por producto, `vector_caracteristicas`, con su huella `caracteristicas_hash` (migracion 055). Sale del texto de las caracteristicas del producto y de sus variantes (marca, memoria, talla, color), lo calcula el mismo worker con **Ollama** y la misma bandera `pendiente_vector` de **MongoDB**, y el ETL del arranque solo marca los que faltan. Parecidos a este ordena cada bloque por un puntaje, 0,7 del parecido general, 0,2 del de caracteristicas y 0,1 de la nota bayesiana de sus resenas, todo en una consulta de **PostgreSQL** sobre los candidatos que trae el indice HNSW. El de caracteristicas no lleva indice. El diagrama se rehace en blanco y negro con la notacion C4 (`docs/dibujar-arquitectura.py`), y el de draw.io queda con `--drawio` |
 
 El `pgvector` de la Entrega final **venia en la imagen desde la Entrega 1**: el
 compose usa `pgvector/pgvector:pg18` y no el `postgres` a secas. Cuando toco no

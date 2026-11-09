@@ -2,7 +2,7 @@
 
 Para Jose David y para la presentacion final. Dice donde esta cada cosa del
 backend, con el archivo y la linea, y como se conecta con la pagina y con las
-bases. Las lineas se revisaron el 6 de noviembre contra el repositorio. Si
+bases. Las lineas se revisaron el 8 de noviembre contra el repositorio. Si
 alguien mueve codigo, se abre el archivo y se busca el nombre de la funcion.
 
 Va primero lo que mas se va a preguntar, los vectores, el control de acceso y el
@@ -25,25 +25,34 @@ pgvector y busca las mas cercanas con un indice.
 
 ### 2.1 De donde sale el vector
 
-1. **El texto.** `construirTexto()` en
-   `backend/src/services/productos/vectores-sync.service.ts:42` arma
+1. **Los dos textos.** `construirTexto()` en
+   `backend/src/services/productos/vectores-sync.service.ts:61` arma
    `nombre. Categoria X. descripcion`, leido de MongoDB. Es el mismo formato
-   del ETL, para que un producto que no cambio no se vuelva a calcular.
+   del ETL, para que un producto que no cambio no se vuelva a calcular. Desde
+   el 8 de noviembre hay un segundo texto, el de caracteristicas,
+   `construirTextoCaracteristicas()` en la `:98`. Junta las del producto y las
+   de sus variantes, una por nombre y ordenadas, como `Marca Aurora. Memoria
+   RAM 16 GB, 32 GB.`
 2. **Ollama.** `pedirVectores()` en `backend/src/helpers/vectores-ollama.ts:33`
    hace `POST /api/embed` a Ollama, en la misma PC, con el modelo
-   `paraphrase-multilingual` (`backend/src/database/ollama.ts:17`). Manda los
-   textos de 32 en 32 (`LOTE_VECTORES`, linea 8) y espera hasta 30 segundos
-   (linea 14). `keep_alive` en -1 (linea 19) deja el modelo cargado, para que la
-   primera busqueda no espere a que arranque.
-3. **Solo si cambio.** El worker guarda el md5 del texto (linea 144). Si el md5
-   es el mismo que ya tiene, no llama a Ollama. Corre cada 10 segundos,
-   `@Interval` de la linea 77.
+   `paraphrase-multilingual` (`backend/src/database/ollama.ts:17`). Manda hasta
+   32 textos por llamada (`LOTE_VECTORES`, `vectores-ollama.ts:8`) y espera
+   hasta 30 segundos (`vectores-ollama.ts:14`). `keep_alive` en -1
+   (`vectores-ollama.ts:19`) deja el modelo cargado, para que la primera
+   busqueda no espere a que arranque.
+3. **Solo si cambio.** El worker guarda el md5 de cada texto, `texto_hash` y
+   `caracteristicas_hash`, y los compara en `vectores-sync.service.ts:248` y
+   `:249`. Si los dos son iguales, no llama a Ollama. Si cambio uno, pide solo
+   ese. Corre cada 10 segundos, `@Interval` de `vectores-sync.service.ts:159`.
 4. **El grupo.** Tambien guarda el md5 de categoria y descripcion sin el nombre
-   (linea 145). Las copias del mismo producto, como `Laptop Lienzo 15` y
-   `Laptop Lienzo 15 L1-0149`, comparten grupo y no se recomiendan entre si.
-5. **Se guarda** en `guardar()`, linea 273, con
-   `INSERT ... ON CONFLICT (id_producto_mongo) DO UPDATE` en la 278, asi que
-   recalcular reemplaza.
+   (`vectores-sync.service.ts:240`). Las copias del mismo producto, como
+   `Laptop Lienzo 15` y `Laptop Lienzo 15 L1-0149`, comparten grupo y no se
+   recomiendan entre si.
+5. **Se guarda** en `guardar()` (`vectores-sync.service.ts:462`), con
+   `INSERT ... ON CONFLICT (id_producto_mongo) DO UPDATE` en la `:472`, asi que
+   recalcular reemplaza. El de caracteristicas va despues, en
+   `guardarCaracteristicas()` (`:491`), un `UPDATE` de la misma fila. Si el
+   producto no tiene caracteristicas queda `NULL`.
 
 ### 2.2 La tabla y el indice
 
@@ -57,17 +66,23 @@ pgvector y busca las mas cercanas con un indice.
 | `grupo` | md5 sin el nombre, para no recomendar copias |
 | `activo` | Si el producto esta activo, solo esos se recomiendan |
 | `modelo` | Con que modelo se calculo |
+| `vector_caracteristicas` | `vector(768)` del texto de caracteristicas, o `NULL` si no tiene. Migracion 055 |
+| `caracteristicas_hash` | md5 de ese texto. `NULL` si todavia no se calculo |
 
-El indice esta en la linea 69, `USING hnsw (vector vector_cosine_ops)`. HNSW es
-un grafo de vecinos que encuentra los mas cercanos sin comparar contra todos, y
-`vector_cosine_ops` dice que la distancia es la del coseno.
+El indice esta en `migrations/040_vectores_en_postgres.sql:69`, `USING hnsw
+(vector vector_cosine_ops)`. HNSW es un grafo de vecinos que encuentra los mas
+cercanos sin comparar contra todos, y `vector_cosine_ops` dice que la distancia
+es la del coseno. El vector de caracteristicas no tiene indice, solo se compara
+contra los candidatos que ya trajo el general
+(`migrations/055_vector_caracteristicas.sql:35`).
 
 ### 2.3 La consulta de Parecidos a este
 
-`obtener()` en `backend/src/services/productos/similares.service.ts:60`. Saca
-6 parecidos (`LIMITE`, linea 9) en dos bloques.
+`obtener()` en `backend/src/services/productos/similares.service.ts:123`. Saca
+6 parecidos (`LIMITE`, `similares.service.ts:9`) en dos bloques, y dentro de
+cada bloque los ordena por un puntaje.
 
-**Bloque 1, su misma categoria**, linea 111.
+**Bloque 1, su misma categoria**, `similares.service.ts:184`.
 ```sql
 SELECT v.id_producto_mongo, v.grupo, 1 - (v.vector <=> $1::vector) AS similitud
   FROM vector_producto v
@@ -78,17 +93,52 @@ SELECT v.id_producto_mongo, v.grupo, 1 - (v.vector <=> $1::vector) AS similitud
  LIMIT $5
 ```
 
-**Bloque 2, todo el catalogo**, linea 128, la misma sin el `JOIN` ni la
-categoria, para que el `ORDER BY` use el indice HNSW.
+**Bloque 2, todo el catalogo**, `similares.service.ts:201`, la misma sin el
+`JOIN` ni la categoria, para que el `ORDER BY` use el indice HNSW.
 
 - `<=>` es la distancia coseno de pgvector. `1 - distancia` es el parecido, de
   0 a 1.
 - `$1` es el vector del producto, que va como parametro y no como subconsulta.
   Con subconsulta PostgreSQL no usa el indice.
 - `v.grupo <> $3` saca las copias del mismo producto.
-- Se piden 200 candidatos (`CANDIDATOS`, linea 12) y se llena en orden, primero
-  los de su categoria y despues el resto (lineas 170 y 171). Cada uno sale con
-  `misma_categoria`.
+- Se piden 200 candidatos (`CANDIDATOS`, `similares.service.ts:12`).
+
+**El puntaje**, desde el 8 de noviembre. `puntuar()` en
+`similares.service.ts:277` mira solo esos candidatos, por su id, y saca en
+PostgreSQL el parecido de caracteristicas y la nota de las resenas publicadas.
+
+```sql
+SELECT v.id_producto_mongo,
+       CASE WHEN v.vector_caracteristicas IS NULL OR $2::vector IS NULL
+            THEN NULL
+            ELSE 1 - (v.vector_caracteristicas <=> $2::vector)
+       END AS parecido_caracteristicas,
+       r.promedio, coalesce(r.total, 0)::int AS total
+  FROM vector_producto v
+  LEFT JOIN (SELECT id_producto_mongo, avg(calificacion)::float8 AS promedio,
+                    count(*) AS total
+               FROM resena
+              WHERE id_estado_resena = 1 AND id_producto_mongo = ANY($1::bigint[])
+              GROUP BY id_producto_mongo) r USING (id_producto_mongo)
+ WHERE v.id_producto_mongo = ANY($1::bigint[])
+```
+
+`puntajeDe()` en `similares.service.ts:75` hace la cuenta, con los pesos de
+`:20` a `:27`.
+
+```text
+puntaje = 0,7 x parecido general + 0,2 x parecido de caracteristicas + 0,1 x nota / 5
+nota    = (suma de estrellas + 2 x 3) / (resenas + 2)
+```
+
+- Si a alguno le faltan las caracteristicas, esa parte vale lo mismo que el
+  general.
+- La nota es bayesiana, como si cada producto tuviera dos resenas de 3
+  estrellas. Una sola resena de 5 no le gana a veinte buenas.
+- Despues ordena cada bloque por puntaje (`enOrden`, `:223`) y llena los seis,
+  primero los de su categoria y despues el resto (`:263` y `:264`). Cada uno
+  sale con `misma_categoria`, `similitud`, `puntaje`,
+  `parecido_caracteristicas` y `nota_resenas`.
 
 **El ajuste del indice**, `buscarCercanos()` en
 `backend/src/helpers/vectores-pgvector.ts:41`. Antes de la consulta, en la
@@ -133,6 +183,16 @@ mas largo.
 recomendando, porque el vector esta guardado en PostgreSQL. Lo que no se puede
 es calcular el de un producto nuevo ni buscar por frase, que cae a solo
 palabras.
+
+**Con que campos se parece un producto a otro.** Con nombre, categoria y
+descripcion en el vector general, con las caracteristicas del producto y de sus
+variantes en el segundo vector, y con la nota de sus resenas. El puntaje es 0,7,
+0,2 y 0,1, y la categoria decide el bloque.
+
+**Por que una columna aparte para las caracteristicas.** Asi cada parte pesa lo
+que se decide al ordenar. Si las caracteristicas fueran dentro del mismo texto,
+no se podria decir cuanto pesan, y un producto sin caracteristicas tendria un
+vector distinto solo por eso.
 
 ## 3. Control de acceso, por dentro del backend
 
@@ -407,7 +467,7 @@ base guarda. Un controller casi no tiene logica.
 Ejemplo, la compradora da clic en **Agregar** en una ficha.
 
 1. **La pagina** llama `PUT /api/carrito/lineas/:idOferta`, desde
-   `frontend/src/routes/producto/[id]/+page.svelte:683`.
+   `frontend/src/routes/producto/[id]/+page.svelte:690`.
 2. **Vite**, el que sirve la pagina en el 5173, le quita el `/api` y la pasa al
    backend en el 3000. Esta en `frontend/vite.config.ts:53`.
 3. **Fastify** la recibe, `backend/src/main.ts:34`. Con `trustProxy` guarda la
@@ -421,7 +481,7 @@ Ejemplo, la compradora da clic en **Agregar** en una ficha.
 6. **PermisoGuard**, `backend/src/guards/permiso.guard.ts:41`, pregunta a la
    tabla `rol_permiso` si el rol tiene `carrito.usar`. Si no, 403.
 7. **El servicio**, `definirCantidad()` en
-   `backend/src/services/carrito/carrito.service.ts:236`, guarda la linea en
+   `backend/src/services/carrito/carrito.service.ts:242`, guarda la linea en
    PostgreSQL y su copia rapida en Redis.
 8. **La respuesta** sale siempre con la misma forma, `ok`, `mensaje` y
    `payload`, armada por `exito()` y `fallo()` de
@@ -497,8 +557,9 @@ facetas que dan los numeros de cada filtro. La busqueda por frase es
 la de palabras con la de significado por vectores.
 
 **Parecidos a este.** `obtener()` en
-`backend/src/services/productos/similares.service.ts:60`. Primero los de su
-misma categoria y despues el resto, los dos ordenados por el vector en
+`backend/src/services/productos/similares.service.ts:123`. Primero los de su
+misma categoria y despues el resto, cada bloque ordenado por un puntaje, 0,7
+del parecido general, 0,2 del de caracteristicas y 0,1 de la nota, todo en
 PostgreSQL con pgvector. El detalle esta en `docs/GUIA-ESTUDIO-VECTORES.md`.
 
 **Quienes lo compraron tambien llevaron.** `obtener()` en
@@ -509,15 +570,17 @@ tambien compro.
 **Pagar.** `POST /carrito/comprar`,
 `backend/src/controllers/carrito/carrito.controller.ts:124`, con el permiso
 `carrito.comprar` en la 123. El servicio es `comprarCarrito()`,
-`backend/src/services/carrito/carrito.service.ts:628`. Todo va en una sola
-transaccion de PostgreSQL, que empieza con el `BEGIN` de la linea 677 y
-bloquea las ofertas con `FOR UPDATE` para que dos personas no se lleven la
-misma unidad. Si todo sale bien, `COMMIT` en la 685. Si algo falla, `ROLLBACK`
-en la 704 y no se cobra nada.
+`backend/src/services/carrito/carrito.service.ts:634`. Todo va en una sola
+transaccion de PostgreSQL, que empieza con el `BEGIN` de la linea 683 y
+bloquea las ofertas con `FOR UPDATE` (`consultarOfertas()`, linea 1566, el
+`FOR UPDATE OF o` en la 1600) para que dos personas no se lleven la misma
+unidad. El cobro lo hace la funcion `comprar_pedido()` de PostgreSQL, llamada
+en la 851. Si todo sale bien, `COMMIT` en la 876. Si algo falla, `ROLLBACK`
+en la 879 y no se cobra nada.
 
 **Cancelar.** `POST /comprador/pedidos/:id/cancelar`,
 `backend/src/controllers/compradores/pedidos.controller.ts:80`.
-`cancelarPedido()` en `backend/src/services/compradores/pedidos.service.ts:247`
+`cancelarPedido()` en `backend/src/services/compradores/pedidos.service.ts:251`
 devuelve las unidades a la oferta y deja el pago reembolsado.
 
 **Venta relampago.** `reservar()` en
@@ -538,7 +601,7 @@ preguntan.
 | Tarea | Cada cuanto | Que hace | Donde |
 |---|---|---|---|
 | Indice del buscador | 10 s | Lleva a Elasticsearch los productos que cambiaron en MongoDB | `services/buscador/buscador-sync.service.ts:39` |
-| Vectores | 10 s | Pasa por Ollama el texto de cada producto que cambio y guarda su vector | `services/productos/vectores-sync.service.ts:77` |
+| Vectores | 10 s | Pasa por Ollama los dos textos de cada producto que cambio, el general y el de caracteristicas, y guarda sus vectores | `services/productos/vectores-sync.service.ts:159` |
 | Grafo de resenas | 10 s | Lleva a Neo4j cada resena tocada | `services/grafo/grafo-sync.service.ts:90` |
 | Grafo de compras | 10 s | Lleva a Neo4j cada compra | `services/grafo/grafo-compras-sync.service.ts:97` |
 | Ofertas al buscador | 5 s | Indexa las ofertas tocadas y revisa los avisame | `services/vendedores/evento-oferta-sync.service.ts:93` |

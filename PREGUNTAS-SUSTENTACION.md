@@ -2,9 +2,9 @@
 
 Mesh, backend y bases de datos. Proyecto de Bases de Datos 2.
 
-Este archivo reúne 189 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
+Este archivo reúne 192 preguntas que el profesor puede hacer sobre el backend y las bases de datos de Mesh. Cada respuesta es corta y trae tres cosas. Dónde se ve, con el archivo y las líneas exactas. Lo que pide el profesor, según el enunciado y su rúbrica. Y por qué se hizo así.
 
-Las partes 7 a 13, las de la entrega final, se repasaron contra el código el 2 de noviembre de 2026; las primeras, al 23 de octubre. Los números de línea de las primeras partes se tomaron el 20 de septiembre y el código creció desde entonces, así que pueden correrse unas líneas. El nombre del archivo y de la función siguen sirviendo para encontrar el sitio.
+Las partes 7 a 13, las de la entrega final, se repasaron contra el código el 2 de noviembre de 2026; las primeras, al 23 de octubre. Las líneas de las partes 15 a 17 se revisaron una por una el 8 de noviembre. Los números de línea de las primeras partes se tomaron el 20 de septiembre y el código creció desde entonces, así que pueden correrse unas líneas. El nombre del archivo y de la función siguen sirviendo para encontrar el sitio.
 
 ## Lo que pide el profesor, en corto
 
@@ -32,9 +32,7 @@ Las partes 7 a 13, las de la entrega final, se repasaron contra el código el 2 
 - [Parte 14. Varias bases caídas a la vez y dos países, 4 de noviembre](#parte-14-varias-bases-caídas-a-la-vez-y-dos-países-4-de-noviembre), preguntas 171 y 172
 - [Parte 15. Parecidos por bloques y el control de acceso en vivo, 5 de noviembre](#parte-15-parecidos-por-bloques-y-el-control-de-acceso-en-vivo-5-de-noviembre), preguntas 173 a 180
 - [Parte 16. Lo que la tienda gestiona desde el panel, 7 de noviembre](#parte-16-lo-que-la-tienda-gestiona-desde-el-panel-7-de-noviembre), preguntas 181 a 189
-- [Parte 13. El ACL de funcionalidades, 28 de octubre](#parte-13-el-acl-de-funcionalidades-28-de-octubre), preguntas 162 a 170
-- [Parte 14. Varias bases caídas a la vez y dos países, 4 de noviembre](#parte-14-varias-bases-caídas-a-la-vez-y-dos-países-4-de-noviembre), preguntas 171 a 172
-- [Parte 15. Parecidos por bloques y el control de acceso en vivo, 5 de noviembre](#parte-15-parecidos-por-bloques-y-el-control-de-acceso-en-vivo-5-de-noviembre), preguntas 173 a 179
+- [Parte 17. La similitud por más campos, 8 de noviembre](#parte-17-la-similitud-por-más-campos-8-de-noviembre), preguntas 190 a 192
 
 ---
 
@@ -901,9 +899,9 @@ El panel es una sola pantalla con pestañas para el admin y cada pestaña llama 
 - Por qué así. Cada pestaña usa la base que mejor contesta su pregunta, y el navegador nunca sabe de cuál sale el dato porque toda respuesta trae ok, mensaje y payload.
 
 ### 108. ¿Dónde está el diagrama de arquitectura final y cómo se generó?
-Está en `docs/diagrama-arquitectura.drawio` con su PNG, al 2 de noviembre, y es el mismo de la figura 1 del informe y de la lámina 6. Dibuja los seis motores, Ollama en su propia caja, lo que hace el backend con cada motor, el usuario con que entra a cada uno, lo que guarda cada uno (en PostgreSQL, 93 tablas y 117 llaves, con los permisos por rol y por oferta), el recuadro que dice que las bases pueden correr en otra PC por Tailscale, y doce rutas de datos entre motores con su mecanismo en la leyenda. Las rutas que saltan cajas van anidadas para que ninguna cruce a otra. Lo genera `docs/generar-arquitectura.py`, que al final comprueba que cada flecha nombre cajas que existen.
+Está en `docs/diagrama-arquitectura.png`, con su `.svg`, al 8 de noviembre, y es el mismo de la figura 1 del informe y de la lámina 6. Va en blanco y negro y sigue la notación del modelo C4, nivel de contenedores, junto con el despliegue. Arriba las tres personas, después la PC de la aplicación con la tienda web, el backend (guards, API REST, workers y cortacircuitos) y Ollama, y abajo la PC de las bases. PostgreSQL va al fondo, ancha, como la fuente de verdad, con 96 tablas y 126 llaves, y las otras cinco bases encima, cada una con el protocolo con que el backend le habla y el usuario con que entra. Doce flechas punteadas y numeradas son las copias de fondo entre bases, y la tabla de abajo del dibujo dice qué viaja en cada una y cada cuánto. Una leyenda explica cada forma y cada línea, así se lee igual impreso.
 
-- Dónde se ve. `docs/generar-arquitectura.py`, las tablas CAJAS, FLUJOS, USUARIO y DEBAJO. El diagrama entidad relación es otro archivo, `docs/diagrama-general.drawio`, que dibuja `docs/generar-er.py` leyendo la base viva.
+- Dónde se ve. `docs/dibujar-arquitectura.py`, que escribe el SVG, lo pasa a PNG con Edge sin ventana y lo copia a `presentacion-final/img/arquitectura.png`. `docs/generar-arquitectura.py` lo llama, y con `--drawio` saca el dibujo anterior de draw.io, `docs/diagrama-arquitectura-drawio.drawio`. El diagrama entidad relación es otro archivo, `docs/diagrama-general.drawio`, que dibuja `docs/generar-er.py` leyendo la base viva.
 - Lo que pide el profesor. Entrega final, diagrama de arquitectura completo y correcto (3 pts).
 - Por qué así. El ER se genera de la base porque el dibujado a mano se quedó en 42 cajas cuando ya había 50 tablas.
 
@@ -1349,8 +1347,8 @@ No. Es la misma cuenta la que no puede estar en dos países a la vez, no dos cue
 ### 173. ¿Cómo ordena hoy Parecidos a este?
 Por bloques, igual que quienes lo compraron también llevaron. Primero todos los productos activos de su misma categoría, del más parecido al menos, y después el resto del catálogo, también por parecido, siempre uno por grupo y sin el propio producto. Uno de la misma categoría con 0,40 va antes que otro de otra categoría con 0,80. Cada resultado trae `misma_categoria`. En el Maillot de ruta Peloton salen cinco de Ciclismo y al final una cómoda, que se parece más que la bomba de piso pero es de otra categoría.
 
-- Dónde se ve. `backend/src/services/productos/similares.service.ts`, el bloque 1 en la línea 107 (filtrado por `producto_catalogo.id_categoria`) y el bloque 2 en la 127 (la consulta de siempre, sin JOIN para que use el índice HNSW). Se llenan en las líneas 170 y 171. En la tienda, cualquier ficha, estante Parecidos a este.
-- Por qué. Se pidió el mismo esquema que ADR-25, para que en la ficha de una laptop salgan primero laptops. El vector sigue decidiendo el orden dentro de cada bloque.
+- Dónde se ve. `backend/src/services/productos/similares.service.ts`, el bloque 1 en la línea 184 (filtrado por `producto_catalogo.id_categoria` en la 192) y el bloque 2 en la 201 (la consulta de siempre, sin JOIN para que use el índice HNSW). Se llenan en las líneas 263 y 264. En la tienda, cualquier ficha, estante Parecidos a este.
+- Por qué. Se pidió el mismo esquema que ADR-25, para que en la ficha de una laptop salgan primero laptops. Desde el 8 de noviembre el orden dentro de cada bloque lo decide un puntaje que también mira las características y la nota, ver la 190.
 
 ### 174. Si la ficha ya pone primero su categoría, ¿cómo saben que el vector entiende de qué trata el producto?
 Porque esa cifra se mide solo con el vector, sin el orden por bloques. `pruebas/recomendacion_semantica.py` calcula en PostgreSQL, contra todos y sin índice, los seis vecinos de cada producto de la muestra sin mirar la categoría. El 5 de noviembre el 66 por ciento era de su categoría en la muestra y el 68 por ciento en los 1000 productos activos, contra un 6 por ciento al azar. Con el orden por bloques la ficha llega al 84,5, pero esa cifra ya incluye la regla y no se usa como prueba del modelo.
@@ -1360,7 +1358,7 @@ Porque esa cifra se mide solo con el vector, sin el orden por bloques. `pruebas/
 ### 175. ¿Cómo saben que la ruta devuelve lo correcto con el orden nuevo?
 Se calculó el mismo orden en SQL contra todos, sin índice, para los 1000 productos activos, y se comparó con la ruta. Dieron los mismos seis, en el mismo orden y con los mismos bloques, en los 1000, y la misma similitud. La prueba revisa además que ningún producto de su categoría quede después de uno de otra, que `misma_categoria` coincida con MongoDB y que el primer bloque traiga todos los de su categoría que caben. Esa parte se probó con el orden viejo y dio 2 FALLA, como debía.
 
-- Dónde se ve. Sección 2b de `pruebas/recomendacion_semantica.py`, 21 OK, y `.\demo-entrega-final.ps1 -Parte semantica`, que compara su propio cálculo con la ruta.
+- Dónde se ve. Sección 2b de `pruebas/recomendacion_semantica.py` y `.\demo-entrega-final.ps1 -Parte semantica`, que compara su propio cálculo con la ruta. Desde el 8 de noviembre la prueba tiene 30 OK y la sección 2c hace la misma comparación con el puntaje nuevo, ver la 191.
 
 ### 176. ¿Cómo se prueba en vivo, sin script, que una base no deja hacer lo que no corresponde?
 Se entra a cada base con el usuario que no tiene el permiso y se escribe la orden a mano. PostgreSQL como `mesh_lectura` lee los pedidos y a un UPDATE contesta `cannot execute UPDATE in a read-only transaction`, y como `mesh_backend` a un CREATE TABLE contesta `permission denied for schema public`. MongoDB como `mesh_lectura` cuenta productos y a un updateOne contesta `not authorized on mesh`. Redis como `inspeccion` contesta NOPERM a un SET, y como `backend` a KEYS. ClickHouse como `mesh_lectura` contesta ACCESS_DENIED a un INSERT. Neo4j contesta `Unsupported administration command` a CREATE ROLE.
@@ -1384,7 +1382,7 @@ En las dos guías de estudio, `docs/GUIA-ESTUDIO-VECTORES.md` y `docs/GUIA-ESTUD
 ### 180. ¿Se le puede hacer una inyección SQL a Mesh?
 No. Lo que escribe la persona nunca se pega dentro del SQL. Va con parámetros, `$1`, `$2`, y el texto viaja aparte como un valor que PostgreSQL compara entero y nunca lee como SQL. Las partes que sí se arman por pedazos, como el orden ASC o DESC o la columna de un ranking, salen de listas fijas del código y no del texto que llega. Así `' OR '1'='1' --` en el login es solo un correo que no existe y contesta 401. Los id se revisan antes de tocar la base, solo dígitos, y `1 OR 1=1` contesta 400. Un `DROP TABLE usuario` en el buscador se busca como palabras, y la petición siguiente lee la cuenta de esa misma tabla.
 
-- Dónde se ve. `backend/src/services/usuario.service.ts:137` y `:138`, la consulta del login y su valor aparte. `backend/src/services/compradores/pedidos.service.ts:120`, el id. La carpeta 8 de la colección de Postman, 8 peticiones en verde el 6 de noviembre.
+- Dónde se ve. `backend/src/services/usuario.service.ts:137` y `:138`, la consulta del login y su valor aparte. `backend/src/services/compradores/pedidos.service.ts:126`, el id, que solo pasa si son dígitos. La carpeta 8 de la colección de Postman, 8 peticiones en verde el 6 de noviembre.
 - Ojo. Esto cuida el backend. Si aun así pasara algo, `mesh_backend` no puede borrar ni crear tablas (capítulo 3 del informe final), así que un DROP TABLE tampoco correría.
 
 ## Parte 16. Lo que la tienda gestiona desde el panel, 7 de noviembre
@@ -1392,7 +1390,7 @@ No. Lo que escribe la persona nunca se pega dentro del SQL. Va con parámetros, 
 ### 181. ¿La tienda puede cancelar el pedido de un comprador?
 Sí, cualquiera, también si ya está enviado o entregado. Devuelve las unidades a cada oferta y reembolsa el pago, igual que cuando cancela el comprador, y queda anotado quién lo canceló, que fue la tienda y por qué, en `pedido_cambio_estado`. El comprador lo ve en Mis pedidos como Lo canceló la tienda.
 
-- Dónde se ve. `migrations/051_pedidos_de_la_tienda.sql:75`, `cancelar_pedido_por()`. `backend/src/services/compradores/pedidos.service.ts:283`, `cancelarComoTienda()`. En el panel, Dashboard, Pedidos, la columna Gestión.
+- Dónde se ve. `migrations/051_pedidos_de_la_tienda.sql:75`, `cancelar_pedido_por()`. `backend/src/services/compradores/pedidos.service.ts:284`, `cancelarComoTienda()`. En el panel, Dashboard, Pedidos, la columna Gestión.
 - La prueba. `node pruebas/pedidos_tienda.mjs`, 32 en verde el 7 de noviembre contra las bases de la PC de José David.
 
 ### 182. Si la tienda cancela, ¿el comprador queda marcado como sospechoso?
@@ -1419,19 +1417,38 @@ No sobre el mismo producto del mismo vendedor. La fila sigue en la tabla, y el U
 ### 186. ¿Qué pasa si la tienda retira un producto que ya estaba en el carrito de alguien?
 Ya no se cobra. Sus ofertas siguen activas, para que el vendedor no pierda nada si el producto vuelve, pero el carrito revisa también el estado del producto en la copia del catálogo en PostgreSQL. La línea sale como no disponible, con el motivo producto_no_disponible, y pagar contesta 409 diciendo que la tienda lo retiró. Al volverlo a activar, todo vuelve solo.
 
-- Dónde se ve. `backend/src/services/carrito/carrito.service.ts:1528`. La prueba es `node pruebas/producto_inactivo.mjs`, 13 en verde.
+- Dónde se ve. `backend/src/services/carrito/carrito.service.ts:1543`, dentro de `evaluarDisponibilidad()`. La prueba es `node pruebas/producto_inactivo.mjs`, 13 en verde.
 
 ### 187. ¿La tienda puede cambiarle el precio a la oferta de un vendedor?
 No. Puede pausarla, volverla a activar, retirarla y ajustarle las unidades, que es lo que hace falta para cuidar el catálogo. El precio sigue siendo solo del vendedor. Cada ajuste de unidades queda en el kardex, `stock_movimiento`, a nombre del admin.
 
-- Dónde se ve. `backend/src/services/vendedores/ofertas.service.ts:833`, `administrar()`, y `:779`, la lista de todas las ofertas de un producto. En el panel, Catálogo, el botón Ofertas de cada producto. La prueba es `node pruebas/ofertas_tienda.mjs`, 23 en verde.
+- Dónde se ve. `backend/src/services/vendedores/ofertas.service.ts:840`, `administrar()`, y `:794`, la lista de todas las ofertas de un producto. En el panel, Catálogo, el botón Ofertas de cada producto. La prueba es `node pruebas/ofertas_tienda.mjs`, 23 en verde.
 
 ### 188. Si se le cambia el nombre a una categoría, ¿hay que tocar producto por producto?
 No. Cada producto de MongoDB lleva su categoría como `{id_categoria, nombre}`, así que un solo `updateMany` por id cambia el nombre en todos, y se marcan para que el buscador los vuelva a indexar. Agregar una característica a una categoría no toca ningún producto, porque cada uno guarda solo las que llena. Es la razón de la Entrega 1 para tener el catálogo en una base documental. PostgreSQL sigue siendo el dueño de la paleta y su copia en MongoDB se escribe en la misma transacción.
 
-- Dónde se ve. `backend/src/services/admin/admin-categorias.service.ts:168`, `renombrar()`, con el `updateMany` en la línea 196. En el panel, Catálogo, el botón Categorías. La prueba es `node pruebas/categorias_tienda.mjs`, que renombra Fragancias en sus 44 productos y la regresa.
+- Dónde se ve. `backend/src/services/admin/admin-categorias.service.ts:195`, `renombrar()`, con el `updateMany` en la línea 233. En el panel, Catálogo, el botón Categorías. La prueba es `node pruebas/categorias_tienda.mjs`, que renombra Fragancias en sus 44 productos y la regresa.
 
 ### 189. Al probar las categorías encontraron un error en el buscador. ¿Cuál era?
 El worker del buscador leía los productos pendientes, los indexaba y después bajaba su bandera a ciegas. Si alguien cambiaba un producto mientras tanto, el cambio nuevo perdía su bandera y el índice se quedaba con lo viejo. Pasó al renombrar Fragancias dos veces seguidas, 20 productos se quedaron con el nombre de prueba. Ahora la bandera se baja de forma atómica, con `findOneAndUpdate` devolviendo el documento de antes, y si ya no es lo que se indexó se vuelve a subir. El worker de los vectores tenía la misma carrera y se arregló igual.
 
-- Dónde se ve. `backend/src/services/buscador/buscador-sync.service.ts:75` y `backend/src/services/productos/vectores-sync.service.ts:233`. La prueba de categorías comprueba al final que el buscador vuelve a decir solo Fragancias.
+- Dónde se ve. `backend/src/services/buscador/buscador-sync.service.ts:75` y `backend/src/services/productos/vectores-sync.service.ts:402`. La prueba de categorías comprueba al final que el buscador vuelve a decir solo Fragancias.
+
+## Parte 17. La similitud por más campos, 8 de noviembre
+
+### 190. ¿Con qué campos se calcula hoy la similitud entre productos?
+Con dos vectores y la nota de las reseñas. El vector general sale de nombre, categoría y descripción, como antes. El segundo, nuevo, sale de las características del producto y de sus variantes, como marca, memoria, talla o color, escritas en un texto ordenado, por ejemplo `Marca Aurora. Memoria RAM 16 GB, 32 GB.` Dentro de cada bloque se ordena por un puntaje, 0,7 del parecido general, 0,2 del parecido de características y 0,1 de la nota. La nota es un promedio bayesiano, como si cada producto tuviera dos reseñas imaginarias de 3 estrellas, para que una sola reseña de 5 no le gane a veinte buenas. Si a alguno le faltan las características, esa parte vale lo mismo que el general. En el Maillot de ruta Peloton el Casco de ruta (0,666) pasa delante de los Guantes (0,650), aunque solo por el vector general los Guantes iban primero.
+
+- Dónde se ve. `backend/src/services/productos/similares.service.ts`, los pesos en las líneas 20 a 27, `puntajeDe()` en la 75 y `puntuar()` en la 277. El texto de características lo arma `construirTextoCaracteristicas()` en `backend/src/services/productos/vectores-sync.service.ts:98`. La ruta devuelve `similitud`, `puntaje`, `parecido_caracteristicas` y `nota_resenas`.
+- Lo que pide el profesor. El 8 de noviembre le preguntó al grupo que presentó antes con qué campos se calcula la similitud. Hasta ese día el nuestro solo leía nombre, categoría y descripción, y se sumaron las características y la nota.
+
+### 191. ¿Cómo saben que el puntaje de la ruta está bien calculado?
+`pruebas/recomendacion_semantica.py` lo calcula aparte, en PostgreSQL contra todos y sin índice, para 60 productos, y lo compara con la ruta. Dieron los mismos seis, en el mismo orden, en el mismo bloque y con el mismo puntaje en los 60, con diferencia 0. Como control, en 58 de los 60 las características y la nota cambian el orden respecto al parecido general solo. La prueba se saboteó con los pesos 1, 0 y 0, es decir solo el parecido general, y dio 2 FALLA, como debía. Además la sección 1b revisa que los 1014 productos tienen su vector de características calculado, 1007 con vector y 7 sin características.
+
+- Dónde se ve. Secciones 1b y 2c de `pruebas/recomendacion_semantica.py`, 30 OK, y `node pruebas/vectores_worker.cjs`, 10 OK, que revisa que el worker arma el texto igual. En vivo, `.\demo-entrega-final.ps1 -Parte semantica -Producto maillot` enseña el puntaje, el general, el de características y la nota de cada parecido.
+
+### 192. ¿Por qué un vector aparte para las características y no meterlas en el mismo texto?
+Por dos razones. Así cada parte pesa lo que se decide al ordenar, el general manda y las características suman. Y si un producto no tiene características, o su vector todavía no se calculó, el general no cambia y esa parte vale lo mismo que el general, así no gana ni pierde por eso. El vector de características no tiene índice, porque no se buscan vecinos con él. El índice HNSW del general trae los candidatos, unos 200 por bloque, y el de características solo se compara contra esos, por su id.
+
+- Dónde se ve. `migrations/055_vector_caracteristicas.sql`, que agrega `vector_caracteristicas` y `caracteristicas_hash` a `vector_producto` y explica la decisión en su cabecera. Lo calcula el mismo worker, `VectoresSyncService`, con la misma bandera `pendiente_vector`, y solo llama a Ollama si cambió la huella del texto. El ETL del arranque solo marca los que faltan, `etl/cargar_vectores.ps1` paso 7.
+- Por qué columnas y no una tabla nueva. Es uno a uno con el vector general, del mismo producto y del mismo modelo, y la fila ya tiene la llave foránea a `producto_catalogo` con borrado en cascada.
