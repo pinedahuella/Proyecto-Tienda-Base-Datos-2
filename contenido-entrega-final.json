@@ -12,7 +12,7 @@
       "p": "La Entrega final cierra la arquitectura con dos piezas. La recomendación de productos parecidos por el significado de su descripción, con vectores que empezaron en PostgreSQL con pgvector, pasaron unas semanas por Elasticsearch y volvieron a pgvector, y el control de acceso, que empezó en Redis con un usuario por servicio y desde el 23 de octubre está en las cinco bases que lo permiten. El informe incluye además el diagrama de arquitectura final, el registro único de las decisiones del semestre, lo que se sumó después con los mismos vectores y la retrospectiva."
      },
      {
-      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 378 commits sobre `main` entre el 15 de agosto y el 8 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron. El 5 de noviembre los parecidos por el vector pasaron a ese mismo orden, y el 8 de noviembre se ordenan también por las características de cada producto y por la nota de sus reseñas."
+      "p": "El trabajo está en el repositorio `https://github.com/pinedahuella/Proyecto-Tienda-Base-Datos-2`, con 379 commits sobre `main` entre el 15 de agosto y el 9 de noviembre de 2026. Cada afirmación del informe sale de código que corre o de una prueba que se puede repetir, y cada prueba indica el comando que la reproduce. La primera versión de este informe es del 25 de septiembre, la segunda del 8 de octubre y la tercera del 20 de octubre. Esta versión suma el control de acceso en todas las bases, la seguridad de Elasticsearch, la foto en el buscador y un solo registro con las 26 decisiones del semestre. La última semana sumó dos ACL que viven en PostgreSQL, uno por rol para cada función y otro por oferta, y ordenó por categoría la recomendación de quienes lo compraron también llevaron. El 5 de noviembre los parecidos por el vector pasaron a ese mismo orden, y el 8 de noviembre se ordenan también por las características de cada producto y por la nota de sus reseñas."
      }
     ]
    },
@@ -173,7 +173,7 @@
         [
          "José Manuel González Corado",
          "José Manuel González Corado",
-         "255"
+         "256"
         ],
         [
          "José David Navichoque Pineda",
@@ -188,7 +188,7 @@
         [
          "Total",
          "",
-         "378"
+         "379"
         ]
        ],
        "anchos": [
@@ -196,7 +196,7 @@
         2.4,
         1.2
        ],
-       "leyenda": "Commits por integrante en el historial de git al 8 de noviembre de 2026."
+       "leyenda": "Commits por integrante en el historial de git al 9 de noviembre de 2026."
       }
      }
     ]
@@ -1598,6 +1598,66 @@
        "Replantearíamos dejar el control de acceso para el final. Durante casi todo el semestre cualquier servicio pudo vaciar Redis, el backend entró a MongoDB como root y Elasticsearch no pidió contraseña aunque su puerto estaba abierto a la red. Configurarlo desde la Entrega 2 habría costado lo mismo.",
        "Replantearíamos numerar las decisiones por entrega. Los números chocaron entre los informes y varias decisiones de octubre se implementaron sin su registro. Un solo registro desde el primer día, con el registro escrito en el mismo cambio que el código, lo habría evitado."
       ]
+     }
+    ]
+   },
+   {
+    "titulo": "7.5. Lo que sigue en una siguiente versión",
+    "bloques": [
+     {
+      "p": "La tienda cumple todo lo que pide el enunciado. Con lo aprendido, y con la retroalimentación de la presentación final, estas son las mejoras que haríamos si el proyecto siguiera creciendo. Cada una parte de algo que ya funciona y lo lleva a una escala mayor o a un caso más."
+     },
+     {
+      "tabla": {
+       "cabecera": [
+        "Mejora",
+        "Lo que ya funciona",
+        "Cómo la haríamos"
+       ],
+       "filas": [
+        [
+         "Los permisos de cada sesión en Redis, para muchos usuarios a la vez",
+         "Cada petición revisa el permiso en PostgreSQL, así un cambio de rol vale desde el clic siguiente sin cerrar sesión",
+         "Cargar los permisos del rol al iniciar sesión y guardarlos con la sesión en Redis. Cuando el administrador cambia un rol, se borra esa copia y la sesión los vuelve a cargar"
+        ],
+        [
+         "Una cola de respaldo para los eventos de ClickHouse",
+         "El cortacircuitos protege a la tienda, que sigue vendiendo aunque ClickHouse no conteste",
+         "Anotar cada evento en una cola de PostgreSQL, igual que la del grafo, y vaciarla cuando ClickHouse vuelva"
+        ],
+        [
+         "Una pasarela de pago real",
+         "El checkout valida la tarjeta y cobra en la misma transacción que el stock, con un cobro de prueba",
+         "Conectar una pasarela de pago y guardar su respuesta en PostgreSQL junto con el pedido"
+        ],
+        [
+         "Detectar el anillo de reseñas que vuelve después de meses",
+         "Los detectores generan 30 tipos de fraude en cinco bases, y el tipo del anillo que vuelve ya está en el catálogo",
+         "Una consulta en Neo4j que compare las fechas de las reseñas del mismo grupo de cuentas"
+        ],
+        [
+         "Ver las detecciones de fraude en el tiempo",
+         "Cada señal guarda su primera y su última detección y cuántas veces se repitió",
+         "Copiar cada detección a ClickHouse para graficar cómo crece por semana y por tipo"
+        ],
+        [
+         "Unir casos de fraude por IP con una segunda señal",
+         "Los casos ya se arman solos, juntando las señales que comparten cuentas",
+         "Unir por IP solo cuando además coincide otra señal, como el dispositivo o la dirección, para no juntar cuentas de una misma red de oficina"
+        ],
+        [
+         "Que Lo más vendido vea al instante un precio nuevo",
+         "El ranking se recalcula solo cada 10 minutos desde ClickHouse y se sirve desde Redis",
+         "Que el cambio de precio avise al worker para que rehaga en el momento la tarjeta de ese producto"
+        ]
+       ],
+       "anchos": [
+        2.0,
+        2.3,
+        2.2
+       ],
+       "leyenda": "Las mejoras para una siguiente versión."
+      }
      }
     ]
    }

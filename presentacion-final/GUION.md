@@ -124,15 +124,51 @@ pregunta, pero solo una guarda la verdad. Informe final, 4.2, la tabla de los
 componentes.
 
 ### 6. El diagrama
-PostgreSQL va abajo, ancha, porque es la fuente de verdad, y las otras cinco
-bases encima. Las flechas llenas son lo que hace el backend con cada base, y las
-punteadas y numeradas lo que viaja de una base a otra. Cada base dice con que
-usuario entra el backend.
+Este es el diagrama de Mesh. Se lee de arriba hacia abajo, en tres pisos, las
+personas, la aplicacion y las bases de datos.
+
+Arriba estan la compradora, el vendedor y el admin. Todos entran desde el
+navegador.
+
+En el medio hay tres partes. La tienda web, que es lo que la gente ve. El
+backend, que es el cerebro y el unico que entra a las bases, y en cada clic
+revisa quien eres y si tienes permiso. Y Ollama, que convierte textos en
+numeros para entender el significado de cada producto.
+
+Abajo estan las seis bases, cada una porque hace una cosa mejor que las demas.
+PostgreSQL esta al fondo, como el cimiento. Ahi vive lo que no se puede perder,
+el dinero, el stock y los pedidos. Encima estan las otras cinco, cada una unida
+a PostgreSQL con una flecha de ida y otra de vuelta.
+- MongoDB guarda el catalogo. Recibe el precio y el stock, y devuelve los datos
+  de cada producto.
+- Elasticsearch es el buscador. Recibe las ofertas, y devuelve las alertas de
+  fraude del login.
+- Neo4j guarda las relaciones entre cuentas. Recibe las resenas y las compras,
+  y devuelve los anillos de resenas falsas.
+- Redis es lo rapido. Recibe la venta relampago, y devuelve el carrito.
+- ClickHouse guarda las visitas y los clics. Recibe las compras, y devuelve las
+  ventas para los descuentos automaticos.
+
+Las flechas las mueven trabajadores del backend cada pocos segundos. Si una
+base se apaga, lo pendiente espera en PostgreSQL y no se pierde nada. La regla
+de todo el diagrama es que el dinero solo se anota en PostgreSQL. Las otras
+bases tienen copias de ayuda, menos ClickHouse, porque las visitas nacen ahi.
+Asi cada base hace lo que mejor sabe.
 
 **Se hace.** Clic sobre el diagrama para abrirlo a tamano completo, Esc para
 cerrar.
 
 **Si preguntan.**
+- Que son las flechas. Las llenas son lo que hace el backend con cada base, y
+  las punteadas y numeradas lo que viaja de una base a otra, ida y vuelta. La
+  tabla de abajo del dibujo dice que viaja en cada una y cada cuanto
+  (`docs/dibujar-arquitectura.py:343`).
+- Y si se cae MongoDB. Igual se puede comprar, porque el dinero esta en
+  PostgreSQL. El stock nuevo espera en la cola `evento_producto` y llega cuando
+  MongoDB vuelva.
+- Por que tantas bases. Cada pregunta tiene su mejor base. Buscar con errores de
+  escritura es de Elasticsearch, los circulos entre cuentas de Neo4j y contar
+  millones de clics de ClickHouse.
 - Sale de `docs/dibujar-arquitectura.py`, en blanco y negro y con la notacion
   del modelo C4, para que se lea igual impreso. La tabla de abajo del dibujo
   dice que viaja en cada flecha punteada y cada cuanto.
